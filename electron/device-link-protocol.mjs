@@ -2,7 +2,7 @@
 // its browsers make, the computer connects it, and each side sends a stream's bytes only while the other has room for
 // them, so neither end buffers more than a window per stream.
 //
-// Text frames are JSON: open {id, host, port} or {id, chrome: true} (My Cloud), opened {id} / refused {id, reason} / failed {id, reason} (the
+// Text frames are JSON: open {id, host, port}, {id, chrome: true} or {id, mcp: {name, port | fingerprint}} (My Cloud), opened {id} / refused {id, reason} / failed {id, reason} (the
 // computer), credit {id, bytes}, end {id}, close {id}, ping / pong, and hello {seenAs} (My Cloud, once). A binary frame
 // is a stream's bytes: its id as 4 bytes, big-endian, then at most MAX_CHUNK bytes.
 
@@ -16,6 +16,17 @@ export const MAX_STREAMS = 128;
 export const OPEN_MS = 20_000;
 const MAX_ID = 0xffff_ffff;
 
+// An MCP target names a server and exactly one way to it: a port, or a fingerprint of the server's saved entry.
+const validMcp = (mcp) => Boolean(mcp) && typeof mcp === "object" && typeof mcp.name === "string" && mcp.name !== ""
+  && Number.isInteger(mcp.port) !== (typeof mcp.fingerprint === "string") && (mcp.port === undefined || Number.isInteger(mcp.port)) && (mcp.fingerprint === undefined || typeof mcp.fingerprint === "string");
+const openTarget = (message) => {
+  if (message.chrome === true) return { chrome: true };
+  if (message.mcp && typeof message.mcp === "object") {
+    const { name, port, fingerprint } = message.mcp;
+    return { mcp: { name, ...(port !== undefined ? { port } : {}), ...(fingerprint !== undefined ? { fingerprint } : {}) } };
+  }
+  return { host: message.host, port: message.port };
+};
 const header = (id) => { const bytes = Buffer.allocUnsafe(4); bytes.writeUInt32BE(id); return bytes; };
 const validId = (id) => Number.isInteger(id) && id > 0 && id <= MAX_ID;
 
@@ -87,9 +98,10 @@ export function createLinkMux({ send, accept = null, window = STREAM_WINDOW, max
       case "open": {
         if (!accept || !validId(message.id) || streams.has(message.id)) return;
         if (streams.size >= maxStreams) return control({ t: "failed", id: message.id, reason: "busy" });
+        if (message.chrome !== true && "mcp" in message && !validMcp(message.mcp)) return control({ t: "failed", id: message.id, reason: "bad-target" });
         const opening = stream(message.id);
         streams.set(opening.id, opening);
-        void Promise.resolve().then(() => accept(message.chrome === true ? { chrome: true } : { host: message.host, port: message.port })).catch(() => ({ failed: "unreachable" })).then((result) => {
+        void Promise.resolve().then(() => accept(openTarget(message))).catch(() => ({ failed: "unreachable" })).then((result) => {
           if (streams.get(opening.id) !== opening || closed) { result?.socket?.destroy(); return; }
           if (result?.socket) { control({ t: "opened", id: opening.id }); attach(opening, result.socket); return; }
           streams.delete(opening.id);
@@ -153,9 +165,10 @@ export function createLinkMux({ send, accept = null, window = STREAM_WINDOW, max
       }
       onData(Buffer.isBuffer(data) ? data : Buffer.from(data instanceof ArrayBuffer ? new Uint8Array(data) : data));
     },
-    /** My Cloud's side: a stream to `host:port`, or to the computer's Chrome, through the computer. `{ gone }` when the link ended before it answered. */
+    /** My Cloud's side: a stream to `host:port`, to the computer's Chrome, or to one of its MCP servers, through the computer. `{ gone }` when the link ended before it answered. */
     open(target) {
       if (closed) return Promise.resolve({ gone: true });
+      if (target.mcp && !validMcp(target.mcp)) return Promise.resolve({ failed: "bad-target" });
       if (streams.size >= maxStreams) return Promise.resolve({ failed: "busy" });
       while (streams.has(nextId)) nextId = nextId >= MAX_ID ? 1 : nextId + 1;
       const entry = stream(nextId);
@@ -166,7 +179,7 @@ export function createLinkMux({ send, accept = null, window = STREAM_WINDOW, max
         // No answer this long: the link is not carrying anything, so the connection goes another way.
         entry.timer = setTimeout(() => { if (entry.settle) { entry.settle({ gone: true }); entry.settle = null; forget(entry, true); } }, openMs);
         entry.timer.unref?.();
-        control(target.chrome === true ? { t: "open", id: entry.id, chrome: true } : { t: "open", id: entry.id, host: target.host, port: target.port });
+        control(target.chrome === true ? { t: "open", id: entry.id, chrome: true } : target.mcp ? { t: "open", id: entry.id, mcp: target.mcp } : { t: "open", id: entry.id, host: target.host, port: target.port });
       });
     },
     get size() { return streams.size; },

@@ -3,6 +3,7 @@
 // without it.
 import { answerAsleep, type CloudPower } from "../cloud-power.ts";
 import type { DeviceLinks } from "../device-links.ts";
+import type { LentMcp } from "../lent-mcp.ts";
 import { requestSource, type RequestAuth } from "../request-auth.ts";
 import type { SessionRecord } from "../sessions.ts";
 import { desktopPresence, type Answerer, type ComputerAsks } from "../computer-asks.ts";
@@ -15,6 +16,8 @@ const LINK = /^\/api\/shared-computers\/([\w-]+)\/link$/;
 export function createSharedComputerRoutes(deps: {
   enabled: () => boolean;
   computers: SharedComputers;
+  /** A command server's definition, for the computer that runs it. */
+  lentMcp: Pick<LentMcp, "definition">;
   sessionLive: (id: string) => boolean;
   environmentId: string;
   /** On a Cloud home every lent computer is the owner's, under this one name. */
@@ -78,7 +81,7 @@ export function createSharedComputerRoutes(deps: {
       if (power?.sleeping()) return answerAsleep(res, json);
       return json(res, 200, news);
     }
-    const route = /^\/api\/shared-computers\/([\w-]+)\/(poll|lease|result|disconnect)$/.exec(path);
+    const route = /^\/api\/shared-computers\/([\w-]+)\/(poll|lease|result|disconnect|mcp-server)$/.exec(path);
     if (!route) return json(res, 404, { error: "not found" });
     const [, id, action] = route;
     if (action === "poll") {
@@ -89,6 +92,7 @@ export function createSharedComputerRoutes(deps: {
       return json(res, 200, { job });
     }
     if (action === "lease") return json(res, 200, { active: deps.computers.liveJob(id, auth.session.id, secret, String(body?.jobId)) });
+    if (action === "mcp-server") return json(res, 200, { server: deps.lentMcp.definition(deps.computers.owner(id, auth.session.id, secret), id, String(body?.name)) });
     if (action === "result") deps.computers.complete(id, auth.session.id, secret, String(body?.jobId), body?.result);
     if (action === "disconnect") deps.computers.disconnect(id, auth.session.id, secret, body?.paused === true);
     return json(res, 200, { ok: true });

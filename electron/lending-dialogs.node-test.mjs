@@ -155,3 +155,47 @@ test("main asks in its own dialog before a server gets this computer, and Cancel
   assert.deepEqual({ path: folder.path, write: folder.write }, { path: "/Users/me/Plans", write: false });
   assert.equal(allowed.calls.at(-1)[2].title, "Choose a folder or drive to share");
 });
+
+test("allowMcpServer defaults to Don't allow, names the port or the shown command with its setting names, and answers true only on Allow", async () => {
+  const ask = fakeDialog({ response: 0 });
+  const dialogs = createLendingDialogs({ dialog: ask.dialog, window: () => null, validate: named, device: "Mac", platform: "linux" });
+  assert.equal(await dialogs.allowMcpServer({ name: "notes", target: { kind: "url", port: 4100 } }), true);
+  assert.equal(await dialogs.allowMcpServer({ name: "files", target: { kind: "command", command: "npx files --token ***", env: ["API_KEY", "HOST"] } }), true);
+  assert.equal(await dialogs.allowMcpServer({ name: "plain", target: { kind: "command", command: "npx plain", env: [] } }), true);
+  const options = ask.calls.map(([, options]) => options);
+  assert.deepEqual(options.map(({ message, buttons, defaultId, cancelId }) => ({ message, buttons, defaultId, cancelId })), [
+    { message: "Let My Cloud use notes on this Mac?", buttons: ["Allow", "Don't allow"], defaultId: 1, cancelId: 1 },
+    { message: "Let My Cloud use files on this Mac?", buttons: ["Allow", "Don't allow"], defaultId: 1, cancelId: 1 },
+    { message: "Let My Cloud use plain on this Mac?", buttons: ["Allow", "Don't allow"], defaultId: 1, cancelId: 1 },
+  ]);
+  assert.equal(options[0].detail, "A server at port 4100 on this Mac. My Cloud's bots would send it requests through OpenMausBot.");
+  assert.equal(options[1].detail, "It runs this command here as you, with its saved settings (secrets hidden):\nnpx files --token ***\n\nSettings it gets: API_KEY, HOST");
+  assert.equal(options[2].detail, "It runs this command here as you, with its saved settings (secrets hidden):\nnpx plain");
+  for (const response of [1, -1]) {
+    const deny = fakeDialog({ response });
+    assert.equal(await createLendingDialogs({ dialog: deny.dialog, window: () => null, validate: named, platform: "linux" }).allowMcpServer({ name: "a", target: { kind: "url", port: 4100 } }), false);
+  }
+});
+
+test("allowMcpServer on macOS asks over the app's window, shown first, and never without one", async () => {
+  const shown = [];
+  const win = { isDestroyed: () => false, isVisible: () => shown.length > 0, show: () => shown.push(true) };
+  const ask = fakeDialog({ response: 0 });
+  assert.equal(await createLendingDialogs({ dialog: ask.dialog, window: () => win, validate: named, platform: "darwin" }).allowMcpServer({ name: "notes", target: { kind: "url", port: 4100 } }), true);
+  assert.equal(shown.length, 1);
+  assert.equal(ask.calls[0][1], win);
+  assert.equal(ask.calls[0][2].defaultId, 1);
+  for (const missing of [null, { isDestroyed: () => true }]) {
+    const none = fakeDialog({ response: 0 });
+    await assert.rejects(createLendingDialogs({ dialog: none.dialog, window: () => missing, validate: named, platform: "darwin" }).allowMcpServer({ name: "notes", target: { kind: "url", port: 4100 } }));
+    assert.equal(none.calls.length, 0);
+  }
+});
+
+test("canAskMcp is false exactly where allowMcpServer won't ask: macOS with no live window", () => {
+  const canAsk = (window, platform) => createLendingDialogs({ dialog: fakeDialog().dialog, window: () => window, validate: named, platform }).canAskMcp();
+  assert.equal(canAsk(null, "darwin"), false);
+  assert.equal(canAsk({ isDestroyed: () => true }, "darwin"), false);
+  assert.equal(canAsk(liveWindow(), "darwin"), true);
+  for (const platform of ["win32", "linux"]) assert.equal(canAsk(null, platform), true, platform);
+});

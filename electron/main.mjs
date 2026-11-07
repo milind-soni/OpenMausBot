@@ -36,7 +36,7 @@ import { createAllWindowsClosedQuit } from "./window-all-closed.mjs";
 import { createStartupScreen } from "./startup-screen.mjs";
 import { createSystemTray } from "./system-tray.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
-import { createLendingDialogs } from "./lending-dialogs.mjs";
+import { createLendingDialogs } from "./lending-dialogs.mjs"; import { lentMcpOptions } from "./lent-mcp-wiring.mjs";
 import { createActivityWindow } from "./lending-activity-window.mjs";
 import { missingPermissions } from "./lent-screen-failures.mjs";
 import { createScreenControl } from "./screen-control.mjs"; import { createAskPrompt } from "./ask-prompt.mjs";
@@ -1444,7 +1444,7 @@ function sharingController() {
     protectedPaths: [desktopDataDir(), cleanWorkspaceDir(desktopDataDir()), profilesDir(desktopDataDir())],
     fetch: (...args) => session.defaultSession.fetch(...args),
     environments: () => environmentsState.environments, localEnvironments: () => ownEnvironmentIds([desktopDataDir(), runningDataDir]),
-    enabled: refreshSharedComputersAllowed, t: nativeT,
+    enabled: refreshSharedComputersAllowed, t: nativeT, ...lentMcpOptions({ sharing: sharingController, prompt: ask => lendingDialogs.allowMcpServer(ask), canAsk: () => lendingDialogs.canAskMcp(), serverPorts: () => [SERVER_PORT] }),
     cloud: lendingTarget.cloud, myCloud: lendingTarget.environment, ownClouds: lendingTarget.places, screen: screenControl.now, askForScreen, power: cloudPower, cloudPower: origin => cloudAccount?.powerOf?.(origin) ?? null, reconnect: reconnectCloud,
     prompt: createAskPrompt({ t: nativeT, dialog, window: () => mainWindow, idleSeconds: () => powerMonitor.getSystemIdleState(1) === "unknown" ? null : powerMonitor.getSystemIdleTime() }), startScreen: screenControl.start, confirmTerminal: () => lendingDialogs.lendTerminal(true, () => sharingController().lendTerminal(true)), log: slog,
     linkHeaders: async env => ({ cookie: (await session.defaultSession.cookies.get({ url: env.origin })).map(cookie => `${cookie.name}=${cookie.value}`).join("; ") }),
@@ -1495,7 +1495,7 @@ let lendingTray = null;
 function lendingIndicator() {
   lendingTray ??= createLendingIndicator({
     Tray, Menu, nativeImage, iconPath: APP_ICON, t: nativeT, onPause: () => sharingController().pause(), onActivity: () => lendingActivity.show(),
-    onResume: () => void sharingController().resume()?.catch(error => slog(`lending resume: ${error?.message ?? error}`)), onStartScreen: () => void screenControl.start(),
+    onResume: () => void sharingController().resume()?.catch(error => slog(`lending resume: ${error?.message ?? error}`)), onStartScreen: () => void screenControl.start(), onMcp: on => void sharingController().lendMcp(on)?.catch(error => slog(`lending mcp: ${error?.message ?? error}`)),
     onTerminal: on => void lendingDialogs.lendTerminal(on, () => sharingController().lendTerminal(on)).catch(error => slog(`lending terminal: ${error?.message ?? error}`)),
   });
   return lendingTray;

@@ -80,7 +80,7 @@ test("the icon's menu says plainly what the Clouds can't use, why, and offers th
   fix.click();
   assert.equal(started, 1, "one click starts screen control");
   indicator.update({ clouds: ["My Cloud"], screen: { ready: true, lent: true, reason: null, fix: null } });
-  assert.deepEqual(trays[0].menu.filter(item => item.label).map(item => item.label), ["My Cloud can use this PC", "Pause", "Let Clouds run commands on this PC", "See activity"]);
+  assert.deepEqual(trays[0].menu.filter(item => item.label).map(item => item.label), ["My Cloud can use this PC", "Pause", "Let Clouds run commands on this PC", "Let My Cloud use your MCP servers on this PC", "See activity"]);
 });
 
 test("the app's own prompt names the bot, its Cloud, what it wants and why, and why it can't now", () => {
@@ -133,7 +133,7 @@ test("the menu never says a Cloud can use this computer before that Cloud accept
     onPause: () => {}, onResume: () => {}, onActivity: () => {}, onTerminal: () => {}, device: "Mac" });
   indicator.update({ clouds: ["My Cloud", "Debian Server"], waiting: ["Debian Server"], screen: ready });
   assert.deepEqual(trays[0].menu.filter(item => item.label).map(item => item.label),
-    ["My Cloud can use this Mac", "Waiting for Debian Server to accept this Mac", "Pause", "Let Clouds run commands on this Mac", "See activity"]);
+    ["My Cloud can use this Mac", "Waiting for Debian Server to accept this Mac", "Pause", "Let Clouds run commands on this Mac", "Let My Cloud use your MCP servers on this Mac", "See activity"]);
   assert.equal(trays[0].tip, "OpenMausBot: My Cloud can use this Mac. Waiting for Debian Server to accept this Mac");
   indicator.update({ clouds: ["My Cloud", "Debian Server"], waiting: [], screen: ready });
   assert.equal(trays[0].menu[0].label, "My Cloud and Debian Server can use this Mac", "accepted: the waiting line goes away");

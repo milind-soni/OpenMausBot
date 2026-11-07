@@ -57,6 +57,7 @@ const PUBLIC_ROUTES = [
   "/api/shared-computers/11111111-1111-4111-8111-111111111111/lease",
   "/api/shared-computers/11111111-1111-4111-8111-111111111111/result",
   "/api/shared-computers/11111111-1111-4111-8111-111111111111/disconnect",
+  "/api/shared-computers/11111111-1111-4111-8111-111111111111/mcp-server",
   "/api/desktop/shared-computer-control",
 ];
 

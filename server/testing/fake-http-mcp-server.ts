@@ -37,6 +37,8 @@ export interface FakeHttpMcpOptions {
   callError?: (params: unknown) => { code: number; message: string } | undefined;
   /** answer each tools/call only after this many milliseconds */
   callDelayMs?: number;
+  /** each tools/call waits for this to settle before it answers */
+  holdCall?: (params: unknown) => Promise<void> | void;
   /** answer each tools/call as an event stream that first says the tool list changed */
   listChangedOnCall?: boolean;
   /** the server's own initialize instructions */
@@ -295,6 +297,7 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
         }
       }
       if (frame.method === "tools/list" && options.silentTools) return;
+      if (frame.method === "tools/call") await options.holdCall?.(frame.params);
       if (frame.method === "tools/call" && options.callDelayMs) {
         await new Promise((resolve) => setTimeout(resolve, options.callDelayMs));
       }

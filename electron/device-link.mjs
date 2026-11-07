@@ -23,9 +23,9 @@ export function linkUrl(origin, path) {
  * `egress`: what the computer's own check takes (resolve, connect, interfaces), for tests. `onStream(target, result)`:
  * each connection My Cloud asked for, with what this computer's check answered. `lends()`: what this computer lends right
  * now, read on every stream, so My Cloud is never taken at its word. `chrome`: the Chrome door's options, or an object
- * with its own `open` to stand in for the door.
+ * with its own `open` to stand in for the door. `mcp`: the door to the computer's MCP servers, an object with `open(target)`.
  */
-export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocket: Socket = globalThis.WebSocket, pingMs = PING_MS, silentMs = SILENT_MS, openMs = OPEN_MS, lends = () => ({ internet: true, chrome: false }), chrome = {}, onOpen = () => {}, onStream = () => {}, traffic = () => {}, now = Date.now }) {
+export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocket: Socket = globalThis.WebSocket, pingMs = PING_MS, silentMs = SILENT_MS, openMs = OPEN_MS, lends = () => ({ internet: true, chrome: false, mcp: false }), chrome = {}, mcp = { open: async () => ({ failed: "no-server" }) }, onOpen = () => {}, onStream = () => {}, traffic = () => {}, now = Date.now }) {
   return new Promise((done) => {
     let seenAs = null;
     let heard = now();
@@ -40,7 +40,8 @@ export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocke
     const mux = createLinkMux({ send, traffic, accept: async (target) => {
       const isChrome = target.chrome === true;
       const grant = lends();
-      const result = !(isChrome ? grant.chrome : grant.internet) ? { refused: "not-lent" } : isChrome ? await chromeDoor.open() : await deviceEgress.open(target);
+      const lent = target.mcp ? grant.mcp : isChrome ? grant.chrome : grant.internet;
+      const result = !lent ? { refused: "not-lent" } : target.mcp ? await mcp.open(target.mcp) : isChrome ? await chromeDoor.open() : await deviceEgress.open(target);
       try { onStream(target, result); } catch {}
       return result;
     } });

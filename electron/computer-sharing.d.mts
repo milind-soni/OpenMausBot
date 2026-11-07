@@ -30,6 +30,8 @@ export interface CloudLendingState {
   chrome: boolean;
   /** Lent and connected with Chrome: whether My Cloud reaches it yet. */
   chromeLink?: "on" | "connecting" | "unsupported";
+  /** Its MCP servers, for the bots on My Cloud. */
+  mcp: boolean;
   /** Lent and connected with the internet connection: whether My Cloud's browsing goes through it yet. */
   link?: "on" | "connecting" | "unsupported";
   /** An action from the Cloud is running on this computer right now. */
@@ -69,16 +71,18 @@ export interface LendingSummary {
   using: string[];
   paused: boolean;
   terminal?: boolean;
+  /** The MCP servers are lent to the signed-in account's Clouds. */
+  mcp: boolean;
   busy: { env: string; action: string } | null;
   /** Computer control's latest state, null until it is first read. */
   screen: ScreenStatus | null;
 }
-export interface AutomaticGrant { folders: SharedFolder[]; screen: boolean; internet: true; chrome: true; terminal: false }
+export interface AutomaticGrant { folders: SharedFolder[]; screen: boolean; internet: true; chrome: true; terminal: false; mcp: boolean }
 export type CloudLendingVerdict = { allow: true } | { pause: string } | { stop: "signed-out" | "account-changed" | "machine-changed" };
 export function cloudLendingVerdict(binding: { accountId: string; origin: string } | null | undefined, current: { status: string; accountId: string | null; origin: string | null } | null, env: { origin: string } | null | undefined): CloudLendingVerdict;
 /** The person said no to lending this Cloud before lending was automatic, so lending starts Paused. */
 export function saidNo(record: { enabled?: boolean; cloud?: unknown; internet?: boolean; stopped?: { reason?: string } } | null | undefined): boolean;
-export function automaticGrant(input: { kept?: SharedFolder[]; home?: SharedFolder | null; screen?: boolean; projects?: SharedFolder[] }): AutomaticGrant;
+export function automaticGrant(input: { kept?: SharedFolder[]; home?: SharedFolder | null; screen?: boolean; projects?: SharedFolder[]; mcp?: boolean }): AutomaticGrant;
 export function lendsAsWanted(record: unknown, wanted: AutomaticGrant): boolean;
 export function isHomeFolder(target: string): Promise<boolean>;
 export function existingFolders<T>(folders: unknown[], validate: (folders: unknown[]) => Promise<T[]>): Promise<T[]>;
@@ -118,6 +122,9 @@ export function createComputerSharing(options: {
   WebSocket?: typeof globalThis.WebSocket;
   /** The Chrome door's options, for tests: an object with `open` stands in for the door. */
   chrome?: Parameters<typeof import("./device-chrome.mjs").createChromeDoor>[0];
+  /** Builds the door to this computer's MCP servers for one Cloud's link; `definition(name)` is the command that Cloud
+   * keeps for a name now. Without it, the link refuses every MCP server. */
+  mcp?: (env: Workspace, definition: (name: string) => Promise<{ command: string; args: string[]; env: Record<string, string> } | null>) => Pick<import("./device-mcp.mjs").McpDoor, "open" | "close">;
   /** This computer's own check on each connection, for tests: how it looks names up and connects. */
   egress?: Omit<NonNullable<Parameters<typeof import("./device-egress.mjs").createDeviceEgress>[0]>, "seenAs">;
   /** The saved server that is the person's own My Cloud: the move's project folders are lent to it. */
@@ -145,6 +152,10 @@ export function createComputerSharing(options: {
   save(env: Workspace, input: Pick<SharingState, "folders" | "terminal" | "computer">, identity: Identity): Promise<SharingState>;
   revoke(env: Workspace): SharingState;
   forget(env: Workspace): void;
+  /** Whether the signed-in account's Clouds may use this computer's MCP servers, across restarts too; off forgets every Allow. */
+  lendMcp(on: boolean): Promise<void> | undefined;
+  /** The Allows this computer's person gave, kept with the switch's account; a write while it is off is dropped. */
+  mcpApprovals: { read(): Record<string, import("./device-mcp.mjs").McpApproval>; write(next: Record<string, import("./device-mcp.mjs").McpApproval>): void };
   cloudState(env: Workspace | null | undefined): CloudLendingState;
   /** The folders lent to My Cloud, for Files' copies of them (electron/lent-folders.mjs). */
   lentToCloud(env: Workspace | null | undefined): { lendingId: string; folders: Array<{ id: string; path: string; name: string; write: boolean }>; protectedPaths: string[]; paused?: true } | { off: true };

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
@@ -160,6 +161,28 @@ it("explicit edits and terminal work; old credentials and other sessions cannot 
   expect((await api("POST", `/api/shared-computers/${grant.id}/lease`, {}, { cookie, origin: "https://evil.invalid", "x-omb-computer-secret": grant.secret })).status).toBe(403);
   evidence.push("explicit hash-guarded edit and real terminal; cross-session, stale-secret, CSRF, local-control gate refusals");
 }, 60_000);
+
+it("POST /api/shared-computers/:id/mcp-server answers the definition only with that computer's secret, and { server: null } for none", async () => {
+  const grant = storedGrant();
+  const auth = { authorization: `Bearer ${pairing.token}` };
+  const runsOn = { environmentId: randomUUID(), label: hostname().slice(0, 120) };
+  const notes = { command: "notes-mcp", args: ["--dir", "notes"], env: { NOTES_TOKEN: "saved-env" } };
+  expect((await api("POST", "/api/mcp/servers", { name: "notes", ...notes, runsOn })).status).toBe(201);
+  expect((await api("PATCH", "/api/mcp/servers/notes", { enabled: true })).status).toBe(200);
+  try {
+    const ask = (name: string, headers: Record<string, string>) => api("POST", `/api/shared-computers/${grant.id}/mcp-server`, { name }, headers);
+    expect(await ask("notes", { ...auth, "x-omb-computer-secret": grant.secret })).toEqual({ status: 200, body: { server: { name: "notes", ...notes } } });
+    expect(await ask("missing", { ...auth, "x-omb-computer-secret": grant.secret })).toEqual({ status: 200, body: { server: null } });
+    expect((await ask("notes", auth)).status).toBe(403);
+    expect((await ask("notes", { ...auth, "x-omb-computer-secret": "0".repeat(64) })).status).toBe(403);
+    const second = await api("POST", "/api/auth/pairing", { label: "Another desktop" });
+    const other = (await api("POST", "/api/auth/pair", { code: second.body.code })).body;
+    expect((await ask("notes", { authorization: `Bearer ${other.token}`, "x-omb-computer-secret": grant.secret })).status).toBe(403);
+  } finally {
+    expect((await api("DELETE", "/api/mcp/servers/notes")).status).toBe(200);
+  }
+  evidence.push("a lent computer reads a command server's definition with its own secret only");
+}, 30_000);
 
 it("a big lent file changes by one passage, gains lines at its end, and is deleted only once read", async () => {
   await connector.save(env, { folders: [{ ...folder, write: true }], terminal: false, computer: false }, await connector.identity(env));

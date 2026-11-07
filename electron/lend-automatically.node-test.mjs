@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import os, { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { ownCloud } from "./cloud-list.mjs";
 import { automaticGrant, createComputerSharing, lendsAsWanted } from "./computer-sharing.mjs";
+import { createMcpDoor } from "./device-mcp.mjs";
+import { createLinkMux } from "./device-link-protocol.mjs";
 import { activityPage, createActivityWindow } from "./lending-activity-window.mjs";
 import { createLendingIndicator, indicatorText } from "./lending-indicator.mjs";
 import { createLendingTarget } from "./lending-target.mjs";
@@ -33,8 +36,9 @@ async function scratch(t) {
   return dir;
 }
 
-/** A Cloud home as the poll sees it: what this computer registered, each job's result, and its disconnects. */
-function cloudHome({ link = true, chrome = true } = {}) {
+/** A Cloud home as the poll sees it: what this computer registered, each job's result, and its disconnects. `servers`:
+ * the MCP servers it keeps for this computer to run, by name. */
+function cloudHome({ link = true, chrome = true, mcp = true, servers = {} } = {}) {
   const json = (value, status = 200) => ({ ok: status < 400, status, headers: { get: () => null }, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
   const state = { environmentId: randomUUID(), sessionId: randomUUID(), connects: [], results: [], queue: [], disconnects: [], calls: 0 };
   state.push = operation => state.queue.push({ id: randomUUID(), operation: { computer_id: state.connects.at(-1).id, ...operation } });
@@ -42,9 +46,10 @@ function cloudHome({ link = true, chrome = true } = {}) {
     state.calls++;
     const route = new URL(url).pathname;
     if (route === "/api/auth/session") return json({ kind: "session", id: state.sessionId, scopes: ["admin", "client"], cloudHome: true });
-    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, lendingDetails: true, ...(link ? { deviceLink: true } : {}), ...(chrome ? { myChromeLink: true } : {}) } });
+    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, lendingDetails: true, ...(link ? { deviceLink: true } : {}), ...(chrome ? { myChromeLink: true } : {}), ...(mcp ? { lentMcpLink: true } : {}) } });
     const body = init?.body ? JSON.parse(init.body) : {};
     if (route === "/api/shared-computers/connect") { state.connects.push(body); return json({ ok: true }); }
+    if (route.endsWith("/mcp-server")) return json({ server: servers[body.name] ?? null });
     if (route.endsWith("/poll")) {
       const job = state.queue.shift() ?? null;
       if (!job) await delay(50, undefined, { signal: init?.signal }).catch(() => {});
@@ -74,15 +79,28 @@ function session() {
     signInAs: id => { state = { ...session().account.state(), account: { id } }; } };
 }
 
+/** A device link that opens at once; `ends` gets My Cloud's side of each, which asks this computer for streams. */
+const openingLink = (dials, ends) => class {
+  constructor(url) {
+    dials.push(url);
+    this.end = createLinkMux({ send: frame => setImmediate(() => this.onmessage?.({ data: frame })) });
+    ends.push(this.end);
+    setImmediate(() => this.onopen?.());
+  }
+  send(frame) { setImmediate(() => this.end.receive(frame)); }
+  close() { this.end.close(); }
+};
+
 /** This computer lending to every saved place the way main wires it: the session's own Clouds, its home folder, and
- * apps and screen while `screen` says so. */
-async function computer(t, { places = [myCloud, clientA, acme], screen = () => false, home, homes = {}, cuaConnection = async () => null, askForScreen, ownHome } = {}) {
+ * apps and screen while `screen` says so. `link`: its device links open, and `ends` holds My Cloud's side of each. */
+async function computer(t, { places = [myCloud, clientA, acme], screen = () => false, home, homes = {}, cuaConnection = async () => null, askForScreen, ownHome, mcp, link = false } = {}) {
   const dir = await scratch(t);
   const file = path.join(dir, "profile", "computer-sharing.json");
   const signedIn = session();
   const target = createLendingTarget({ account: () => signedIn.account, environments: () => places, ...(ownHome ? { ownHome } : {}) });
   const summaries = [];
   const dials = [];
+  const ends = [];
   const make = () => createComputerSharing({
     file, environments: () => places, enabled: async () => false, home: home ?? path.join(dir, "home"),
     fetch: (url, init) => {
@@ -92,11 +110,11 @@ async function computer(t, { places = [myCloud, clientA, acme], screen = () => f
     },
     cloud: target.cloud, myCloud: target.environment, ownClouds: target.places, screen, cuaConnection, ...(askForScreen ? { askForScreen } : {}),
     hostControl: async () => ({ renew: async () => {}, release: async () => {} }), onChange: summary => summaries.push(summary),
-    WebSocket: class { constructor(url) { dials.push(url); } close() {} send() {} },
+    WebSocket: link ? openingLink(dials, ends) : class { constructor(url) { dials.push(url); } close() {} send() {} }, ...(mcp ? { mcp } : {}),
   });
   let sharing = make();
   t.after(() => sharing.close());
-  return { dir, file, target, summaries, dials, signedIn, get sharing() { return sharing; }, restart: () => { sharing.close(); sharing = make(); return sharing; } };
+  return { dir, file, target, summaries, dials, ends, signedIn, get sharing() { return sharing; }, restart: () => { sharing.close(); sharing = make(); return sharing; } };
 }
 
 test("each Cloud of the person's own is lent this computer by itself: the internet connection, their Chrome and the home folder with editing; not the terminal unless turned on", async t => {
@@ -209,7 +227,7 @@ test("Pause stops every Cloud at once and lasts across restarts; Resume lends ag
   await until(() => homes[HOME].connects.length === 1 && homes[OTHER].connects.length === 1, "both Clouds to be lent");
   mac.sharing.pause();
   await until(() => homes[HOME].disconnects.length === 1 && homes[OTHER].disconnects.length === 1, "both Clouds to be told");
-  assert.deepEqual(mac.summaries.at(-1), { lending: [], clouds: ["My Cloud", "Client A"], waiting: [], using: [], paused: true, terminal: false, busy: null, screen: null });
+  assert.deepEqual(mac.summaries.at(-1), { lending: [], clouds: ["My Cloud", "Client A"], waiting: [], using: [], paused: true, terminal: false, mcp: false, busy: null, screen: null });
   assert.equal(mac.sharing.lentToCloud(myCloud).paused, true, "Files keeps My Cloud's copies, and holds bots' changes there");
   const plans = path.join(mac.dir, "Plans");
   await mkdir(plans);
@@ -372,6 +390,183 @@ test("the terminal is lent only to the account that turned it on: another accoun
   assert.ok(homes[HOME].connects.slice(3).every(connect => connect.terminal === false), "not after a restart either");
 });
 
+/** Lends this computer's MCP servers and waits for a link that lends them: My Cloud's side of it. */
+async function mcpLent(mac, home) {
+  await mac.sharing.lendMcp(true);
+  await until(() => home.connects.at(-1)?.mcp === true && mac.sharing.cloudState(myCloud).link === "on", "MCP lent over an open link");
+  return mac.ends.at(-1);
+}
+
+/** The MCP door main gives lending, recording each one built and how often each was closed. */
+function doors(prompt, sharing) {
+  const built = [];
+  const mcp = (env, definition) => {
+    const door = createMcpDoor({ approvals: sharing().mcpApprovals, prompt, ownPorts: async () => [], definition });
+    const entry = { env: env.id, closed: 0 };
+    built.push(entry);
+    return { open: door.open, close() { entry.closed++; door.close(); } };
+  };
+  return { built, mcp };
+}
+
+/** A server on this computer's loopback address, and whether each connection it took has ended. */
+async function listening(t) {
+  const sockets = [], ended = [];
+  const server = createServer(socket => { const index = sockets.push(socket) - 1; ended[index] = false; socket.on("close", () => { ended[index] = true; }); socket.on("error", () => {}); socket.resume(); });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { for (const socket of sockets) socket.destroy(); return new Promise(resolve => server.close(resolve)); });
+  return { port: server.address().port, sockets, ended };
+}
+
+test("lendMcp(true) needs a signed-in account, persists mcpAccount, and the automatic pass re-lends with mcp", async t => {
+  const homes = { [HOME]: cloudHome() };
+  const mac = await computer(t, { homes, places: [myCloud] });
+  mac.signedIn.signOut();
+  assert.throws(() => mac.sharing.lendMcp(true), { message: "Sign in to My Cloud before lending it your MCP servers." });
+  mac.signedIn.signIn();
+  mac.sharing.start();
+  await until(() => homes[HOME].connects.length === 1, "the automatic grant to reach My Cloud");
+  assert.equal(homes[HOME].connects[0].mcp, false, "off by default");
+  assert.equal(mac.summaries.at(-1).mcp, false);
+  await mac.sharing.lendMcp(true);
+  await until(() => homes[HOME].connects.length === 2, "the grant with MCP to reach My Cloud");
+  assert.equal(homes[HOME].connects[1].mcp, true);
+  assert.equal(mac.sharing.cloudState(myCloud).mcp, true);
+  assert.equal(mac.summaries.at(-1).mcp, true);
+  assert.equal(JSON.parse(await readFile(mac.file, "utf8")).automatic.mcpAccount, "acct_1");
+  const restarted = mac.restart();
+  restarted.start();
+  await until(() => homes[HOME].connects.length === 3, "the kept grant to reach My Cloud after a restart");
+  assert.equal(homes[HOME].connects[2].mcp, true, "still lent after a restart");
+  restarted.mcpApprovals.write({ notes: { kind: "command", fingerprint: "a".repeat(64) } });
+  mac.signedIn.signInAs("acct_2");
+  await restarted.screenChanged();
+  await until(() => homes[HOME].connects.length === 4, "the other account's grant to reach My Cloud");
+  assert.equal(homes[HOME].connects[3].mcp, false, "the other account did not turn it on");
+  await restarted.lendMcp(true);
+  await until(() => homes[HOME].connects.length === 5, "the other account's grant with MCP to reach My Cloud");
+  assert.equal(homes[HOME].connects[4].mcp, true);
+  assert.deepEqual(restarted.mcpApprovals.read(), {}, "the first account's Allows are not the second's");
+});
+
+test("one door per env: two opens share the decline hold, and stop(id) closes that door", async t => {
+  const homes = { [HOME]: cloudHome() };
+  const asks = [];
+  let mac;
+  const door = doors(async ask => { asks.push(ask); return false; }, () => mac.sharing);
+  mac = await computer(t, { homes, places: [myCloud], link: true, mcp: door.mcp });
+  mac.sharing.start();
+  await until(() => homes[HOME].connects.length === 1, "the automatic grant to reach My Cloud");
+  const end = await mcpLent(mac, homes[HOME]);
+  const built = door.built.length;
+  assert.deepEqual(await end.open({ mcp: { name: "local", port: 19501 } }), { refused: "needs-approval" });
+  await until(() => asks.length === 1, "the person to be asked");
+  assert.deepEqual(asks[0], { name: "local", target: { kind: "url", port: 19501 } });
+  assert.deepEqual(await end.open({ mcp: { name: "local", port: 19501 } }), { refused: "declined" }, "the No holds across the link's streams");
+  assert.equal(asks.length, 1);
+  assert.equal(door.built.length, built, "the streams share the link's door");
+  assert.deepEqual(door.built.map(entry => [entry.env, entry.closed]), [...door.built.slice(0, -1).map(() => [myCloud.id, 1]), [myCloud.id, 0]], "a door ends with its link");
+  mac.sharing.pause();
+  assert.equal(door.built.at(-1).closed, 1, "stopping lending closes the door");
+});
+
+test("turning the switch off ends the link, forgets approvals and ends every child", async t => {
+  const homes = { [HOME]: cloudHome() };
+  let mac;
+  const door = doors(async () => true, () => mac.sharing);
+  mac = await computer(t, { homes, places: [myCloud], link: true, mcp: door.mcp });
+  const local = await listening(t);
+  mac.sharing.start();
+  await until(() => homes[HOME].connects.length === 1, "the automatic grant to reach My Cloud");
+  const end = await mcpLent(mac, homes[HOME]);
+  mac.sharing.mcpApprovals.write({ local: { kind: "url", port: local.port } });
+  const opened = await end.open({ mcp: { name: "local", port: local.port } });
+  assert.ok(opened.join, JSON.stringify(opened));
+  await until(() => local.sockets.length === 1, "the stream to reach the server");
+  const lentDoor = door.built.at(-1);
+  await mac.sharing.lendMcp(false);
+  assert.deepEqual(mac.sharing.mcpApprovals.read(), {});
+  assert.equal(lentDoor.closed, 1, "the switch closes the door");
+  await until(() => local.ended[0], "the server's connection to end");
+  const saved = JSON.parse(await readFile(mac.file, "utf8"));
+  assert.deepEqual(["mcpApprovals" in saved, saved.automatic.mcpAccount], [false, undefined]);
+  await until(() => homes[HOME].connects.at(-1).mcp === false && mac.sharing.cloudState(myCloud).link === "on", "lent again without MCP, over a new link");
+  assert.deepEqual(await mac.ends.at(-1).open({ mcp: { name: "local", port: local.port } }), { refused: "not-lent" });
+  assert.equal(local.sockets.length, 1);
+});
+
+test("the switch's account leaving takes the switch and its Allows with it", async t => {
+  const homes = { [HOME]: cloudHome() };
+  let mac;
+  const door = doors(async () => true, () => mac.sharing);
+  mac = await computer(t, { homes, places: [myCloud], link: true, mcp: door.mcp });
+  mac.sharing.start();
+  await until(() => homes[HOME].connects.length === 1, "the automatic grant to reach My Cloud");
+  await mcpLent(mac, homes[HOME]);
+  mac.sharing.mcpApprovals.write({ local: { kind: "url", port: 19501 } });
+  const lentDoor = door.built.at(-1);
+  mac.sharing.leaveAccount("acct_1");
+  assert.deepEqual(mac.sharing.mcpApprovals.read(), {});
+  assert.equal(lentDoor.closed, 1, "its door closes with its lending");
+  assert.equal(mac.summaries.at(-1).mcp, false);
+  const saved = JSON.parse(await readFile(mac.file, "utf8"));
+  assert.deepEqual(["mcpApprovals" in saved, saved.automatic.mcpAccount], [false, undefined]);
+});
+
+test("an MCP door that fails to start costs the link nothing: it opens, and MCP streams answer unreachable", async t => {
+  const homes = { [HOME]: cloudHome() };
+  const mac = await computer(t, { homes, places: [myCloud], link: true, mcp: () => { throw new Error("no door here"); } });
+  mac.sharing.start();
+  await until(() => homes[HOME].connects.length === 1, "the automatic grant to reach My Cloud");
+  const end = await mcpLent(mac, homes[HOME]);
+  assert.deepEqual(await end.open({ mcp: { name: "local", port: 19501 } }), { failed: "unreachable" });
+});
+
+test("an approval written after the switch went off is dropped", async t => {
+  const homes = { [HOME]: cloudHome() };
+  const mac = await computer(t, { homes, places: [myCloud] });
+  mac.sharing.start();
+  await until(() => homes[HOME].connects.length === 1, "the automatic grant to reach My Cloud");
+  mac.sharing.mcpApprovals.write({ early: { kind: "url", port: 3000 } });
+  assert.deepEqual(mac.sharing.mcpApprovals.read(), {}, "nothing is kept before the switch is on");
+  await mac.sharing.lendMcp(true);
+  const notes = { kind: "command", fingerprint: "a".repeat(64) };
+  mac.sharing.mcpApprovals.write({ notes });
+  const restarted = mac.restart();
+  assert.deepEqual(restarted.mcpApprovals.read(), { notes }, "an Allow lasts across restarts while the switch is on");
+  await restarted.lendMcp(false);
+  restarted.mcpApprovals.write({ late: { kind: "url", port: 3000 } });
+  assert.deepEqual(restarted.mcpApprovals.read(), {});
+  assert.equal("mcpApprovals" in JSON.parse(await readFile(mac.file, "utf8")), false);
+});
+
+test("a stream's outcome is one activity row: action mcp, detail the server's name, never a port or command", async t => {
+  const notes = { command: "/opt/notes/notes-mcp", args: ["--token", "arg-secret"], env: { NOTES_TOKEN: "env-secret" } };
+  const homes = { [HOME]: cloudHome({ servers: { notes } }) };
+  let mac;
+  const door = doors(() => new Promise(() => {}), () => mac.sharing);
+  mac = await computer(t, { homes, places: [myCloud], link: true, mcp: door.mcp });
+  const files = await listening(t);
+  mac.sharing.start();
+  await until(() => homes[HOME].connects.length === 1, "the automatic grant to reach My Cloud");
+  const end = await mcpLent(mac, homes[HOME]);
+  assert.deepEqual(await end.open({ mcp: { name: "local", port: 19501 } }), { refused: "needs-approval" });
+  assert.deepEqual(await end.open({ mcp: { name: "local", port: 19501 } }), { refused: "needs-approval" });
+  assert.deepEqual(await end.open({ mcp: { name: "notes", fingerprint: "b".repeat(64) } }), { failed: "changed" });
+  mac.sharing.mcpApprovals.write({ files: { kind: "url", port: files.port } });
+  const opened = await end.open({ mcp: { name: "files", port: files.port } });
+  assert.ok(opened.join, JSON.stringify(opened));
+  opened.cancel();
+  const rows = mac.sharing.activity(myCloud.id).filter(entry => entry.action === "mcp");
+  assert.deepEqual(rows.map(({ detail, ok, error }) => ({ detail, ok, error })), [
+    { detail: "files", ok: true, error: undefined },
+    { detail: "notes", ok: false, error: "changed" },
+    { detail: "local", ok: false, error: "needs-approval" },
+  ]);
+  const said = JSON.stringify(mac.sharing.activity().map(({ at: _at, ...entry }) => entry));
+  for (const hidden of ["19501", String(files.port), "notes-mcp", "arg-secret", "env-secret", "b".repeat(64)]) assert.ok(!said.includes(hidden), hidden);
+});
+
 test("the automatic grant, piece by piece: the home folder first with editing, folders kept as they were, project folders with editing, at most 20", () => {
   const folder = (name, write = false, extra = {}) => ({ id: randomUUID(), path: `/Users/me/${name}`, name, write, ...extra });
   const home = { id: randomUUID(), path: "/Users/me", name: "me", write: true, home: true };
@@ -386,6 +581,11 @@ test("the automatic grant, piece by piece: the home folder first with editing, f
   assert.deepEqual(automaticGrant({}).folders, [], "no home folder where it can't be lent");
   const record = { enabled: true, cloud: { accountId: "a", origin: HOME }, folders: wanted.folders, internet: true, chrome: true, computer: true, terminal: false };
   assert.equal(lendsAsWanted(record, wanted), true);
+  assert.equal(wanted.mcp, false);
+  assert.equal(automaticGrant({ mcp: true }).mcp, true, "MCP servers only when the person turned them on");
+  assert.equal(lendsAsWanted({ ...record, mcp: true }, { ...wanted, mcp: true }), true);
+  assert.equal(lendsAsWanted({ ...record, mcp: true }, wanted), false, "lent MCP servers the switch no longer wants");
+  assert.equal(lendsAsWanted(record, { ...wanted, mcp: true }), false);
   assert.equal(automaticGrant({ terminal: true }).terminal, true, "the terminal only when the person turned it on");
   assert.equal(lendsAsWanted({ ...record, terminal: true }, { ...wanted, terminal: true }), true);
   for (const changed of [{ terminal: true }, { chrome: false }, { internet: false }, { computer: false }, { enabled: false }, { cloud: undefined }, { folders: wanted.folders.slice(1) }]) {
@@ -472,17 +672,18 @@ test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, the t
   }
   const clicked = [];
   const turned = [];
+  const mcpTurned = [];
   const indicator = createLendingIndicator({ Tray, Menu: { buildFromTemplate: items => items }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, iconPath: "icon.png",
-    onPause: () => clicked.push("pause"), onResume: () => clicked.push("resume"), onActivity: () => clicked.push("activity"), onTerminal: on => turned.push(on), device: "Mac" });
+    onPause: () => clicked.push("pause"), onResume: () => clicked.push("resume"), onActivity: () => clicked.push("activity"), onTerminal: on => turned.push(on), onMcp: on => mcpTurned.push(on), device: "Mac" });
   const labels = () => trays.at(-1).menu.map(item => item.type === "separator" ? "-" : item.label);
   indicator.update({ clouds: [], using: [], paused: false });
   assert.equal(trays.length, 0, "nothing in the menu bar without a Cloud of the person's own");
   indicator.update({ clouds: ["My Cloud", "Client A"], using: [], paused: false });
-  assert.deepEqual(labels(), ["My Cloud and Client A can use this Mac", "-", "Pause", "Let Clouds run commands on this Mac", "See activity"]);
+  assert.deepEqual(labels(), ["My Cloud and Client A can use this Mac", "-", "Pause", "Let Clouds run commands on this Mac", "Let My Cloud use your MCP servers on this Mac", "See activity"]);
   assert.equal(trays[0].title, "");
   indicator.update({ clouds: ["My Cloud", "Client A"], using: ["Client A"], paused: false });
   assert.equal(trays.length, 1);
-  assert.deepEqual(labels(), ["Client A is using this Mac", "-", "Pause", "Let Clouds run commands on this Mac", "See activity"]);
+  assert.deepEqual(labels(), ["Client A is using this Mac", "-", "Pause", "Let Clouds run commands on this Mac", "Let My Cloud use your MCP servers on this Mac", "See activity"]);
   assert.equal(trays[0].title, "Client A is using this Mac");
   assert.equal(trays[0].tip, "OpenMausBot: Client A is using this Mac");
   trays[0].menu.find(item => item.label === "Pause").click();
@@ -498,6 +699,14 @@ test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, the t
   terminal().click();
   indicator.update({ clouds: ["My Cloud"], using: [], paused: false, terminal: false });
   assert.equal(terminal().checked, false);
+  const mcp = () => trays[0].menu.find(item => item.label === "Let My Cloud use your MCP servers on this Mac");
+  assert.deepEqual([mcp().type, mcp().checked], ["checkbox", false]);
+  indicator.update({ clouds: ["My Cloud"], using: [], paused: false, mcp: true });
+  assert.equal(mcp().checked, true);
+  mcp().click();
+  indicator.update({ clouds: ["My Cloud"], using: [], paused: false, mcp: false });
+  mcp().click();
+  assert.deepEqual(mcpTurned, [false, true], "each click asks for the opposite of the saved state");
   terminal().click();
   assert.deepEqual(turned, [false, true]);
   terminal().checked = true;
@@ -513,6 +722,7 @@ test("See activity shows this computer's own record in the app's language: every
   const entries = [
     { at: Date.UTC(2026, 9, 28, 14, 2), server: "Client <A>", origin: OTHER, action: "read_file", detail: "Notes/<img src=x onerror=alert(1)>.md", ok: true },
     { at: Date.UTC(2026, 9, 28, 14, 3), server: "My Cloud", origin: HOME, action: "run_command", detail: "rm -rf ~", ok: false, error: "Terminal access is not enabled for this server" },
+    { at: Date.UTC(2026, 9, 28, 14, 4), server: "My Cloud", origin: HOME, action: "mcp", detail: "notes", ok: true },
   ];
   const page = activityPage(entries, "de");
   assert.doesNotMatch(page, /<script|<img/i);
@@ -520,6 +730,7 @@ test("See activity shows this computer's own record in the app's language: every
   assert.match(page, /Client &lt;A&gt;/);
   assert.match(page, /default-src 'none'/);
   assert.match(page, new RegExp(WORDS.de["lending.action.readFile"]));
+  assert.match(page, new RegExp(WORDS.de["lending.action.mcp"]));
   assert.match(page, /class="refused"/);
   assert.match(activityPage([], "en"), new RegExp(WORDS.en["lending.activity.empty"].replace(/[.]/g, "\\.")));
   const windows = [];

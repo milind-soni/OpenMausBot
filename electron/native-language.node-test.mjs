@@ -58,12 +58,12 @@ test("a new language redraws main's menu, both trays, the window title and the b
   vm.runInContext(`${MAIN.slice(start, end)}; this.applyNativeLanguage = applyNativeLanguage;`, context);
 
   const said = (tray) => tray.menu.filter((item) => item.label).map((item) => item.label);
-  assert.deepEqual(said(trays[1]), ["My Cloud can use this PC", "Pause", "Let Clouds run commands on this PC", "See activity"]);
+  assert.deepEqual(said(trays[1]), ["My Cloud can use this PC", "Pause", "Let Clouds run commands on this PC", "Let My Cloud use your MCP servers on this PC", "See activity"]);
 
   text.set("pt-br");
   context.applyNativeLanguage();
   assert.deepEqual(calls, [["menu", "Servidor"], ["title", "OpenMausBot — Hospedado: Office (office.example.test)"], ["badge", "Nenhuma conversa não lida"]]);
   assert.deepEqual(said(trays[0]), ["Abrir o OpenMaus Bot", "Sair do OpenMaus Bot"]);
-  assert.deepEqual(said(trays[1]), ["My Cloud com acesso a este PC", "Pausar", "Permitir que os Clouds executem comandos neste PC", "Ver atividade"]);
+  assert.deepEqual(said(trays[1]), ["My Cloud com acesso a este PC", "Pausar", "Permitir que os Clouds executem comandos neste PC", "Deixar o My Cloud usar seus servidores MCP neste PC", "Ver atividade"]);
   assert.equal(trays[1].tip, "OpenMausBot: My Cloud com acesso a este PC");
 });
