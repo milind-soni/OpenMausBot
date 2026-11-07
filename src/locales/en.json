@@ -8808,6 +8808,7 @@
   "skins.tagline.meadow": "Fresh white with a calm green. The MausBot look.",
   "skins.tagline.pop": "Cream paper, thick ink outlines, hard shadows. Chunky and cheerful.",
   "skins.tagline.halloween": "Plum after dark, lit in pumpkin orange. Bats optional.",
+  "skins.tagline.aurora": "Near-black, crossed by a band of green light. Glass on top.",
   "automations.calendar.cronMove": "Open this automation to change its repeating schedule.",
   "automations.calendar.moveSeries": "Move every time it repeats?",
   "automations.address.copyAddressFailed": "Couldn't copy the address",
