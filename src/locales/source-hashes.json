@@ -3394,7 +3394,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -9439,7 +9440,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -12700,7 +12702,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -15813,7 +15816,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -23535,7 +23539,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -33308,7 +33313,10 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "chat.notice.acpMcpAppsFailed": "d4e7b2a8d9464e8365bf1842d5e0eea17f602dc29834f58cd2d4d8b258387fba",
+      "chat.notice.acpMcpServerFailed": "0691e7f2e00e744d7a8092a5ff69a6be41fc3d998c0cd996bdf4ff6e31560bdd"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -40916,7 +40924,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -50686,7 +50695,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -54240,7 +54250,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59784,7 +59795,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -65328,7 +65340,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72135,7 +72148,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -79004,7 +79018,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -85673,7 +85688,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -93064,7 +93080,8 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381"
     }
   }
 }
