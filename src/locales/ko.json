@@ -7261,5 +7261,12 @@
   "rail.localRemoveFailed": "제거되지 않았습니다. 잠시 후 다시 시도하세요.",
   "native.menu.newLocal": "이 컴퓨터에 새 작업 공간…",
   "lending.action.mcp": "MCP 서버 사용",
-  "native.lend.mcpSignIn": "My Cloud에 MCP 서버를 빌려주기 전에 먼저 My Cloud에 로그인하세요."
+  "native.lend.mcpSignIn": "My Cloud에 MCP 서버를 빌려주기 전에 먼저 My Cloud에 로그인하세요.",
+  "native.lendTray.mcp": "이 {device}에서 My Cloud가 내 MCP 서버를 사용하도록 허용",
+  "native.lend.mcp.title": "이 {device}에서 My Cloud가 {name}을(를) 사용하도록 허용할까요?",
+  "native.lend.mcp.port": "이 {device}의 포트 {port}에 있는 서버입니다. My Cloud의 봇이 OpenMausBot을 통해 요청을 보냅니다.",
+  "native.lend.mcp.command": "저장된 설정으로 여기서 내 권한으로 이 명령을 실행합니다(비밀 값 숨김):\n{command}",
+  "native.lend.mcp.allow": "허용",
+  "native.lend.mcp.deny": "허용 안 함",
+  "native.lend.mcp.settings": "전달되는 설정: {names}"
 }

@@ -26,7 +26,7 @@ export function indicatorText({ clouds, using, paused, screen = null, waiting = 
   return { line, title: "", screen: why, ...pending };
 }
 
-export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, onTerminal, onStartScreen = () => {}, device = deviceWord(), t = nativeText.englishText.t }) {
+export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, onTerminal, onMcp = () => {}, onStartScreen = () => {}, device = deviceWord(), t = nativeText.englishText.t }) {
   let tray = null;
   let shown = null;
   const draw = view => {
@@ -45,13 +45,15 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
       view.paused ? { label: t("native.lendTray.resume"), click: () => onResume() } : { label: t("native.lendTray.pause"), click: () => onPause() },
       ...view.paused ? [] : [{ label: t("native.lendTray.terminal", { device: device === "computer" ? t("native.lendTray.computer") : device }), type: "checkbox", checked: view.terminal,
         // Electron 43 ticks a checkbox on click by itself: the menu keeps the saved choice until the person confirms one.
-        click: () => { draw(view); onTerminal(!view.terminal); } }],
+        click: () => { draw(view); onTerminal(!view.terminal); } },
+      { label: t("native.lendTray.mcp", { device: device === "computer" ? t("native.lendTray.computer") : device }), type: "checkbox", checked: view.mcp,
+        click: () => { draw(view); onMcp(!view.mcp); } }],
       { label: t("native.lendTray.activity"), click: () => onActivity() },
     ]));
   };
   return {
-    update({ clouds = [], using = [], paused = false, terminal = false, screen = null, waiting = [] }) {
-      const next = { clouds: [...clouds], using: paused ? [] : [...using], waiting: paused ? [] : [...waiting], paused: paused === true, terminal: terminal === true,
+    update({ clouds = [], using = [], paused = false, terminal = false, mcp = false, screen = null, waiting = [] }) {
+      const next = { clouds: [...clouds], using: paused ? [] : [...using], waiting: paused ? [] : [...waiting], paused: paused === true, terminal: terminal === true, mcp: mcp === true,
         screen: screen ? { ready: screen.ready === true, reason: screen.reason ?? null, fix: screen.fix ?? null, ...(screen.message ? { message: screen.message } : {}) } : null };
       if (shown && JSON.stringify(next) === JSON.stringify(shown)) return;
       shown = next;

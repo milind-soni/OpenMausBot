@@ -7595,5 +7595,12 @@
   "serverError.mailbox.outgoingFields": "送信サーバーを確認してください: mail.example.com のような名前、1〜65535 のポート、SSL/TLS または STARTTLS。",
   "native.menu.newLocal": "このコンピューターに新しいワークスペース…",
   "lending.action.mcp": "MCP サーバーを使用",
-  "native.lend.mcpSignIn": "MCP サーバーを My Cloud に貸し出す前に、My Cloud にサインインしてください。"
+  "native.lend.mcpSignIn": "MCP サーバーを My Cloud に貸し出す前に、My Cloud にサインインしてください。",
+  "native.lendTray.mcp": "この{device}でMy CloudにMCPサーバーを使わせる",
+  "native.lend.mcp.title": "この{device}でMy Cloudに{name}を使わせますか?",
+  "native.lend.mcp.port": "この{device}のポート{port}にあるサーバーです。My CloudのボットはOpenMausBot経由でリクエストを送ります。",
+  "native.lend.mcp.command": "保存された設定を使い、あなたとしてここでこのコマンドを実行します(シークレットは非表示):\n{command}",
+  "native.lend.mcp.allow": "許可",
+  "native.lend.mcp.deny": "許可しない",
+  "native.lend.mcp.settings": "渡される設定:{names}"
 }

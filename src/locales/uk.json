@@ -3423,5 +3423,12 @@
   "rail.localRemoveFailed": "Не вдалося видалити. Спробуйте ще раз за мить.",
   "native.menu.newLocal": "Новий робочий простір на цьому комп'ютері…",
   "lending.action.mcp": "Використано MCP-сервер",
-  "native.lend.mcpSignIn": "Увійдіть у My Cloud, перш ніж надавати йому свої MCP-сервери."
+  "native.lend.mcpSignIn": "Увійдіть у My Cloud, перш ніж надавати йому свої MCP-сервери.",
+  "native.lendTray.mcp": "Дозволити My Cloud використовувати ваші MCP-сервери на цьому {device}",
+  "native.lend.mcp.title": "Дозволити My Cloud використовувати {name} на цьому {device}?",
+  "native.lend.mcp.port": "Сервер на порту {port} цього {device}. Боти My Cloud надсилатимуть йому запити через OpenMausBot.",
+  "native.lend.mcp.command": "Він запускає тут цю команду від вашого імені зі збереженими налаштуваннями (секрети приховано):\n{command}",
+  "native.lend.mcp.allow": "Дозволити",
+  "native.lend.mcp.deny": "Не дозволяти",
+  "native.lend.mcp.settings": "Налаштування, які він отримує: {names}"
 }

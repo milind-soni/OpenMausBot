@@ -2982,5 +2982,12 @@
   "rail.localRemoveFailed": "यह हटाया नहीं गया। थोड़ी देर में फिर कोशिश करें।",
   "native.menu.newLocal": "इस कंप्यूटर पर नया वर्कस्पेस…",
   "lending.action.mcp": "एक MCP सर्वर इस्तेमाल किया",
-  "native.lend.mcpSignIn": "My Cloud को अपने MCP सर्वर देने से पहले उसमें साइन इन करें।"
+  "native.lend.mcpSignIn": "My Cloud को अपने MCP सर्वर देने से पहले उसमें साइन इन करें।",
+  "native.lendTray.mcp": "My Cloud को इस {device} पर आपके MCP सर्वर इस्तेमाल करने दें",
+  "native.lend.mcp.title": "क्या My Cloud को इस {device} पर {name} इस्तेमाल करने दें?",
+  "native.lend.mcp.port": "इस {device} पर पोर्ट {port} पर एक सर्वर। My Cloud के बॉट OpenMausBot के ज़रिए इसे अनुरोध भेजेंगे।",
+  "native.lend.mcp.command": "यह यहाँ आपके रूप में यह कमांड चलाता है, अपनी सहेजी गई सेटिंग के साथ (सीक्रेट छिपे हैं):\n{command}",
+  "native.lend.mcp.allow": "अनुमति दें",
+  "native.lend.mcp.deny": "अनुमति न दें",
+  "native.lend.mcp.settings": "इसे मिलने वाली सेटिंग: {names}"
 }

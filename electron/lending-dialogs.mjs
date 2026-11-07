@@ -2,6 +2,7 @@
 // person. These are main's own dialogs, which no page (this computer's or a server's) can draw or answer, and each one
 // defaults to Cancel.
 import { randomUUID } from "node:crypto";
+import { deviceWord } from "./lending-indicator.mjs";
 import nativeText from "./native-text.cjs";
 
 export function serverAccessDetail(env, { folders, terminal, computer }, t = nativeText.englishText.t) {
@@ -23,7 +24,7 @@ export function serverAccessDetail(env, { folders, terminal, computer }, t = nat
  *   t?: (key: string, params?: Record<string, string | number>) => string,
  * }} deps
  */
-export function createLendingDialogs({ dialog, window, validate, isHome = async () => false, t = nativeText.englishText.t }) {
+export function createLendingDialogs({ dialog, window, validate, isHome = async () => false, device = deviceWord(), t = nativeText.englishText.t }) {
   let askingTerminal = false;
   return {
     /** Turning the terminal on runs `lend` only once the person confirms, one question at a time; turning it off never asks.
@@ -60,6 +61,15 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
         folder.home = true;
       }
       return (await validate([folder]))[0];
+    },
+    /** One MCP server this computer's person is asked to let My Cloud use; Don't allow is the default, and anything but Allow is no. */
+    async allowMcpServer({ name, target }) {
+      const where = device === "computer" ? t("native.lendTray.computer") : device;
+      const detail = target.kind === "url" ? t("native.lend.mcp.port", { port: target.port, device: where })
+        : [t("native.lend.mcp.command", { command: target.command }), ...target.env?.length ? [t("native.lend.mcp.settings", { names: target.env.join(", ") })] : []].join("\n\n");
+      const { response } = await dialog.showMessageBox({ type: "warning", message: t("native.lend.mcp.title", { name, device: where }), detail,
+        buttons: [t("native.lend.mcp.allow"), t("native.lend.mcp.deny")], defaultId: 1, cancelId: 1 });
+      return response === 0;
     },
     async confirmServerAccess(env, grant) {
       const { response } = await dialog.showMessageBox(window(), { type: "warning", message: t("native.lend.allow.title", { name: env.name }), detail: serverAccessDetail(env, grant, t),

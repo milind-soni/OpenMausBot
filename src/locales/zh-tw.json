@@ -4805,5 +4805,12 @@
   "rail.localRemoveFailed": "沒有移除，請稍後再試。",
   "native.menu.newLocal": "在這台電腦上新增工作區…",
   "lending.action.mcp": "使用了 MCP 伺服器",
-  "native.lend.mcpSignIn": "請先登入 My Cloud，再把你的 MCP 伺服器借給它。"
+  "native.lend.mcpSignIn": "請先登入 My Cloud，再把你的 MCP 伺服器借給它。",
+  "native.lendTray.mcp": "允許 My Cloud 使用這台{device}上的 MCP 伺服器",
+  "native.lend.mcp.title": "允許 My Cloud 使用這台{device}上的 {name} 嗎?",
+  "native.lend.mcp.port": "這台{device}上連接埠 {port} 的伺服器。My Cloud 的機器人會透過 OpenMausBot 向它傳送請求。",
+  "native.lend.mcp.command": "它會以你的身分在此執行這個指令,並使用已儲存的設定(密鑰已隱藏):\n{command}",
+  "native.lend.mcp.allow": "允許",
+  "native.lend.mcp.deny": "不允許",
+  "native.lend.mcp.settings": "它取得的設定:{names}"
 }

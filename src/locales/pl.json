@@ -6676,5 +6676,12 @@
   "rail.localRemoveFailed": "Nie usunięto. Spróbuj ponownie za chwilę.",
   "native.menu.newLocal": "Nowy obszar roboczy na tym komputerze…",
   "lending.action.mcp": "Użyto serwera MCP",
-  "native.lend.mcpSignIn": "Zaloguj się do My Cloud, zanim udostępnisz mu swoje serwery MCP."
+  "native.lend.mcpSignIn": "Zaloguj się do My Cloud, zanim udostępnisz mu swoje serwery MCP.",
+  "native.lendTray.mcp": "Pozwól My Cloud używać Twoich serwerów MCP na tym {device}",
+  "native.lend.mcp.title": "Pozwolić My Cloud używać {name} na tym {device}?",
+  "native.lend.mcp.port": "Serwer na porcie {port} tego {device}. Boty My Cloud wysyłałyby do niego żądania przez OpenMausBot.",
+  "native.lend.mcp.command": "Uruchamia tutaj to polecenie jako Ty, z zapisanymi ustawieniami (sekrety ukryte):\n{command}",
+  "native.lend.mcp.allow": "Zezwól",
+  "native.lend.mcp.deny": "Nie zezwalaj",
+  "native.lend.mcp.settings": "Ustawienia, które otrzymuje: {names}"
 }

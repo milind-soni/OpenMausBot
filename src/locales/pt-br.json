@@ -9661,5 +9661,12 @@
   "remote.e2e.local": "Neste Wi-Fi e Tailscale · criptografia de ponta a ponta",
   "serverError.mailbox.outgoingFields": "Confira o servidor de saída: um nome como mail.example.com, uma porta de 1 a 65535 e SSL/TLS ou STARTTLS.",
   "lending.action.mcp": "Usou um servidor MCP",
-  "native.lend.mcpSignIn": "Entre no My Cloud antes de permitir que ele use seus servidores MCP."
+  "native.lend.mcpSignIn": "Entre no My Cloud antes de permitir que ele use seus servidores MCP.",
+  "native.lendTray.mcp": "Deixar o My Cloud usar seus servidores MCP neste {device}",
+  "native.lend.mcp.title": "Deixar o My Cloud usar {name} neste {device}?",
+  "native.lend.mcp.port": "Um servidor na porta {port} deste {device}. Os bots do My Cloud enviariam solicitações a ele pelo OpenMausBot.",
+  "native.lend.mcp.command": "Ele executa este comando aqui como você, com as configurações salvas (segredos ocultos):\n{command}",
+  "native.lend.mcp.allow": "Permitir",
+  "native.lend.mcp.deny": "Não permitir",
+  "native.lend.mcp.settings": "Configurações que ele recebe: {names}"
 }

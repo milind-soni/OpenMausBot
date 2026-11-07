@@ -672,17 +672,18 @@ test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, the t
   }
   const clicked = [];
   const turned = [];
+  const mcpTurned = [];
   const indicator = createLendingIndicator({ Tray, Menu: { buildFromTemplate: items => items }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, iconPath: "icon.png",
-    onPause: () => clicked.push("pause"), onResume: () => clicked.push("resume"), onActivity: () => clicked.push("activity"), onTerminal: on => turned.push(on), device: "Mac" });
+    onPause: () => clicked.push("pause"), onResume: () => clicked.push("resume"), onActivity: () => clicked.push("activity"), onTerminal: on => turned.push(on), onMcp: on => mcpTurned.push(on), device: "Mac" });
   const labels = () => trays.at(-1).menu.map(item => item.type === "separator" ? "-" : item.label);
   indicator.update({ clouds: [], using: [], paused: false });
   assert.equal(trays.length, 0, "nothing in the menu bar without a Cloud of the person's own");
   indicator.update({ clouds: ["My Cloud", "Client A"], using: [], paused: false });
-  assert.deepEqual(labels(), ["My Cloud and Client A can use this Mac", "-", "Pause", "Let Clouds run commands on this Mac", "See activity"]);
+  assert.deepEqual(labels(), ["My Cloud and Client A can use this Mac", "-", "Pause", "Let Clouds run commands on this Mac", "Let My Cloud use your MCP servers on this Mac", "See activity"]);
   assert.equal(trays[0].title, "");
   indicator.update({ clouds: ["My Cloud", "Client A"], using: ["Client A"], paused: false });
   assert.equal(trays.length, 1);
-  assert.deepEqual(labels(), ["Client A is using this Mac", "-", "Pause", "Let Clouds run commands on this Mac", "See activity"]);
+  assert.deepEqual(labels(), ["Client A is using this Mac", "-", "Pause", "Let Clouds run commands on this Mac", "Let My Cloud use your MCP servers on this Mac", "See activity"]);
   assert.equal(trays[0].title, "Client A is using this Mac");
   assert.equal(trays[0].tip, "OpenMausBot: Client A is using this Mac");
   trays[0].menu.find(item => item.label === "Pause").click();
@@ -698,6 +699,14 @@ test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, the t
   terminal().click();
   indicator.update({ clouds: ["My Cloud"], using: [], paused: false, terminal: false });
   assert.equal(terminal().checked, false);
+  const mcp = () => trays[0].menu.find(item => item.label === "Let My Cloud use your MCP servers on this Mac");
+  assert.deepEqual([mcp().type, mcp().checked], ["checkbox", false]);
+  indicator.update({ clouds: ["My Cloud"], using: [], paused: false, mcp: true });
+  assert.equal(mcp().checked, true);
+  mcp().click();
+  indicator.update({ clouds: ["My Cloud"], using: [], paused: false, mcp: false });
+  mcp().click();
+  assert.deepEqual(mcpTurned, [false, true], "each click asks for the opposite of the saved state");
   terminal().click();
   assert.deepEqual(turned, [false, true]);
   terminal().checked = true;
