@@ -22,8 +22,24 @@ import {
   composerTakesFocusOnOpen,
   replyTargetTakesFocus,
   dataContextFor,
+  discardNeedsConfirm,
   discardUnsentUpload,
 } from "./composer-attachments";
+
+describe("discardNeedsConfirm", () => {
+  it("asks before dropping an upload the server already holds, and not for one still uploading or pasted text", () => {
+    expect(discardNeedsConfirm(fileAttachment("notes.txt", "/home/a/.openmausbot/attachments/0f1e2d3c-aaaa-4bbb-8ccc-123456789abc.txt", 3))).toBe(true);
+    expect(discardNeedsConfirm({ kind: "image", id: "i", path: "/home/a/.openmausbot/attachments/0f1e2d3c-aaaa-4bbb-8ccc-123456789abc.png", name: "x.png", size: 3, mime: "image/png" })).toBe(true);
+    expect(discardNeedsConfirm({ kind: "image", id: "i", path: "", name: "x.png", size: 0, mime: "image/png", uploading: true })).toBe(false);
+    expect(discardNeedsConfirm({ kind: "paste", id: "p", text: "hi", size: 2, lines: 1 })).toBe(false);
+    expect(discardNeedsConfirm({ kind: "file", id: "f2", path: "C:\Users\me\my_file.bin", name: "my_file.bin", size: 3 })).toBe(false);
+    expect(discardNeedsConfirm({ kind: "file", id: "f3", path: "C:\Users\me\report.pdf", name: "report.pdf", size: 3 })).toBe(false);
+    expect(discardNeedsConfirm({
+      kind: "citation", version: 1, id: "c", quote: "a line", size: 3,
+      source: { ownerType: "bot", ownerId: "bot-1", threadId: "t-1", messageId: "m-1", start: 0, end: 4, prefix: "", suffix: "" },
+    })).toBe(false);
+  });
+});
 
 describe("discardUnsentUpload", () => {
   it("asks the server to drop an uploaded file taken off the message, and nothing else", () => {

@@ -687,11 +687,26 @@ export function splitAttachedImages(text: string): { display: string; images: st
   return { display, images: images.map((image) => image.path) };
 }
 
+/** The attachment name a DELETE would target, when the path is one the server created for an upload; a local file
+ * (or any name the server's attachment route does not serve) never gets a deletion attempt. */
+function uploadedAttachmentName(path: string): string | null {
+  const name = attachmentBasename(path);
+  return /^[A-Za-z0-9-]+\.[A-Za-z0-9]{1,10}$/.test(name) ? name : null;
+}
+
+/** Taking off an upload the server already holds deletes that copy: worth a confirm. One still uploading is a plain
+ * cancel, and so is anything the server does not hold a copy of — asking would promise a deletion that never happens. */
+export function discardNeedsConfirm(attachment: Attachment): boolean {
+  if ((attachment.kind !== "image" && attachment.kind !== "file") || !attachment.path) return false;
+  if ("uploading" in attachment && attachment.uploading) return false;
+  return uploadedAttachmentName(attachment.path) !== null;
+}
+
 /** A file uploaded for a message and taken off it before sending: the server keeps it only while a message uses it. */
 export function discardUnsentUpload(attachment: Attachment): void {
-  if ((attachment.kind !== "image" && attachment.kind !== "file") || !attachment.path) return;
-  const name = attachmentBasename(attachment.path);
-  if (!/^[A-Za-z0-9-]+\.[A-Za-z0-9]{1,10}$/.test(name)) return;
+  if (attachment.kind !== "image" && attachment.kind !== "file") return;
+  const name = attachment.path ? uploadedAttachmentName(attachment.path) : null;
+  if (!name) return;
   void fetch(`/api/attachments/${encodeURIComponent(name)}`, { method: "DELETE" }).catch(() => undefined);
 }
 

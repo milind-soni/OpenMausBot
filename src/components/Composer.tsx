@@ -59,6 +59,7 @@ import {
   isLongPaste,
   pasteAttachment,
   releaseAttachmentImagePreview,
+  discardNeedsConfirm,
   type Attachment,
   type PasteAttachment,
 } from "@/lib/composer-attachments";
@@ -197,8 +198,12 @@ export function Composer({
   const removeAttachment = useCallback(
     (id: string) => {
       const removed = attachments.find((attachment) => attachment.id === id);
-      if (removed?.kind === "image") releaseAttachmentImagePreview(removed);
-      if (removed) discardUnsentUpload(removed);
+      if (!removed) return;
+      // A finished upload lives on the server until a message uses it: dropping it deletes that copy. One still
+      // uploading is a plain cancel.
+      if (discardNeedsConfirm(removed) && !window.confirm(t("composer.attachment.discard"))) return;
+      if (removed.kind === "image") releaseAttachmentImagePreview(removed);
+      discardUnsentUpload(removed);
       editAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
     },
     [attachments, editAttachments],
