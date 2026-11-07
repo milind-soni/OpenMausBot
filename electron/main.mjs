@@ -1,4 +1,4 @@
-import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess, nativeTheme } from "electron";
+import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, net, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess, nativeTheme } from "electron";
 import { createRequire } from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -87,7 +87,7 @@ import {
 } from "./companion-account-service.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
-import { pairingPageUrl } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs";
+import { pairingPageUrl } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
 import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs"; import { ownEnvironmentIds } from "./lent-mcp.mjs";
@@ -1824,7 +1824,7 @@ const serverConnect = createServerConnect({ fetch: (...args) => session.defaultS
   ask: async (found) => (await dialog.showMessageBox({ type: "question", buttons: [nativeT("native.dialog.connect.button"), nativeT("native.common.cancel")], defaultId: 0, cancelId: 1,
     message: nativeT("native.dialog.connect.title", { host: found.label }), detail: nativeT(found.code || found.credential ? "native.dialog.connect.withCode" : "native.dialog.connect.noCode") })).response === 0,
   open: (found, name) => {
-    const next = withEnvironment(environmentsState, { origin: found.origin, name: name ?? found.label }, () => randomUUID());
+    const next = withEnvironment(environmentsState, { origin: found.origin, name: name ?? environmentsState.environments.find((e) => e.origin === found.origin)?.name ?? found.label }, () => randomUUID());
     persistEnvironments(withActive(next, next.environments.find((e) => e.origin === found.origin).id));
     navigateMainWindow(pairingPageUrl(found.origin, found.code ?? found.credential));
   } });
@@ -1903,11 +1903,11 @@ async function forgetEnvironment(id, purge = false, confirmed = false) {
   if (env.kind !== "local" && !confirmed) {
     const { response } = await dialog.showMessageBox({
       type: "warning",
-      buttons: [nativeT("native.dialog.forget.button"), nativeT("native.common.cancel")],
+      buttons: [nativeT("native.dialog.removeServer.button"), nativeT("native.common.cancel")],
       defaultId: 1,
       cancelId: 1,
-      message: nativeT("native.dialog.forget.title", { name: env.name }),
-      detail: nativeT("native.dialog.forget.detail"),
+      message: nativeT("native.dialog.removeServer.title", { name: env.name }),
+      detail: nativeT("native.dialog.removeServer.detail"),
     });
     if (response !== 0) return;
   }
@@ -2749,6 +2749,9 @@ ipcMain.handle("environments:add-from-link", localWorkspaceOnly("environments:ad
   return connectHostedWorkspace(link, typeof name === "string" ? name : undefined);
 }));
 ipcMain.handle("environments:forget", localWorkspaceOnly("environments:forget", (_event, id, purge) => forgetEnvironment(typeof id === "string" ? id : "", purge === true)));
+const savedServerStatus = createServerStatus({ entries: () => environmentsState.environments.filter((e) => e.kind === "remote" && !e.home && !e.team && !e.cloud), check: (origin) => checkServer(origin, (...args) => session.defaultSession.fetch(...args)),
+  appVersion: app.getVersion(), onChange: () => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("environments:status-changed"); } });
+installServerStatus({ ipcMain, guard: localWorkspaceOnly, status: savedServerStatus, app, powerMonitor, online: () => net.isOnline() });
 
 // A cloud page may open the native chooser, never choose a destination or edit the saved list.
 // Once My Cloud is home the switcher lists only whole places, and shows only when there is more than My Cloud.
