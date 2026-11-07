@@ -6,7 +6,6 @@ import { MacCuaRecoveryActions } from "./MacCuaRecoveryActions";
 import { NotNowButton } from "./NoticeCard";
 import { t } from "@/lib/i18n";
 
-// "Not now" hides the card in every place it shows until the app starts again; nothing is saved.
 let hiddenUntilRelaunch = false;
 const hiddenListeners = new Set<() => void>();
 const subscribeHidden = (listener: () => void) => { hiddenListeners.add(listener); return () => { hiddenListeners.delete(listener); }; };
@@ -51,7 +50,7 @@ export function MacLocalControl() {
   };
 
   useEffect(() => {
-    if (!awaitingGrant) return;
+    if (!awaitingGrant || hidden) return;
     let used = false;
     const onFocus = () => {
       if (used) return;
@@ -66,7 +65,7 @@ export function MacLocalControl() {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
     };
-  }, [awaitingGrant]);
+  }, [awaitingGrant, hidden]);
 
   if (capabilities.host.platform !== "darwin" || capabilities.localComputer.reasonCode === "remote-server") return null;
   if (capabilities.localComputer.available || hidden) return null;

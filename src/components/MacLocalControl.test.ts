@@ -12,7 +12,7 @@ vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({ capabilities: { host: { platform: "darwin" }, localComputer: fixture.localComputer }, ready: true }),
 }));
 
-const { MacLocalControl, hideMacLocalControlUntilRelaunch } = await import("./MacLocalControl");
+const { MacLocalControl } = await import("./MacLocalControl");
 afterAll(() => vi.unstubAllGlobals());
 
 describe("Mac local computer status", () => {
@@ -39,10 +39,13 @@ describe("Mac local computer status", () => {
     expect(renderToStaticMarkup(createElement(MacLocalControl))).toBe("");
   });
 
-  it("hides the card after Not now until the app starts again", () => {
+  it("hides the card after Not now until the app starts again", async () => {
+    vi.resetModules();
+    const isolated = await import("./MacLocalControl");
     fixture.localComputer = { available: false, message: "Accessibility required; grant access in System Settings" } as DesktopCapabilities["localComputer"];
+    expect(renderToStaticMarkup(createElement(isolated.MacLocalControl))).toContain("Allow control of this computer");
+    isolated.hideMacLocalControlUntilRelaunch();
+    expect(renderToStaticMarkup(createElement(isolated.MacLocalControl))).toBe("");
     expect(renderToStaticMarkup(createElement(MacLocalControl))).toContain("Allow control of this computer");
-    hideMacLocalControlUntilRelaunch();
-    expect(renderToStaticMarkup(createElement(MacLocalControl))).toBe("");
   });
 });
