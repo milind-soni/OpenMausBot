@@ -8306,6 +8306,7 @@
   "shortcuts.category.groups": "Management & Groups",
   "shortcuts.command-palette": "Open command palette (switcher & transcript search)",
   "shortcuts.new-bot": "Create a new bot",
+  "shortcuts.new-thread": "Start a new thread with the selected bot",
   "shortcuts.jump-bot": "Jump to bot 1–9 in the roster",
   "shortcuts.switch-bot": "Switch to previous / next bot",
   "shortcuts.find-conversation": "Find in conversation",
