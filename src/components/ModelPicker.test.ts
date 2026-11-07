@@ -103,6 +103,19 @@ describe("EffortRow", () => {
     high.props.onClick();
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "setModel", botId: "atlas", threadId: "independent-thread", selection: { instanceId: "codex", model: "gpt-5.6", effort: "high" } });
   });
+  it("offers the levels of the selected model when its catalog names them", () => {
+    const grok = (model: string) => {
+      fixture.instances = [{ ...engine(["low", "medium", "high", "xhigh"]), models: { default: "grok-4.7", options: [
+        { id: "grok-4.7", label: "Grok 4.7" },
+        { id: "grok-4.5", label: "Grok 4.5", effortLevels: ["low", "medium", "high"] },
+      ] } }];
+      const atlas = bot();
+      return renderToStaticMarkup(createElement(EffortRow, { bot: { ...atlas, modelSelection: { ...atlas.modelSelection!, model } } }));
+    };
+    expect(levelButtons(grok("grok-4.7")).map((level) => level.label)).toContain("X-High");
+    expect(levelButtons(grok("grok-4.5")).map((level) => level.label)).not.toContain("X-High");
+    expect(levelButtons(grok("grok-4.5")).map((level) => level.label)).toContain("High");
+  });
   it("renders nothing for an engine that declares no effort levels", () => {
     expect(renderEffort([engine()])).toBe("");
     expect(renderEffort([engine([])])).toBe("");
@@ -255,6 +268,13 @@ describe("OpenCode model variants", () => {
     expect(modelSelectionForPick(selection, opencode(), "provider/model")).toEqual(selection);
     expect(modelSelectionForPick({ ...selection, effort: "high" }, opencode(), "provider/other")).not.toHaveProperty("effort");
     expect(modelSelectionForPick(bot("high").modelSelection, engine(["high"]), "other")).toEqual({ instanceId: "codex", model: "other", effort: "high" });
+  });
+
+  it("drops an effort the picked model does not take and keeps one it does", () => {
+    const grok: InstanceInfo = { ...engine(["high", "xhigh"]), models: { default: "new", options: [{ id: "new", label: "New" }, { id: "old", label: "Old", effortLevels: ["high"] }] } };
+    expect(modelSelectionForPick(bot("xhigh").modelSelection, grok, "old")).toEqual({ instanceId: "codex", model: "old" });
+    expect(modelSelectionForPick(bot("high").modelSelection, grok, "old")).toEqual({ instanceId: "codex", model: "old", effort: "high" });
+    expect(modelSelectionForPick(bot("xhigh").modelSelection, grok, "new")).toEqual({ instanceId: "codex", model: "new", effort: "xhigh" });
   });
 });
 

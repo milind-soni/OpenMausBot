@@ -480,6 +480,8 @@ export interface ModelCatalog {
     contextWindow?: number;
     /** Discovery hints; the native session revalidates these before each turn. */
     variants?: ModelVariantOption[];
+    /** Only these of the engine's levels work on this model; without it, all of them do. */
+    effortLevels?: readonly EffortLevel[];
     /** The organization of the signed-in account turned this model off: the engine would answer with another. */
     orgBlocked?: true;
   }>;

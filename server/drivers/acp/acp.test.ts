@@ -2568,7 +2568,7 @@ describe("ACP turns (fake CLI)", () => {
 
   it("declares effort levels for Grok only", async () => {
     await create(GrokAgentDriver);
-    expect(instance.adapter.capabilities.effortLevels).toEqual(["low", "medium", "high"]);
+    expect(instance.adapter.capabilities.effortLevels).toEqual(["low", "medium", "high", "xhigh"]);
 
     await create(GeminiAgentDriver);
     expect(instance.adapter.capabilities.effortLevels).toBeUndefined();
@@ -2614,6 +2614,17 @@ describe("ACP turns (fake CLI)", () => {
     expect(argv[modelFlag + 1]).toBe("grok-4.5");
     expect(argv.indexOf("--reasoning-effort")).toBeGreaterThan(agent);
     expect(argv.indexOf("--permission-mode")).toBeLessThan(agent);
+  });
+
+  it("passes xhigh to Grok 4.7", async () => {
+    const dump = join(scratch, "grok-xhigh-argv.json");
+    await create(GrokAgentDriver);
+    process.env.FAKE_ACP_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-xhigh", text: "hi", model: "grok-4.7", effort: "xhigh" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const argv = JSON.parse(readFileSync(dump, "utf8")).argv as string[];
+    expect(argv[argv.indexOf("--reasoning-effort") + 1]).toBe("xhigh");
   });
 
   describe("opt-in startup recovery", () => {

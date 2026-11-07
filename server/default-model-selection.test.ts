@@ -3,7 +3,7 @@ import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineAccess, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
-import { readyToRun, selectDefaultModelSelection, withInstanceConfig, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
+import { engineModelEfforts, readyToRun, selectDefaultModelSelection, withInstanceConfig, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
 import { ManagedDesktopPolicy } from "./managed-policy.ts";
 
 const codex = {
@@ -70,6 +70,24 @@ describe("new bot default model selection", () => {
     expect(selection).toEqual({ instanceId: "codex", model: "selected-model" });
     expect(selection).not.toHaveProperty("effort");
     expect(preferred.effort).toBe("high");
+  });
+
+  it("omits an effort the saved model does not take, even when its engine has the level", () => {
+    const instance = { ...codex, models: { default: "wide", options: [{ id: "wide", label: "Wide" }, { id: "narrow", label: "Narrow", effortLevels: ["low"] as const }] } };
+    expect(selectDefaultModelSelection([instance], { instanceId: "codex", model: "narrow", effort: "high" })).toEqual({ instanceId: "codex", model: "narrow" });
+    expect(selectDefaultModelSelection([instance], { instanceId: "codex", model: "narrow", effort: "low" })).toEqual({ instanceId: "codex", model: "narrow", effort: "low" });
+    expect(selectDefaultModelSelection([instance], { instanceId: "codex", model: "wide", effort: "high" })).toEqual({ instanceId: "codex", model: "wide", effort: "high" });
+  });
+
+  it("reads a registered engine's levels for one model, for the checks that gate saving it", () => {
+    const engine = {
+      models: { default: "wide", options: [{ id: "wide", label: "Wide" }, { id: "narrow", label: "Narrow", effortLevels: ["low"] as const }] },
+      adapter: { capabilities: { effortLevels: ["low", "high"] as const } },
+    };
+    expect(engineModelEfforts(engine, "wide")).toEqual(["low", "high"]);
+    expect(engineModelEfforts(engine, "narrow")).toEqual(["low"]);
+    expect(engineModelEfforts(engine, "typed-by-hand")).toEqual(["low", "high"]);
+    expect(engineModelEfforts(null, "wide")).toBeUndefined();
   });
 
   it("accepts the provider default even when it is not repeated in its options", () => {

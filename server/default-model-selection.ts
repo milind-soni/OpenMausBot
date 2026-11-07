@@ -1,4 +1,5 @@
 import { freeFallback, rankAis } from "../shared/ai-ranking.ts";
+import { modelEffortLevels } from "../shared/model-effort.ts";
 import type { EffortLevel, EngineAccess, InstanceConfigMap, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
 
 export interface SelectableInstance {
@@ -73,7 +74,7 @@ export function selectDefaultModelSelection(
     }
     const selection = { ...preferred };
     // A saved effort can outlive driver support: keep the model, let the provider use its default effort.
-    if (selection.effort && !instance.capabilities?.effortLevels?.includes(selection.effort)) delete selection.effort;
+    if (selection.effort && !modelEffortLevels(instance.capabilities?.effortLevels, instance.models, preferred.model)?.includes(selection.effort)) delete selection.effort;
     return selection;
   }
   const available = instances.filter((instance) => instance.enabled !== false && instance.snapshot.state === "available" && context.refusal?.(instance) === undefined && defaultModel(instance));
@@ -84,6 +85,10 @@ export function selectDefaultModelSelection(
     : undefined;
   const pick = personal ?? best(ready, context) ?? best(available, context);
   return { instanceId: pick?.instanceId ?? "", model: pick ? defaultModel(pick) : "" };
+}
+
+export function engineModelEfforts(engine: { models: ModelCatalog; adapter: { capabilities: { effortLevels?: readonly EffortLevel[] } } } | null | undefined, model: string) {
+  return modelEffortLevels(engine?.adapter.capabilities.effortLevels, engine?.models, model);
 }
 
 /** An explicit effort or variant wins; an engine without the level sends none rather than failing turn 1. */

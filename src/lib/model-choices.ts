@@ -1,4 +1,5 @@
 import type { InstanceInfo, ModelSelection } from "@/state/store";
+import { modelEffortLevels } from "../../shared/model-effort";
 import { typedOpenCodeModel, typedOpenCodeModelId } from "../../shared/opencode-model-id";
 import { t } from "./i18n";
 
@@ -24,11 +25,15 @@ export function choiceIsSelected(choice: ModelChoice, selection: ModelSelection)
   return (choice.nativeModel ?? choice.id) === selection.model && choice.variant === selection.variant;
 }
 
+export function effortChoices(instance: InstanceInfo | undefined, model: string) {
+  return modelEffortLevels(instance?.capabilities?.effortLevels, instance?.models, model);
+}
+
 export function modelSelectionForPick(selection: ModelSelection, instance: InstanceInfo, model: string): ModelSelection {
   const next: ModelSelection = { instanceId: instance.instanceId, model };
   if (instance.instanceId === selection.instanceId) {
     if (instance.capabilities?.modelVariants && model === selection.model && selection.variant !== undefined) next.variant = selection.variant;
-    else if (!instance.capabilities?.modelVariants && selection.effort) next.effort = selection.effort;
+    else if (!instance.capabilities?.modelVariants && selection.effort && (effortChoices(instance, model)?.includes(selection.effort) ?? true)) next.effort = selection.effort;
   }
   return next;
 }
