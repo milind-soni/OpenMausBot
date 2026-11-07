@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -662,5 +662,73 @@ describe("createChatApps", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("a live folder page", () => {
+  function liveSetup() {
+    const fake = fakeStore();
+    const base = mkdtempSync(join(tmpdir(), "omb-live-pages-"));
+    const dash = join(base, "dash");
+    mkdirSync(dash, { recursive: true });
+    writeFileSync(join(dash, "index.html"), "<h1>Dash</h1><script src=\"app.js\"></script>");
+    writeFileSync(join(dash, "app.js"), "draw()");
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,10\n");
+    const live = vi.fn((): Array<{ threadId: string; messageId: string }> => []);
+    const apps = createChatApps({ store: fake.store, dataDir: mkdtempSync(join(tmpdir(), "omb-chat-apps-")), sweeps: false, liveRows: live });
+    opened.push(apps);
+    const folders = async () => ({ roots: [base], vmWorkspace: null });
+    const show = (input: Record<string, unknown>) => apps.createAppCard({ bot: SCOUT, threadId: THREAD, input: { tool: "show_html", title: "Dash", ...input }, folders });
+    const row = (id: string) => fake.rows(THREAD).find((message) => message.id === id)!;
+    return { apps, dash, live, show, row, rows: () => fake.rows(THREAD) };
+  }
+
+  it("is marked live only when asked, and only for a page from a folder", async () => {
+    const { show, row } = liveSetup();
+    expect(await show({ path: "dash", live: true })).toEqual({ ok: true, messageId: "m1" });
+    expect(row("m1").app).toMatchObject({ live: true, rev: 0 });
+    expect(await show({ path: "dash" })).toEqual({ ok: true, messageId: "m2" });
+    expect(row("m2").app).not.toHaveProperty("live");
+    expect(await show({ html: PAGE, live: true })).toMatchObject({ ok: false, status: 400, error: expect.stringContaining("live:") });
+    expect(await show({ path: "dash", live: "yes" })).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("reloads in place when a file in its folder changes, and not otherwise", async () => {
+    const { apps, dash, live, show, row } = liveSetup();
+    await show({ path: "dash", live: true });
+    await show({ path: "dash" });
+    live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }, { threadId: THREAD, messageId: "m2" }]);
+    const first = row("m1").app!.doc;
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app).toMatchObject({ doc: first, rev: 0 });
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,10\n2,25\n");
+    expect(await apps.refreshLive()).toBe(1);
+    expect(row("m1").app).toMatchObject({ live: true, rev: 1, history: [first] });
+    expect(apps.docs.readFile(row("m1").app!.doc, "data.csv")?.toString()).toBe("day,sales\n1,10\n2,25\n");
+    // The page that did not ask to be live stays as it was shown.
+    expect(row("m2").app).toMatchObject({ rev: 0 });
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app!.rev).toBe(1);
+  });
+
+  it("can be turned off, and a folder that is gone leaves the page as it was", async () => {
+    const { apps, dash, live, show, row } = liveSetup();
+    await show({ path: "dash", live: true });
+    live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }]);
+    await apps.refreshLive();
+    rmSync(dash, { recursive: true, force: true });
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app).toMatchObject({ live: true, rev: 0 });
+    // Half-written: a folder with no index.html yet is not a page; the card stays as it was.
+    mkdirSync(dash, { recursive: true });
+    writeFileSync(join(dash, "data.csv"), "day,sales\n");
+    expect(await apps.refreshLive()).toBe(0);
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app).toMatchObject({ live: true, rev: 0 });
+    writeFileSync(join(dash, "index.html"), "<h1>Back</h1>");
+    expect(await apps.refreshLive()).toBe(1);
+    expect(await apps.createAppCard({ bot: SCOUT, threadId: THREAD, input: { tool: "update_html", app_id: "m1", html: "<p>still</p>", live: false } }))
+      .toEqual({ ok: true, messageId: "m1" });
+    expect(row("m1").app).not.toHaveProperty("live");
   });
 });

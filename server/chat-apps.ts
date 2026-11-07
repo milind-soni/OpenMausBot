@@ -12,7 +12,7 @@ import { speakerIn, type AgentCardResult, type AgentCardStore } from "./chat-wid
 import { compileJsxPage } from "./jsx-compile.ts";
 import { appDocRefs } from "./message-db.ts";
 import { createPageFiles, type PageFilesViewer } from "./page-files.ts";
-import { PageBundleError, readBotPageBundle, skippedNote, type BotFolders, type PageBundle, type PageFile } from "./pages/bundle.ts";
+import { pageSignature, PageBundleError, readBotPageBundle, readPageBundle, skippedNote, type BotFolders, type PageBundle, type PageFile } from "./pages/bundle.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { Message, StoreChange } from "./store.ts";
 import { userError, type UserError } from "./user-errors.ts";
@@ -127,7 +127,7 @@ export function createAppCard(args: {
 
 function placePage(
   args: { store: AgentCardStore; docs: AppDocs; bot: { id: string; name: string; color: MausColor }; threadId: string; authored?(messageId: string): void },
-  value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean },
+  value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean; live?: boolean },
   made: MadePage,
 ): AgentCardResult {
   const { store, docs, bot, threadId } = args;
@@ -140,6 +140,7 @@ function placePage(
       ...(page.format ? { format: page.format } : {}),
       ...(value.height !== undefined ? { height: value.height } : {}),
       border: value.frameless !== true,
+      ...(value.live && page.folder ? { live: true as const } : {}),
       network: { connect: [...BOT_HTML_NETWORK.connect], resources: [...BOT_HTML_NETWORK.resources] },
       ...(stored.ok ? {} : { blocked: "too-large" as const }),
     };
@@ -150,7 +151,7 @@ function placePage(
   const existing = appRow(store, threadId, value.appId);
   if (!existing || (existing.from && existing.from.botId !== bot.id)) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   if (existing.app.source !== "html") return { ok: false, status: 409, error: NOT_A_PAGE };
-  const patched = replacePage(store, docs, threadId, existing, made, value.frameless);
+  const patched = replacePage(store, docs, threadId, existing, made, { frameless: value.frameless, live: value.live });
   if (!patched) return { ok: false, status: 404, error: NO_SUCH_PAGE };
   args.authored?.(patched.id);
   return { ok: true, messageId: patched.id, ...(made.masked ? { masked: true as const } : {}), ...(made.leftOut ? { leftOut: made.leftOut } : {}) };
@@ -158,16 +159,22 @@ function placePage(
 
 /** The next version of a row's page; the row is unchanged when the page is the same document. */
 function replacePage(
-  store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs, threadId: string, existing: Message & { app: AppPayload }, made: MadePage, frameless?: boolean,
+  store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs, threadId: string, existing: Message & { app: AppPayload }, made: MadePage,
+  options: { frameless?: boolean; live?: boolean } = {},
 ): Message | null {
   const { page } = made;
   const stored = storePage(docs, page);
-  const border = frameless === undefined ? existing.app.border : !frameless;
+  const border = options.frameless === undefined ? existing.app.border : !options.frameless;
+  // Only a page from a folder can stay live; a page sent as html or jsx stops being live.
+  const live = Boolean(page.folder) && (options.live ?? existing.app.live === true);
+  const liveField = live ? { live: true as const } : {};
   if (stored.ok && stored.doc === existing.app.doc && made.title === existing.app.title) {
-    return border === existing.app.border ? existing : store.patchMessage(threadId, existing.id, { app: { ...existing.app, border } });
+    if (border === existing.app.border && live === (existing.app.live === true)) return existing;
+    const { live: _wasLive, ...same } = existing.app;
+    return store.patchMessage(threadId, existing.id, { app: { ...same, border, ...liveField } });
   }
   // The page reloads: what the old one told the model about itself no longer holds.
-  const { context: _context, blocked: _blocked, format: _format, history: earlier, ...kept } = existing.app;
+  const { context: _context, blocked: _blocked, format: _format, history: earlier, live: _live, ...kept } = existing.app;
   const history = [...(earlier ?? []), ...(existing.app.doc ? [existing.app.doc] : [])].slice(-(APP_PAGE_VERSIONS - 1));
   const payload: AppPayload = {
     ...kept,
@@ -176,6 +183,7 @@ function replacePage(
     rev: (existing.app.rev ?? 0) + 1,
     bytes: pageBytes(page),
     border,
+    ...liveField,
     ...(history.length ? { history } : {}),
     ...(page.format ? { format: page.format } : {}),
     ...(stored.ok ? {} : { blocked: "too-large" as const }),
@@ -460,8 +468,14 @@ export interface ChatApps {
   mcpAccess?: McpAppAccess;
   recordMcpAppCall?(args: { bot: { id: string; name: string }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void }): Promise<AgentCardResult>;
   sweep(): number;
+  /** Re-reads each live page whose folder changed and replaces it in place; how many pages changed. */
+  refreshLive(): Promise<number>;
   close(): void;
 }
+
+/** How often live pages' folders are checked, and how many pages are watched at most (the newest). */
+const LIVE_EVERY_MS = 5_000;
+const LIVE_PAGES_MAX = 50;
 
 export function createChatApps(deps: {
   store: ChatAppsStore;
@@ -469,6 +483,8 @@ export function createChatApps(deps: {
   maxBytes?: number;
   references?(): string[];
   sweeps?: boolean;
+  /** The live pages already in the store, read once: the server picks them up again after a restart. */
+  liveRows?(limit: number): Array<{ threadId: string; messageId: string }>;
 }): ChatApps {
   const docs = new AppDocs(`${deps.dataDir}/app-docs`, deps.maxBytes ? { maxBytes: deps.maxBytes } : {});
   const references = deps.references ?? appDocRefs;
@@ -497,9 +513,61 @@ export function createChatApps(deps: {
     const row = appRow(deps.store, target.threadId, target.messageId);
     return Boolean(row && (row.app.doc === target.doc || row.app.history?.includes(target.doc)));
   };
+  // Live pages, by row: the page's folder (looked up again only when its document changes) and the folder's
+  // fingerprint when it was last read. Loaded from the store on the first check.
+  const live = new Map<string, { threadId: string; messageId: string; doc?: string; folder?: string; signature?: string }>();
+  let liveLoaded = false, refreshing: Promise<number> | null = null;
+  const watch = (threadId: string, messageId: string) => {
+    const key = `${threadId}\n${messageId}`;
+    if (live.has(key)) return;
+    live.set(key, { threadId, messageId });
+    // The newest pages are kept: a Map iterates oldest first.
+    for (const old of live.keys()) { if (live.size <= LIVE_PAGES_MAX) break; live.delete(old); }
+  };
+  const watchIfLive = (threadId: string, result: AgentCardResult) => {
+    if (result.ok && appRow(deps.store, threadId, result.messageId)?.app.live) watch(threadId, result.messageId);
+    return result;
+  };
+  const refreshOnce = async (): Promise<number> => {
+    if (!liveLoaded) {
+      liveLoaded = true;
+      try { for (const row of [...(deps.liveRows?.(LIVE_PAGES_MAX) ?? [])].reverse()) watch(row.threadId, row.messageId); } catch (error) {
+        console.error("chat apps: could not read live pages", error);
+      }
+    }
+    let changed = 0;
+    for (const [key, entry] of live) {
+      const row = appRow(deps.store, entry.threadId, entry.messageId);
+      if (row?.app.live && row.app.doc && row.app.doc !== entry.doc) Object.assign(entry, { doc: row.app.doc, folder: docs.read(row.app.doc)?.data?.folder });
+      const folder = row?.app.live && row.app.doc ? entry.folder : undefined;
+      if (!row || !folder) { live.delete(key); continue; }
+      try {
+        const signature = await pageSignature(folder);
+        if (signature === null || signature === entry.signature) continue;
+        // A half-written folder (no index.html yet, over a limit) is read again only on its next change.
+        entry.signature = signature;
+        const made = bundlePage(await readPageBundle(folder, [folder], undefined, { videos: true }), row.app.title);
+        if (!made.ok) continue;
+        // The row may have been replaced or turned off while the folder was read.
+        const now = appRow(deps.store, entry.threadId, entry.messageId);
+        if (!now?.app.live || now.app.doc !== row.app.doc) continue;
+        const patched = replacePage(deps.store, docs, entry.threadId, now, made);
+        if (patched && patched.app?.rev !== now.app.rev) changed++;
+      } catch (error) {
+        if (!(error instanceof PageBundleError) && (error as NodeJS.ErrnoException)?.code !== "ENOENT") console.error("chat apps: live page refresh failed", error);
+      }
+    }
+    return changed;
+  };
+  const refreshLive = () => (refreshing ??= refreshOnce().finally(() => { refreshing = null; }));
+  const liveTimer = deps.sweeps === false ? null : setInterval(() => { void refreshLive(); }, LIVE_EVERY_MS);
+  liveTimer?.unref?.();
   const apps: ChatApps = {
     docs,
-    createAppCard: (args) => createAppCard({ ...args, store: deps.store, docs }),
+    createAppCard: (args) => {
+      const result = createAppCard({ ...args, store: deps.store, docs });
+      return result instanceof Promise ? result.then((done) => watchIfLive(args.threadId, done)) : watchIfLive(args.threadId, result);
+    },
     appDocument: (threadId, messageId, rev, origin, viewer) => appDocument({ store: deps.store, docs, threadId, messageId, ...(rev !== undefined ? { rev } : {}),
       ...(apps.mcpAccess ? { mcpAccess: apps.mcpAccess } : {}),
       ...(origin ? { files: { origin, folder: (target) => files.folder(target, { key: viewer?.key ?? "", allowed: () => stillShown(target) && (viewer?.allowed() ?? true) }) } } : {}) }),
@@ -509,8 +577,10 @@ export function createChatApps(deps: {
     setAppContext: (args) => setAppContext(deps.store, args),
     withAppContext: (text, threadId) => withAppContext(deps.store, text, threadId),
     sweep,
+    refreshLive,
     close() {
       unsubscribe?.();
+      if (liveTimer) clearInterval(liveTimer);
       if (pending) clearTimeout(pending);
       pending = null;
     },

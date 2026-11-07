@@ -198,3 +198,30 @@ export async function botFileSource(requested: string, folders: BotFolders): Pro
   const path = vmWorkspace ? guestWorkspaceToHost(requested, VM_WORKSPACE_GUEST, vmWorkspace) ?? requested : requested;
   return pageSource(path, vmWorkspace ? [vmWorkspace, ...roots] : roots);
 }
+
+/** A cheap fingerprint of a page's file or folder, by the same walk as readPageBundle (hidden files, package folders and
+ * the secret folder left out): each file's path, size and modified time. null when it is gone. A live page re-reads its
+ * folder only when this changes. */
+export async function pageSignature(source: string, limit = PAGE_MAX_FILES * 4): Promise<string | null> {
+  const info = await stat(source).catch(() => null);
+  if (!info) return null;
+  if (info.isFile()) return `${info.size}:${info.mtimeMs}`;
+  if (!info.isDirectory()) return null;
+  const parts: string[] = [];
+  const walk = async (folder: string, depth: number): Promise<void> => {
+    for (const name of (await readdir(folder).catch(() => [] as string[])).sort()) {
+      if (parts.length >= limit) return;
+      const full = join(folder, name);
+      if (name.startsWith(".") || inSecretFolder(full)) continue;
+      const entry = await stat(full).catch(() => null);
+      if (!entry) continue;
+      if (entry.isDirectory()) {
+        if (!SKIPPED_FOLDERS.has(name) && depth < 9) await walk(full, depth + 1);
+      } else if (entry.isFile()) {
+        parts.push(`${relative(source, full)}:${entry.size}:${entry.mtimeMs}`);
+      }
+    }
+  };
+  await walk(source, 0);
+  return parts.join("\n");
+}

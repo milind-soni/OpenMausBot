@@ -474,6 +474,10 @@
             "type": "boolean",
             "description": "Optional: true shows the page without the card frame. A replacement with app_id keeps the page's frame unless this is given."
           },
+          "live": {
+            "type": "boolean",
+            "description": "With path: true reloads it when its folder changes."
+          },
           "app_id": {
             "type": "string",
             "description": "Only to replace a page you showed: the id it returned."
@@ -500,6 +504,10 @@
             "type": "string",
             "pattern": "^[a-z0-9]{20,63}$",
             "description": "The page's id, the first part of its link."
+          },
+          "live": {
+            "type": "boolean",
+            "description": "True republishes it when its folder changes; open copies reload."
           }
         },
         "required": [

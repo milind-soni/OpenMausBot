@@ -415,3 +415,48 @@ describe("pages access", () => {
     expect(pagesHomeSignature("s".repeat(43), "cm-test-home", "1792670400", "nonce-nonce-nonce-1", '{"action":"create"}')).toBe("smys7kDYS99REKsdwsd9OaXv6pH_hP1Wajaq3KrTiVo");
   });
 });
+
+describe("a live published page", () => {
+  const publishLive = (f: ReturnType<typeof setup>, live?: boolean) => f.pages.publisher.publish({
+    botId: "bot-1", threadId: "thread-1", path: "site", title: "Bake sale", roots: [f.work], post: () => "m1", ...(live !== undefined ? { live } : {}) });
+
+  it("carries a version and a reload check in its index.html, and is remembered as live", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    expect((await publishLive(f, true)).status).toBe(200);
+    const [page] = [...f.service.pages.keys()];
+    const html = f.service.pages.get(page!)!.files.get("index.html")!;
+    expect(html.startsWith("<!doctype html><meta name=\"omb-live\" content=\"")).toBe(true);
+    expect(html).toContain("location.reload()");
+    expect(html.endsWith("<h1>Bake sale</h1>")).toBe(true);
+    expect(f.service.pages.get(page!)!.files.get("style.css")).toBe(SITE["style.css"]);
+    expect(f.pages.store.get(page!)).toMatchObject({ live: true });
+  });
+
+  it("publishes again to the same link when its folder changes, at most once a minute, and never a page that isn't live", async () => {
+    const f = setup();
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    writeSite(join(f.work, "still"), { "index.html": "<p>Still</p>" });
+    await f.pages.publisher.publish({ botId: "bot-1", threadId: "thread-1", path: "still", title: "Still", roots: [f.work], post: () => "m2" });
+    const [page] = [...f.service.pages.keys()];
+    const version = () => /content="([^"]+)"/u.exec(f.service.pages.get(page!)!.files.get("index.html")!)?.[1];
+    const first = version();
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(0);
+    writeFileSync(join(site, "style.css"), "h1{color:blue}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 1_000)).toBe(0);
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
+    expect(f.service.pages.get(page!)!.files.get("style.css")).toBe("h1{color:blue}");
+    expect(version()).not.toBe(first);
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "create", "update"]);
+    expect(await f.pages.publisher.refreshLive(Date.now() + 130_000)).toBe(0);
+    // Publishing it again keeps it live unless told otherwise.
+    await publishLive(f);
+    expect(f.pages.store.get(page!)).toMatchObject({ live: true });
+    await publishLive(f, false);
+    expect(f.pages.store.get(page!)).not.toHaveProperty("live");
+    expect(f.service.pages.get(page!)!.files.get("index.html")).toBe(SITE["index.html"]);
+  });
+});
