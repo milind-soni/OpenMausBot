@@ -4,15 +4,18 @@ import { acpRuntimeFailure } from "./failure-words.ts";
 describe("acpRuntimeFailure: an MCP server that failed to connect at session start", () => {
   it("says the connected apps could not be set up when dsh's composio client fails", () => {
     const error = new Error("Internal error: mcp-client(composio): initial connection or tool synchronization failed (session/new)");
-    expect(acpRuntimeFailure(error, "DeepSeek Harness")).toEqual({
+    expect(acpRuntimeFailure(error, "DeepSeek Harness")).toMatchObject({
       message: "Connected apps couldn't be set up, so DeepSeek Harness couldn't start this reply. Try again, or switch this bot to another AI.",
+      text: { key: "chat.notice.acpMcpAppsFailed", params: { provider: "DeepSeek Harness" } },
     });
   });
 
   it("names any other MCP server that could not be set up", () => {
     const error = new Error("mcp-client(github): initial connection or tool synchronization failed");
-    expect(acpRuntimeFailure(error, "DeepSeek Harness").message)
-      .toBe("The \"github\" MCP server couldn't be set up, so DeepSeek Harness couldn't start this reply. Try again, or switch this bot to another AI.");
+    expect(acpRuntimeFailure(error, "DeepSeek Harness")).toMatchObject({
+      message: "The \"github\" MCP server couldn't be set up, so DeepSeek Harness couldn't start this reply. Try again, or switch this bot to another AI.",
+      text: { key: "chat.notice.acpMcpServerFailed", params: { server: "github", provider: "DeepSeek Harness" } },
+    });
   });
 
   it("leaves other errors as they were", () => {

@@ -1,6 +1,6 @@
 import { PAGE_ID, type PublishedPageCard } from "../../shared/published-page.ts";
 import { redactSecretsInText } from "../../shared/redact.ts";
-import { PageBundleError, pageSignature, pageSource, readPageBundle, skippedNote, type PageBundle } from "./bundle.ts";
+import { PageBundleError, pageSignature, pageSource, readPageBundle, skippedNote, stillReadable, type PageBundle } from "./bundle.ts";
 import { liveFiles } from "./live.ts";
 import type { PagesCall, PagesClient, PagesFailure, PageUsage } from "./client.ts";
 import type { PublishedPagesStore } from "./store.ts";
@@ -53,6 +53,10 @@ export function createPagePublisher(deps: {
   store: PublishedPagesStore;
   /** Re-draws a card already in a conversation (an unpublished page's). */
   patch: (threadId: string, messageId: string, text: string, card: PublishedPageCard) => void;
+  /** The folders the bot may read in the conversation of the page's latest card; null once the bot is gone. */
+  liveRoots?(botId: string, threadId: string): readonly string[] | null;
+  /** True while the workspace is being backed up, restored or moved: live pages wait. */
+  paused?(): boolean;
 }) {
   const { client, store } = deps;
 
@@ -158,24 +162,32 @@ export function createPagePublisher(deps: {
 
     /** Publishes each live page whose folder changed again, to the same link; how many were published. */
     async refreshLive(now = Date.now()): Promise<number> {
-      if (refreshing) return 0;
+      if (refreshing || deps.paused?.()) return 0;
       refreshing = true;
       let changed = 0;
       try {
         for (const record of store.list().filter((each) => each.live)) {
           if (now < Math.max(record.updatedAt + LIVE_MIN_MS, nextTry.get(record.pageId) ?? 0)) continue;
+          // The bot is gone or no longer has the folder: the page stays at its link as it is, and stops being republished.
+          const threadId = record.cards.at(-1)?.threadId;
+          if (deps.liveRoots && !(await stillReadable(record.source, threadId ? deps.liveRoots(record.botId, threadId) : null))) {
+            store.published({ ...record, card: null, live: false }, record.updatedAt);
+            continue;
+          }
           const signature = await pageSignature(record.source);
           if (signature === null || signature === record.signature) continue;
           nextTry.set(record.pageId, now + LIVE_MIN_MS);
           let bundle;
           try {
-            bundle = await readPageBundle(record.source, [record.source]);
+            bundle = await readPageBundle(record.source, [record.source], undefined, { exactRoots: true });
           } catch (error) {
             if (!(error instanceof PageBundleError)) throw error;
             nextTry.set(record.pageId, now + LIVE_BROKEN_MS);
             continue;
           }
           if (bundle.source !== record.source) continue;
+          // A backup or move began while the folder was read: nothing is sent; the folder is read again after it.
+          if (deps.paused?.()) { nextTry.delete(record.pageId); break; }
           const outcome = await publishBundle({ botId: record.botId, threadId: "", title: record.title, pageId: record.pageId, post: () => null, live: true, signature, refresh: true }, bundle);
           if (outcome.status === 200) changed++;
           // Taken down elsewhere: its cards say so, and it stops being published.
