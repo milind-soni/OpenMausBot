@@ -936,6 +936,12 @@ folder holds 512 MB. A team fills that sooner: set
 `OMB_ATTACHMENTS_MAX_BYTES` in the server's environment and restart, for
 example `OMB_ATTACHMENTS_MAX_BYTES=4294967296` for 4 GB.
 
+One file can be up to 100 MB, whether a person sends it or a bot attaches it;
+that setting does not change it. It matches Cloudflare's upload ceiling, so a
+tunnel carries it too. A video or audio file over 25 MB does not play inside
+the chat, but it still downloads, and so does a file a bot links to, up to
+500 MB.
+
 ## Putting a proxy in front
 
 Any reverse proxy works, given three things:

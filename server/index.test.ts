@@ -10066,7 +10066,7 @@ describe("harness HTTP API", () => {
   });
 
   it.skipIf(process.platform === "win32").each([
-    { mode: "size", sizes: [25 * 1024 * 1024 + 1], message: "Uploads are limited to 25 MiB per file.", status: 200 },
+    { mode: "size", sizes: [FILE_MAX_BYTES + 1], message: "Uploads are limited to 100 MiB per file.", status: 200 },
     { mode: "batch", sizes: Array(5).fill(21 * 1024 * 1024) as number[], message: "Uploads are limited to 100 MiB per batch.", status: 200 },
     { mode: "changed", sizes: [1024], message: expect.stringContaining("changed while staging"), status: 200 },
     { mode: "stop", sizes: [1024], message: expect.stringContaining("turn has already ended"), status: 401 },
