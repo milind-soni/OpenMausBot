@@ -9,7 +9,7 @@ import { chromeDataDirs, DEVTOOLS_FILE, parseDevtoolsActivePort } from "./device
 import { DESKTOP_PORTS } from "./desktop-ports.mjs";
 
 /** What a job from a My Cloud too old for the link hears. */
-export const MCP_JOBS_MOVED = "This computer runs MCP servers for My Cloud only through its link now; this My Cloud is too old to use it.";
+export const MCP_JOBS_MOVED = "This computer runs MCP servers for My Cloud only through its link now; this My Cloud is too old to use it. It works once My Cloud updates.";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 
 /** What a lent server inherits from this app: where things live, never a key. */

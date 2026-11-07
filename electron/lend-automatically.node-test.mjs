@@ -513,13 +513,13 @@ test("the switch's account leaving takes the switch and its Allows with it", asy
   assert.deepEqual(["mcpApprovals" in saved, saved.automatic.mcpAccount], [false, undefined]);
 });
 
-test("an MCP door that fails to start costs the link nothing: it opens, and MCP streams answer no-server", async t => {
+test("an MCP door that fails to start costs the link nothing: it opens, and MCP streams answer unreachable", async t => {
   const homes = { [HOME]: cloudHome() };
   const mac = await computer(t, { homes, places: [myCloud], link: true, mcp: () => { throw new Error("no door here"); } });
   mac.sharing.start();
   await until(() => homes[HOME].connects.length === 1, "the automatic grant to reach My Cloud");
   const end = await mcpLent(mac, homes[HOME]);
-  assert.deepEqual(await end.open({ mcp: { name: "local", port: 19501 } }), { failed: "no-server" });
+  assert.deepEqual(await end.open({ mcp: { name: "local", port: 19501 } }), { failed: "unreachable" });
 });
 
 test("an approval written after the switch went off is dropped", async t => {

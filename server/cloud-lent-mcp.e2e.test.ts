@@ -177,7 +177,7 @@ it("a bot on My Cloud uses MCP servers on the person's lent Mac through its link
   let ownHits = 0;
   const ownServer = createServer((_req, res) => { ownHits += 1; res.writeHead(200).end(); });
   await new Promise<void>((resolve) => ownServer.listen(0, "127.0.0.1", resolve));
-  cleanups.push(async () => { await mac.close(); await sse.close(); await new Promise((resolve) => ownServer.close(resolve)); });
+  cleanups.push(async () => { release(); await mac.close(); await sse.close(); await new Promise((resolve) => ownServer.close(resolve)); });
   const ownPort = (ownServer.address() as { port: number }).port;
   const macUrl = mac.url;
   const macPort = Number(new URL(macUrl).port);
@@ -376,6 +376,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   expect(crossed, "the capture saw the opens").toContain(`"notes"`);
   expect(crossed, "env value on a frame").not.toContain("mac-env-key");
   expect(frames.text.join("\n"), "header value on a control frame").not.toContain("mac-header-key");
+  expect(crossed, "the header value rides inside the replayed request bytes").toContain("mac-header-key");
   for (const bearer of bearers) expect(crossed, "turn bearer on a frame").not.toContain(bearer);
   expect(bearers.size).toBeGreaterThan(0);
   const dumps = [...readTurns().values()].join("\n");

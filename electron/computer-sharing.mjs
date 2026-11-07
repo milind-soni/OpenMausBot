@@ -414,7 +414,10 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
    * so a person's No holds across its streams; stop() closes it. */
   const keepLink = async (env, grant, signal, live) => {
     try { live.door = mcp?.(env, name => request(env, `/api/shared-computers/${grant.id}/mcp-server`, { name }, signal, grant.secret).then(answer => answer.server ?? null)); }
-    catch { log("lending: this computer's MCP door did not start"); }
+    catch {
+      live.door = { open: async () => ({ failed: "unreachable" }), close() {} };
+      log("lending: this computer's MCP door did not start");
+    }
     for (let failures = 0; !signal.aborted;) {
       if (sleepsHere(env) && sleepGate(env).asleep()) {
         await sleepGate(env).wait(signal);

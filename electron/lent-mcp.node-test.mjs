@@ -41,7 +41,7 @@ test("an mcp_tools job is answered with one sentence and starts nothing", async 
     assert.equal(validSharedOperation(operation, id), true, "an older My Cloud's job is answered, not refused as malformed");
     await assert.rejects(executeSharedOperation(grant, operation, signal(), () => assert.fail("computer control is never asked")), { message: MCP_JOBS_MOVED });
   }
-  assert.equal(MCP_JOBS_MOVED, "This computer runs MCP servers for My Cloud only through its link now; this My Cloud is too old to use it.");
+  assert.equal(MCP_JOBS_MOVED, "This computer runs MCP servers for My Cloud only through its link now; this My Cloud is too old to use it. It works once My Cloud updates.");
   assert.equal(existsSync(marker), false);
 });
 
