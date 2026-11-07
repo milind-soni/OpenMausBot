@@ -17,4 +17,14 @@ describe("Details tab item row", () => {
     expect(trailing).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "justify-end", "text-right"]));
     expect(trailing).not.toContain("shrink-0");
   });
+
+  it("keeps a shortcut at its full width and lets the label truncate instead", () => {
+    const markup = renderToStaticMarkup(createElement(ItemRow, {
+      item: { key: "find", label: "Find in conversation", icon: null, onSelect: () => undefined, trailing: createElement("kbd", null, "Ctrl F") },
+    }));
+    const [, label, trailing] = spans(markup);
+    expect(label).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "truncate"]));
+    expect(trailing).toContain("shrink-0");
+    expect(trailing).not.toContain("flex-1");
+  });
 });

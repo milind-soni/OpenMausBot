@@ -18,6 +18,8 @@ export const CONVERSATION_ITEMS = ["find", "usage", "activity"];
 
 /** A ⋯ menu item drawn as a panel row: the same label, icon, value and handler. */
 export function ItemRow({ item }: { item: SidebarMenuItem }) {
+  // Only the usage value is long text that should wrap; shortcuts and other values keep their full width.
+  const wrapsValue = item.key === "usage";
   return (
     <button
       type="button"
@@ -30,8 +32,8 @@ export function ItemRow({ item }: { item: SidebarMenuItem }) {
       <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-ink/[0.05] text-ink-secondary [&_svg]:size-[15px]" aria-hidden="true">
         {item.icon}
       </span>
-      <span className={cn("min-w-0 truncate text-[14px] font-medium", item.active ? "text-accent-text" : "text-ink")}>{item.label}</span>
-      {item.trailing && <span className="flex min-w-0 flex-1 items-center justify-end text-right">{item.trailing}</span>}
+      <span className={cn("min-w-0 truncate text-[14px] font-medium", !wrapsValue && "flex-1", item.active ? "text-accent-text" : "text-ink")}>{item.label}</span>
+      {item.trailing && <span className={cn("flex items-center", wrapsValue ? "min-w-0 flex-1 justify-end text-right" : "shrink-0")}>{item.trailing}</span>}
     </button>
   );
 }
