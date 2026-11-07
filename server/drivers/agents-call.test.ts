@@ -430,4 +430,34 @@ it("rejects a non-string group_id instead of delegating to the current room", as
     expect(result.isError).toBeFalsy();
     expect(calls[0].body).not.toHaveProperty("groupId");
   });
+
+it("falls back to a nonblank camelCase groupId when group_id is blank", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: "", groupId: "room-9" });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0].body.groupId).toBe("room-9");
+  });
+
+  it("falls back to a nonblank camelCase groupId when group_id is null", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: null, groupId: "room-9" });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0].body.groupId).toBe("room-9");
+  });
+
+  it("rejects conflicting nonblank group_id and groupId destinations", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: "room-1", groupId: "room-9" });
+    expect(result.isError).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects a non-string camelCase groupId alongside a real group_id", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: "room-1", groupId: 42 });
+    expect(result.isError).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it("accepts the same destination in both spellings", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: "room-9", groupId: "room-9" });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0].body.groupId).toBe("room-9");
+  });
 });
