@@ -100,7 +100,8 @@ describe("readPageBundle", () => {
 
 describe("pageSignature", () => {
   it("counts videos only for a page that carries them", async () => {
-    const page = folder();
+    // As the page's own source is named: the native realpath, which on Windows expands a short (8.3) temp path.
+    const page = realpathSync.native(folder());
     writeFileSync(join(page, "index.html"), "<h1>Clip</h1>");
     writeFileSync(join(page, "clip.mp4"), "a");
     const plain = await pageSignature(page), withVideos = await pageSignature(page, { videos: true });
