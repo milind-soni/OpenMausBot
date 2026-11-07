@@ -1,53 +1,120 @@
 // ＋ at the end of the rail: one sheet of choices. A new workspace on this computer (named here, then main opens it), a new
 // organization on the Team plan the person pays for (when they run one), buy a Cloud (the buying sheet: another Cloud right
-// here, or the first one on this computer's own sheet), or add a server of the person's own by pasting its pairing link.
+// here, or the first one on this computer's own sheet), or connect to a server of the person's own.
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Building2, Cloud, Laptop, Loader2, Server, UserRound, X } from "lucide-react";
 import type { CloudSwatch } from "../../electron/cloud-list.mjs";
 import type { RailAddChoices, RailPlace } from "../../electron/cloud-rail.mjs";
+import { EXAMPLE_ADDRESS, parseServerInput } from "../../electron/server-address.mjs";
+import { CONNECT_PROBLEM_KEYS, type ServerProbe, type ServerProbeProblem } from "../../electron/server-probe.mjs";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { CLOUD_LIST_NAME_LIMIT, CLOUD_SWATCH_ORDER, SWATCH_COLOR, swatchFill } from "@/lib/cloud-extra";
+import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { computerName, createLocal, placeInitials, suggestedLocalName } from "@/lib/places";
 import { AddCloudFlow } from "./cloud-buy/AddCloudFlow";
 import { NewOrganization } from "./cloud-buy/NewOrganization";
 import { BackLink, FIELD, Heading, PRIMARY_WIDE } from "./cloud-buy/parts";
 import { SwatchRadios } from "./SwatchRadios";
 
-/** A server's pairing link, pasted here: main checks it and asks "Connect to <host>?" itself, then opens it. The sheet
- * stays open when the person cancels, and says so when the link isn't one. `connect`: a server of theirs that signed in
- * with their account, not connected to this app yet. */
-export function OwnServerLink({ onBack, onConnected, connect = null }: { onBack: (() => void) | null; onConnected: () => void; connect?: { name: string } | null }) {
-  const [link, setLink] = useState("");
+const PAIR_COMMAND = "npx openmausbot pair";
+
+/** A command to run on the server, with its own Copy button. */
+function CommandLine({ command }: { command: string }) {
+  const { state, copy } = useCopyFeedback(command);
+  return <span className="flex items-center gap-2">
+    <code className="min-w-0 truncate rounded-md bg-inset px-2 py-1 font-mono text-[12px] text-ink">{command}</code>
+    <button type="button" onClick={copy} className="text-[12px] font-medium text-accent-text hover:underline">{t(state === "copied" ? "connect.copied" : "connect.copy")}</button>
+  </span>;
+}
+
+function problemText(problem: ServerProbeProblem, host?: string): string {
+  return t(CONNECT_PROBLEM_KEYS[problem] as LocaleKey, { host: host ?? "", example: EXAMPLE_ADDRESS });
+}
+
+const TRANSPORT_KEY = { https: "connect.found.https", tailscale: "connect.found.tailscale", "private-http": "connect.found.privateHttp", loopback: "connect.found.loopback" } as const;
+
+/** Connect to a server: a link, or an address with the pairing code typed apart (a code pasted alone is moved to its
+ * field). Main looks the address up as the person types and connects only to the server it found, opening that server's
+ * own /pair page with the code. `connect`: a server of theirs that signed in with their account, not connected yet. */
+export function OwnServerLink({ onBack, onConnected, connect = null, start = null }: { onBack: (() => void) | null; onConnected: () => void; connect?: { name: string } | null;
+  start?: { address: string; locked: boolean; title: string } | null }) {
+  const [address, setAddress] = useState(start?.address ?? "");
+  const [code, setCode] = useState("");
+  const [movedCode, setMovedCode] = useState(false);
+  const [probe, setProbe] = useState<ServerProbe | null>(null);
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const codeField = useRef<HTMLInputElement>(null);
+  const workspaces = window.ogb?.workspaces;
+  const canProbe = typeof workspaces?.probe === "function";
+  const parsed = parseServerInput(address, code);
+  const linkHasCode = parsed.ok && !code.trim() && (parsed.code !== null || parsed.credential !== null);
+  const showCode = movedCode || (address.trim() !== "" && !linkHasCode && !(parsed.ok === false && parsed.problem === "codeOnly"));
+  useEffect(() => {
+    if (!canProbe || !address.trim()) { setProbe(null); return; }
+    let current = true;
+    const timer = window.setTimeout(() => {
+      void workspaces!.probe!(address, code).then((found) => { if (current) setProbe(found); }).catch(() => { if (current) setProbe(null); });
+    }, 400);
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [address, code, canProbe, workspaces]);
+  const typeAddress = (value: string) => {
+    setFailure(null);
+    const read = parseServerInput(value);
+    if (!read.ok && read.problem === "codeOnly" && read.code) {
+      setCode(read.code);
+      setAddress("");
+      setMovedCode(true);
+      return;
+    }
+    setAddress(value);
+    if (read.ok && read.code === null && read.credential === null) window.setTimeout(() => codeField.current?.focus(), 0);
+  };
+  const found = probe?.outcome === "found" ? probe : null;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const pasted = link.trim();
-    if (!pasted || busy) return;
+    if (!address.trim() || busy || (canProbe && !found)) return;
     track("rail_add", { step: "link" });
     setBusy(true);
-    setFailed(false);
+    setFailure(null);
     try {
-      if (await window.ogb?.workspaces?.add?.("link", pasted) !== false) onConnected();
-    } catch {
-      setFailed(true);
+      const result = await workspaces?.add?.("link", address.trim(), code.trim());
+      if (result && typeof result === "object") {
+        if (result.outcome === "connected") onConnected();
+        else if (result.outcome === "problem") setFailure(problemText(result.problem, result.host));
+      } else if (result !== false) onConnected();
+    } catch (error) {
+      setFailure(error instanceof Error && error.message ? error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "") : problemText("notAnAddress"));
     } finally {
       setBusy(false);
     }
   };
+  const shownProblem = failure ?? (probe?.outcome === "problem" && probe.problem !== "empty" ? problemText(probe.problem, probe.host) : null);
+  const codeOnlyHint = movedCode && !address.trim();
   return <form data-place-add={connect ? "connect-server" : "own-server"} onSubmit={(event) => void submit(event)} className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
     {onBack && <div><BackLink label={t("rail.back")} onClick={onBack} /></div>}
-    <Heading title={connect ? t("rail.connectTitle", { name: connect.name }) : t("rail.own")} sub={t(connect ? "rail.connectPasteLede" : "rail.pasteLede")} />
-    <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("rail.paste")}
-      <input data-autofocus data-own-server-link value={link} disabled={busy} onChange={(event) => { setLink(event.target.value); setFailed(false); }}
-        placeholder="https://" autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} aria-invalid={failed || undefined}
+    <Heading title={connect ? t("rail.connectTitle", { name: connect.name }) : start?.title ?? t("connect.title")} sub={t(connect ? "connect.signedInLede" : "connect.lede")} />
+    <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.address")}
+      <input data-autofocus={start?.locked ? undefined : true} data-own-server-link value={address} disabled={busy} readOnly={start?.locked === true} onChange={(event) => { if (!start?.locked) typeAddress(event.target.value); }}
+        placeholder={t("connect.addressPlaceholder")} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} aria-invalid={Boolean(shownProblem) || undefined}
         className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink outline-none focus:border-accent/50" />
     </label>
-    {failed && <p role="alert" className="text-[13px] text-danger">{t("rail.linkFailed")}</p>}
-    <div><button type="submit" disabled={busy || !link.trim()} className="ui-button ui-button-primary inline-flex items-center gap-2">
-      {busy && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}{t("rail.connect")}
+    {codeOnlyHint && <p data-connect-hint className="text-[13px] text-ink-secondary">{t("connect.addAddress", { example: EXAMPLE_ADDRESS })}</p>}
+    {found && <p data-connect-found className="text-[13px] text-ink-secondary">
+      ✓ {found.version ? t("connect.found", { name: found.label, version: found.version }) : found.label} · {t(TRANSPORT_KEY[found.transport])}
+    </p>}
+    {showCode && <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.code")}
+      <input ref={codeField} data-autofocus={start?.locked ? true : undefined} data-own-server-code value={code} disabled={busy} onChange={(event) => { setCode(event.target.value); setFailure(null); }}
+        placeholder="7KQ2-M9XD-H4TP" autoCapitalize="characters" autoCorrect="off" autoComplete="off" spellCheck={false}
+        className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[14px] font-normal text-ink outline-none focus:border-accent/50" />
+      <span className="flex flex-col gap-1 text-[12px] font-normal text-ink-secondary">{t("connect.noCode")}<CommandLine command={PAIR_COMMAND} /></span>
+    </label>}
+    {shownProblem && <p role="alert" data-connect-problem className="text-[13px] text-danger">{shownProblem}</p>}
+    <div><button type="submit" data-own-server-connect disabled={busy || !address.trim() || (canProbe && !found)} className="ui-button ui-button-primary inline-flex items-center gap-2">
+      {busy && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}{found ? t("connect.to", { name: found.label }) : t("rail.connect")}
     </button></div>
   </form>;
 }
@@ -174,7 +241,7 @@ export function PlaceAddSheet({ choices, places = [], connect = null, onClose, o
       <div className="flex flex-col gap-3 sm:flex-row">
         {organization && <Choice kind="organization" icon={<Building2 size={19} />} title={t("rail.org")} sub={t("rail.orgSub")} onClick={() => setView("organization")} />}
         {choices.cloud && <Choice kind="cloud" icon={<Cloud size={19} />} title={t("rail.buy")} sub={t("rail.buySub")} onClick={() => setView("cloud")} />}
-        {server && <Choice kind="server" icon={<Server size={19} />} title={t("rail.own")} sub={t("rail.ownSub")} onClick={() => setView("server")} />}
+        {server && <Choice kind="server" icon={<Server size={19} />} title={t("connect.title")} sub={t("connect.choiceSub")} onClick={() => setView("server")} />}
         {account && <Choice kind="account" icon={<UserRound size={19} />} title={t("accounts.add")} sub={t("rail.accountSub")} onClick={() => onAccount!()} />}
       </div>
     </div>}

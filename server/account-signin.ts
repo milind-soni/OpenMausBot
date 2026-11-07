@@ -38,7 +38,8 @@ export type SignInFailure = { ok: false; status: number } & UserError;
 
 export interface EmailSignIn {
   enabled(): boolean;
-  start(email: string): Promise<{ ok: true } | SignInFailure>;
+  /** `target`: the host the code signs in to, for the email's subject. */
+  start(email: string, target?: string | null): Promise<{ ok: true } | SignInFailure>;
   verify(email: string, code: string): Promise<{ ok: true; email: string; userId: string; scopes: Scope[] } | SignInFailure>;
 }
 
@@ -112,12 +113,12 @@ export function createEmailSignIn(options: {
 function mailedSignIn(allow: () => SignInAllowList, mail: SignInMail): EmailSignIn {
   return {
     enabled: () => signInEnabled(allow()),
-    async start(rawEmail) {
+    async start(rawEmail, target) {
       const email = normalizeAccountEmail(rawEmail);
       if (!email) return { ok: false, status: 400, ...userError("serverError.email.invalid") };
       if (!allowedScopes(email, allow())) return NOT_WELCOME;
       try {
-        if ((await mail.send(email)) === "tooSoon") return { ok: false, status: 429, ...userError("serverError.email.tooMany") };
+        if ((await mail.send(email, target)) === "tooSoon") return { ok: false, status: 429, ...userError("serverError.email.tooMany") };
       } catch (error) {
         console.warn(`sign-in code not sent: ${error instanceof Error ? error.message : String(error)}`);
         return { ok: false, status: 502, ...userError("serverError.email.unavailable", { detail: error instanceof SignInMailError ? error.message : "the mail server refused it" }) };

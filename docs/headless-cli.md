@@ -20,8 +20,9 @@ files it links, and writes everything to `./rehearsal`.
 
 ## Which workspace, and as whom
 
-- `--url URL` or `OPENMAUSBOT_URL`: a workspace somewhere else. Use `https://`
-  unless it is this computer (`ALLOW_INSECURE_HTTP=true` allows plain `http://`).
+- `--url URL` or `OPENMAUSBOT_URL`: a workspace somewhere else. `https://`
+  works anywhere; plain `http://` works only on this computer or a private
+  network (a LAN address, Tailscale's 100.x or `*.ts.net`, `*.local`).
 - `--port N` or `OMB_PORT`: this computer, on that port.
 - Otherwise the command looks on this computer's usual ports (8799, 18799,
   28799), as the desktop app uses them.
@@ -30,13 +31,15 @@ On this computer a headless server treats you as its owner, and no token is
 needed. Anywhere else you need a token:
 
 ```sh
-openmausbot connect https://maus.example.com --code ABCD1234 --out ~/.openmausbot-token
+openmausbot connect https://maus.example.com --code 7KQ2-M9XD-H4TP --out ~/.openmausbot-token
 openmausbot doctor --url https://maus.example.com --token-file ~/.openmausbot-token
 ```
 
-Get the code in the app under **Settings → Phone → Set up a phone**, or on
-the server with `openmausbot pair --client --ttl 24h` (a code lasts five
-minutes unless `--ttl` says otherwise, at most a day, and works once). On this
+`connect` also takes the whole link the server printed
+(`https://maus.example.com/pair#code=…`), so `--code` can be left out then.
+Make the pairing code on the server with `openmausbot pair` (add
+`--client --ttl 24h` for a chat-only code that stays open up to a day; a code
+works once). On this
 computer's own server, `connect` makes the code itself (`--client` gives a
 token that can chat but not change settings). The token goes to a file only
 you can read, and is never printed. Pass it with `--token-file FILE` or
