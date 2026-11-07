@@ -48,7 +48,7 @@ export async function startRelay(config: RelayConfig, options: RelayOptions = {}
   const { limits } = config;
   const now = options.now ?? (() => performance.now());
   const wallSeconds = options.wallSeconds ?? (() => Date.now() / 1000);
-  const metrics = new Metrics();
+  const metrics = new Metrics(wallSeconds);
   const ctx = {
     node: config.node,
     limits,
@@ -76,17 +76,13 @@ export async function startRelay(config: RelayConfig, options: RelayOptions = {}
 
   const gauges = () => {
     let pending = 0;
-    let spliced = 0;
     for (const entry of ctx.hosts.all()) {
-      for (const session of entry.sessions.values()) {
-        if (session.state === "pending") pending += 1;
-        else if (session.state === "spliced") spliced += 1;
-      }
+      for (const session of entry.sessions.values()) if (session.state === "pending") pending += 1;
     }
     return [
       { name: "relay_hosts_connected", help: "Hosts with a control socket on this node", value: ctx.hosts.connected },
       { name: "relay_sessions_pending", help: "Phones waiting for their host's data socket", value: pending },
-      { name: "relay_sessions_spliced", help: "Phone sessions spliced to a host", value: spliced },
+      { name: "relay_sessions_spliced", help: "Phone sessions spliced to a host", value: ctx.hosts.spliced },
       { name: "relay_sockets_open", help: "WebSockets held, every route", value: sockets.size },
       { name: "relay_sockets_max", help: "WebSockets this node holds before answering 4503", value: limits.socketsMax },
       { name: "relay_ip_entries", help: "Client keys with limiter state", value: ipLimiter.size },
@@ -159,6 +155,7 @@ export async function startRelay(config: RelayConfig, options: RelayOptions = {}
       }
       metrics.inc("relay_upgrades_total", route);
       sockets.set(ws, route);
+      metrics.peak("sockets_open", sockets.size);
       ws.once("close", () => {
         sockets.delete(ws);
         ipLimiter.release(key);

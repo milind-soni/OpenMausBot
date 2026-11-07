@@ -8,6 +8,8 @@ export interface DecodedPng {
   height: number;
   /** RGB at (x, y); alpha is dropped. */
   pixel: (x: number, y: number) => [number, number, number];
+  /** How opaque (x, y) is, 0 to 255: 255 for a picture without alpha. */
+  alpha: (x: number, y: number) => number;
 }
 
 export function decodePng(file: Buffer): DecodedPng {
@@ -59,6 +61,7 @@ export function decodePng(file: Buffer): DecodedPng {
       const at = y * stride + x * channels;
       return [pixels[at], pixels[at + 1], pixels[at + 2]];
     },
+    alpha: (x, y) => (channels === 4 ? pixels[y * stride + x * channels + 3]! : 255),
   };
 }
 

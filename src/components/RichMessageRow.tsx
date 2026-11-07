@@ -17,7 +17,8 @@ export function richRowKind(message: Message): Message["kind"] {
   return message.kind;
 }
 
-export function RichMessageRow({ botId, botName, threadId, message }: { botId: string; botName: string; threadId?: string; message: Message }) {
+/** `room`: shown to everyone in a room, view-only. */
+export function RichMessageRow({ botId, botName, threadId, message, room }: { botId: string; botName: string; threadId?: string; message: Message; room?: boolean }) {
   return (
     <MessageBoundary fallbackText={message.text ?? ""}>
       {message.setupSuggestion
@@ -25,9 +26,18 @@ export function RichMessageRow({ botId, botName, threadId, message }: { botId: s
         : message.kind === "goal.run"
           ? <GoalRunRow botId={botId} threadId={threadId} message={message} />
           : message.kind === "app"
-            ? <AppMessage botId={botId} botName={botName} threadId={threadId} message={message} />
-            : <WidgetMessage botId={botId} threadId={threadId} message={message} />}
+            ? <AppMessage botId={botId} botName={botName} threadId={threadId} message={message} room={room} />
+            : <WidgetMessage botId={botId} threadId={threadId} message={message} viewOnly={room} />}
     </MessageBoundary>
+  );
+}
+
+/** A page, an app or a widget a room member showed: the same row as in its own chat, view-only. */
+export function RoomRichRow({ message, from, threadId }: { message: Message; from: NonNullable<Message["from"]>; threadId: string }) {
+  return (
+    <div className="flex justify-start">
+      <RichMessageRow botId={from.botId} botName={from.name} threadId={threadId} message={message} room />
+    </div>
   );
 }
 

@@ -13,6 +13,7 @@ ADMIN_URL="${MAUSBOT_ADMIN_URL:-@MAUSBOT_ADMIN_URL@}"
 CONNECTOR_IMAGE="${MAUSBOT_CONNECTOR_IMAGE:-@MAUSBOT_CONNECTOR_IMAGE@}"
 
 ETC_DIR="${MAUSBOT_ETC_DIR:-/etc/mausbot}"
+AUDIT_DIR="${MAUSBOT_AUDIT_DIR:-/var/log/mausbot}"
 APPARMOR_DIR="${MAUSBOT_APPARMOR_DIR:-/etc/apparmor.d}"
 PROFILE=omb-home-narrow
 SECCOMP=seccomp-omb-home.json
@@ -89,31 +90,40 @@ install_docker() {
   if command -v systemctl >/dev/null 2>&1; then systemctl enable --now docker >/dev/null 2>&1 || true; fi
 }
 
-offer_docker() {
+offer_docker() { # what is wrong, in one sentence
   if [ "${MAUSBOT_INSTALL_DOCKER:-}" = 1 ]; then
     install_docker
     return
   fi
   if tty_available; then
-    printf "Docker isn't installed. Install it now with Docker's official script (get.docker.com)? [Y/n] " >/dev/tty
+    printf "%s Install the current Docker now with Docker's official script (get.docker.com)? [Y/n] " "$1" >/dev/tty
     answer=""
     read -r answer </dev/tty || answer=n
     case "$answer" in
       "" | y | Y | yes | Yes) install_docker; return ;;
     esac
   fi
-  fail "Docker isn't installed. Install it with: curl -fsSL https://get.docker.com | sudo sh  and then run this command again."
+  fail "$1 Install the current Docker with: curl -fsSL https://get.docker.com | sudo sh  and then run this command again (or run it with --install-docker)."
 }
 
-check_docker() {
-  command -v docker >/dev/null 2>&1 || offer_docker
+docker_server() {
   server=$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)
   if [ -z "$server" ]; then
     fail "Docker is installed but not running. Start it with: sudo systemctl enable --now docker  and then run this command again."
   fi
   major=${server%%.*}
   case "$major" in '' | *[!0-9]*) major=0 ;; esac
-  [ "$major" -ge "$MIN_DOCKER" ] || fail "Docker $server is too old; MausBot needs Docker $MIN_DOCKER or newer. Update it with: curl -fsSL https://get.docker.com | sudo sh"
+}
+
+check_docker() {
+  command -v docker >/dev/null 2>&1 || offer_docker "Docker isn't installed."
+  docker_server
+  # Debian 12's own Docker is 20.10: Docker's script replaces it with the current one, keeping its containers and volumes.
+  if [ "$major" -lt "$MIN_DOCKER" ]; then
+    offer_docker "Docker $server is too old; MausBot needs Docker $MIN_DOCKER or newer."
+    docker_server
+    [ "$major" -ge "$MIN_DOCKER" ] || fail "Docker is still $server after the update (Docker's output is above). Fix that, then run this command again."
+  fi
   security=$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null || true)
   case "$security" in
     *rootless*) fail "Docker runs in rootless mode here. MausBot needs the standard Docker service: run curl -fsSL https://get.docker.com | sudo sh" ;;
@@ -123,6 +133,12 @@ check_docker() {
 
 check_apparmor() {
   enabled=$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null || true)
+  # Debian 12's cloud images run AppArmor in the kernel without its tools; installing them needs no restart.
+  if [ "$enabled" = Y ] && ! command -v apparmor_parser >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+    say "Installing AppArmor's tools..."
+    { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apparmor; } >/dev/null 2>&1 ||
+      fail "AppArmor's tools could not be installed. Run: sudo apt-get install -y apparmor  and then run this command again."
+  fi
   case "$security" in
     *name=apparmor*name=seccomp* | *name=seccomp*name=apparmor*) docker_confines=yes ;;
     *) docker_confines=no ;;
@@ -219,6 +235,8 @@ install_profiles() {
 start_connector() {
   say "Starting the MausBot connector..."
   docker volume create "$STATE_VOLUME" >/dev/null
+  # The audit log: every job MausBot runs here, root's, for you to read (mausbot-connector audit).
+  install -d -m 0750 "$AUDIT_DIR"
   docker rm -f "$CONNECTOR" "$CONNECTOR_NEXT" >/dev/null 2>&1 || true
   instance=$(cat /proc/sys/kernel/random/uuid)
   set -- --label "$ROLE_LABEL=connector" --label "com.mausbot.instance=$instance" \
@@ -229,7 +247,7 @@ start_connector() {
   esac
   docker run -d --name "$CONNECTOR" --restart unless-stopped --network host \
     --security-opt no-new-privileges=true --cap-drop ALL --read-only --tmpfs /tmp \
-    -v /var/run/docker.sock:/var/run/docker.sock -v "$STATE_VOLUME:/state" -v "$ETC_DIR:/etc/mausbot:ro" \
+    -v /var/run/docker.sock:/var/run/docker.sock -v "$STATE_VOLUME:/state" -v "$ETC_DIR:/etc/mausbot:ro" -v "$AUDIT_DIR:/var/log/mausbot" \
     --log-opt max-size=10m --log-opt max-file=3 \
     "$@" "$CONNECTOR_IMAGE" run >/dev/null || fail "The MausBot connector could not be started (Docker's message is above). Run this command again."
   for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -298,7 +316,7 @@ install_connector() {
   check_box
   connect "$code"
   say ""
-  say "Connected. Your server shows up in MausBot in a minute."
+  say "Connected. Your server shows up in MausBot in a minute, for your team's Owner to accept."
 }
 
 # Removal never deletes the data, its safety copy or its backups unless --delete-data is typed.
@@ -321,15 +339,16 @@ uninstall() {
   if command -v apparmor_parser >/dev/null 2>&1 && [ -f "$APPARMOR_DIR/$PROFILE" ]; then apparmor_parser -R "$APPARMOR_DIR/$PROFILE" >/dev/null 2>&1 || true; fi
   rm -f "$APPARMOR_DIR/$PROFILE" "$ETC_DIR/$SECCOMP"
   rmdir "$ETC_DIR" 2>/dev/null || true
-  # The connector's own state (its token, the home's settings) is not your data: MausBot hands both out again.
+  # The connector's own state (its key, the home's settings) is not your data: a new code makes a new key.
   docker volume rm "$STATE_VOLUME" >/dev/null 2>&1 || true
   if [ "$delete" = yes ]; then
     for volume in "$DATA_VOLUME" "$SNAPSHOT_VOLUME" $(docker volume ls -q --filter "label=$ROLE_LABEL=backup" 2>/dev/null); do
       docker volume rm "$volume" >/dev/null 2>&1 || true
     done
+    rm -rf "$AUDIT_DIR"
     say "MausBot is removed from this server, and so is its data."
   else
-    say "MausBot is removed from this server. Your data is kept in the Docker volume $DATA_VOLUME, with its backups."
+    say "MausBot is removed from this server. Your data is kept in the Docker volume $DATA_VOLUME, with its backups, and the audit log in $AUDIT_DIR."
     say "To delete the data too, run: $(command_line uninstall --delete-data)"
   fi
 }

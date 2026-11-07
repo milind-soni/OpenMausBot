@@ -1,0 +1,41 @@
+# What the home's edge answers, imported by each of its configs: Caddyfile (Fly, or a server where something else ends
+# TLS) and Caddyfile.tls (a server with its own domain).
+encode zstd gzip
+
+# Fly's health check reaches the machine by address, not by name.
+handle /api/health {
+	reverse_proxy 127.0.0.1:8799 {
+		lb_try_duration {$OMB_CLOUD_EDGE_HOLD:0s}
+		lb_try_interval 50ms
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+# Everything else answers only for this machine's own public name.
+@home host {$OMB_CLOUD_PUBLIC_HOST}
+handle @home {
+	# Webhook ingress has its own per-hook secrets.
+	handle /hooks/* {
+		reverse_proxy 127.0.0.1:8800 {
+			lb_try_duration {$OMB_CLOUD_EDGE_HOLD:0s}
+			lb_try_interval 50ms
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8799 {
+			lb_try_duration {$OMB_CLOUD_EDGE_HOLD:0s}
+			lb_try_interval 50ms
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {client_ip}
+			# the event stream must not be buffered
+			flush_interval -1
+		}
+	}
+}
+
+handle {
+	respond 403
+}

@@ -1062,8 +1062,13 @@ the `list_shared_computers` and `shared_computer` tools.
 The `Dockerfile`'s `cloud-home` target shares the server image's runtime
 layers (Node, Chrome's libraries, agent-browser and its Chrome) and adds:
 
-- Caddy (`deploy/fly/Caddyfile`), as the only listener the network can reach
-  (`0.0.0.0:8080`);
+- Caddy, as the only listener the network can reach: `0.0.0.0:8080` with
+  `deploy/fly/Caddyfile`, and also 443 for the home's own domain with
+  `deploy/fly/Caddyfile.tls`, or a loopback listener for the home's own
+  tunnel with `deploy/fly/Caddyfile.tunnel` (all import the same routes,
+  `deploy/fly/edge-routes.caddy`);
+- `cloudflared`, pinned and digest-checked by `scripts/prepare-cloudflared.mjs`,
+  run only for a home reached through its own tunnel, as the `omb-tunnel` user;
 - Grok Build (`/usr/local/bin/grok`) from xAI's own installer, pinned by
   `GROK_VERSION` to the version the Grok driver is verified against. The
   build fails if the installer cannot be reached, rather than shipping an
@@ -1203,7 +1208,7 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   the root supervisor that restarts them is -1000, never picked. When memory
   runs out the kernel takes a bot's process, never the workspace.
 - **OpenCode reaches OpenMausBot's own tools over HTTP.** The agents,
-  browser, computer, Data and HighLevel servers are endpoints of this server
+  browser, computer, Data, Email and phone servers are endpoints of this server
   (`/api/internal/mcp-http/<name>`, `server/routes/own-mcp-http.ts`) with the
   turn's capability in the Authorization header, instead of a Node proxy
   process each (about 20–30 MB PSS apiece) in every OpenCode session. A server
@@ -1238,12 +1243,87 @@ a public interface. Caddy
 https` and `X-Forwarded-For`, so the server sees each one as remote: it needs
 a paired session, whatever `Host` it claims. On Fly (`FLY_APP_NAME` is set),
 Caddy trusts `Fly-Client-IP` only from Fly's private ranges. On your own
-server, where any local process can reach the published port, it trusts
-`Cf-Connecting-IP` only from the home's own loopback, where the Cloudflare
-tunnel connects from, and ignores a client-address header from any other peer
-(the launcher sets both: `edgeClientAddress`). That address feeds the pairing
-lockout, never authorization. Apart from `/api/health`, Caddy answers only for
-the machine's own name (`OMB_PUBLIC_URL`) and refuses any other `Host`.
+server, where any local process can reach the published port and a bot can
+reach the edge's loopback, it trusts no client-address header by default: the
+client is the connection's peer. Only proxies the owner names may name one
+(below). The launcher sets these values (`edgeClientAddress`). That address
+feeds the pairing lockout, never authorization. Apart from `/api/health`,
+Caddy answers only for the machine's own name (`OMB_PUBLIC_URL`) and refuses
+any other `Host`.
+
+### On your own server: how people reach it
+
+A home on a server of its owner's (Team on your own server) runs the same
+image. Its agent on the server sets these, with the boot contract below, on the
+home's container. None of them may be set on Fly: the launcher refuses to
+start.
+
+| Variable | Value |
+| --- | --- |
+| `OMB_PUBLIC_URL` | `https://` and the name people use, e.g. `https://mausbot.acme.eu`. Its DNS points at the server. |
+| `OMB_CLOUD_EDGE_TLS` | `1`: the edge gets and renews a Let's Encrypt certificate for that name and serves it on 443. Unset or `0`: the edge serves only `:8080`, for the agent, and something else ends TLS. |
+| `OMB_CLOUD_TRUSTED_PROXIES` | Only when the owner's own proxy stands in front: its addresses or ranges (`10.0.0.5`, `10.0.0.0/24`, `private_ranges`), separated by spaces or commas, at most 32. Unset: none. A `/0` range, a host name or anything else stops the home with a message naming the variable. |
+| `OMB_CLOUD_CLIENT_IP_HEADER` | The header those proxies put the client's address in. Default `X-Forwarded-For`; it needs `OMB_CLOUD_TRUSTED_PROXIES`. |
+| `OMB_CLOUD_TUNNEL_TOKEN` | For a server with no inbound port: the connector token of the home's own Cloudflare tunnel. `OMB_PUBLIC_URL` is then the tunnel's address. Not with `OMB_CLOUD_EDGE_TLS`. |
+
+**Its own domain (`OMB_CLOUD_EDGE_TLS=1`).** The agent publishes the
+container's 443 (and 80 if the owner opens it). Let's Encrypt checks the name
+over TLS on 443 (TLS-ALPN), so port 80 is optional; a certificate took 6 to 8 s
+in tests. Clients reach 443 directly, so the edge counts each by its own
+address with no header at all, and the agent's requests, which arrive through
+`127.0.0.1:8080` from the Docker bridge, are counted apart from any stranger
+on 443. The certificate and the ACME account live on the volume, in
+`/data/.omb-edge/caddy`, outside the server's data folder (no workspace backup
+or export carries the key) and never in `/tmp`: an update or a rollback is a
+new container, and Let's Encrypt issues the same name at most 5 times a week.
+The edge speaks HTTP/1.1 and HTTP/2 only, so UDP 443 stays closed.
+
+Docker gives a container on its default bridge no IPv6 address, and then
+forwards IPv6 clients of a port published on `[::]` through its own proxy,
+from the bridge's gateway, `172.17.0.1`: the address the agent's requests come
+from. Measured on Docker 29: ten wrong codes from one IPv6 client made the
+Admin's next signed pairing answer 429. So the agent publishes 443 on IPv4
+only (`0.0.0.0`) and the name has no AAAA record, unless the home's Docker
+network has IPv6 of its own (not verified).
+
+**The owner's own proxy in front.** It ends TLS and forwards to the home's
+`:8080` (published where the proxy can reach it). Name it in
+`OMB_CLOUD_TRUSTED_PROXIES` and, if it does not use `X-Forwarded-For`, its
+header in `OMB_CLOUD_CLIENT_IP_HEADER`, or every member shares one lockout:
+ten wrong codes from anyone would also refuse the Admin's own pairings for a
+minute. A proxy on the same host reaches a published port from the Docker
+bridge's gateway (usually `172.17.0.1`), which the agent shares; naming the
+gateway lets anything that arrives from it name a client, so do it only when
+no port is published on `[::]` (Docker's proxy sends IPv6 clients from there
+too). Only the named peers are believed, and only the last address they add,
+so a client's own `X-Forwarded-For` or `Cf-Connecting-IP` changes nothing.
+
+**No inbound port: a Cloudflare tunnel.** The same managed tunnel as
+`openmausbot serve --tunnel`, one per server: the control plane's
+`ensureEndpoint`, called with the server's installation credential
+(`fleetAccess` in `server/tunnel.ts`), returns the address
+(`https://c-<32 hex>.<zone>`) and the connector token, which go into
+`OMB_PUBLIC_URL` and `OMB_CLOUD_TUNNEL_TOKEN`. The home then runs the pinned
+`cloudflared` from its image (`/usr/local/bin/cloudflared`, the release
+`scripts/prepare-cloudflared.mjs` checks) as its own user, `omb-tunnel`: the
+token rides that process's environment, which `maus`, and so no bot or engine,
+can read. If it stops, the launcher starts it again after 5 s, doubling to
+5 minutes. The control plane points every tunnel at `127.0.0.1:8812`, where
+the edge (`deploy/fly/Caddyfile.tunnel`) listens on loopback only and believes
+`Cf-Connecting-IP`, which Cloudflare's edge sets, so each member is counted
+on their own; `:8080` still believes no header. The home lives in one
+container, so a restart brings its tunnel back with it. Cloudflare decrypts
+the traffic at its edge, which EU customers are told plainly. A boxed turn has
+its own loopback, but a process that shares the home's (a bot's browser, or
+a turn when the box is off) could name any address to `:8812`. That changes
+only whose lockout its own failed codes count toward, never who is signed in.
+
+**Private, on a tailnet.** `tailscale serve --bg --https=443
+http://127.0.0.1:8080` on the server serves `https://<machine>.<tailnet>.ts.net`
+to the tailnet; set `OMB_PUBLIC_URL` to that name, and name the bridge's
+gateway in `OMB_CLOUD_TRUSTED_PROXIES` so each member's tailnet address is
+counted apart. The Admin never needs that address: its requests come through
+the agent. Not verified on a tailnet.
 
 ### Fly
 
@@ -1628,9 +1708,8 @@ kinds, random ids, connector slugs, booleans and machine numbers. Connected
 apps are looked up in the background at most every 30 minutes, so a slow
 provider never holds the answer. `connectors.items` lists only apps the
 person set up: connected now, or connected once and since expired or failed.
-An app never connected, HighLevel without a saved connection included, is not
-listed. Cloud computers are not listed: through the
-Admin's Boat relay that would count as using an included service and hold back
+An app never connected is not listed. Cloud computers are not listed: through
+the Admin's Boat relay that would count as using an included service and hold back
 updates; a cloud computer that fails a turn arrives as its place's code
 (`cc-unavailable`, `cc-no-start`, `cc-provider`, …).
 
@@ -1654,7 +1733,10 @@ judge a pending timer by a wall-clock time stored when it was set.
 
 - no turn running (bots, rooms, delegated work), no routine run queued to start
   now or running (one waiting on a person doesn't count: their answer wakes
-  the home), no Live call, no cloud computer on or starting (its idle timer
+  the home), no work one bot handed another still moving on by itself (an
+  assignment queued, running or due to resume its requester, or a report to
+  send; one parked on a person's answer doesn't count), no Live call, no cloud
+  computer on or starting (its idle timer
   lives in this process), no maintenance (backup or restore, Move to Cloud, an
   engine or browser install, a provider sign-in) and no request in progress;
 - nobody used the home for 10 minutes (the Admin may ask for another window).
@@ -1675,8 +1757,10 @@ its own nonces. `200`:
   "nextDueAt": 1792358600000, "sleeping": false, "wokeBy": { "by": "events", "background": true } }
 ```
 
-`busy` holds fixed codes only: `turn`, `run`, `live-call`, `computer`,
-`maintenance`, `recent-activity`, `recent-work`, `just-woke`, `due-soon`.
+`busy` holds fixed codes only: `turn`, `run`, `handoff`, `live-call`,
+`computer`, `maintenance`, `recent-activity`, `recent-work`, `just-woke`,
+`due-soon`. A Team Cloud answers like any other home: its plan decides whether
+the Admin ever asks.
 `nextDueAt` is the earliest enabled routine's next run or queued run's retry,
 or, while a bot waits for something (`wait_until`), 30 minutes on, so its
 checks go on that often: the Admin starts a sleeping home a minute before it

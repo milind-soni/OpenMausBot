@@ -94,14 +94,15 @@ it("pairs three people with the Admin's signed claims, each with their role, and
   expect((await fx.onCloud("GET", "/api/auth/session")).body.team).toBeUndefined();
 }, hostTimeout(60_000));
 
-it("keeps every member's session across a restart, never sleeps, and exports for the Owner only", async () => {
+it("keeps every member's session across a restart, waits to sleep only while it is used, and exports for the Owner only", async () => {
   await team.relaunch();
   expect((await team.as(ada, "GET", "/api/auth/session")).status).toBe(200);
   expect((await team.as(cleo, "GET", "/api/auth/session")).status).toBe(200);
   expect((await team.as(owner, "GET", "/api/auth/session")).status).toBe(200);
   const sleep = await team.signed("POST", "/api/cloud/power/sleep", {});
   expect(sleep.status, JSON.stringify(sleep.body)).toBe(409);
-  expect(sleep.body.busy).toContain("team");
+  expect(sleep.body.busy).toEqual(expect.arrayContaining(["recent-activity", "just-woke"]));
+  expect(sleep.body.busy).not.toContain("team");
   expect((await team.signed("GET", "/api/cloud/power")).status).toBe(200);
   expect((await team.signed("GET", "/api/cloud/health")).status).toBe(200);
   // A member reaches nothing an admin does: the team's setup is the admins'.
@@ -279,7 +280,7 @@ it("a person's own connected apps cannot be brought into the team, and the team'
   const refused = await team.as(owner, "POST", "/api/cloud-connections/connected-apps", { share: "share-code-from-a-laptop", apps: ["gmail"] });
   expect(refused.status).toBe(403);
   expect(refused.body.error).toBe("Personal connections never enter Acme. Ask an admin to connect these apps for Acme.");
-  expect((await team.as(owner, "PUT", "/api/cloud-connections/highlevel", { locationId: "loc", accessToken: "a", refreshToken: "r", expiresAt: 1 })).body.error).toContain("Personal connections never enter Acme");
+  expect((await team.as(owner, "PUT", "/api/cloud-connections/email", { accounts: [{ address: "owner@example.test" }] })).body.error).toContain("Personal connections never enter Acme");
   // Nor anything of a computer's one-time move: every send and move route answers the same plain line.
   for (const [method, route] of [["GET", "/api/cloud-send/manifest"], ["POST", "/api/cloud-send/chats"], ["GET", "/api/cloud-send?move=1"]] as const) {
     const moved = await team.as(owner, method, route, method === "POST" ? { conversations: [] } : undefined);

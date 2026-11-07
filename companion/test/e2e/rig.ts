@@ -225,6 +225,8 @@ export const json = (reply: Reply) => JSON.parse(reply.body.toString("utf8")) as
 /** Opens the event stream and collects events as they come. */
 export function events(session: E2ESession<never>, token: string, lastEventId?: number) {
   const seen: Array<{ id: number; data: unknown }> = [];
+  /** Events with no `id:`: the ones the sidecar itself sends. */
+  const pushed: Array<{ at: number; data: Record<string, unknown> }> = [];
   let buffer = "";
   let abort = () => {};
   const done = new Promise<void>((resolve) => {
@@ -246,6 +248,7 @@ export function events(session: E2ESession<never>, token: string, lastEventId?: 
             const id = /^id: (\d+)$/m.exec(event);
             const data = /^data: (.*)$/m.exec(event);
             if (id && data) seen.push({ id: Number(id[1]), data: JSON.parse(data[1]) });
+            else if (data) pushed.push({ at: Date.now(), data: JSON.parse(data[1]) });
           }
         });
         res.on("close", resolve);
@@ -255,7 +258,7 @@ export function events(session: E2ESession<never>, token: string, lastEventId?: 
     abort = () => req.destroy();
     req.end();
   });
-  return { seen, done, abort: () => abort() };
+  return { seen, pushed, done, abort: () => abort() };
 }
 
 /** Pairs a phone through the relay with a fresh pairing window; returns its device token and id. */

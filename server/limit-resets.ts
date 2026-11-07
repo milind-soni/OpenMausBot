@@ -181,7 +181,7 @@ export class LimitResetClock {
   noteRefusal(engine: string | undefined, resetsAt: number | undefined): void {
     if (!engine || resetsAt === undefined || !Number.isFinite(resetsAt) || resetsAt <= this.now()) return;
     // Without this refresh, a usage read between two refusals would end the hold.
-    if (this.refusals.get(engine) === resetsAt && !this.guessed.has(engine)) { this.heldAt.set(engine, this.now()); return; }
+    if (this.refusals.get(engine) === resetsAt && !this.guessed.has(engine)) { this.heldAt.set(engine, this.now()); this.saveHolds(); return; }
     this.hold(engine, resetsAt, false);
   }
 
@@ -207,6 +207,7 @@ export class LimitResetClock {
       next.set(limit.engine, limit);
       if (fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && codexHoldGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
         this.refusals.delete(limit.engine);
+        this.heldAt.delete(limit.engine);
         released = true;
       }
     }
@@ -275,17 +276,20 @@ export class LimitResetClock {
     let saved: unknown;
     try { saved = JSON.parse(readFileSync(this.options.file, "utf8")); } catch { return; }
     if (!saved || typeof saved !== "object" || Array.isArray(saved)) return;
-    for (const [engine, hold] of Object.entries(saved as Record<string, { until?: unknown; guessed?: unknown } | null>)) {
+    for (const [engine, hold] of Object.entries(saved as Record<string, { until?: unknown; guessed?: unknown; heldAt?: unknown } | null>)) {
       const until = hold?.until;
       if (typeof until !== "number" || !Number.isFinite(until) || until < this.now() - REFUSAL_GRACE_MS) continue;
       this.refusals.set(engine, until);
       if (hold?.guessed === true) this.guessed.add(engine);
+      // A file from before heldAt was kept: only a usage read made after this start can end the hold.
+      const heldAt = hold?.heldAt;
+      this.heldAt.set(engine, typeof heldAt === "number" && Number.isFinite(heldAt) ? heldAt : this.now());
     }
   }
 
   private saveHolds(): void {
     if (!this.options.file) return;
-    const holds = Object.fromEntries([...this.refusals].map(([engine, until]) => [engine, { until, guessed: this.guessed.has(engine) }]));
+    const holds = Object.fromEntries([...this.refusals].map(([engine, until]) => [engine, { until, guessed: this.guessed.has(engine), heldAt: this.heldAt.get(engine) ?? this.now() }]));
     try {
       writeFileAtomic(this.options.file, JSON.stringify(holds), { mode: 0o600 });
     } catch (error) {

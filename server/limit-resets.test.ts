@@ -374,6 +374,33 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("codex"), "a read from after it").toBeNull();
   });
 
+  it("still ignores a usage read from before the refusal after a restart, including a hold saved without its start", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-limit-held-at-"));
+    try {
+      const file = join(dir, "limit-holds.json");
+      let now = NOW;
+      const codexAccounts = () => [{ id: "codex", name: "Codex", driver: "codex" as const, environment: {} }];
+      const boot = () => new LimitResetClock({ accounts: codexAccounts, now: () => now, file });
+      boot().noteRefusal("codex", NOW + 23 * HOUR);
+      now = NOW + 5 * 60_000;
+      const restarted = boot();
+      const room = codex([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR]);
+      restarted.noteUsage({ fetchedAt: iso(NOW - 30_000), providers: [room] });
+      expect(restarted.blockedUntil("codex"), "a cached read from before the refusal").toBe(NOW + 23 * HOUR);
+      restarted.noteUsage({ fetchedAt: iso(NOW + 30_000), providers: [room] });
+      expect(restarted.blockedUntil("codex"), "a read from after it").toBeNull();
+      // A file an earlier version wrote names no start: the hold counts from this start.
+      writeFileSync(file, JSON.stringify({ codex: { until: NOW + 23 * HOUR, guessed: false } }));
+      const legacy = boot();
+      legacy.noteUsage({ fetchedAt: iso(NOW + 60_000), providers: [room] });
+      expect(legacy.blockedUntil("codex"), "a read from before this start").toBe(NOW + 23 * HOUR);
+      legacy.noteUsage({ fetchedAt: iso(now), providers: [room] });
+      expect(legacy.blockedUntil("codex")).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("counts a Codex hold from its latest refusal, so a read between two refusals with the same reset does not end it", () => {
     let now = NOW;
     const instance = new LimitResetClock({ accounts: () => [{ id: "codex", name: "Codex", driver: "codex" as const, environment: {} }], now: () => now });

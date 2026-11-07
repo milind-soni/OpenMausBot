@@ -2,6 +2,9 @@
 import type { ValidateFunction } from "ajv";
 import { isolatedRemoteCommand, runCommand, screenshotBoat } from "./boat.ts";
 import { isRedditAddress, REDDIT_REFUSAL } from "./browser/egress/reddit.ts";
+import {
+  backgroundStatus, commandLateText, EXEC_LATE, PROCESS_ID_PATTERN, startInBackground, STATUS_WAIT_MAX_SECONDS, STDERR_TAIL_CHARS, STDOUT_TAIL_CHARS,
+} from "./cloud-computer-background.ts";
 import { copyFromComputer, copyToComputer } from "./cloud-computer-files.ts";
 import type { AppConfig } from "./config.ts";
 import { controlRefusal, type ControlState } from "./control-client.ts";
@@ -21,7 +24,14 @@ export const CLOUD_COMPUTER_TOOLS = [
   tool("key_press", "Press an X11 key or shortcut.", { key: { type: "string", pattern: "^[A-Za-z0-9_+]+$", minLength: 1, maxLength: 100 } }, ["key"]),
   tool("scroll", "Scroll at a point on the cloud desktop.", { x: coordinate, y: coordinate, direction: { type: "string", enum: ["up", "down", "left", "right"] }, amount: { type: "integer", minimum: 1, maximum: 30 } }, ["x", "y", "direction"]),
   tool("open_url", "Request opening an HTTP or HTTPS URL in the cloud desktop browser; inspect the screen to confirm it loaded.", { url: { type: "string", pattern: "^https?://", maxLength: 2000 } }, ["url"]),
-  tool("exec", "Run a shell command on the assigned cloud computer.", { command: { type: "string", minLength: 1, maxLength: 4000 } }, ["command"]),
+  tool("exec", "Run a shell command on the assigned cloud computer and wait for its result. For a command that may run long (downloads, installs, builds, data jobs), set background: true: it starts the command and answers at once with a process_id to follow with exec_status, and the computer stays on for it for up to two hours.", {
+    command: { type: "string", minLength: 1, maxLength: 4000 },
+    background: { type: "boolean", description: "Start the command and answer at once with a process_id, instead of waiting for it to finish." },
+  }, ["command"]),
+  tool("exec_status", `Check a command started with exec and background: true: running or finished, its exit code, and the end of its stdout and stderr (the last ${STDOUT_TAIL_CHARS.toLocaleString("en-US")} and ${STDERR_TAIL_CHARS.toLocaleString("en-US")} characters).`, {
+    process_id: { type: "string", pattern: PROCESS_ID_PATTERN },
+    wait_seconds: { type: "integer", minimum: 0, maximum: STATUS_WAIT_MAX_SECONDS, description: "Wait up to this many seconds for the command to finish before answering." },
+  }, ["process_id"]),
   tool("copy_from_computer", "Copy one file of up to 2 GiB from the cloud computer into your working folder, for example to load it with data_load or use it in a page. A file already there is replaced.", {
     path: { type: "string", minLength: 1, maxLength: 4096, description: "The file on the cloud computer, under /home/user or /tmp." },
     to: { type: "string", minLength: 1, maxLength: 1000, description: "Where it goes, relative to your working folder. Default: the file's own name." },
@@ -98,12 +108,14 @@ export async function runCloudComputerTool(
     case "key_press": command = `xdotool key --clearmodifiers ${quote(String(a.key))}`; break;
     case "scroll": command = `${mouse} click --repeat ${a.amount ?? 3} --delay 80 ${scrollButtons[String(a.direction)]}`; break;
     case "open_url": command = `nohup xdg-open ${quote(String(a.url))} >/dev/null 2>&1 </dev/null &`; break;
-    case "exec": command = String(a.command); break;
+    case "exec": if (a.background === true) return startInBackground(cfg, boxId, String(a.command), signal); command = String(a.command); break;
+    case "exec_status": return backgroundStatus(cfg, boxId, a as { process_id: string; wait_seconds?: number }, signal);
     default: return { isError: true, content: [{ type: "text", text: "Unknown cloud computer tool." }] };
   }
   const result = await runCommand(cfg, boxId, isolatedRemoteCommand(command), { signal });
   signal.throwIfAborted();
   if (name === "open_url" && result.ok) return { content: [{ type: "text", text: "Browser launch requested. Page loading is not confirmed; inspect the screen before continuing." }] };
+  if (name === "exec" && result.timedOut) return { isError: true, content: [{ type: "text", text: EXEC_LATE }] };
   return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result) }] };
 }
 
@@ -137,8 +149,9 @@ export async function cloudComputerRpc(
   const problem = cloudComputerCallProblem(params.name, args);
   if (problem) return { isError: true, content: [{ type: "text", text: problem }] };
   const control = await deps.gate();
-  deps.assertActive();
+  // A refusal acts on no Boat, so it answers even when the turn has ended meanwhile.
   if (control.held) return { isError: true, content: [{ type: "text", text: controlRefusal(control) }] };
+  deps.assertActive();
   const boxId = deps.boxId();
   if (!boxId) return { isError: true, content: [{ type: "text", text: CLOUD_COMPUTER_NOT_READY }] };
   const late = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
@@ -147,7 +160,7 @@ export async function cloudComputerRpc(
     result = await runCloudComputerTool(deps.cfg, boxId, params.name as string, args as Record<string, unknown>, AbortSignal.any([deps.signal, late]), deps.folder?.());
   } catch (error) {
     if (!late.aborted || deps.signal.aborted) throw error;
-    return { isError: true, content: [{ type: "text", text: copy ? CLOUD_COMPUTER_COPY_LATE : CLOUD_COMPUTER_LATE }] };
+    return { isError: true, content: [{ type: "text", text: commandLateText(params.name, args) ?? (copy ? CLOUD_COMPUTER_COPY_LATE : CLOUD_COMPUTER_LATE) }] };
   }
   deps.assertActive();
   return result;

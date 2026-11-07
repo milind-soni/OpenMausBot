@@ -9,6 +9,7 @@ import {
   DeviceRegistry,
   MAX_PAIRING_ATTEMPTS,
   PAIRING_TTL_MS,
+  UNCONFIRMED_DEVICE_MS,
 } from "../src/devices.ts";
 
 const pair = (registry: DeviceRegistry, name = "iPhone") => {
@@ -47,6 +48,28 @@ describe("DeviceRegistry", () => {
     expect(registry.pairing()?.token).toBe(second.token);
     expect(registry.closePairing(second.token)).toBe(true);
     expect(registry.pairing()).toBeNull();
+  });
+
+  it("drops a paired device its phone never used, and keeps one it did", () => {
+    vi.useFakeTimers();
+    try {
+      const registry = new DeviceRegistry();
+      const dropped: string[] = [];
+      registry.onDropped((id) => dropped.push(id));
+      const unused = pair(registry, "Lost reply");
+      const used = pair(registry, "Used");
+      const viaSession = pair(registry, "Encrypted");
+      expect(registry.authenticate(used.token)?.id).toBe(used.device.id);
+      registry.confirm(viaSession.device.id);
+      vi.advanceTimersByTime(UNCONFIRMED_DEVICE_MS - 1);
+      expect(registry.list()).toHaveLength(3);
+      vi.advanceTimersByTime(1);
+      expect(dropped).toEqual([unused.device.id]);
+      expect(registry.list().map((device) => device.name)).toEqual(["Used", "Encrypted"]);
+      expect(registry.authenticate(unused.token)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("survives a restart", () => {

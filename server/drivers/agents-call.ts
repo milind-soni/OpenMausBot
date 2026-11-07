@@ -603,10 +603,13 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       return { text: `send_voice_note is limited to 1000 characters; this one is ${text.length}. Shorten the note.`, isError: true };
     }
     try {
-      await api("/api/internal/voice-note", {
+      const r = await api("/api/internal/voice-note", {
         method: "POST",
         body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, text }),
       });
+      if (r.attached !== true || typeof r.file !== "string" || !r.file) {
+        return { text: "Voice note not sent: OpenMausBot did not confirm the audio was saved. Tell the person the note did not go through; do not say it is attached.", isError: true };
+      }
       return { text: "Voice note recorded. It will be attached to this turn's reply when the turn ends; the note text is also the visible caption." };
     } catch (error) {
       return { text: `Voice note not sent: ${error instanceof Error ? error.message : String(error)}`, isError: true };
@@ -904,7 +907,7 @@ async function requestEmailCard(args: Json, context: ToolCallContext): Promise<T
     body: JSON.stringify({ fromBotId: context.botId, fromThreadId: context.threadId, credentialId: EMAIL_CREDENTIAL, address: args.address, reason: args.reason }),
   });
   if (!r.ok) return { text: String(r.body.error ?? `request_credential failed (HTTP ${r.status}).`), isError: true };
-  if (r.body.alreadyConfigured === true) return { text: `${String(r.body.label)} is already connected. Use the email tools.` };
+  if (r.body.alreadyConfigured === true) return { text: typeof r.body.text === "string" ? r.body.text : `${String(r.body.label)} is already connected. Use the email tools.` };
   return { text: "A secure card for the mailbox is ready in OpenMausBot, on the computer and on a freshly QR-paired phone. End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person connects it or declines." };
 }
 

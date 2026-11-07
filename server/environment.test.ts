@@ -129,7 +129,7 @@ describe("environment identity", () => {
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: false }).capabilities)
       .not.toHaveProperty("sharedComputers");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities)
-      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, selfUpdate: "desktop-managed", emailSignIn: false, jobs: true });
+      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, lentMcp: true, selfUpdate: "desktop-managed", emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true }).capabilities)
       .toEqual({ remoteSessions: true, cloudHome: true, move: 1, selfUpdate: "operator", emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: false }).capabilities).not.toHaveProperty("cloudHome");
@@ -138,8 +138,15 @@ describe("environment identity", () => {
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, ownHome: false }).capabilities).not.toHaveProperty("move");
     // A lent computer may lend its internet connection only to a Cloud home that lends at all.
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false, cloudHome: true, sharedComputers: true }).capabilities)
-      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, deviceLink: true, myChromeLink: true, computerAsks: true, cloudHome: true, move: 1, selfUpdate: "operator", emailSignIn: false, jobs: true });
+      .toEqual({ remoteSessions: true, sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, deviceLink: true, lentMcp: true, myChromeLink: true, computerAsks: true, cloudHome: true, move: 1, selfUpdate: "operator", emailSignIn: false, jobs: true });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities).not.toHaveProperty("deviceLink");
+  });
+
+  it("advertises lentMcp wherever computers are lent, except on a team Cloud", () => {
+    const base = { environmentId: "abc", desktopManaged: false };
+    expect(environmentDescriptor({ ...base, sharedComputers: true, cloudHome: true }).capabilities.lentMcp).toBe(true);
+    expect(environmentDescriptor({ ...base, sharedComputers: true, cloudHome: true, cloudTeam: true }).capabilities).not.toHaveProperty("lentMcp");
+    expect(environmentDescriptor({ ...base, sharedComputers: false, cloudHome: true }).capabilities).not.toHaveProperty("lentMcp");
   });
 
   it("advertises myChromeLink only on a personal Cloud home with lending", () => {

@@ -90,6 +90,8 @@ const ALLOWED: Record<string, string> = {
   "cloudPhone.step1": "points at the app menu's Server menu, entry by entry",
   "botAccess.tools.syntax": "the tool names people type, such as mcp:SERVER:NAME",
   "chat.notice.modelServerStoppedAnswering": "the person's model server at a named host, not the app's internal server",
+  "rail.local": "the owner's own name for the ＋ choice that adds a workspace of this computer's own",
+  "rail.localNumbered": "a new workspace's first name, which the person may change, in the owner's word for it",
 };
 
 const prefixes = Object.values(EVERYDAY_PREFIXES).flat();

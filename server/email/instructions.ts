@@ -18,3 +18,17 @@ export const EMAIL_TO_CONNECT_PROMPT =
 /** The failed-call text when no mailbox is connected. */
 export const EMAIL_NOT_CONNECTED_TEXT =
   "OpenMausBot note: no mailbox is connected, so this call did not run. Call request_credential with credential_id email, then end this turn.";
+
+/** The failed-call text for a mailbox that can't send until the person fixes its outgoing server: what is wrong, who
+ * fixes it and where, and no way round it, so a bot neither retries nor builds one. */
+export const EMAIL_CANT_SEND_TEXT = (address: string, problem: string) =>
+  `OpenMausBot note: nothing was sent. Sending from ${address} doesn't work: ${problem} Only the person can fix this, under Outgoing server for ${address} in Connected apps › Email; reading mail still works. ` +
+  "Don't retry, don't send another way (no script, other mail tool or mail client of your own) and don't ask for the password: tell the person this in one line and carry on without sending.";
+
+/** The system prompt line for a mailbox that can't send yet. */
+export const EMAIL_CANT_SEND_PROMPT = (address: string, problem: string) =>
+  ` Sending from ${address} doesn't work until the person fixes its outgoing server in Connected apps › Email (${problem}); don't try to send from it, and say so if a task needs it.`;
+
+/** The failed-call text when a send didn't go but may later: nothing to retry now. */
+export const EMAIL_NOT_SENT_TEXT = (problem: string) =>
+  `OpenMausBot note: nothing was sent. ${problem} Tell the person in one line; don't retry in this turn or send another way.`;

@@ -162,12 +162,14 @@ const __APP_VERSION__: string;
       workspaces?: {
         /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up); `home`: this window's
          * home is this Cloud, so there is nothing to switch to; `localPath`: a local workspace's folder, absent for This
-         * computer's own. */
-        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean; role?: string; localPath?: string }>;
+         * computer's own; `profile`: this computer's page is a profile of its own (This Mac), by its id, and
+         * `profileName` its own name when it has one (a workspace added from ＋). */
+        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean; role?: string; localPath?: string; profile?: string; profileName?: string }>;
         /** The native server menu; resolves when it closes. `from: "howto"`: the Show me how tip opened it. */
         menu: (options?: { from?: "howto" }) => Promise<void>;
-        /** One plain line for the next page, served once: a team this person is no longer in. */
-        line?: () => Promise<{ kind: "left"; name: string } | null>;
+        /** One plain line for the next page: a team this person is no longer in (served once), or, while it runs, that the
+         * clean workspace or a profile (`profile`) of this computer's own isn't where the Cloud's bots are. */
+        line?: () => Promise<{ kind: "left"; name: string } | { kind: "clean"; saved?: boolean } | { kind: "profile"; name?: string } | null>;
         /** The rail's circles, for this app's page and a hosted Cloud's only (empty elsewhere, and with fewer than two
          * places). Absent on an older app. */
         places?: () => Promise<import("../../electron/cloud-rail.mjs").RailState>;
@@ -192,6 +194,16 @@ const __APP_VERSION__: string;
         makeHome?: (id: string) => Promise<{ started: true }>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
+        /** A workspace of this computer's own (main refuses any page but the rail's and this computer's own): a new one,
+         * which main opens next; a name or colour for one the rail lists; its removal, once the person said yes. Absent on
+         * an older app. */
+        local?: {
+          create(name: string, color: import("../../electron/cloud-list.mjs").CloudSwatch | null): Promise<{ outcome: "made"; id: string } | { outcome: "name" | "taken" | "failed" }>;
+          edit(id: string, changes: { name: string } | { color: import("../../electron/cloud-list.mjs").CloudSwatch | null }): Promise<{ outcome: "saved" | "name" | "taken" | "full" | "gone" }>;
+          remove(id: string): Promise<{ outcome: "removed" | "gone" | "failed" }>;
+        };
+        /** The Server menu's New workspace on this computer: this computer's own page asks its name. */
+        onNewLocal?: (callback: () => void) => () => void;
       };
       /** Buying another Cloud from the rail's ＋, on this app's page or a hosted Cloud's; absent on an older app. */
       cloudAdd?: {

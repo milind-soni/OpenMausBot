@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 
 /** Why a home is not idle, as fixed codes (the Admin keeps the latest one for its operator page). */
-export type CloudPowerBusy = "turn" | "run" | "live-call" | "computer" | "maintenance" | "recent-activity" | "recent-work" | "just-woke" | "due-soon" | "team";
+export type CloudPowerBusy = "turn" | "run" | "handoff" | "live-call" | "computer" | "maintenance" | "recent-activity" | "recent-work" | "just-woke" | "due-soon";
 
 export interface CloudPowerReport {
   v: 1; at: number; bootedAt: number; wokeAt: number;
@@ -32,6 +32,9 @@ export interface CloudPowerProbes {
   turn(): boolean;
   /** A routine run is queued to start now, starting or running. One waiting for a person's answer is not: the answer wakes the home. */
   run(): boolean;
+  /** Work one bot handed another moves on without anyone: an assignment queued, running or due to resume its requester, or a
+   * report to send. One parked on a person's answer is not: the answer wakes the home. */
+  handoff(): boolean;
   liveCall(): boolean;
   /** A cloud computer is on, starting or within its own idle window: its idle timer lives in this process. */
   computer(): boolean;
@@ -102,8 +105,6 @@ export function wokeFromSleep(dataDir: string): boolean {
 
 export function createCloudPower(options: {
   dataDir: string; probes: CloudPowerProbes;
-  /** A Team Cloud: the Admin never sleeps a team plan, and a sleep request is refused as busy with `team`. */
-  team?: boolean;
   /** Tells connected clients the home is going to sleep (`{ kind: "power", state: "sleeping" }`). */
   broadcast(payload: Record<string, unknown>): void;
   now?: () => number;
@@ -134,6 +135,7 @@ export function createCloudPower(options: {
     const { probes } = options;
     if (probes.turn()) busy.push("turn");
     if (probes.run()) busy.push("run");
+    if (probes.handoff()) busy.push("handoff");
     if (probes.liveCall()) busy.push("live-call");
     if (probes.computer()) busy.push("computer");
     if (probes.maintenance() || inFlight > 0) busy.push("maintenance");
@@ -207,7 +209,7 @@ export function createCloudPower(options: {
     /** The Admin is about to suspend or stop this machine: yes only when idle now. From here until a resume, someone's
      * use or CLOUD_SLEEP_PENDING_MS, held polls answer "asleep" and new ones are refused (`sleeping`). */
     prepareSleep(activityMs = CLOUD_IDLE_ACTIVITY_MS): { ok: true; nextDueAt: number | null } | { ok: false; busy: CloudPowerBusy[] } {
-      const busy = options.team ? ["team" as const, ...busyNow(activityMs)] : busyNow(activityMs);
+      const busy = busyNow(activityMs);
       if (busy.length) return { ok: false, busy };
       sleepingSince = now();
       try { writeFileAtomic(join(options.dataDir, MARKER), JSON.stringify({ at: sleepingSince })); }
