@@ -103,6 +103,31 @@ export function chatgptPlanCodexArgs(): string[] {
   ];
 }
 
+/**
+ * Background/helper codex calls (skill review, title generation) run in a
+ * separate CODEX_HOME, so they cannot read the user's ~/.codex/config.toml
+ * and fall back to codex's built-in default provider (api.openai.com).
+ * In regions where api.openai.com is blocked (or when a custom gateway is
+ * configured), every background call fails with 403.
+ *
+ * When OMB_CODEX_GATEWAY_URL is set, background calls route through that
+ * URL instead, using OMB_CODEX_GATEWAY_TOKEN (or GATEWAY_TOKEN) for auth.
+ */
+export function gatewayCodexArgs(): string[] {
+  const url = process.env.OMB_CODEX_GATEWAY_URL || process.env.GATEWAY_URL;
+  if (!url) return [];
+  const base = url.replace(/\/+$/, "") + (url.endsWith("/v1") ? "/" : "/v1/");
+  const key = process.env.OMB_CODEX_GATEWAY_TOKEN || process.env.GATEWAY_TOKEN || "";
+  return [
+    "-c", 'model_provider="omb_gateway"',
+    "-c", 'model_providers.omb_gateway.name="Gateway"',
+    "-c", `model_providers.omb_gateway.base_url=${JSON.stringify(base)}`,
+    "-c", 'model_providers.omb_gateway.env_key="GATEWAY_TOKEN"',
+    "-c", 'model_providers.omb_gateway.wire_api="responses"',
+    "-c", "model_providers.omb_gateway.requires_openai_auth=false",
+  ];
+}
+
 function decodeManagedCodex(raw: object): NonNullable<CodexConfig["managed"]> {
   const value = raw as { url?: unknown; models?: unknown };
   if (typeof value.url !== "string" || !Array.isArray(value.models) || !value.models.length || value.models.some(model => typeof model !== "string" || !/^[\w][\w./+-]*$/.test(model))) {
@@ -669,7 +694,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const env = childEnv();
         const launchedLogin = chatgptTurn ? storedCodexLogin(env) : null;
         if (planToken) env.OPENMAUSBOT_CHATGPT_TOKEN = planToken;
-        const appServerArgs = ["app-server", ...(plan ? chatgptPlanCodexArgs() : config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs(),
+        const appServerArgs = ["app-server", ...(plan ? chatgptPlanCodexArgs() : config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...gatewayCodexArgs(), ...codexToolSurfaceArgs(),
           // Native shell snapshots can restore variables the shell policy removed.
           ...(turn.toolScope === undefined ? [] : ["-c", "features.shell_snapshot=false"]),
           // A guest-driven turn: no shell, no file reads (-c wins over config files).
@@ -1704,7 +1729,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         spawn: spawnCli, kill: killCliTree, cli: config.cli, env, prompt, options,
         model: selection.model ?? id,
         modelProvider: selection.modelProvider,
-        providerArgs: planAuth || config.managed ? providerArgs : codexLocalProviderArgs(env, id),
+        providerArgs: planAuth || config.managed ? providerArgs : [...codexLocalProviderArgs(env, id), ...gatewayCodexArgs()],
         describeError: (message) => codexUserError(message, planAuth ? "plan" : selection.modelProvider === OFFICIAL_CODEX_PROVIDER ? "own" : "other"),
       });
     }, options);
