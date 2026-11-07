@@ -14,7 +14,7 @@ import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV
 import { openStartupModelCatalog } from "../../startup-model-catalog.ts";
 import { acpModelCatalog } from "./model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
-import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
+import { DeviceAuthController, deviceAuthInstanceSurface, type DeviceSignIn } from "../device-auth.ts";
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts";
@@ -1672,11 +1672,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         },
         refreshModels: support.resolveModels ? () => refreshModels(true) : undefined,
         ...(startupModelRefresh ? { startupModelRefresh } : {}),
-        ...(deviceSignIn ? {
-          startAuthentication: () => deviceSignIn.start(),
-          getAuthentication: (flowId: string) => deviceSignIn.get(flowId),
-          cancelAuthentication: () => deviceSignIn.cancel(),
-        } : {}),
+        ...(support.deviceSignIn && deviceSignIn ? deviceAuthInstanceSurface(deviceSignIn, support.deviceSignIn) : {}),
         snapshot,
         adapter: {
           provider: DRIVER_KIND,
