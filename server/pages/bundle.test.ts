@@ -51,7 +51,7 @@ describe("readPageBundle", () => {
     await expect(read).rejects.toThrow(/no index\.html/);
   });
 
-  it.skipIf(process.platform !== "linux")("does not read a file through its folder swapped, put back and swapped again around the open", async () => {
+  it.skipIf(process.platform !== "linux")("does not read a file through its folder swapped during the open", async () => {
     const base = folder();
     const page = join(base, "page"), other = join(base, "other"), moved = join(base, "moved");
     mkdirSync(page);
@@ -65,7 +65,7 @@ describe("readPageBundle", () => {
     opener.mockImplementationOnce((async (...args: Parameters<typeof actualOpen>) => {
       swap();
       const handle = await actualOpen(...args);
-      // Put back before the path is resolved, swapped again before it is compared with the opened file.
+      // Fallback path only (no /proc/self/fd): put back before the path is resolved, swapped again before the compare.
       resolver.mockImplementationOnce((async (...rest: Parameters<typeof actualRealpath>) => {
         unlinkSync(page);
         renameSync(moved, page);
@@ -77,9 +77,15 @@ describe("readPageBundle", () => {
       }) as typeof actualStat);
       return handle;
     }) as typeof actualOpen);
-    const read = readPageBundle(page, [page]);
-    await expect(read).rejects.toBeInstanceOf(PageBundleError);
-    await expect(read).rejects.toThrow(/no index\.html/);
+    try {
+      const read = readPageBundle(page, [page]);
+      await expect(read).rejects.toBeInstanceOf(PageBundleError);
+      await expect(read).rejects.toThrow(/no index\.html/);
+    } finally {
+      // The /proc/self/fd path never calls these, so drop any hooks left queued for later tests.
+      resolver.mockReset();
+      stater.mockReset();
+    }
   });
 
   it("with exact roots, does not follow the root itself swapped for a link", async () => {
