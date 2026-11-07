@@ -508,13 +508,15 @@ saved as plaintext, not encrypted, in private `config.json` (`0600` on Unix).
 See the [short setup guide](docs/cli-onboarding.md) for account differences,
 phone choices, credential storage, and cancellation.
 
-For a background service on a VPS or an always-on computer, use
-`npx openmausbot serve` with explicit remote options: `--tunnel` after
-`npx openmausbot login` for a managed public address, `--tailscale` for your
-tailnet, or the Docker stack for your own domain. These are separate from
-AI-provider sign-in. Devices pair once with a short code. The deployment guide is
-[docs/deploy-vps.md](docs/deploy-vps.md); the reference is
-[docs/self-hosting.md](docs/self-hosting.md).
+For a server on a VPS or an always-on computer, run `npx openmausbot serve`
+with one way in: `--public-url` behind your own cloudflared, Caddy or nginx,
+`--domain` for a certificate on your own domain, `--tailscale` for your
+tailnet, `--lan` for this network only, or `--tunnel` (after
+`npx openmausbot login`) for a free MausBot web address. It prints one
+pairing link; paste it into the desktop app under **＋ → Connect to a
+server**. The short path for each install method (npx, Docker, a service) is
+at the top of [docs/self-hosting.md](docs/self-hosting.md); a server from
+scratch is [docs/deploy-vps.md](docs/deploy-vps.md).
 
 ## License
 
