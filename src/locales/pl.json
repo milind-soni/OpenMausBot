@@ -4580,6 +4580,8 @@
   "computer.tab.files": "Pliki",
   "computer.tabsAria": "Widok panelu bota",
   "computer.fullScreen": "Pełny ekran",
+  "computer.watchFullScreenTitle": "Oglądaj cały ekran; bot dalej pracuje",
+  "computer.watchingBotWorks": "Oglądasz · bot dalej pracuje",
   "computer.browserOff.title": "Przeglądarka jest wyłączona",
   "computer.browserOff.body": "Włącz wbudowaną przeglądarkę, aby obserwować, jak {name} przegląda sieć, i w każdej chwili przejąć kontrolę.",
   "computer.browserOff.turnOn": "Włącz przeglądarkę",

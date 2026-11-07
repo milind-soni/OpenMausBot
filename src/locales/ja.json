@@ -5202,6 +5202,8 @@
   "computer.tab.files": "ファイル",
   "computer.tabsAria": "ボットパネルの表示",
   "computer.fullScreen": "フルスクリーン",
+  "computer.watchFullScreenTitle": "画面全体を見る。ボットは作業を続けます",
+  "computer.watchingBotWorks": "表示中 · ボットは作業を続けています",
   "computer.browserOff.title": "ブラウザーはオフです",
   "computer.browserOff.body": "内蔵ブラウザーをオンにすると、{name} が Web を閲覧する様子を確認でき、いつでも操作を引き継げます。",
   "computer.browserOff.turnOn": "ブラウザーをオンにする",
