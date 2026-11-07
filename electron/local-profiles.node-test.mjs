@@ -16,7 +16,7 @@ function computer(t, { home = "cloud", frozen = home === "cloud" } = {}) {
   mkdirSync(dataDir, { recursive: true });
   if (frozen) writeFileSync(join(dataDir, "moved.json"), JSON.stringify({ v: 1, at: 1, cloud: "https://omb-t-1.fly.dev" }));
   let clock = 1_000;
-  const w = { dataDir, running: dataDir, swaps: [], home, shown: null, onScreen: "cloud", busy: [], trashed: [], trashFails: false, changes: 0, logs: [], waits: 0 };
+  const w = { dataDir, running: dataDir, swaps: [], home, shown: null, onScreen: "cloud", busy: [], trashed: [], trashFails: false, changes: 0, logs: [], waits: 0, remembered: [] };
   w.now = () => clock;
   w.clean = createCleanWorkspace({ dataDir: () => dataDir, running: () => w.running,
     swap: async (dir) => { w.swaps.push(dir); await new Promise((resolve) => setImmediate(resolve)); w.running = dir; w.onScreen = "local"; return { ok: true }; } });
@@ -30,7 +30,7 @@ function computer(t, { home = "cloud", frozen = home === "cloud" } = {}) {
     showLocal: () => { w.onScreen = "local"; }, onLocal: () => w.onScreen === "local",
     busy: async () => w.busy[0] ?? null,
     trash: async (dir) => { if (w.trashFails) throw new Error("no Trash here"); w.trashed.push(dir); rmSync(dir, { recursive: true, force: true }); },
-    reserved: () => "This Mac", changed: () => { w.changes++; }, log: (line) => w.logs.push(line), now: w.now,
+    reserved: () => "This Mac", remember: (place) => w.remembered.push(place), changed: () => { w.changes++; }, log: (line) => w.logs.push(line), now: w.now,
     sleep: async (ms) => { clock += ms; w.waits++; w.onWait?.(); } });
   w.file = () => join(profilesDir(dataDir), PROFILES_FILE);
   w.saved = () => JSON.parse(readFileSync(w.file(), "utf8"));
@@ -256,4 +256,23 @@ test("a switch a newer click took over while its workspace started says so (null
   assert.equal(await w.profiles.open("work"), null, "the home window gave way to the newer click");
   w.beforeOpen = () => false;
   assert.equal(await w.profiles.open("work"), false, "with no newer click it didn't open: main says so");
+});
+
+test("the workspace that opened is the place the next launch opens; one that didn't, or lost to a newer switch, isn't; This computer again forgets it", async (t) => {
+  const w = computer(t);
+  w.registry.create({ name: "Work" });
+  assert.equal(await w.profiles.open("work"), true);
+  assert.equal(await w.profiles.open("gone"), false);
+  assert.deepEqual(w.remembered, [{ profile: "work" }]);
+  w.busy = [{ name: "Scout" }];
+  let newer = null;
+  w.onWait = () => { w.onWait = null; w.busy = []; newer = w.profiles.open("work"); };
+  assert.equal(await w.profiles.open(DEFAULT_PROFILE), null, "a newer switch took over");
+  assert.equal(await newer, true);
+  assert.deepEqual(w.remembered, [{ profile: "work" }, { profile: "work" }], "only the switch that won");
+  const local = computer(t, { home: "local" });
+  local.registry.create({ name: "Work" });
+  assert.equal(await local.profiles.open("work"), true);
+  assert.equal(await local.profiles.computer(), true);
+  assert.deepEqual(local.remembered, [{ profile: "work" }, null]);
 });

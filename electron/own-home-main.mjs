@@ -92,7 +92,7 @@ function jsonStore(store) {
  *   sendState: { read(): unknown, write(value: unknown): void },
  *   cloudJournal(): unknown,
  *   lend?(projects: string[], place: any): Promise<unknown>,
- *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
+ *   phone?: { paired(): boolean, start(): Promise<void> },
  *   openHome?(place: any): void,
  *   lastInput?(): number,
  *   version?: string,

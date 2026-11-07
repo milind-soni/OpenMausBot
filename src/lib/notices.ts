@@ -124,6 +124,29 @@ export function introShown(record: OnboardingStatus | undefined, now: number): {
   return hintSeenPatch(record, introDayHint(Math.min(Math.max(recordedDays(record) + 1, next.length), MAX_INTRO_DAYS)));
 }
 
+/** The line atop a workspace of this computer's own: closed for good with its ✕, else shown on HOME_LINE_DAYS days at most
+ * and for HOME_LINE_SPAN_DAYS from the first. Kept in the workspace's own config, so each workspace has its own. */
+export const HOME_LINE_NOTICE = "home-line-profile";
+const HOME_LINE_DAYS = 3, HOME_LINE_SPAN_DAYS = 7;
+const homeLineDayHint = (day: string) => `${HOME_LINE_NOTICE}:day-${day}`;
+const homeLineDays = (record: OnboardingStatus | undefined) => (record?.hintsSeen ?? [])
+  .filter(id => id.startsWith(`${HOME_LINE_NOTICE}:day-`)).map(id => id.slice(`${HOME_LINE_NOTICE}:day-`.length))
+  .filter(day => /^\d{4}-\d{2}-\d{2}$/.test(day)).sort();
+const dayNumber = (day: string) => { const [year, month, date] = day.split("-").map(Number); return Math.round(new Date(year!, month! - 1, date!).getTime() / 86_400_000); };
+
+export function homeLineStage(record: OnboardingStatus | undefined, now: number): "due" | "done" {
+  if (hintSeen(record, HOME_LINE_NOTICE)) return "done";
+  const days = homeLineDays(record), today = localDay(now);
+  if (days.includes(today)) return "due";
+  if (days.length >= HOME_LINE_DAYS) return "done";
+  return days.length && dayNumber(today) - dayNumber(days[0]!) >= HOME_LINE_SPAN_DAYS ? "done" : "due";
+}
+
+/** Today counted among the line's days: the patch to save, or null when today is counted already or the line is done. */
+export function homeLineShown(record: OnboardingStatus | undefined, now: number): { onboarding: { hintsSeen: string[] } } | null {
+  return homeLineStage(record, now) === "due" ? hintSeenPatch(record, homeLineDayHint(localDay(now))) : null;
+}
+
 export const LAUNCHED_AT = Date.now();
 
 export function usedBefore(

@@ -98,7 +98,7 @@ function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": fals
   return w;
 }
 
-test("a new buyer's move runs every phase and ends with home on My Cloud, this computer lent and its phone link off", async () => {
+test("a new buyer's move runs every phase and ends with home on My Cloud, this computer lent and its phone link left on", async () => {
   const w = world();
   await w.home.kick();
   assert.equal(w.journal.phase, "done");
@@ -108,7 +108,7 @@ test("a new buyer's move runs every phase and ends with home on My Cloud, this c
   assert.deepEqual(w.switchedOn().sort(), ["/api/calendar-calls/c1", "/api/routines/r1", "/api/webhooks/w1"], "only what was on here, and nothing off");
   assert.deepEqual(w.cloudCalls.find(([, route]) => route === "/api/cloud-send/arrived")?.[2], { v: 1, computer: "MacBook Air", webhooks: ["w1"] });
   assert.deepEqual(w.lent, [["/Users/p/code/shop"]], "lent once, with each bot's own project folder");
-  assert.equal(w.phone.stopped, 1);
+  assert.equal(w.phone.stopped, 0, "a phone paired here hears from the frozen copy where its bots went, and reaches a workspace of this computer's own once one is open");
   assert.deepEqual(w.opened, ["cloud"]);
   assert.equal(w.home.away(), true);
   assert.deepEqual(w.home.view(), { phase: "done", at: w.journal.doneAt, counts: { bots: 2, skills: 0, logins: 1, onePassword: false, chats: 1, routines: 1 }, phone: true, held: ["OpenRouter"] });
@@ -116,7 +116,7 @@ test("a new buyer's move runs every phase and ends with home on My Cloud, this c
 
   await w.relaunch().kick();
   assert.equal(w.lent.length, 1, "a relaunch lends nothing again");
-  assert.equal(w.phone.stopped, 1);
+  assert.equal(w.phone.stopped, 0);
   assert.equal(w.server.unfreezes, 0);
 });
 

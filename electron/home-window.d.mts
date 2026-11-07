@@ -40,7 +40,9 @@ export type Home = ({ kind: "computer" } | { kind: "cloud"; origin: string } | {
 export type HomePlace = { kind: "cloud"; origin: string } | { kind: "team" | "own"; id: string; name: string; role: string | null; origin: string };
 /** What to open: My Cloud, a team's Cloud, another Cloud of the person's own, or (null) the place remembered from last time. */
 export type HomeAsk = "cloud" | { team: string; name?: string } | { cloud: string; name?: string } | null;
-export type RememberedPlace = (({ team: string } | { cloud: string }) & { name?: string; origin?: string }) | null;
+/** The place the window showed last, as home-places.mjs keeps it: a team's Cloud or another of the person's own (with its
+ * name and address as saved), a workspace of this computer's own, or a server saved by hand. */
+export type RememberedPlace = (({ team: string } | { cloud: string }) & { name?: string; origin?: string }) | { profile: string } | { server: string } | null;
 export declare function otherPlace(place: unknown): boolean;
 /** This computer's screen for a listed Cloud that isn't running (or its setup's step); null for one that opens. */
 export declare function cloudScreen(cloud: import("./cloud-list.mjs").CloudListEntry | null | undefined): HomeView | null;
@@ -76,6 +78,7 @@ export interface HomeWindow {
   show(options?: { open?: "phone" | null; place?: HomeAsk }): Promise<unknown>;
   openProfile(id: string): Promise<boolean>;
   profile(): string | null;
+  opensNow(ask: "cloud" | { team: string } | { cloud: string }): boolean | null;
   cancel(): void;
   openCloud(open?: "phone" | null): Promise<unknown>;
   /** Remove from list from this computer's screen: the Cloud it shows leaves the person's list. */
@@ -121,7 +124,7 @@ export function createHomeWindow(deps: {
   showLocal(leaving: boolean): unknown;
   clean?: import("./clean-workspace.mjs").CleanWorkspace | null;
   remembered?(): RememberedPlace;
-  remember?(place: { team: string } | { cloud: string } | null): void;
+  remember?(place: { team: string } | { cloud: string } | { profile: string } | { server: string } | null): void;
   left?(name: string): void;
   drop?(place: { kind: "team" | "own"; id: string; name: string }): void;
   splash?(): { status(text: string): void } | null;

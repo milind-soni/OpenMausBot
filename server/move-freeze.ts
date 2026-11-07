@@ -16,6 +16,11 @@ import type { WebhookManager } from "./webhooks.ts";
 export const MOVED_REFUSAL = "This bot lives on My Cloud now.";
 /** Why a frozen copy refuses, naming the server of the person's own its bots moved to (`place`), else My Cloud. */
 export const movedRefusal = (place: string | null): string => (place ? `This bot lives on ${place} now.` : MOVED_REFUSAL);
+/** What a frozen copy answers a phone still paired with this computer: where its bots went, and, after a move to My
+ * Cloud, the workspace of this computer's own (This Mac or This PC) that the same pairing reaches once it is open. */
+export const phoneMovedRefusal = (place: string | null, platform: NodeJS.Platform = process.platform): string => place
+  ? `This computer's bots moved to ${place}. Open ${place} from your phone instead.`
+  : `This computer's bots moved to My Cloud. Open ${platform === "darwin" ? "This Mac" : "This PC"} in the app on this computer to use it from your phone, or open My Cloud.`;
 /** The one page a frozen copy serves: the desktop app's screen while My Cloud can't be opened (electron/home-window.mjs). */
 export const HOME_SCREEN = "/home";
 /** The desktop window's own rail of places (electron/chrome-rail.mjs): this app's page, beside whichever place is open. */
