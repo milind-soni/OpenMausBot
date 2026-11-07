@@ -12654,18 +12654,50 @@ describe("harness HTTP API", () => {
     const tokenPath = join(home, ".openmausbot", "openconnector-route-test-token");
     writeFileSync(tokenPath, "0".repeat(64), { mode: 0o600 });
     const config = JSON.parse(originalConfig);
+    const accountId = encodeURIComponent(`oc:github:${"あ".repeat(40)}.work`);
+    const statePath = join(home, ".openmausbot", "openconnector-state.json");
+    const disconnectCalls: Array<{ method: string; path: string; authorization: string | undefined }> = [];
+    const openConnector = createServer((req, res) => {
+      disconnectCalls.push({
+        method: req.method ?? "",
+        path: req.url ?? "",
+        authorization: req.headers.authorization,
+      });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ success: true, data: { deleted: true } }));
+    });
+    await new Promise<void>((resolve) => openConnector.listen(0, "127.0.0.1", resolve));
+    const openConnectorUrl = `http://127.0.0.1:${(openConnector.address() as { port: number }).port}`;
     writeFileSync(configPath, JSON.stringify({
       ...config,
       connectors: {
         provider: "openconnector",
-        openconnector: { url: "https://connector.example.test", adminTokenRef: `file:${tokenPath}` },
+        openconnector: { url: openConnectorUrl, adminTokenRef: `file:${tokenPath}` },
       },
     }));
+    writeFileSync(statePath, JSON.stringify({
+      runtimeUrl: openConnectorUrl,
+      connections: [{
+        accountId: decodeURIComponent(accountId),
+        service: "github",
+        alias: `${"あ".repeat(40)}.work`,
+        status: "connected",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }],
+    }), { mode: 0o600 });
     try {
-      const response = await api("DELETE", `/api/connectors/github/accounts/${encodeURIComponent("oc:github:work")}`);
+      const response = await api("DELETE", `/api/connectors/github/accounts/${accountId}`);
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ removed: 0 });
+      expect(response.body).toEqual({ removed: 1 });
+      expect(disconnectCalls).toEqual([{
+        method: "DELETE",
+        path: `/api/connections/github?alias=${encodeURIComponent(`${"あ".repeat(40)}.work`)}`,
+        authorization: `Bearer ${"0".repeat(64)}`,
+      }]);
     } finally {
+      await new Promise<void>((resolve) => openConnector.close(() => resolve()));
+      rmSync(statePath, { force: true });
+      rmSync(`${statePath}.lock.db`, { force: true });
       rmSync(tokenPath, { force: true });
       writeFileSync(configPath, originalConfig);
     }

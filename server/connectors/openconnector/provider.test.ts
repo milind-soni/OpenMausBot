@@ -1,7 +1,7 @@
 // The OpenConnector provider behind the ConnectorProvider seam. A stub runtime on an ephemeral
 // port answers every call; the state store lives in a temp dir. No port 3000, no real runtime.
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -132,17 +132,6 @@ describe("availability", () => {
 });
 
 describe("inventory / status", () => {
-  it("clears a stale state lock and reads records written by another instance", () => {
-    const state = newState();
-    const other = new OpenConnectorStateStore(state.file, origin);
-    other.upsertConnection({ accountId: "oc:github:work", service: "github", alias: "work", status: "ACTIVE", updatedAt: "old" });
-    writeFileSync(`${state.file}.lock`, "stale");
-    utimesSync(`${state.file}.lock`, new Date(Date.now() - 6_000), new Date(Date.now() - 6_000));
-    state.upsertConnection({ accountId: "oc:gmail:default", service: "gmail", status: "ACTIVE", updatedAt: "new" });
-    expect(state.listConnections().map((record) => record.accountId)).toEqual(["oc:github:work", "oc:gmail:default"]);
-    expect(existsSync(`${state.file}.lock`)).toBe(false);
-  });
-
   it("lists providers with connected state from /v1/apps/authenticated", async () => {
     const services = await provider().inventory(cfg);
     expect(services.complete).toBe(true);
@@ -164,6 +153,33 @@ describe("inventory / status", () => {
     expect((await provider(connected).status(cfg, ["slack"])).slack.accounts).toEqual([
       { id: "oc:slack:default", status: "ACTIVE" },
     ]);
+  });
+
+  it("reports setup-needed without a runtime request when settings are incomplete", async () => {
+    const state = newState();
+    state.upsertConnection({ accountId: "oc:gmail:default", service: "gmail", status: "pending", updatedAt: "t" });
+    const unavailable = createOpenConnectorProvider({ settings: { url: origin }, env: {}, state });
+    expect(unavailable.mode(cfg)).toBe("unavailable");
+    expect(await unavailable.inventory(cfg)).toEqual({ services: {}, complete: true });
+    expect(await unavailable.tools(cfg)).toEqual({});
+    expect(await unavailable.serviceSlugs(cfg)).toEqual([]);
+    expect(await unavailable.status(cfg, ["github", "gmail"])).toMatchObject({
+      github: { connected: false, pending: false, status: "setup-needed" },
+      gmail: { connected: false, pending: true, status: "pending" },
+    });
+    await expect(unavailable.authorize(cfg, "github")).rejects.toThrow(/admin token/);
+    expect(calls).toEqual([]);
+  });
+
+  it("keeps strict URL validation for operations while status still reports", async () => {
+    const unavailable = createOpenConnectorProvider({
+      settings: { url: "ftp://invalid.example.test", adminTokenRef: "env:STUB_ADMIN" },
+      env: { STUB_ADMIN: "admintok" },
+      state: newState(),
+    });
+    expect(await unavailable.status(cfg, ["github"])).toMatchObject({ github: { status: "setup-needed" } });
+    expect(await unavailable.tools(cfg)).toEqual({});
+    await expect(unavailable.catalog(cfg)).rejects.toThrow(/runtime must use HTTPS/);
   });
 });
 
@@ -367,6 +383,84 @@ describe("background authorization convergence", () => {
       expect(state.findConnectionByAccountId("oc:github:restart")).toMatchObject({ status: "connected" });
     }, { timeout: 5_000, interval: 20 });
   });
+
+  it("silently abandons background polling after the runtime state switches", async () => {
+    const state = new OpenConnectorStateStore(join(dir, `mismatch-${Math.random().toString(36).slice(2)}.json`), "https://first.example.test");
+    state.upsertConnection({
+      accountId: "oc:github:mismatch",
+      service: "github",
+      connectionRequestId: "cr_mismatch",
+      status: "pending",
+      updatedAt: "first-runtime",
+    });
+    connectionRequestStatus = 500;
+    gateConnectionRequests = true;
+    const unhandled: Array<unknown> = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on("unhandledRejection", onUnhandled);
+    createOpenConnectorProvider({
+      settings: { url: origin, adminTokenRef: "env:STUB_ADMIN" },
+      env: { STUB_ADMIN: "admintok" },
+      state,
+      polling: { intervalMs: 10 },
+    });
+    try {
+      await vi.waitFor(() => {
+        expect(requestPollCalls().some((call) => call.path.includes("cr_mismatch"))).toBe(true);
+      }, { timeout: 5_000, interval: 20 });
+
+      const replaced = {
+        runtimeUrl: "https://second.example.test",
+        connections: [{
+          accountId: "oc:linear:new",
+          service: "linear",
+          connectionRequestId: "cr_new",
+          status: "pending",
+          updatedAt: "second-runtime",
+        }],
+        appOAuth: [],
+      };
+      const before = JSON.stringify(replaced);
+      writeFileSync(state.file, before, { mode: 0o600 });
+      gateConnectionRequests = false;
+      releaseGate?.();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(unhandled).toEqual([]);
+      expect(readFileSync(state.file, "utf8")).toBe(before);
+      expect(new OpenConnectorStateStore(state.file, "https://second.example.test").listConnections()).toEqual([
+        expect.objectContaining({ accountId: "oc:linear:new", status: "pending" }),
+      ]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      gateConnectionRequests = false;
+      releaseGate = null;
+      connectionRequestStatus = 200;
+    }
+  });
+
+  it("defers polling while unavailable and resumes when the token becomes available", async () => {
+    const env: NodeJS.ProcessEnv = {};
+    const state = newState();
+    state.upsertConnection({
+      accountId: "oc:github:deferred", service: "github", alias: "deferred",
+      connectionRequestId: "cr_deferred", status: "pending", updatedAt: "t",
+    });
+    createOpenConnectorProvider({
+      settings: { url: origin, adminTokenRef: "env:STUB_ADMIN" },
+      env,
+      state,
+      polling: { intervalMs: 1, resumeIntervalMs: 10 },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(requestPollCalls()).toEqual([]);
+    expect(state.findConnectionByAccountId("oc:github:deferred")).toMatchObject({ status: "pending" });
+    env.STUB_ADMIN = "admintok";
+    await vi.waitFor(() => {
+      expect(requestPollCalls().some((call) => call.path.includes("cr_deferred"))).toBe(true);
+      expect(state.findConnectionByAccountId("oc:github:deferred")).toMatchObject({ status: "connected" });
+    }, { timeout: 5_000, interval: 20 });
+  });
 });
 
 describe("relayMcp translation", () => {
@@ -398,7 +492,7 @@ describe("relayMcp translation", () => {
     expect(frame.result.isError).toBe(false);
     expect(JSON.parse(frame.result.content[0].text)).toEqual({ ran: "github.get_current_user", input: { verbose: true } });
     expect(lastCall()).toMatchObject({ method: "POST", path: "/v1/actions/github.get_current_user" });
-    expect(calls.filter((call) => call.method === "GET" && call.path.startsWith("/v1/actions/github."))).toEqual([]);
+    expect(calls.filter((call) => call.method === "GET" && call.path.startsWith("/v1/actions/"))).toEqual([]);
   });
 
   it("refuses an unmapped tool name without executing an action", async () => {

@@ -27,7 +27,6 @@ export async function configureAppOAuth(
   if (!clientId) throw inputError("OAuth clientId is required");
   if (!clientSecret) throw inputError("OAuth clientSecret is required");
   const scopes = (input.scopes ?? []).map((scope) => scope.trim()).filter(Boolean);
-  const expectedUpdatedAt = state.findAppOAuth(service)?.updatedAt ?? null;
   const { expectedRedirectUri } = await client.oauthConfigs();
   await client.putOauthConfig(service, { clientId, clientSecret, scopes });
   state.upsertAppOAuth({
@@ -36,7 +35,7 @@ export async function configureAppOAuth(
     scopes,
     sealedClientSecret: state.sealSecret(clientSecret),
     updatedAt: new Date().toISOString(),
-  }, expectedUpdatedAt);
+  });
   return { expectedRedirectUri };
 }
 
@@ -120,20 +119,18 @@ export async function pollConnectionRequest(
             : "pending";
       if (TERMINAL_OK.has(status) || TERMINAL_BAD.has(status)) {
         const accountId = accountIdForConnection(service, alias);
-        const existing = state.findConnectionByAccountId(accountId);
-        if (existing?.connectionRequestId !== requestId) {
-          throw new Error(`The ${service} authorization was superseded`);
-        }
-        const record: OpenConnectorConnectionRecord = {
+        const record = state.updateConnectionIf(accountId, requestId, (existing) => ({
           accountId,
           service,
           ...(alias ? { alias } : {}),
-          ...(existing?.label ? { label: existing.label } : {}),
+          ...(existing.label ? { label: existing.label } : {}),
           connectionRequestId: requestId,
           status,
           updatedAt: new Date().toISOString(),
-        };
-        state.upsertConnection(record, existing.updatedAt);
+        }));
+        if (!record) {
+          throw new Error(`The ${service} authorization was superseded`);
+        }
         return { status, connected: TERMINAL_OK.has(status), record };
       }
     }

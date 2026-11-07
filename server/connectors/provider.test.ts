@@ -99,6 +99,15 @@ describe("connectorProvider", () => {
     expect(selected).not.toBe(composioProvider);
   });
 
+  it("selects a degraded OpenConnector provider instead of throwing when settings are incomplete", () => {
+    const selected = connectorProvider(env({
+      [CONNECTOR_PROVIDER_ENV]: "openconnector",
+      [OPENCONNECTOR_URL_ENV]: "https://connector.example.test",
+    }));
+    expect(selected.id).toBe("openconnector");
+    expect(selected.isConfigured({} as never)).toBe(false);
+  });
+
   it("does not reuse a provider bound to a different direct admin token", () => {
     const settings = (token: string) => env({
       [CONNECTOR_PROVIDER_ENV]: "openconnector",
@@ -116,7 +125,7 @@ describe("connectorProvider", () => {
     expect(incomplete.isConfigured({} as never)).toBe(false);
     expect(incomplete.mode({} as never)).toBe("unavailable");
     await expect(incomplete.status({} as never, ["github"])).resolves.toEqual({
-      github: { connected: false, pending: false, status: "not_connected", accounts: [] },
+      github: { connected: false, pending: false, status: "setup-needed", accounts: [] },
     });
     const invalid = connectorProvider(env({
       [CONNECTOR_PROVIDER_ENV]: "openconnector",

@@ -3,7 +3,8 @@
 // credentials themselves live on the OpenConnector runtime. Sealing mirrors server/webhooks.ts: a
 // random AES-256-GCM key in a 0600 file no backup carries (workspace-backup-policy excludes it).
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { closeSync, constants, mkdirSync, openSync, readFileSync, statSync, unlinkSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "../../atomic.ts";
@@ -58,56 +59,107 @@ const stateFileSchema = z.object({
   appOAuth: z.array(appOAuthRecordSchema).optional(),
 });
 
-const LOCK_TIMEOUT_MS = 1_000;
-const STALE_LOCK_AGE_MS = 5_000;
-
-function acquireStateLock(path: string): () => void {
-  mkdirSync(dirname(path), { recursive: true });
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  let cause: unknown;
-  do {
-    try {
-      const descriptor = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      closeSync(descriptor);
-      return () => {
-        try { unlinkSync(path); } catch {}
-      };
-    } catch (error: unknown) {
-      cause = error;
-      try {
-        if (Date.now() - statSync(path).mtimeMs > STALE_LOCK_AGE_MS) unlinkSync(path);
-      } catch {}
-    }
-  } while (Date.now() < deadline);
-  throw new Error(`Timed out waiting for the OpenConnector state lock: ${cause instanceof Error ? cause.message : "locked"}`);
+interface OpenConnectorStateStoreOptions {
+  /** Test seam for asserting SQLite handle lifecycle; production uses node:sqlite directly. */
+  createLockDatabase?: () => DatabaseSync;
+  busyTimeoutMs?: number;
 }
 
 export class OpenConnectorStateStore {
   readonly file: string;
   private readonly runtimeUrl?: string;
+  private readonly lockPath: string;
+  private readonly createLockDatabase: () => DatabaseSync;
+  private readonly busyTimeoutMs: number;
+  private runtimeMismatch = false;
   private connections: OpenConnectorConnectionRecord[];
   private appOAuth: OpenConnectorAppOAuthRecord[];
 
-  constructor(file = join(DATA_DIR, OPENCONNECTOR_STATE_FILE), runtimeUrl?: string) {
+  constructor(
+    file = join(DATA_DIR, OPENCONNECTOR_STATE_FILE),
+    runtimeUrl?: string,
+    options: OpenConnectorStateStoreOptions = {},
+  ) {
     this.file = file;
     this.runtimeUrl = runtimeUrl?.trim() || undefined;
-    const loaded = this.read();
+    this.lockPath = `${file}.lock.db`;
+    this.createLockDatabase = options.createLockDatabase ?? (() => new DatabaseSync(this.lockPath));
+    this.busyTimeoutMs = options.busyTimeoutMs ?? 5_000;
+    const loaded = this.readUnlocked();
+    this.runtimeMismatch = Boolean(this.runtimeUrl && loaded.runtimeUrl && loaded.runtimeUrl !== this.runtimeUrl);
     this.connections = loaded.connections;
     this.appOAuth = loaded.appOAuth;
   }
 
-  private read(): { connections: OpenConnectorConnectionRecord[]; appOAuth: OpenConnectorAppOAuthRecord[] } {
+  private readUnlocked(): { runtimeUrl?: string; connections: OpenConnectorConnectionRecord[]; appOAuth: OpenConnectorAppOAuthRecord[] } {
     try {
       const parsed = stateFileSchema.safeParse(parseJson(readFileSync(this.file, "utf8")));
       if (parsed.success) {
         if (this.runtimeUrl && parsed.data.runtimeUrl && parsed.data.runtimeUrl !== this.runtimeUrl) {
-          return { connections: [], appOAuth: [] };
+          return { runtimeUrl: parsed.data.runtimeUrl, connections: [], appOAuth: [] };
         }
-        return { connections: parsed.data.connections ?? [], appOAuth: parsed.data.appOAuth ?? [] };
+        return { runtimeUrl: parsed.data.runtimeUrl, connections: parsed.data.connections ?? [], appOAuth: parsed.data.appOAuth ?? [] };
       }
     } catch {
     }
     return { connections: [], appOAuth: [] };
+  }
+
+  private refreshUnlocked(): void {
+    const loaded = this.readUnlocked();
+    this.runtimeMismatch = Boolean(this.runtimeUrl && loaded.runtimeUrl && loaded.runtimeUrl !== this.runtimeUrl);
+    this.connections = this.runtimeMismatch ? [] : loaded.connections;
+    this.appOAuth = this.runtimeMismatch ? [] : loaded.appOAuth;
+  }
+
+  private lock(): DatabaseSync {
+    mkdirSync(dirname(this.lockPath), { recursive: true });
+    const database = this.createLockDatabase();
+    try {
+      if (process.platform !== "win32" && (statSync(this.lockPath).mode & 0o777) !== 0o600) chmodSync(this.lockPath, 0o600);
+      database.exec(`PRAGMA busy_timeout = ${this.busyTimeoutMs}`);
+      database.exec("CREATE TABLE IF NOT EXISTS state_lock (id INTEGER PRIMARY KEY CHECK (id = 1))");
+      return database;
+    } catch (error) {
+      try {
+        database.close();
+      } catch {}
+      throw error;
+    }
+  }
+
+  /** A SQLite exclusive transaction serializes hosts, threads and processes without path-unlink races.
+   * Every read refreshes under it; every mutation refreshes first and persists before commit, so a
+   * store bound to another runtime can read an empty view but can never overwrite the newer state. */
+  private withLock<T>(operation: () => T, persist = true): T {
+    const database = this.lock();
+    let transactionStarted = false;
+    try {
+      database.exec("BEGIN EXCLUSIVE");
+      transactionStarted = true;
+      this.refreshUnlocked();
+      if (persist && this.runtimeMismatch) {
+        throw new Error("Refusing to write OpenConnector state for a different runtime URL");
+      }
+      const connectionsBefore = JSON.stringify(this.connections);
+      const appOAuthBefore = JSON.stringify(this.appOAuth);
+      const result = operation();
+      if (persist && (JSON.stringify(this.connections) !== connectionsBefore || JSON.stringify(this.appOAuth) !== appOAuthBefore)) {
+        this.persist();
+      }
+      database.exec("COMMIT");
+      transactionStarted = false;
+      return result;
+    } finally {
+      if (transactionStarted) {
+        try {
+          database.exec("ROLLBACK");
+        } catch {}
+      }
+      try {
+        database.close();
+      } catch {}
+    }
   }
 
   private persist(): void {
@@ -119,87 +171,86 @@ export class OpenConnectorStateStore {
     }), { mode: 0o600 });
   }
 
-  private locked<T>(operation: (fresh: { connections: OpenConnectorConnectionRecord[]; appOAuth: OpenConnectorAppOAuthRecord[] }) => {
-    result: T;
-    connections?: OpenConnectorConnectionRecord[];
-    appOAuth?: OpenConnectorAppOAuthRecord[];
-  }): T {
-    const unlock = acquireStateLock(`${this.file}.lock`);
-    try {
-      const fresh = this.read();
-      const next = operation(fresh);
-      this.connections = next.connections ?? fresh.connections;
-      this.appOAuth = next.appOAuth ?? fresh.appOAuth;
-      if (next.connections || next.appOAuth) this.persist();
-      return next.result;
-    } finally {
-      unlock();
-    }
-  }
-
   listConnections(): OpenConnectorConnectionRecord[] {
-    return this.locked((fresh) => ({ result: fresh.connections.map((record) => ({ ...record })) }));
+    return this.withLock(() => this.connections.map((record) => ({ ...record })), false);
   }
 
   connectionsForService(service: string): OpenConnectorConnectionRecord[] {
-    return this.listConnections().filter((record) => record.service === service);
+    return this.withLock(() => this.connections
+      .filter((record) => record.service === service)
+      .map((record) => ({ ...record })), false);
   }
 
   findConnectionByAccountId(accountId: string): OpenConnectorConnectionRecord | null {
-    return this.locked((fresh) => ({
-      result: fresh.connections.find((record) => record.accountId === accountId) ?? null,
-    }));
+    return this.withLock(() => this.connections.find((record) => record.accountId === accountId) ?? null, false);
+  }
+
+  /** CAS for authorization convergence: the mutation sees the latest record inside the same lock and
+   * can only replace that row. A replacement or deletion makes the expected request id stale, so no
+   * stale poll can write or resurrect the connection. */
+  updateConnectionIf(
+    accountId: string,
+    expectedConnectionRequestId: string | undefined,
+    mutate: (record: OpenConnectorConnectionRecord) => OpenConnectorConnectionRecord | null | undefined,
+  ): OpenConnectorConnectionRecord | null {
+    return this.withLock(() => {
+      const index = this.connections.findIndex((record) => record.accountId === accountId);
+      if (index < 0) return null;
+      const current = { ...this.connections[index] };
+      if (current.connectionRequestId !== expectedConnectionRequestId) return null;
+      const updated = mutate(current);
+      if (!updated) return null;
+      const next = { ...updated, accountId: current.accountId };
+      this.connections[index] = next;
+      return { ...next };
+    });
   }
 
   upsertConnection(record: OpenConnectorConnectionRecord, expectedUpdatedAt?: string | null): void {
-    this.locked((fresh) => {
-      const connections = [...fresh.connections];
-      const index = connections.findIndex((existing) => existing.accountId === record.accountId);
-      const existing = index >= 0 ? connections[index] : undefined;
+    this.withLock(() => {
+      const index = this.connections.findIndex((existing) => existing.accountId === record.accountId);
+      const existing = index >= 0 ? this.connections[index] : undefined;
       if (expectedUpdatedAt !== undefined && (existing?.updatedAt ?? null) !== expectedUpdatedAt) {
         throw new Error(`The OpenConnector connection ${record.accountId} was updated by another process`);
       }
-      if (index >= 0) connections[index] = record;
-      else connections.push(record);
-      return { result: undefined, connections };
+      if (index >= 0) this.connections[index] = record;
+      else this.connections.push(record);
     });
   }
 
   removeConnection(accountId: string): boolean {
-    return this.locked((fresh) => {
-      const connections = fresh.connections.filter((record) => record.accountId !== accountId);
-      return { result: connections.length !== fresh.connections.length, connections };
+    return this.withLock(() => {
+      const before = this.connections.length;
+      this.connections = this.connections.filter((record) => record.accountId !== accountId);
+      return this.connections.length !== before;
     });
   }
 
   removeConnectionsForService(service: string): number {
-    return this.locked((fresh) => {
-      const connections = fresh.connections.filter((record) => record.service !== service);
-      return { result: fresh.connections.length - connections.length, connections };
+    return this.withLock(() => {
+      const before = this.connections.length;
+      this.connections = this.connections.filter((record) => record.service !== service);
+      return before - this.connections.length;
     });
   }
 
   listAppOAuth(): OpenConnectorAppOAuthRecord[] {
-    return this.locked((fresh) => ({ result: fresh.appOAuth.map((record) => ({ ...record })) }));
+    return this.withLock(() => this.appOAuth.map((record) => ({ ...record })), false);
   }
 
   findAppOAuth(service: string): OpenConnectorAppOAuthRecord | null {
-    return this.locked((fresh) => ({
-      result: fresh.appOAuth.find((record) => record.service === service) ?? null,
-    }));
+    return this.withLock(() => this.appOAuth.find((record) => record.service === service) ?? null, false);
   }
 
   upsertAppOAuth(record: OpenConnectorAppOAuthRecord, expectedUpdatedAt?: string | null): void {
-    this.locked((fresh) => {
-      const appOAuth = [...fresh.appOAuth];
-      const index = appOAuth.findIndex((existing) => existing.service === record.service);
-      const existing = index >= 0 ? appOAuth[index] : undefined;
+    this.withLock(() => {
+      const index = this.appOAuth.findIndex((existing) => existing.service === record.service);
+      const existing = index >= 0 ? this.appOAuth[index] : undefined;
       if (expectedUpdatedAt !== undefined && (existing?.updatedAt ?? null) !== expectedUpdatedAt) {
         throw new Error(`The OpenConnector OAuth record for ${record.service} was updated by another process`);
       }
-      if (index >= 0) appOAuth[index] = record;
-      else appOAuth.push(record);
-      return { result: undefined, appOAuth };
+      if (index >= 0) this.appOAuth[index] = record;
+      else this.appOAuth.push(record);
     });
   }
 

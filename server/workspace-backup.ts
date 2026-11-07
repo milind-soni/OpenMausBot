@@ -175,23 +175,20 @@ function assertLocalAuthOutsideSnapshot(dataDir: string): void {
   };
   const connectors = record(config) && record(config.connectors) ? config.connectors : {};
   const openconnector = record(connectors.openconnector) ? connectors.openconnector : {};
-  const environments = [process.env, ...Object.values(instances).filter(record).map((instance) => ({ ...process.env, ...(record(instance.environment) ? instance.environment : {}) }))];
-  const tokenRefs = [
-    ...(typeof openconnector.adminTokenRef === "string" ? [openconnector.adminTokenRef] : []),
-    ...environments.map((environment) => environment[OPENCONNECTOR_ADMIN_TOKEN_REF_ENV]),
-  ];
-  for (const tokenRef of tokenRefs) {
-    const reference = typeof tokenRef === "string" ? tokenRef.trim() : "";
-    if (!reference.startsWith("file:")) continue;
-    const resolved = resolve(reference.slice(5));
+  const checkTokenRef = (value: unknown, source: string) => {
+    const tokenRef = typeof value === "string" ? value.trim() : "";
+    if (!tokenRef.startsWith("file:")) return;
+    const path = tokenRef.slice(5);
+    const resolved = resolve(path);
     const exists = entryExists(resolved);
-    const path = relative(exists ? realpathSync(dataDir) : resolve(dataDir), exists ? realpathSync(resolved) : resolved).replaceAll("\\", "/");
-    const outsideBackup = !path || path === ".." || path.startsWith("../") || isAbsolute(path);
-    const excludedFromBackup = excluded(path.split("/")[0]) || excludedWorkspaceAuthPath(path);
-    if (!outsideBackup && !excludedFromBackup) {
-      throw new Error("OpenConnector admin token file is inside backed-up workspace files. Move it outside or into the excluded providers folder, chmod 600 it, and rotate the token if a backup may already contain it.");
+    const pathInWorkspace = relative(exists ? realpathSync(dataDir) : resolve(dataDir), exists ? realpathSync(resolved) : resolved).replaceAll("\\", "/");
+    if (pathInWorkspace && pathInWorkspace !== ".." && !pathInWorkspace.startsWith("../") && !isAbsolute(pathInWorkspace) && !forbiddenArchivePath(pathInWorkspace)) {
+      throw new Error(`OpenConnector admin token file ${source} is inside backed-up workspace files. Move it outside or into an excluded folder, chmod 600 it, and rotate the token if a backup may already contain it.`);
     }
-  }
+  };
+  checkTokenRef(openconnector.adminTokenRef, "file reference");
+  const environments = [process.env, ...Object.values(instances).filter(record).map((instance) => ({ ...process.env, ...(record(instance.environment) ? instance.environment : {}) }))];
+  for (const environment of environments) checkTokenRef(environment[OPENCONNECTOR_ADMIN_TOKEN_REF_ENV], "environment reference");
   for (const environment of environments) {
     const home = String(environment.HOME || environment.USERPROFILE || homedir());
     for (const field of fields) check(environment[field], field, home);

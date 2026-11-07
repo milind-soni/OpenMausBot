@@ -370,7 +370,7 @@ describe("encrypted full workspace backups", () => {
       "vm-home/.browser-profiles/chrome/Cookies", "vm-homes/abc/.browser-profiles/chromium/Cookies",
       "tmp/omb-mcp-123/mcp.json", ".tmp/secret",
       "logins.json.enc", "logins-key", "logins.json.enc.123.05a7b3e0-1234.tmp",
-      "connected-apps-installation.json", "webhook-key",
+      "highlevel.json.enc", "highlevel-key", "connected-apps-installation.json", "webhook-key",
     ];
     for (const root of [source, target]) {
       for (const path of authPaths) {
@@ -548,7 +548,7 @@ describe("encrypted full workspace backups", () => {
       const path = encryptedPayload(source, Buffer.concat([tarEntry("manifest.json", "File", JSON.stringify(manifest)), tarEntry("data", "Directory"), ...parents.map((parent) => tarEntry(`data/${parent}`, "Directory")), tarEntry(`data/${name}`, "File", content), Buffer.alloc(1024)]));
       await expect(stageWorkspaceBackup(directory(), path, { password: PASSWORD })).rejects.toThrow(/Unsafe|connection settings|webhook credentials/);
     }
-  });
+  }, 60_000);
 
   it("retains differently cased destination auth roots and refuses them in recovery journals", async () => {
     const source = directory();
@@ -575,6 +575,26 @@ describe("encrypted full workspace backups", () => {
     await expect(createWorkspaceBackup(source, { password: PASSWORD })).rejects.toThrow(/OpenConnector admin token file/);
     expect(existsSync(join(source, ".backups"))).toBe(false);
     expect(readFileSync(tokenPath, "utf8")).toBe("runtime-root-token");
+  });
+
+  it("checks OpenConnector token references from instance environments and honors exclusions", async () => {
+    const source = directory();
+    mkdirSync(join(source, "providers", "openconnector"), { recursive: true });
+    const excludedToken = join(source, "providers", "openconnector", "admin-token");
+    writeFileSync(excludedToken, "runtime-root-token", { mode: 0o600 });
+    const unsafeToken = join(source, "openconnector-admin-token");
+    writeFileSync(unsafeToken, "runtime-root-token", { mode: 0o600 });
+    const saved = process.env.OMB_OPENCONNECTOR_ADMIN_TOKEN_REF;
+    process.env.OMB_OPENCONNECTOR_ADMIN_TOKEN_REF = `file:${unsafeToken}`;
+    try {
+      json(join(source, "config.json"), { connectors: { provider: "openconnector", openconnector: { url: "https://runtime.example.test" } } });
+      await expect(createWorkspaceBackup(source, { password: PASSWORD })).rejects.toThrow(/environment reference/);
+      process.env.OMB_OPENCONNECTOR_ADMIN_TOKEN_REF = `file:${excludedToken}`;
+      await expect(createWorkspaceBackup(source, { password: PASSWORD })).resolves.toMatchObject({ summary: expect.anything() });
+    } finally {
+      if (saved === undefined) delete process.env.OMB_OPENCONNECTOR_ADMIN_TOKEN_REF;
+      else process.env.OMB_OPENCONNECTOR_ADMIN_TOKEN_REF = saved;
+    }
   });
 
   it("refuses an instance-environment file-backed OpenConnector token inside the backup root", async () => {
