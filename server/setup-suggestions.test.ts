@@ -99,6 +99,8 @@ describe("what is sent", () => {
     expect(hasSetupChoices("es")).toBe(true);
     expect(worthAsking({ ...nothing, languageCode: "es" }, null)).toBe(false);
     expect(hasSetupChoices("de")).toBe(false);
+    expect(hasSetupChoices("zh-tw")).toBe(true);
+    expect(setupChoices("zh-hant")[0]).toBe("研究與深入探討主題");
     expect(worthAsking({ ...nothing, languageCode: "de" }, null)).toBe(true);
   });
 

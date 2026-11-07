@@ -45,4 +45,9 @@ describe("cron words on a routine request", () => {
     expect(routineCronText(schedule, "de")).toBe("Jede Woche am Montag um 09:00 UTC");
     expect(routineCronText(schedule, "fr")).toBe("Weekly on Monday at 9:00 UTC");
   });
+
+  it("uses Traditional Chinese weekday names for zh-TW", () => {
+    const schedule = { type: "cron" as const, expression: "0 9 * * 1", timeZone: "UTC" };
+    expect(routineCronText(schedule, "zh-tw")).toContain("星期一");
+  });
 });
