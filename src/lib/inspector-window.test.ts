@@ -9,10 +9,31 @@ const event = (i: number): RuntimeEvent => ({
 const entry = (i: number): InspectorEntry => ({ kind: "runtime", at: String(i), data: event(i) });
 
 describe("Inspector's recent event window", () => {
+  it("does not count displaced equal-time disk records as new live arrivals", () => {
+    const entries: InspectorEntry[] = Array.from({ length: 800 }, (_, i) => ({
+      kind: "runtime", at: "same", data: { ...event(i), createdAt: "same" },
+    }));
+    const previous = mergeInspectorSnapshot(null, { entries: entries.slice(0, 400), total: { runtime: 400, native: 0 } });
+    const snapshot = { entries: entries.slice(400), total: { runtime: 800, native: 0 } };
+    expect(mergeInspectorSnapshot(previous, snapshot)).toEqual(snapshot);
+  });
+
+  it("stops treating a live record as pending once a snapshot acknowledges it", () => {
+    const first = { ...event(1), createdAt: "same" };
+    const live = appendInspectorRuntime(null, [first])!;
+    const acknowledged = mergeInspectorSnapshot(live, {
+      entries: [{ kind: "runtime", at: "same", data: first }], total: { runtime: 1, native: 0 },
+    });
+    const advanced: InspectorPage = {
+      entries: [{ kind: "runtime", at: "same", data: { ...event(2), createdAt: "same" } }], total: { runtime: 2, native: 0 },
+    };
+    expect(mergeInspectorSnapshot(acknowledged, advanced)).toEqual(advanced);
+  });
+
   it("preserves distinct equal-time records without an overlap and counts the union once", () => {
     const first = { ...event(1), createdAt: "same" };
     const second = { ...event(2), createdAt: "same" };
-    const previous: InspectorPage = { entries: [{ kind: "runtime", at: "same", data: second }], total: { runtime: 1, native: 0 } };
+    const previous = appendInspectorRuntime(null, [second])!;
     const snapshot: InspectorPage = { entries: [{ kind: "runtime", at: "same", data: first }], total: { runtime: 1, native: 0 } };
     const merged = mergeInspectorSnapshot(previous, snapshot);
     expect(merged.entries).toEqual([...snapshot.entries, ...previous.entries]);
@@ -22,7 +43,7 @@ describe("Inspector's recent event window", () => {
   });
 
   it("retains a live tail across stale snapshots and counts it once when disk catches up", () => {
-    const previous: InspectorPage = { entries: [entry(1), entry(2), entry(3)], total: { runtime: 53, native: 12 } };
+    const previous = appendInspectorRuntime({ entries: [entry(1), entry(2)], total: { runtime: 52, native: 12 } }, [event(3)])!;
     const snapshot: InspectorPage = { entries: [entry(1), entry(2)], total: { runtime: 52, native: 10 } };
     const merged = mergeInspectorSnapshot(previous, snapshot);
     expect(merged).toEqual({ entries: previous.entries, total: { runtime: 53, native: 10 } });
@@ -34,7 +55,7 @@ describe("Inspector's recent event window", () => {
 
   it("preserves publication order for equal-time events using the overlap anchor", () => {
     const entries: InspectorEntry[] = [1, 2, 3].map((i) => ({ kind: "runtime", at: "same", data: { ...event(i), createdAt: "same" } }));
-    const previous: InspectorPage = { entries, total: { runtime: 3, native: 0 } };
+    const previous = appendInspectorRuntime(null, [1, 2, 3].map((i) => ({ ...event(i), createdAt: "same" })))!;
     const snapshot: InspectorPage = { entries: entries.slice(0, 2), total: { runtime: 2, native: 0 } };
     expect(mergeInspectorSnapshot(previous, snapshot)).toEqual(previous);
   });
@@ -53,7 +74,7 @@ describe("Inspector's recent event window", () => {
     });
     const native: InspectorEntry = { kind: "native", at: "0001", data: { at: "0001", dir: "out", source: "fixture", msg: "fresh" } };
     const merged = mergeInspectorSnapshot(
-      { entries: entries.slice(1), total: { runtime: 501, native: 100 } },
+      appendInspectorRuntime({ entries: entries.slice(0, 400), total: { runtime: 500, native: 100 } }, [entries[400].data])!,
       { entries: [...entries.slice(0, 400), native], total: { runtime: 500, native: 101 } },
     );
     expect(merged.entries.filter((item) => item.kind === "runtime")).toEqual(entries.slice(1));
