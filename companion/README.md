@@ -35,6 +35,7 @@ upstream hardened its loopback gate.
 | **Scrubbing** | `resumeCursors` — the harness's own provider session ids — never reach a device, whether or not the harness still sends them. |
 | **Discovery** | Bonjour, so a phone finds the computer by name instead of by typed address. |
 | **Secure credential relay** | Carries an HPKE envelope for one pending, allowlisted credential card. The sidecar never receives the desktop private key or plaintext. |
+| **Moving bots in** | A separate per-device grant the computer's owner gives in a dialog on the computer, for 30 minutes. It opens only the routes a move needs (`MOVE_ROUTES`); the harness lets those requests change only the bots that phone brought in. |
 
 ## Transport security
 

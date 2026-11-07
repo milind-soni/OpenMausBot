@@ -134,6 +134,7 @@ function mainSharing({ response }) {
     createLendingDialogs, nativeT: nativeText.englishText.t, dialog, mainWindow: win, validateSharedFolders: named, isHomeFolder: async () => false,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localWorkspaceOnly: (_channel, handler) => handler,
     requireSharedComputers: async () => {}, savedWorkspace: () => team,
+    setCompanionMoveAskListener: () => {}, createMoveInAsks: () => ({ ask: async () => {} }), companionMoveAccess: async () => {}, slog: () => {},
     sharingController: () => ({ identity: async () => ({ id: "info" }), save: async (env, grant, info) => { saved.push([env.id, grant, info]); } }),
   });
   vm.runInContext(mainSection("const lendingDialogs = createLendingDialogs(", 'ipcMain.handle("sharing:revoke"')

@@ -7,6 +7,17 @@ import nativeText from "./native-text.cjs";
 /** Waits at most this long for a quiet moment. */
 const QUIET_WAIT_MS = 15_000;
 
+/** Electron 43 runs a message box without a window synchronously on macOS, stopping main until it is answered, and
+ * `signal` cannot close it there; so on macOS the box is a sheet on `window()`, shown first if hidden, and null without
+ * one. */
+export function showClosableMessageBox(dialog, options, { window, platform }) {
+  if (platform !== "darwin") return dialog.showMessageBox(options);
+  const parent = window();
+  if (!parent || parent.isDestroyed()) return null;
+  if (!parent.isVisible()) parent.show();
+  return dialog.showMessageBox(parent, options);
+}
+
 /** `window()`: this app's main window, or null. `idleSeconds()`: seconds since the last touch, null when unknown. */
 export function createAskPrompt({ dialog, window, idleSeconds = () => null, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), platform = process.platform, t = nativeText.englishText.t }) {
   const open = () => { const win = window(); return win && !win.isDestroyed() ? win : null; };
@@ -25,11 +36,9 @@ export function createAskPrompt({ dialog, window, idleSeconds = () => null, wait
     if (signal.aborted || looking(env)) return null;
     const words = askPromptWords(ask, { cloud: env.name, device: deviceWord(platform), t });
     const options = { type: "question", message: words.message, detail: words.detail, buttons: words.buttons, defaultId: 0, cancelId: 1, noLink: true, signal };
-    // Electron 43 runs a message box without a window synchronously on macOS, where `signal` cannot close it.
-    const parent = platform === "darwin" ? open() : null;
-    if (platform === "darwin" && !parent) return null;
-    if (parent && !parent.isVisible()) parent.show();
-    const { response } = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+    const shown = showClosableMessageBox(dialog, options, { window: open, platform });
+    if (!shown) return null;
+    const { response } = await shown;
     if (signal.aborted) return null;
     return response === 0 ? "turn-on" : "not-now";
   };

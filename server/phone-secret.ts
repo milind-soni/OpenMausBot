@@ -90,43 +90,41 @@ export function phoneSecretKeyIdFromJwk(jwk: webcrypto.JsonWebKey): string | nul
     .toString("base64url");
 }
 
+function canonicalAAD(first: string, keyId: string, routeIds: string[], target: string, requestKey: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]{22}$/.test(keyId) || ![...routeIds, requestKey].every((value) => ROUTE_ID.test(value)) || !TARGET_ID.test(target)) {
+    throw new PhoneSecretError("The credential request metadata is invalid");
+  }
+  return new TextEncoder().encode([first, keyId, ...routeIds, target, requestKey].join("\n"));
+}
+
 /** One canonical string shared with Swift. Authenticating it stops a relay moving a ciphertext to another bot, conversation, card, device or credential. */
 export function phoneSecretAAD(context: Pick<
   PhoneSecretContext,
   "keyId" | "deviceId" | "botId" | "threadId" | "messageId" | "target" | "requestKey"
 >): Uint8Array {
-  const fields = [
-    "openmausbot-phone-credential-v1",
-    context.keyId,
-    context.deviceId,
-    context.botId,
-    context.threadId,
-    context.messageId,
-    context.target,
-    context.requestKey,
-  ];
-  if (
-    !/^[A-Za-z0-9_-]{22}$/.test(context.keyId) ||
-    !fields.slice(2, 6).every((value) => ROUTE_ID.test(value)) ||
-    !TARGET_ID.test(context.target) ||
-    !ROUTE_ID.test(context.requestKey)
-  ) {
-    throw new PhoneSecretError("The credential request metadata is invalid");
-  }
-  return new TextEncoder().encode(fields.join("\n"));
+  const { keyId, deviceId, botId, threadId, messageId, target, requestKey } = context;
+  return canonicalAAD("openmausbot-phone-credential-v1", keyId, [deviceId, botId, threadId, messageId], target, requestKey);
 }
 
-export function phoneSecretOperationId(context: PhoneSecretContext): string {
-  const aad = phoneSecretAAD(context);
+/** "openmausbot-phone-move-key-v1\n{keyId}\n{deviceId}\n{target}\n{requestKey}", shared with Swift. Its own first line keeps a card's envelope from opening here, and a move key from opening as a card. */
+export function phoneMoveKeyAAD(envelope: Pick<PhoneSecretEnvelope, "keyId" | "deviceId" | "target" | "requestKey">): Uint8Array {
+  return canonicalAAD("openmausbot-phone-move-key-v1", envelope.keyId, [envelope.deviceId], envelope.target, envelope.requestKey);
+}
+
+export function sealedOperationId(aad: Uint8Array, sealed: Pick<PhoneSecretEnvelope, "version" | "encapsulatedKey" | "ciphertext">): string {
   return createHash("sha256")
     .update(aad)
     .update("\0")
-    .update(String(context.version))
+    .update(String(sealed.version))
     .update("\n")
-    .update(context.encapsulatedKey)
+    .update(sealed.encapsulatedKey)
     .update("\n")
-    .update(context.ciphertext)
+    .update(sealed.ciphertext)
     .digest("base64url");
+}
+
+export function phoneSecretOperationId(context: PhoneSecretContext): string {
+  return sealedOperationId(phoneSecretAAD(context), context);
 }
 
 export function assertPhoneSecretRequestMatches(
@@ -352,12 +350,16 @@ export class PhoneSecretBridge {
   }
 
   async provide(context: PhoneSecretContext): Promise<void> {
-    await this.withinLimit(async () => this.save(context, await this.openWithinLimit(context)));
+    await this.withinLimit(() => this.openAndSave(context, phoneSecretAAD(context)));
+  }
+
+  async provideMoveKey(envelope: PhoneSecretEnvelope): Promise<void> {
+    await this.withinLimit(() => this.openAndSave(envelope, phoneMoveKeyAAD(envelope)));
   }
 
   /** The value a paired phone sealed for this computer, for a secret this server keeps itself and never sends on. */
   async open(context: PhoneSecretContext): Promise<string> {
-    return this.withinLimit(() => this.openWithinLimit(context));
+    return this.withinLimit(() => this.openSealed(context, phoneSecretAAD(context)));
   }
 
   private async withinLimit<T>(work: () => Promise<T>): Promise<T> {
@@ -372,7 +374,11 @@ export class PhoneSecretBridge {
     }
   }
 
-  private async openWithinLimit(context: PhoneSecretContext): Promise<string> {
+  private async openAndSave(envelope: PhoneSecretEnvelope, aad: Uint8Array): Promise<void> {
+    await this.save(sealedOperationId(aad, envelope), envelope.target, await this.openSealed(envelope, aad));
+  }
+
+  private async openSealed(context: PhoneSecretEnvelope, aad: Uint8Array): Promise<string> {
     if (!this.identity) {
       throw new PhoneSecretError(
         "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again.",
@@ -405,7 +411,7 @@ export class PhoneSecretBridge {
       opened = await (await suite()).open(
         { recipientKey: identity.privateKey, enc: encapsulatedKey, info: INFO },
         ciphertext,
-        phoneSecretAAD(context),
+        aad,
       );
     } catch {
       throw new PhoneSecretError("The encrypted credential could not be verified");
@@ -426,19 +432,19 @@ export class PhoneSecretBridge {
     return value;
   }
 
-  private async save(context: PhoneSecretContext, value: string): Promise<void> {
-    const requestId = phoneSecretOperationId(context);
+  private async save(requestId: string, target: string, value: string): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
         reject(new PhoneSecretError("The operating-system credential store did not respond. Try again.", 504));
       }, this.timeoutMs);
       timer.unref?.();
-      this.pending.set(requestId, { resolve, reject, timer });
+      // The parent's refusal text comes from outside this process (a provider check, an OS store): it must never carry the key back out.
+      this.pending.set(requestId, { resolve, reject: (error) => reject(error.message.includes(value) ? new PhoneSecretError("The credential could not be saved", 503) : error), timer });
       if (this.send({
         type: "openmausbot:phone-secret-save",
         requestId,
-        target: context.target,
+        target,
         value,
       })) return;
       clearTimeout(timer);

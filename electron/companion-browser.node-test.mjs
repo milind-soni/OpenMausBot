@@ -46,3 +46,21 @@ test("browser access reaches only the fixed sidecar path, refuses bad ids, and r
   fail = true;
   await assert.rejects(change("phone-1", true), /save failed/);
 });
+
+test("move access reaches only the fixed sidecar path, names the ask it answers, and refuses bad ids", async () => {
+  const source = readFileSync(new URL("./companion.mjs", import.meta.url), "utf8");
+  const start = source.indexOf("export async function companionMoveAccess");
+  assert.ok(start >= 0);
+  const calls = [];
+  const context = vm.createContext({ proc: {}, control: async (...args) => { calls.push(args); } });
+  vm.runInContext(source.slice(start).replaceAll("export ", ""), context);
+  const answer = context.companionMoveAccess;
+  await answer("phone-1", true, 301_000);
+  await answer("phone-1", false, 301_000);
+  for (const id of ["../other", "phone?all=1", "a".repeat(129), "", undefined]) await answer(id, true, 301_000);
+  for (const expiresAt of [Number.NaN, Number.POSITIVE_INFINITY, "301000", "1&x=2", undefined]) await answer("phone-1", true, expiresAt);
+  assert.deepEqual(calls, [["POST", "/devices/phone-1/move?expiresAt=301000"], ["DELETE", "/devices/phone-1/move"]]);
+  context.proc = null;
+  await answer("phone-1", true, 301_000);
+  assert.equal(calls.length, 2, "no sidecar, no call");
+});

@@ -17,7 +17,7 @@ import type { BotRecord } from "./store.ts";
 import type { TeamMemory, TeamMemoryEntry } from "./team-memory.ts";
 import { readMemoryFile } from "./workspace.ts";
 
-const MEMORY_BODY_MAX = 16 * 1024 * 1024;
+export const MEMORY_BODY_MAX = 16 * 1024 * 1024;
 const JOURNAL_ROWS = 500;
 const FRONTMATTER = /^---\n[\s\S]*?\n---\n/u;
 

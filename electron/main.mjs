@@ -460,11 +460,11 @@ const DESKTOP_CRASH_LOG_MAX_BYTES = 512 * 1024;
 let logStream = null;
 let desktopShutdownStarted = false;
 import { companionAdvertisedHostedUrl, companionEnabledAtRest, companionOriginTarget, companionPairing, companionPairingRenew, companionDeviceRoutes, companionRefreshTailscale, companionCloudDesktopAccess,
-  companionBrowserControlAccess, companionRevoke, companionRunning, companionState, rememberCompanionEnabled, rememberCompanionKeepAwake, setCompanionHostedUrl, setCompanionLifecycleListener, startCompanion, stopCompanion } from "./companion.mjs";
+  companionBrowserControlAccess, companionMoveAccess, companionRevoke, companionRunning, companionState, rememberCompanionEnabled, rememberCompanionKeepAwake, setCompanionHostedUrl, setCompanionLifecycleListener, setCompanionMoveAskListener, createMoveInAsks, startCompanion, stopCompanion } from "./companion.mjs";
 import { createDesktopCompanionE2E, deviceCounts } from "./companion-e2e-desktop.mjs";
 import { autoStartCompanion } from "./companion-autostart.mjs";
 import { createRoutineWakeHold, rememberRoutineWake, routineWakeSettings } from "./routine-wake.mjs";
-import { CREDENTIAL_PATCH, credentialSaveError } from "./credential-patch.mjs";
+import { CREDENTIAL_PATCH, PROVIDER_KEY_PATCH, credentialSaveError } from "./credential-patch.mjs";
 
 /** Second wall after preload's reduced bridge: computer-controlling IPC answers only the local server's UI.
  * Declared before any handler registration (temporal dead zone). */
@@ -2694,7 +2694,7 @@ ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_even
   await requireSharedComputers();
   return sharingController().state(savedWorkspace(id).id);
 }));
-const lendingDialogs = createLendingDialogs({ dialog, window: () => mainWindow, validate: validateSharedFolders, isHome: isHomeFolder, t: nativeT });
+const lendingDialogs = createLendingDialogs({ dialog, window: () => mainWindow, validate: validateSharedFolders, isHome: isHomeFolder, t: nativeT }); setCompanionMoveAskListener(createMoveInAsks({ dialog, locale: () => { try { return jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")).read()?.language || app.getLocale(); } catch { return app.getLocale(); } }, answer: companionMoveAccess, window: () => mainWindow ?? (openWindowForLink?.(), mainWindow), log: slog }).ask);
 ipcMain.handle("sharing:folder", localWorkspaceOnly("sharing:folder", async () => {
   await requireSharedComputers();
   return lendingDialogs.chooseFolder(nativeT("native.picker.shareFolder"));
@@ -2796,17 +2796,17 @@ ipcMain.handle("desktop:capabilities", async (event) =>
 );
 
 async function saveWorkspaceCredential(name, value) {
-  const patchFor = CREDENTIAL_PATCH[name];
+  const provider = PROVIDER_KEY_PATCH[name], patchFor = provider ?? CREDENTIAL_PATCH[name];
   if (!patchFor || typeof value !== "string") {
     throw new Error("Unsupported credential");
   }
-  if (app.isPackaged && !(await safeStorage.isAsyncEncryptionAvailable())) {
+  if (!provider && app.isPackaged && !(await safeStorage.isAsyncEncryptionAvailable())) {
     throw new Error("The operating-system credential store is unavailable");
   }
   const secret = value.trim();
   const applyToHarness = async () => {
     if (app.isPackaged && !serverReady) throw new Error("The embedded bot server is unavailable");
-    const secretStorage = app.isPackaged ? "?secretStorage=external" : "";
+    const secretStorage = !provider && app.isPackaged ? "?secretStorage=external" : "";
     const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/config${secretStorage}`, {
       method: "PUT",
       headers: desktopServerHeaders(
@@ -2819,7 +2819,7 @@ async function saveWorkspaceCredential(name, value) {
     if (!response.ok) throw credentialSaveError(response.status, body, nativeT);
     return body;
   };
-  if (!app.isPackaged) return applyToHarness();
+  if (!app.isPackaged || provider) return applyToHarness();
 
   // Commit the encrypted value before the server makes it live; a failed reload rolls credentials.bin back.
   return updateSecureCredentialDocument(

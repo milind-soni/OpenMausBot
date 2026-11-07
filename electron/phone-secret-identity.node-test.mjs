@@ -161,3 +161,14 @@ test("does not cache a failed save for an exact encrypted retry", async () => {
   assert.deepEqual(await save(request), phoneSecretSaveResult("operation_1", true));
   assert.equal(calls, 2);
 });
+
+test("a save refusal never carries any part of the key, however long the text before it", async () => {
+  const key = "sk-ant-fake-refusal-9c2e";
+  const save = createPhoneSecretSaveCoordinator(async (_target, value) => {
+    throw new Error(`${"The provider refused this key after a long explanation. ".repeat(3).slice(0, 170)}${value.trim()} (code 401)`);
+  });
+  const result = await save({ requestId: "operation_1", target: "anthropicApiKey", value: `  ${key}\n` });
+  assert.equal(result.ok, false);
+  assert.ok(result.error.length <= 180);
+  for (let cut = 4; cut <= key.length; cut += 1) assert.ok(!result.error.includes(key.slice(0, cut)), `leaks ${cut} characters`);
+});

@@ -18,13 +18,14 @@ import type { WebhookManager } from "./webhooks.ts";
 
 const FILE = "moved-from.json";
 
-export interface MovedFrom { computer: string; at: number; told: string[] }
+export interface MovedFrom { computer: string; at: number; told: string[]; phone?: true }
 
 export function movedFrom(dataDir: string): MovedFrom | null {
   try {
     const raw = JSON.parse(readFileSync(join(dataDir, FILE), "utf8")) as Partial<MovedFrom>;
     if (typeof raw.computer !== "string" || !raw.computer.trim() || !Number.isSafeInteger(raw.at)) return null;
-    return { computer: raw.computer, at: raw.at!, told: Array.isArray(raw.told) ? raw.told.filter((id): id is string => typeof id === "string") : [] };
+    return { computer: raw.computer, at: raw.at!, told: Array.isArray(raw.told) ? raw.told.filter((id): id is string => typeof id === "string") : [],
+      ...(raw.phone === true ? { phone: true as const } : {}) };
   } catch { return null; }
 }
 
@@ -42,11 +43,14 @@ export interface ArrivedDeps {
   store: Pick<Store, "bot" | "appendMessage">;
   webhooks(): Pick<WebhookManager, "list"> | null;
   owner(auth: RequestAuth): CloudOwner | null;
+  /** A phone's move: its arrival is kept as the phone's and never replaces a computer's record. */
+  phone?(auth: RequestAuth): boolean;
   lineLanguage?: LineLanguage;
   /** The person hears what stayed on the computer the bots came from (cloud-connections-stayed.ts). */
   stayed?(language?: string): void;
 }
 
+export const ARRIVED_BODY_MAX = 64 * 1024;
 const arrivedBody = z.object({ v: z.literal(1), computer: z.string().trim().min(1).max(120), webhooks: z.array(z.string().regex(/^[\w-]{1,128}$/u)).max(500),
   place: z.string().trim().min(1).max(120).optional() });
 
@@ -57,9 +61,11 @@ export async function arrivedRoute(deps: ArrivedDeps, { req, res, path, method, 
   if (method !== "POST") return refuse(405, "method not allowed");
   const owner = deps.owner(auth);
   if (!owner) return refuse(403, "Only My Cloud's owner can finish a move into it.");
-  const body = arrivedBody.safeParse(await readBody(req, 64 * 1024));
+  const body = arrivedBody.safeParse(await readBody(req, ARRIVED_BODY_MAX));
   if (!body.success) return refuse(400, "send { v: 1, computer, webhooks }");
   const kept = movedFrom(deps.dataDir);
+  const phone = deps.phone?.(auth) === true;
+  if (phone && kept && kept.phone !== true) { json(res, 200, { v: 1, told: 0 }); return true; }
   const told = new Set(kept?.told ?? []);
   const hooks = deps.webhooks()?.list() ?? [];
   const telling = body.data.webhooks.flatMap((id) => {
@@ -69,7 +75,7 @@ export async function arrivedRoute(deps: ArrivedDeps, { req, res, path, method, 
   });
   for (const { id } of telling) told.add(id);
   // Recorded before the lines go: a move cut short here never has a bot say it twice.
-  writeFileAtomic(join(deps.dataDir, FILE), JSON.stringify({ computer: body.data.computer, at: kept?.at ?? Date.now(), told: [...told] }), { mode: 0o600 });
+  writeFileAtomic(join(deps.dataDir, FILE), JSON.stringify({ computer: body.data.computer, at: kept?.at ?? Date.now(), told: [...told], ...(phone ? { phone: true } : {}) }), { mode: 0o600 });
   for (const line of telling) deps.store.appendMessage(line.threadId, { role: "bot", kind: "text", text: webhookMovedLine(line.name, body.data.place, deps.lineLanguage?.(owner.person)) });
   deps.stayed?.(deps.lineLanguage?.(owner.person));
   json(res, 200, { v: 1, told: telling.length });

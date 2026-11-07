@@ -29,6 +29,14 @@ const CARRIED_OTHERWISE = /^workspaces\/[\w-]{1,128}\/(?:MEMORY\.md$|memory(?:\/
 
 export interface BotFile { path: string; size: number; sha256: string }
 
+/** The answer to a query that names a key twice, which a check before the route and the route itself would read apart. */
+export const REPEATED_QUERY = { error: "Send each query value once.", code: "repeated_query" } as const;
+
+export function repeatsQueryKey(url: URL): boolean {
+  const keys = [...url.searchParams.keys()];
+  return new Set(keys).size !== keys.length;
+}
+
 export interface MoveFilesDeps {
   dataDir: string;
   bots(): ReadonlyArray<{ id: string }>;
@@ -196,6 +204,7 @@ async function takePart(deps: MoveFilesDeps, req: IncomingMessage, query: z.infe
 export async function moveFilesRoute(deps: MoveFilesDeps, { req, res, path, method, url, auth, json }: RouteContext): Promise<boolean> {
   if (path !== "/api/cloud-send/files") return false;
   res.setHeader("cache-control", "no-store");
+  if (repeatsQueryKey(url)) { await rawBody(req, 0); json(res, 400, REPEATED_QUERY); return true; }
   if (method === "GET" && url.searchParams.has("path")) {
     const part = partSchema.safeParse(Object.fromEntries(url.searchParams));
     const bytes = part.success && movedFilePath(part.data.path) ? await readPart(deps.dataDir, part.data) : null;

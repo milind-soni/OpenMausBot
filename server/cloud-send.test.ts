@@ -71,7 +71,7 @@ describe("what a server reports for Send to My Cloud", () => {
 });
 
 describe("a bot sent from the person's other computer keeps its id", () => {
-  const store = { bot: (id: string) => (id === "taken-0001" ? ({} as BotRecord) : null), botByThread: (id: string) => (id === "thread-taken" ? ({} as BotRecord) : null), groupByThread: () => undefined };
+  const store = { bots: [{ id: "taken-0001", threadId: "thread-taken" }] as BotRecord[], groups: [{ id: "room-0001", threadId: "room-thread-0001", tasks: [{ threadId: "room-task-0001" }] }] as never };
   it("takes the server's own id form, only while nothing here uses it", () => {
     expect(keptBotIds({}, store)).toEqual({});
     expect(keptBotIds({ id: "ember-0001", threadId: "thread-0001" }, store)).toEqual({ id: "ember-0001", threadId: "thread-0001" });
@@ -81,5 +81,14 @@ describe("a bot sent from the person's other computer keeps its id", () => {
     expect(keptBotIds({ id: "ember-0001", threadId: "ember-0001" }, store)).toEqual({ error: "this conversation id is already used here" });
     for (const id of ["short", "../../etc/passwd", "x".repeat(129), 42]) expect(keptBotIds({ id }, store)).toHaveProperty("error");
     expect(keptBotIds({ threadId: "thread-0001" }, store)).toHaveProperty("error");
+  });
+
+  it("refuses an id that names something here in other capitals: a bot's folder and a conversation's files are named by their ids, and macOS and Windows ignore case", () => {
+    for (const id of ["TAKEN-0001", "Thread-Taken", "ROOM-THREAD-0001", "Room-Task-0001"]) expect(keptBotIds({ id }, store), id).toEqual({ error: "a bot with this id already exists here" });
+    for (const threadId of ["TAKEN-0001", "THREAD-TAKEN", "room-task-0001", "EMBER-0001"]) {
+      expect(keptBotIds({ id: "ember-0001", threadId }, store), threadId).toEqual({ error: "this conversation id is already used here" });
+    }
+    const capitals = { bots: [{ id: "Here-Caps-0001", threadId: "Thread-Caps-0001" }] as BotRecord[], groups: [] as never };
+    expect(keptBotIds({ id: "here-caps-0001" }, capitals), "an id here in capitals").toEqual({ error: "a bot with this id already exists here" });
   });
 });

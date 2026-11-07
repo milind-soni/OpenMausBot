@@ -18,6 +18,19 @@ export const CREDENTIAL_PATCH = {
   postizApiKey: (value) => ({ postiz: { key: value } }),
 };
 
+// AI provider keys live in the server's config, as Settings → Keys saves them, never in the encrypted credential store.
+export const PROVIDER_KEY_PATCH = {
+  openaiApiKey: (value) => ({ openai: { key: value } }),
+  anthropicApiKey: (value) => ({ anthropic: { key: value, everyClaudeBot: false } }),
+  openrouterApiKey: (value) => ({ openrouter: { key: value } }),
+  mistralApiKey: (value) => ({ mistral: { key: value } }),
+  cerebrasApiKey: (value) => ({ cerebras: { key: value } }),
+  groqApiKey: (value) => ({ groq: { key: value } }),
+  greenferenceApiKey: (value) => ({ greenference: { key: value } }),
+  metaApiKey: (value) => ({ meta: { key: value } }),
+  deepseekApiKey: (value) => ({ deepseek: { key: value } }),
+};
+
 const DECIDER_ERRORS = Object.freeze({
   "serverError.decider.accountRequired": "native.decider.accountRequired",
   "serverError.decider.jevRejected": "native.decider.jevRejected",

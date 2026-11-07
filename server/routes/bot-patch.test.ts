@@ -40,7 +40,7 @@ beforeEach(() => {
   lifecycleBusy.mockReturnValue(false);
 });
 
-function fixture() {
+function fixture(movesIn?: BotPatchRouteDeps["movesIn"]) {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const cfg = { vps: { sshAlias: "production-vps" } } as AppConfig;
@@ -59,6 +59,8 @@ function fixture() {
     routines: () => null,
     // A member's session may chat with this bot: the level that still can't move it or change what it may do.
     levelOf: () => "chat",
+    activeGroupTurnForBot: () => null,
+    ...(movesIn ? { movesIn } : {}),
     mainThreadTasks: (botId: string) => store.tasks(botId).filter((task) => !privateThreads.has(task.threadId)),
   } as unknown as BotPatchRouteDeps;
   const handler = createBotPatchRoutes(deps);
@@ -373,5 +375,49 @@ describe("PATCH /api/bots/:id mainThreadChoice", () => {
     expect(client.status).toBe(403);
     expect(paired.status).toBe(403);
     expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
+  });
+});
+
+describe("PATCH /api/bots/:id under a phone's move", () => {
+  const phone = { headers: { "x-openmausbot-companion": "1" } };
+  it("lets a phone's move set its own bot's profile, model, voice and memory, never what the bot may do", async () => {
+    const { store, bot, patch } = fixture((_auth, id) => id === store.bots[0]?.id);
+    const ok = await patch(bot.id, { soul: "Plans trips", memoryEnabled: true }, phone);
+    expect(ok.status).toBe(200);
+    expect(store.bot(bot.id)?.soul).toBe("Plans trips");
+    expect(store.bot(bot.id)?.memoryEnabled).toBe(true);
+    const refused = await patch(bot.id, { approvalMode: "full" }, phone);
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toBe(`forbidden: a phone's move may bring a bot's profile, look, model, voice, memory and phone-app settings, not "approvalMode"; set that on the host computer`);
+  });
+
+  it("lets a phone's move carry its own bot's phone-app grant", async () => {
+    const { store, bot, patch } = fixture((_auth, id) => id === store.bots[0]?.id);
+    const ok = await patch(bot.id, { phoneApps: { calendar: "read" } }, phone);
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(store.bot(bot.id)?.phoneApps).toEqual({ calendar: "read" });
+  });
+
+  it("refuses a malformed phone-app grant on its own bot, and any grant on a bot the move did not bring", async () => {
+    const own = fixture((_auth, id) => id === own.store.bots[0]?.id);
+    expect((await own.patch(own.bot.id, { phoneApps: ["calendar"] }, phone)).status).toBe(400);
+    const other = fixture(() => false);
+    expect((await other.patch(other.bot.id, { phoneApps: { calendar: "read" } }, phone)).status).toBe(403);
+  });
+
+  it("keeps today's look-only rule for every bot the move did not bring", async () => {
+    const { bot, patch } = fixture(() => false);
+    const refused = await patch(bot.id, { soul: "x" }, phone);
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/a paired device may change how a bot looks, not "soul"/);
+  });
+});
+
+describe("PATCH /api/bots/:id by a moving phone", () => {
+  it("lets voiceNoteEveryReply land on a bot it brought", async () => {
+    const { store, bot, patch } = fixture(() => true);
+    const answer = await patch(bot.id, { voiceNoteEveryReply: true }, { auth: { kind: "device", scopes: [] } as unknown as RequestAuth, headers: { "x-openmausbot-companion": "1" } });
+    expect(answer.status).toBe(200);
+    expect(store.bot(bot.id)?.voiceNoteEveryReply).toBe(true);
   });
 });

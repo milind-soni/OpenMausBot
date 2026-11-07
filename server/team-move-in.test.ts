@@ -1,8 +1,11 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { moveFilesRoute, REPEATED_QUERY } from "./cloud-send-files.ts";
 import { personKey } from "./person-key.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { PASS, type RouteContext } from "./routes/table.ts";
@@ -80,6 +83,25 @@ describe("a move-in's sign-in", () => {
     expect(moveInRefusal({}, "GET", "/api/logins", url("/api/logins")), "any other sign-in is not narrowed here").toBeNull();
     expect(moveInBot(moveInSession())).toBe(SCOUT);
     expect(moveInBot(session())).toBeNull();
+  });
+});
+
+describe("a move-in's files", () => {
+  it("never land in another bot's folder through a path sent twice", async () => {
+    const text = "x";
+    const target = url(`/api/cloud-send/files?path=workspaces/${SCOUT}/a.md&path=workspaces/${OTHER}/b.md&size=1&sha256=${createHash("sha256").update(text).digest("hex")}&offset=0&mode=new`);
+    let answer: { status: number; body: unknown } | null = null;
+    const narrowed = moveInRefusal({ moveIn: SCOUT }, "POST", target.pathname, target);
+    if (narrowed) answer = { status: 403, body: { error: narrowed } };
+    else {
+      await moveFilesRoute({ dataDir: dir, bots: () => [{ id: SCOUT }, { id: OTHER }], owner: () => ({ person: adaKey, name: "Ada" }) }, {
+        path: target.pathname, method: "POST", url: target, auth: moveInSession(), req: Readable.from([Buffer.from(text)]) as never, res: { setHeader() {} } as never,
+        json: ((_res: unknown, status: number, body: unknown) => { answer = { status, body }; }) as never, readBody: (async () => null) as never });
+    }
+    expect([400, 403]).toContain(answer!.status);
+    expect(existsSync(join(dir, "workspaces", OTHER, "b.md"))).toBe(false);
+    expect(existsSync(join(dir, "workspaces", SCOUT, "a.md"))).toBe(false);
+    if (answer!.status === 400) expect(answer!.body).toEqual(REPEATED_QUERY);
   });
 });
 

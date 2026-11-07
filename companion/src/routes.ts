@@ -10,6 +10,8 @@ export interface RouteRequest {
   path: string;
   method: string;
   authenticated: boolean;
+  /** The device holds a live move grant. */
+  move?: boolean;
 }
 
 /** The one companion route that crosses into full interactive desktop control. */
@@ -54,6 +56,24 @@ export const LOCAL_VM_SCREENSHOT_ROUTE = {
   path: /^\/api\/bots\/[\w-]+\/local-computer\/screenshot$/,
 } as const;
 
+/** The only routes a live move grant opens and the companion marks as a move. */
+export const MOVE_ROUTES: ReadonlyArray<{ method: string; path: RegExp }> = [
+  { method: "POST", path: /^\/api\/bots$/ },
+  { method: "PATCH", path: /^\/api\/bots\/[\w-]+$/ },
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/skills$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/skill-template$/ },
+  { method: "PUT", path: /^\/api\/cloud-send\/kind$/ },
+  { method: "POST", path: /^\/api\/cloud-send\/chats$/ },
+  { method: "POST", path: /^\/api\/cloud-send\/chats\/(?:verify|attachments)$/ },
+  { method: "POST", path: /^\/api\/cloud-send\/chats\/attachment\/[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}$/ },
+  { method: "POST", path: /^\/api\/cloud-send\/(?:memory|files|arrived)$/ },
+  { method: "POST", path: /^\/api\/phone-move\/key$/ },
+];
+
+export function isMoveRoute(method: string, path: string): boolean {
+  return MOVE_ROUTES.some((route) => route.method === method && route.path.test(path));
+}
+
 export function isCloudDesktopJoin(method: string, path: string): boolean {
   return method === CLOUD_DESKTOP_JOIN_ROUTE.method && CLOUD_DESKTOP_JOIN_ROUTE.path.test(path);
 }
@@ -90,6 +110,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/team-map$/ },
   // Sidecar-owned: the proxy answers it locally.
   { method: "GET", path: /^\/api\/companion\/endpoints$/ },
+  { method: "GET", path: /^\/api\/companion\/move$/ },
+  { method: "POST", path: /^\/api\/companion\/move$/ },
+  { method: "DELETE", path: /^\/api\/companion\/move$/ },
 
   { method: "GET", path: /^\/api\/bots$/ },
   { method: "POST", path: /^\/api\/bots$/ },
@@ -265,7 +288,7 @@ const EXPLAINED: ReadonlyArray<{ path: RegExp; error: string }> = [
 
 /** Default deny: anything not listed is "no route", so a stolen token cannot
  * map the API. */
-export function denyReason({ path, method, authenticated }: RouteRequest): Denial | null {
+export function denyReason({ path, method, authenticated, move }: RouteRequest): Denial | null {
   // Pairing is the one thing a device does before it has a credential.
   if (method === "POST" && path === "/api/pair") return null;
   // Liveness is open too: the first thing anyone curls when pairing fails, and
@@ -277,6 +300,7 @@ export function denyReason({ path, method, authenticated }: RouteRequest): Denia
   }
 
   if (ALLOWED.some((route) => route.method === method && route.path.test(path))) return null;
+  if (move && isMoveRoute(method, path)) return null;
 
   const explained = EXPLAINED.find((family) => family.path.test(path));
   if (explained) return { status: 403, error: explained.error };

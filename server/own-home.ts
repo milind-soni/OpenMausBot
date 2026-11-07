@@ -27,12 +27,12 @@ export function ownServerOwner(facts: OwnServerFacts, auth: RequestAuth): boolea
   return !email || facts.admins.length === 0 || facts.admins[0] === email;
 }
 
-/** `facts()` is read on every ask, so a sign-in list changed in Settings counts at once. `here()`: this server took a move
- * from its owner (cloud-send-arrived.ts keeps where from), so it is their home and their computers work for it. */
+/** `facts()` is read on every ask, so a sign-in list changed in Settings counts at once. `here()`: this server took a computer's
+ * move from its owner; a phone's move does not count. */
 export function createOwnHome({ facts, dataDir }: { facts(): OwnServerFacts; dataDir: string }) {
   return {
     owner: (auth: RequestAuth): auth is Extract<RequestAuth, { kind: "session" }> => ownServerOwner(facts(), auth),
     takesMove: () => oneOwner(facts()),
-    here: () => oneOwner(facts()) && movedFrom(dataDir) !== null,
+    here: () => { const from = movedFrom(dataDir); return oneOwner(facts()) && from !== null && from.phone !== true; },
   };
 }

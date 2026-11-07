@@ -11,6 +11,8 @@ import { z } from "zod";
 import { EMPTY, MOVE_BOT_PARTS, itemKey } from "../electron/cloud-send-parts.mjs";
 import type { MoveKind } from "../electron/cloud-send-parts.mjs";
 import type { AppTrigger } from "../shared/app-triggers.ts";
+import { chiefScope } from "../shared/bot-owner.ts";
+import { defaultBotPerson } from "../shared/default-bot.ts";
 import { canonicalJson } from "../shared/package-format.ts";
 import { isSkillName } from "../shared/skill-md.ts";
 import type { InstalledPlaybook, InstalledPackageMetadata } from "../shared/wire.ts";
@@ -19,7 +21,7 @@ import type { AppTriggerManager } from "./app-triggers.ts";
 import type { CalendarCall, CalendarCallManager } from "./calendar-calls.ts";
 import type { CloudOwner } from "./cloud-owner-lines.ts";
 import type { CloudSendItem } from "./cloud-send.ts";
-import { retireUnusedStarter, takeArrivingDefaultBot } from "./default-bot.ts";
+import { placeMausBotUnused, retireUnusedStarter, takeArrivingDefaultBot, unusedStarter } from "./default-bot.ts";
 import { watchAsMade } from "./host/default-watch.ts";
 import { IMPORTED_SKILLS_DIR, readImportedSkills, storeImportedSkills, type ImportedSkillInput } from "./imported-skills.ts";
 import type { RequestAuth } from "./request-auth.ts";
@@ -34,7 +36,7 @@ import { restorePaths, validRelative } from "./workspace-backup-paths.ts";
 /** Where both servers name their own data folder when they compare a definition, so one moved keeps its hash. */
 const SHARED_ROOT = "/omb-data";
 const FINISHED = new Set(["completed", "failed", "cancelled", "missed"]);
-const KIND_BODY_MAX = 8 * 1024 * 1024;
+export const KIND_BODY_MAX = 8 * 1024 * 1024;
 const ROUTINE_FIELDS = ["name", "prompt", "target", "botId", "groupId", "runOn", "schedule", "durationMinutes", "timeoutMinutes", "attachments", "continuity", "modelSelection",
   "overlap", "runOnStartup", "sourceThreadId", "resultsThreadId", "createdAt", "checks", "access", "deliver"] as const;
 const CALL_FIELDS = ["name", "description", "botIds", "schedule", "durationMinutes", "attachments", "roomId", "createdAt"] as const;
@@ -265,7 +267,7 @@ const librarySkillSchema = z.object({ text: z.string().max(512 * 1024), entry: z
 
 /** My Cloud sets a bot's move-only fields as they are on this computer: absent ones it clears, its own projects it keeps
  * beside the ones that arrive, and an engine, team or library skill it lacks it leaves out. */
-function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown): void {
+function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown, mainIfUnused: boolean): { mainBot: boolean } | undefined {
   const bot = deps.store.bot(id) ?? refuse(409, "This bot is not on My Cloud yet.");
   const parsed = botFieldsSchema.safeParse(raw);
   if (!parsed.success) refuse(400, "send the bot's fields as this computer holds them");
@@ -276,7 +278,6 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown): void {
   set("pinned", fields.pinned ?? undefined);
   set("sidebarHidden", fields.sidebarHidden ?? undefined);
   set("welcomed", fields.welcomed ?? undefined);
-  set("managedSections", fields.managedSections ? [...new Set(fields.managedSections.filter(Boolean))] : undefined);
   set("fallback", fields.fallback ? fields.fallback.filter((entry) => deps.instanceExists(entry.instanceId)) : undefined);
   if (fields.projects) {
     const arriving = new Set(fields.projects.map((project) => project.id));
@@ -289,15 +290,26 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown): void {
     const library = readSkillLibraryIndex();
     patch.assignedSkills = fields.assignedSkills ? fields.assignedSkills.filter((name) => library[name]) : undefined;
   }
-  if (Object.hasOwn(fields, "chiefOfStaff") && fields.chiefOfStaff !== true) patch.chiefOfStaff = fields.chiefOfStaff ?? undefined;
-  if (fields.chiefOfStaff === true) delete patch.hidden;
+  // On a phone's move only its MausBot can take anything, and only over a place MausBot nobody uses; Chief and sections move
+  // only when the place's Chief is absent, the unused starter, or the arrival itself.
+  const main = !!bot.defaultBot && !defaultBotPerson(bot);
+  const takes = !mainIfUnused || (!!fields.defaultBot && (main || placeMausBotUnused(deps.store, deps.dataDir)));
+  const chief = deps.store.bots.find((held) => held.chiefOfStaff && chiefScope(held) === chiefScope(bot));
+  const chiefMoves = !mainIfUnused || (takes && (!chief || chief.id === id || chief.id === unusedStarter(deps.store, deps.dataDir)?.id));
+  if (chiefMoves) {
+    set("managedSections", fields.managedSections ? [...new Set(fields.managedSections.filter(Boolean))] : undefined);
+    if (Object.hasOwn(fields, "chiefOfStaff") && fields.chiefOfStaff !== true) patch.chiefOfStaff = fields.chiefOfStaff ?? undefined;
+    if (fields.chiefOfStaff === true) delete patch.hidden;
+  }
+  if (mainIfUnused && fields.defaultBot && !takes) { patch.sidebarHidden = undefined; patch.welcomed = undefined; }
   deps.store.patchBot(id, patch);
-  if (fields.chiefOfStaff === true) {
+  if (chiefMoves && fields.chiefOfStaff === true) {
     deps.store.setChiefOfStaff(id);
     if (patch.managedSections) deps.store.patchBot(id, { managedSections: patch.managedSections });
   }
-  if (fields.defaultBot) takeArrivingDefaultBot(deps.store, id);
+  if (fields.defaultBot && takes) takeArrivingDefaultBot(deps.store, id);
   retireUnusedStarter(deps.store, deps.dataDir);
+  return fields.defaultBot ? { mainBot: takes } : undefined;
 }
 
 /** A routine as it arrives: off unless My Cloud switched it on, with its finished runs My Cloud lacks. */
@@ -326,10 +338,10 @@ function adoptRoutine(deps: MoveKindsDeps, raw: unknown, runs: unknown, from: st
   deps.arrived?.();
 }
 
-async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, runs: unknown, from: string, owner: CloudOwner): Promise<void> {
+async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, runs: unknown, from: string, owner: CloudOwner, mainIfUnused: boolean): Promise<{ mainBot: boolean } | void> {
   if (!record(raw) && kind !== "bot") refuse(400, "send the item's record");
   const same = (value: unknown) => record(value) && (value.id === undefined || value.id === id);
-  if (kind === "bot") return applyBotFields(deps, id, raw);
+  if (kind === "bot") return applyBotFields(deps, id, raw, mainIfUnused);
   if (kind === "routine") return adoptRoutine(deps, raw, runs, from, owner);
   if (!same(raw) && kind !== "imported-skill" && kind !== "library-skill") refuse(400, "the record names another item");
   if (kind === "call") {
@@ -376,7 +388,7 @@ async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, 
   }
 }
 
-const putSchema = z.object({ v: z.literal(1), key: z.string().max(200), dataDir: z.string().min(1).max(4096), record: z.unknown(), runs: z.array(z.unknown()).max(2_000).optional() });
+const putSchema = z.object({ v: z.literal(1), key: z.string().max(200), dataDir: z.string().min(1).max(4096), record: z.unknown(), runs: z.array(z.unknown()).max(2_000).optional(), mainIfUnused: z.boolean().optional() });
 
 /** False when the path is not this route. */
 export async function moveKindsRoute(deps: MoveKindsDeps, { req, res, path, method, url, auth, json, readBody }: RouteContext): Promise<boolean> {
@@ -396,8 +408,8 @@ export async function moveKindsRoute(deps: MoveKindsDeps, { req, res, path, meth
       const body = putSchema.safeParse(await readBody(req, KIND_BODY_MAX));
       const key = body.success ? parseKey(body.data.key) : null;
       if (!body.success || !key) { json(res, 400, { error: "send { v: 1, key, dataDir, record }" }); return true; }
-      await adopt(deps, key.kind, key.id, body.data.record, body.data.runs, body.data.dataDir, owner);
-      json(res, 200, { v: 1, ok: true });
+      const adopted = await adopt(deps, key.kind, key.id, body.data.record, body.data.runs, body.data.dataDir, owner, body.data.mainIfUnused === true);
+      json(res, 200, { v: 1, ok: true, ...adopted });
       return true;
     }
     if (method === "DELETE") {

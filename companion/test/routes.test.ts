@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { denyReason, isBrowserControlAccess, isCloudDesktopAccess, isCompanionNotice } from "../src/routes.ts";
+import { denyReason, isBrowserControlAccess, isCloudDesktopAccess, isCompanionNotice, isMoveRoute } from "../src/routes.ts";
 
 const ask = (method: string, path: string, authenticated = true) =>
   denyReason({ method, path, authenticated });
@@ -38,6 +38,9 @@ describe("what the app may do", () => {
     ["POST", "/api/instances/claude.work/claude-update"],
     ["GET", "/api/team-map"],
     ["GET", "/api/companion/endpoints"],
+    ["GET", "/api/companion/move"],
+    ["POST", "/api/companion/move"],
+    ["DELETE", "/api/companion/move"],
     ["GET", "/api/bots"],
     ["POST", "/api/bots"],
     ["PATCH", "/api/bots/bot_123"],
@@ -384,5 +387,36 @@ describe("browser control", () => {
     expect(allowed("GET", "/api/bots/b1/browser/live/../../config")).toBe(false);
     expect(allowed("GET", "/api/bots/b1/browser/live?x=1")).toBe(false);
     expect(isBrowserControlAccess("GET", "/api/bots/b1/browser/live/extra")).toBe(false);
+  });
+});
+
+describe("moving bots in", () => {
+  const MOVE_ONLY: Array<[string, string]> = [
+    ["GET", "/api/bots/b1/skills"], ["POST", "/api/bots/b1/skill-template"], ["PUT", "/api/cloud-send/kind"],
+    ["POST", "/api/cloud-send/chats"], ["POST", "/api/cloud-send/chats/verify"], ["POST", "/api/cloud-send/chats/attachments"],
+    ["POST", "/api/cloud-send/chats/attachment/3f2a-map.png"], ["POST", "/api/cloud-send/memory"], ["POST", "/api/cloud-send/files"],
+    ["POST", "/api/cloud-send/arrived"], ["POST", "/api/phone-move/key"],
+  ];
+
+  it("opens the move routes only while the computer's owner allows the move", () => {
+    for (const [method, path] of MOVE_ONLY) {
+      expect(denyReason({ method, path, authenticated: true })).toEqual({ status: 404, error: `no route: ${method} ${path}` });
+      expect(denyReason({ method, path, authenticated: true, move: true })).toBeNull();
+      expect(isMoveRoute(method, path)).toBe(true);
+    }
+    for (const [method, path] of [["POST", "/api/bots"], ["PATCH", "/api/bots/b1"]]) {
+      expect(denyReason({ method, path, authenticated: true })).toBeNull();
+      expect(isMoveRoute(method, path)).toBe(true);
+    }
+    expect(denyReason({ method: "POST", path: "/api/cloud-send/chats", authenticated: false, move: true })?.status).toBe(401);
+  });
+
+  it("keeps every other cloud-send, settings and team route closed even under a grant", () => {
+    for (const [method, path] of [["GET", "/api/cloud-send/manifest"], ["POST", "/api/cloud-send/verify-secrets"], ["POST", "/api/cloud-send/chats/settings"],
+      ["POST", "/api/cloud-send/chats/owner"], ["DELETE", "/api/cloud-send/kind"], ["GET", "/api/cloud-send/files"], ["POST", "/api/cloud-send/home"],
+      ["PUT", "/api/config"], ["POST", "/api/teams/import"], ["PUT", "/api/bots/b1/memory/file"]]) {
+      expect(denyReason({ method, path, authenticated: true, move: true })).not.toBeNull();
+      expect(isMoveRoute(method, path)).toBe(false);
+    }
   });
 });

@@ -11,6 +11,7 @@ import { createAddressWatcher } from "./advertise-watch.ts";
 import { createControlServer, hostCandidates, initialControlToken } from "./control.ts";
 import { createConnectedDeviceTracker } from "./connected-devices.ts";
 import { DeviceRegistry } from "./devices.ts";
+import { MoveGrants } from "./move-grants.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
 import { lanAddresses, refreshTailnetName, tailnetName, tailscaleAddress } from "./listener.ts";
 import {
@@ -143,6 +144,7 @@ const service = (): ServiceInfo => ({
 });
 
 const connectedDevices = createConnectedDeviceTracker();
+const moves = new MoveGrants();
 const proxy = createProxyHandler({
     harnessPort: HARNESS_PORT,
     mutationToken: parentPort ? () => mutationToken : undefined,
@@ -153,6 +155,13 @@ const proxy = createProxyHandler({
     hosts: () => hostCandidates(),
     endpoints: () => companionEndpointCandidates(COMPANION_PORT, undefined, undefined, hostedUrl),
     connected: connectedDevices.open,
+    moves,
+    askOwner: parentPort
+      ? (ask) => {
+          parentPort.postMessage({ type: "openmausbot:companion-move-ask", ...ask });
+          return true;
+        }
+      : undefined,
     e2eDescriptor: (deviceId) => e2e.descriptor(deviceId),
     e2ePaired: (context, deviceId) => e2e.paired(context, deviceId),
   });
@@ -209,6 +218,7 @@ devices.onDropped((deviceId) => {
 
 const control = createControlServer({
   devices,
+  moves,
   controlToken: () => controlToken,
   companionPort: COMPANION_PORT,
   secretPublicKey: () => SECRET_PUBLIC_KEY,

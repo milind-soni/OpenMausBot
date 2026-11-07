@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { listBotFiles, movedFilePath, moveFilesRoute } from "./cloud-send-files.ts";
+import { listBotFiles, movedFilePath, moveFilesRoute, REPEATED_QUERY } from "./cloud-send-files.ts";
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
@@ -36,14 +36,25 @@ describe("My Cloud takes a file", () => {
   const data = mkdtempSync(join(tmpdir(), "omb-files-"));
   const owner = { person: "p_owner", name: "Amit" };
   const deps = (who: typeof owner | null = owner) => ({ dataDir: data, bots: () => [{ id: "b1" }], owner: () => who });
-  async function send(query: Record<string, string | number>, bytes: string, who: typeof owner | null = owner) {
+  async function send(query: Record<string, string | number> | string, bytes: string, who: typeof owner | null = owner, method = "POST") {
     let answered: { status: number; body: any } | undefined;
-    const url = new URL(`http://127.0.0.1/api/cloud-send/files?${new URLSearchParams(Object.fromEntries(Object.entries(query).map(([k, v]) => [k, String(v)])))}`);
-    await moveFilesRoute(deps(who), { path: "/api/cloud-send/files", method: "POST", url, auth: {} as never, req: Readable.from([Buffer.from(bytes)]) as never,
+    const search = typeof query === "string" ? query : new URLSearchParams(Object.fromEntries(Object.entries(query).map(([k, v]) => [k, String(v)])));
+    const url = new URL(`http://127.0.0.1/api/cloud-send/files?${search}`);
+    await moveFilesRoute(deps(who), { path: "/api/cloud-send/files", method, url, auth: {} as never, req: Readable.from([Buffer.from(bytes)]) as never,
       res: { setHeader() {} } as never, json: ((_res: unknown, status: number, value: unknown) => { answered = { status, body: value }; }) as never, readBody: (async () => null) as never });
     return answered!;
   }
   const file = (path: string, text: string, mode = "new", extra: Record<string, string> = {}) => ({ path, size: Buffer.byteLength(text), sha256: sha(text), mode, ...extra });
+
+  it("refuses a query that names a key twice, so what it writes is never other than what was checked", async () => {
+    const text = "twice";
+    const f = file("workspaces/b1/first.md", text);
+    const twice = `${new URLSearchParams({ ...f, size: String(f.size), offset: "0" })}&path=${encodeURIComponent("workspaces/b1/second.md")}`;
+    expect(await send(twice, text)).toEqual({ status: 400, body: REPEATED_QUERY });
+    expect(existsSync(join(data, "workspaces", "b1", "first.md"))).toBe(false);
+    expect(existsSync(join(data, "workspaces", "b1", "second.md"))).toBe(false);
+    expect(await send(twice, "", owner, "GET")).toEqual({ status: 400, body: REPEATED_QUERY });
+  });
 
   it("in parts, from where its copy ends, and only whole and as sent", async () => {
     const text = "first part|second part";

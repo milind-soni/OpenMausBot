@@ -7,7 +7,7 @@ import { MOVE_BOT_FIELDS, moveKindsRoute, type MoveKindsDeps } from "./cloud-sen
 import { chiefLevel, readTeamRolesWith } from "./chief-level.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
-import { defaultBotPatchRefusal, ensureDefaultBot } from "./default-bot.ts";
+import { defaultBotPatchRefusal, ensureDefaultBot, placeMausBotUnused, unusedStarter } from "./default-bot.ts";
 import * as mdb from "./message-db.ts";
 import { Store, type BotRecord } from "./store.ts";
 import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
@@ -250,17 +250,36 @@ describe("MausBot, every person's helper", () => {
     expect(tools(admin)).toContain("create_bot");
   });
 
+  it("counts the place's MausBot unused only while it is the fresh starter nobody wrote to", () => {
+    const fresh = new Store(selection);
+    fresh.seedIfEmpty();
+    const seed = boot(fresh)!;
+    expect(placeMausBotUnused(fresh, DATA_DIR)).toBe(true);
+    expect(unusedStarter(fresh, DATA_DIR)?.id).toBe(seed.id);
+    fresh.appendMessage(seed.threadId, { role: "user", kind: "text", text: "hi" });
+    expect(placeMausBotUnused(fresh, DATA_DIR)).toBe(false);
+  });
+
+  it("counts a MausBot with its own soul as used", () => {
+    const other = new Store(selection);
+    other.seedIfEmpty();
+    const second = boot(other)!;
+    other.patchBot(second.id, { soul: "Mine" });
+    expect(placeMausBotUnused(other, DATA_DIR)).toBe(false);
+  });
+
   describe("moves", () => {
     const OWNER = { person: "p_owner0000000000000000", name: "Amit" };
     const deps = (store: Store): MoveKindsDeps => ({ dataDir: DATA_DIR, store, routines: () => null, calls: () => null, webhooks: () => null, appEvents: () => null,
       claudeCodeSkills: () => [], instanceExists: () => true, owner: () => OWNER, ownRoutine: () => {} } as unknown as MoveKindsDeps);
-    async function arrive(store: Store, id: string, record: Record<string, unknown>) {
-      let status = 0;
+    async function arriveWith(store: Store, id: string, record: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+      let answered: { status: number; body: unknown } = { status: 0, body: undefined };
       await moveKindsRoute(deps(store), { path: "/api/cloud-send/kind", method: "PUT", url: new URL("http://127.0.0.1/api/cloud-send/kind"), auth: {} as never, req: {} as never,
-        res: { setHeader() {} } as never, json: ((_res: unknown, code: number) => { status = code; }) as never,
-        readBody: (async () => ({ v: 1, key: `bot:${id}`, dataDir: "/Users/amit/.openmausbot", record })) as never });
-      return status;
+        res: { setHeader() {} } as never, json: ((_res: unknown, code: number, body: unknown) => { answered = { status: code, body }; }) as never,
+        readBody: (async () => ({ v: 1, key: `bot:${id}`, dataDir: "/Users/amit/.openmausbot", record, ...extra })) as never });
+      return answered;
     }
+    const arrive = async (store: Store, id: string, record: Record<string, unknown>) => (await arriveWith(store, id, record)).status;
     const fields = (bot: Record<string, unknown>) => Object.fromEntries(MOVE_BOT_FIELDS.map((name) => [name, bot[name] ?? null]));
 
     it("leaves My Cloud exactly one MausBot when this computer's arrives: My Cloud's unused one is archived, whatever order the Chief comes in", async () => {
@@ -322,6 +341,102 @@ describe("MausBot, every person's helper", () => {
       boot(home);
       expect(home.bots.map((bot) => bot.id)).toEqual([mausOnCloud.id]);
       expect(placeMausBots(home)[0]).toMatchObject({ name: "Jarvis", sidebarHidden: true });
+    });
+
+    describe("mainIfUnused", () => {
+      const phoneMaus = { defaultBot: {}, chiefOfStaff: true, managedSections: ["phone-section"] };
+      const place = () => { const cloud = new Store(selection); cloud.seedIfEmpty(); const seed = boot(cloud)!; return { cloud, seed, arriving: cloud.createBot({ name: "MausBot" }, { id: "pocket-maus-000001", seedMessages: false }) }; };
+
+      it("a phone's MausBot becomes the main bot over an unused starter, and says so", async () => {
+        const { cloud, seed, arriving } = place();
+        expect(await arriveWith(cloud, arriving.id, phoneMaus, { mainIfUnused: true })).toEqual({ status: 200, body: { v: 1, ok: true, mainBot: true } });
+        expect(cloud.bot(arriving.id)?.defaultBot).toEqual({});
+        expect(cloud.bot(arriving.id)?.managedSections).toEqual(["phone-section"]);
+        expect(cloud.bot(seed.id)).toMatchObject({ hidden: true });
+        expect(cloud.bot(seed.id)?.defaultBot).toBeUndefined();
+        expect(await arriveWith(cloud, arriving.id, phoneMaus, { mainIfUnused: true })).toEqual({ status: 200, body: { v: 1, ok: true, mainBot: true } });
+        expect(cloud.bot(arriving.id)).toMatchObject({ defaultBot: {}, chiefOfStaff: true });
+      });
+
+      it("a phone's MausBot arrives beside a MausBot someone uses, which stays main and Chief with its sections", async () => {
+        const { cloud, seed, arriving } = place();
+        cloud.patchBot(seed.id, { managedSections: ["mine"] });
+        cloud.appendMessage(seed.threadId, { role: "user", kind: "text", text: "Hi" });
+        expect(await arriveWith(cloud, arriving.id, phoneMaus, { mainIfUnused: true })).toEqual({ status: 200, body: { v: 1, ok: true, mainBot: false } });
+        expect(cloud.bot(seed.id)).toMatchObject({ defaultBot: {}, chiefOfStaff: true, managedSections: ["mine"] });
+        expect(cloud.bot(seed.id)?.hidden).toBeFalsy();
+        expect(cloud.bot(arriving.id)?.defaultBot).toBeUndefined();
+        expect(cloud.bot(arriving.id)?.chiefOfStaff).toBeFalsy();
+        expect(cloud.bot(arriving.id)?.managedSections).toBeUndefined();
+      });
+
+      it("a phone's Chief that is not MausBot takes nothing from a MausBot someone uses", async () => {
+        const { cloud, seed } = place();
+        cloud.patchBot(seed.id, { managedSections: ["mine"] });
+        cloud.appendMessage(seed.threadId, { role: "user", kind: "text", text: "Hi" });
+        const planner = cloud.createBot({ name: "Planner" }, { id: "pocket-planner-01", seedMessages: false });
+        expect(await arriveWith(cloud, planner.id, { chiefOfStaff: true, managedSections: ["theirs"] }, { mainIfUnused: true })).toMatchObject({ status: 200 });
+        expect(cloud.bot(seed.id)).toMatchObject({ chiefOfStaff: true, managedSections: ["mine"] });
+        expect(cloud.bot(planner.id)?.chiefOfStaff).toBeFalsy();
+        expect(cloud.bot(planner.id)?.managedSections).toBeUndefined();
+      });
+
+      it("a phone's MausBot that arrives beside keeps no hidden or welcomed mark, and a resend changes nothing", async () => {
+        const { cloud, seed, arriving } = place();
+        cloud.appendMessage(seed.threadId, { role: "user", kind: "text", text: "Hi" });
+        const record = { ...phoneMaus, sidebarHidden: true, welcomed: true };
+        for (let again = 0; again < 2; again++) {
+          expect(await arriveWith(cloud, arriving.id, record, { mainIfUnused: true })).toEqual({ status: 200, body: { v: 1, ok: true, mainBot: false } });
+          expect(cloud.bot(arriving.id)?.sidebarHidden).toBeUndefined();
+          expect(cloud.bot(arriving.id)?.welcomed).toBeUndefined();
+          expect(cloud.bot(arriving.id)?.defaultBot).toBeUndefined();
+          expect(cloud.bot(seed.id)).toMatchObject({ defaultBot: {}, chiefOfStaff: true });
+        }
+      });
+
+      it("a phone's MausBot takes main over an unused starter but not Chief from a Chief someone uses", async () => {
+        const { cloud, seed, arriving } = place();
+        const jarvis = cloud.createBot({ name: "Jarvis" }, { id: "desk-jarvis-0001", seedMessages: false });
+        cloud.setChiefOfStaff(jarvis.id);
+        cloud.patchBot(jarvis.id, { managedSections: ["mine"] });
+        for (let again = 0; again < 2; again++) {
+          expect(await arriveWith(cloud, arriving.id, phoneMaus, { mainIfUnused: true })).toEqual({ status: 200, body: { v: 1, ok: true, mainBot: true } });
+          expect(cloud.bot(arriving.id)?.defaultBot).toEqual({});
+          expect(cloud.bot(arriving.id)?.chiefOfStaff).toBeFalsy();
+          expect(cloud.bot(arriving.id)?.managedSections).toBeUndefined();
+          expect(cloud.bot(jarvis.id)).toMatchObject({ chiefOfStaff: true, managedSections: ["mine"] });
+        }
+        expect(cloud.bot(seed.id)?.defaultBot).toBeUndefined();
+      });
+
+      it("a department Chief made after the unused starter does not stop a phone's MausBot taking the place's Chief", async () => {
+        const { cloud, seed, arriving } = place();
+        cloud.createBot({ name: "Sales" }, { id: "desk-sales-000001", seedMessages: false });
+        cloud.patchBot("desk-sales-000001", { section: "Sales" });
+        cloud.setChiefOfStaff("desk-sales-000001");
+        expect(await arriveWith(cloud, arriving.id, phoneMaus, { mainIfUnused: true })).toEqual({ status: 200, body: { v: 1, ok: true, mainBot: true } });
+        expect(cloud.bot(arriving.id)).toMatchObject({ defaultBot: {}, chiefOfStaff: true, managedSections: ["phone-section"] });
+        expect(cloud.bot(seed.id)).toMatchObject({ hidden: true });
+        expect(cloud.bot(seed.id)?.chiefOfStaff).toBeFalsy();
+        expect(cloud.bot("desk-sales-000001")?.chiefOfStaff).toBe(true);
+      });
+
+      it("a hidden place Chief someone uses keeps Chief and its sections when a phone's MausBot takes main", async () => {
+        const { cloud, arriving } = place();
+        const jarvis = cloud.createBot({ name: "Jarvis" }, { id: "desk-jarvis-0002", seedMessages: false });
+        cloud.setChiefOfStaff(jarvis.id);
+        cloud.patchBot(jarvis.id, { managedSections: ["mine"], hidden: true });
+        expect(await arriveWith(cloud, arriving.id, phoneMaus, { mainIfUnused: true })).toMatchObject({ body: { mainBot: true } });
+        expect(cloud.bot(jarvis.id)).toMatchObject({ chiefOfStaff: true, managedSections: ["mine"] });
+        expect(cloud.bot(arriving.id)?.chiefOfStaff).toBeFalsy();
+      });
+
+      it("without mainIfUnused, an arriving MausBot takes over as before", async () => {
+        const { cloud, seed, arriving } = place();
+        cloud.appendMessage(seed.threadId, { role: "user", kind: "text", text: "Hi" });
+        expect(await arriveWith(cloud, arriving.id, phoneMaus)).toEqual({ status: 200, body: { v: 1, ok: true, mainBot: true } });
+        expect(cloud.bot(arriving.id)?.defaultBot).toEqual({});
+      });
     });
   });
 });
