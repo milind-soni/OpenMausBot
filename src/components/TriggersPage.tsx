@@ -61,6 +61,12 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
     for (const run of open?.runs ?? []) if (isRoutineProblemRun(run) && !run.seenAt) dispatch({ type: "markRoutineRunSeen", runId: run.id });
   }, [open, dispatch]);
 
+  // The server's sweep marks every run the viewer may see, webhooks included, so a paired client, which lists no webhooks, marks only what it lists.
+  const markAllSeen = () => {
+    if (!routinesOnly) return dispatch({ type: "markAllRoutineRunsSeen" });
+    for (const run of all.flatMap((automation) => automation.runs)) if (isRoutineProblemRun(run) && !run.seenAt) dispatch({ type: "markRoutineRunSeen", runId: run.id });
+  };
+
   const macInset = capabilities.windowChrome === "mac-inset";
   const windowDragStyle = macInset ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
   const windowNoDragStyle = macInset ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
@@ -102,7 +108,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
               {unseenRuns > 0 && (
                 <div data-automations-unseen="" className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1 text-[13px] text-ink-secondary">
                   <span>{unseenProblemRunsLabel(unseenRuns)}</span>
-                  <button type="button" onClick={() => dispatch({ type: "markAllRoutineRunsSeen" })} className="font-medium text-accent-text underline-offset-2 hover:underline">{t("routines.markAllSeen")}</button>
+                  <button type="button" onClick={markAllSeen} className="font-medium text-accent-text underline-offset-2 hover:underline">{t("routines.markAllSeen")}</button>
                 </div>
               )}
               {all.length === 0 && state.routinesLoadState !== "loading" && state.hydrated ? (
