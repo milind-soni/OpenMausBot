@@ -1721,6 +1721,8 @@
   "chat.stop": "Dừng",
   "chat.stopTurn": "Dừng lượt này",
   "chat.computer": "Màn hình của bot",
+  "chat.watchScreen": "Xem",
+  "chat.watchScreenHint": "Xem bot đang làm gì trên màn hình của nó",
   "chat.advancedOnly": "Ở chế độ Nâng cao",
   "chat.inspector": "Trình kiểm tra",
   "chat.inspectorHint": "Trình kiểm tra — sự kiện runtime và giao thức thô cho luồng này",

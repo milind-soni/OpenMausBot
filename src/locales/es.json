@@ -2016,6 +2016,8 @@
   "chat.stop": "Detener",
   "chat.stopTurn": "Detener este turno",
   "chat.computer": "Pantalla del bot",
+  "chat.watchScreen": "Ver",
+  "chat.watchScreenHint": "Ver lo que hace el bot en su pantalla",
   "chat.advancedOnly": "En el modo avanzado",
   "chat.inspector": "Inspector",
   "chat.inspectorHint": "Inspector: eventos de ejecución y protocolo en bruto de esta conversación",

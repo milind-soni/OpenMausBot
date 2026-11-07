@@ -196,6 +196,10 @@
             "type": "string",
             "pattern": "^[a-z0-9]{20,63}$",
             "description": "The page's id, the first part of its link."
+          },
+          "live": {
+            "type": "boolean",
+            "description": "True republishes it when its folder changes; open copies reload."
           }
         },
         "required": [

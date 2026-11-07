@@ -176,11 +176,17 @@ export function requestOrigin(req: IncomingMessage): string | null {
   return `${proto}://${host.toLowerCase()}`;
 }
 
+/** Every header a reverse proxy uses to name its client, so one that sets only X-Real-IP is still not loopback. */
+const PROXY_HEADERS = [
+  "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "forwarded",
+  "x-real-ip", "cf-connecting-ip", "true-client-ip", "x-client-ip",
+] as const;
+
 /** Security: loopback trust rests on the Host header, which any client writes, so a request is remote (never the owner)
  * when it came through a proxy, over the IPC socket, or from another machine's address, as on a LAN listener. */
 export function isProxied(req: IncomingMessage): boolean {
-  const h = req.headers;
-  return ipcPeer(req) || networkPeer(req) || Boolean(h["x-forwarded-for"] || h["x-forwarded-proto"] || h["x-forwarded-host"] || h["forwarded"]);
+  if (ipcPeer(req) || networkPeer(req)) return true;
+  return PROXY_HEADERS.some((name) => req.headers[name] !== undefined);
 }
 
 const LOOPBACK_PEER = /^(?:127\.|::1$|::ffff:127\.)/;

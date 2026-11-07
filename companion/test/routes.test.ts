@@ -116,6 +116,8 @@ describe("what the app may do", () => {
     ["POST", "/api/routines/routine_1/run"],
     ["POST", "/api/routine-runs/run_1/cancel"],
     ["POST", "/api/routine-runs/run_1/seen"],
+    // The stopped turn's "Continue when your limit resets" makes a one-time automation, like POST /api/routines.
+    ["POST", "/api/limit-resets/continue"],
     ["GET", "/api/connectors/catalog"],
     ["GET", "/api/connectors/connected"],
     ["GET", "/api/connectors"],
@@ -127,6 +129,7 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/connector-cards/msg_2/dismiss"],
     ["POST", "/api/bots/bot_123/secret-cards/msg_2/resume"],
     ["POST", "/api/bots/bot_123/secret-cards/msg_2/dismiss"],
+    ["POST", "/api/bots/bot_123/secret-cards/msg_2/save"],
     ["POST", "/api/bots/bot_123/sign-in-cards/msg_3/done"],
     ["POST", "/api/bots/bot_123/sign-in-cards/msg_3/cancel"],
   ];
@@ -268,6 +271,13 @@ describe("what it may not", () => {
     expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/provide/extra")).toBe(false);
   });
 
+  it("allows a typed custom secret only through the exact save verb", () => {
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/save")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/secret-cards/message_1/save")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/save/extra")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/saved")).toBe(false);
+  });
+
   it("allows a path only for the methods it was allowed for", () => {
     expect(allowed("GET", "/api/bots")).toBe(true);
     expect(allowed("DELETE", "/api/bots/bot_123")).toBe(false);
@@ -304,6 +314,10 @@ describe("what it may not", () => {
     expect(allowed("POST", "/api/bots/bot_123/sign-in-cards/msg_3/resume")).toBe(false);
     expect(allowed("GET", "/api/bots/bot_123/sign-in-cards/msg_3/done")).toBe(false);
     expect(allowed("PATCH", "/api/groups/room-1")).toBe(false);
+    expect(allowed("GET", "/api/limit-resets/continue")).toBe(false);
+    expect(allowed("DELETE", "/api/limit-resets/continue")).toBe(false);
+    expect(allowed("GET", "/api/limit-resets")).toBe(false);
+    expect(allowed("POST", "/api/limit-resets/after-reset")).toBe(false);
   });
 
   it("lets a phone update Claude Code and change nothing else about engines", () => {

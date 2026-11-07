@@ -77,11 +77,12 @@ export function deciderSharedKeyUsable(cfg: AppConfig): boolean {
   return Boolean(sharedOpenRouterKey(cfg));
 }
 
-/** Never a key, nor a base URL (operator settings with no UI). `provider` is the one in use; `keySource` and
- * `sharedKey` are OpenRouter's, while it is in use. Which own keys are on file is `describeHelpers`'s. */
+/** Never a key, nor a base URL (operator settings with no UI). `provider` is the one in use, else the one chosen
+ * (so Settings shows its key field); `keySource` and `sharedKey` are OpenRouter's, while it is in use. Which own
+ * keys are on file is `describeHelpers`'s. */
 export function describeDecider(cfg: AppConfig) {
   const account = deciderAccount(cfg);
-  const provider = account?.provider ?? "jev";
+  const provider = account?.provider ?? draftProvider(cfg);
   return {
     provider,
     ...(provider === "openrouter" ? { model: deciderModel(cfg), api: deciderApi(cfg) } : {}),

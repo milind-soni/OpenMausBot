@@ -12,6 +12,7 @@ import { closeMessageDb,
   insertMessage,
   insertNotificationLog,
   lastRowAt,
+  liveAppRows,
   latestPersonLineAts,
   logNotification,
   openRescueMessages,
@@ -62,6 +63,16 @@ describe("message-db", () => {
     const thread = readThread("t1", legacy("t1"));
     expect(thread.messages.map((m) => m.text)).toEqual(["hello, edited", "world"]);
     expect(thread.activeLeafId).toBe("m2");
+  });
+
+  it("lists the live pages, newest first, up to the limit", () => {
+    const app = (id: string, live?: true) => msg(id, "", { role: "bot", kind: "app", app: { title: "Sales", doc: `d-${id}`, rev: 0, ...(live ? { live } : {}) } } as Partial<Message>);
+    insertMessage("t1", app("a1", true));
+    insertMessage("t1", app("a2"));
+    insertMessage("t2", app("a3", true));
+    insertMessage("t2", msg("m1", "{\"app\":{\"live\":true}}"));
+    expect(liveAppRows()).toEqual([{ threadId: "t2", messageId: "a3" }, { threadId: "t1", messageId: "a1" }]);
+    expect(liveAppRows(1)).toEqual([{ threadId: "t2", messageId: "a3" }]);
   });
 
   it("finds the first-reply rescue rows that never settled or ended", () => {

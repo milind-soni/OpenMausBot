@@ -46,6 +46,33 @@ describe("copyText", () => {
     expect(await copyText("x")).toBe("failed");
   });
 
+  const legacyDocument = (execCommand: () => boolean) => {
+    const focus = vi.fn();
+    vi.stubGlobal("document", {
+      body: { appendChild() {} },
+      activeElement: { focus },
+      createElement: () => ({ style: {}, setAttribute() {}, select() {}, setSelectionRange() {}, remove() {} }),
+      execCommand: vi.fn(execCommand),
+    });
+    return { focus, execCommand: (document as unknown as { execCommand: ReturnType<typeof vi.fn> }).execCommand };
+  };
+
+  it("copies with the legacy path when there is no clipboard and no bridge (phone on plain LAN http)", async () => {
+    setEnv(undefined);
+    const legacy = legacyDocument(() => true);
+    expect(await copyText("hello")).toBe("copied");
+    expect(legacy.execCommand).toHaveBeenCalledWith("copy");
+    expect(legacy.focus).toHaveBeenCalled();
+  });
+
+  it("prefers the desktop bridge over the legacy path", async () => {
+    const bridge = vi.fn(async () => true);
+    setEnv(undefined, bridge);
+    const legacy = legacyDocument(() => true);
+    expect(await copyText("hello")).toBe("copied");
+    expect(legacy.execCommand).not.toHaveBeenCalled();
+  });
+
   it("treats empty or blank text as empty and writes nothing", async () => {
     const writeText = vi.fn(async () => {});
     const bridge = vi.fn(async () => true);

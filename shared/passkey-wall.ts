@@ -18,7 +18,8 @@ export function passkeyWallAt(address: string): PasskeyWall | null {
 const GOOGLE_ADDRESS = /https:\/\/accounts\.google\.com(\/[^\s"'?#)]*)/gu;
 /** Google's wording on its passkey step, in English, Brazilian Portuguese and Spanish. */
 const GOOGLE_WORDS = /\buse your passkey\b|\busing your passkey\b|verifying it(?:'|’)s you[\s\S]{0,400}\bpasskey\b|\buse sua chave de acesso\b|\busando sua chave de acesso\b|\busa tu llave de acceso\b|\busando tu llave de acceso\b/iu;
-const GOOGLE_PAGE = /\bGoogle\b|accounts\.google\.com/u;
+/** A Google page, by its name or its sign-in address. */
+export const GOOGLE_PAGE = /\bGoogle\b|accounts\.google\.com/u;
 /** "your", not "a": a passkey offered as one option among others is no wall. */
 const MICROSOFT_WORDS = /\bsign in with your passkey\b|\buse your passkey\b|\bsign in with your face, fingerprint, PIN,? or security key\b/iu;
 const MICROSOFT_PAGE = /login\.(?:microsoftonline|live)\.com|\bMicrosoft\b/u;

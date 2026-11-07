@@ -10,7 +10,7 @@ import type { Routine } from "@/lib/routines";
 import { dayName, scheduleLabel } from "@/lib/schedule-label";
 import { intlLocale, t } from "@/lib/i18n";
 import { api, ApiError, useStore, type Bot } from "@/state/store";
-import { releaseComputerPanelFocus, useComputerPanelEntry } from "@/lib/computer-panel-focus";
+import { releaseComputerPanelFocus, takeComputerPanelBrowserView, useComputerPanelEntry } from "@/lib/computer-panel-focus";
 import { RoutineEditor } from "./RoutinesPage";
 import { BrowserPanel, type BrowserSignIn } from "./BrowserPanel";
 import { SignInBanner } from "./SignInRequestCard";
@@ -76,7 +76,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   const previewBusy = useRef(bot.busy);
   useEffect(() => { previewBusy.current = bot.busy; }, [bot.busy]);
   const [creatingRoutine, setCreatingRoutine] = useState(false);
-  const [view, setView] = useState<"desktop" | "browser">("desktop");
+  const [view, setView] = useState<"desktop" | "browser">(() => takeComputerPanelBrowserView(bot.id) ? "browser" : "desktop");
   const [signIn, setSignIn] = useState<BrowserSignIn>();
   const help = state.computerControl[bot.id]?.help ?? null;
   const asker = help ? state.bots.find((candidate) => candidate.id === help.botId)?.name ?? bot.name : bot.name;

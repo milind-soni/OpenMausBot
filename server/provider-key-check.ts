@@ -1,4 +1,6 @@
 // OpenRouter's catalog is public, so /key proves the key there; elsewhere /models proves only catalog access. Keys go only over TLS (or loopback).
+import { isIP } from "node:net";
+
 export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "meta";
 
 export type ProviderKeyVerdict =
@@ -26,7 +28,7 @@ const MAX_MODELS = 5;
 /** A URL hostname on this machine: the only place a key may go over plain http. */
 export function isLoopback(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "");
-  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.startsWith("127.");
+  return host === "localhost" || host === "::1" || (isIP(host) === 4 && host.startsWith("127."));
 }
 
 export function providerBaseUrl(provider: ProviderKeyKind, base?: string | null): string {

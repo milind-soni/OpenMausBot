@@ -1014,6 +1014,8 @@
   "chat.stop": "Стоп",
   "chat.stopTurn": "Зупинити цей запит",
   "chat.computer": "Екран бота",
+  "chat.watchScreen": "Дивитися",
+  "chat.watchScreenHint": "Дивитися, що бот робить на своєму екрані",
   "chat.inspector": "Інспектор",
   "chat.inspectorHint": "Інспектор — події рантайму і сирий протокол цієї гілки",
   "chat.conversationWith": "Розмова з {name}",

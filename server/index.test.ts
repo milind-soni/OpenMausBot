@@ -13938,6 +13938,32 @@ describe("message pages", () => {
     })).status).toBe(404);
   });
 
+  it("downloads a linked file over the 25 MB preview limit, but not an inline image that big or a file over 500 MB", async () => {
+    const threadId = "test-linked-file-room-thread";
+    const linkedFile = join(home, ".openmausbot", "workspaces", "test-bot-a", "phone report.md");
+    const linkedImage = join(home, ".openmausbot", "workspaces", "test-bot-a", "preview.png");
+    const [fileBytes, imageBytes] = [readFileSync(linkedFile), readFileSync(linkedImage)];
+    const reel = 26 * 1024 * 1024;
+    try {
+      truncateSync(linkedFile, reel);
+      const download = await fetch(`${BASE}/api/threads/${threadId}/messages/linked-file-message/file`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: linkedFile }),
+      });
+      expect(download.status).toBe(200);
+      expect(download.headers.get("content-length")).toBe(String(reel));
+      await download.body?.cancel();
+
+      truncateSync(linkedImage, reel);
+      expect((await fetch(`${BASE}/api/threads/${threadId}/messages/linked-image-message/file?preview=1&ref=0`)).status).toBe(413);
+
+      truncateSync(linkedFile, 500 * 1024 * 1024 + 1);
+      expect((await api("POST", `/api/threads/${threadId}/messages/linked-file-message/file`, { path: linkedFile })).status).toBe(413);
+    } finally {
+      writeFileSync(linkedFile, fileBytes);
+      writeFileSync(linkedImage, imageBytes);
+    }
+  });
+
   it("downloads a structured generated image from an image-only reply", async () => {
     const image = join(home, ".openmausbot", "attachments", "generated.png");
     const response = await fetch(`${BASE}/api/threads/test-linked-file-room-thread/messages/generated-image-message/file`, {

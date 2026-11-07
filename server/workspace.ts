@@ -58,6 +58,12 @@ Las notas más largas van en memory/<tema>.md y se leen cuando es necesario.
 세션을 시작할 때마다 불러와요 — 이 파일은 짧고 잘 정리된 상태로 유지하세요.
 더 긴 메모는 memory/<주제>.md 파일에 두고, 필요할 때 읽어요.
 `,
+  "zh-tw": `# 記憶
+
+這個機器人在不同任務之間保留的長期筆記。前 ${MEMORY_MAX_LINES} 行
+會在每次工作階段開始時載入 — 請讓這個檔案保持簡短、整理好。
+較長的筆記放在 memory/<主題>.md 檔案裡，需要時再讀取。
+`,
 };
 
 const MEMORY_SEED_VALUES = new Set(Object.values(MEMORY_SEEDS));
@@ -71,6 +77,7 @@ function memorySeedFor(language?: string): string {
   if (normalized === "pt" || normalized.startsWith("pt-")) return MEMORY_SEEDS["pt-br"];
   if (normalized === "es" || normalized.startsWith("es-")) return MEMORY_SEEDS.es;
   if (normalized === "ko" || normalized.startsWith("ko-")) return MEMORY_SEEDS.ko;
+  if (/^zh-(?:tw|hant|hk|mo)(?:-|$)/.test(normalized)) return MEMORY_SEEDS["zh-tw"];
   return MEMORY_SEEDS[normalized] ?? MEMORY_SEEDS.en;
 }
 

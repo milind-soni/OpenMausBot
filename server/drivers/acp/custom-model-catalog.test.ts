@@ -24,7 +24,13 @@ import { createInterface } from 'node:readline';
 let current='deep';
 const mode=process.env.CATALOG_MODE;
 const modelOptions=[{value:'deep',name:'Deep'},{value:'flash',name:'Flash'},{value:'silent',name:'Silent'},{value:'rejected',name:'Rejected'}];
-function result(){return {sessionId:'fake-session',configOptions:[{id:'model',type:'select',category:'model',currentValue:current,options:modelOptions},...(current==='silent'?[]:[{id:current==='flash'?'thought_level':'reasoning_effort',type:'select',category:'thought_level',currentValue:current==='flash'?'low':'max',options:[{value:current==='flash'?'low':'max',name:current==='flash'?'Low':'Max'}]}])]};}
+function result(){if(mode==='hostile'||mode==='hostile-default'||mode==='hostile-labels'||mode==='hostile-all'){const options=mode==='hostile-labels'
+ ?[{value:'plain-model',name:'Plain'+String.fromCharCode(0x202e)+'Reversed'},{value:'good-model',name:'Good Model'}]
+ :mode==='hostile-all'
+ ?[{value:'../../.openmausbot',name:'Traversal'},{value:'bad'+String.fromCharCode(0)+'id',name:'Control'},{value:'x'.repeat(500),name:'Long'}]
+ :[{value:'../../.openmausbot',name:'Traversal'},{value:'bad'+String.fromCharCode(0)+'id',name:'Control'},{value:'x'.repeat(500),name:'Long'},{value:'ok-model',name:'Fine'+String.fromCharCode(7)+'Name'},{value:'good-model',name:'Good Model'}];
+ return {sessionId:'fake-session',configOptions:[{id:'model',type:'select',category:'model',currentValue:mode==='hostile-default'?String.fromCharCode(46,46,92)+String.fromCharCode(46,46,92)+'private':mode==='hostile-all'?'../../.openmausbot':'good-model',options}]};}
+ return {sessionId:'fake-session',configOptions:[{id:'model',type:'select',category:'model',currentValue:current,options:modelOptions},...(current==='silent'?[]:[{id:current==='flash'?'thought_level':'reasoning_effort',type:'select',category:'thought_level',currentValue:current==='flash'?'low':'max',options:[{value:current==='flash'?'low':'max',name:current==='flash'?'Low':'Max'}]}])]};}
 function emit(value){process.stdout.write(JSON.stringify(value)+'\\n');}
 function legacyResult(){const r=result();return {...r,models:{currentModelId:current,availableModels:modelOptions.map(x=>({modelId:x.value,name:x.name}))},configOptions:r.configOptions.filter(x=>x.id!=='model')}}
 appendFileSync(process.env.CATALOG_DUMP,JSON.stringify({cwd:process.cwd(),pid:process.pid})+'\\n');
@@ -158,5 +164,40 @@ describe("custom ACP catalog discovery (isolated fake CLI)", () => {
     await expect(resolveCustomAcpModels(fixture.env, fixture.config)).rejects.toThrow("line limit");
     const requests = await fixture.requests();
     await expect(readFile(requests[0].cwd)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("skips discovered entries whose id or label is not a usable slug, and never sends them back to the agent", async () => {
+    const fixture = await fake("hostile");
+    const catalog = await discoverAcpModels(fixture.env, fixture.config.cli, []);
+    expect(catalog.options).toEqual([
+      { id: "ok-model", label: "ok-model" },
+      { id: "good-model", label: "Good Model" },
+    ]);
+    expect(catalog.default).toBe("good-model");
+    const sent = JSON.stringify(await fixture.requests());
+    expect(sent).not.toContain("../.openmausbot");
+    expect(sent).not.toContain("bad\u0000id");
+    expect(sent).not.toContain("x".repeat(500));
+  });
+
+  it("never lets an unusable session model become the catalog default", async () => {
+    const fixture = await fake("hostile-default");
+    const catalog = await discoverAcpModels(fixture.env, fixture.config.cli, []);
+    expect(catalog.default).toBe("ok-model");
+    expect(catalog.options.map((option) => option.id)).toEqual(["ok-model", "good-model"]);
+  });
+
+  it("rejects a custom catalog whose every discovered id was unusable instead of leaving only the default", async () => {
+    const fixture = await fake("hostile-all");
+    await expect(resolveCustomAcpModels(fixture.env, fixture.config)).rejects.toThrow("did not advertise any usable models");
+  });
+
+  it("rejects bidirectional controls and control characters in labels, and falls back to the id", async () => {
+    const fixture = await fake("hostile-labels");
+    const catalog = await discoverAcpModels(fixture.env, fixture.config.cli, []);
+    expect(catalog.options).toEqual([
+      { id: "plain-model", label: "plain-model" },
+      { id: "good-model", label: "Good Model" },
+    ]);
   });
 });

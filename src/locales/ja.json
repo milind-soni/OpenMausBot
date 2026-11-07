@@ -2412,6 +2412,8 @@
   "chat.stop": "停止",
   "chat.stopTurn": "このターンを停止",
   "chat.computer": "ボットの画面",
+  "chat.watchScreen": "見る",
+  "chat.watchScreenHint": "ボットが画面で何をしているかを見る",
   "chat.advancedOnly": "詳細モードで表示",
   "chat.inspector": "インスペクター",
   "chat.inspectorHint": "インスペクター — このスレッドの実行イベントと生のプロトコル",
