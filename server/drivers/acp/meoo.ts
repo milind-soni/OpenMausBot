@@ -21,6 +21,7 @@ const MEOO_MODELS = {
   default: "auto",
   options: [
     { id: "auto", label: "Auto" },
+    { id: "max", label: "Max" },
     { id: "moonshot/kimi-k3.1-pro", label: "Kimi K3.1 Pro" },
     { id: "moonshot/kimi-k3", label: "Kimi K3" },
     { id: "qwen3.8-max", label: "Qwen3.8-Max" },

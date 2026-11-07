@@ -13,13 +13,9 @@ import { QwenAgentDriver } from "./acp/qwen.ts";
 import { CustomAcpDriver } from "./acp/custom.ts";
 import { HermesAgentDriver } from "./acp/hermes.ts";
 import { DeepSeekAgentDriver } from "./acp/deepseek.ts";
-import { CodeBuddyCnDriver, CodeBuddyDriver } from "./acp/codebuddy.ts";
-import { QoderCnDriver, QoderDriver } from "./acp/qoder.ts";
 import { ClineAgentDriver } from "./acp/cline.ts";
-import { CodeArtsAgentDriver } from "./acp/codearts.ts";
-import { McodeAgentDriver } from "./acp/mcode.ts";
-import { MeooAgentDriver } from "./acp/meoo.ts";
 import { CopilotAgentDriver } from "./acp/copilot.ts";
+import { CommandCodeAgentDriver } from "./acp/command-code.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { PiDriver } from "./pi.ts";
 import { MistralDriver } from "./mistral.ts";
@@ -29,6 +25,11 @@ import { GreenferenceDriver } from "./greenference.ts";
 import { MetaDriver } from "./meta.ts";
 import { MuseCodeDriver } from "./muse-code.ts";
 import { MinimaxDriver } from "./minimax.ts";
+import { CodeBuddyDriver, CodeBuddyCnDriver } from "./acp/codebuddy.ts";
+import { QoderDriver, QoderCnDriver } from "./acp/qoder.ts";
+import { CodeArtsAgentDriver } from "./acp/codearts.ts";
+import { McodeAgentDriver } from "./acp/mcode.ts";
+import { MeooAgentDriver } from "./acp/meoo.ts";
 
 export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   GrokDriver,
@@ -42,6 +43,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   HermesAgentDriver,
   ClineAgentDriver,
   CopilotAgentDriver,
+  CommandCodeAgentDriver,
   CustomAcpDriver,
   PiDriver,
   OpenAICompatDriver,
@@ -56,10 +58,9 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   MetaDriver,
   MuseCodeDriver,
   DeepSeekAgentDriver,
-  CodeBuddyDriver,
-  CodeBuddyCnDriver,
-  QoderDriver,
-  QoderCnDriver,
+  // Chinese coding CLIs. CodeBuddy and Qoder each register twice: one international, one CN endpoint.
+  CodeBuddyDriver, CodeBuddyCnDriver,
+  QoderDriver, QoderCnDriver,
   CodeArtsAgentDriver,
   McodeAgentDriver,
   MeooAgentDriver,

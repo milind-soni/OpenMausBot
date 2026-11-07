@@ -38,14 +38,39 @@ const CODEBUDDY_MODEL_OPTIONS = [
   { id: "hy3", label: "HY3" },
 ];
 
+/**
+ * The six levels `codebuddy --effort` advertises (its --help, both editions). The CLI has no ACP config option for
+ * them, so the level travels on argv — hence the `-high` suffix form rather than a session/set_config_option.
+ */
+export const CODEBUDDY_EFFORTS = [
+  { id: "minimal", label: "Minimal" },
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "xhigh", label: "X-High" },
+  { id: "max", label: "Max" },
+];
+
+const EFFORT_IDS = CODEBUDDY_EFFORTS.map((entry) => entry.id).join("|");
+const EFFORT_SUFFIX = new RegExp(`^(.*)-(${EFFORT_IDS})$`, "i");
+
+/** A `-high` suffix on a model id is the reasoning effort, matching how Cursor slugs its own variants. The base
+ * model is unchanged, so a picker id stays stable across levels and a bare id keeps the CLI's own default. */
+export function splitCodeBuddyEffort(model: string | undefined, variant: string | undefined): { model: string | undefined; effort: string | undefined } {
+  if (variant) return { model, effort: variant };
+  const match = model ? EFFORT_SUFFIX.exec(model) : null;
+  if (!match) return { model, effort: undefined };
+  return { model: match[1], effort: match[2]!.toLowerCase() };
+}
+
 const CODEBUDDY_MODELS = {
   default: "deepseek-v4.1-flash",
-  options: CODEBUDDY_MODEL_OPTIONS,
+  options: CODEBUDDY_MODEL_OPTIONS.map((option) => ({ ...option, variants: CODEBUDDY_EFFORTS })),
 };
 
 const CODEBUDDY_CN_MODELS = {
   default: "deepseek-v4.1-flash",
-  options: CODEBUDDY_MODEL_OPTIONS,
+  options: CODEBUDDY_MODEL_OPTIONS.map((option) => ({ ...option, variants: CODEBUDDY_EFFORTS })),
 };
 
 /** auth.info is the CLI's own credential blob; a present file with a size is a login, and it never gets read here. */
@@ -88,7 +113,11 @@ const intl: AcpSupport = {
   loginNote: loginNote("(international)"),
   install: CODEBUDDY_INSTALL,
   // --acp is the verified ACP stdio entry point; the model travels on argv, not as a session option.
-  spawnArgs: (_config, turn) => ["--acp", ...(turn.model ? ["--model", turn.model] : [])],
+  // The effort goes on argv: the CLI exposes no session config option for it, only `--effort <level>`.
+  spawnArgs: (_config, turn) => {
+    const { model, effort } = splitCodeBuddyEffort(turn.model, turn.variant);
+    return ["--acp", ...(model ? ["--model", model] : []), ...(effort ? ["--effort", effort] : [])];
+  },
   // Already signed in from the CLI; never launch an interactive login from here.
   pickAuthMethod: () => null,
   authFailure: "continue",

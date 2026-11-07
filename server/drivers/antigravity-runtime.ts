@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   open,
+  readdir,
   readFile,
   rename,
   rm,
@@ -59,15 +60,14 @@ const INSTALL_RECORD = ".install-complete.json";
 
 export interface AntigravityRuntime {
   executablePath: string;
-  /** Empty for a `cli` runtime: the 1.5+ agy CLI carries its own ACP server, so there is no separate harness binary. */
+  /** Empty for a `cli` runtime: the 1.5+ agy CLI carries its own ACP server, so no separate harness binary. */
   harnessPath: string;
   source: "managed" | "override" | "path";
   version: string | null;
-  /** Arguments that put the executable into ACP stdio mode: Google's packaged agy_acp_server.par takes `--uid=`,
-   * the agy CLI takes its `acp` subcommand. */
+  /** Google's packaged agy_acp_server.par takes `--uid=` on Linux; the agy CLI takes its `acp` subcommand. */
   spawnArgs: string[];
-  /** `packaged` is Google's runtime (executable + localharness sibling) with its own isolated Google profile;
-   * `cli` is the person's own agy CLI, which reuses the Google sign-in they already did. */
+  /** `packaged` is Google's runtime with its isolated Google profile; `cli` is the person's own agy CLI, whose
+   * existing Google sign-in is reused instead of demanding a second login. */
   kind: "packaged" | "cli";
 }
 
@@ -370,6 +370,21 @@ export function installAntigravityRuntime(options: AntigravityInstallOptions = {
   const running = installOnce(options).finally(() => installs.delete(key));
   installs.set(key, running);
   return running;
+}
+
+/** The newest runtime the app installed here, when it is not the pinned one; null when the pinned one is installed or none is. */
+export async function antigravityOlderRuntime(baseDir = DATA_DIR, asset = resolveAntigravityReleaseAsset()): Promise<string | null> {
+  if (!asset) return null;
+  const versions = join(runtimeRoot(baseDir), "versions");
+  if (await completedRelease(join(versions, asset.sha256), asset)) return null;
+  const found: string[] = [];
+  for (const name of await readdir(versions).catch(() => [] as string[])) {
+    try {
+      const record = JSON.parse(await readFile(join(versions, name, INSTALL_RECORD), "utf8")) as Partial<InstallRecord>;
+      if (record.sha256 === name && typeof record.version === "string") found.push(record.version);
+    } catch {}
+  }
+  return found.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0] ?? null;
 }
 
 export function antigravityManagedInstallAvailable(): boolean {
