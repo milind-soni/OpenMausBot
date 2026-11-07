@@ -1712,6 +1712,27 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(thread.params.config["shell_environment_policy.exclude"]).toContain("ELECTRON_RUN_AS_NODE");
   });
 
+  it("runs a turn for a restarted custom server, leaving the host's restart count out of its environment", async () => {
+    await create();
+    const dump = join(scratch, "custom-restarted.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: "t-custom-mcp-restarted",
+      text: "go",
+      integrations: {
+        custom: {
+          health: { command: "health-mcp", args: [], env: { OMB_MCP_RESTART: "1", HEALTH_REGION: "eu" } },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const envVars = JSON.parse(seen.argv.find((arg: string) => arg.startsWith("mcp_servers.health.env_vars=")).split("=").slice(1).join("="));
+    expect(envVars).toEqual(["HEALTH_REGION"]);
+    expect(seen.env.OMB_MCP_RESTART).toBeUndefined();
+  });
+
   it.each(["ask", "auto"] as const)("pre-allows peer-agent comms without exposing its token in %s mode", async (approvalMode) => {
     await create();
     const dump = join(scratch, "agents.json");

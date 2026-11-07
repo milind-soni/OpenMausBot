@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { RESERVED_MCP_NAMES, slugMcpName } from "../shared/mcp-name.ts";
 import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts";
+import { MCP_RESTART_ENV } from "./mcp-app-catalog.ts";
 
 export { importedMcpServerName } from "../shared/mcp-name.ts";
 
@@ -101,6 +102,22 @@ export function isHarnessOwnedMcpEnvName(name: string): boolean {
 export function isReservedMcpEnvEntry(name: string, value: string): boolean {
   if (name === "ELECTRON_RUN_AS_NODE") return value !== "1";
   return isHarnessOwnedMcpEnvName(name);
+}
+
+/** Custom command servers as Codex mounts them, with new MCP children every turn: the host's restart count (MCP_RESTART_ENV)
+ * only tells an engine that keeps servers across turns to start a new one, so it is dropped here instead of failing every
+ * turn as an OMB_ name; any other reserved variable is refused. */
+export function perTurnCustomMcp<T extends { integrations?: { custom?: Record<string, McpServerSpec> } }>(turn: T): T {
+  if (!turn.integrations?.custom) return turn;
+  const custom = { ...turn.integrations.custom };
+  for (const [name, server] of Object.entries(custom)) {
+    if ("url" in server) continue;
+    const { [MCP_RESTART_ENV]: _restarts, ...env } = server.env;
+    const reserved = Object.entries(env).find(([key, value]) => isReservedMcpEnvEntry(key, value));
+    if (reserved) throw new Error(`Custom MCP server “${name}” cannot set reserved environment variable “${reserved[0]}”`);
+    custom[name] = { ...server, env };
+  }
+  return { ...turn, integrations: { ...turn.integrations, custom } };
 }
 
 function environmentEntryError(name: string, value: string): string | null {
