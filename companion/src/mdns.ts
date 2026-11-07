@@ -5,6 +5,7 @@ import { createSocket } from "node:dgram";
 import { hostname, networkInterfaces } from "node:os";
 
 import { lanAddresses } from "./listener.ts";
+import { directRoutes, isTailnetAddress } from "./direct-routes.ts";
 
 const MDNS_ADDRESS = "224.0.0.251";
 const MDNS_PORT = 5353;
@@ -357,8 +358,9 @@ export function defaultHostName(machine = hostname()): string {
   return `openmausbot-${digest}.local`;
 }
 
+/** Bonjour is part of Same Wi-Fi: nothing is advertised while it is off, and never the tailnet address. */
 export function advertisableAddresses(): string[] {
-  return lanAddresses();
+  return directRoutes().wifi ? lanAddresses().filter((address) => !isTailnetAddress(address)) : [];
 }
 
 

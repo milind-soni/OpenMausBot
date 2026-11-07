@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
 
 import type { CompanionAccountState } from "../types/ogb";
 import {
@@ -14,8 +16,10 @@ import {
   deriveTailscalePairingStatus,
   loadCompanionBridgeState,
   pairingSurfaceCopy,
+  RouteNotices,
   shouldHydrateCompanionEmail,
 } from "./CompanionSection";
+import type { PhoneSetupController } from "./PhoneSetupFlow";
 
 const account = (status: CompanionAccountState["status"], message?: string): CompanionAccountState => ({
   available: true,
@@ -205,41 +209,43 @@ describe("Tailscale pairing onboarding", () => {
     );
   });
 
-  it("explains every step between unchecked and ready", () => {
-    expect(deriveTailscalePairingStatus({ enabled: false }, false)).toMatchObject({
-      kind: "unchecked",
-      title: "Remote access off",
-      detail: expect.stringContaining("once Remote access is on"),
+  it("explains every step from off to ready", () => {
+    const tailscale = (route: { on: boolean; since: number | null; name?: string | null }) => ({
+      wifi: { on: false, since: null }, relay: { on: false, since: null }, https: { on: false, since: null }, tailscale: route,
     });
-    expect(deriveTailscalePairingStatus({ enabled: true }, false).kind).toBe("unavailable");
-    expect(deriveTailscalePairingStatus({
-      enabled: true,
-      tailscale: "100.99.1.2",
-    }, false).kind).toBe("magicdns");
-    expect(deriveTailscalePairingStatus({
-      enabled: true,
-      tailscale: "100.99.1.2",
-      tailnetName: "mac.tail1234.ts.net",
-    }, true)).toMatchObject({
-      kind: "ready",
+    expect(deriveTailscalePairingStatus({ enabled: true }).kind).toBe("off");
+    expect(deriveTailscalePairingStatus({ enabled: false, tailscaleProblem: "not-installed" })).toMatchObject({ kind: "not-installed", title: "Tailscale isn't installed on this computer." });
+    expect(deriveTailscalePairingStatus({ enabled: false, tailscaleProblem: "signed-out" })).toMatchObject({ kind: "signed-out", title: "Open Tailscale and sign in, then try again." });
+    expect(deriveTailscalePairingStatus({ enabled: true, routes: tailscale({ on: true, since: 1, name: null }) }).kind).toBe("magicdns");
+    expect(deriveTailscalePairingStatus({ enabled: false, routes: tailscale({ on: true, since: 1, name: "mac.tail1234.ts.net" }) })).toMatchObject({
+      kind: "waiting",
       title: "Ready on mac.tail1234.ts.net",
+      detail: "On. It answers once a device is paired.",
     });
-  });
-
-  it("says why the tailnet has no HTTPS address when Tailscale would not serve one", () => {
-    const ready = { enabled: true, tailscale: "100.99.1.2", tailnetName: "mac.tail1234.ts.net" };
-    expect(deriveTailscalePairingStatus({ ...ready, tailscaleProblem: "port-taken" }, true).detail).toContain("Port 8813");
-    expect(deriveTailscalePairingStatus({ ...ready, tailscaleProblem: "serve-refused" }, true).detail).toContain("HTTPS certificates");
+    expect(deriveTailscalePairingStatus({ enabled: true, routes: tailscale({ on: true, since: 1, name: "mac.tail1234.ts.net" }) }).kind).toBe("ready");
   });
 
   it("surfaces sidecar failures instead of pretending Tailscale is merely absent", () => {
     expect(deriveTailscalePairingStatus({
       enabled: true,
       error: "the companion is not responding",
-    }, false)).toEqual({
+    })).toEqual({
       kind: "error",
       title: "Remote access needs attention",
       detail: "the companion is not responding",
     });
+  });
+});
+
+describe("the update's notes about routes it kept on", () => {
+  it("names each kept route with Turn off beside OK, and shows nothing once they are seen", () => {
+    const c = { busy: false, act: vi.fn() } as unknown as PhoneSetupController;
+    const html = renderToStaticMarkup(createElement(RouteNotices, { c, notices: ["wifi", "tailscale"] }));
+    expect(html).toContain('data-route-notice="wifi"');
+    expect(html).toContain("Same Wi-Fi is on because a paired device uses it.");
+    expect(html).toContain("Tailscale is on because a paired device may use it.");
+    expect(html.match(/>Turn off</g)).toHaveLength(2);
+    expect(html.match(/>OK</g)).toHaveLength(2);
+    expect(renderToStaticMarkup(createElement(RouteNotices, { c, notices: [] }))).toBe("");
   });
 });

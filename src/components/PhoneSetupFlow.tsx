@@ -68,7 +68,7 @@ import { PhonePairingQr } from "./PhonePairingQr";
 import { productName } from "../lib/brand";
 
 import type { CompanionBridge, CompanionState } from "../lib/companion-types";
-export type { CompanionBridge, CompanionState, PhoneDevice } from "../lib/companion-types";
+export type { CompanionBridge, CompanionRoute, CompanionState, PhoneDevice } from "../lib/companion-types";
 
 type AccountBridge = NonNullable<NonNullable<Window["ogb"]>["companionAccount"]>;
 type StateBridge<T> = { state: () => Promise<T> };
@@ -328,7 +328,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
             read: () => companion.state(),
             start: () => mutateCompanionBridgeState(
               companionMutationEpoch,
-              () => companion.start(),
+              () => companion.start(routeMode === "tailscale" ? [] : undefined),
             ),
             refreshTailscale: () => mutateCompanionBridgeState(
               companionMutationEpoch,

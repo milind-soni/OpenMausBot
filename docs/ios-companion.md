@@ -179,19 +179,23 @@ Remote access so the phone has a listener to reach. OpenMausBot then places the
 computer's tailnet addresses in that dedicated QR; it never silently replaces
 the default hosted HTTPS route. Manual entry remains available as a fallback.
 
-With the switch on, the app asks Tailscale to serve the link at
-`https://<computer>.<tailnet>.ts.net:8813` (`tailscale serve --bg --https=8813`),
-with Tailscale's own certificate, when HTTPS certificates are enabled for the
-tailnet. The plain `http://<computer>.<tailnet>.ts.net:8810` name stays as a
-second route: it is encrypted and authenticated by WireGuard inside the
-tailnet. Use the MagicDNS name rather than the `100.64.0.0/10` address: App
-Transport Security exceptions are domain-based, and `ios/project.yml` narrowly
-allows insecure HTTP for `ts.net` subdomains. Turning the switch off removes
-only the serve entry the app added, never anything else in your Tailscale.
+With the switch on, the link also answers on this computer's tailnet address,
+and the app asks Tailscale for the computer's MagicDNS name once: when you turn
+the switch on, and again only when you choose **Check again**. It looks for the
+`tailscale` command line tool first and runs the macOS app's own executable only
+in its command-line mode; it never opens the Tailscale app or signs it in. The
+URL is `http://<computer>.<tailnet>.ts.net:8810`, encrypted and authenticated
+by WireGuard inside the tailnet. Use the MagicDNS name rather than the
+`100.64.0.0/10` address: App Transport Security exceptions are domain-based,
+and `ios/project.yml` narrowly allows insecure HTTP for `ts.net` subdomains.
+Turning the switch off stops answering on the tailnet address; it never changes
+anything in your Tailscale.
 
-The phone link itself starts by itself at launch only when a phone is paired
-with this computer and the computer runs its own workspace; a desktop that is
-only a client of another computer never starts it.
+Each way in (Same Wi-Fi, Anywhere through MausBot, Tailscale, the HTTPS
+address) is its own switch and stays off until you turn it on. While nothing is
+paired and no code is open, the phone link sleeps: nothing listens and there is
+no relay connection. A desktop that is only a client of another computer starts
+none of it.
 
 Tailscale is optional. The direct path does not use an OpenMausBot-operated
 relay or create a cloud copy of local transcript data.

@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCompanionEntry } from "./companion-entry.mjs";
-import { COMPANION_SETTINGS_VERSION, countPairedPhones, phoneLinkStartsAtLaunch, readCompanionSettings } from "./companion-settings.mjs";
+import { anyRouteOn, COMPANION_SETTINGS_VERSION, countPairedPhones, directRoutesOn, hasTailnetAddress, phoneLinkStartsAtLaunch, readCompanionSettings, readPairedDevices, setRoute } from "./companion-settings.mjs";
 import {
   cleanupCompanionOriginEndpoint,
   companionOriginHealth,
@@ -34,36 +34,41 @@ const entryPoint = (resourcesPath) =>
 
 const settingsFile = () => path.join(app.getPath("userData"), "companion-settings.json");
 
-function companionSettings() {
+let migrationFacts = () => ({});
+
+/** Main's part of the one-time update: whether this computer has its managed HTTPS address. */
+export function setCompanionMigrationFacts(read) {
+  migrationFacts = read;
+}
+
+export function companionSettings() {
   let raw = null;
   try {
     raw = JSON.parse(fs.readFileSync(settingsFile(), "utf8"));
   } catch {
   }
-  const settings = readCompanionSettings(raw, raw?.version === COMPANION_SETTINGS_VERSION ? 0 : countPairedPhones());
-  if (raw && raw.version !== COMPANION_SETTINGS_VERSION) writeCompanionSettings(settings);
+  if (raw?.version === COMPANION_SETTINGS_VERSION) return readCompanionSettings(raw);
+  const settings = readCompanionSettings(raw, raw?.enabled === true ? { devices: readPairedDevices() ?? [], tailnetAddress: hasTailnetAddress(), ...migrationFacts() } : {});
+  if (raw) writeCompanionSettings(settings);
   return settings;
 }
 
+/** Any way in turned on: the old single switch reads this. */
 export function companionEnabledAtRest() {
-  return companionSettings().enabled;
+  return anyRouteOn(companionSettings());
 }
 
-export function companionTailscaleAtRest() {
-  return companionSettings().tailscale;
+export function companionRouteOn(route) {
+  return companionSettings().routes[route]?.on === true;
 }
 
-/** The launch rule, with this computer's paired phones read from the companion's store. */
+/** The launch rule, with this computer's paired devices read from the companion's store. */
 export function companionStartsAtLaunch({ remoteClient, serverReady }) {
-  return phoneLinkStartsAtLaunch({ remoteClient, serverReady, enabled: companionEnabledAtRest(), pairedPhones: countPairedPhones() });
+  return phoneLinkStartsAtLaunch({ remoteClient, serverReady, settings: companionSettings(), pairedPhones: countPairedPhones() });
 }
 
 export function companionKeepAwakeAtRest() {
   return companionSettings().keepAwake;
-}
-
-function rememberCompanionSettings(patch) {
-  writeCompanionSettings({ ...companionSettings(), ...patch });
 }
 
 function writeCompanionSettings(next) {
@@ -81,17 +86,24 @@ function writeCompanionSettings(next) {
   }
 }
 
-
-export function rememberCompanionEnabled(enabled) {
-  rememberCompanionSettings({ enabled });
-}
-
 export function rememberCompanionKeepAwake(keepAwake) {
-  rememberCompanionSettings({ keepAwake });
+  writeCompanionSettings({ ...companionSettings(), keepAwake: keepAwake === true });
 }
 
-export function rememberCompanionTailscale(tailscale) {
-  rememberCompanionSettings({ tailscale });
+/** Turns one way in on or off for good, and tells a running sidecar which direct ways in to listen on. */
+export async function rememberCompanionRoute(route, on, extra) {
+  const next = setRoute(companionSettings(), route, on, extra);
+  writeCompanionSettings(next);
+  if (proc && (route === "wifi" || route === "tailscale")) {
+    await control("PUT", "/routes", { ...directRoutesOn(next), tailnetName: next.routes.tailscale.name ?? null }).catch(() => {});
+  }
+  return next;
+}
+
+/** The person saw the update's note about a route kept on. */
+export function dismissCompanionNotice(route) {
+  const settings = companionSettings();
+  writeCompanionSettings({ ...settings, notices: settings.notices.filter((notice) => notice !== route) });
 }
 
 async function control(method, urlPath, body, { timeoutMs = 4_000 } = {}) {
@@ -200,8 +212,11 @@ async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = nu
   delete childEnvironment.OMB_COMPANION_HOSTED_URL;
   delete childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN;
   delete childEnvironment.OMB_PHONE_SECRET_PUBLIC_KEY;
-  delete childEnvironment.OMB_COMPANION_TAILSCALE;
-  if (companionTailscaleAtRest()) childEnvironment.OMB_COMPANION_TAILSCALE = "1";
+  delete childEnvironment.OMB_COMPANION_TAILNET_NAME;
+  const settings = companionSettings();
+  const direct = directRoutesOn(settings);
+  childEnvironment.OMB_COMPANION_ROUTES = Object.keys(direct).filter((route) => direct[route]).join(",");
+  if (direct.tailscale && settings.routes.tailscale.name) childEnvironment.OMB_COMPANION_TAILNET_NAME = settings.routes.tailscale.name;
   if (hostedUrl) childEnvironment.OMB_COMPANION_HOSTED_URL = hostedUrl;
   childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN = allocatedOrigin.socketPath;
   if (/^[A-Za-z0-9_-]{87}$/.test(String(secretPublicKey ?? ""))) {
@@ -334,15 +349,24 @@ export function setCompanionHostedUrl(endpoint) {
   });
 }
 
+/** Paired devices as the sidecar would list them, read from its store while it sleeps. */
+function devicesAtRest() {
+  return (readPairedDevices() ?? []).map(({ tokenHash: _secret, ...device }) => device);
+}
+
+function restState() {
+  const settings = companionSettings();
+  return { keepAwake: settings.keepAwake, routes: settings.routes, notices: settings.notices };
+}
+
 export async function companionState() {
-  const keepAwake = companionKeepAwakeAtRest();
+  const rest = restState();
   if (!proc) {
     const state = {
       enabled: false,
-      keepAwake,
-      tailscaleOn: companionTailscaleAtRest(),
+      ...rest,
       port: COMPANION_PORT,
-      devices: [],
+      devices: devicesAtRest(),
       connectedDeviceIds: [],
       pairing: null,
     };
@@ -351,37 +375,16 @@ export async function companionState() {
   }
   try {
     const state = await control("GET", "/state");
-    return { enabled: true, keepAwake, ...state };
+    return { enabled: true, ...rest, ...state };
   } catch {
     return {
       enabled: true,
-      keepAwake,
+      ...rest,
       port: COMPANION_PORT,
       devices: [],
       connectedDeviceIds: [],
       pairing: null,
       error: "the companion is not responding",
-    };
-  }
-}
-
-/** Remembers the person's choice and tells a running sidecar; only "on" lets it run the Tailscale CLI. */
-export async function companionSetTailscale(on) {
-  rememberCompanionTailscale(on);
-  if (!proc) return companionState();
-  try {
-    // The CLI hunt is bounded to 5 s, then `tailscale serve` may take its own 20 s.
-    const state = await control("POST", on ? "/tailscale/on" : "/tailscale/off", undefined, { timeoutMs: 40_000 });
-    return {
-      enabled: true,
-      keepAwake: companionKeepAwakeAtRest(),
-      ...state,
-    };
-  } catch {
-    const state = await companionState();
-    return {
-      ...state,
-      error: state.error ?? (on ? "Tailscale could not be turned on." : "Tailscale could not be turned off."),
     };
   }
 }
@@ -402,7 +405,7 @@ export async function companionPairing(open, expectedToken) {
     e2eHooks.changed();
     return {
       enabled: true,
-      keepAwake: companionKeepAwakeAtRest(),
+      ...restState(),
       ...state,
     };
   } catch {
@@ -427,7 +430,7 @@ export async function companionRevoke(deviceId) {
 export async function companionPairingRenew() {
   if (!proc) return companionState();
   try {
-    return { enabled: true, keepAwake: companionKeepAwakeAtRest(), ...(await control("POST", "/pairing/renew")) };
+    return { enabled: true, ...restState(), ...(await control("POST", "/pairing/renew")) };
   } catch {
     return companionPairing(true);
   }

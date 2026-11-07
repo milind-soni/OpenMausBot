@@ -25,7 +25,7 @@ const freePort = (): Promise<number> =>
   });
 
 /** Starts a real sidecar until it says it is up, and returns every program it tried to run meanwhile. */
-async function programsRunAtStart(env: Record<string, string>): Promise<string[][]> {
+async function startSidecar(env: Record<string, string>): Promise<{ programs: string[][]; out: string }> {
   const home = mkdtempSync(join(tmpdir(), "omb-companion-tailscale-"));
   dirs.push(home);
   const record = join(home, "exec.jsonl");
@@ -45,13 +45,13 @@ async function programsRunAtStart(env: Record<string, string>): Promise<string[]
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  let out = "";
   try {
     await new Promise<void>((resolve, reject) => {
-      let out = "";
       const timer = setTimeout(() => reject(new Error(`the sidecar never came up:\n${out}`)), 15_000);
       child.stdout.on("data", (chunk) => {
         out += chunk;
-        if (out.includes("companion  http://")) {
+        if (out.includes("companion  ")) {
           clearTimeout(timer);
           resolve();
         }
@@ -62,21 +62,23 @@ async function programsRunAtStart(env: Record<string, string>): Promise<string[]
   } finally {
     child.kill("SIGKILL");
   }
-  if (!existsSync(record)) return [];
-  return readFileSync(record, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as string[]);
+  const programs = existsSync(record) ? readFileSync(record, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as string[]) : [];
+  return { programs, out };
 }
 
 const isTailscale = (program: string[]) => /tailscale/i.test(program[0] ?? "");
 
 describe("the phone link and Tailscale", () => {
-  it("runs no Tailscale program when it starts, unless the person turned Tailscale on", async () => {
-    expect((await programsRunAtStart({})).filter(isTailscale)).toEqual([]);
+  it("never runs a Tailscale program when it starts, with Tailscale off or on", async () => {
+    expect((await startSidecar({})).programs.filter(isTailscale)).toEqual([]);
+    const on = await startSidecar({ OMB_COMPANION_ROUTES: "wifi,tailscale", OMB_COMPANION_TAILNET_NAME: "mac.tail1.ts.net" });
+    expect(on.programs.filter(isTailscale)).toEqual([]);
+    expect(on.out).toContain("(wifi, tailscale)");
   }, 30_000);
 
-  it("asks Tailscale for this computer's name at start once Tailscale is on, the CLI before the macOS app", async () => {
-    const tailscale = (await programsRunAtStart({ OMB_COMPANION_TAILSCALE: "1" })).filter(isTailscale);
-    expect(tailscale.length).toBeGreaterThan(0);
-    expect(tailscale[0]).toEqual(["/opt/homebrew/bin/tailscale", "status", "--json"]);
-    expect(tailscale.at(-1)?.[0]).toMatch(/Tailscale\.app/);
+  it("binds no device port when only the relay or the HTTPS address is on", async () => {
+    const { out } = await startSidecar({ OMB_COMPANION_ROUTES: "" });
+    expect(out).toContain("no direct way in is on");
+    expect(out).not.toContain("http://0.0.0.0");
   }, 30_000);
 });

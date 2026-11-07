@@ -124,7 +124,8 @@ it is switched on, so the opt-in is never implicit.
 | `OMB_COMPANION_DIR` | `~/.openmausbot-companion` | paired devices live here |
 | `OMB_COMPANION_NAME` | your name, from the harness | what the phone calls this computer |
 | `OMB_COMPANION_E2E` | off | `1` turns on the end-to-end encrypted connection when standing alone (the desktop app turns it on itself); the transport key is kept in `e2e-key.json` beside the devices |
-| `OMB_COMPANION_TAILSCALE` | off | `1` offers the link over your tailnet: the sidecar asks the Tailscale CLI for this computer's MagicDNS name and runs `tailscale serve --bg --https=8813 http://127.0.0.1:8810`. Off, it runs no Tailscale program at all (the desktop app sets it from the Tailscale switch in Settings → Remote access) |
+| `OMB_COMPANION_ROUTES` | `wifi` | the direct ways in, a comma list of `wifi` (this computer's LAN addresses and Bonjour) and `tailscale` (its tailnet address); empty for neither, when only the relay or an HTTPS address reaches it. A connection arriving on a way in that is off is refused. The desktop app sets it from Settings → Remote access |
+| `OMB_COMPANION_TAILNET_NAME` | none | this computer's MagicDNS name, offered while `tailscale` is listed. The sidecar never runs Tailscale to learn it: the desktop app asks Tailscale once, when the person turns Tailscale on |
 | `OMB_COMPANION_BONJOUR` | on | `0` keeps a test rig off the network's Bonjour |
 | `OMB_COMPANION_RELAY_URL` | none | test rigs only: a `ws://127.0.0.1:<port>` relay in place of `wss://relayN.openmausbot.com` |
 

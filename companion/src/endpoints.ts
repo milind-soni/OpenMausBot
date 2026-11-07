@@ -1,4 +1,5 @@
-import { lanAddresses, tailnetName, tailscaleAddress } from "./listener.ts";
+import { tailnetName, tailscaleAddress } from "./listener.ts";
+import { directRoutes, routedAddresses } from "./direct-routes.ts";
 import { defaultHostName } from "./mdns.ts";
 
 export const COMPANION_ENDPOINT_KINDS = ["hosted", "tailnet", "lan", "bonjour"] as const;
@@ -46,23 +47,20 @@ const httpOrigin = (host: string, port: number): string => {
   return `http://${authority}:${port}`;
 };
 
-/** Best first: the hosted HTTPS route when configured, the tailnet's HTTPS
- * route while Tailscale is on, then the direct routes
+/** Best first: the hosted HTTPS route when configured, then the direct routes
  * in the host list's order, Bonjour last. The cap bounds QR size and the
  * connection walk. */
 export function companionEndpointCandidates(
   port: number,
-  addresses: string[] = lanAddresses(),
+  addresses: string[] = routedAddresses(),
   magicDnsName: string | null = tailnetName(),
   hostedUrl: string | null = null,
-  bonjourHost: string = defaultHostName(),
-  tailnetHttps: string | null = null,
+  bonjourHost: string | null = directRoutes().wifi ? defaultHostName() : null,
 ): CompanionEndpoint[] {
   const tailscale = tailscaleAddress(addresses);
   const candidates: CompanionEndpoint[] = [];
 
   if (hostedUrl) candidates.push({ url: hostedUrl, kind: "hosted", priority: 0 });
-  if (tailnetHttps) candidates.push({ url: tailnetHttps, kind: "tailnet", priority: 90 });
   if (tailscale && magicDnsName) {
     candidates.push({ url: httpOrigin(magicDnsName, port), kind: "tailnet", priority: 100 });
   }
@@ -71,7 +69,7 @@ export function companionEndpointCandidates(
       candidates.push({ url: httpOrigin(address, port), kind: "lan", priority: 200 + index });
     }
   });
-  candidates.push({ url: httpOrigin(bonjourHost, port), kind: "bonjour", priority: 300 });
+  if (bonjourHost) candidates.push({ url: httpOrigin(bonjourHost, port), kind: "bonjour", priority: 300 });
 
   const seen = new Set<string>();
   const ordered = candidates

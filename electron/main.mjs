@@ -459,10 +459,11 @@ const DESKTOP_CRASH_LOG = path.join(LOG_DIR, "desktop-crashes.log");
 const DESKTOP_CRASH_LOG_MAX_BYTES = 512 * 1024;
 let logStream = null;
 let desktopShutdownStarted = false;
-import { companionAdvertisedHostedUrl, companionEnabledAtRest, companionOriginTarget, companionPairing, companionPairingRenew, companionDeviceRoutes, companionSetTailscale, companionStartsAtLaunch, companionCloudDesktopAccess,
-  companionBrowserControlAccess, companionRevoke, companionRunning, companionState, rememberCompanionEnabled, rememberCompanionKeepAwake, setCompanionHostedUrl, setCompanionLifecycleListener, startCompanion, stopCompanion } from "./companion.mjs";
+import { companionAdvertisedHostedUrl, companionEnabledAtRest, companionOriginTarget, companionPairing, companionPairingRenew, companionDeviceRoutes, companionStartsAtLaunch, companionCloudDesktopAccess, companionRouteOn, dismissCompanionNotice, rememberCompanionRoute, setCompanionMigrationFacts,
+  companionBrowserControlAccess, companionRevoke, companionRunning, companionState, rememberCompanionKeepAwake, setCompanionHostedUrl, setCompanionLifecycleListener, startCompanion, stopCompanion } from "./companion.mjs";
 import { createDesktopCompanionE2E, deviceCounts } from "./companion-e2e-desktop.mjs";
 import { autoStartCompanion } from "./companion-autostart.mjs";
+import { createPhoneLinkRoutes } from "./phone-link-routes.mjs";
 import { createRoutineWakeHold, rememberRoutineWake, routineWakeSettings } from "./routine-wake.mjs";
 import { CREDENTIAL_PATCH, credentialSaveError } from "./credential-patch.mjs";
 
@@ -647,7 +648,7 @@ async function startManagedCompanionConnection({ waitForVerification = true } = 
   if (companionAccountCleanupPending(secureCredentials)) {
     return publicManagedCompanionState();
   }
-  const access = managedCompanionTunnelAccess(secureCredentials);
+  const access = companionRouteOn("https") ? managedCompanionTunnelAccess(secureCredentials) : null;
   if (!access) return publicManagedCompanionState();
   const target = companionOriginTarget();
   if (!target) return publicManagedCompanionState();
@@ -661,7 +662,7 @@ async function startManagedCompanionConnection({ waitForVerification = true } = 
   return publicManagedCompanionState();
 }
 
-async function startDesktopCompanion({ waitForHosted = true, remember = true } = {}) {
+async function startDesktopCompanion({ waitForHosted = true, remember = true, routes = ["wifi", "relay"] } = {}) {
   const refusal = managedRemoteAccessRefusal();
   if (refusal) throw new Error(refusal);
   companionDesiredThisLaunch = true;
@@ -671,7 +672,8 @@ async function startDesktopCompanion({ waitForHosted = true, remember = true } =
     companionDesiredThisLaunch = false;
     return desktopCompanionState();
   }
-  if (remember) rememberCompanionEnabled(true);
+  if (remember) for (const route of routes.filter((name) => ["wifi", "relay"].includes(name))) await rememberCompanionRoute(route, true);
+  phoneLinkRoutes.touched();
   await startManagedCompanionConnection({ waitForVerification: waitForHosted });
   return desktopCompanionState();
 }
@@ -679,18 +681,16 @@ async function startDesktopCompanion({ waitForHosted = true, remember = true } =
 async function stopDesktopCompanion({ remember = true } = {}) {
   companionDesiredThisLaunch = false;
   companionLaunchGeneration += 1;
-  if (remember) rememberCompanionEnabled(false);
+  if (remember) for (const route of ["wifi", "relay", "tailscale", "https"]) await rememberCompanionRoute(route, false);
   syncCompanionKeepAwake(false, false);
   await managedCompanionConnector?.stop();
   await stopCompanion();
   return desktopCompanionState();
 }
 
-async function setDesktopCompanionTailscale(on) {
-  const started = on && !companionRunning() ? await startDesktopCompanion({ waitForHosted: false }) : null;
-  if (started && (!started.enabled || started.error)) return started;
-  return decorateDesktopCompanionState(await companionSetTailscale(on));
-}
+const phoneLinkRoutes = createPhoneLinkRoutes({ rememberRoute: rememberCompanionRoute, routeOn: companionRouteOn, dismissNotice: dismissCompanionNotice, state: () => desktopCompanionState(), running: companionRunning, log: slog, changed: (route, on) => (route !== "https" ? companionE2E?.reconcile() : on ? startManagedCompanionConnection({ waitForVerification: false }) : stopManagedCompanionEndpointLocally()),
+  wake: () => (!companionRunning() && companionStartsAtLaunch({ remoteClient: Boolean(desktopRemoteAccess), serverReady }) ? startDesktopCompanion({ waitForHosted: false, remember: false }) : null), sleep: () => stopDesktopCompanion({ remember: false }) });
+setCompanionMigrationFacts(() => ({ managedAddress: Boolean(managedCompanionTunnelAccess(secureCredentials)) }));
 
 setCompanionLifecycleListener(({ expected, pid }) => {
   if (expected) return;
@@ -2420,7 +2420,7 @@ function managedRemoteAccessRefusal() {
   const policy = managedDesktop?.policy?.();
   return policy?.remoteAccess === false ? `${policy.organizationName} does not allow remote access to this computer.` : null;
 }
-ipcMain.handle("companion:start", localOnly("companion:start", () => startDesktopCompanion()));
+ipcMain.handle("companion:start", localOnly("companion:start", (_event, routes) => startDesktopCompanion({ routes: Array.isArray(routes) ? routes : undefined })));
 ipcMain.handle("companion:stop", localOnly("companion:stop", () => stopDesktopCompanion()));
 ipcMain.handle("companion:keep-awake", localOnly("companion:keep-awake", async (_event, enabled) => {
   rememberCompanionKeepAwake(Boolean(enabled));
@@ -2431,11 +2431,11 @@ ipcMain.handle("routines:keep-awake", localOnly("routines:keep-awake", async (_e
   rememberRoutineWake(app.getPath("userData"), Boolean(enabled));
   return routineWake.poll();
 }));
-ipcMain.handle("companion:refresh-tailscale", localOnly("companion:refresh-tailscale", () => setDesktopCompanionTailscale(true)));
-ipcMain.handle("companion:tailscale", localOnly("companion:tailscale", (_event, on) => setDesktopCompanionTailscale(on === true)));
+phoneLinkRoutes.install(ipcMain, localOnly);
 ipcMain.handle("companion:pairing", localOnly("companion:pairing", (_event, open, expectedToken) => {
   const refusal = open ? managedRemoteAccessRefusal() : null;
   if (refusal) throw new Error(refusal);
+  phoneLinkRoutes.touched();
   return companionPairing(Boolean(open), expectedToken).then(decorateDesktopCompanionState);
 }));
 ipcMain.handle("companion:cloud-desktop", localOnly("companion:cloud-desktop", (_event, deviceId, allowed) =>
@@ -2515,7 +2515,7 @@ ipcMain.handle("companion-account:retry", localOnly("companion-account:retry", (
 ipcMain.handle("companion-account:prepare", localOnly("companion-account:prepare", () => {
   const refusal = managedRemoteAccessRefusal();
   if (refusal) throw new Error(refusal);
-  return ensureCompanionAccountService().prepare();
+  return rememberCompanionRoute("https", true).then(() => ensureCompanionAccountService().prepare());
 }));
 ipcMain.handle("companion-account:sign-out", localOnly("companion-account:sign-out", () => ensureCompanionAccountService().signOut()));
 
@@ -3097,6 +3097,7 @@ app.whenReady().then(async () => {
     const wanted = () => !desktopShutdownStarted && companionEnabledAtRest() && !companionRunning();
     void autoStartCompanion({ restored: managedDesktop?.whenRestored(), start: () => startDesktopCompanion({ waitForHosted: false, remember: false }), wanted, log: slog });
   }
+  phoneLinkRoutes.start();
   setLocalOrigin(rendererOrigin());
   session.defaultSession.webRequest.onCompleted({ urls: ["https://*/api/*"] }, details => homeWindow.responded(details));
   appPermissions = appPermissionHandlers({
