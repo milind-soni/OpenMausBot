@@ -12,7 +12,8 @@ import { createControlServer, hostCandidates, initialControlToken } from "./cont
 import { createConnectedDeviceTracker } from "./connected-devices.ts";
 import { DeviceRegistry } from "./devices.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
-import { lanAddresses, refreshTailnetName, tailnetName, tailscaleAddress } from "./listener.ts";
+import { tailnetName, tailscaleAddress } from "./listener.ts";
+import { acceptsConnection, anyDirectRoute, directRoutes, directRoutesFromEnv, routedAddresses, setDirectRoutes } from "./direct-routes.ts";
 import {
   advertisableAddresses,
   clampBytes,
@@ -73,6 +74,7 @@ const COMPANION_PORT = num(process.env.OMB_COMPANION_PORT, 8810);
 const CONTROL_PORT = num(process.env.OMB_CONTROL_PORT, 8811);
 const SERVICE_TYPE = "_openmausbot._tcp";
 let hostedUrl = hostedCompanionUrl(process.env.OMB_COMPANION_HOSTED_URL);
+directRoutesFromEnv(process.env);
 const PRIVATE_ORIGIN = companionOriginSocket(process.env.OMB_COMPANION_INTERNAL_ORIGIN);
 const SECRET_PUBLIC_KEY = normalizedPhoneSecretPublicKey(
   process.env.OMB_PHONE_SECRET_PUBLIC_KEY ?? "",
@@ -158,6 +160,26 @@ const proxy = createProxyHandler({
   });
 const e2eOrigin = createE2EOrigin((req, res) => proxy(req, res), (req, socket, head) => proxy.upgrade(req, socket, head));
 const companion = createServer((req, res) => proxy(req, res, "lan"));
+const directSockets = new Set<import("node:net").Socket>();
+companion.on("connection", (socket) => {
+  if (!acceptsConnection(socket.localAddress, socket.remoteAddress)) return void socket.destroy();
+  directSockets.add(socket);
+  socket.once("close", () => directSockets.delete(socket));
+});
+let directListening = false;
+
+/** Binds the device port while Same Wi-Fi or Tailscale is on, and drops connections on a way in just turned off. */
+async function syncDirectListener(): Promise<void> {
+  for (const socket of directSockets) if (!acceptsConnection(socket.localAddress, socket.remoteAddress)) socket.destroy();
+  if (anyDirectRoute() && !directListening) {
+    await listen(companion, COMPANION_PORT, "0.0.0.0");
+    directListening = true;
+  } else if (!anyDirectRoute() && directListening) {
+    directListening = false;
+    companion.closeAllConnections?.();
+    await new Promise<void>((resolve) => companion.close(() => resolve()));
+  }
+}
 // `createServer` handles plain HTTP only; noVNC's WebSocket and /v1/e2e arrive as Node's separate `upgrade` event.
 companion.on("upgrade", (req, socket, head) =>
   isE2EUpgrade(req) ? handleDirectUpgrade(req, socket, head, e2e, e2eOrigin) : proxy.upgrade(req, socket, head, "lan"));
@@ -229,7 +251,14 @@ const control = createControlServer({
     if (parentPort && !mutationToken) return;
     void notifyDeviceRevoked({ harnessPort: HARNESS_PORT, deviceId, mutationToken: mutationToken ?? undefined });
   },
-  refreshTailscale: () => refreshTailnetName(),
+  setDirectRoutes: (body) => {
+    const next = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+    if (!next || typeof next.wifi !== "boolean" || typeof next.tailscale !== "boolean") return false;
+    setDirectRoutes(next);
+    void syncDirectListener().catch((error: Error) => console.warn(`companion: ${error.message}`));
+    void watcher.check();
+    return true;
+  },
   e2e: () => ({ enabled: e2e.enabled, relay: relay?.status ?? "off", node: relay?.node ?? null, descriptor: e2e.descriptor(null) }),
   liveRoutes: () => e2e.routes(),
   // The phone hears where it may connect from inside its session first. Narrowed, the relay keeps it a moment so that
@@ -300,16 +329,13 @@ async function main(): Promise<void> {
     console.log(`e2e: on, transport key ${b64u(key.publicKey).slice(0, 8)}…`);
   }
   await listen(control, CONTROL_PORT, "127.0.0.1");
-  await listen(companion, COMPANION_PORT, "0.0.0.0");
+  await syncDirectListener();
   if (managedOrigin && PRIVATE_ORIGIN) {
     await listenCompanionOrigin(managedOrigin, PRIVATE_ORIGIN);
   }
 
   // Before advertising, so the first record already carries the name; a later rename withdraws the old one.
   await refreshMachineName();
-
-  const tailscaleTried: string[] = [];
-  await refreshTailnetName((cli, outcome) => tailscaleTried.push(`  ${cli} — ${outcome}`)).catch(() => {});
 
   // Through the watcher: a laptop may have no addresses yet, and they change
   // under a running sidecar. Discovery failing is never fatal.
@@ -321,16 +347,15 @@ async function main(): Promise<void> {
   nameTimer = setInterval(() => void refreshMachineName().then((changed) => (changed && !stopping ? watcher.check() : undefined)), 30_000);
   nameTimer.unref?.();
 
-  const addresses = lanAddresses();
+  const addresses = routedAddresses();
   const tailscale = tailscaleAddress(addresses);
   const reach = tailnetName() ?? tailscale ?? addresses[0];
-  console.log(`companion  http://0.0.0.0:${COMPANION_PORT}  →  harness 127.0.0.1:${HARNESS_PORT}`);
+  const on = Object.entries(directRoutes()).filter(([name, value]) => name !== "tailnetName" && value).map(([name]) => name);
+  console.log(directListening
+    ? `companion  http://0.0.0.0:${COMPANION_PORT} (${on.join(", ")})  →  harness 127.0.0.1:${HARNESS_PORT}`
+    : `companion  no direct way in is on  →  harness 127.0.0.1:${HARNESS_PORT}`);
   if (!parentPort) console.log(`pair here  http://127.0.0.1:${CONTROL_PORT}/#token=${controlToken}`);
-  if (reach) console.log(`on your phone, enter  ${reach}:${COMPANION_PORT}`);
-  if (tailscale && !tailnetName()) {
-    console.log("no MagicDNS name found. Tailscale CLI attempts:");
-    for (const line of tailscaleTried) console.log(line);
-  }
+  if (reach && directListening) console.log(`on your phone, enter  ${reach}:${COMPANION_PORT}`);
 }
 
 const shutdown = async (signal: string): Promise<void> => {

@@ -31,7 +31,7 @@ The HTTPS address uses the host's managed outbound tunnel. TLS is verified by th
 ## Pair over Tailscale
 
 1. Install Tailscale on both computers, sign into the same tailnet, and leave MagicDNS enabled.
-2. On the host, open **Settings → Remote access**, turn on Remote access, and open **Pair over Tailscale** to display a six-digit code.
+2. On the host, open **Settings → Remote access → Advanced**, turn the **Tailscale pairing** switch on (the app never starts or checks Tailscale until you do), and open **Pair over Tailscale** to display a six-digit code.
 3. On the client, open **Settings → Remote access → Connect to another computer**
    and choose **Desktop companion**.
 4. Enter the host's full `.ts.net` MagicDNS name and the six-digit code.
