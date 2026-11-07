@@ -12,11 +12,13 @@ import {
 } from "node:fs";
 import { link, open, unlink } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
+import { fileMaxBytes } from "../shared/upload-limits.ts";
 import { DATA_DIR } from "./config.ts";
 import { boxUploadsDir } from "./bot-box/plan.ts";
 
-export { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
+export { FILE_MAX_BYTES, fileMaxBytes } from "../shared/upload-limits.ts";
+/** The per-file ceiling this process enforces on uploads (OMB_FILE_MAX_BYTES overridable, #4705). */
+const FILE_LIMIT = fileMaxBytes();
 export const ATTACHMENTS_DIR = join(DATA_DIR, "attachments");
 
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
@@ -309,7 +311,7 @@ class AttachmentReservation {
   ensure(bytes: number): void {
     if (bytes <= this.held) return;
     const required = bytes - this.held;
-    const remainingPerFileCapacity = FILE_MAX_BYTES - this.held;
+    const remainingPerFileCapacity = FILE_LIMIT - this.held;
     const preferred = Math.min(
       Math.max(required, STREAM_RESERVATION_INCREMENT_BYTES),
       remainingPerFileCapacity,
@@ -445,8 +447,8 @@ export async function saveFile(
   if (expectedBytes !== undefined && (!Number.isSafeInteger(expectedBytes) || expectedBytes < 0)) {
     throw statusError(400, "content-length must be a non-negative integer");
   }
-  if (expectedBytes !== undefined && expectedBytes > FILE_MAX_BYTES) {
-    throw statusError(413, `file exceeds ${FILE_MAX_BYTES} bytes`);
+  if (expectedBytes !== undefined && expectedBytes > FILE_LIMIT) {
+    throw statusError(413, `file exceeds ${FILE_LIMIT} bytes`);
   }
 
   return withUploadLock(uploadId, async () => {
@@ -461,8 +463,8 @@ export async function saveFile(
           ? value
           : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
         if (chunk.byteLength === 0) continue;
-        if (bytes + chunk.byteLength > FILE_MAX_BYTES) {
-          throw statusError(413, `file exceeds ${FILE_MAX_BYTES} bytes`);
+        if (bytes + chunk.byteLength > FILE_LIMIT) {
+          throw statusError(413, `file exceeds ${FILE_LIMIT} bytes`);
         }
         incomingHash.update(chunk);
         bytes += chunk.byteLength;
@@ -492,8 +494,8 @@ export async function saveFile(
           ? value
           : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
         if (chunk.byteLength === 0) continue;
-        if (bytes + chunk.byteLength > FILE_MAX_BYTES) {
-          throw statusError(413, `file exceeds ${FILE_MAX_BYTES} bytes`);
+        if (bytes + chunk.byteLength > FILE_LIMIT) {
+          throw statusError(413, `file exceeds ${FILE_LIMIT} bytes`);
         }
         reservation.ensure(bytes + chunk.byteLength);
         let offset = 0;
@@ -537,7 +539,7 @@ export async function saveFile(
  * upload (507 when it is full), written under a partial name cleanup knows, never over a file already here, and never
  * leaving a partial file behind. `stored`: false when the same file was here already. */
 export async function saveNamedAttachment(name: string, chunks: AsyncIterable<Uint8Array>, expectedBytes?: number): Promise<{ stored: boolean }> {
-  if (expectedBytes !== undefined && expectedBytes > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
+  if (expectedBytes !== undefined && expectedBytes > FILE_LIMIT) throw statusError(413, `attachments are limited to ${FILE_LIMIT} bytes`);
   ensureAttachmentsDir();
   const path = join(ATTACHMENTS_DIR, name);
   const partialPath = join(ATTACHMENTS_DIR, `.openmaus-upload-${randomUUID()}-${randomUUID()}.partial`);
@@ -551,7 +553,7 @@ export async function saveNamedAttachment(name: string, chunks: AsyncIterable<Ui
     let bytes = 0;
     for await (const value of chunks) {
       const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
-      if (bytes + chunk.byteLength > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
+      if (bytes + chunk.byteLength > FILE_LIMIT) throw statusError(413, `attachments are limited to ${FILE_LIMIT} bytes`);
       reservation.ensure(bytes + chunk.byteLength);
       await file.write(chunk);
       bytes += chunk.byteLength;
@@ -644,8 +646,8 @@ export function saveAudio(bytes: Buffer, mime: string): SavedAttachment {
     throw Object.assign(new Error("unsupported audio type"), { status: 400 });
   }
   if (bytes.byteLength === 0) throw Object.assign(new Error("empty audio"), { status: 400 });
-  if (bytes.byteLength > FILE_MAX_BYTES) {
-    throw Object.assign(new Error(`audio exceeds ${FILE_MAX_BYTES} bytes`), { status: 413 });
+  if (bytes.byteLength > FILE_LIMIT) {
+    throw Object.assign(new Error(`audio exceeds ${FILE_LIMIT} bytes`), { status: 413 });
   }
   ensureAttachmentsDir();
   const reservation = new AttachmentReservation();

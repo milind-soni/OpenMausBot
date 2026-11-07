@@ -9,7 +9,9 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { windowsPathDestinations } from "../shared/markdown-windows-paths.ts";
 import { inSecretFolder, SECRET_FILE_REFUSAL } from "./secret-folder.ts";
+import { fileMaxBytes } from "../shared/upload-limits.ts";
 
+/** Kept for compatibility: the shipped default. Enforcement follows OMB_FILE_MAX_BYTES (#4705). */
 export const MESSAGE_FILE_MAX_BYTES = 25 * 1024 * 1024;
 
 export interface OpenedMessageFile {
@@ -388,8 +390,8 @@ export async function openMessageFile(href: string, roots: readonly string[]): P
       const opened = await handle.stat();
       if (opened.isDirectory()) throw statusError(400, "the link points to a folder, not a file", "directory");
       if (!opened.isFile()) throw statusError(400, "the link does not point to a regular file");
-      if (opened.size > MESSAGE_FILE_MAX_BYTES) {
-        throw statusError(413, `file exceeds ${MESSAGE_FILE_MAX_BYTES} bytes`);
+      if (opened.size > fileMaxBytes()) {
+        throw statusError(413, `file exceeds ${fileMaxBytes()} bytes`);
       }
 
       const canonicalAfter = await realpath(candidate);
