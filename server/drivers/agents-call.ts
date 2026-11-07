@@ -187,22 +187,29 @@ function recallWhen(at: unknown, dateOnly: boolean): string {
   return dateOnly ? day : `${day} ${pad(said.getHours())}:${pad(said.getMinutes())}`;
 }
 
-/** A model that fills every optional argument with `""` meant to leave it out. Dropped once here, so no tool reads
- * a blank id, path or body as a value it then has to reject. */
-function dropBlankStrings(input: Json): Json {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
-  const out: Json = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (typeof value === "string" && !value.trim()) continue;
-    out[key] = value && typeof value === "object" && !Array.isArray(value) ? dropBlankStrings(value as Json) : value;
+/** The top-level arguments a model may fill with `""` (or spaces) when it means to leave them out, per tool. Only these:
+ * elsewhere a blank can be the value itself, such as a cleared room bulletin or a bot's private folder. */
+const BLANK_MEANS_LEFT_OUT: Readonly<Record<string, readonly string[]>> = {
+  coordinate_bots: ["group_id", "reason", "thread", "title", "reply", "done_when", "answers"],
+  session_search: ["thread_id", "message_id", "query", "since", "until", "scope"],
+  show_html: ["html", "jsx", "path"],
+  memory_update: ["old_text", "text", "until"],
+};
+
+function dropBlankArguments(name: string, input: Json): Json {
+  const keys = Object.hasOwn(BLANK_MEANS_LEFT_OUT, name) ? BLANK_MEANS_LEFT_OUT[name] : undefined;
+  if (!keys || !input || typeof input !== "object" || Array.isArray(input)) return input;
+  const out: Json = { ...input };
+  for (const key of keys) {
+    const value = out[key];
+    if (typeof value === "string" && !value.trim()) delete out[key];
   }
   return out;
 }
 
 export async function callTool(called: string, input: Json, context: ToolCallContext): Promise<ToolCallResult> {
-  const resolved = resolveAgentsCall(called, input);
-  const name = resolved.name;
-  const args = dropBlankStrings(resolved.arguments);
+  const { name, arguments: given } = resolveAgentsCall(called, input);
+  const args = dropBlankArguments(name, given);
   const refused = outOfBounds(name, fullInputSchema(name), args);
   if (refused) return { text: refused, isError: true };
   const member = agentsCallMember(name, args);
@@ -294,20 +301,15 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         isError: true,
       };
     }
-    const send = (withMyFolder: boolean) => api("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
-      ...(withMyFolder ? { inMyFolder: canonical.in_my_folder } : {}),
+    const r = await api("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
       groupId: canonical.group_id, botIds: ids, message: canonical.message,
       reason: typeof canonical.reason === "string" && canonical.reason.trim() ? canonical.reason.trim() : undefined,
       rework: canonical.rework,
       thread: canonical.thread, reply: canonical.reply,
-      title: typeof canonical.title === "string" && canonical.title.trim() ? canonical.title.trim() : undefined, consult: canonical.consult,
+      title: typeof canonical.title === "string" && canonical.title.trim() ? canonical.title.trim() : undefined, consult: canonical.consult, inMyFolder: canonical.in_my_folder,
       done_when: typeof canonical.done_when === "string" && canonical.done_when.trim() ? canonical.done_when.trim() : undefined,
       answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined,
     }) });
-    let r = await send(true);
-    // A conversation with no project folder has nothing to share, and the whole hand-off fails for the flag. Send it
-    // again without; the bot keeps its work instead of reporting a step it cannot explain.
-    if (!r.ok && /in_my_folder cannot be used/i.test(String(r.result ?? ""))) r = await send(false);
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
   }
   if (name === "assignment_status") {
