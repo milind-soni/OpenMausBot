@@ -1713,6 +1713,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
   });
 
   it("runs a turn for a restarted custom server, leaving the host's restart count out of its environment", async () => {
+    vi.stubEnv("HEALTH_REGION", "inherited");
     await create();
     const dump = join(scratch, "custom-restarted.json");
     process.env.FAKE_CODEX_DUMP = dump;
