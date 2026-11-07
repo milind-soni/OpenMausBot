@@ -36,15 +36,17 @@ export function toolPlace(toolName: string, effective: EffectivePlace): Place | 
   return null;
 }
 
-/** Whether a running tool call is using the bot's screen (its browser or computer) right now, so the chat can offer
- * to watch it. Only the live calls matter, and they sit at the end of the transcript. */
-export function screenToolLive(messages: readonly { id: string; tool?: { name: string } | null }[], liveTools: ReadonlySet<string>, effective: EffectivePlace): boolean {
+/** Where a running tool call is using the bot's screen right now (its browser or its computer), so the chat can offer
+ * to watch it; null when none is. Only the live calls matter, and they sit at the end of the transcript. A call that
+ * already finished (ok set) does not count, even while the turn goes on. */
+export function liveScreenPlace(messages: readonly { id: string; tool?: { name: string; ok?: boolean } | null }[], liveTools: ReadonlySet<string>, effective: EffectivePlace): Place | null {
   let left = liveTools.size;
   for (let index = messages.length - 1; index >= 0 && left > 0; index--) {
     const message = messages[index];
     if (!liveTools.has(message.id)) continue;
     left--;
-    if (message.tool && toolPlace(message.tool.name, effective)) return true;
+    const place = message.tool && message.tool.ok === undefined ? toolPlace(message.tool.name, effective) : null;
+    if (place) return place;
   }
-  return false;
+  return null;
 }

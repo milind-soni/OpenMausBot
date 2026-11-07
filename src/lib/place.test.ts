@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { effectivePlace, isComputerPlace, PLACES, placeLabelKey, placeOffered, screenToolLive, toolPlace } from "./place";
+import { effectivePlace, isComputerPlace, PLACES, placeLabelKey, placeOffered, liveScreenPlace, toolPlace } from "./place";
 import { toolSurfaceKind } from "../../shared/tool-surface";
 
 describe("where a conversation works", () => {
@@ -48,13 +48,15 @@ describe("where a conversation works", () => {
       { id: "bash", tool: { name: "Bash" } },
       { id: "snap", tool: { name: "mcp__browser__browser_snapshot" } },
       { id: "shot", tool: { name: "screenshot" } },
+      { id: "done", tool: { name: "mcp__browser__browser_navigate", ok: true } },
     ];
-    expect(screenToolLive(messages, new Set(), "cloud")).toBe(false);
-    expect(screenToolLive(messages, new Set(["bash"]), "cloud")).toBe(false);
-    expect(screenToolLive(messages, new Set(["bash", "snap"]), "auto")).toBe(true);
-    expect(screenToolLive(messages, new Set(["shot"]), "cloud")).toBe(true);
-    expect(screenToolLive(messages, new Set(["shot"]), "auto")).toBe(false);
-    expect(screenToolLive(messages, new Set(["text"]), "cloud")).toBe(false);
+    expect(liveScreenPlace(messages, new Set(), "cloud")).toBeNull();
+    expect(liveScreenPlace(messages, new Set(["bash"]), "cloud")).toBeNull();
+    expect(liveScreenPlace(messages, new Set(["bash", "snap"]), "auto")).toBe("browser");
+    expect(liveScreenPlace(messages, new Set(["shot"]), "cloud")).toBe("cloud");
+    expect(liveScreenPlace(messages, new Set(["shot"]), "auto")).toBeNull();
+    expect(liveScreenPlace(messages, new Set(["text"]), "cloud")).toBeNull();
+    expect(liveScreenPlace(messages, new Set(["done", "bash"]), "cloud")).toBeNull();
   });
 
   it("classifies tool names without guessing computer for unrelated tools", () => {

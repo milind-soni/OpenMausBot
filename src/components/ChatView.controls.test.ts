@@ -277,10 +277,10 @@ describe("header name", () => {
   });
 
   it("offers a Watch button only while a running tool uses the bot's screen", () => {
-    const working = (tool: string, busy = true, computer: Bot["computer"] | "auto" = "cloud") => renderToStaticMarkup(createElement(ChatView, {
+    const working = (tool: string, busy = true, computer: Bot["computer"] | "auto" = "cloud", ok?: boolean) => renderToStaticMarkup(createElement(ChatView, {
       bot: { ...bot, computer: computer === "auto" ? undefined : computer, busy, turnStartedAt: 1, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy, turnStartedAt: 1 })), messages: [
         { id: "ask", role: "user", kind: "text", at: 1, text: "Check the site" },
-        { id: "tool", role: "bot", kind: "activity", at: 2, tool: { name: tool } },
+        { id: "tool", role: "bot", kind: "activity", at: 2, tool: { name: tool, ok } },
       ] } as Bot,
     }));
     const watch = (markup: string) => markup.match(/<button[^>]*data-testid="watch-screen"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
@@ -289,6 +289,7 @@ describe("header name", () => {
     expect(watch(working("mcp__computer__click", false))).toBe("");
     expect(watch(working("Bash"))).toBe("");
     expect(watch(working("screenshot", true, "auto"))).toBe("");
+    expect(watch(working("mcp__browser__browser_snapshot", true, "cloud", true))).toBe("");
   });
 
   it("centres the bot in the header's middle column, with the controls in the last", () => {
