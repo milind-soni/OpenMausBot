@@ -3,6 +3,7 @@ export type LentMcpServer =
   | { name: string; url: string; type: "http" | "sse"; headers: Record<string, string> };
 export const LENT_MCP_ACTIONS: ReadonlySet<"mcp_tools" | "mcp_call">;
 export function validLentMcpServer(server: unknown): server is LentMcpServer;
+export function commandFingerprint(server: { command: string; args: string[]; env: Record<string, string> }): string;
 export function isLoopbackAddress(url: string): boolean;
 export function lentMcpRefusal(grant: { cloud?: unknown; terminal?: boolean }, server: LentMcpServer): string | null;
 export function ownEnvironmentIds(dataDirs: ReadonlyArray<string | null | undefined>): string[];

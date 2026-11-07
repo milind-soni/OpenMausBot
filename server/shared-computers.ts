@@ -209,6 +209,8 @@ export class SharedComputers {
     if (!entry || !this.sessionLive(session) || !/^[a-f0-9]{64}$/.test(secret) || !timingSafeEqual(Buffer.from(secret), Buffer.from(entry.secret))) throw failure("Shared computer is disconnected or not authorized", 403);
     return entry;
   }
+  /** Whose computer this is, checked as every route of the computer's own checks it. */
+  owner(id: string, session: string, secret: string): string { return this.authorize(id, session, secret).owner.person; }
   list(principal: string | null) {
     if (!principal) return [];
     return [...this.computers.values()].filter(entry => entry.owner.person === principal && this.online(entry)).map(({ registration: { platform, ...rest } }) => ({ ...rest, ...(platform ? { device: deviceWord(platform) } : {}) }));

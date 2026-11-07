@@ -48,6 +48,10 @@ export function validLentMcpServer(server) {
   return keys === "headers,name,type,url" && typeof server.url === "string" && server.url.length <= 2048 && (server.type === "http" || server.type === "sse") && secrets(server.headers, HEADER_NAME);
 }
 
+/** What the person allows when they allow a command server: its command, args and env names, so a changed key needs no
+ * new Allow. Security: no env value is hashed into what crosses the link. */
+export const commandFingerprint = ({ command, args, env }) => createHash("sha256").update(JSON.stringify([command, args, Object.keys(env).sort()])).digest("hex");
+
 export function isLoopbackAddress(url) {
   try {
     const parsed = new URL(url);

@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { createLentMcp, inheritedEnvironment, isLoopbackAddress, lentMcpRefusal, ownEnvironmentIds, ownPorts, validLentMcpServer, windowsLaunch } from "./lent-mcp.mjs";
+import { commandFingerprint, createLentMcp, inheritedEnvironment, isLoopbackAddress, lentMcpRefusal, ownEnvironmentIds, ownPorts, validLentMcpServer, windowsLaunch } from "./lent-mcp.mjs";
 import { executeSharedOperation } from "./shared-computer-access.mjs";
 import { validSharedOperation } from "./computer-sharing.mjs";
 
@@ -78,6 +78,14 @@ test("security: an address only on its own port, 1024 or higher, never one left 
     assert.match(lentMcpRefusal(cloud, http(url)) ?? "", OWN_PORT, url);
   }
   for (const url of ["http://127.0.0.1:19501/mcp", "http://localhost:19501/mcp", "http://[::1]:19501/mcp", "https://127.0.0.1:1024/mcp"]) assert.equal(lentMcpRefusal(cloud, http(url)), null, url);
+});
+
+test("commandFingerprint hashes command, args and env names, never env values", () => {
+  const server = { command: "notes-mcp", args: ["--dir", "notes"], env: { NOTES_TOKEN: "a", NOTES_DIR: "x" } };
+  assert.match(commandFingerprint(server), /^[a-f0-9]{64}$/);
+  assert.equal(commandFingerprint({ ...server, env: { NOTES_DIR: "y", NOTES_TOKEN: "b" } }), commandFingerprint(server));
+  assert.notEqual(commandFingerprint({ ...server, args: ["--dir", "other"] }), commandFingerprint(server));
+  assert.notEqual(commandFingerprint({ ...server, env: { NOTES_TOKEN: "a" } }), commandFingerprint(server));
 });
 
 test("security: never this computer's own OpenMausBot ports or Chrome's DevTools port, and nothing is fetched", async t => {

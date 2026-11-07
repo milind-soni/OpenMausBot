@@ -289,7 +289,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/team\/phones$/ },
   { methods: ["DELETE"], path: /^\/api\/team\/phones\/[\w-]+$/ },
   // Own desktop connector, bound to a private secret; listed only while features.sharedComputers is on.
-  { methods: ["POST"], path: /^\/api\/shared-computers\/(?:connect|[\w-]+\/(?:poll|lease|result|disconnect))$/, feature: "sharedComputers" },
+  { methods: ["POST"], path: /^\/api\/shared-computers\/(?:connect|[\w-]+\/(?:poll|lease|result|disconnect|mcp-server))$/, feature: "sharedComputers" },
   { methods: ["GET"], path: /^\/api\/shared-computers$/, feature: "sharedComputers" },
   // The same desktop's device link: a WebSocket bound to that secret too.
   { methods: ["GET"], path: /^\/api\/shared-computers\/[\w-]+\/link$/, feature: "sharedComputers" },

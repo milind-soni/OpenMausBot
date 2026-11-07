@@ -29,7 +29,7 @@ async function cloud(options: { sleeping?: () => boolean; sleep?: AbortControlle
   const upgrades = createUpgrades();
   const sleep = options.sleep ?? new AbortController();
   const route = createSharedComputerRoutes({
-    enabled: () => true, computers, sessionLive: (id) => live.has(id), environmentId: "11111111-1111-4111-8111-111111111111",
+    enabled: () => true, computers, lentMcp: { definition: () => null }, sessionLive: (id) => live.has(id), environmentId: "11111111-1111-4111-8111-111111111111",
     cloudHomeLender: PERSON, principal: () => PERSON, personKey: () => PERSON,
     power: () => ({ sleeping: options.sleeping ?? (() => false), sleepSignal: () => sleep.signal }),
     links, upgrades,
