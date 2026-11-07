@@ -198,6 +198,23 @@ describe("the Automations list switch", () => {
 
   beforeEach(() => { fixture.state.routines = [routine]; });
 
+  it("names the unread failed runs on the list and on their row, and marks them all read from one button", () => {
+    const failed = { id: "run-1", routineId: "routine-1", routineName: "Morning summary", target: "bot", botId: "bot-a", runOn: "maus", scheduledFor: now - 7_200_000, startedAt: now - 7_200_000, createdAt: now - 7_200_000, status: "failed", manual: false };
+    fixture.state.routineRuns = [failed, { ...failed, id: "run-2", status: "missed", scheduledFor: now - 90_000_000, startedAt: now - 90_000_000 }];
+    mountPage();
+    expect(container.querySelector("[data-automations-unseen]")?.textContent).toContain("2 failed or missed runs not read");
+    expect(row("routine-1").querySelector("[data-automation-unseen]")?.textContent).toBe("2 failed or missed runs not read");
+
+    const markAll = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Mark all as read")!;
+    flushSync(() => markAll.click());
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "markAllRoutineRunsSeen" });
+
+    fixture.state.routineRuns = [{ ...failed, seenAt: now }];
+    fixture.dispatch({ type: "routinePatched", routine });
+    expect(container.querySelector("[data-automations-unseen]")).toBeNull();
+    expect(row("routine-1").querySelector("[data-automation-unseen]")).toBeNull();
+  });
+
   it.each([
     ["a schedule", "Morning summary", "routine-1", "/api/routines/routine-1", (enabled: boolean) => ({ enabled }), (enabled: boolean) => ({ routine: { ...routine, enabled, nextRunAt: enabled ? now + 3_600_000 : null, updatedAt: now + (enabled ? 2 : 1) } })],
     ["another app's", "Sales form leads", "hook-1", "/api/webhooks/hook-1", (enabled: boolean) => ({ enabled, verificationPending: false }), (enabled: boolean) => ({ webhook: { ...webhook, enabled } })],

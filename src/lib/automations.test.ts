@@ -4,7 +4,8 @@ import { setLocale } from "@/lib/i18n";
 import type { Routine, RoutineRun } from "@/lib/routines";
 import type { WebhookTrigger } from "@/lib/webhooks";
 import {
-  automationSentence, automationsFrom, automationStatus, doesPhrase, lastReceived, lastWhen, nextWhen, orderAutomations, plainWhen, runLine, sourcePhrase, statusLine,
+  automationSentence, automationsFrom, automationStatus, doesPhrase, hasUnseenProblemRun, lastReceived, lastWhen, nextWhen, orderAutomations, plainWhen, runLine, sourcePhrase, statusLine,
+  unseenProblemRunCount, unseenProblemRunsLabel,
   webhookCalls, type Automation,
 } from "./automations";
 import type { WebhookAttempt } from "@/lib/webhooks";
@@ -226,5 +227,27 @@ describe("order and the grey line", () => {
 
   it("says a run that found nothing to tell found nothing new, whatever its last words were", () => {
     expect(runLine(run("completed", at(0, 9, 2), { output: "Checked 14 emails.\nNOTHING NEW", report: { state: "quiet" } }), NOW)).toEqual({ when: "Today 9:02 AM", mark: "✓", text: "Nothing new" });
+  });
+});
+
+describe("failed or missed runs not read", () => {
+  it("counts only failed or missed runs not yet seen, and says one or many", () => {
+    const list = [automation([run("failed", at(-1, 9)), run("missed", at(-2, 9)), run("failed", at(-3, 9), { seenAt: at(-1, 10) }), run("completed", at(-4, 9))])];
+    expect(unseenProblemRunCount(list)).toBe(2);
+    expect(hasUnseenProblemRun(list)).toBe(true);
+    expect(unseenProblemRunsLabel(2)).toBe("2 failed or missed runs not read");
+    expect(unseenProblemRunsLabel(1)).toBe("1 failed or missed run not read");
+  });
+
+  it("asks nothing for a failure a later completed run recovered from", () => {
+    const list = [automation([run("completed", at(-1, 9)), run("failed", at(-2, 9))])];
+    expect(unseenProblemRunCount(list)).toBe(0);
+    expect(hasUnseenProblemRun(list)).toBe(false);
+  });
+
+  it("has nothing to count once every run is seen", () => {
+    const list = [automation([run("failed", at(-1, 9), { seenAt: at(-1, 10) })])];
+    expect(unseenProblemRunCount(list)).toBe(0);
+    expect(hasUnseenProblemRun(list)).toBe(false);
   });
 });

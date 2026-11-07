@@ -63,9 +63,22 @@ export function automationsFrom(sources: { routines: readonly Routine[]; webhook
 }
 
 /** An unseen failed or missed run the person can clear: it belongs to an automation in `automations`, and opening that
- * automation marks it seen. A run whose automation or bot was deleted has nothing to open, so it never asks for attention. */
+ * automation marks it seen. A run whose automation or bot was deleted has nothing to open, so it never asks for attention,
+ * nor does one a later completed run recovered from, which the list shows as Working. */
 export function hasUnseenProblemRun(automations: readonly Automation[]): boolean {
-  return automations.some((automation) => automation.runs.some((run) => isRoutineProblemRun(run) && !run.seenAt));
+  return unseenProblemRunCount(automations) > 0;
+}
+
+export function unseenProblemRunCount(automations: readonly Automation[]): number {
+  return automations.reduce((total, { runs }) => {
+    const recovered = runs.findIndex((run) => run.status === "completed");
+    const outstanding = recovered === -1 ? runs : runs.slice(0, recovered);
+    return total + outstanding.filter((run) => isRoutineProblemRun(run) && !run.seenAt).length;
+  }, 0);
+}
+
+export function unseenProblemRunsLabel(count: number): string {
+  return count === 1 ? t("automations.unseenRuns.one") : t("automations.unseenRuns.many", { count: String(count) });
 }
 
 export function automationFor(ref: { kind: AutomationKind; id: string }, sources: Parameters<typeof automationsFrom>[0]): Automation | null {

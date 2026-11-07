@@ -4995,6 +4995,8 @@
   "routines.logsFor": "Run logs for {name}",
   "routines.logsHint": "Recent saved runs across your bots. Open a run for its result, error, and execution thread.",
   "routines.markAllSeen": "Mark all as read",
+  "automations.unseenRuns.one": "1 failed or missed run not read",
+  "automations.unseenRuns.many": "{count} failed or missed runs not read",
   "routines.unread": "Unseen failure",
   "routines.activeSchedule": "Active",
   "routines.pausedSchedule": "Paused",
