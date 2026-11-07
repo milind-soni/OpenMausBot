@@ -15,8 +15,8 @@ import type {
 } from "../types.ts";
 import { join } from "node:path";
 import { normalizeAccountAlias } from "../common.ts";
-import { OpenConnectorClient, OpenConnectorError, normalizeOpenConnectorBaseUrl } from "./client.ts";
-import { OpenConnectorStateStore, OPENCONNECTOR_STATE_FILE, accountIdForConnection } from "./state.ts";
+import { OpenConnectorClient, OpenConnectorError, normalizeOpenConnectorBaseUrl, type OpenConnectorActionItem } from "./client.ts";
+import { OpenConnectorStateStore, OPENCONNECTOR_STATE_FILE, accountIdForConnection, isConnectedConnectionRecord, type OpenConnectorConnectionRecord } from "./state.ts";
 import { pollConnectionRequest } from "./oauth.ts";
 import { actionIdForConnectorTool, connectorToolListingForAction } from "./tools.ts";
 import { OPENCONNECTOR_ADMIN_TOKEN_ENV, resolveTokenRef, type OpenConnectorSettings } from "../provider.ts";
@@ -56,6 +56,9 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
   const pollsInFlight = new Map<string, Promise<void>>();
   const deferredPolls = new Map<string, ReturnType<typeof setTimeout>>();
   const resumeIntervalMs = options.polling?.resumeIntervalMs ?? 30_000;
+  const actionDetailCache = new Map<string, OpenConnectorActionItem>();
+  const fetchedActionDetails = new Set<string>();
+  let disposed = false;
 
   const client = () => new OpenConnectorClient({
     baseUrl: options.settings.url ?? "",
@@ -91,7 +94,7 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
   };
 
   const deferPoll = (service: string, requestId: string, alias: string | undefined): void => {
-    if (pollsInFlight.has(requestId) || deferredPolls.has(requestId)) return;
+    if (disposed || pollsInFlight.has(requestId) || deferredPolls.has(requestId)) return;
     const timer = setTimeout(() => {
       deferredPolls.delete(requestId);
       if (available()) convergeConnection(service, requestId, alias);
@@ -104,6 +107,7 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
    * while the local record walks pending -> connected/failed on its own. One poll per request id;
    * a failed convergence never changes what authorize already returned, it only marks the record. */
   const convergeConnection = (service: string, requestId: string, alias: string | undefined): void => {
+    if (disposed) return;
     clearDeferredPoll(requestId);
     if (pollsInFlight.has(requestId)) return;
     if (!available()) {
@@ -149,16 +153,23 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
 
 
 
-  const serviceStates = (services: readonly string[], authenticated: ReadonlySet<string>): Record<string, ConnectorServiceState> =>
-    Object.fromEntries(services.map((service) => {
+  const serviceStates = (services: readonly string[], authenticated: ReadonlySet<string>): Record<string, ConnectorServiceState> => {
+    const connectionsByService = new Map<string, OpenConnectorConnectionRecord[]>();
+    for (const record of state.listConnections()) {
+      const records = connectionsByService.get(record.service) ?? [];
+      records.push(record);
+      connectionsByService.set(record.service, records);
+    }
+    return Object.fromEntries(services.map((service) => {
       const slug = canonicalToolkitSlug(service);
-      const accounts = state.connectionsForService(slug)
+      const records = connectionsByService.get(slug) ?? [];
+      const accounts = records
         .map((record) => ({
           id: record.accountId,
           status: record.status === "connected" ? "ACTIVE" : record.status,
           ...(record.alias ? { alias: record.alias } : {}),
         }));
-      const pending = state.connectionsForService(slug).some((record) => record.status === "pending");
+      const pending = records.some((record) => record.status === "pending");
       const connected = authenticated.has(slug);
       return [slug, {
         connected,
@@ -167,13 +178,14 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
         accounts,
       }];
     }));
+  };
 
   const notFound = (error: unknown) => error instanceof OpenConnectorError && (error.status === 404 || error.code === "connection_not_found" || error.code === "unknown_action");
 
   const actionAliasFor = (actionId: string, params: Record<string, unknown>): string | undefined => {
     const requested = selectedAccountAlias(params);
     const service = canonicalToolkitSlug(actionId.slice(0, actionId.indexOf(".")));
-    const records = state.connectionsForService(service);
+    const records = state.connectionsForService(service).filter(isConnectedConnectionRecord);
     if (requested) {
       const record = records.find((item) => item.alias?.toLowerCase() === requested.toLowerCase());
       if (!record) throw new Error(`No selected OpenConnector account named "${requested}" for ${service}`);
@@ -196,12 +208,37 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
     }
   };
 
+  const detailedActionsForRelay = async (actions: readonly OpenConnectorActionItem[]): Promise<OpenConnectorActionItem[]> => {
+    const detailed = actions.map((action) => fetchedActionDetails.has(action.id) ? actionDetailCache.get(action.id) ?? action : action);
+    const missing = detailed
+      .map((action, index) => ({ action, index }))
+      .filter(({ action }) => !fetchedActionDetails.has(action.id) && (!(action.raw.inputSchema instanceof Object) || Array.isArray(action.raw.inputSchema)));
+    const runtime = client();
+    for (let offset = 0; offset < missing.length; offset += 8) {
+      const batch = missing.slice(offset, offset + 8);
+      const settled = await Promise.allSettled(batch.map(({ action }) => runtime.action(action.id)));
+      for (const [position, result] of settled.entries()) {
+        if (result.status !== "fulfilled") continue;
+        const { index, action } = batch[position];
+        detailed[index] = result.value;
+        actionDetailCache.set(action.id, result.value);
+        fetchedActionDetails.add(action.id);
+      }
+    }
+    return detailed;
+  };
+
   return {
     id: "openconnector",
     mode: () => (available() ? "self-hosted" : "unavailable"),
     isConfigured: () => available(),
 
     inventory: (_cfg: AppConfig, as?: BrokerAccess) => inventory(as),
+
+    dispose: () => {
+      disposed = true;
+      for (const requestId of deferredPolls.keys()) clearDeferredPoll(requestId);
+    },
 
     async tools(): Promise<Record<string, ConnectorToolListing[]>> {
       try {
@@ -338,7 +375,7 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
       as?: BrokerAccess,
     ) {
       rejectMemberInstallation(as, "call connector tools");
-      return relayOpenConnectorMcp(client, payload, beforeSend, signal, actionAliasFor);
+      return relayOpenConnectorMcp(client, payload, beforeSend, signal, actionAliasFor, detailedActionsForRelay);
     },
   };
 }
@@ -354,6 +391,7 @@ async function relayOpenConnectorMcp(
   beforeSend?: () => void,
   signal?: AbortSignal,
   accountAliasFor?: (actionId: string, params: Record<string, unknown>) => string | undefined,
+  detailActionsFor?: (actions: readonly OpenConnectorActionItem[]) => Promise<OpenConnectorActionItem[]>,
 ): Promise<{ status: number; bytes: Uint8Array; contentType: string }> {
   const frame = typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload : null;
   const method = typeof frame?.method === "string" ? frame.method : undefined;
@@ -382,7 +420,7 @@ async function relayOpenConnectorMcp(
   if (method?.startsWith("notifications/")) return encode({}, 202);
   if (method === "tools/list") {
     const actions = await client().actions();
-    const detailedActions = await client().actionDetails(actions);
+    const detailedActions = await (detailActionsFor?.(actions) ?? client().actionDetails(actions));
     const tools = detailedActions
       .map((action) => connectorToolListingForAction(action))
       .filter((listing): listing is NonNullable<typeof listing> => listing !== null)

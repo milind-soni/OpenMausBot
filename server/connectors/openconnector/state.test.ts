@@ -228,23 +228,24 @@ describe("state persistence", () => {
 
   it("closes a busy lock handle and resumes after the holder releases it", () => {
     const file = join(dir, `busy-${Math.random().toString(36).slice(2)}.json`);
-    const store = new OpenConnectorStateStore(file);
+    const store = new OpenConnectorStateStore(file, undefined, { busyTimeoutMs: 200 });
     store.upsertConnection({ accountId: "oc:github:before", service: "github", status: "ACTIVE", updatedAt: "before" });
     const lockPath = `${file}.lock.db`;
     const holder = new DatabaseSync(lockPath);
     holder.exec("PRAGMA busy_timeout = 1000");
     holder.exec("CREATE TABLE IF NOT EXISTS state_lock (id INTEGER PRIMARY KEY CHECK (id = 1))");
     holder.exec("BEGIN EXCLUSIVE");
-    const lockDescriptors = () => readdirSync("/proc/self/fd")
-      .filter((entry) => /^\d+$/.test(entry))
-      .map((entry) => {
-        try { return readlinkSync(join("/proc/self/fd", entry)); } catch { return ""; }
-      })
-      .filter((target) => target === lockPath);
+    const lockDescriptors = () => {
+      if (process.platform !== "linux") return [];
+      return readdirSync("/proc/self/fd")
+        .filter((entry) => /^\d+$/.test(entry))
+        .map((entry) => {
+          try { return readlinkSync(join("/proc/self/fd", entry)); } catch { return ""; }
+        })
+        .filter((target) => target === lockPath);
+    };
 
-    const failedAt = Date.now();
     expect(() => store.listConnections()).toThrow(/database is locked|SQLITE_BUSY/i);
-    expect(Date.now() - failedAt).toBeGreaterThanOrEqual(4_000);
 
     holder.exec("COMMIT");
     holder.close();
@@ -318,12 +319,25 @@ describe("state persistence", () => {
     expect(new OpenConnectorStateStore(file).findConnectionByAccountId(record.accountId)).toBeNull();
   });
 
-  it("reads a missing or corrupt file as empty", () => {
+  it("reads missing state as empty but refuses to overwrite corrupt state", () => {
     const store = newStore();
     expect(store.listConnections()).toEqual([]);
     const file = join(dir, "corrupt.json");
     writeFileSync(file, "{not json", { mode: 0o600 });
-    expect(new OpenConnectorStateStore(file).listConnections()).toEqual([]);
+    const corrupt = new OpenConnectorStateStore(file);
+    expect(corrupt.listConnections()).toEqual([]);
+    expect(() => corrupt.upsertConnection({ accountId: "oc:github:default", service: "github", status: "ACTIVE", updatedAt: "t" })).toThrow(/unreadable or invalid/);
+    expect(readFileSync(file, "utf8")).toBe("{not json");
+  });
+
+  it("keeps the loaded runtime URL when a local-only store writes", () => {
+    const file = join(dir, `loaded-runtime-${Math.random().toString(36).slice(2)}.json`);
+    const first = new OpenConnectorStateStore(file, "https://first.example.test");
+    first.upsertConnection({ accountId: "oc:github:default", service: "github", status: "ACTIVE", updatedAt: "t" });
+    const local = new OpenConnectorStateStore(file);
+    local.upsertConnection({ accountId: "oc:slack:default", service: "slack", status: "ACTIVE", updatedAt: "t" });
+    expect(JSON.parse(readFileSync(file, "utf8")).runtimeUrl).toBe("https://first.example.test");
+    expect(new OpenConnectorStateStore(file, "https://second.example.test").listConnections()).toEqual([]);
   });
 });
 

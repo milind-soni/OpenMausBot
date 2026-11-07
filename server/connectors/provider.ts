@@ -8,7 +8,6 @@ import { join } from "node:path";
 import { z } from "zod";
 import { DATA_DIR } from "../config.ts";
 import { parseJson } from "../schema.ts";
-import { settledFileStamp } from "../settled-file.ts";
 import type { ConnectorProvider } from "./types.ts";
 import { composioProvider } from "./composio.ts";
 import { createOpenConnectorProvider } from "./openconnector/provider.ts";
@@ -138,9 +137,9 @@ export function connectorProvider(env: NodeJS.ProcessEnv = process.env): Connect
     settings.openconnector.adminTokenRef,
     tokenIsResolvable(),
     createHash("sha256").update(resolvedToken() ?? "").digest("hex"),
-    settledFileStamp(join(DATA_DIR, "config.json")),
   ]);
   if (selected?.key === key) return selected.provider;
+  selected?.provider.dispose?.();
   const provider = selectProvider(settings, env);
   selected = { key, provider };
   return provider;

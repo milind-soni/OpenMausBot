@@ -112,4 +112,5 @@ export interface ConnectorProvider {
     signal?: AbortSignal,
     as?: BrokerAccess,
   ): Promise<ConnectorRelayResult>;
+  dispose?(): void;
 }

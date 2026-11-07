@@ -43,6 +43,10 @@ const connectionRecordSchema = z.object({
 
 export type OpenConnectorConnectionRecord = z.infer<typeof connectionRecordSchema>;
 
+/** "ACTIVE" is the public inventory spelling; the runtime and older local records use "connected". */
+export const isConnectedConnectionRecord = (record: OpenConnectorConnectionRecord): boolean =>
+  record.status === "connected" || record.status === "ACTIVE";
+
 const appOAuthRecordSchema = z.object({
   service: z.string(),
   clientId: z.string(),
@@ -72,6 +76,8 @@ export class OpenConnectorStateStore {
   private readonly createLockDatabase: () => DatabaseSync;
   private readonly busyTimeoutMs: number;
   private runtimeMismatch = false;
+  private unreadableState = false;
+  private loadedRuntimeUrl?: string;
   private connections: OpenConnectorConnectionRecord[];
   private appOAuth: OpenConnectorAppOAuthRecord[];
 
@@ -87,13 +93,22 @@ export class OpenConnectorStateStore {
     this.busyTimeoutMs = options.busyTimeoutMs ?? 5_000;
     const loaded = this.readUnlocked();
     this.runtimeMismatch = Boolean(this.runtimeUrl && loaded.runtimeUrl && loaded.runtimeUrl !== this.runtimeUrl);
+    this.unreadableState = Boolean(loaded.unreadable);
+    this.loadedRuntimeUrl = loaded.runtimeUrl;
     this.connections = loaded.connections;
     this.appOAuth = loaded.appOAuth;
   }
 
-  private readUnlocked(): { runtimeUrl?: string; connections: OpenConnectorConnectionRecord[]; appOAuth: OpenConnectorAppOAuthRecord[] } {
+  private readUnlocked(): { runtimeUrl?: string; unreadable?: boolean; connections: OpenConnectorConnectionRecord[]; appOAuth: OpenConnectorAppOAuthRecord[] } {
+    let text: string;
     try {
-      const parsed = stateFileSchema.safeParse(parseJson(readFileSync(this.file, "utf8")));
+      text = readFileSync(this.file, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { connections: [], appOAuth: [] };
+      return { unreadable: true, connections: [], appOAuth: [] };
+    }
+    try {
+      const parsed = stateFileSchema.safeParse(parseJson(text));
       if (parsed.success) {
         if (this.runtimeUrl && parsed.data.runtimeUrl && parsed.data.runtimeUrl !== this.runtimeUrl) {
           return { runtimeUrl: parsed.data.runtimeUrl, connections: [], appOAuth: [] };
@@ -102,12 +117,14 @@ export class OpenConnectorStateStore {
       }
     } catch {
     }
-    return { connections: [], appOAuth: [] };
+    return { unreadable: true, connections: [], appOAuth: [] };
   }
 
   private refreshUnlocked(): void {
     const loaded = this.readUnlocked();
     this.runtimeMismatch = Boolean(this.runtimeUrl && loaded.runtimeUrl && loaded.runtimeUrl !== this.runtimeUrl);
+    this.unreadableState = Boolean(loaded.unreadable);
+    this.loadedRuntimeUrl = loaded.runtimeUrl;
     this.connections = this.runtimeMismatch ? [] : loaded.connections;
     this.appOAuth = this.runtimeMismatch ? [] : loaded.appOAuth;
   }
@@ -138,6 +155,9 @@ export class OpenConnectorStateStore {
       database.exec("BEGIN EXCLUSIVE");
       transactionStarted = true;
       this.refreshUnlocked();
+      if (persist && this.unreadableState) {
+        throw new Error("Refusing to write OpenConnector state because the existing state file is unreadable or invalid");
+      }
       if (persist && this.runtimeMismatch) {
         throw new Error("Refusing to write OpenConnector state for a different runtime URL");
       }
@@ -165,7 +185,7 @@ export class OpenConnectorStateStore {
   private persist(): void {
     mkdirSync(dirname(this.file), { recursive: true });
     writeFileAtomic(this.file, JSON.stringify({
-      ...(this.runtimeUrl ? { runtimeUrl: this.runtimeUrl } : {}),
+      ...(this.runtimeUrl ?? this.loadedRuntimeUrl ? { runtimeUrl: this.runtimeUrl ?? this.loadedRuntimeUrl } : {}),
       connections: this.connections,
       appOAuth: this.appOAuth,
     }), { mode: 0o600 });

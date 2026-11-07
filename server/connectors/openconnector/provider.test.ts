@@ -207,7 +207,8 @@ describe("tools / catalog", () => {
       { id: "github.create_issue", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
       { id: "gmail.list_emails" },
     ];
-    const relayed = await provider().relayMcp(cfg, { jsonrpc: "2.0", id: 20, method: "tools/list" });
+    const current = provider();
+    const relayed = await current.relayMcp(cfg, { jsonrpc: "2.0", id: 20, method: "tools/list" });
     const frame = JSON.parse(new TextDecoder().decode(relayed.bytes));
     expect(frame.result.tools).toEqual([
       { name: "GITHUB_CREATE_ISSUE", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
@@ -215,6 +216,28 @@ describe("tools / catalog", () => {
     ]);
     expect(calls.filter((call) => call.path === "/v1/actions")).toHaveLength(1);
     expect(calls.filter((call) => call.path.startsWith("/v1/actions/"))).toHaveLength(2);
+
+    calls.length = 0;
+    await current.relayMcp(cfg, { jsonrpc: "2.0", id: 21, method: "tools/list" });
+    expect(calls.filter((call) => call.path === "/v1/actions")).toHaveLength(1);
+    expect(calls.filter((call) => call.path.startsWith("/v1/actions/"))).toHaveLength(0);
+  });
+
+  it("keeps tools/list usable when one missing detail fails", async () => {
+    actionsBody = [
+      { id: "github.create_issue", description: "Open an issue" },
+      { id: "gmail.list_emails" },
+    ];
+    actionDetailsBody = [
+      { id: "github.create_issue", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
+    ];
+    const current = provider();
+    const relayed = await current.relayMcp(cfg, { jsonrpc: "2.0", id: 22, method: "tools/list" });
+    const frame = JSON.parse(new TextDecoder().decode(relayed.bytes));
+    expect(frame.result.tools).toEqual([
+      { name: "GITHUB_CREATE_ISSUE", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
+      { name: "GMAIL_LIST_EMAILS", inputSchema: { type: "object", properties: {}, additionalProperties: false, required: [] } },
+    ]);
   });
 
   it("serves the provider list as the app catalog", async () => {
@@ -235,6 +258,26 @@ describe("disconnect", () => {
     await expect(provider(state).removeService(cfg, "github")).resolves.toEqual({ removed: 1 });
     expect(state.listConnections()).toEqual([]);
     expect(lastCall()).toMatchObject({ method: "DELETE", path: "/api/connections/github" });
+  });
+
+  it("reads state once per inventory and selects only usable accounts", async () => {
+    const state = newState();
+    state.upsertConnection({ accountId: "oc:github:default", service: "github", status: "ACTIVE", updatedAt: "t" });
+    state.upsertConnection({ accountId: "oc:github:failed", service: "github", alias: "failed", status: "expired", updatedAt: "t" });
+    const current = provider(state);
+    await expect(current.inventory(cfg)).resolves.toMatchObject({
+      services: { github: { connected: true, status: "ACTIVE", accounts: [
+        { id: "oc:github:default", status: "ACTIVE" },
+        { id: "oc:github:failed", status: "expired", alias: "failed" },
+      ] } },
+    });
+    const before = readFileSync(state.file, "utf8");
+    const selected = await current.relayMcp(cfg, {
+      jsonrpc: "2.0", id: 6, method: "tools/call",
+      params: { name: "GITHUB_GET_CURRENT_USER", arguments: {}, _meta: { openconnectorAccountAlias: "failed" } },
+    });
+    expect(JSON.parse(new TextDecoder().decode(selected.bytes)).result.isError).toBe(true);
+    expect(readFileSync(state.file, "utf8")).toBe(before);
   });
 
   it("removeService disconnects every named connection before clearing local records", async () => {
