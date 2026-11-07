@@ -474,7 +474,7 @@ export function ApprovalCard({
       ? "update_profile"
     // An ACP permission request without a tool kind carries the qualified MCP tool name as its title: label the
     // action with it instead of "use a tool".
-    : (!card.tool || card.tool === "tool") && /^mcp__/.test(card.title ?? "") ? card.title
+    : (!card.tool || card.tool === "tool") && (card.title ?? "").startsWith("mcp__") ? card.title
     : card.tool;
   const profileHeader = isProfileRequest && card.profileRequest
     ? card.profileRequest.targetBotId === card.profileRequest.botId
