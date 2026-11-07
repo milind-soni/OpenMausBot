@@ -27,10 +27,36 @@ function writeWeb(text: string): Promise<boolean> {
   });
 }
 
-/** The web Clipboard API rejects unfocused, denied and insecure-context writes; then the desktop bridge runs. Never throws. */
+/**
+ * Legacy execCommand fallback: on insecure-context (plain-LAN-HTTP) mobile
+ * browsers `navigator.clipboard` is undefined and only the classic
+ * select-then-copy path works. No-op outside a real DOM.
+ */
+function writeLegacy(text: string): boolean {
+  if (typeof document === "undefined" || !document.body) return false;
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.left = "-9999px";
+  document.body.appendChild(area);
+  area.select();
+  area.setSelectionRange(0, text.length);
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  area.remove();
+  return ok;
+}
+
+/** Web Clipboard API, then legacy execCommand (insecure-context mobile), then the desktop bridge. Never throws. */
 export async function copyText(text: string): Promise<CopyResult> {
   if (!text.trim()) return "empty";
   if (await writeWeb(text)) return "copied";
+  if (writeLegacy(text)) return "copied";
   try {
     if (typeof window !== "undefined" && (await window.ogb?.copyText?.(text)) === true) return "copied";
   } catch {
