@@ -478,6 +478,29 @@ describe("ApprovalCard tool-call kinds", () => {
     }
   });
 
+  it("names the custom MCP server a tool comes from, and stays quiet about the app's own servers", () => {
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__github__create_issue") }));
+    expect(html).toContain("Scout wants to github · create issue");
+    const own = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__ogb__computer_batch") }));
+    expect(own).toContain("Scout wants to computer batch");
+    expect(own).not.toContain("ogb");
+    const underscored = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__my_server__create_issue") }));
+    expect(underscored).toContain("Scout wants to my_server · create issue");
+    const email = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__email__EMAIL_SEND_MESSAGE") }));
+    expect(email).toContain("Scout wants to send message");
+    expect(email).not.toContain("email ·");
+  });
+
+  it("labels the action from a qualified MCP title when the request carries no tool kind", () => {
+    const message = kindMessage("tool");
+    message.card = { ...message.card!, title: "mcp__github__create_issue" };
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message }));
+    expect(html).toContain("Scout wants to github · create issue");
+    expect(html).not.toContain("use a tool");
+    const plain = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("tool") }));
+    expect(plain).toContain("Scout wants to use a tool");
+  });
+
   it("reads grammatically when no tool is known", () => {
     const html = renderToStaticMarkup(createElement(ApprovalCard, { message: kindMessage(undefined) }));
     expect(html).toContain("Wants to take an action");
