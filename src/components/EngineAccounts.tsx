@@ -106,7 +106,7 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
     }
   };
 
-  const item = "ui-menu-row w-full text-left disabled:cursor-not-allowed disabled:opacity-50";
+  const item = "ui-menu-row w-full text-start disabled:cursor-not-allowed disabled:opacity-50";
   return (
     <div ref={menuRef} className="relative flex items-center gap-1">
       {canRemove && <button type="button" disabled={busy || usedBy > 0} onClick={() => setConfirm("remove")}
@@ -120,13 +120,13 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
         {busy ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={16} />}
       </button>
       {open && (
-        <div role="menu" className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden text-[13px]", MENU_SHEET)}>
+        <div role="menu" className={cn("absolute end-0 top-full z-40 mt-1 w-[220px] overflow-hidden text-[13px]", MENU_SHEET)}>
           <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); onRename(); }}>{t("accounts.rename")}</button>
           {canSignOut && <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); setConfirm("signOut"); }}>{t("accounts.signOut")}</button>}
           {canRemove && usedBy > 0 && <p className="px-3 pb-1 pt-0.5 text-[11px] leading-snug text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
         </div>
       )}
-      {error && <p role="alert" className="absolute right-0 top-full z-30 mt-1 w-[260px] rounded-lg bg-card p-2 text-[12px] text-danger shadow-lg">{error}</p>}
+      {error && <p role="alert" className="absolute end-0 top-full z-30 mt-1 w-[260px] rounded-lg bg-card p-2 text-[12px] text-danger shadow-lg">{error}</p>}
       <ConfirmDialog
         open={confirm === "signOut"}
         title={t("accounts.signOutTitle", { name: engineDisplayName(instance) })}
@@ -227,7 +227,7 @@ function AccountRow({ group, instance, signingIn, onSignIn, onSignInDone }: {
         )}
       </div>
       {signingIn && (
-        <div className="pl-9">
+        <div className="ps-9">
           {group === "claude"
             ? <>
               <ClaudeSignIn instanceId={instance.instanceId} autoStart onDone={onSignInDone} />
@@ -242,7 +242,7 @@ function AccountRow({ group, instance, signingIn, onSignIn, onSignInDone }: {
         </div>
       )}
       {group === "chatgpt" && state === "signedIn" && instance.snapshot.chatgptPlan && (
-        <div className="pl-9"><ChatGptPlanStatus instanceId={instance.instanceId} welcome={false} /></div>
+        <div className="ps-9"><ChatGptPlanStatus instanceId={instance.instanceId} welcome={false} /></div>
       )}
     </li>
   );

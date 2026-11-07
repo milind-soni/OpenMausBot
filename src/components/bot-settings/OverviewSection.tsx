@@ -57,7 +57,7 @@ export function OverviewSection({
                   <button
                     type="button"
                     onClick={() => onOpen(step.section!)}
-                    className="flex w-full items-center gap-2.5 rounded-lg px-1 py-1 text-left text-[13px] text-ink hover:bg-inset"
+                    className="flex w-full items-center gap-2.5 rounded-lg px-1 py-1 text-start text-[13px] text-ink hover:bg-inset"
                   >
                     <Circle aria-hidden="true" size={14} className="shrink-0 text-ink-secondary" />
                     <span className="flex-1">{setupLabel(step.id, step.label)}</span>

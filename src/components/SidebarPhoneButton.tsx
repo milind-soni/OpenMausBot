@@ -176,7 +176,7 @@ export function SidebarPhoneStatusButton({
         <span
           aria-hidden="true"
           data-phone-plus
-          className="absolute bottom-1 right-1 flex size-3.5 items-center justify-center rounded-full border border-panel bg-panel"
+          className="absolute bottom-1 end-1 flex size-3.5 items-center justify-center rounded-full border border-panel bg-panel"
         >
           <Plus size={10} strokeWidth={2.8} />
         </span>
@@ -185,7 +185,7 @@ export function SidebarPhoneStatusButton({
         <span
           aria-hidden="true"
           data-phone-connected
-          className="absolute bottom-1.5 right-1.5 size-1.5 rounded-full border border-panel bg-success"
+          className="absolute bottom-1.5 end-1.5 size-1.5 rounded-full border border-panel bg-success"
         />
       )}
     </button>

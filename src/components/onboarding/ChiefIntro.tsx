@@ -18,7 +18,7 @@ const PRIMARY = "ui-button ui-button-pill ui-button-primary";
 
 function ChiefBadge() {
   return (
-    <span aria-hidden="true" data-chief-badge="" className="absolute bottom-0 right-0 flex size-4 items-center justify-center rounded-full bg-[#E8993A] text-white ring-2 ring-menu">
+    <span aria-hidden="true" data-chief-badge="" className="absolute bottom-0 end-0 flex size-4 items-center justify-center rounded-full bg-[#E8993A] text-white ring-2 ring-menu">
       <Crown size={9} strokeWidth={2.5} fill="currentColor" />
     </span>
   );

@@ -29,7 +29,7 @@ export function HandoffReply({ message, children }: { message: Message; children
           <details className="group/reply w-fit max-w-full rounded-xl border border-hairline/40 bg-panel text-[13px] open:w-[min(38rem,100%)]">
             <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-3 py-1.5 text-ink-secondary hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
               <span className="min-w-0 max-w-[34rem] truncate">{result.preview}</span>
-              <ChevronRight size={13} className="ml-auto shrink-0 group-open/reply:rotate-90" aria-hidden="true" />
+              <ChevronRight size={13} className="ms-auto shrink-0 group-open/reply:rotate-90" aria-hidden="true" />
             </summary>
             <p className="max-h-80 overflow-auto border-t border-hairline/40 px-3 py-2 whitespace-pre-wrap break-words text-ink">{result.more}</p>
           </details>

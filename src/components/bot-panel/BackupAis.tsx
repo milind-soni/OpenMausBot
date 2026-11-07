@@ -232,9 +232,9 @@ export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Ba
           <RowIcon icon={LifeBuoy} />
           <RowText title={t("botPanel.backups.title")} />
         </div>
-        <p className="-mt-1 pl-[38px] text-[13px] leading-[1.35] text-ink-secondary">{t("botPanel.backups.hint", { name: bot.name })}</p>
+        <p className="-mt-1 ps-[38px] text-[13px] leading-[1.35] text-ink-secondary">{t("botPanel.backups.hint", { name: bot.name })}</p>
         {chain.length > 0 && (
-          <ol aria-label={t("botPanel.backups.title")} className="flex flex-col gap-1 pl-[38px]">
+          <ol aria-label={t("botPanel.backups.title")} className="flex flex-col gap-1 ps-[38px]">
             {chain.map((entry, index) => {
               const { instance, name, short } = describe(entry);
               return (
@@ -248,7 +248,7 @@ export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Ba
                     label={t("botPanel.backups.row", { position: index + 1, model: name })}
                     title={instance ? `${instance.displayName} · ${name}` : name}
                     data-panel-action="backup-change"
-                    className="group flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[9px] bg-ink/[0.04] pl-2.5 pr-2 text-left text-[13px] text-ink hover:bg-ink/[0.07] aria-expanded:bg-ink/[0.08]"
+                    className="group flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[9px] bg-ink/[0.04] ps-2.5 pe-2 text-start text-[13px] text-ink hover:bg-ink/[0.07] aria-expanded:bg-ink/[0.08]"
                   >
                     {instance
                       ? <InstanceProviderMark instance={instance} size={14} subtle />
@@ -271,7 +271,7 @@ export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Ba
           </ol>
         )}
         {chain.length < MAX_BACKUPS && (
-          <div className="pl-[38px]">
+          <div className="ps-[38px]">
             <BackupChooser
               bot={bot}
               current={null}

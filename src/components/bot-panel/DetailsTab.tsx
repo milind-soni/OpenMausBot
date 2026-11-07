@@ -27,13 +27,13 @@ export function ItemRow({ item }: { item: SidebarMenuItem }) {
       disabled={item.disabled}
       aria-pressed={item.active || undefined}
       onClick={item.onSelect}
-      className={cn(rowCls, "w-full text-left enabled:hover:bg-ink/[0.03] disabled:cursor-default disabled:opacity-45")}
+      className={cn(rowCls, "w-full text-start enabled:hover:bg-ink/[0.03] disabled:cursor-default disabled:opacity-45")}
     >
       <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-ink/[0.05] text-ink-secondary [&_svg]:size-[15px]" aria-hidden="true">
         {item.icon}
       </span>
       <span className={cn("min-w-0 truncate text-[14px] font-medium", !wrapsValue && "flex-1", item.active ? "text-accent-text" : "text-ink")}>{item.label}</span>
-      {item.trailing && <span className={cn("flex items-center", wrapsValue ? "min-w-0 flex-1 justify-end text-right" : "shrink-0")}>{item.trailing}</span>}
+      {item.trailing && <span className={cn("flex items-center", wrapsValue ? "min-w-0 flex-1 justify-end text-end" : "shrink-0")}>{item.trailing}</span>}
     </button>
   );
 }

@@ -164,7 +164,7 @@ export function AttentionThreadRows({ entries, onJump, inset = false }: { entrie
       const label = t("attention.item", { title: entry.task.title, name, status });
       return <button key={`${entry.kind}-${entry.kind === "bot" ? entry.botId : entry.groupId}-${entry.task.threadId}`} type="button" aria-label={label} title={label}
         onClick={() => onJump(entry)}
-        className={cn("flex w-full items-center gap-2.5 text-left text-[13px] text-ink hover:bg-menu-hover", inset ? "rounded-md px-2 py-1.5" : "px-3.5 py-2")}>
+        className={cn("flex w-full items-center gap-2.5 text-start text-[13px] text-ink hover:bg-menu-hover", inset ? "rounded-md px-2 py-1.5" : "px-3.5 py-2")}>
         <Icon size={inset ? 16 : 15} aria-hidden="true" className={cn("shrink-0", colorClass)} />
         <span className="min-w-0 flex-1">
           <span className="block truncate">{entry.task.title}</span>
@@ -189,7 +189,7 @@ export function PinnedThreadRows({ entries, now, onJump, onUnpin }: { entries: A
       return <div key={key} className="group/pinned flex w-full items-center">
         <button type="button" aria-label={label} title={label}
           onClick={() => onJump(entry)}
-          className="flex min-w-0 flex-1 items-center gap-2.5 px-3.5 py-2 text-left text-[13px] text-ink hover:bg-menu-hover">
+          className="flex min-w-0 flex-1 items-center gap-2.5 px-3.5 py-2 text-start text-[13px] text-ink hover:bg-menu-hover">
           <Icon size={15} aria-hidden="true" className={cn("shrink-0", status.active ? status.colorClass : "text-ink-secondary")} />
           <span className="min-w-0 flex-1">
             <span className="block truncate">{entry.task.title}</span>
@@ -197,7 +197,7 @@ export function PinnedThreadRows({ entries, now, onJump, onUnpin }: { entries: A
           </span>
         </button>
         <button type="button" aria-label={unpinLabel} title={unpinLabel} onClick={() => onUnpin(entry)}
-          className="mr-2 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/pinned:opacity-100 max-md:opacity-70 touch:opacity-70">
+          className="me-2 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/pinned:opacity-100 max-md:opacity-70 touch:opacity-70">
           <PinOff size={13} aria-hidden="true" />
         </button>
       </div>;
@@ -211,7 +211,7 @@ export function SidebarBotActivity({ bot, rowThreadId, density, pendingQueued, d
   const tasks = [...others, ...runningRoutineRuns(bot)].filter((task) => task.threadId !== rowThreadId);
   if (!tasks.length) return null;
   const iconOnly = density === "icons";
-  return <div data-sidebar-bot-activity={bot.id} className={cn("mb-1 space-y-0.5", !iconOnly && "ml-6")}>
+  return <div data-sidebar-bot-activity={bot.id} className={cn("mb-1 space-y-0.5", !iconOnly && "ms-6")}>
     {tasks.map((task) => {
       const waiting = task.activity === "waiting-on-you";
       const teammateWait = !waiting && task.waitingForTeammates === true;
@@ -222,7 +222,7 @@ export function SidebarBotActivity({ bot, rowThreadId, density, pendingQueued, d
       const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || task.queued ? Clock3 : BellDot;
       return <button key={task.threadId} type="button" data-sidebar-activity-row={task.threadId} aria-label={label} title={label}
         onClick={() => dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId })}
-        className={cn("flex min-h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-left text-[11px] outline-none hover:bg-raised/50 focus-visible:ring-1 focus-visible:ring-accent/60", iconOnly && "justify-center", waiting ? "text-warning" : "text-ink-secondary")}>
+        className={cn("flex min-h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-start text-[11px] outline-none hover:bg-raised/50 focus-visible:ring-1 focus-visible:ring-accent/60", iconOnly && "justify-center", waiting ? "text-warning" : "text-ink-secondary")}>
         <Icon size={12} aria-hidden="true" className={cn("shrink-0", working && "animate-spin text-success", teammateWait && "text-warning", task.unread && !waiting && !working && !teammateWait && "text-accent")} />
         {!iconOnly && <><span className="min-w-0 flex-1 truncate">{title}</span><span className="shrink-0 text-[10px]">{waiting ? t("task.waiting") : status}</span>
           {task.unread && (waiting || working || teammateWait || task.queued) && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}</>}

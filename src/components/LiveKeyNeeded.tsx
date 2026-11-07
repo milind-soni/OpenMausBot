@@ -16,7 +16,7 @@ export function LiveKeyNeeded() {
   const azure = live?.provider === "azure";
   // A key is tied to the endpoint it is saved for, so the endpoint comes first.
   const keyForm = azure && Boolean(live?.azureEndpoint) && live?.keySource !== "live";
-  return <section aria-labelledby={titleId} className="flex flex-col gap-2.5 rounded-xl border border-hairline bg-panel p-4 text-left text-[13px]">
+  return <section aria-labelledby={titleId} className="flex flex-col gap-2.5 rounded-xl border border-hairline bg-panel p-4 text-start text-[13px]">
     <div className="flex items-start gap-2.5">
       <KeyRound size={16} className="mt-0.5 shrink-0 text-ink-secondary" aria-hidden="true" />
       <h2 id={titleId} className="text-[14px] font-medium leading-[1.4] text-ink">{t(azure ? "call.live.needsAzure" : "call.live.needsKey")}</h2>

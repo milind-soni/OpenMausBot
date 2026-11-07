@@ -172,7 +172,7 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
       {/* direction: rtl clips the oldest words (and puts the ellipsis) on the left; the text itself stays left-to-right. */}
       <span
         className={cn(
-          "order-last w-full min-w-0 truncate text-left [direction:rtl] sm:order-none sm:w-auto sm:flex-1",
+          "order-last w-full min-w-0 truncate text-start [direction:rtl] sm:order-none sm:w-auto sm:flex-1",
           view.heard ? "text-ink-tertiary" : "text-ink-secondary",
         )}
         title={spoken || undefined}
@@ -180,7 +180,7 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
         <bdi dir="ltr">{spoken}</bdi>
       </span>
       {view.hint && <span role="status" className="order-last w-full min-w-0 truncate text-[12px] text-warning" title={view.hint}>{view.hint}</span>}
-      <span className="ml-auto flex shrink-0 items-center gap-1">
+      <span className="ms-auto flex shrink-0 items-center gap-1">
         <button
           ref={gearRef}
           type="button"
@@ -217,7 +217,7 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
         </button>
       </span>
       {settingsOpen && (
-        <div className="absolute bottom-full right-0 z-40 mb-2">
+        <div className="absolute bottom-full end-0 z-40 mb-2">
           <LiveCallSettings
             onClose={() => {
               setSettingsOpen(false);

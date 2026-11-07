@@ -444,7 +444,7 @@ function SimpleEngines({ rows, isReady, renderEngine, more }: {
                       <span className="truncate text-[13px] leading-[18px] text-ink-secondary">{simpleStatus(instance, ready)}</span>
                     </span>
                   </span>
-                  <button type="button" aria-expanded={open} className="ui-button ml-auto shrink-0" onClick={() => setOpened(open ? null : instance.instanceId)}>
+                  <button type="button" aria-expanded={open} className="ui-button ms-auto shrink-0" onClick={() => setOpened(open ? null : instance.instanceId)}>
                     {t(open ? "common.done" : ready ? "settings.simple.ai.manage" : "settings.simple.ai.setUp")}
                   </button>
                 </div>

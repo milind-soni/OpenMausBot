@@ -147,7 +147,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const total = lens === "raw" ? (page?.total.native ?? 0) : (page?.total.runtime ?? 0);
 
   return (
-    <aside aria-label={t("inspector.title")} className="animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel md:static md:z-auto md:w-[min(460px,45vw)] md:shrink-0">
+    <aside aria-label={t("inspector.title")} className="animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-s border-hairline/40 bg-panel md:static md:z-auto md:w-[min(460px,45vw)] md:shrink-0">
       <div {...dragProps} className="flex items-center justify-between px-4 py-3">
         <span className="flex items-center gap-2 text-[15px] font-semibold text-ink">
           <Bug size={16} className="text-ink-secondary" /> {t("inspector.title")}
@@ -194,7 +194,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
             </button>
           ))}
         </div>
-        {lens !== "run" && <span className="ml-auto text-[11px] text-ink-secondary">
+        {lens !== "run" && <span className="ms-auto text-[11px] text-ink-secondary">
           {page ? (shown < total ? t("inspector.entries.lastOf", { shown, total }) : t("inspector.entries.count", { count: shown })) : t("inspector.entries.loading")}
         </span>}
         {lens !== "run" && <button onClick={() => managedRefresh.current()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title={t("inspector.reload")}>
@@ -228,7 +228,7 @@ function Row({ row, open, onToggle }: { row: InspectorRow; open: boolean; onTogg
         row.tone === "error" && "bg-danger/10",
       )}
     >
-      <button onClick={onToggle} className="flex w-full items-start gap-2 px-3 py-1.5 text-left hover:bg-raised/60">
+      <button onClick={onToggle} className="flex w-full items-start gap-2 px-3 py-1.5 text-start hover:bg-raised/60">
         <span className="mt-[1px] shrink-0 text-ink-secondary">{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
         <span className="shrink-0 tabular-nums text-ink-secondary">{formatTime(row.at)}</span>
         <span

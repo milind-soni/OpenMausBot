@@ -23,7 +23,7 @@ function Miniature({ skin }: { skin: SkinId }) {
         <span className="size-[5px] rounded-full bg-ink-secondary/40" />
         <span className="size-[5px] rounded-full bg-ink-secondary/40" />
       </div>
-      <div className="flex w-[30px] shrink-0 flex-col gap-[3px] border-r border-hairline bg-panel p-[4px]">
+      <div className="flex w-[30px] shrink-0 flex-col gap-[3px] border-e border-hairline bg-panel p-[4px]">
         <span className="flex h-[9px] w-full items-center gap-[2px] rounded-sm bg-raised px-[2px]">
           <span className="size-[4px] shrink-0 rounded-full bg-accent" />
           <span className="h-[2px] flex-1 rounded-full bg-ink/50" />
@@ -96,7 +96,7 @@ export function SkinPicker() {
               }}
               aria-pressed={selected}
               className={cn(
-                "cursor-pointer flex flex-col gap-2 rounded-xl border p-2 text-left transition-colors",
+                "cursor-pointer flex flex-col gap-2 rounded-xl border p-2 text-start transition-colors",
                 selected
                   ? "border-accent-border bg-control"
                   : "border-hairline/60 hover:border-hairline hover:bg-control/50",

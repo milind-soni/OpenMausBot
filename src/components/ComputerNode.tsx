@@ -42,7 +42,7 @@ export const ComputerNode = memo(function ComputerNode({ computer, bots, frameUr
     {live && <span aria-hidden className="pointer-events-none absolute -inset-[5px] animate-computer-glow rounded-[22px] border-2 border-success/70 shadow-[0_0_24px_rgba(52,199,89,0.35)]" />}
     <button type="button" onClick={onOpen} disabled={!onOpen} title={activity ? `${name} · ${activity}` : name}
       aria-label={t("mapComputer.open", { name, state: t(STATE_LABEL[state]) })}
-      className="relative flex size-full flex-col rounded-[18px] border border-white/10 bg-[#0f1117] p-2 text-left shadow-[0_10px_30px_rgba(0,0,0,0.35)] outline-none transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-default">
+      className="relative flex size-full flex-col rounded-[18px] border border-white/10 bg-[#0f1117] p-2 text-start shadow-[0_10px_30px_rgba(0,0,0,0.35)] outline-none transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-default">
       <span className="relative block h-[160px] w-full overflow-hidden rounded-[10px] bg-[#06070b] [contain:paint]">
         {frameUrl
           ? <img src={frameUrl} alt="" draggable={false} decoding="async" className={cn("size-full object-cover", state === "asleep" || state === "off" ? "opacity-40 grayscale" : "")} />
@@ -50,7 +50,7 @@ export const ComputerNode = memo(function ComputerNode({ computer, bots, frameUr
             {state === "starting" ? <Loader2 size={20} className="animate-spin" /> : state === "asleep" ? <Moon size={20} /> : state === "problem" ? <TriangleAlert size={20} /> : <MonitorOff size={20} />}
             {t(state === "starting" ? "mapComputer.empty.starting" : state === "asleep" ? "mapComputer.empty.asleep" : state === "problem" ? "mapComputer.empty.problem" : state === "off" ? "mapComputer.empty.off" : "mapComputer.empty.waiting")}
           </span>}
-        <span className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/65 px-2 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur-[2px]">
+        <span className="absolute start-2 top-2 flex items-center gap-1.5 rounded-full bg-black/65 px-2 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur-[2px]">
           <span className={cn("size-1.5 rounded-full", STATE_DOT[state], live && "animate-pulse")} />{t(STATE_LABEL[state])}
         </span>
         {activity && live && <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/85 via-black/55 to-transparent px-2.5 pb-1.5 pt-6 text-[11px] leading-tight text-white/90">{activity}</span>}

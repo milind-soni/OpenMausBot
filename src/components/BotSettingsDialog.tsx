@@ -254,7 +254,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
                   }}
                   aria-expanded={open}
                   className={cn(
-                    "flex w-full shrink-0 items-center gap-2.5 px-4 py-2.5 text-left text-[14px]",
+                    "flex w-full shrink-0 items-center gap-2.5 px-4 py-2.5 text-start text-[14px]",
                     open ? "bg-control/60 text-ink" : "text-ink-secondary hover:bg-control/40 hover:text-ink",
                   )}
                 >

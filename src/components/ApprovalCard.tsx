@@ -405,7 +405,7 @@ function CompactApprovalRow({
               aria-expanded={open}
               title={detail}
               onClick={toggle}
-              className={cn(APPROVAL_CODE_CHIP, "text-left hover:bg-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus")}
+              className={cn(APPROVAL_CODE_CHIP, "text-start hover:bg-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus")}
             >
               <span className="truncate">{detail}</span>
             </button>

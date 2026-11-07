@@ -165,7 +165,7 @@ export function CloudWelcome() {
   return <main data-cloud-welcome={view} className="@container/welcome relative flex h-full min-w-0 flex-1 flex-col bg-app">
     <WindowDragStrip />
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto @2xl/welcome:grid @2xl/welcome:grid-cols-[250px_minmax(0,1fr)] @2xl/welcome:grid-rows-[minmax(0,1fr)] @2xl/welcome:overflow-hidden">
-      <nav aria-label={t("cloudWelcome.steps")} className="flex shrink-0 flex-col border-b border-hairline/50 bg-panel px-5 pb-4 pt-7 max-md:pt-14 @2xl/welcome:min-h-0 @2xl/welcome:overflow-y-auto @2xl/welcome:border-b-0 @2xl/welcome:border-r @2xl/welcome:px-[18px] @2xl/welcome:pb-5 @2xl/welcome:pt-[30px]">
+      <nav aria-label={t("cloudWelcome.steps")} className="flex shrink-0 flex-col border-b border-hairline/50 bg-panel px-5 pb-4 pt-7 max-md:pt-14 @2xl/welcome:min-h-0 @2xl/welcome:overflow-y-auto @2xl/welcome:border-b-0 @2xl/welcome:border-e @2xl/welcome:px-[18px] @2xl/welcome:pb-5 @2xl/welcome:pt-[30px]">
         <h1 className="px-1.5 text-[18px] font-semibold tracking-[-0.015em] text-ink [text-wrap:balance]">{t("cloudWelcome.title", { name })}</h1>
         <p className="mt-1 px-1.5 text-[13px] leading-relaxed text-ink-secondary">{t("cloudWelcome.intro")}</p>
         <div className="mt-3 flex items-center justify-between gap-2 @2xl/welcome:mt-4 @2xl/welcome:flex-1 @2xl/welcome:flex-col @2xl/welcome:items-stretch @2xl/welcome:justify-start">
@@ -176,8 +176,8 @@ export function CloudWelcome() {
               const current = view === step;
               return <li key={step} className="min-w-0">
                 <button type="button" data-welcome-rail={step} data-finished={finished || undefined} data-bringing={bringing || undefined} data-skipped={skipped || undefined} aria-current={current ? "step" : undefined} onClick={() => go(step)}
-                  className={cn("flex w-full min-w-0 items-center gap-2 rounded-full text-left transition-colors duration-150 motion-reduce:transition-none @2xl/welcome:items-start @2xl/welcome:gap-2.5 @2xl/welcome:rounded-[10px] @2xl/welcome:p-2.5",
-                    current ? "bg-raised py-1.5 pl-1.5 pr-3" : "p-1.5 hover:bg-raised/60")}>
+                  className={cn("flex w-full min-w-0 items-center gap-2 rounded-full text-start transition-colors duration-150 motion-reduce:transition-none @2xl/welcome:items-start @2xl/welcome:gap-2.5 @2xl/welcome:rounded-[10px] @2xl/welcome:p-2.5",
+                    current ? "bg-raised py-1.5 ps-1.5 pe-3" : "p-1.5 hover:bg-raised/60")}>
                   <span aria-hidden="true" className={cn("flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] text-[12px] font-semibold tabular-nums",
                     finished ? "check-in border-success bg-success" : current ? "border-accent text-accent-text" : "border-ink-secondary/40 text-ink-secondary")}>
                     {finished ? <Check size={12} strokeWidth={3} /> : bringing ? <Loader2 size={12} strokeWidth={2.5} className="animate-spin" /> : skipped ? <Minus size={11} strokeWidth={3} /> : index + 1}

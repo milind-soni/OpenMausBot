@@ -326,7 +326,7 @@ export function VoicePicker({
           show();
         }}
         className={cn(
-          "flex w-full items-center gap-2 rounded-lg border bg-inset py-2 pl-3 pr-2 text-start text-[13px] text-ink disabled:cursor-default",
+          "flex w-full items-center gap-2 rounded-lg border bg-inset py-2 ps-3 pe-2 text-start text-[13px] text-ink disabled:cursor-default",
           open ? "border-focus" : "border-hairline/40",
         )}
       >

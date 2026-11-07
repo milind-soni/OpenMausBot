@@ -46,7 +46,7 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
   };
 
   return (
-    <aside aria-label={t("automations.panel.label")} className="flex h-full w-[min(380px,100vw)] shrink-0 flex-col border-l border-hairline/40 bg-panel">
+    <aside aria-label={t("automations.panel.label")} className="flex h-full w-[min(380px,100vw)] shrink-0 flex-col border-s border-hairline/40 bg-panel">
       <div className="flex items-start gap-3 border-b border-hairline/40 px-5 py-4">
         <div className="min-w-0 flex-1">
           <h2 className="text-[16px] font-semibold leading-snug text-ink">{name || sentence}</h2>
@@ -86,7 +86,7 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
                   {calls.length === 0 ? <p className="mt-0.5">{t("automations.calls.none")}</p> : (
                     <ul className="mt-1 space-y-0.5">{calls.map((call) => (
                       <li key={call.id} data-call={call.ok ? "ok" : "refused"}>
-                        <button type="button" aria-expanded={openCall === call.id} onClick={() => setOpenCall((current) => (current === call.id ? null : call.id))} className="flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left hover:bg-raised">
+                        <button type="button" aria-expanded={openCall === call.id} onClick={() => setOpenCall((current) => (current === call.id ? null : call.id))} className="flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-start hover:bg-raised">
                           <span className="shrink-0">{capital(lastWhen(call.at))}</span>
                           <span className={cn("shrink-0 font-semibold", call.ok ? "text-success" : "text-danger")}>{call.ok ? "✓" : "✗"}</span>
                           <span className="min-w-0 truncate text-ink">{call.reason}</span>
@@ -125,7 +125,7 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
               return (
                 <li key={run.id}>
                   <button type="button" disabled={!run.threadId} onClick={() => actions.openRun(automation, run)} title={run.threadId ? t("automations.panel.open") : undefined}
-                    className="flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-raised disabled:hover:bg-transparent">
+                    className="flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-start text-[13px] hover:bg-raised disabled:hover:bg-transparent">
                     <span className="shrink-0 text-ink-secondary">{line.when}</span>
                     <span className={cn("shrink-0 font-semibold", line.mark === "✓" ? "text-success" : line.mark === "✗" ? "text-danger" : "text-warning")}>{line.mark}</span>
                     <span className="min-w-0 truncate text-ink">{line.text}</span>

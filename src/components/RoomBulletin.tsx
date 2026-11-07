@@ -59,7 +59,7 @@ export function RoomBulletin({ group, remoteClient }: { group: Group; remoteClie
         <button
           disabled={remoteClient}
           onClick={() => { if (!remoteClient) bulletin.start(); }}
-          className={cn("mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left", !remoteClient && "hover:bg-raised/40")}
+          className={cn("mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-start", !remoteClient && "hover:bg-raised/40")}
           title={t("room.bulletin.title")}
         >
           <Pin size={12} className="shrink-0 text-ink-secondary" />

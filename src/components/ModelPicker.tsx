@@ -606,7 +606,7 @@ export function ModelPicker({
     <button
       {...triggerProps}
       className={cn(
-        "group flex items-center gap-1.5 rounded-full py-1 pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed",
+        "group flex items-center gap-1.5 rounded-full py-1 ps-2 pe-2.5 text-[13px] text-ink disabled:cursor-not-allowed",
         contained
           ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
           : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
@@ -655,19 +655,19 @@ export function ModelPicker({
         contained
           ? "min-w-0 max-w-[58%] transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:hover:bg-transparent"
           : cn("shrink-0", ELEVATED_FLOAT, ELEVATED_HOVER, "hover:text-ink aria-expanded:text-ink disabled:hover:bg-composer"),
-        size === "sm" ? "h-7 pl-2 pr-1.5" : "h-8 pl-2.5 pr-2",
+        size === "sm" ? "h-7 ps-2 pe-1.5" : "h-8 ps-2.5 pe-2",
       )}
     >
-      <span className="relative mr-1.5 flex shrink-0 group-disabled:opacity-50">
+      <span className="relative me-1.5 flex shrink-0 group-disabled:opacity-50">
         {active
           ? <InstanceProviderMark instance={active} size={14} subtle />
           : <span className="size-3.5 rounded-full bg-ink/[0.08]" aria-hidden="true" />}
-        {attention && <span data-model-attention className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-warning ring-[1.5px] ring-app" />}
+        {attention && <span data-model-attention className="absolute -bottom-0.5 -end-0.5 size-1.5 rounded-full bg-warning ring-[1.5px] ring-app" />}
       </span>
       <span className="min-w-0 max-w-[160px] truncate">{modelName(active, selection.model)}</span>
       {selection.variant !== undefined && <span className="shrink-0 whitespace-pre">{variantSuffix(active, selection.model, selection.variant)}</span>}
-      <UsageBars engine={selection.instanceId} className="ml-1.5" />
-      <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="ml-1 shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />
+      <UsageBars engine={selection.instanceId} className="ms-1.5" />
+      <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="ms-1 shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />
     </button>
   );
 
@@ -904,7 +904,7 @@ export function ModelPicker({
                   }
                   disabled={!canOpenCustom}
                   onClick={() => openLocalModels(railInstance)}
-                  className="flex h-10 w-full shrink-0 items-center justify-between gap-2 border-t-[0.5px] border-ink/10 px-3.5 text-left text-[13px] leading-[18px] text-ink hover:bg-ink/[0.06] focus:bg-ink/[0.06] disabled:cursor-not-allowed disabled:text-ink-tertiary disabled:hover:bg-transparent"
+                  className="flex h-10 w-full shrink-0 items-center justify-between gap-2 border-t-[0.5px] border-ink/10 px-3.5 text-start text-[13px] leading-[18px] text-ink hover:bg-ink/[0.06] focus:bg-ink/[0.06] disabled:cursor-not-allowed disabled:text-ink-tertiary disabled:hover:bg-transparent"
                 >
                   <span>{t("model.useLocal")}</span>
                   <span className="flex items-center gap-2">
@@ -922,7 +922,7 @@ export function ModelPicker({
           {!remote && (
             <div className="flex h-9 shrink-0 items-center gap-1 border-t-[0.5px] border-ink/10 px-1.5">
               <button type="button" onClick={openEngines}
-                className="h-7 min-w-0 flex-1 truncate rounded-md px-2 text-left text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
+                className="h-7 min-w-0 flex-1 truncate rounded-md px-2 text-start text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
                 {t("settings.engines.title")}
               </button>
               <button type="button" data-model-add-api-keys onClick={openApiKeys}
@@ -1006,7 +1006,7 @@ export function ModelPicker({
       {menu && floating ? createPortal(menu, document.body) : menu}
       {!contained && changedBotModel && !open && ownModelThreads > 0 && (
         <div data-thread-models-notice role="status"
-          className="menu-surface absolute right-0 top-full z-30 mt-1 flex w-max max-w-[min(300px,calc(100vw-2rem))] items-center gap-2 py-1.5 pl-3 pr-1.5 text-[13px] leading-[18px]">
+          className="menu-surface absolute end-0 top-full z-30 mt-1 flex w-max max-w-[min(300px,calc(100vw-2rem))] items-center gap-2 py-1.5 ps-3 pe-1.5 text-[13px] leading-[18px]">
           <ThreadModelsLine bot={profile} />
           <button type="button" aria-label={t("common.close")} onClick={() => setChangedBotModel(false)}
             className="flex size-6 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/[0.06] hover:text-ink">

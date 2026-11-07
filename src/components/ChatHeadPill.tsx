@@ -58,7 +58,7 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
       aria-label={conversation ? `${label}, ${conversation}` : label}
       aria-expanded={open}
       aria-controls={open ? BOT_PANEL_ID : undefined}
-      className={cn("group flex min-w-0 max-w-full items-center gap-2 rounded-full py-[7.5px] pl-[7.5px] pr-[13.5px] text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
+      className={cn("group flex min-w-0 max-w-full items-center gap-2 rounded-full py-[7.5px] ps-[7.5px] pe-[13.5px] text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
     >
       <BotAvatar bot={bot} size={24} {...avatar} />
       <span dir="auto" className="min-w-0 truncate text-[14px] font-medium leading-5">{bot.name}</span>
@@ -78,8 +78,8 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
         <span role="img" data-chathead-elsewhere aria-label={t("task.otherActivity", { count: elsewhere })} className="size-1.5 shrink-0 rounded-full bg-accent" />
       )}
       {!open && !conversation && (
-        <span aria-hidden="true" data-chathead-chevron className={cn("-ml-2 flex w-0 shrink-0 overflow-hidden opacity-0 transition-[width,margin,opacity] group-hover:ml-0 group-hover:w-2 group-hover:opacity-100 group-focus-visible:ml-0 group-focus-visible:w-2 group-focus-visible:opacity-100", CHEVRON_MOTION)}>
-          <ChevronRight size={12} className={cn("-ml-0.5 shrink-0 -translate-x-1.5 text-ink-tertiary transition-transform group-hover:translate-x-0 group-focus-visible:translate-x-0", CHEVRON_MOTION)} />
+        <span aria-hidden="true" data-chathead-chevron className={cn("-ms-2 flex w-0 shrink-0 overflow-hidden opacity-0 transition-[width,margin,opacity] group-hover:ms-0 group-hover:w-2 group-hover:opacity-100 group-focus-visible:ms-0 group-focus-visible:w-2 group-focus-visible:opacity-100", CHEVRON_MOTION)}>
+          <ChevronRight size={12} className={cn("-ms-0.5 shrink-0 -translate-x-1.5 text-ink-tertiary transition-transform group-hover:translate-x-0 group-focus-visible:translate-x-0", CHEVRON_MOTION)} />
         </span>
       )}
     </button>

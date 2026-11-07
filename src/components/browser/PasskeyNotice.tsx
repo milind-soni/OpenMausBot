@@ -34,7 +34,7 @@ export function PasskeyNotice({ wall, botName, onDismiss }: { wall: PasskeyWall;
         <div className="min-w-0 flex-1">
           <p className="font-medium text-ink">{t("browser.passkey.title")}</p>
           <p>{t("browser.passkey.body", { provider })}</p>
-          <ol className="mt-1 list-decimal space-y-1 pl-4">
+          <ol className="mt-1 list-decimal space-y-1 ps-4">
             <li>
               {t(wall === "google" ? "browser.passkey.appsGoogle" : "browser.passkey.appsMicrosoft", { name: botName })}{" "}
               <button type="button" className="text-accent-text underline" onClick={() => dispatch({ type: "togglePlugins", open: true, surface: "apps" })}>{t("browser.passkey.connect")}</button>

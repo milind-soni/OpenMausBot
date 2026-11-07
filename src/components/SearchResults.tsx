@@ -65,7 +65,7 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
           <button
             key={`${hit.threadId}:${hit.messageId}`}
             onClick={() => void land(hit)}
-            className="flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-left hover:bg-raised/60"
+            className="flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-start hover:bg-raised/60"
           >
             {bot ? (
               <BotAvatar bot={bot} state="idle" size={26} animated={false} />
@@ -76,10 +76,10 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
               <span className="flex items-baseline gap-1.5 text-[12px] text-ink-secondary">
                 <span className="truncate font-medium text-ink">{hit.from ?? hit.name}</span>
                 {hit.task ? <span className="truncate">· {hit.task}</span> : null}
-                <span className="ml-auto shrink-0 tabular-nums">{formatTime(hit.at)}</span>
+                <span className="ms-auto shrink-0 tabular-nums">{formatTime(hit.at)}</span>
               </span>
               <span dir="auto" className={cn("mt-0.5 line-clamp-2 text-[13px] leading-snug", hit.role === "user" ? "text-ink" : "text-ink-secondary")}>
-                {hit.kind === "activity" && <Wrench size={11} className="mr-1 inline text-ink-secondary" />}
+                {hit.kind === "activity" && <Wrench size={11} className="me-1 inline text-ink-secondary" />}
                 {before}
                 <mark className="rounded-sm bg-accent/25 px-0.5 text-ink">{match}</mark>
                 {after}

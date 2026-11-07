@@ -198,7 +198,7 @@ export function NewLocalWorkspace({ places, onBack, onDone }: { places: readonly
     <div className="flex items-center gap-3 rounded-xl border border-hairline/70 bg-card/70 px-4 py-3">
       <span aria-hidden="true" className={cn("relative grid size-10 shrink-0 place-items-center rounded-[12px] text-[14px] font-semibold", color === "slate" ? "bg-raised text-ink" : "text-white")}
         style={color === "slate" ? undefined : { background: swatchFill(color) }}>{placeInitials(shown || t("rail.localWork"))}
-        <span className="absolute -bottom-1 -right-1 grid size-4 place-items-center rounded-full border border-hairline bg-panel text-ink-secondary"><Laptop size={9} strokeWidth={2.25} /></span>
+        <span className="absolute -bottom-1 -end-1 grid size-4 place-items-center rounded-full border border-hairline bg-panel text-ink-secondary"><Laptop size={9} strokeWidth={2.25} /></span>
       </span>
       <span className="min-w-0">
         <span data-local-preview className="block truncate text-[14px] font-semibold text-ink">{shown || t("rail.localWork")}</span>

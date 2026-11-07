@@ -116,7 +116,7 @@ export function ExportTranscriptMenu({
         <div
           role="menu"
           aria-label={t("chat.export.options")}
-          className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}
+          className={cn("absolute end-0 top-full z-40 mt-1 w-[220px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}
         >
           <div className={MENU_HEADING}>
             {t("chat.export.menuTitle")}

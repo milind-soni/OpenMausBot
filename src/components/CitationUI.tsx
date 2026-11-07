@@ -281,7 +281,7 @@ export function CitationBadge({
         <div
           role="dialog"
           aria-label={t("chat.citation.details")}
-          className="fixed z-50 w-[min(30rem,calc(100vw-1rem))] rounded-xl border border-hairline/50 bg-panel p-3 text-left text-ink shadow-2xl"
+          className="fixed z-50 w-[min(30rem,calc(100vw-1rem))] rounded-xl border border-hairline/50 bg-panel p-3 text-start text-ink shadow-2xl"
           style={point}
           ref={(element) => {
             detailsRef.current = element;

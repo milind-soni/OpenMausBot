@@ -31,7 +31,7 @@ export function PinnedBanner({
         <Pin size={12} className="shrink-0 text-accent" />
         <button
           onClick={() => onJump(pinned.id)}
-          className="flex min-w-0 flex-1 items-baseline gap-2 text-left"
+          className="flex min-w-0 flex-1 items-baseline gap-2 text-start"
           title={t("chat.pinnedJump")}
         >
           <span className="shrink-0 text-[12px] font-medium text-accent">{sender}</span>

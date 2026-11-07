@@ -145,10 +145,10 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
         )}
       >
         <PlaceIcon place={effective} size={16} className="shrink-0 opacity-80" aria-hidden="true" />
-        {showLive && <span className="absolute right-1.5 top-1.5 size-1.5 animate-pulse rounded-full bg-success" aria-label={t("place.live")} />}
+        {showLive && <span className="absolute end-1.5 top-1.5 size-1.5 animate-pulse rounded-full bg-success" aria-label={t("place.live")} />}
       </button>
       {motion.shown && (
-        <div role="menu" aria-label={t("place.chipTitle")} className={cn("absolute bottom-full left-0 z-40 mb-2 w-[300px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}>
+        <div role="menu" aria-label={t("place.chipTitle")} className={cn("absolute bottom-full start-0 z-40 mb-2 w-[300px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}>
           <div className={MENU_HEADING}>{t("place.chipTitle")}</div>
           <div className="flex flex-col gap-1">
             <button
@@ -156,7 +156,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
               role="menuitemradio"
               aria-checked={!pinned}
               onClick={() => choose(null)}
-              className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-left", !pinned ? "bg-menu-active" : "hover:bg-menu-hover")}
+              className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-start", !pinned ? "bg-menu-active" : "hover:bg-menu-hover")}
             >
               <PlaceIcon place={botDefault} size={16} className="mt-px shrink-0 text-ink-secondary" aria-hidden="true" />
               <span className="min-w-0 flex-1">
@@ -180,7 +180,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
                   disabled={!reachable}
                   title={!policy ? t("place.unavailable") : placeHasIssue(view) ? view.line : undefined}
                   onClick={() => choose(place)}
-                  className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-left", selected ? "bg-menu-active" : reachable ? "hover:bg-menu-hover" : "cursor-not-allowed opacity-45")}
+                  className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-start", selected ? "bg-menu-active" : reachable ? "hover:bg-menu-hover" : "cursor-not-allowed opacity-45")}
                 >
                   <PlaceIcon place={place} size={16} className="mt-px shrink-0 text-ink-secondary" aria-hidden="true" />
                   <span className="min-w-0 flex-1">

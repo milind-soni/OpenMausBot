@@ -75,9 +75,9 @@ export function WriteCommandCard({ bot, taken, onSaved }: { bot: Bot; taken: rea
       >
         <div className="flex items-center gap-2">
           <div className="relative w-44 shrink-0">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-[15px] text-ink-secondary">/</span>
+            <span className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 font-mono text-[15px] text-ink-secondary">/</span>
             <input
-              className={inputCls + " pl-6 font-mono"}
+              className={inputCls + " ps-6 font-mono"}
               placeholder={t("skills.write.namePlaceholder")}
               aria-label={t("skills.write.name")}
               value={name}

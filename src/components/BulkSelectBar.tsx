@@ -83,7 +83,7 @@ export function BulkSelectFilters({ rows, selected, now, onChange, onDone }: {
     <button type="button" className={chip} onClick={() => add(olderThanIds(rows, OLDER_DAYS, now))}>{t("task.bulk.older", { days: OLDER_DAYS })}</button>
     <button type="button" className={chip} onClick={() => add(archivedIds(rows))}>{t("task.bulk.archived")}</button>
     <button type="button" className={chip} disabled={selected.size === 0} onClick={() => onChange(clearSelection())}>{t("task.bulk.clear")}</button>
-    <button type="button" onClick={onDone} className="ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium text-accent hover:underline">{t("task.bulk.done")}</button>
+    <button type="button" onClick={onDone} className="ms-auto rounded px-1.5 py-0.5 text-[11px] font-medium text-accent hover:underline">{t("task.bulk.done")}</button>
   </div>;
 }
 
@@ -150,7 +150,7 @@ export function ThreadListFooter({ bulk, rows, selected, total, canShowAll, canS
   }
   if (!canShowAll && !canSelect) return null;
   const link = "inline-flex h-7 items-center text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink";
-  return <div className="flex items-center justify-between pl-6 pr-2">
+  return <div className="flex items-center justify-between ps-6 pe-2">
     {canShowAll ? <button type="button" onClick={onShowAll} className={link}>{t("task.showAll", { count: total })}</button> : <span />}
     {canSelect && <button type="button" onClick={bulk.start} className={link}>{t("task.bulk.select")}</button>}
   </div>;

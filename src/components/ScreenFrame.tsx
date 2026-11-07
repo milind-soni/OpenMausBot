@@ -25,7 +25,7 @@ export function ScreenFrame({ threadId, message }: { threadId: string; message: 
         type="button"
         onClick={() => setOpen(true)}
         aria-label={t("attach.previewAria", { name: image.name })}
-        className="group/image relative w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] overflow-hidden rounded-2xl border border-hairline/40 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="group/image relative w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] overflow-hidden rounded-2xl border border-hairline/40 text-start focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         <img
           src={image.src}
@@ -34,7 +34,7 @@ export function ScreenFrame({ threadId, message }: { threadId: string; message: 
         />
         <span
           aria-hidden
-          className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-full bg-black/55 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover/image:opacity-100 group-focus-within/image:opacity-100"
+          className="absolute end-2 top-2 flex size-7 items-center justify-center rounded-full bg-black/55 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover/image:opacity-100 group-focus-within/image:opacity-100"
         >
           <ZoomIn size={13} />
         </span>

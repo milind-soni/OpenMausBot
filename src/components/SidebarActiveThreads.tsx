@@ -22,12 +22,12 @@ export function SidebarActiveThreads({ entries, icons, phone, dispatch }: { entr
         className={cn("relative flex items-center justify-center text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
           icons ? "size-[46px] shrink-0 rounded-xl" : phone ? "size-10 shrink-0 rounded-full border border-hairline bg-card text-ink" : "size-8 rounded-full")}>
         <Activity size={icons ? 20 : 18} strokeWidth={1.5} />
-        {entries.length > 0 && <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[10px] font-semibold leading-4 text-ink">{entries.length > 9 ? "9+" : entries.length}</span>}
-        {attentionHasRunningWork(entries) && <span data-header-activity="" className="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-success" aria-hidden="true" />}
+        {entries.length > 0 && <span className="absolute -end-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[10px] font-semibold leading-4 text-ink">{entries.length > 9 ? "9+" : entries.length}</span>}
+        {attentionHasRunningWork(entries) && <span data-header-activity="" className="absolute bottom-0.5 end-0.5 size-1.5 rounded-full bg-success" aria-hidden="true" />}
       </button>
       {motion.shown && (
-        <div className={cn("absolute top-full z-40 mt-1 overflow-hidden", MENU_SHEET, icons ? "left-0 w-72" : "right-0 w-72 md:w-[min(288px,calc(var(--sidebar-width)_-_32px))]", motion.className)} {...motion.exitProps}>
-          <div className="flex items-center gap-1 py-0.5 pl-2">
+        <div className={cn("absolute top-full z-40 mt-1 overflow-hidden", MENU_SHEET, icons ? "start-0 w-72" : "end-0 w-72 md:w-[min(288px,calc(var(--sidebar-width)_-_32px))]", motion.className)} {...motion.exitProps}>
+          <div className="flex items-center gap-1 py-0.5 ps-2">
             <span className="flex-1 text-[13px] font-medium text-ink">{t("attention.title")}</span>
             <button type="button" onClick={() => setAttentionPinned(!pinned)} aria-label={t(pinned ? "attention.unpin" : "attention.pin")} title={t(pinned ? "attention.unpin" : "attention.pin")}
               className="flex size-6 items-center justify-center rounded-md text-ink-secondary hover:bg-menu-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">

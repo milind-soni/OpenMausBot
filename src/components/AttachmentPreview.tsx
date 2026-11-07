@@ -635,7 +635,7 @@ export function AttachmentPreviewDialog({
                 type="button"
                 onClick={() => navigate(-1)}
                 aria-label={t("attach.previous")}
-                className="absolute left-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm hover:bg-black/75 hover:text-white sm:left-4"
+                className="absolute start-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm hover:bg-black/75 hover:text-white sm:start-4"
               >
                 <ChevronLeft size={21} />
               </button>
@@ -643,7 +643,7 @@ export function AttachmentPreviewDialog({
                 type="button"
                 onClick={() => navigate(1)}
                 aria-label={t("attach.next")}
-                className="absolute right-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm hover:bg-black/75 hover:text-white sm:right-4"
+                className="absolute end-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm hover:bg-black/75 hover:text-white sm:end-4"
               >
                 <ChevronRight size={21} />
               </button>
@@ -728,7 +728,7 @@ export function AttachmentThumbnail({
               onPreview();
             }
           }}
-          className="absolute inset-0 block size-full cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 aria-disabled:cursor-default"
+          className="absolute inset-0 block size-full cursor-pointer text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 aria-disabled:cursor-default"
           aria-label={t("attach.previewImageAria", { name: image.name })}
           title={t("attach.previewAria", { name: image.name })}
         >
@@ -752,7 +752,7 @@ export function AttachmentThumbnail({
               state === "ready" ? "opacity-100" : "opacity-0",
             )}
           />
-          <span className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-full bg-black/55 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover/image:opacity-100 group-focus-within/image:opacity-100">
+          <span className="absolute end-2 top-2 flex size-7 items-center justify-center rounded-full bg-black/55 text-white opacity-0 backdrop-blur-sm transition-opacity group-hover/image:opacity-100 group-focus-within/image:opacity-100">
             <Maximize2 size={13} />
           </span>
         </span>
@@ -921,7 +921,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
         <button
           type="button"
           {...chipNameAction(preview, save, file.name, save.retryable)}
-          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-raised/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:hover:bg-transparent"
+          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-start transition-colors hover:bg-raised/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:hover:bg-transparent"
         >
           <FileText size={14} className="shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>

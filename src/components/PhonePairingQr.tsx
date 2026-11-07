@@ -14,7 +14,7 @@ export const PAIRING_RENEW_MS = 100_000;
 
 function RouteRow({ on, label, value }: { on: boolean; label: string; value: string }) {
   return (
-    <div className="flex h-7 items-center gap-2 text-left">
+    <div className="flex h-7 items-center gap-2 text-start">
       {on ? <Check size={14} className="shrink-0 text-success" /> : <Minus size={14} className="shrink-0 text-ink-tertiary" />}
       <span className="w-[120px] shrink-0 text-[13px] text-ink">{label}</span>
       <span className="min-w-0 truncate text-[12px] text-ink-secondary">{value}</span>
@@ -61,11 +61,11 @@ export function PhonePairingQr({ c, signedIn }: { c: PhoneSetupController; signe
         />
       </div>
       {c.localFallback && state.publicNetwork && (
-        <p role="note" className="mt-3 w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-left text-[12px] leading-relaxed text-warning">
+        <p role="note" className="mt-3 w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-start text-[12px] leading-relaxed text-warning">
           {t("phone.code.publicNetwork", { network: state.publicNetwork })}
         </p>
       )}
-      <p className="mt-4 flex items-start gap-1.5 px-2 text-left text-[12px] text-ink-tertiary">
+      <p className="mt-4 flex items-start gap-1.5 px-2 text-start text-[12px] text-ink-tertiary">
         <Lock size={12} className="mt-0.5 shrink-0" />
         {t("phone.code.e2e.encrypted")}
       </p>
@@ -75,7 +75,7 @@ export function PhonePairingQr({ c, signedIn }: { c: PhoneSetupController; signe
           {t("phone.code.e2e.getApp")}
         </button>
         {storeOpen && (
-          <div className="absolute bottom-8 right-0 z-10 rounded-xl border border-hairline/40 bg-card p-4 shadow-lg">
+          <div className="absolute bottom-8 end-0 z-10 rounded-xl border border-hairline/40 bg-card p-4 shadow-lg">
             <div className="flex gap-4">
               {[["App Store", IOS_APP_STORE_URL], ["Android", ANDROID_APK_URL]].map(([label, url]) => (
                 <div key={label} className="flex flex-col items-center gap-2">

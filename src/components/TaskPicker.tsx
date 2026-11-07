@@ -246,7 +246,7 @@ function ConversationTaskPicker({
       </button>
 
       {motion.shown && (
-        <div className={cn("absolute right-0 top-full z-40 mt-1 w-[300px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}>
+        <div className={cn("absolute end-0 top-full z-40 mt-1 w-[300px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}>
           <div>
             <div className="flex items-center gap-2 rounded-md bg-ink/[0.05] px-2 py-1.5 focus-within:ring-2 focus-within:ring-focus/60">
               <Search size={14} className="shrink-0 text-ink-secondary" />
@@ -342,7 +342,7 @@ function ConversationTaskPicker({
                         e.stopPropagation();
                         startRename(task);
                       }}
-                      className="min-w-0 flex-1 text-left"
+                      className="min-w-0 flex-1 text-start"
                       title={t("task.renameHint")}
                     >
                       <div dir="auto" className="truncate text-[14px] leading-[18px] text-ink">{localizedTaskTitle(task.title)}</div>
@@ -408,7 +408,7 @@ function ConversationTaskPicker({
               closeMenu();
             }}
             disabled={busy}
-            className="flex min-h-[30px] w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] text-ink hover:bg-menu-hover disabled:opacity-40"
+            className="flex min-h-[30px] w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[14px] text-ink hover:bg-menu-hover disabled:opacity-40"
           >
             <SquarePen size={16} className="text-ink-secondary" /> {t("task.newShort")}
           </button>}

@@ -97,6 +97,14 @@ export function useSidebarWidth({ simple, sidePanelOpen, sidebarRef }: {
   };
 }
 
+const isRtl = (element: Element) => getComputedStyle(element).direction === "rtl";
+
+function sidebarWidthAt(clientX: number, sidebar: HTMLElement | null): number {
+  if (!sidebar) return clientX;
+  const { left, right } = sidebar.getBoundingClientRect();
+  return isRtl(sidebar) ? right - clientX : clientX - left;
+}
+
 /** While the edge is dragged the whole page shows the resize cursor and selects no text, wherever the pointer is. */
 function holdPageCursor(held: boolean) {
   document.body.style.cursor = held ? "col-resize" : "";
@@ -133,8 +141,8 @@ export function SidebarResizeHandle({ sizing, sidebarRef, avatars, avatarsWidth,
       aria-valuenow={avatars ? avatarsWidth : sizing.valueNow}
       tabIndex={0}
       data-sidebar-resize={dragging ? "dragging" : ""}
-      className={cn("absolute inset-y-0 -right-1.5 z-20 hidden w-3 cursor-col-resize touch-none outline-none md:block",
-        "after:absolute after:inset-y-0 after:left-[5px] after:w-0.5 focus-visible:after:bg-focus")}
+      className={cn("absolute inset-y-0 -end-1.5 z-20 hidden w-3 cursor-col-resize touch-none outline-none md:block",
+        "after:absolute after:inset-y-0 after:start-[5px] after:w-0.5 focus-visible:after:bg-focus")}
       style={style}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
@@ -147,7 +155,7 @@ export function SidebarResizeHandle({ sizing, sidebarRef, avatars, avatarsWidth,
       onPointerMove={(event) => {
         const current = drag.current;
         if (!current || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
-        const wanted = event.clientX - (sidebarRef.current?.getBoundingClientRect().left ?? 0);
+        const wanted = sidebarWidthAt(event.clientX, sidebarRef.current);
         const next = nextEdgeDrag(current.state, wanted, current.from);
         if (next.avatars !== current.state.avatars) {
           sizing.snap();
@@ -163,7 +171,7 @@ export function SidebarResizeHandle({ sizing, sidebarRef, avatars, avatarsWidth,
       onKeyDown={(event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault();
-        const wider = event.key === "ArrowRight";
+        const wider = event.key === (isRtl(event.currentTarget) ? "ArrowLeft" : "ArrowRight");
         if (avatars) { if (wider) onAvatars(false); return; }
         if (!wider && sizing.atMinimum()) onAvatars(true);
         else sizing.stepResize(wider ? 16 : -16);

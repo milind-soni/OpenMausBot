@@ -43,7 +43,7 @@ function PanelRow({ entry }: { entry: KeyEntry }) {
   return (
     <div data-key-row={entry.id} role="group" aria-labelledby={titleId} className={KEY_ROW}>
       <RowHeading entry={entry} status={status} titleId={titleId} />
-      <div className="flex flex-col gap-2 pl-8">{PANELS[entry.id]?.()}</div>
+      <div className="flex flex-col gap-2 ps-8">{PANELS[entry.id]?.()}</div>
     </div>
   );
 }
@@ -57,7 +57,7 @@ function ElsewhereRow({ entry }: { entry: KeyEntry }) {
   return (
     <div data-key-row={entry.id} role="group" aria-labelledby={titleId} className={KEY_ROW}>
       <RowHeading entry={entry} status={status} titleId={titleId} />
-      <div className="flex flex-col gap-2 pl-8">
+      <div className="flex flex-col gap-2 ps-8">
         {saved.configured && <div className="flex"><MaskedKey saved={saved} label={t(entry.labelKey)} /></div>}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {entry.whereKey && <span className="min-w-0 flex-1 text-[12px] leading-4 text-ink-secondary">{t(entry.whereKey)}</span>}
@@ -92,7 +92,7 @@ function KeySection({ id, rows, open, onToggle }: { id: KeySectionId; rows: KeyE
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={onToggle}
-        className="flex w-full cursor-pointer items-center gap-3 rounded-[inherit] px-4 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
+        className="flex w-full cursor-pointer items-center gap-3 rounded-[inherit] px-4 py-2.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
       >
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span id={headId} className="text-[14px] font-medium leading-5 text-ink">{t(section.titleKey)}</span>

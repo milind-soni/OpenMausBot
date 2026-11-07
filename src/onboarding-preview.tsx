@@ -85,7 +85,7 @@ function Preview() {
   return (
     <div className="min-h-screen bg-app p-6 text-ink">
       <header className="mb-5 flex flex-wrap items-center gap-3 text-[13px] text-ink-secondary">
-        <h1 className="mr-2 text-[18px] font-semibold text-ink">First run</h1>
+        <h1 className="me-2 text-[18px] font-semibold text-ink">First run</h1>
         <label className="flex items-center gap-1.5">Screen
           <Select size="sm" value={screen} onChange={(e) => { setScreen(e.target.value as BeatId); setRun((r) => r + 1); }}>
             <option value="meet">Meet</option>
@@ -98,7 +98,7 @@ function Preview() {
           </Select>
         </label>
         <button onClick={() => setRun((r) => r + 1)} className="rounded-lg bg-raised px-3 py-1.5 text-ink hover:bg-raised-hover">Replay</button>
-        <span className="ml-auto">?ai=0 for no AI, ?bots=3 for bots to choose from</span>
+        <span className="ms-auto">?ai=0 for no AI, ?bots=3 for bots to choose from</span>
       </header>
       <div className="relative overflow-hidden rounded-xl border border-hairline/40 bg-app" style={{ width, height }}>
         <WelcomeFlow key={`${screen}-${run}`} embedded initialBeat={screen} onDone={() => setRun((r) => r + 1)} />

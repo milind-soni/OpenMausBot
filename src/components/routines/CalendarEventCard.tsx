@@ -121,7 +121,7 @@ export function CalendarEventCard({
       aria-pressed={selected}
       aria-label={`${name}, ${niceTime(item.at)}${paused ? `, ${t("routines.pausedSchedule")}` : statusLabel ? `, ${statusLabel}` : ""}`}
       className={cn(
-        "group absolute z-10 overflow-hidden rounded-md border border-l-[3px] text-left transition hover:z-20 focus:z-20 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent",
+        "group absolute z-10 overflow-hidden rounded-md border border-s-[3px] text-start transition hover:z-20 focus:z-20 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent",
         fit === "roomy" ? "px-1.5 py-1" : "px-1.5 py-0",
         paused && "border-dashed opacity-70",
         status === "cancelled" && "opacity-55",

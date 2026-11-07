@@ -7,7 +7,7 @@ import { currentTaskBot, useStore, type Action, type Bot } from "@/state/store";
 import { bulkDeleteBody, bulkDeleteOutcome, deleteThreadsInBulk } from "./BulkSelectBar";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-export function BotDeleteMenuItem({ deleting, onClick, className = "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]" }: { deleting: boolean; onClick: () => void; className?: string }) {
+export function BotDeleteMenuItem({ deleting, onClick, className = "flex w-full items-center gap-3 px-3.5 py-2 text-start text-[14px]" }: { deleting: boolean; onClick: () => void; className?: string }) {
   return (
     <button
       type="button"

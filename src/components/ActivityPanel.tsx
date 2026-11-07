@@ -102,7 +102,7 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
   };
 
   return (
-    <aside aria-label={t("activity.panel.aria", { name: bot.name })} className="animate-panel-in flex h-full w-[400px] max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30">
+    <aside aria-label={t("activity.panel.aria", { name: bot.name })} className="animate-panel-in flex h-full w-[400px] max-w-full shrink-0 flex-col border-s border-hairline/40 bg-panel max-md:absolute max-md:inset-y-0 max-md:end-0 max-md:z-30">
       <div {...dragProps} className="flex items-center justify-between px-4 py-3">
         <span className="flex items-center gap-2 text-[15px] font-semibold text-ink">
           <ListChecks size={16} className="text-ink-secondary" /> {t("activity.panel.title")}
@@ -162,7 +162,7 @@ function ActivityLine({ row, current, focused, onJump }: { row: ActivityRow; cur
       onClick={onJump}
       aria-current={focused || undefined}
       data-activity-focused={focused ? "" : undefined}
-      className={cn("flex w-full items-start gap-3 border-b border-hairline/20 px-4 py-2 text-left hover:bg-raised/60", focused && "bg-raised/60")}
+      className={cn("flex w-full items-start gap-3 border-b border-hairline/20 px-4 py-2 text-start hover:bg-raised/60", focused && "bg-raised/60")}
       title={current ? row.tool : t("activity.panel.openOtherTask", { tool: row.tool })}
     >
       <span className="mt-[2px] shrink-0 tabular-nums text-[11px] text-ink-secondary">{formatActivityTime(row.at)}</span>

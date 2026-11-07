@@ -108,7 +108,7 @@ export function BotProfileAvatarCard({
               onClick={() => onPatch({ avatarCrop: candidate })}
               className={cn(
                 "py-1.5 text-[13px] disabled:opacity-50",
-                index > 0 && "border-l border-hairline/40",
+                index > 0 && "border-s border-hairline/40",
                 crop === candidate ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60 hover:text-ink",
               )}
             >

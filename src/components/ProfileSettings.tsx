@@ -126,7 +126,7 @@ function ProfilePhoto() {
                 <div className="text-[12px] font-medium text-ink">{t("settings.profile.avatar.cropTitle")}</div>
                 <div className="text-[11px] text-ink-secondary">{draft.width} × {draft.height}px</div>
                 <label className="mt-1 block text-[11px] text-ink-secondary">{t("settings.profile.avatar.zoom")}
-                  <input aria-label={t("settings.profile.avatar.zoom")} type="range" min="1" max="2.5" step="0.05" value={draft.zoom} onChange={(event) => replaceDraft({ ...draft, zoom: Number(event.target.value) })} className="ml-2 w-28 align-middle accent-accent" />
+                  <input aria-label={t("settings.profile.avatar.zoom")} type="range" min="1" max="2.5" step="0.05" value={draft.zoom} onChange={(event) => replaceDraft({ ...draft, zoom: Number(event.target.value) })} className="ms-2 w-28 align-middle accent-accent" />
                 </label>
               </div>
               <button type="button" className="rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control" onClick={() => replaceDraft(null)}>{t("settings.profile.avatar.cancel")}</button>

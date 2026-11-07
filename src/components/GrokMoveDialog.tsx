@@ -183,8 +183,8 @@ export function GrokMoveDialog({ onClose }: { onClose: () => void }) {
           if (preview) setPreview(null);
           else onClose();
         }}
-        className="ui-modal animate-pop-in flex max-h-[min(720px,calc(100dvh-32px))] w-[560px] max-w-full flex-col overflow-hidden text-left outline-none">
-        <div className="flex h-[52px] shrink-0 items-center justify-between pl-4 pr-3">
+        className="ui-modal animate-pop-in flex max-h-[min(720px,calc(100dvh-32px))] w-[560px] max-w-full flex-col overflow-hidden text-start outline-none">
+        <div className="flex h-[52px] shrink-0 items-center justify-between ps-4 pe-3">
           <h2 id="grok-move-title" className="text-[14px] font-semibold leading-[22px] text-ink">
             {preview ? t("grokMove.previewTitle") : t("settings.import.grokTitle")}
           </h2>

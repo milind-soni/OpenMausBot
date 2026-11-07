@@ -629,7 +629,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
                         : server.envKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.secretsSaved", { keys: server.envKeys.join(", ") })}</div>}
                       {isRemoteMcpListing(server) && server.oauth && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t(server.oauth.clientSecretConfigured ? "mcp.oauth.savedWithSecret" : "mcp.oauth.saved", { clientId: server.oauth.clientId })}</div>}
                     </div>
-                    <div data-mcp-row-actions className="ml-auto flex flex-wrap items-center justify-end gap-1">
+                    <div data-mcp-row-actions className="ms-auto flex flex-wrap items-center justify-end gap-1">
                       {signingIn === server.name ? (
                         <button type="button" onClick={() => signInAbort.current?.abort()} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">
                           <Loader2 size={14} className="animate-spin" /> {t("mcp.auth.cancel")}
@@ -648,8 +648,8 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
                       </button>
                       <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => openEditor(server.name)} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40" aria-label={t("mcp.editAria", { name: server.name })}><Pencil size={14} /></button>
                       <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => void remove(server)} className="rounded-lg p-2 text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40" aria-label={t("mcp.removeAria", { name: server.name })}><Trash2 size={14} /></button>
-                      <span className="ml-1 flex items-center">
-                        {busy === `toggle:${server.name}` && <Loader2 size={13} className="mr-1.5 animate-spin text-ink-secondary" />}
+                      <span className="ms-1 flex items-center">
+                        {busy === `toggle:${server.name}` && <Loader2 size={13} className="me-1.5 animate-spin text-ink-secondary" />}
                         <Switch
                           checked={server.enabled}
                           disabled={busy !== null || signingIn !== null}

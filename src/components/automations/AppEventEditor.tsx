@@ -97,7 +97,7 @@ export function AppEventEditor({ trigger, bots, initialBotId, onClose, onSaved }
             <div>
               <div className="mb-2 text-[13px] font-medium text-ink">{t("automations.editor.app.who")}</div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{bots.map((bot) => (
-                <button key={bot.id} type="button" onClick={() => setBotId(bot.id)} className={cn("flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left", botId === bot.id ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised/60")}>
+                <button key={bot.id} type="button" onClick={() => setBotId(bot.id)} className={cn("flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-start", botId === bot.id ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised/60")}>
                   <BotAvatar bot={bot} state={botId === bot.id ? "happy" : "idle"} size={32} animated={false} /><span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{bot.name}</span>
                 </button>
               ))}</div>

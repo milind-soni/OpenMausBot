@@ -59,11 +59,11 @@ export function SidebarPhoneBar({ query, onQuery }: { query: string; onQuery: (q
           renderTrigger={({ open }) => (
             <span className={`relative flex size-11 items-center justify-center rounded-full border border-hairline text-ink ${open ? "bg-raised" : "bg-card"}`}>
               <LayoutGrid size={19} aria-hidden="true" />
-              {automationsNeedYou && <span aria-hidden className="absolute right-1 top-1 size-2.5 rounded-full bg-danger ring-2 ring-app" />}
+              {automationsNeedYou && <span aria-hidden className="absolute end-1 top-1 size-2.5 rounded-full bg-danger ring-2 ring-app" />}
             </span>
           )}
         />
-        <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-hairline bg-card pl-3.5 pr-1.5 text-ink-secondary focus-within:border-focus">
+        <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-hairline bg-card ps-3.5 pe-1.5 text-ink-secondary focus-within:border-focus">
           <Search size={17} aria-hidden="true" className="shrink-0" />
           <input
             value={query}

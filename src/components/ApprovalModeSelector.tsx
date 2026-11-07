@@ -91,7 +91,7 @@ export function ApprovalModeSelector({
         triggerRef.current?.focus();
         onManageCommandAllowlist();
       }}
-      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] text-ink hover:bg-menu-hover"
+      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-start text-[14px] text-ink hover:bg-menu-hover"
     >
       <ListChecks size={16} className="shrink-0 text-ink-secondary" />
       {t("commandAllowlist.title")}
@@ -132,7 +132,7 @@ export function ApprovalModeSelector({
           className={cn(
             "absolute z-40 w-[340px] overflow-hidden", MENU_SHEET,
             menuDirection === "up" ? "bottom-full mb-2" : "top-full mt-2",
-            align === "right" ? "right-0" : "left-0",
+            align === "right" ? "end-0" : "start-0",
             wide && "w-full min-w-[340px]",
             motion.className,
           )}
@@ -169,7 +169,7 @@ export function ApprovalModeSelector({
                       setOpen(false);
                     }}
                     className={cn(
-                      "flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-menu-hover",
+                      "flex items-start gap-2 rounded-md px-2 py-1.5 text-start hover:bg-menu-hover",
                       modesDisabled && "cursor-not-allowed opacity-45 hover:bg-transparent",
                     )}
                   >

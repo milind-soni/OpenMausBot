@@ -26,7 +26,7 @@ type Gesture = {
 } & ({ kind: "pan" } | { kind: "team"; key: string; origin: Point } | { kind: "bot"; bot: Bot });
 
 const iconButton = "flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent";
-const menuButton = "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] text-ink-secondary hover:bg-control hover:text-ink";
+const menuButton = "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-start text-[12px] text-ink-secondary hover:bg-control hover:text-ink";
 
 function BotCard({ bot, selected, moving, connected, tagged = false, sent, onComputer, onArrange }: {
   bot: Bot;
@@ -56,7 +56,7 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, onCom
         event.preventDefault(); event.stopPropagation();
         onArrange(bot, event.key === "ArrowUp" ? -1 : 1);
       }}
-      className="flex h-[82px] w-full cursor-grab items-center gap-3 rounded-t-xl px-4 text-left active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-accent">
+      className="flex h-[82px] w-full cursor-grab items-center gap-3 rounded-t-xl px-4 text-start active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-accent">
       <BotAvatar bot={bot} size={38} motion="none" motionKey={0} animated={false} />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5"><span className="truncate text-[14px] font-semibold">{name}</span>
@@ -75,7 +75,7 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, onCom
         onClick={() => onComputer(bot)}><Monitor size={13} /></button>}
       <button aria-label={t("canvas.changeModel", { name: bot.name })} title={`${t("canvas.defaultModel")}: ${model}`}
         onClick={() => openBotSettings(dispatch, "model", { botId: bot.id })}
-        className="ml-auto flex h-8 min-w-0 max-w-[130px] items-center gap-1.5 rounded-md px-2 text-[10px] text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
+        className="ms-auto flex h-8 min-w-0 max-w-[130px] items-center gap-1.5 rounded-md px-2 text-[10px] text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
         <span className="flex size-3.5 shrink-0 items-center justify-center">{instance
           ? <InstanceProviderMark instance={instance} size={13} />
           : <ProviderMark driverKind="" size={13} />}</span>
@@ -425,7 +425,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
           style={{ left: tile.x, top: tile.y, width: tile.width, height: tile.height }}>
           <header className="flex h-16 items-center gap-2 px-5">
             <button data-arrange-team={section.key} disabled={!layoutLoaded} aria-label={t("canvas.arrange", { name: section.name })}
-              title={t("canvas.arrangeHint")} className="min-w-0 flex-1 cursor-grab rounded-md py-2 text-left active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-accent"
+              title={t("canvas.arrangeHint")} className="min-w-0 flex-1 cursor-grab rounded-md py-2 text-start active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-accent"
               onKeyDown={(event) => {
                 const delta = ({ ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] } as Record<string, number[]>)[event.key];
                 if (!delta) return;
@@ -449,7 +449,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
               }
             }}>
               <summary aria-label={t("canvas.manageTeam", { name: section.name })} className={cn(iconButton, "cursor-pointer list-none [&::-webkit-details-marker]:hidden")}><MoreHorizontal size={17} /></summary>
-              <div className={cn("absolute right-0 z-30 w-[220px] animate-pop-in rounded-xl border border-hairline bg-panel p-1.5 shadow-xl", menuAbove === section.key ? "bottom-10" : "top-10")} onClick={(event) => {
+              <div className={cn("absolute end-0 z-30 w-[220px] animate-pop-in rounded-xl border border-hairline bg-panel p-1.5 shadow-xl", menuAbove === section.key ? "bottom-10" : "top-10")} onClick={(event) => {
                 const menu = event.currentTarget.closest("details");
                 menu?.querySelector("summary")?.focus();
                 menu?.removeAttribute("open");
@@ -462,7 +462,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
               </div>
             </details>}
           </header>
-          {dropping && <div className="pointer-events-none absolute -top-7 left-2 z-30 max-w-[calc(100%-16px)] truncate rounded-md bg-accent px-2 py-1 text-[10px] text-white shadow-sm">{dropHint}</div>}
+          {dropping && <div className="pointer-events-none absolute -top-7 start-2 z-30 max-w-[calc(100%-16px)] truncate rounded-md bg-accent px-2 py-1 text-[10px] text-white shadow-sm">{dropHint}</div>}
           {geometry ? <>
             <svg aria-hidden className="pointer-events-none absolute inset-0 overflow-visible" width={tile.width} height={tile.height}>
               {geometry.tree.map((line, lineIndex) => <path key={`tree-${lineIndex}`} d={polylinePath(line)} fill="none" strokeWidth={1.5} className="stroke-ink-secondary/25" />)}

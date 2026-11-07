@@ -94,7 +94,7 @@ function ProgressRing({ value = 0, waiting = false }: { value?: number; waiting?
     + ` A ${corner} ${corner} 0 0 1 ${box - inset - corner} ${box - inset} H ${inset + corner} A ${corner} ${corner} 0 0 1 ${inset} ${box - inset - corner}`
     + ` V ${inset + corner} A ${corner} ${corner} 0 0 1 ${inset + corner} ${inset} Z`;
   return <svg aria-hidden="true" data-rail-ring={waiting ? "waiting" : Math.round(value * 100)} width={box} height={box} viewBox={`0 0 ${box} ${box}`}
-    className={cn("pointer-events-none absolute -left-[3px] -top-[3px]", waiting && "animate-pulse motion-reduce:animate-none")}>
+    className={cn("pointer-events-none absolute -start-[3px] -top-[3px]", waiting && "animate-pulse motion-reduce:animate-none")}>
     <path d={edge} fill="none" stroke="var(--color-hairline)" strokeWidth={2} />
     <path d={edge} fill="none" stroke="var(--color-accent)" strokeWidth={2} strokeLinecap="round" strokeDasharray={`${shown * around} ${around}`}
       className="transition-[stroke-dasharray] duration-500 motion-reduce:transition-none" />
@@ -118,13 +118,13 @@ export function PlaceMark({ place, size = TILE }: { place: MarkedPlace; size?: n
  * reads on any tile colour in either theme. */
 function KindBadge({ place }: { place: RailPlace }) {
   if (cloudTile(place)) return <span aria-hidden="true" data-rail-cloud
-    className="pointer-events-none absolute -bottom-1 -right-1 grid size-3.5 place-items-center rounded-full border-2 border-(--rail-surface) bg-ink text-(--rail-surface)">
+    className="pointer-events-none absolute -bottom-1 -end-1 grid size-3.5 place-items-center rounded-full border-2 border-(--rail-surface) bg-ink text-(--rail-surface)">
     <Cloud size={9} strokeWidth={3} />
   </span>;
   const Icon = place.server ? Server : place.named ? Laptop : null;
   if (!Icon) return null;
   return <span aria-hidden="true" data-rail-server={place.server ? "" : undefined} data-rail-local={place.server ? undefined : ""}
-    className="pointer-events-none absolute -bottom-1 -right-1 grid size-3 place-items-center rounded-full border border-hairline bg-(--rail-surface) text-ink-secondary">
+    className="pointer-events-none absolute -bottom-1 -end-1 grid size-3 place-items-center rounded-full border border-hairline bg-(--rail-surface) text-ink-secondary">
     <Icon size={7} strokeWidth={2.25} />
   </span>;
 }
@@ -156,12 +156,12 @@ function PlaceTile({ place, canPair, onOpen, onMenu }: { place: RailPlace; canPa
     className={cn("group/tile relative shrink-0 rounded-[7px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
       !acts && cn("cursor-default", !place.offline && "opacity-75"))}>
     <span aria-hidden="true" data-rail-pill={place.active ? "page" : acts ? "hover" : undefined}
-      className={cn("pointer-events-none absolute -left-1.5 top-1/2 w-[3px] -translate-y-1/2 rounded-r-full bg-ink transition-[height,opacity] duration-150 motion-reduce:transition-none",
+      className={cn("pointer-events-none absolute -start-1.5 top-1/2 w-[3px] -translate-y-1/2 rounded-e-full bg-ink transition-[height,opacity] duration-150 motion-reduce:transition-none",
         place.active ? "h-4" : acts ? "h-2 opacity-0 group-hover/tile:opacity-100" : "hidden")} />
     <PlaceMark place={place} />
     {(place.progress !== undefined || place.settling !== undefined) && <ProgressRing value={place.progress} waiting={place.waiting === true || place.settling !== undefined} />}
-    {place.attention && <span aria-hidden="true" data-rail-dot className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-(--rail-surface) bg-danger" />}
-    {place.update && !place.attention && <span aria-hidden="true" data-rail-update className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-(--rail-surface) bg-accent" />}
+    {place.attention && <span aria-hidden="true" data-rail-dot className="absolute -end-1 -top-1 size-2.5 rounded-full border-2 border-(--rail-surface) bg-danger" />}
+    {place.update && !place.attention && <span aria-hidden="true" data-rail-update className="absolute -end-1 -top-1 size-2.5 rounded-full border-2 border-(--rail-surface) bg-accent" />}
     <KindBadge place={place} />
   </button>;
 }
@@ -241,7 +241,7 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
   };
   const note = paint?.locked === "member" || outcome === "refused" ? t("placeLook.member") : paint?.locked === "signed-out" ? t("placeLook.signedOut")
     : outcome === "unsupported" ? t("placeLook.unsupported") : null;
-  return <div ref={ref} role="dialog" aria-label={name} data-rail-menu={place.id} className={cn("absolute left-full z-50 ml-2 w-72", MENU_SHEET)} style={{ top }}
+  return <div ref={ref} role="dialog" aria-label={name} data-rail-menu={place.id} className={cn("absolute start-full z-50 ms-2 w-72", MENU_SHEET)} style={{ top }}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
     <div className="flex items-center gap-2 px-2 pt-1">
       <PlaceMark place={place} size={22} />
@@ -338,7 +338,7 @@ function LocalMenu({ place, top, onClose }: { place: RailPlace; top: number; onC
     setPending(value); setFailed(false);
     void editLocal(place.id, { color: value }).then((outcome) => { setPending(undefined); if (outcome === "saved") onClose(); else setFailed(true); });
   };
-  return <div ref={ref} role="dialog" aria-label={name} data-rail-menu={place.id} className={cn("absolute left-full z-50 ml-2 w-72", MENU_SHEET)} style={{ top }}
+  return <div ref={ref} role="dialog" aria-label={name} data-rail-menu={place.id} className={cn("absolute start-full z-50 ms-2 w-72", MENU_SHEET)} style={{ top }}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
     <div className="flex items-center gap-2 px-2 pt-1">
       <PlaceMark place={place} size={22} />
@@ -359,7 +359,7 @@ function MorePlaces({ places, canPair, onOpen, onMenu, onClose }: { places: Rail
   const [query, setQuery] = useState("");
   const found = matchingPlaces(places, query);
   const search = t(places.some((place) => place.profile) ? "rail.searchAny" : "rail.search");
-  return <div role="dialog" aria-label={search} data-rail-more className={cn("absolute bottom-0 left-full z-50 ml-2 w-64", MENU_SHEET)}
+  return <div role="dialog" aria-label={search} data-rail-more className={cn("absolute bottom-0 start-full z-50 ms-2 w-64", MENU_SHEET)}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
     <label className="flex h-8 items-center gap-2 rounded-md bg-ink/[0.05] px-2">
       <Search size={14} aria-hidden="true" className="shrink-0 text-ink-secondary" />
@@ -443,7 +443,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   };
   return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail style={drag}
     className={cn("relative w-9 shrink-0 flex-col items-center", chrome ? "flex h-full" : "hidden md:flex",
-      framed ? "bg-frame [--rail-surface:var(--color-frame)]" : cn("border-r bg-panel [--rail-surface:var(--color-panel)]", calm ? "border-r-[0.5px] border-edge" : "border-hairline/50"))}>
+      framed ? "bg-frame [--rail-surface:var(--color-frame)]" : cn("border-e bg-panel [--rail-surface:var(--color-panel)]", calm ? "border-e-[0.5px] border-edge" : "border-hairline/50"))}>
     <div aria-hidden="true" className={cn(above, "shrink-0")} />
     {/* As wide as the rail, so nothing round a tile is cut off at the sides: a list that scrolls clips its overflow. */}
     <ul className="flex min-h-0 w-full flex-col items-center gap-2 overflow-y-auto py-1" style={noDrag}>

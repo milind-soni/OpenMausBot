@@ -18,7 +18,7 @@ export function SimpleRailFooter({ owner = null, archived }: {
       <SidebarConnectApps circle />
       <UpdateIndicator />
       <SidebarProfileMenu iconOnly rail simple={account} />
-      <SidebarPlaceStatus place={place} className="absolute bottom-3 left-full z-40 ml-2 w-56 rounded-md bg-menu px-2 py-1 text-[11px] shadow-lg" />
+      <SidebarPlaceStatus place={place} className="absolute bottom-3 start-full z-40 ms-2 w-56 rounded-md bg-menu px-2 py-1 text-[11px] shadow-lg" />
     </div>
   );
 }

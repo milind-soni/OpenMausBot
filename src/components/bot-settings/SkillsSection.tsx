@@ -461,12 +461,12 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                   <button
                     type="button"
                     onClick={() => void view(skill)}
-                    className="min-w-0 flex-1 text-left"
+                    className="min-w-0 flex-1 text-start"
                   >
                     <div className="truncate font-mono text-[13px] text-ink">{skill.name}</div>
                     {(libraryOn || skill.origin === "imported" || skill.origin === "native") && (
                       <span
-                        className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[10px] uppercase tracking-wide text-ink-secondary"
+                        className="ms-1.5 rounded bg-control px-1 py-px font-mono text-[10px] uppercase tracking-wide text-ink-secondary"
                         title={skill.origin === "imported" ? t("skills.origin.importedHint") : skill.origin === "native" ? t("skills.origin.nativeHint") : undefined}
                       >
                         {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "library" ? t("skills.origin.library") : t("skills.origin.private")}

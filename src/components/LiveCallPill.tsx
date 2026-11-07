@@ -71,7 +71,7 @@ export function LiveCallPill({ onOpen, currentBotId, iconOnly = false }: {
           className={cn(round, "relative text-success hover:bg-raised")}
         >
           <Phone className="size-4" />
-          <span className="absolute right-0.5 top-0.5 size-1.5 animate-pulse rounded-full bg-success" aria-hidden />
+          <span className="absolute end-0.5 top-0.5 size-1.5 animate-pulse rounded-full bg-success" aria-hidden />
         </button>
         {mute}
         {hangUp}
@@ -80,7 +80,7 @@ export function LiveCallPill({ onOpen, currentBotId, iconOnly = false }: {
   }
   return (
     <div className="mx-2 mb-2 flex items-center gap-1 rounded-xl border border-success/40 bg-panel px-2 py-1.5 text-[13px] text-ink">
-      <button type="button" onClick={() => onOpen(bot.id, threadId)} title={t("call.live.back")} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+      <button type="button" onClick={() => onOpen(bot.id, threadId)} title={t("call.live.back")} className="flex min-w-0 flex-1 items-center gap-2 text-start">
         <span className="size-2 shrink-0 animate-pulse rounded-full bg-success" aria-hidden />
         <span className="truncate">{title}</span>
       </button>

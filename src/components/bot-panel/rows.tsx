@@ -125,7 +125,7 @@ export function NavRow({ title, hint, value, icon, onClick, drill = true, danger
       disabled={disabled}
       title={tooltip}
       onClick={onClick}
-      className={cn(rowCls, "w-full text-left enabled:hover:bg-ink/[0.03] disabled:cursor-default disabled:opacity-45")}
+      className={cn(rowCls, "w-full text-start enabled:hover:bg-ink/[0.03] disabled:cursor-default disabled:opacity-45")}
     >
       {icon && <RowIcon icon={icon} />}
       <div className="min-w-0 flex-1">
@@ -175,7 +175,7 @@ export function LinkRow({ children, onClick, icon: Icon = ChevronRight, ...rest 
   "data-panel-link"?: string;
 }) {
   return (
-    <button type="button" {...rest} onClick={onClick} className="flex w-full items-center gap-2 px-3.5 py-[11px] text-left text-[13px] text-ink-secondary hover:text-ink">
+    <button type="button" {...rest} onClick={onClick} className="flex w-full items-center gap-2 px-3.5 py-[11px] text-start text-[13px] text-ink-secondary hover:text-ink">
       <span className="min-w-0 flex-1">{children}</span>
       <Icon size={14} className="shrink-0" aria-hidden="true" />
     </button>
@@ -270,7 +270,7 @@ export function RadioRow({ title, hint, checked, onClick, disabled, ...rest }: {
       aria-checked={checked}
       disabled={disabled}
       onClick={onClick}
-      className={cn(rowCls, "w-full text-left enabled:hover:bg-ink/[0.03] disabled:cursor-not-allowed disabled:opacity-50")}
+      className={cn(rowCls, "w-full text-start enabled:hover:bg-ink/[0.03] disabled:cursor-not-allowed disabled:opacity-50")}
     >
       <RowText title={title} hint={hint} />
       <span className="flex w-4 shrink-0 text-ink">{checked && <Check size={16} aria-hidden="true" />}</span>
@@ -317,7 +317,7 @@ export function PageHeader({ back, title, intro, onBack }: { back: string; title
         type="button"
         data-panel-back
         onClick={onBack}
-        className="mt-0.5 inline-flex items-center gap-0.5 rounded-[7px] py-1 pl-0.5 pr-2 text-[13px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
+        className="mt-0.5 inline-flex items-center gap-0.5 rounded-[7px] py-1 ps-0.5 pe-2 text-[13px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
       >
         <ChevronLeft size={15} aria-hidden="true" />
         <span>{back}</span>

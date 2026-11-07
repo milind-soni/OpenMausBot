@@ -21,7 +21,7 @@ export function PhoneHero({ bot, selected, onOpen, onMenu }: { bot: Bot; selecte
       >
         <span className="relative flex">
           <BotAvatar bot={bot} state={stateForBot({ ...bot, messages: visible })} size={88} motion="none" motionKey={0} animated={Boolean(bot.busy)} />
-          <span className="absolute -bottom-0.5 -right-0.5 flex rounded-full border-2 border-app bg-raised p-1">
+          <span className="absolute -bottom-0.5 -end-0.5 flex rounded-full border-2 border-app bg-raised p-1">
             <Crown size={13} strokeWidth={2.25} className="text-accent" aria-hidden="true" />
           </span>
         </span>
@@ -30,7 +30,7 @@ export function PhoneHero({ bot, selected, onOpen, onMenu }: { bot: Bot; selecte
       </button>
       <button type="button" data-bot-actions={bot.id} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu"
         onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
-        className="absolute right-1 top-1 flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"><MoreHorizontal size={16} /></button>
+        className="absolute end-1 top-1 flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"><MoreHorizontal size={16} /></button>
     </div>
   );
 }

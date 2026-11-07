@@ -211,7 +211,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   };
 
   return (
-    <aside className="relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline bg-panel" ref={panelRef} data-computer-panel>
+    <aside className="relative z-20 flex h-full w-[400px] shrink-0 flex-col border-s border-hairline bg-panel" ref={panelRef} data-computer-panel>
       <div {...dragProps} className="flex items-center justify-between border-b border-hairline px-5 py-4">
         <div>
           <div className="text-[14px] font-medium text-ink">{t("remoteDesktop.title", { name: bot.name })}</div>
@@ -300,7 +300,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           {t(pending ? "settings.updates.opening" : "computer.takeControl")}
         </button>
         {error && (
-          <div role="alert" className="w-full rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-left text-[12px] text-danger">
+          <div role="alert" className="w-full rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-start text-[12px] text-danger">
             {error}
           </div>
         )}
@@ -308,7 +308,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           {t("remoteDesktop.accessHint")}
         </p>
 
-        <div className="w-full rounded-xl bg-card p-4 text-left">
+        <div className="w-full rounded-xl bg-card p-4 text-start">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-[15px] font-medium text-ink">
               <CalendarClock size={16} className="text-accent" />
@@ -324,7 +324,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
             <button
               type="button"
               onClick={() => dispatch({ type: "showRoutines" })}
-              className="mt-3 flex w-full items-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-left text-[12px] text-accent hover:bg-accent/15"
+              className="mt-3 flex w-full items-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-start text-[12px] text-accent hover:bg-accent/15"
             >
               <Loader2 size={13} className={activeRoutineRun.status === "queued" ? "" : "animate-spin"} />
               <span className="min-w-0 flex-1 truncate">
@@ -339,7 +339,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
                   type="button"
                   key={routine.id}
                   onClick={() => dispatch({ type: "showRoutines" })}
-                  className="flex w-full items-center gap-2 rounded-lg bg-inset px-3 py-2 text-left hover:bg-control/60"
+                  className="flex w-full items-center gap-2 rounded-lg bg-inset px-3 py-2 text-start hover:bg-control/60"
                 >
                   <span className={cn("size-1.5 shrink-0 rounded-full", routine.enabled ? "bg-success" : "bg-ink-secondary/40")} />
                   <span className="min-w-0 flex-1">

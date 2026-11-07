@@ -28,7 +28,7 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
   const picture = Boolean(preview.avatarUrl) && preview.avatarCrop !== "mascot";
   const shape = (patch: AvatarPatch) => onPatch({ ...patch, avatarCrop: "mascot" });
   return (
-    <div className="space-y-3 rounded-2xl bg-ink/[0.03] p-3.5 text-left">
+    <div className="space-y-3 rounded-2xl bg-ink/[0.03] p-3.5 text-start">
       <label className="block">
         <span className={LABEL}>{t("onboarding.bot.name")}</span>
         <input

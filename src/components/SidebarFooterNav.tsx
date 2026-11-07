@@ -47,7 +47,7 @@ function NavRow({
       aria-current={active ? "page" : undefined}
       className={cn(
         "relative flex items-center rounded-xl transition-colors",
-        rail ? "size-9 shrink-0 justify-center" : iconsOnly ? "mx-auto size-[46px] shrink-0 justify-center" : "w-full min-h-9 gap-3 px-3 py-1.5 text-left",
+        rail ? "size-9 shrink-0 justify-center" : iconsOnly ? "mx-auto size-[46px] shrink-0 justify-center" : "w-full min-h-9 gap-3 px-3 py-1.5 text-start",
         active ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
       )}
     >
@@ -56,7 +56,7 @@ function NavRow({
       {attention && (
         <span
           data-testid="routines-attention"
-          className={cn("size-2 shrink-0 rounded-full bg-danger", iconsOnly && (rail ? "absolute right-1 top-1" : "absolute right-2 top-2"))}
+          className={cn("size-2 shrink-0 rounded-full bg-danger", iconsOnly && (rail ? "absolute end-1 top-1" : "absolute end-2 top-2"))}
         />
       )}
     </button>

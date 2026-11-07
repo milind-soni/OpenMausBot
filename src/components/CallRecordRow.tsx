@@ -44,7 +44,7 @@ export function CallRecordRow({ message, transcript, botName, threadId, busy, ha
           <AudioLines size={14} aria-hidden="true" className="shrink-0 text-accent" />
           <span className="min-w-0 truncate font-medium text-ink">{title}</span>
           <span className="shrink-0 tabular-nums">{`· ${duration}`}</span>
-          <ChevronRight size={13} aria-hidden="true" className="-mr-1 shrink-0 text-ink-tertiary" />
+          <ChevronRight size={13} aria-hidden="true" className="-me-1 shrink-0 text-ink-tertiary" />
         </button>
         {lines.length > 0 && (
           <ul className="flex max-w-full min-w-0 flex-col gap-0.5 text-[13px]">

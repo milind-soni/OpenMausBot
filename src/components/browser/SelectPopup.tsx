@@ -87,7 +87,7 @@ export function SelectPopup({ options, selectedIndex, anchor, bounds, onChoose, 
                 onPointerEnter={() => { if (!option.disabled) setActive(index); }}
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={() => { if (!option.disabled) onChoose(index); }}
-                className={`flex cursor-default items-center gap-2 px-3 py-1.5 ${option.group !== undefined ? "pl-5" : ""} ${option.disabled ? "text-ink-tertiary" : index === active ? "bg-accent text-accent-ink" : ""}`}
+                className={`flex cursor-default items-center gap-2 px-3 py-1.5 ${option.group !== undefined ? "ps-5" : ""} ${option.disabled ? "text-ink-tertiary" : index === active ? "bg-accent text-accent-ink" : ""}`}
               >
                 <span className="min-w-0 flex-1 truncate">{option.label || " "}</span>
                 {index === selectedIndex ? <Check size={13} aria-hidden="true" /> : null}

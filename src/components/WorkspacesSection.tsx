@@ -36,8 +36,8 @@ export function WorkspacesTable({ fleet, onAct, busy }: { fleet: FleetView; onAc
     <div className="flex flex-col">
       <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-5 border-b border-hairline/40 pb-2 text-[12px] font-medium uppercase tracking-wide text-ink-secondary">
         <span>{t("workspaces.colWorkspace")}</span>
-        <span className="text-right">{t("workspaces.colState")}</span>
-        <span className="text-right">{t("workspaces.colMonth")}</span>
+        <span className="text-end">{t("workspaces.colState")}</span>
+        <span className="text-end">{t("workspaces.colMonth")}</span>
         <span />
       </div>
       {fleet.workspaces.map((workspace) => {
@@ -54,8 +54,8 @@ export function WorkspacesTable({ fleet, onAct, busy }: { fleet: FleetView; onAc
               <a href={`https://${workspace.host}`} target="_blank" rel="noreferrer" className="block truncate text-[12px] text-accent hover:underline">{workspace.host}</a>
               {!operational && <span className="block text-[12px] text-ink-secondary">{t("workspaces.recoveryHint")}</span>}
             </span>
-            <span className={cn("text-right", suspended || workspace.status === "provisioning" ? "text-warning" : workspace.status === "running" && workspace.live === "active" ? "text-success" : "text-danger")}>{state}</span>
-            <span className="text-right tabular-nums text-ink" title={workspace.usage.turns === null ? undefined : t("workspaces.turns", { turns: String(workspace.usage.turns) })}>
+            <span className={cn("text-end", suspended || workspace.status === "provisioning" ? "text-warning" : workspace.status === "running" && workspace.live === "active" ? "text-success" : "text-danger")}>{state}</span>
+            <span className="text-end tabular-nums text-ink" title={workspace.usage.turns === null ? undefined : t("workspaces.turns", { turns: String(workspace.usage.turns) })}>
               {hasFiniteCost(workspace.usage.costUsd) ? formatUsd(workspace.usage.costUsd) : "—"}
               {hasFiniteCost(workspace.usage.billableUsd) && <span className="text-ink-secondary"> · {formatUsd(workspace.usage.billableUsd)}</span>}
             </span>
@@ -248,7 +248,7 @@ export function WorkspacesSection({ load = fetchFleet }: { load?: () => Promise<
       <Card title={t("workspaces.title")} subtitle={t("workspaces.subtitle")}>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => void refresh()} disabled={loading || busy !== null} className="flex items-center gap-1 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-50"><RefreshCw size={12} className={cn(loading && "animate-spin")} />{t("workspaces.refresh")}</button>
-          <button type="button" onClick={() => setCreating((value) => !value)} disabled={busy !== null} className="ml-auto flex items-center gap-1.5 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"><Plus size={13} />{t("workspaces.new")}</button>
+          <button type="button" onClick={() => setCreating((value) => !value)} disabled={busy !== null} className="ms-auto flex items-center gap-1.5 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"><Plus size={13} />{t("workspaces.new")}</button>
           <button type="button" onClick={() => void upgrade()} disabled={busy !== null || !fleet?.workspaces.length} className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50">{busy === "*" ? t("workspaces.working") : t("workspaces.upgradeAll")}</button>
         </div>
         {creating && fleet && <div className="mb-4 rounded-xl border border-hairline/40 p-3"><NewWorkspaceForm domain={fleet.domain} disabled={busy !== null} onCreated={(lines, created) => { setCreating(false); setLog(lines); setInviteLink(`https://${created.slug}.${fleet.domain}/pair?email=${encodeURIComponent(created.admin)}`); void refresh(); }} /></div>}

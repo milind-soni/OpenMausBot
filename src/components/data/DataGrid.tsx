@@ -203,7 +203,7 @@ export function DataGrid({ botId, target, columns, rowCount, name, revision, han
       </div>
       <DataResultFooter controls={footerControls}>
         <span role="status">{t(filter ? "data.grid.countFiltered" : "data.grid.count", { shown: formatCount(total), total: formatCount(rowCount), count: formatCount(total), columns: columns.length })}</span>
-        {error && <span role="alert" className="ml-2 text-danger" title={error}>{t("data.grid.loadFailed", { reason: error })}</span>}
+        {error && <span role="alert" className="ms-2 text-danger" title={error}>{t("data.grid.loadFailed", { reason: error })}</span>}
         {copyState !== "idle" && <span role={copyState === "failed" ? "alert" : "status"}>{t(copyState === "failed" ? "data.card.copyFailed" : "data.card.copied")}</span>}
       </DataResultFooter>
     </div>

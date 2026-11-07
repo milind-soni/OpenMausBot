@@ -69,7 +69,7 @@ export function cloudEngineChoices(engines: CloudEngineChoices, { handing = fals
             aria-controls="cloud-sign-in-panel"
             onClick={() => setOpen(picked ? null : choice.id)}
             className={cn(
-              "animate-rise group relative flex flex-col rounded-2xl border p-4 text-left transition-[border-color,background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.985]",
+              "animate-rise group relative flex flex-col rounded-2xl border p-4 text-start transition-[border-color,background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.985]",
               picked
                 ? "border-accent/70 bg-accent/[0.07] shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent)_16%,transparent)]"
                 : connected ? "border-success/60 bg-card/50 hover:bg-card" : "border-hairline/50 bg-card/50 hover:border-hairline hover:bg-card",
@@ -107,7 +107,7 @@ export function cloudEngineChoices(engines: CloudEngineChoices, { handing = fals
         <div id="cloud-sign-in-panel" className="step-open mt-3">
           <div className="relative rounded-2xl border border-hairline/50 bg-card px-4 pb-4 pt-4">
             <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)]" style={{ transform: `translateX(${(index / choices.length) * 100}%)` }}>
-              <span className="absolute top-0 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border-l border-t border-hairline/50 bg-card" style={{ left: `${50 / choices.length}%` }} />
+              <span className="absolute top-0 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border-s border-t border-hairline/50 bg-card" style={{ left: `${50 / choices.length}%` }} />
             </span>
             <div key={open} className="animate-rise">
               {instance
@@ -208,7 +208,7 @@ export function CloudEngineSignIn() {
               )}
             </figcaption>
             <p className="mt-1 text-[14px] leading-relaxed text-ink">
-              <span className="mr-1.5 inline-flex h-[21px] items-center rounded-md bg-accent/15 px-1.5 align-[1px] text-[13px] font-semibold text-accent">/setup</span>
+              <span className="me-1.5 inline-flex h-[21px] items-center rounded-md bg-accent/15 px-1.5 align-[1px] text-[13px] font-semibold text-accent">/setup</span>
               {pending}
             </p>
             {handing && (

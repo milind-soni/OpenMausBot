@@ -45,7 +45,7 @@ export function DataFilter({ columns, value, onChange }: { columns: DataColumn[]
       {active && <span className="max-w-40 truncate text-[11px]">· {selected}</span>}
     </button>
     {open && <div id={id} role="dialog" aria-label={t("data.grid.filter")} data-testid="data-filter-popover" onKeyDown={onKeyDown}
-      className="absolute left-0 top-full z-40 mt-1 flex max-h-[min(20rem,calc(100cqh-5.5rem))] w-64 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-hairline/60 bg-menu text-ink shadow-xl">
+      className="absolute start-0 top-full z-40 mt-1 flex max-h-[min(20rem,calc(100cqh-5.5rem))] w-64 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-hairline/60 bg-menu text-ink shadow-xl">
       {choosing ? <>
         <label className="flex shrink-0 items-center gap-2 border-b border-hairline/40 px-3 py-2 text-ink-secondary">
           <Search size={14} aria-hidden="true" />
@@ -53,13 +53,13 @@ export function DataFilter({ columns, value, onChange }: { columns: DataColumn[]
             className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-ink-tertiary" />
         </label>
         <div className="min-h-0 overflow-y-auto p-1">
-          <button type="button" data-filter-option className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-inset focus-visible:bg-inset focus-visible:outline-none" onClick={() => choose()}>
+          <button type="button" data-filter-option className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-start text-xs hover:bg-inset focus-visible:bg-inset focus-visible:outline-none" onClick={() => choose()}>
             <Columns3 size={14} className="text-ink-tertiary" aria-hidden="true" /><span className="flex-1">{t("data.filter.allColumns")}</span>{value.column === undefined && <Check size={13} aria-hidden="true" />}
           </button>
           {matches.map((column) => {
             const Icon = isNumericType(column.type) ? Hash : isTemporalType(column.type) ? CalendarDays : /^BOOLEAN$/i.test(column.type) ? ToggleLeft : Type;
             return <button key={column.name} type="button" data-filter-option aria-label={column.name} title={`${column.name} · ${column.type}`} onClick={() => choose(column.name)}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-inset focus-visible:bg-inset focus-visible:outline-none">
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-start text-xs hover:bg-inset focus-visible:bg-inset focus-visible:outline-none">
               <Icon size={14} className="shrink-0 text-ink-tertiary" aria-hidden="true" /><span className="min-w-0 flex-1 truncate">{column.name}</span>{value.column === column.name && <Check size={13} aria-hidden="true" />}
             </button>;
           })}

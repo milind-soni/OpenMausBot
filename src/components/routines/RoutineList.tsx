@@ -29,7 +29,7 @@ export function RoutineList({ routines, runs, bots, loading, error, onOpen, onLo
       const switched = onToggle !== undefined && !routineFinished(routine);
       return <article key={routine.id} className="rounded-xl border border-hairline/40 bg-card p-3.5" aria-label={routine.name}>
         <div className="flex items-start gap-2">
-          <button type="button" onClick={() => onOpen(routine)} className="min-w-0 flex-1 text-left hover:text-accent">
+          <button type="button" onClick={() => onOpen(routine)} className="min-w-0 flex-1 text-start hover:text-accent">
             <span className="block truncate text-[13px] font-semibold text-ink">{routine.name}</span>
             <span className="mt-1 block text-[12px] leading-relaxed text-ink-secondary">{bot && `${bot.name} · `}{scheduleLabel(routine.schedule)}</span>
           </button>

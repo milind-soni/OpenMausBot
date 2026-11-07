@@ -103,7 +103,7 @@ function OrgPackageCard({
             <Check size={13} className="text-success" />{t("orgLibrary.added")}
           </span>
         )}
-        {action === "updateApp" && <span className="max-w-[140px] text-right text-[12px] text-ink-secondary">{t("orgLibrary.updateApp")}</span>}
+        {action === "updateApp" && <span className="max-w-[140px] text-end text-[12px] text-ink-secondary">{t("orgLibrary.updateApp")}</span>}
         {action === "notReady" && <span className="text-[12px] text-ink-secondary">{t("orgLibrary.notReady")}</span>}
         {action === "noRelease" && <span className="text-[12px] text-ink-secondary">{t("orgLibrary.noRelease")}</span>}
         {entry.blob === "ready" && (

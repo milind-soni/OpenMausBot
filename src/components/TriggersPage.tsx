@@ -69,11 +69,11 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
 
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col bg-app animate-workspace-in">
-      <header className={cn("shrink-0 border-b border-hairline/35 bg-app py-3 pr-4", macInset && !windowFramed(capabilities) && view === "calendar" ? "pl-[86px]" : view === "list" ? "pl-12 md:pl-4" : "pl-4")} style={windowDragStyle}>
+      <header className={cn("shrink-0 border-b border-hairline/35 bg-app py-3 pe-4", macInset && !windowFramed(capabilities) && view === "calendar" ? "ps-[86px]" : view === "list" ? "ps-12 md:ps-4" : "ps-4")} style={windowDragStyle}>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" ref={backButtonRef} onClick={onBack} aria-label={t("automations.back")} title={t("automations.back")} className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink" style={windowNoDragStyle}><ArrowLeft size={18} /></button>
-          <h1 data-tour="automations-page" className="mr-1 text-[18px] font-semibold tracking-tight text-ink">{t("automations.title")}</h1>
-          <div className="ml-auto flex items-center gap-3" style={windowNoDragStyle}>
+          <h1 data-tour="automations-page" className="me-1 text-[18px] font-semibold tracking-tight text-ink">{t("automations.title")}</h1>
+          <div className="ms-auto flex items-center gap-3" style={windowNoDragStyle}>
             {showFilter && view === "list" && (
               <Select size="sm" aria-label={t("automations.allBots")} value={botFilter} onChange={(event) => setBotFilter(event.target.value)} className="max-w-[180px]">
                 <option value="all">{t("automations.allBots")}</option>
@@ -114,7 +114,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
                       <li key={automation.id} data-automation={automation.id} data-automation-status={status.state} className={cn("flex items-start gap-3 px-4 py-3.5", openId === automation.id && "bg-raised/60")}>
                         <StatusMark status={status} className="mt-[5px]" />
                         <div className="min-w-0 flex-1">
-                          <button type="button" onClick={() => setOpenId(automation.id)} className="block text-left text-[15px] font-medium leading-snug text-ink hover:text-accent-text">{name || sentenceOf(automation)}</button>
+                          <button type="button" onClick={() => setOpenId(automation.id)} className="block text-start text-[15px] font-medium leading-snug text-ink hover:text-accent-text">{name || sentenceOf(automation)}</button>
                           {name && <div className="mt-0.5 text-[13px] text-ink">{sentenceOf(automation)}</div>}
                           {status.state === "needs-you"
                             ? <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px] text-warning">{t("automations.needsYou", { reason: status.reason ?? "" })}<FixButton automation={automation} status={status} actions={actions} onEdit={() => setEditing({ kind: automation.kind, id: automation.id })} /></div>
@@ -133,7 +133,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
           </div>
         )}
         {open && (
-          <div className="absolute inset-y-0 right-0 z-30 flex shadow-2xl lg:static lg:shadow-none">
+          <div className="absolute inset-y-0 end-0 z-30 flex shadow-2xl lg:static lg:shadow-none">
             <AutomationPanel key={open.id} automation={open} sentence={sentenceOf(open)} onClose={() => setOpenId(null)} onDeleted={() => setOpenId(null)} onEdit={() => setEditing({ kind: open.kind, id: open.id })} />
           </div>
         )}

@@ -65,7 +65,7 @@ export function HomeLine() {
     {words && <span dir="auto">{homeLineText(line, window.ogb?.platform)}</span>}
     {aiMissing && <ConnectAiLink />}
     {informational && words && <button type="button" data-home-line-close aria-label={t("common.close")} title={t("common.close")}
-      className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 hover:bg-hairline/40 hover:text-ink" onClick={() => { setClosed(true); save(hintSeenPatch(record, HOME_LINE_NOTICE)); }}>
+      className="absolute end-2 top-1/2 -translate-y-1/2 rounded p-0.5 hover:bg-hairline/40 hover:text-ink" onClick={() => { setClosed(true); save(hintSeenPatch(record, HOME_LINE_NOTICE)); }}>
       <X size={14} aria-hidden="true" />
     </button>}
   </div>;

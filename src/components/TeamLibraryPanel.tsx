@@ -471,7 +471,7 @@ export function TeamLibraryPanel({
                 {pending ? pending.name : t("templates.title")}
               </h2>
             </div>
-            <p className={cn("mt-1 text-[13px] text-ink-secondary", pending && "ml-9")}>
+            <p className={cn("mt-1 text-[13px] text-ink-secondary", pending && "ms-9")}>
                 {pending
                   ? pending.kind === "backup"
                     ? t("templates.backupSummary", { bots: pending.members.length, conversations: pending.conversations ?? 0 })

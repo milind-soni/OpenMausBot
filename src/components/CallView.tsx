@@ -260,7 +260,7 @@ export function CallTargetButton({
         style={fill && !active ? { backgroundColor: fill, color: ink } : undefined}
         className={cn(
           "relative flex shrink-0 items-center justify-center disabled:opacity-60",
-          round ? "rounded-full transition-[color,background,filter]" : "rounded-l-3xl rounded-r-lg active:rounded-3xl transition-[color,background,border-radius]",
+          round ? "rounded-full transition-[color,background,filter]" : "rounded-s-3xl rounded-e-lg active:rounded-3xl transition-[color,background,border-radius]",
           composer && fill ? "size-7" : composer || placement === "panel" ? "size-8" : "size-9",
           active
             ? "bg-danger text-white hover:brightness-110"
@@ -283,7 +283,7 @@ export function CallTargetButton({
           ? <PhoneOff size={composer || round ? 15 : 17} />
           : composer ? fill ? <AudioLines size={15} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" /> : <AudioLines size={16} aria-hidden="true" /> : <Phone size={round ? 15 : 17} />}
         {unavailable && (
-          <span className="absolute right-1 top-1 size-1.5 rounded-full bg-warning ring-2 ring-app" aria-hidden="true" />
+          <span className="absolute end-1 top-1 size-1.5 rounded-full bg-warning ring-2 ring-app" aria-hidden="true" />
         )}
       </button>
       {canLive && !round && (
@@ -304,7 +304,7 @@ export function CallTargetButton({
           className={cn(
               "grid place-content-center",
               "bg-control w-8 hover:bg-raised-hover text-ink-secondary hover:text-ink disabled:opacity-40 transition-colors",
-              "rounded-l-lg rounded-r-3xl active:rounded-3xl transition-[color,background,border-radius]",
+              "rounded-s-lg rounded-e-3xl active:rounded-3xl transition-[color,background,border-radius]",
               composer ? "h-8" : "h-9"
             )}
         >
@@ -331,7 +331,7 @@ export function CallTargetButton({
         <div
           ref={keyRef}
           id={keyId}
-          className={cn("animate-pop-in absolute right-0 z-30 max-h-[calc(100dvh-80px)] w-[340px] max-w-[90vw] overflow-y-auto overscroll-contain rounded-xl shadow-2xl", composer ? "bottom-full mb-1.5" : "top-full mt-1.5")}
+          className={cn("animate-pop-in absolute end-0 z-30 max-h-[calc(100dvh-80px)] w-[340px] max-w-[90vw] overflow-y-auto overscroll-contain rounded-xl shadow-2xl", composer ? "bottom-full mb-1.5" : "top-full mt-1.5")}
         >
           <LiveKeyNeeded />
         </div>
@@ -342,7 +342,7 @@ export function CallTargetButton({
           id={helpId}
           role="group"
           aria-label={t("call.turns.unavailable")}
-          className={cn("absolute right-0 z-30 w-[280px]", composer ? "bottom-full mb-1.5" : "mt-1.5", "rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl", helpMotion.className)} {...helpMotion.exitProps}
+          className={cn("absolute end-0 z-30 w-[280px]", composer ? "bottom-full mb-1.5" : "mt-1.5", "rounded-xl border border-hairline bg-panel p-3 text-start shadow-2xl", helpMotion.className)} {...helpMotion.exitProps}
         >
           <div className="text-[13px] font-medium text-ink">{t("call.turns.unavailable")}</div>
           <div className="mt-1 text-[12px] leading-[1.45] text-ink-secondary">{reason}</div>
@@ -353,7 +353,7 @@ export function CallTargetButton({
                 setCallMode("live");
                 start("live");
               }}
-              className="mt-2.5 mr-2 rounded-lg border border-hairline px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-raised"
+              className="mt-2.5 me-2 rounded-lg border border-hairline px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-raised"
               title={callModeHint("live", { cloudHome })}
             >
               {t("call.live.startInstead")}
@@ -421,7 +421,7 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
         if (event.key === "Tab") onClose();
         else navigateThreadMenu(event);
       }}
-      className={cn("animate-pop-in absolute right-0 z-30 w-[280px] text-left", MENU_SHEET, placement === "composer" ? "bottom-full mb-1.5" : "top-full mt-1.5")}
+      className={cn("animate-pop-in absolute end-0 z-30 w-[280px] text-start", MENU_SHEET, placement === "composer" ? "bottom-full mb-1.5" : "top-full mt-1.5")}
     >
       {CALL_MODES.map((entry) => {
         const unavailable = entry.id === "turns" ? turnsUnavailable : null;
@@ -437,7 +437,7 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
               if (!unavailable) onChoose(entry.id);
             }}
             className={cn(
-              "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-menu-hover aria-disabled:cursor-default aria-disabled:hover:bg-transparent",
+              "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-start outline-none hover:bg-menu-hover aria-disabled:cursor-default aria-disabled:hover:bg-transparent",
               mode === entry.id && "bg-menu-active",
             )}
           >
@@ -780,7 +780,7 @@ function Call({ bot }: { bot: Bot }) {
       <button
         onClick={() => endCall(bot.id)}
         aria-label={t("call.live.hangUp")}
-        className="absolute right-5 top-5 rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
+        className="absolute end-5 top-5 rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
       >
         <X size={18} />
       </button>

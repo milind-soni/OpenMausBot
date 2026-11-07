@@ -66,10 +66,10 @@ export function FolderActions({ project, canMoveUp, canMoveDown, canMarkRead, sa
       className={cn("fixed z-50 w-[220px]", MENU_SHEET, motion.className)} {...motion.exitProps}
       onMouseDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); } else navigateThreadMenu(event); }}>
-      <button type="button" role="menuitem" onClick={() => { close(); onEdit(); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Pencil size={16} />{t("folder.settings")}</button>
-      <button type="button" role="menuitem" disabled={!canMarkRead || saving} onClick={() => onMarkRead(close)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><CheckCheck size={16} />{t("folder.markRead")}</button>
-      <button type="button" role="menuitem" disabled={!canMoveUp || saving} onClick={() => move(-1)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><ArrowUp size={16} />{t("folder.moveUp")}</button>
-      <button type="button" role="menuitem" disabled={!canMoveDown || saving} onClick={() => move(1)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><ArrowDown size={16} />{t("folder.moveDown")}</button>
+      <button type="button" role="menuitem" onClick={() => { close(); onEdit(); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Pencil size={16} />{t("folder.settings")}</button>
+      <button type="button" role="menuitem" disabled={!canMarkRead || saving} onClick={() => onMarkRead(close)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><CheckCheck size={16} />{t("folder.markRead")}</button>
+      <button type="button" role="menuitem" disabled={!canMoveUp || saving} onClick={() => move(-1)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><ArrowUp size={16} />{t("folder.moveUp")}</button>
+      <button type="button" role="menuitem" disabled={!canMoveDown || saving} onClick={() => move(1)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><ArrowDown size={16} />{t("folder.moveDown")}</button>
     </div>, document.body)}
   </>;
 }
@@ -186,7 +186,7 @@ export function NewThreadButton({ bot, className, compact = false, onCreated }: 
       dispatch({ type: "newTask", botId: bot.id, ...(currentProject ? { projectId: currentProject.id } : {}) });
       onCreated?.();
     }}
-    className={cn("flex min-w-0 items-center gap-2 rounded-lg px-2.5 text-left text-[12px] text-ink-secondary hover:bg-raised/60 hover:text-ink", compact ? "py-1 @max-4xl/chathead:h-[30px] @max-4xl/chathead:px-2" : "py-2", className)}>
+    className={cn("flex min-w-0 items-center gap-2 rounded-lg px-2.5 text-start text-[12px] text-ink-secondary hover:bg-raised/60 hover:text-ink", compact ? "py-1 @max-4xl/chathead:h-[30px] @max-4xl/chathead:px-2" : "py-2", className)}>
     <Plus aria-hidden="true" size={12} /><span className={cn("truncate", compact && "@max-4xl/chathead:hidden")}>{t("task.newShort")}</span>
   </button>;
 }

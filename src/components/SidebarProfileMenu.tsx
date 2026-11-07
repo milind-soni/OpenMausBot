@@ -653,7 +653,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             className={cn("relative flex size-9 items-center justify-center rounded-full ring-2 transition-shadow", open ? "ring-ink/15" : "ring-transparent hover:ring-ink/10")}
           >
             <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={36} fallback={nameless} fontSize={14} className="ring-1 ring-inset ring-ink/[0.04]" />
-            {dot && <span aria-hidden data-account-dot={dot} className={cn("absolute -right-0.5 -top-0.5 size-2.5 rounded-full ring-2 ring-panel", DOT_COLOR[dot])} />}
+            {dot && <span aria-hidden data-account-dot={dot} className={cn("absolute -end-0.5 -top-0.5 size-2.5 rounded-full ring-2 ring-panel", DOT_COLOR[dot])} />}
           </span>
         ) : iconOnly ? (
           <span
@@ -672,13 +672,13 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
           <span
             ref={triggerRef}
             className={cn(
-              "flex min-h-[46px] w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+              "flex min-h-[46px] w-full items-center gap-3 rounded-xl px-3 py-2 text-start transition-colors",
               open ? "bg-raised" : "hover:bg-raised/50",
             )}
           >
             <span className="relative flex shrink-0">
               <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={28} />
-              {moveDot && <span aria-hidden data-account-dot={moveDot} className={cn("absolute -right-0.5 -top-0.5 size-2 rounded-full ring-2 ring-app", DOT_COLOR[moveDot])} />}
+              {moveDot && <span aria-hidden data-account-dot={moveDot} className={cn("absolute -end-0.5 -top-0.5 size-2 rounded-full ring-2 ring-app", DOT_COLOR[moveDot])} />}
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="truncate text-[14px] font-medium leading-5 text-ink">{name}</span>
