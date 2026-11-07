@@ -1,0 +1,31 @@
+import type { RuntimeEvent } from "../../shared/runtime-events";
+import type { InspectorEntry, InspectorPage } from "../../shared/inspector";
+
+export const INSPECTOR_WINDOW_LIMIT = 400;
+
+export function boundInspectorEntries(entries: InspectorEntry[]): InspectorEntry[] {
+  const counts = { runtime: 0, native: 0 };
+  const kept: InspectorEntry[] = [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (++counts[entry.kind] <= INSPECTOR_WINDOW_LIMIT) kept.push(entry);
+  }
+  return kept.length === entries.length ? entries : kept.reverse();
+}
+
+export function appendInspectorRuntime(page: InspectorPage | null, events: RuntimeEvent[]): InspectorPage | null {
+  if (!events.length) return page;
+  const previous = page ?? { entries: [], total: { runtime: 0, native: 0 } };
+  const seen = new Set(previous.entries.flatMap((entry) => entry.kind === "runtime" ? [entry.data.eventId] : []));
+  const added: InspectorEntry[] = [];
+  for (const event of events) {
+    if (seen.has(event.eventId)) continue;
+    seen.add(event.eventId);
+    added.push({ kind: "runtime", at: event.createdAt, data: event });
+  }
+  if (!added.length) return page;
+  return {
+    entries: boundInspectorEntries([...previous.entries, ...added]),
+    total: { ...previous.total, runtime: previous.total.runtime + added.length },
+  };
+}
