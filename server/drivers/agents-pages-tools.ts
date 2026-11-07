@@ -25,6 +25,7 @@ export const PAGE_TOOL_DEFINITIONS = [
         path: { type: "string", description: "The file or folder, in your working folder." },
         title: { type: "string", maxLength: 200, description: "A short name for the page." },
         page_id: PAGE_ID,
+        live: { type: "boolean", description: "True republishes it when its folder changes; open copies reload." },
       },
       required: ["path", "title"],
     },

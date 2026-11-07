@@ -2,6 +2,7 @@
 // where the loopback token names the bot. Unrecognized argument shapes are denied: "this bot may call exactly these tools"
 // must hold even against a model that garbles the protocol.
 import { CONNECTOR_TOOL_NAME_PATTERN, type ConnectorToolGrant } from "../shared/wire.ts";
+import { EMAIL_SLUG } from "../shared/email.ts";
 
 /** The only Composio meta-tool whose arguments name target tools. */
 export const COMPOSIO_MULTI_EXECUTE_TOOL = "COMPOSIO_MULTI_EXECUTE_TOOL";
@@ -151,4 +152,10 @@ export function connectorScopeRefusalText(call: ConnectorCall, reason: "app" | "
   return reason === "app"
     ? `OpenMausBot did not run this: ${bot} has not been given access to ${app}. Ask the user to allow it under the bot's Access settings, and do not retry.`
     : `OpenMausBot did not run this: ${app} is read-only for ${bot}, and ${tool} would write to it. Ask the user before trying again.`;
+}
+
+/** Connected-app services a connectorTools grant names. The built-in Email app is never in the connected-apps inventory or
+ * catalog; its own tools check its grant when called. */
+export function connectedAppGrantSlugs(grants: Record<string, ConnectorToolGrant>): string[] {
+  return Object.keys(grants).filter((slug) => slug !== EMAIL_SLUG);
 }

@@ -27,7 +27,7 @@ import {
   serializeConnectorAllowedTools,
   serializeConnectorServiceSlugs,
 } from "./connector-advertisement.ts";
-import { serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
+import { connectedAppGrantSlugs, serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
 import { parseMcpResponse, withToolsListFallback } from "./connector-tools-list.ts";
 import { brokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
 export { applyManagedBrokerMessage, brokerAccess, setManagedBrokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
@@ -525,15 +525,15 @@ export async function validateConnectorGrants(
       return `connectorTools.${slug}.tools names tools that belong to another service: ${misplaced.join(", ")}`;
     }
   }
-  if (!connected) return null;
-  const unconnected = Object.keys(grants).filter((slug) => !connected[slug]?.connected);
+  if (!connected || !connectedAppGrantSlugs(grants).length) return null;
+  const unconnected = connectedAppGrantSlugs(grants).filter((slug) => !connected[slug]?.connected);
   if (unconnected.length) {
     return `connectorTools names services that are not connected: ${unconnected.join(", ")}`;
   }
   const catalog = await listToolkits(cfg);
   if (catalog.source !== "api" || !catalog.pagination?.complete) return null;
   const known = new Set(catalog.cards.map((card) => card.slug.toLowerCase()));
-  const unknown = Object.keys(grants).filter((slug) => !known.has(slug));
+  const unknown = connectedAppGrantSlugs(grants).filter((slug) => !known.has(slug));
   if (unknown.length) {
     return `connectorTools names services missing from the connected-apps catalog: ${unknown.join(", ")}`;
   }

@@ -111,6 +111,8 @@ export interface AppPayload {
    * (`too-large`, or an MCP server that was signed out or unreachable). The
    * row is still written, with its text. */
   blocked?: AppBlockedReason;
+  /** A page from a folder that reloads in place when a file in its folder changes (show_html `live`). */
+  live?: true;
 }
 
 /** A user row an app's ui/message sent. */
@@ -193,6 +195,8 @@ export interface ShowHtmlInput {
   fallbackText?: string;
   /** Show the page without the card frame (still in its sandboxed frame). */
   frameless?: boolean;
+  /** Reload the page in place whenever a file in its folder changes; only with `path`. */
+  live?: boolean;
 }
 
 export interface UpdateHtmlInput {
@@ -203,6 +207,8 @@ export interface UpdateHtmlInput {
   title?: string;
   /** Change whether the page has the card frame; kept as it was when omitted. */
   frameless?: boolean;
+  /** Turn reloading on folder changes on (only with `path`) or off; kept as it was when omitted. */
+  live?: boolean;
 }
 
 export type AppInputResult<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -285,6 +291,13 @@ function checkFrameless(value: unknown): AppInputResult<boolean | undefined> {
   return { ok: true, value };
 }
 
+function checkLive(value: unknown, path: string | undefined): AppInputResult<boolean | undefined> {
+  if (value === undefined || value === null) return { ok: true, value: undefined };
+  if (typeof value !== "boolean") return { ok: false, error: "live: must be true or false." };
+  if (value && path === undefined) return { ok: false, error: "live: only a page from a folder (path) can be live." };
+  return { ok: true, value };
+}
+
 export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput> {
   if (!isRecord(input)) return { ok: false, error: "show_html needs {html, jsx or path, title, height?, fallback_text?}." };
   const page = checkPage(input);
@@ -295,6 +308,9 @@ export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput
   const frameless = checkFrameless(input.frameless);
   if (!frameless.ok) return frameless;
   if (frameless.value) out.frameless = true;
+  const live = checkLive(input.live, out.path);
+  if (!live.ok) return live;
+  if (live.value) out.live = true;
   if (input.height !== undefined && input.height !== null) {
     if (typeof input.height !== "number" || !Number.isFinite(input.height)) return { ok: false, error: "height: must be a number of pixels, 80 to 720." };
     out.height = Math.round(Math.min(APP_LIMITS.heightMax, Math.max(APP_LIMITS.heightMin, input.height)));
@@ -319,6 +335,9 @@ export function parseUpdateHtmlInput(input: unknown): AppInputResult<UpdateHtmlI
   const frameless = checkFrameless(input.frameless);
   if (!frameless.ok) return frameless;
   if (frameless.value !== undefined) out.frameless = frameless.value;
+  const live = checkLive(input.live, out.path);
+  if (!live.ok) return live;
+  if (live.value !== undefined) out.live = live.value;
   if (input.title !== undefined && input.title !== null) {
     const title = checkTitle(input.title);
     if (!title.ok) return title;
