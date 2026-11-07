@@ -1001,6 +1001,8 @@
   "chat.stop": "Stopp",
   "chat.stopTurn": "Diesen Zug stoppen",
   "chat.computer": "Bildschirm des Bots",
+  "chat.watchScreen": "Zusehen",
+  "chat.watchScreenHint": "Zusehen, was der Bot auf seinem Bildschirm macht",
   "chat.inspector": "Inspektor",
   "chat.inspectorHint": "Inspektor — Laufzeitereignisse und Rohprotokoll dieses Verlaufs",
   "chat.conversationWith": "Unterhaltung mit {name}",

@@ -2135,6 +2135,8 @@
   "chat.stop": "Zatrzymaj",
   "chat.stopTurn": "Zatrzymaj tę turę",
   "chat.computer": "Ekran bota",
+  "chat.watchScreen": "Oglądaj",
+  "chat.watchScreenHint": "Zobacz, co bot robi na swoim ekranie",
   "chat.advancedOnly": "W trybie zaawansowanym",
   "chat.inspector": "Inspektor",
   "chat.inspectorHint": "Inspektor — zdarzenia czasu działania i surowy protokół tego wątku",

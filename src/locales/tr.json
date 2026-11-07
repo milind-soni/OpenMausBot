@@ -1721,6 +1721,8 @@
   "chat.stop": "Durdur",
   "chat.stopTurn": "Bu turu durdur",
   "chat.computer": "Botun ekranı",
+  "chat.watchScreen": "İzle",
+  "chat.watchScreenHint": "Botun ekranında ne yaptığını izle",
   "chat.advancedOnly": "Gelişmiş modda",
   "chat.inspector": "Denetçi",
   "chat.inspectorHint": "Denetçi — bu konu için çalışma zamanı olayları ve ham protokol",

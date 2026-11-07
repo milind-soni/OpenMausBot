@@ -276,6 +276,21 @@ describe("header name", () => {
     expect(button(pinned)).toContain('data-testid="computer-button-live"');
   });
 
+  it("offers a Watch button only while a running tool uses the bot's screen", () => {
+    const working = (tool: string, busy = true, computer: Bot["computer"] | "auto" = "cloud") => renderToStaticMarkup(createElement(ChatView, {
+      bot: { ...bot, computer: computer === "auto" ? undefined : computer, busy, turnStartedAt: 1, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy, turnStartedAt: 1 })), messages: [
+        { id: "ask", role: "user", kind: "text", at: 1, text: "Check the site" },
+        { id: "tool", role: "bot", kind: "activity", at: 2, tool: { name: tool } },
+      ] } as Bot,
+    }));
+    const watch = (markup: string) => markup.match(/<button[^>]*data-testid="watch-screen"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
+    expect(watch(working("mcp__computer__click"))).toContain(">Watch<");
+    expect(watch(working("mcp__browser__browser_snapshot", true, "auto"))).toContain(">Watch<");
+    expect(watch(working("mcp__computer__click", false))).toBe("");
+    expect(watch(working("Bash"))).toBe("");
+    expect(watch(working("screenshot", true, "auto"))).toBe("");
+  });
+
   it("centres the bot in the header's middle column, with the controls in the last", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     const row = markup.match(/data-chathead-row="true" class="([^"]*)"/)?.[1] ?? "";

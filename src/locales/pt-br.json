@@ -2459,6 +2459,8 @@
   "chat.stop": "Parar",
   "chat.stopTurn": "Parar esta sessão",
   "chat.computer": "Tela do bot",
+  "chat.watchScreen": "Assistir",
+  "chat.watchScreenHint": "Veja o que o bot está fazendo na tela",
   "chat.advancedOnly": "No modo avançado",
   "chat.inspector": "Inspetor",
   "chat.inspectorHint": "Inspetor: eventos de execução e protocolo bruto desta conversa",

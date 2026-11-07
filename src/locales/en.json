@@ -2588,6 +2588,8 @@
   "chat.stop": "Stop",
   "chat.stopTurn": "Stop this turn",
   "chat.computer": "Bot's screen",
+  "chat.watchScreen": "Watch",
+  "chat.watchScreenHint": "Watch what the bot is doing on its screen",
   "chat.advancedOnly": "In Advanced mode",
   "chat.inspector": "Inspector",
   "chat.inspectorHint": "Inspector: runtime events and raw protocol for this thread",

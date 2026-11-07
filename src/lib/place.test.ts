@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { effectivePlace, isComputerPlace, PLACES, placeLabelKey, placeOffered, toolPlace } from "./place";
+import { effectivePlace, isComputerPlace, PLACES, placeLabelKey, placeOffered, screenToolLive, toolPlace } from "./place";
 import { toolSurfaceKind } from "../../shared/tool-surface";
 
 describe("where a conversation works", () => {
@@ -39,6 +39,22 @@ describe("where a conversation works", () => {
     for (const name of ["Bash", "Read", "list_bots", "recall", "propose_routine", "mcp__agents__ask_bot"]) {
       expect(toolPlace(name, "cloud"), name).toBeNull();
     }
+  });
+
+  it("knows when a running tool call is using the bot's screen", () => {
+    const messages = [
+      { id: "old-click", tool: { name: "mcp__computer__click" } },
+      { id: "text" },
+      { id: "bash", tool: { name: "Bash" } },
+      { id: "snap", tool: { name: "mcp__browser__browser_snapshot" } },
+      { id: "shot", tool: { name: "screenshot" } },
+    ];
+    expect(screenToolLive(messages, new Set(), "cloud")).toBe(false);
+    expect(screenToolLive(messages, new Set(["bash"]), "cloud")).toBe(false);
+    expect(screenToolLive(messages, new Set(["bash", "snap"]), "auto")).toBe(true);
+    expect(screenToolLive(messages, new Set(["shot"]), "cloud")).toBe(true);
+    expect(screenToolLive(messages, new Set(["shot"]), "auto")).toBe(false);
+    expect(screenToolLive(messages, new Set(["text"]), "cloud")).toBe(false);
   });
 
   it("classifies tool names without guessing computer for unrelated tools", () => {
