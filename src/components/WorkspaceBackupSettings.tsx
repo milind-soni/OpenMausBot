@@ -24,8 +24,6 @@ export function WorkspaceBackupRestartNotice({ onRetry, serverRestarts = false }
     if (!serverRestarts) return;
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
-    // One check at a time, so requests do not pile up while the server is down; a request that hangs
-    // across the restart times out, so polling carries on.
     // A restored workspace may not know this browser's session: a reload shows sign-in.
     const check = () => api("/api/workspace-backup/status", { timeoutMs: 10_000 }).then((status: BackupStatus) => status.pendingRestore === false ? "installed" : "wait",
       (cause: unknown) => cause instanceof Error && "status" in cause && cause.status === 401 ? "signedOut" : "wait").then((state) => {
