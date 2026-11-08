@@ -1133,6 +1133,11 @@
 [data-chat-bubble="simple"] .chat-md > * + * {
   margin-top: 10px;
 }
+/* No lone last word in a bubble or a reply's paragraphs. */
+[data-chat-bubble="simple"],
+.chat-md :is(p, li, blockquote) {
+  text-wrap: pretty;
+}
 [data-chat-bubble="simple"] .chat-md > * + .md-heading {
   margin-top: 18px;
 }
@@ -1584,7 +1589,7 @@ body {
     padding: 48px 16px;
   }
   .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup {
-    width: min(900px, 100%);
+    width: min(860px, 100%);
     height: min(700px, 100%);
     border-radius: 12px;
   }
