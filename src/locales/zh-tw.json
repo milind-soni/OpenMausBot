@@ -3090,6 +3090,7 @@
   "attach.unavailable": "無法使用",
   "task.chip": "對話",
   "task.newShort": "新增對話",
+  "task.untitledChat": "未命名對話",
   "task.sharedChat": "共享聊天",
   "task.untitledConversation": "新對話",
   "task.matching": "{count} 個符合的對話",

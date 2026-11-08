@@ -25,6 +25,8 @@ import { SettingRow, SettingsDisclosureRow, SettingsGroup, SettingsRows } from "
 import { UsageSection } from "./UsageSection";
 import { PlanUsageSummary } from "./PlanUsage";
 import { SkinPicker } from "./SkinPicker";
+import { useSkinChoice } from "./ThemeRow";
+import { resolveSkin, SKINS } from "@/lib/skins";
 import { PlaceLookRows } from "./PlaceLookCard";
 import { ChromeRailRow } from "./ChromeRailToggle";
 import { WindowFrameRow } from "./WindowFrameRow";
@@ -64,16 +66,20 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
         <SettingsGroup label={t("settings.section.appearance")} block="appearance">
           <SettingsRows>
             <ThemeRow simple />
+            <LooksRow onLooks={onLooks} />
             <PlaceLookRows />
             <ChromeRailRow />
             <WindowFrameRow />
             <ColorUserBubblesRow simple />
+          </SettingsRows>
+        </SettingsGroup>
+      )}
+      {has("appearance") && (
+        <SettingsGroup label={t("settings.simple.group.typing")}>
+          <SettingsRows>
             <LanguageRow simple />
             <SendKeyRow simple />
             <FollowUpRow simple />
-            <SettingRow title={t("settings.simple.looks.title")}>
-              <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.looks.change")}</button>
-            </SettingRow>
           </SettingsRows>
         </SettingsGroup>
       )}
@@ -100,6 +106,18 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
         <SettingsRows><AdvancedModeRow simple /></SettingsRows>
       </div>
     </>
+  );
+}
+
+function LooksRow({ onLooks }: { onLooks: () => void }) {
+  const choice = useSkinChoice();
+  const current = SKINS.find((skin) => skin.id === resolveSkin(choice))?.name;
+  // A fixed theme is named under the label; Follow system says which it switches between.
+  const hint = choice === "system" ? t("settings.simple.themes.followHint") : current;
+  return (
+    <SettingRow title={t("settings.theme.title")} subtitle={hint}>
+      <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.themes.browse")}</button>
+    </SettingRow>
   );
 }
 

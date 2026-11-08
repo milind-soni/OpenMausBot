@@ -602,11 +602,11 @@ describe("the avatar editor", () => {
 
 
 describe("the Details tab", () => {
-  it("holds the model, the conversations, routines and this conversation's rows, in that order, with no switch or Thinking row", () => {
+  it("holds the model, the conversations, this conversation's rows and routines, in that order, with no switch or Thinking row", () => {
     const rendered = botTab(makeBot());
     expect(ofType(rendered, ModelPicker)!.props).toMatchObject({ bot: expect.objectContaining({ id: "scout" }), threadId: "thread-scout", contained: true });
     expect(ofType(rendered, BotConversations)!.props.bot).toMatchObject({ id: "scout" });
-    const order = ['data-panel-row="model"', 'data-panel-card="conversations"', 'data-panel-empty="routines"', 'data-panel-item="find"', 'data-panel-item="activity"']
+    const order = ['data-panel-row="model"', 'data-panel-card="conversations"', 'data-panel-item="find"', 'data-panel-item="activity"', 'data-panel-empty="routines"']
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -618,13 +618,14 @@ describe("the Details tab", () => {
     expect(switches(rendered.html)).toBe(0);
   });
 
-  it("says what routines are while the bot has none, with Add a routine, and lists them once it has some", () => {
+  it("offers Add a routine, which says what routines are, and Automations while the bot has none, and lists them once it has some", () => {
     const empty = botTab(makeBot());
     expect(empty.html).toContain('data-panel-empty="routines"');
-    expect(empty.html).toContain(">Routines are recurring tasks this bot runs on a schedule. Ask it in chat to set one up.<");
+    expect(empty.html).toContain('title="Jobs this bot runs on a schedule, like a news roundup every morning."');
+    expect(empty.html).toMatch(/data-panel-automations=""[^>]*>Automations<svg/);
     expect(empty.html.match(/data-panel-page="routines"/g)).toHaveLength(1);
     const add = find(empty, "data-panel-page", "routines");
-    expect(add.props.children).toBe("Add a routine");
+    expect(empty.html).toMatch(/data-panel-page="routines"[^>]*>.*<span class="truncate">Add a routine<\/span><\/button>/);
     click(add);
     expect(onOpen).toHaveBeenLastCalledWith("routines");
     fixture.derived.botRoutines = [routine()];

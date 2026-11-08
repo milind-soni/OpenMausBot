@@ -2923,6 +2923,7 @@
   "attach.unavailable": "不可用",
   "task.chip": "对话",
   "task.newShort": "新建对话",
+  "task.untitledChat": "未命名对话",
   "task.sharedChat": "共享聊天",
   "task.untitledConversation": "新对话",
   "task.matching": "{count} 个匹配的对话",

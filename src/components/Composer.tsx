@@ -713,7 +713,7 @@ export function Composer({
         <MentionMenu listRef={mentionListRef} motion={mentionMotion} choices={candidates} highlight={highlight}
           everyoneCount={mentionEveryoneCount} onPick={pickMention} onHighlight={setHighlight} />
         {approval && (
-          <div className={cn("mb-2 overflow-hidden rounded-[24px]", ELEVATED_CARD)}>
+          <div className={cn("mb-2 overflow-hidden rounded-[18px]", ELEVATED_CARD)}>
             <PendingApprovalPanel
               key={approval.requestId}
               pending={approval}

@@ -65,7 +65,7 @@ export function AskCard({
       data-tour={tour}
       data-ask-card="pending"
       onKeyDown={onKeyDown}
-      className={cn("w-full max-w-[560px] rounded-[24px] px-4 pb-3.5 pt-3 text-start", stays ? `sticky top-[60px] bottom-[72px] z-10 ${ELEVATED_FLOAT}` : ELEVATED_CARD)}
+      className={cn("w-full max-w-[560px] rounded-[18px] px-4 pb-3.5 pt-3 text-start", stays ? `sticky top-[60px] bottom-[72px] z-10 ${ELEVATED_FLOAT}` : ELEVATED_CARD)}
     >
       {header && <div className="mb-1.5 pe-6">{header}</div>}
       <div className="flex min-w-0 items-start gap-2">
@@ -294,7 +294,7 @@ export const ASK_SECONDARY_BUTTON = `${ASK_BUTTON_SHAPE} ${ASK_LOOK} bg-ink/[0.0
 /** An extra option that should not compete with the answer: Always allow, Details. */
 export const ASK_QUIET_ANSWER = `${ASK_BUTTON_SHAPE} ${ASK_LOOK} text-ink-secondary enabled:hover:bg-ink/[0.06] enabled:hover:text-ink enabled:active:bg-ink/[0.1]`;
 
-const ASK_CHOICE = `flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3.5 py-2 text-start text-[14px] leading-5 text-ink ring-[0.5px] ring-ink/[0.14] transition-colors ${ASK_LOOK} disabled:cursor-default pointer-coarse:min-h-11`;
+const ASK_CHOICE = `flex min-h-10 w-full items-center gap-2.5 rounded-[12px] px-3.5 py-2 text-start text-[14px] leading-5 text-ink ring-[0.5px] ring-ink/[0.14] transition-colors ${ASK_LOOK} disabled:cursor-default pointer-coarse:min-h-11`;
 
 export const ASK_CHIP = `${ASK_CONTROL} max-w-full border`;
 export const ASK_CHIP_IDLE = "border-transparent bg-ink/[0.07] text-ink hover:bg-ink/[0.12]";
