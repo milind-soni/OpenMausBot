@@ -15,6 +15,7 @@ const PHONE_BUSY_TEXT = "Another thread is using the phone. This call was not pe
 const PACKAGE = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/;
 const COMPONENT = /^([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)\/\S+$/;
 const SAFE_TEXT = /^[A-Za-z0-9 _.,@-]+$/;
+const ADB_KEYBOARD = "com.android.adbkeyboard/.AdbIME";
 const KEYCODES: Record<string, string> = {
   back: "KEYCODE_BACK",
   delete: "KEYCODE_DEL",
@@ -26,9 +27,11 @@ const KEYCODES: Record<string, string> = {
   recent: "KEYCODE_APP_SWITCH",
   return: "KEYCODE_ENTER",
   right: "KEYCODE_DPAD_RIGHT",
+  sleep: "KEYCODE_SLEEP",
   space: "KEYCODE_SPACE",
   tab: "KEYCODE_TAB",
   up: "KEYCODE_DPAD_UP",
+  wakeup: "KEYCODE_WAKEUP",
 };
 const KNOWN_PACKAGES: Record<string, string> = {
   skyscanner: "net.skyscanner.android.main",
@@ -138,6 +141,23 @@ async function onDevice(serial: string, args: string[], binary = false) {
   return runAdb(["-s", serial, ...args], { binary });
 }
 
+type Shell = (...command: string[]) => Promise<string>;
+const deviceShell = (serial: string): Shell => async (...command) => (await onDevice(serial, ["shell", ...command])).toString("utf8");
+
+export async function typePhoneText(shell: Shell, text: string): Promise<string> {
+  if (!text || text.length > 256) throw new Error("Android text must be 1 to 256 characters");
+  if (SAFE_TEXT.test(text)) {
+    await shell("input", "text", text.replaceAll(" ", "%s"));
+  } else {
+    if ((await shell("settings", "get", "secure", "default_input_method")).trim() !== ADB_KEYBOARD) {
+      throw new Error("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard. Ask the person to set it up, or type only those characters.");
+    }
+    // ADBKeyBoard reads msg as Base64 UTF-8; Base64 also keeps the text out of the device shell's syntax.
+    await shell("am", "broadcast", "-a", "ADB_INPUT_B64", "--es", "msg", Buffer.from(text, "utf8").toString("base64"));
+  }
+  return "Typed text into the focused Android field";
+}
+
 function normalize(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -167,6 +187,14 @@ export function findPackages(name: string, packages: string[]) {
     if (found.length) return found;
   }
   return [];
+}
+
+export function launchTarget(name: string, packages: string[]) {
+  const matches = findPackages(name, packages);
+  if (matches.length === 1) return matches[0];
+  throw new Error(matches.length
+    ? `App name is ambiguous: ${matches.join(", ")}`
+    : `No installed launchable app matches ${JSON.stringify(name)}. open_app knows English names and package names; call list_apps without a query and pass the package name.`);
 }
 
 async function launchablePackages(serial: string) {
@@ -229,7 +257,7 @@ function nodeLines(nodes: UiNode[]) {
   }).join("\n") || "No accessible Android UI text is visible.";
 }
 
-const TOOLS = [
+export const TOOLS = [
   { name: "status", description: "Check physical USB Android devices and USB-debugging authorization before any Android phone task.", inputSchema: { type: "object", properties: {} } },
   { name: "read_screen", description: "Read visible text, accessibility labels, resource ids, and pixel bounds from the connected Android screen. Use after every action to verify the result.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
   { name: "screenshot", description: "Capture the connected Android screen when accessibility text is insufficient. Returns a PNG image.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
@@ -238,8 +266,8 @@ const TOOLS = [
   { name: "tap_text", description: "Tap visible Android text or an accessibility label, then use read_screen to verify.", inputSchema: { type: "object", properties: { text: { type: "string" }, exact: { type: "boolean" }, index: { type: "integer", minimum: 0 }, serial: { type: "string" } }, required: ["text"] } },
   { name: "tap", description: "Tap Android screen pixel coordinates obtained from read_screen or screenshot.", inputSchema: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, serial: { type: "string" } }, required: ["x", "y"] } },
   { name: "swipe", description: "Swipe the Android screen in a direction, then use read_screen to verify.", inputSchema: { type: "object", properties: { direction: { type: "string", enum: ["up", "down", "left", "right"] }, serial: { type: "string" } }, required: ["direction"] } },
-  { name: "type_text", description: "Type basic ASCII text into the focused Android field. Never enter passwords or payment details. A one-time code only for a sign-in the person asked for, into the app it was sent for.", inputSchema: { type: "object", properties: { text: { type: "string", maxLength: 256 }, serial: { type: "string" } }, required: ["text"] } },
-  { name: "press", description: "Press an Android navigation or keyboard key.", inputSchema: { type: "object", properties: { key: { type: "string", enum: Object.keys(KEYCODES) }, serial: { type: "string" } }, required: ["key"] } },
+  { name: "type_text", description: "Type text into the focused Android field. Letters, digits, spaces and _.,@- always work; other text, such as Chinese, emoji or +, needs the ADBKeyBoard keyboard selected on the phone. Never enter passwords or payment details. A one-time code only for a sign-in the person asked for, into the app it was sent for.", inputSchema: { type: "object", properties: { text: { type: "string", maxLength: 256 }, serial: { type: "string" } }, required: ["text"] } },
+  { name: "press", description: "Press an Android navigation or keyboard key. wakeup turns the screen on and sleep turns it off.", inputSchema: { type: "object", properties: { key: { type: "string", enum: Object.keys(KEYCODES) }, serial: { type: "string" } }, required: ["key"] } },
 ] as const;
 
 type ToolResult = { content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>; isError?: boolean };
@@ -298,10 +326,9 @@ async function callTool(name: string, args: Json): Promise<ToolResult> {
   if (name === "open_app") {
     const appName = String(args.name ?? "").trim();
     if (!appName) throw new Error("name is required");
-    const matches = findPackages(appName, await launchablePackages(serial));
-    if (matches.length !== 1) throw new Error(matches.length ? `App name is ambiguous: ${matches.join(", ")}` : `No installed launchable app matches ${JSON.stringify(appName)}`);
-    await onDevice(serial, ["shell", "monkey", "-p", matches[0], "-c", "android.intent.category.LAUNCHER", "1"]);
-    return textResult(`Opened ${appName} (${matches[0]})`);
+    const target = launchTarget(appName, await launchablePackages(serial));
+    await onDevice(serial, ["shell", "monkey", "-p", target, "-c", "android.intent.category.LAUNCHER", "1"]);
+    return textResult(`Opened ${appName} (${target})`);
   }
   if (name === "tap_text") {
     const query = String(args.text ?? "").trim().toLowerCase();
@@ -341,12 +368,7 @@ async function callTool(name: string, args: Json): Promise<ToolResult> {
     await onDevice(serial, ["shell", "input", "swipe", ...point.map((value) => String(Math.round(value))), "260"]);
     return textResult(`Swiped ${direction}`);
   }
-  if (name === "type_text") {
-    const value = String(args.text ?? "");
-    if (!value || value.length > 256 || !SAFE_TEXT.test(value)) throw new Error("Android text supports only basic ASCII text up to 256 characters");
-    await onDevice(serial, ["shell", "input", "text", value.replaceAll(" ", "%s")]);
-    return textResult("Typed text into the focused Android field");
-  }
+  if (name === "type_text") return textResult(await typePhoneText(deviceShell(serial), String(args.text ?? "")));
   if (name === "press") {
     const key = String(args.key ?? "").toLowerCase();
     if (!KEYCODES[key]) throw new Error("Unsupported Android key");
