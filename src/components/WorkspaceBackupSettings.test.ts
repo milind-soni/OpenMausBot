@@ -21,10 +21,10 @@ function nodes(value: ReactNode): Node[] {
   const node = value as Node;
   return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
 }
-function render(recovery: boolean | "restart" = false) {
+function render(recovery: boolean | "restart" | "cloud" = false) {
   fixture.index = 0; fixture.effects = [];
   let tree: ReactNode;
-  function Capture() { tree = recovery === "restart" ? WorkspaceBackupRestartNotice() : recovery ? WorkspaceBackupRecovery({ children: createElement("p", null, "Normal app") }) : WorkspaceBackupSettings(); return tree; }
+  function Capture() { tree = recovery === "restart" ? WorkspaceBackupRestartNotice() : recovery === "cloud" ? WorkspaceBackupRestartNotice({ serverRestarts: true }) : recovery ? WorkspaceBackupRecovery({ children: createElement("p", null, "Normal app") }) : WorkspaceBackupSettings(); return tree; }
   const html = renderToStaticMarkup(createElement(Capture));
   return { html, nodes: nodes(tree) };
 }
@@ -144,6 +144,47 @@ describe("Settings full backups", () => {
     render(true); fixture.effects[0](); await flush();
     expect(storage.get("omb-drafts")).toBe("restored"); expect(storage.get("auth-token")).toBe("keep");
     expect(storage.has("omb-pending-workspace-restore")).toBe(false); expect(window.location.reload).toHaveBeenCalledOnce();
+  });
+
+  it("on a server that restarts itself, waits instead of asking to quit, then carries on once the restore is installed", async () => {
+    storage.set("omb-pending-workspace-restore", "stage-id");
+    fixture.api.mockResolvedValueOnce({ busy: true, pendingRestore: true, restarts: true });
+    render(true); fixture.effects[0](); await flush();
+    expect(render(true).html).toContain("is restarting to finish it");
+    expect(render(true).html).not.toContain("Fully quit");
+    vi.useFakeTimers();
+    try {
+      fixture.values = [];
+      const view = render("cloud");
+      expect(view.html).toContain("is restarting to finish it");
+      expect(view.nodes.some(node => node.type === "button")).toBe(false);
+      const stop = fixture.effects[0]() as () => void;
+      fixture.api.mockResolvedValueOnce({ busy: true, pendingRestore: true });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(window.location.reload).not.toHaveBeenCalled();
+      fixture.api.mockResolvedValueOnce({});
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(window.location.reload).not.toHaveBeenCalled();
+      fixture.api.mockResolvedValueOnce({ busy: false, pendingRestore: false, lastRestoreId: "stage-id" });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(window.location.reload).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(window.location.reload).toHaveBeenCalledOnce();
+      stop();
+    } finally { vi.useRealTimers(); }
+    expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
+  });
+
+  it("on a server that restarts itself, reloads to sign-in when the restored workspace does not know this browser", async () => {
+    vi.useFakeTimers();
+    try {
+      render("cloud");
+      const stop = fixture.effects[0]() as () => void;
+      fixture.api.mockRejectedValueOnce(Object.assign(new Error("Sign in"), { status: 401 }));
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(window.location.reload).toHaveBeenCalledOnce();
+      stop();
+    } finally { vi.useRealTimers(); }
   });
 
   it("offers a real desktop restart without clearing the restore marker or drafts, once only", async () => {
