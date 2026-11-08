@@ -121,7 +121,7 @@ it("a move carries the automations, files, memory, fields and skills, and its ch
   mkdirSync(join(dataDir("desktop"), "skill-state"), { recursive: true });
   writeFileSync(join(dataDir("desktop"), "skill-state", "imported-skills.json"), JSON.stringify({ "invoice-check": { description: "Check an invoice.", source: "codex",
     root: "~/.codex/skills", origin: "~/.codex/skills/invoice-check", label: "Codex/invoice-check", sha256: sha256(importedText),
-    filesSha256: sha256(`f - SKILL.md ${sha256(importedText)}\nd references\nf - references/rules.md ${sha256(rules)}\n`),
+    filesSha256: sha256(`f - SKILL.md ${sha256(importedText)}\nd references\nf - references/rules.md ${sha256(rules)}\n`), executableFiles: [],
     importedAt: new Date().toISOString(), warnings: [] } }));
   mkdirSync(join(fx.root, "desktop", ".claude", "skills", "tidy-notes"), { recursive: true });
   writeFileSync(join(fx.root, "desktop", ".claude", "skills", "tidy-notes", "SKILL.md"), skillMd("tidy-notes", "Tidy the notes."));

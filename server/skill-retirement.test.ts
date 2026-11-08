@@ -16,7 +16,7 @@ function fixture() {
   const skill = join(root, "runbook"); mkdirSync(join(skill, "references"), { recursive: true });
   writeFileSync(join(skill, "SKILL.md"), instructions);
   writeFileSync(join(skill, "references", "guide.md"), "Guide.\n");
-  const retired = { identity: skillRootIdentity(skill)!, hash: partHash(skillReleaseValue({ instructions, files: [{ path: "references/guide.md", content: "Guide.\n" }] })) };
+  const retired = { identity: skillRootIdentity(skill)!, hash: partHash(skillReleaseValue({ instructions, files: [{ path: "references/guide.md", content: "Guide.\n" }] })), executableFiles: [] };
   return { root, skill, retired, state };
 }
 afterEach(() => { for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true }); });
@@ -44,6 +44,18 @@ it("retires only the unchanged directory belonging to the previous skill", () =>
     expect(lstatSync(quarantine).mode & 0o077).toBe(0);
     expect(lstatSync(join(quarantine, `${held}.json`)).mode & 0o077).toBe(0);
   }
+});
+
+it("keeps a Windows companion when its executable intent is unknown", () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  try {
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    const { skill, retired, state } = fixture();
+    const { executableFiles: _executableFiles, ...unknown } = retired;
+    expect(retireUnchangedSkillRoot(skill, unknown, state)).toHaveProperty("error");
+    expect(readFileSync(join(skill, "references", "guide.md"), "utf8")).toBe("Guide.\n");
+    expect(retireUnchangedSkillRoot(skill, retired, state)).toEqual({ retired: true });
+  } finally { Object.defineProperty(process, "platform", platform); }
 });
 
 it.skipIf(process.platform === "win32")("retains writes through an open descriptor after verification and across a process restart", () => {

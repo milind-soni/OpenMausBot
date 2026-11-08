@@ -195,6 +195,13 @@ describe("skill extras", () => {
     expect(readImportedSkills()["invoice-check"]).toMatchObject({ source: "claudeCode", label: "Claude Code/invoice-check" });
     const kept = moveItems(deps("/data"), new Set()).find((item) => item.key === listed!.key);
     expect(kept, "the copy kept here now hashes as the person's own folder did").toEqual(listed);
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    try {
+      Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+      expect(kindRecord(deps("/data"), "imported-skill", input.name)!.record).toMatchObject({
+        executableIntentVersion: 1, files: [{ path: "references/rules.md", content: "Add up.\n", executable: false }],
+      });
+    } finally { Object.defineProperty(process, "platform", platform); }
     expect((await take(deps("/data"), listed!.key, { ...input, files: [{ path: "../escape.md", content: "x", executable: false }] })).status).toBe(400);
     expect((await take(deps("/data"), listed!.key, { ...input, files: [{ path: "guide\nfile.md", content: "x", executable: false }] })).status).toBe(400);
     const { executableIntentVersion: _version, ...oldSender } = input;

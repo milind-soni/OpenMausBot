@@ -33616,7 +33616,22 @@
       "activity.tool.team.listModels": "908aa27de87093f1252a4a7b973084e08d01051c0bdb74a3caf5703495a17514",
       "native.lendTray.pauseUnsaved": "e20d6c3cb8e054f9615246aad160e5199c289c4ce409916cbaa57c4f7ff7fa53",
       "native.lendTray.pauseUnsavedTitle": "1fdb457f76f46842ac9f7896a80dc497ed5407db1f87f8d181f780ce2c25b6a9",
-      "native.lendTray.retryPause": "f8adceb69fbef0d722bde69448eb0c0573348bf1389f2d32bfe157db83c61a35"
+      "native.lendTray.retryPause": "f8adceb69fbef0d722bde69448eb0c0573348bf1389f2d32bfe157db83c61a35",
+      "teamImport.sharedTeamFolderSafety": "a2a772b8d5e97ce7fcdce797ff5f93a3f16671f049b338a04dbd342321c6d2bb",
+      "teamShare.folderSafety": "e95cf9bc1a196ebeaedc7c17658ef22ce6d07fdfeac255845be98d337eff37ad",
+      "teamShare.skillFiles": "ce354673054e2f6c19ce93f703a5b180df74e4c0aff0030ac72b2a2a62c9362b",
+      "teamShare.includeBinarySkillFiles": "8101c0ea2d2930b845caccc27fc9e247cd86a6ff27e0763a91850248c514e47e",
+      "teamShare.binarySkillWarning": "53180849903d6fa46d38571aabef1b733b99e7af1e808d590c3d56a602dadbde",
+      "teamShare.binarySkillFile": "62f0794789257168a7b9346117a3f2196f77f0d6f0aa66f5254a31e4244b588b",
+      "teamShare.executableSkillFile": "fbb2a913920f816c5b46ad103c9a18e5a0106446328d3b77096af0b469276294",
+      "teamShare.skip.skill_file_type": "25d811eaa9dd5e06b6126528f89b438ec98d09c1db0af97f519f9fbf8cc52409",
+      "teamShare.skip.skill_file_unsafe": "3f99107cbffe48fd86874ee314009ad85de0e7301551914b9dea2f0781d3f449",
+      "teamShare.skip.skill_file_limit": "f29c2b4774765c2e3ac5cafdcdb435c90f24e15ffa679747cbd2e0d0cead5463",
+      "teamShare.skip.skill_file_binary": "0d0300741c17ddc478bf165ebc36148735019859e9d07fd7a9f268fd8518479f",
+      "teamShare.skip.skill_file_unreviewed": "4c92d16d34fbc797011b0c934160927512859ebad273f98ee808c40e430e3e79",
+      "teamLibrary.shareFolderIntro": "61105bd5d87e4d86f4894c9f6d8d5ca3566da06ff84ccd9dea24ff87a3ead9d7",
+      "orgLibrary.teamFolderSafety": "e21a4bff4d4c15e13f495e9f83b76ace3926c3f69084077f59f6ff3c637080e9",
+      "skills.reviewCompanions": "0084832bd9ee2e04541fd40ed0dfbe79e3cef902eabde336427f5ec7a8a50aeb"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
