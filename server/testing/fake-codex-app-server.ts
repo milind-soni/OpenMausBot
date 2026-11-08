@@ -49,6 +49,7 @@
 //   FAKE_CODEX_TEXT_LOG  `codex exec`: append {argv, cwd, prompt, env} per call
 //   FAKE_CODEX_TEXT_MODE  `codex exec`: ok (default) | fail | exit | hang | tool | noisy
 //   FAKE_CODEX_TEXT_REFUSE  `codex exec`: comma-separated models answered with the 400 a ChatGPT account gets for gpt-5.4-mini
+//   FAKE_CODEX_TEXT_BLOCK  `codex exec`: comma-separated models answered with the 403 OpenAI sends a region it does not serve
 //   FAKE_CODEX_LUNA  "1": model/list also offers gpt-6-luna
 //   FAKE_CODEX_UPDATED_FILE  while this file exists, the CLI was updated in place: --version answers codex-cli 0.162.1
 //     and model/list also offers gpt-6.1-sol
@@ -136,6 +137,12 @@ if (process.argv[2] === "exec") {
   const model = process.argv[process.argv.indexOf("--model") + 1] ?? "";
   if (process.env.FAKE_CODEX_TEXT_REFUSE?.split(",").includes(model)) {
     const message = `unexpected status 400 Bad Request: {"type":"invalid_request_error","message":"The '${model}' model is not supported when using Codex with a ChatGPT account."}`;
+    event({ type: "error", message });
+    event({ type: "turn.failed", error: { message } });
+    process.exit(1);
+  }
+  if (process.env.FAKE_CODEX_TEXT_BLOCK?.split(",").includes(model)) {
+    const message = 'unexpected status 403 Forbidden: {"error":{"code":"unsupported_country_region_territory","message":"Country, region, or territory not supported","param":null,"type":"request_forbidden"}}';
     event({ type: "error", message });
     event({ type: "turn.failed", error: { message } });
     process.exit(1);
