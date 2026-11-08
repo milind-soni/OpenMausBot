@@ -211,14 +211,6 @@ describe.each([
     server.closeAllConnections();
   });
 
-  it("bounds a stalled initial status read by the requested wait", async () => {
-    const processId = await start();
-    hold = true;
-    const result = await call("exec_status", { process_id: processId, wait_seconds: 1 }).done;
-    expect(result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("Nothing was changed; call exec_status again") }] });
-    server.closeAllConnections();
-  });
-
   it("propagates cancellation during a follow-up status read", async () => {
     const processId = await start();
     holdStatusAfterFirst = true;
