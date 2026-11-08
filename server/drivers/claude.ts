@@ -40,7 +40,7 @@ import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { askInputSummary, commandSummary, toolDetailPreview } from "../tool-summary.ts";
-import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS, USAGE_LIMIT } from "./retry.ts";
+import { classifyError, computeBackoff, interruptibleDelay, mayResendTurn, USAGE_LIMIT } from "./retry.ts";
 import { claudeApiError, claudeApiErrorMessage, claudeLimitError, claudeLimitFacts, claudeLimitRefusal, claudeUsageLimit, claudeVersionTooOld, type ClaudeLimit } from "./claude-limits.ts";
 import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-model-access.ts";
 import { engineHomes } from "../engine-homes/engine-homes.ts";
@@ -854,6 +854,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         retryAbort: AbortController;
         settled: boolean;
         sawStreamDelta: boolean;
+        answered?: boolean;
         /** sent to a warm process that has not yet sent this turn's `init`; if it exits first it
          * never took the prompt */
         awaitingInit?: boolean;
@@ -1527,6 +1528,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               if (!session.turn?.stopRequested) emit({ ...base(threadId, currentTurnId()), type: "runtime.error", ...claudeApiError(o, text) });
               break;
             }
+            if (session.turn) session.turn.answered = true;
             if (text.trim()) {
               // fallback delta for CLIs/paths that never streamed the block
               if (!session.turn?.sawStreamDelta) emit({ ...base(threadId, currentTurnId()), type: "content.delta", streamKind: "assistant_text", delta: text });
@@ -1719,15 +1721,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
           const endedBeforeTurn = session.turn.awaitingInit === true;
-          if (
-            !retry.cancelled &&
-            (endedBeforeTurn || (
-              code !== 0 &&
-              verdict.transient &&
-              !session.turn.sawStreamDelta &&
-              retry.attempt < RETRY_MAX_ATTEMPTS - 1
-            ))
-          ) {
+          if (!retry.cancelled && mayResendTurn({ endedBeforeTurn, exitCode: code, transient: verdict.transient,
+            streamed: session.turn.sawStreamDelta, answered: session.turn.answered === true, attempt: retry.attempt })) {
             // `active` stays: an interrupt during the backoff reaches stop() and cancels the retry.
             const failedBroker = session.broker;
             session.broker = undefined;

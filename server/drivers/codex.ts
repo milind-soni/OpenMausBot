@@ -9,8 +9,8 @@ import { boxProxyEnvNames, type McpApprovalMode, mountMcpServer } from "./codex-
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
 // `turn/completed`, approvals arrive as server→client requests, resumeCursor is the codex thread id.
-import { mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { codexConfigMcp, codexConfigRunsServer, mountedMcpServerName } from "./codex-mcp-names.ts";
@@ -53,6 +53,7 @@ import { volatileContextNote, withContextNote } from "./prompt-split.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail, codexHome } from "./codex-identity.ts";
+import { linkSharedCodexHome } from "./codex-shared-home.ts";
 import { containsControlCharacter, mcpAppApprovalForm, mcpAppApprovalText, mcpElicitationDeclined, plainRecord } from "./codex-app-approval.ts";
 import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, codexProviderMismatch, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
 import { codexLoginCheck, codexLoginStatus, storedCodexLogin } from "./codex-login.ts";
@@ -494,7 +495,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           assertPlanCurrent();
           if (!turn.model || !models.options.some(model => model.id === turn.model)) throw new Error("This model is not available to the selected ChatGPT plan. Refresh models and choose a listed model; API billing will not be used.");
         }
-        mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
+        linkSharedCodexHome(codexHome({ ...process.env, ...input.environment }), join(planDirectory, "codex"));
       }
       if (config.endpoint) {
         if (!turn.model || !config.endpoint.models.includes(turn.model)) throw new Error("Select a model configured for this direct API endpoint.");
@@ -1593,7 +1594,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (!models.options.length) await refreshModels();
       env.OPENMAUSBOT_CHATGPT_TOKEN = await planAuth.accessToken();
       if (planSigningOut || disposed) throw new Error("This ChatGPT account is being disconnected.");
-      mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
+      linkSharedCodexHome(codexHome({ ...process.env, ...input.environment }), join(planDirectory, "codex"));
       providerArgs = chatgptPlanCodexArgs();
     } else if (config.endpoint) {
       if (!input.environment.OPENMAUSBOT_CODEX_API_KEY || !input.environment.CODEX_HOME) throw new Error("Direct API key or isolated Codex home is missing. Edit the endpoint in Settings.");

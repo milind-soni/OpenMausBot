@@ -14,6 +14,8 @@ process.env.USERPROFILE = home;
 delete process.env.OMB_DATA_DIR;
 // Do not let a developer's Hermes global config path leak into per-test homes.
 delete process.env.HERMES_HOME;
+// A ChatGPT-plan turn links the person's Codex home ($CODEX_HOME or ~/.codex) into its own: keep it in the throwaway home.
+delete process.env.CODEX_HOME;
 // Named explicitly although homedir() already covers it: the device tests delete this directory wholesale.
 process.env.OMB_COMPANION_DIR = join(home, ".openmausbot-companion");
 
