@@ -337,7 +337,7 @@ describe("OpenCode catalog", () => {
   it.each([
     apiError("Internal error: Invalid API key."),
     apiError("Internal error: socket hang up"),
-    // OpenCode issue 27270: only the refusal wording is proven, other connect failures stay ordinary errors
+    // Only OpenCode's refusal wording is proven; other connect failures stay ordinary errors
     apiError("Internal error: Cannot connect to API: Connect Timeout Error"),
     Object.assign(new Error("Cannot connect to API: ECONNREFUSED"), { code: -32602 }),
     new Error("ECONNREFUSED"),
