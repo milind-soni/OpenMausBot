@@ -27,7 +27,14 @@ describe("how a wait for memory reads", () => {
   it("records the limit and what is ahead", () => {
     const { waits, held } = words(true);
     waits.began("t", { running: 1, ahead: 3 });
-    expect(held).toEqual([["t", "memory: 1 running, 3 ahead, on Starter"]]);
+    waits.began("u", { running: 2, ahead: 1, limit: 2 });
+    expect(held).toEqual([["t", "memory: 1 running, 3 ahead, on Starter"], ["u", "plan: 2 at once, 1 ahead"]]);
+  });
+
+  it("names the plan's limit, not memory, when that is what the turn waits for", () => {
+    expect(words(true).waits.text("t", { first: true, running: 2, ahead: 1, limit: 2 }))
+      .toBe("Waiting for a turn: Starter runs 2 tasks at once on this Cloud. Ahead of this one: 1. It starts by itself when one finishes, and a bigger plan runs more at once.");
+    expect(words(true).waits.text("t", { first: false, running: 2, ahead: 0, limit: 2 })).toBe("Still waiting: Starter runs 2 tasks at once. Ahead of this one: 0.");
   });
 });
 
