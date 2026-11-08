@@ -41,6 +41,8 @@ export function companionPairingAddressText(route: CompanionPairingRoute): strin
 export interface CompanionPairingRoutePin {
   route: CompanionPairingRoute;
   protectedEndpoint: CompanionEndpoint | null;
+  /** Whether the protected endpoint came from the advertised list, rather than a saved route name. */
+  protectedEndpointAdvertised: boolean;
 }
 
 const deduplicatedHosts = (hosts: string[]): string[] => {
@@ -87,6 +89,9 @@ export function companionPairingRoute(
 
   const advertised = qrEndpoints(source.endpoints);
   if (mode === "tailscale") {
+    // The saved switch is the authority: a switched-off route is never
+    // offered, even while the sidecar still advertises its old endpoint.
+    if (source.routes?.tailscale?.on === false) return null;
     let preferred = advertised.find((endpoint) => endpoint.kind === "tailnet") ?? null;
     if (!preferred && source.tailnetName?.trim()) {
       preferred = qrEndpoints([{
@@ -196,9 +201,16 @@ export function companionPairingRoutePin(
         : null;
   if (mode !== "local" && !protectedEndpoint) return null;
 
+  const advertised = qrEndpoints(source.endpoints);
   return {
     route: { ...route, endpoints },
     protectedEndpoint,
+    protectedEndpointAdvertised: protectedEndpoint
+      ? advertised.some(
+        (endpoint) => endpoint.kind === protectedEndpoint.kind
+          && endpoint.url === protectedEndpoint.url,
+      )
+      : false,
   };
 }
 
@@ -208,18 +220,31 @@ export function companionPairingRoutePinAvailable(
   pin: CompanionPairingRoutePin,
 ): boolean {
   if (!pin.protectedEndpoint) return true;
-  if (qrEndpoints(source.endpoints).some(
+  const endpointLive = qrEndpoints(source.endpoints).some(
     (endpoint) => endpoint.kind === pin.protectedEndpoint?.kind
       && endpoint.url === pin.protectedEndpoint.url,
-  )) return true;
-  if (pin.protectedEndpoint.kind !== "tailnet") return false;
+  );
+  if (pin.protectedEndpoint.kind !== "tailnet") return endpointLive;
+  // The saved switch and name are the authority for a tailnet pin: a
+  // switched-off route or a changed name invalidates it even while the old
+  // endpoint is still advertised.
+  if (source.routes?.tailscale?.on === false) return false;
   const routeName = source.routes?.tailscale?.on
     ? source.routes.tailscale.name?.trim().toLowerCase().replace(/\.$/, "")
     : undefined;
-  if (!routeName) return false;
-  try {
-    return new URL(pin.protectedEndpoint.url).hostname.toLowerCase().replace(/\.$/, "") === routeName;
-  } catch {
-    return false;
-  }
+  const pinHost = tailnetHostname(pin.protectedEndpoint.url);
+  if (routeName && pinHost !== routeName) return false;
+  if (endpointLive) return true;
+  // An advertised pin whose endpoint is gone has lost its basis; a pin rebuilt
+  // from the saved name only needs that name to still match.
+  if (pin.protectedEndpointAdvertised) return false;
+  return !!routeName && pinHost === routeName;
 }
+
+const tailnetHostname = (url: string): string | undefined => {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return undefined;
+  }
+};
