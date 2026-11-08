@@ -29,7 +29,7 @@ export function minutesSaved(counts: OutcomeCounts): number {
 
 const EMAIL_APPS = new Set(["GMAIL", "OUTLOOK", "ZOHOMAIL", "AGENTMAIL", "SENDGRID", "RESEND", "POSTMARK", "MAILGUN", "FASTMAIL", "YAHOOMAIL"]);
 /** CRMs: creating, updating, searching or enriching a person, company or deal is a lead or record. */
-const CRM_APPS = new Set(["HUBSPOT", "SALESFORCE", "PIPEDRIVE", "ZOHO", "ATTIO", "CLOSE", "COPPER", "FRESHSALES", "AFFINITY", "FOLK", "KEAP", "ACTIVECAMPAIGN"]);
+const CRM_APPS = new Set(["HUBSPOT", "SALESFORCE", "PIPEDRIVE", "ZOHO", "ZOHOCRM", "ATTIO", "CLOSE", "COPPER", "FRESHSALES", "AFFINITY", "FOLK", "KEAP", "ACTIVECAMPAIGN"]);
 /** Prospecting and enrichment services: every call looks people or companies up. */
 const PROSPECTING_APPS = new Set(["APOLLO", "HUNTER", "CLEARBIT", "LUSHA", "SNOV", "PEOPLEDATALABS", "ROCKETREACH", "PROSPEO", "DROPCONTACT"]);
 const DOC_APPS = new Set([
