@@ -1,3 +1,4 @@
+import { addHeldSecretScrubber, HELD_SECRET_MASK } from "../../shared/redact.ts";
 import { describe, expect, it } from "vitest";
 
 import { CONSENT_RULE } from "../peer-provenance.ts";
@@ -482,6 +483,19 @@ describe("composeEnvelope at Full access: nothing a bot can settle waits on the 
     expect(envelope.endsWith(`\n\nYour question was: "Which repo?". ${line}`)).toBe(true);
     expect(envelopeNote(envelope)).toContain(line);
     expect(composeResume(long, chief, [])).toContain(line);
+  });
+
+  it("keeps the end of a 12 000-character answer that redaction made longer", () => {
+    const removeScrubber = addHeldSecretScrubber((text) => text.replaceAll("code 42", `code ${HELD_SECRET_MASK}`));
+    try {
+      const body = "Sent code 42. ".repeat(100);
+      const answer = `${body}${"x".repeat(12_000 - body.length - 4)}End.`;
+      expect(answer.length).toBe(12_000);
+      const envelope = composeEnvelope(assignment({ question: "Done?", answer, answeredBy: { kind: "bot", botId: "chief" } }), { ...names, answerer: "Chief" });
+      expect(envelope).toContain(`End.".`);
+    } finally {
+      removeScrubber();
+    }
   });
 });
 

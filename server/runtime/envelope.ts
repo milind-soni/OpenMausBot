@@ -9,8 +9,8 @@ import type { Assignment, EnvelopeNames, Level, OriginSource, TurnEvidence } fro
 export const ENVELOPE_MARK = "[From";
 
 const QUOTE_MAX = 400;
-/** An answer is quoted whole: it is what the next turn works from, and the runtime already keeps it to 12 000 characters. */
-const ANSWER_QUOTE_MAX = 12_000;
+// Headroom over the runtime's 12 000-character answer: redaction markers can lengthen it, and the next turn works from all of it.
+const ANSWER_QUOTE_MAX = 16_000;
 const NAME_MAX = 80;
 const DETAIL_MAX = 200;
 const FILES_SHOWN = 8;
