@@ -1135,7 +1135,7 @@
   "approval.opaqueCode": "هذا يشغّل شيفرة قد ترسل أو تغيّر أشياء في تطبيقاتك، لذلك يسأل دائماً أولاً.",
   "approval.held.outbound": "هذا يرسل شيئاً نيابةً عنك، لذلك يسألك أولاً.",
   "approval.held.undeliveredFull": "تعذّر على الوصول الكامل تسليم هذه الموافقة.",
-  "approval.held.undelivered": "تعذّرت الموافقة التلقائية على هذا الطلب.",
+  "approval.held.undelivered": "تعذّر على «وافق نيابةً عني» الرد على هذا الطلب.",
   "settings.title": "الإعدادات",
   "settings.search": "بحث",
   "settings.searchAria": "ابحث في الإعدادات",
