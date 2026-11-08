@@ -11,7 +11,7 @@ import { t } from "@/lib/i18n";
 import { setWebPanels, useWebPanels } from "@/lib/web-panel-preferences";
 import { isAppOrigin, type PinnedChatPage, type WebPanel } from "@/lib/web-panels";
 import { api } from "@/state/api";
-import { useStore } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
 import type { AppDocument } from "../../shared/app";
 import { AppDocumentError, fetchAppDocument } from "./app/app-api";
 import { AppFrame, type AppFrameHandle } from "./app/AppFrame";
@@ -97,8 +97,18 @@ export function WebPanelPage() {
 
 type PageLoad = { doc: AppDocument } | { failure: string };
 
+/** The page's current version when its chat is loaded in the app ("" when it isn't): a bot replacing the page, or a
+ * live folder it watches changing, updates this, and the pinned view fetches the new page, as the chat does. */
+function storedPageVersion(bots: readonly Bot[] | undefined, page: PinnedChatPage): string {
+  const bot = bots?.find((candidate) => candidate.id === page.botId);
+  if (!bot || bot.threadId !== page.threadId) return "";
+  const app = bot.messages.find((message) => message.id === page.messageId)?.app;
+  return app ? `${app.doc}:${app.rev ?? 0}` : "";
+}
+
 function PinnedChatPageView({ panel, page, panels }: { panel: WebPanel; page: PinnedChatPage; panels: readonly WebPanel[] }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
+  const version = storedPageVersion(state.bots, page);
   const [reloads, setReloads] = useState(0);
   const [load, setLoad] = useState<PageLoad | null>(null);
   const handle = useRef<AppFrameHandle | null>(null);
@@ -114,7 +124,7 @@ function PinnedChatPageView({ panel, page, panels }: { panel: WebPanel; page: Pi
       },
     );
     return () => controller.abort();
-  }, [page.threadId, page.messageId, reloads]);
+  }, [page.threadId, page.messageId, reloads, version]);
 
   const unpin = () => setWebPanels(panels.filter((entry) => entry.id !== panel.id));
 
@@ -140,7 +150,7 @@ function PinnedChatPageView({ panel, page, panels }: { panel: WebPanel; page: Pi
       {load && "doc" in load ? (
         <div className="relative min-h-0 flex-1">
           <AppFrame
-            key={reloads}
+            key={`${reloads}:${version}`}
             doc={load.doc}
             botId={page.botId}
             threadId={page.threadId}

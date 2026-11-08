@@ -9,7 +9,7 @@ const fixture = vi.hoisted(() => ({
   panels: [] as Array<{ id: string; name: string; url?: string; page?: { botId: string; threadId: string; messageId: string } }>,
   setWebPanels: vi.fn(),
   fetchAppDocument: vi.fn(async (_threadId: string, _messageId: string, _signal?: AbortSignal): Promise<unknown> => ({ srcdoc: "<p>hi</p>", can: {} })),
-  state: { webPanelId: "panel-1" } as { webPanelId?: string },
+  state: { webPanelId: "panel-1" } as { webPanelId?: string; bots?: unknown[] },
   dispatch: vi.fn(),
   api: vi.fn(async (_path: string, _init?: unknown): Promise<unknown> => ({ framing: "allowed" })),
 }));
@@ -123,5 +123,18 @@ describe("a pinned web panel's page", () => {
     expect(host.querySelector("[role=alert]")?.textContent).toContain("No such page.");
     act(() => [...host.querySelectorAll("button")].find((button) => button.textContent === "Unpin")!.click());
     expect(fixture.setWebPanels).toHaveBeenCalledWith([{ id: "panel-2", name: "CI", url: "https://ci.example/" }]);
+  });
+
+  it("fetches a pinned chat page again when the bot replaces it in a loaded chat", async () => {
+    fixture.panels = [{ id: "panel-1", name: "Sales", page: { botId: "b1", threadId: "t1", messageId: "m1" } }];
+    const withRev = (rev: number) => [{ id: "b1", threadId: "t1", messages: [{ id: "m1", kind: "app", app: { title: "Sales", source: "html", doc: "d1", rev } }] }];
+    fixture.state = { webPanelId: "panel-1", bots: withRev(1) };
+    fixture.fetchAppDocument.mockClear();
+    await act(async () => root.render(createElement(WebPanelPage)));
+    expect(fixture.fetchAppDocument).toHaveBeenCalledTimes(1);
+    fixture.state = { webPanelId: "panel-1", bots: withRev(2) };
+    await act(async () => root.render(createElement(WebPanelPage)));
+    expect(fixture.fetchAppDocument).toHaveBeenCalledTimes(2);
+    fixture.state = { webPanelId: "panel-1" };
   });
 });
