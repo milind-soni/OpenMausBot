@@ -500,16 +500,31 @@ describe("composeEnvelope at Full access: nothing a bot can settle waits on the 
     expect(envelope).toContain(`END".`);
   });
 
-  it("keeps the end of a 12 000-character answer that redaction made longer", () => {
+  it("keeps the end of an answer just under the 12 000-character storage limit that redaction made longer", () => {
     const removeScrubber = addHeldSecretScrubber((text) => text.replaceAll("code 42", `code ${HELD_SECRET_MASK}`));
     try {
       const body = "Sent code 42. ".repeat(100);
-      const answer = `${body}${"x".repeat(12_000 - body.length - 4)}End.`;
-      expect(answer.length).toBe(12_000);
+      const answer = `${body}${"x".repeat(11_999 - body.length - 5)} End.`;
+      expect(answer.length).toBe(11_999);
       const envelope = composeEnvelope(assignment({ question: "Done?", answer, answeredBy: { kind: "bot", botId: "chief" } }), { ...names, answerer: "Chief" });
       expect(envelope).toContain(`End.".`);
       expect(envelope).toContain(`code ${HELD_SECRET_MASK}`);
       expect(envelope).not.toContain("code 42");
+    } finally {
+      removeScrubber();
+    }
+  });
+  it("drops a held secret cut in half where the stored answer was clipped", () => {
+    const secret = "Zq8-held-PASSWORD-value";
+    const removeScrubber = addHeldSecretScrubber((text) => text.replaceAll(secret, HELD_SECRET_MASK));
+    try {
+      const lead = `Done. ${"word ".repeat(2_398)}`;
+      const answer = `${lead}${secret}`.slice(0, 12_000);
+      expect(answer.length).toBe(12_000);
+      expect(answer.endsWith(secret)).toBe(false);
+      const envelope = composeEnvelope(assignment({ question: "Done?", answer, answeredBy: { kind: "bot", botId: "chief" } }), { ...names, answerer: "Chief" });
+      expect(envelope).not.toContain("Zq8");
+      expect(envelope).toContain(`word …".`);
     } finally {
       removeScrubber();
     }
