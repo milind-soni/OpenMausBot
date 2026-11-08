@@ -282,6 +282,26 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     same();
   });
 
+  it("runningIn() and outstandingFor() read only the thread's own rows, however many other assignments are open", () => {
+    const w = world(hold);
+    for (let at = 0; at < 25; at++) send(w, chief, `gen-${at}`, undefined, builder, `Job ${at}`);
+    const store = (w.coordinator as unknown as { store: Record<"all" | "get" | "children", (...args: unknown[]) => unknown> }).store;
+    let read = 0;
+    for (const name of ["all", "get", "children"] as const) {
+      const real = store[name]!.bind(store);
+      store[name] = (...args: unknown[]) => { const rows = real(...args); read += Array.isArray(rows) ? rows.length : rows ? 1 : 0; return rows; };
+    }
+    const reads = (ask: () => unknown) => { read = 0; ask(); return read; };
+    expect(reads(() => w.coordinator.active()), "the whole tree, for comparison").toBeGreaterThanOrEqual(50);
+    expect(reads(() => w.coordinator.runningIn("tester-work"))).toBe(0);
+    expect(reads(() => w.coordinator.outstandingFor("tester-work"))).toBe(0);
+    expect(reads(() => w.coordinator.runningIn("builder-work"))).toBeLessThanOrEqual(50);
+    const live = w.coordinator.active();
+    const mine = new Set(live.filter(n => n.threadId === "chief-chat").map(n => n.id));
+    expect(w.coordinator.outstandingFor("chief-chat").map(n => n.id))
+      .toEqual(live.filter(n => n.parentId !== undefined && mine.has(n.parentId)).map(n => n.id));
+  });
+
   it("active() never reads an ended row: one that no longer parses stops all(), not active() (#2765)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "runtime-coordinator-active-"));
     try {
