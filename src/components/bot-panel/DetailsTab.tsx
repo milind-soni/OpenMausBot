@@ -2,7 +2,7 @@ import { Calendar, CalendarPlus, ChevronRight, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { Bot } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
 import { useChatMoreItems } from "../ChatMoreMenu";
 import { ModelPicker } from "../ModelPicker";
 import type { SidebarMenuItem } from "../SidebarPopoverMenu";
@@ -45,6 +45,7 @@ export function DetailsTab({ bot, derived, onOpen }: {
   onOpen: (page: SimplePageId) => void;
 }) {
   const { items } = useChatMoreItems(bot);
+  const { dispatch } = useStore();
   const routinesOn = derived.botRoutines.filter((routine) => routine.enabled).length;
   const conversationItems = CONVERSATION_ITEMS.flatMap((key) => items.filter((item) => item.key === key));
 
@@ -66,7 +67,13 @@ export function DetailsTab({ bot, derived, onOpen }: {
       {derived.botRoutines.length === 0 ? (
         <section data-panel-empty="routines">
           <CardLabel>{t("botSettings.simple.routines")}</CardLabel>
-          <p className="mx-1 text-[13px] leading-[18px] text-ink-tertiary">{t("botPanel.routines.emptyHint")}</p>
+          <p className="mx-1 text-[13px] leading-[18px] text-ink-tertiary">
+            {t("botPanel.routines.emptyHint")}{" "}
+            <button type="button" data-panel-automations onClick={() => dispatch({ type: "showRoutines", view: "list" })}
+              className="rounded-[4px] font-medium text-ink-secondary underline decoration-ink/25 underline-offset-2 hover:text-ink hover:decoration-ink/60">
+              {t("botPanel.routines.seeAll")}
+            </button>
+          </p>
           <button
             type="button"
             data-panel-page="routines"

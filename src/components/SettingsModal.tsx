@@ -571,7 +571,7 @@ export function SettingsModal() {
               ref={scrollRef}
               data-settings-scroll
               className={cn(
-                "flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-10 pt-4 sm:px-8 sm:pb-12 sm:pt-[22px]",
+                "settings-scroll flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-10 pt-4 sm:px-8 sm:pb-12 sm:pt-[22px]",
                 SIMPLE_BUTTONS,
                 "[&_.uppercase]:normal-case [&_.uppercase]:tracking-normal",
               )}

@@ -129,7 +129,8 @@ export function AppsPage({ bot, derived }: PageContext) {
 
 export function RoutinesPage({ bot, derived }: PageContext) {
   const { state, dispatch } = useStore();
-  const [editing, setEditing] = useState<Routine | "new" | null>(null);
+  // Arriving with no routines means the person asked to add one, so the editor opens straight away.
+  const [editing, setEditing] = useState<Routine | "new" | null>(() => derived.botRoutines.length === 0 ? "new" : null);
   return (
     <>
       <RoutineList

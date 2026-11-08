@@ -1580,6 +1580,24 @@ body {
 :root[data-skin="daylight"] [data-settings-look] > .glass-scrim {
   background: rgb(0 0 0 / 0.18);
 }
+/* Settings fades its bottom edge only while more lies below: the fade rides the pane's own scroll, so it is absent
+   when nothing scrolls and gone once the end is reached. */
+@property --settings-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes settings-fade {
+  0%, 94% { --settings-fade: 36px; }
+  100% { --settings-fade: 0px; }
+}
+@supports (animation-timeline: scroll()) {
+  .settings-scroll {
+    mask-image: linear-gradient(to bottom, #000 calc(100% - var(--settings-fade)), transparent);
+    animation: settings-fade linear both;
+    animation-timeline: scroll(self);
+  }
+}
 /* Over a light scrim the sheet needs its own lift. */
 :root[data-skin="daylight"] [data-settings-look] .glass-surface {
   box-shadow: 0 24px 64px -16px rgb(28 28 28 / 0.28), 0 2px 8px rgb(28 28 28 / 0.06);
@@ -3007,7 +3025,7 @@ button:disabled.bg-danger {
 :root,
 :is([data-skin="midnight"], [data-skin="foundry"], [data-skin="graphite"], [data-skin="dusk"], [data-skin="halloween"]) {
   --radius-menu: 12px;
-  --menu-shadow: 0 0 #0000;
+  --menu-shadow: 0 14px 32px -10px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.35);
 }
 :is([data-skin="atelier"], [data-skin="lagoon"], [data-skin="linen"], [data-skin="meadow"], [data-skin="pop"]) {
   --menu-shadow: 0 8px 24px -6px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.04);
