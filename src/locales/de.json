@@ -3434,5 +3434,9 @@
   "botPanel.heavy": "Dieser Bot lädt bei jedem Zug sehr viel.",
   "botPanel.tidyMemory": "Gedächtnis aufräumen",
   "memory.journal.instructions": "die Anweisungen",
-  "memory.journal.actor.teamSetup": "Die Team-Einrichtung"
+  "memory.journal.actor.teamSetup": "Die Team-Einrichtung",
+  "settings.simple.more.title": "Weitere Einstellungen",
+  "settings.simple.more.subtitle": "Backups, Limits und Einstellungen, die du selten änderst.",
+  "settings.simple.more.limits": "Limits",
+  "settings.simple.more.open": "Öffnen"
 }

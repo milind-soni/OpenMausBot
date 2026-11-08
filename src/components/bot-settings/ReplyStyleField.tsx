@@ -3,7 +3,7 @@ import type { Bot } from "@/state/store";
 import { REPLY_STYLES, type ReplyStyle } from "../../../shared/reply-style";
 import type { BotPatch } from "./useBotSettingsDerived";
 
-const LABELS = {
+export const REPLY_STYLE_LABELS = {
   default: ["botSettings.replyStyle.default", "botSettings.replyStyle.defaultHint"],
   conversational: ["botSettings.replyStyle.conversational", "botSettings.replyStyle.conversationalHint"],
 } as const satisfies Record<ReplyStyle, readonly [string, string]>;
@@ -28,8 +28,8 @@ export function ReplyStyleField({ bot, patch }: { bot: Bot; patch: (patch: BotPa
               onChange={() => patch({ replyStyle: style })}
             />
             <span>
-              {t(LABELS[style][0])}
-              <span className="block text-[12px] text-ink-secondary">{t(LABELS[style][1])}</span>
+              {t(REPLY_STYLE_LABELS[style][0])}
+              <span className="block text-[12px] text-ink-secondary">{t(REPLY_STYLE_LABELS[style][1])}</span>
             </span>
           </label>
         ))}

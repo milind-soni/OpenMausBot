@@ -6083,5 +6083,9 @@
   "botPanel.heavy": "Este bot carga mucho en cada turno.",
   "botPanel.tidyMemory": "Ordenar la memoria",
   "memory.journal.instructions": "las instrucciones",
-  "memory.journal.actor.teamSetup": "La configuración del equipo"
+  "memory.journal.actor.teamSetup": "La configuración del equipo",
+  "settings.simple.more.title": "Más ajustes",
+  "settings.simple.more.subtitle": "Copias de seguridad, límites y ajustes que cambias poco.",
+  "settings.simple.more.limits": "Límites",
+  "settings.simple.more.open": "Abrir"
 }
