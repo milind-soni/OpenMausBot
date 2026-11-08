@@ -138,3 +138,46 @@ describe("a desktop shares its connected apps with the person's own Cloud", () =
     expect((await post(desktop, "/v1/installation/share", { for: cloud.id })).status).toBe(503);
   });
 });
+
+describe("a shared user stops when its sharer is gone", () => {
+  it("keeps the shared user while its sharer is alive", async () => {
+    harness();
+    const desktop = await h.install(), cloud = await h.install();
+    const gmail = h.account(desktop, "gmail");
+    expect((await post(cloud, "/v1/installation/adopt", { code: await share(desktop, cloud) })).status).toBe(200);
+    expect(await me(cloud)).toEqual({ installationId: cloud.id, user: (await me(desktop)).user, shared: true });
+    expect(await mcpCall(cloud)).toMatchObject({ user: desktop.userId, accounts: [gmail] });
+  });
+
+  it("falls back to the adopter's own user and clears the shared link once the sharer is disabled", async () => {
+    harness();
+    const desktop = await h.install(), cloud = await h.install();
+    const gmail = h.account(desktop, "gmail");
+    const own = await me(cloud);
+    expect((await post(cloud, "/v1/installation/adopt", { code: await share(desktop, cloud) })).status).toBe(200);
+    expect(await mcpCall(cloud)).toMatchObject({ user: desktop.userId, accounts: [gmail] });
+
+    h.d1.db.prepare("UPDATE installations SET disabled_at = ? WHERE id = ?").run(Date.now(), desktop.id);
+    expect(await me(cloud)).toEqual({ installationId: cloud.id, user: own.user, shared: false });
+    expect(await mcpCall(cloud)).toMatchObject({ user: cloud.userId, accounts: [] });
+    expect(h.d1.rows<{ shared_user_id: string | null }>("SELECT shared_user_id FROM installations").every((row) => row.shared_user_id === null)).toBe(true);
+  });
+});
+
+describe("an adopter can unshare itself", () => {
+  it("clears the shared user and its session, and answers false when there is nothing to clear", async () => {
+    harness();
+    const desktop = await h.install(), cloud = await h.install();
+    h.account(desktop, "gmail");
+    const own = await me(cloud);
+    expect((await post(cloud, "/v1/installation/adopt", { code: await share(desktop, cloud) })).status).toBe(200);
+    expect(await mcpCall(cloud)).toMatchObject({ user: desktop.userId });
+
+    const unshared = await post(cloud, "/v1/installation/unshare", {});
+    expect(unshared.status).toBe(200);
+    await expect(unshared.json()).resolves.toEqual({ unshared: true });
+    expect(await me(cloud)).toEqual({ installationId: cloud.id, user: own.user, shared: false });
+    expect(await mcpCall(cloud)).toMatchObject({ user: cloud.userId, accounts: [] });
+    await expect((await post(cloud, "/v1/installation/unshare", {})).json()).resolves.toEqual({ unshared: false });
+  });
+});

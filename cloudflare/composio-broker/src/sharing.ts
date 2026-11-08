@@ -87,3 +87,14 @@ export async function adoptSharedUser(request: Request, installation: Installati
   const adopted = { ...installation, shared_user_id: share.composio_user_id };
   return { ok: true, response: json({ shared: true, user: await userDigest(adopted) }) };
 }
+
+/** POST /v1/installation/unshare: this installation stops acting as the user a code shared, and its next
+ *  session is its own. A no-op that still answers when nothing was shared, or on a database that has not
+ *  run migration 0004. */
+export async function unshareSharedUser(installation: InstallationRow, env: Env): Promise<Response> {
+  if (!installation.shared_user_id) return json({ unshared: false });
+  const cleared = await env.DB.prepare(
+    "UPDATE installations SET shared_user_id = NULL, session_id = NULL WHERE id = ? AND shared_user_id IS NOT NULL",
+  ).bind(installation.id).run();
+  return json({ unshared: cleared.meta.changes > 0 });
+}
