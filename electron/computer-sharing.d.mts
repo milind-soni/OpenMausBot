@@ -74,6 +74,8 @@ export interface LendingSummary {
   waiting?: string[];
   using: string[];
   paused: boolean;
+  /** The pause (or a Resume) could not be saved: sharing stays stopped, and Pause retries the save. */
+  pauseError?: string;
   terminal?: boolean;
   /** The menu shows the Clouds' terminal switch: a Cloud of the person's own is signed in here. */
   terminalSwitch?: boolean;
@@ -178,7 +180,7 @@ export function createComputerSharing(options: {
   /** The move's project folders, lent to My Cloud with editing; rejects while that can't happen yet. */
   lendProjects(paths: string[], place?: { id: string; origin: string; name: string } | null): Promise<void>;
   paused(): boolean;
-  /** Every Cloud stops using this computer, across restarts too, until resume(). */
+  /** Stops every Cloud, across restarts too, until resume(); pauseError reports a pause that could not be saved. */
   pause(): void;
   resume(): Promise<void> | undefined;
   /** Whether every Cloud of the signed-in account's own may run commands here as this user, across restarts too. */
