@@ -4,7 +4,6 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 
-import { writeFileAtomic } from "../../atomic.ts";
 import { ATTACHMENTS_DIR } from "../../attachments.ts";
 import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
@@ -24,6 +23,7 @@ import {
   type OpenCodeModelSources,
   type OpenCodeRefreshSchedule,
 } from "./opencode-model-refresh.ts";
+import { trackProbeSessions, type ProbeSessions } from "./opencode-probe-sessions.ts";
 import { parseOpenCodeLogLine } from "./quiet-status.ts";
 import type { ModelCatalog, ModelVariantOption, ProviderDriver, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
@@ -310,47 +310,6 @@ export function surveyOpenCodeEfforts(
   return surveyModelVariants(request, session, budgetMs);
 }
 
-/** Session id -> when a probe opened it. Only ids in here are ever deleted, so another client's sessions in the
- * discovery folder survive; a probe cut off by its timeout leaves its ids for the next probe to delete. */
-type ProbeSessionLedger = Record<string, number>;
-
-const probeLedgerPath = (cwd: string) => join(cwd, ".openmaus-probe-sessions.json");
-
-function readProbeLedger(cwd: string): ProbeSessionLedger {
-  try {
-    const ledger: unknown = JSON.parse(readFileSync(probeLedgerPath(cwd), "utf8"));
-    return ledger && typeof ledger === "object" && !Array.isArray(ledger) ? ledger as ProbeSessionLedger : {};
-  } catch {
-    return {};
-  }
-}
-
-function changeProbeLedger(cwd: string, change: (ledger: ProbeSessionLedger) => void): void {
-  const ledger = readProbeLedger(cwd);
-  change(ledger);
-  try {
-    writeFileAtomic(probeLedgerPath(cwd), JSON.stringify(ledger), { durable: false });
-  } catch {}
-}
-
-/** OpenCode (2.2.0, 2.2.6) keeps every ACP session, even one closed with session/close or whose process was killed,
- * and lists it in the user's history; only session/delete removes it, and it answers {} for an id it does not know. */
-async function deleteProbeSessions(
-  request: (method: string, params: unknown) => Promise<unknown>,
-  cwd: string,
-  opened: string[],
-  timeoutMs: number,
-): Promise<void> {
-  const abandonedBefore = Date.now() - 2 * timeoutMs;
-  const abandoned = Object.entries(readProbeLedger(cwd))
-    .filter(([, openedAt]) => openedAt < abandonedBefore)
-    .map(([sessionId]) => sessionId);
-  await Promise.all([...new Set([...opened, ...abandoned])].map((sessionId) => request("session/delete", { sessionId }).then(
-    () => changeProbeLedger(cwd, (ledger) => delete ledger[sessionId]),
-    () => {},
-  )));
-}
-
 /** `settleMs` keeps the process open that long after it starts, then lists again: OpenCode 2's own catalog refresh
  * reaches a running process's later sessions only. */
 export async function probeOpenCodeSession(
@@ -438,25 +397,19 @@ export async function probeOpenCodeSession(
       pending.set(id, { resolve: resolveRequest, reject: rejectRequest });
       write({ jsonrpc: "2.0", id, method, params });
     });
-    let deletesSessions = false;
-    const opened: string[] = [];
+    let sessions: ProbeSessions | null = null;
     const openSession = async () => {
       const session = await request("session/new", { cwd, mcpServers: [] });
-      const sessionId = (session as { sessionId?: unknown } | null)?.sessionId;
-      if (deletesSessions && typeof sessionId === "string") {
-        opened.push(sessionId);
-        changeProbeLedger(cwd, (ledger) => { ledger[sessionId] = Date.now(); });
-      }
+      sessions?.record(session);
       return session;
     };
-    const cleanUp = () => deletesSessions ? deleteProbeSessions(request, cwd, opened, timeoutMs) : Promise.resolve();
+    const cleanUp = () => sessions?.deleteAll(request) ?? Promise.resolve();
     void (async () => {
-      const initialized = await request("initialize", {
+      sessions = trackProbeSessions(cwd, timeoutMs, await request("initialize", {
         protocolVersion: 1,
         clientInfo: { name: "openmausbot", version: "0.0.0" },
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-      }) as { agentCapabilities?: { sessionCapabilities?: { delete?: unknown } } } | null;
-      deletesSessions = Boolean(initialized?.agentCapabilities?.sessionCapabilities?.delete);
+      }));
       const session = await openSession();
       listed = { session, efforts: new Map() };
       const budget = Math.min(EFFORT_SURVEY_MS, deadline - Date.now() - 1_000);
