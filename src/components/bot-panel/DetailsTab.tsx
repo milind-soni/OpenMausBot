@@ -69,7 +69,7 @@ export function DetailsTab({ bot, derived, onOpen }: {
           <CardLabel>{t("botSettings.simple.routines")}</CardLabel>
           <p className="mx-3.5 text-[13px] leading-[18px] text-ink-tertiary">{t("botPanel.routines.emptyHint")}</p>
           <button type="button" data-panel-automations onClick={() => dispatch({ type: "showRoutines", view: "list" })}
-            className="mx-3.5 mt-0.5 inline-flex min-h-7 items-center gap-0.5 rounded-[4px] text-[13px] font-medium text-ink-secondary underline-offset-2 hover:text-ink hover:underline focus-visible:underline">
+            className="mx-3.5 mt-0.5 inline-flex min-h-7 items-center gap-0.5 rounded-[4px] text-[13px] font-medium text-ink underline decoration-ink/30 underline-offset-2 hover:decoration-ink">
             {t("botPanel.routines.seeAll")}<ChevronRight size={14} aria-hidden="true" className="rtl:-scale-x-100" />
           </button>
           <button

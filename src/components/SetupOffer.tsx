@@ -71,7 +71,7 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
   showedWait.current = pending || updating;
   const quiet = settled || updating;
   const choices = pending ? [] : shown.current!.choices;
-  const title = t("chat.setupCard.title");
+  const title = t("chat.setupCard.heading");
 
   const ask = (text?: string) => {
     if (sending.current || settled) return;

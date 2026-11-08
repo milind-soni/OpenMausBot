@@ -57,7 +57,7 @@ afterAll(() => {
 describe("the setup card in the chat", () => {
   it("is drawn under a blank bot's greeting and sends a pick's words for this conversation", async () => {
     await draw(profile());
-    expect(card()?.textContent).toContain("What should I help you with first?");
+    expect(card()?.textContent).toContain("Pick a starting point");
     expect(firstAnswer()?.textContent).toBe("AResearch and digging into topics");
     sent.length = 0;
     flushSync(() => firstAnswer()!.click());

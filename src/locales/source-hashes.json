@@ -33399,7 +33399,7 @@
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
       "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
-      "chat.setupCard.hint": "0cf6fcebf1c62c47a8977b17944d4f3d11beeee04dda18ee3dedb1808cb96696",
+      "chat.setupCard.hint": "c6ddd65e5fdd0145d1711ce1a16c81129537e39f2b81f1ee165aa231d6e208d8",
       "inbox.emptyHint": "0105954275918cda7ea87a1d942173015f96aaf820ba74a4bd07386d6426b4d8",
       "settings.simple.group.typing": "0b96af8bce90a78a3ab5958209736b8738fe952deefc38fc958a14fbbeb75ef6",
       "model.simple.auto": "0286249762f7c94349cdc0ba3bb2255baf9a80036e2193ead1d77696f888582f",
@@ -33441,7 +33441,10 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "chat.setupCard.heading": "c55d59f402bbe025ee81dbf0efa20086040334938ed8617f340ab81db478b196",
+      "settings.simple.themes.followHint": "d42ba551158199061ebfda7029c05ad07f84ebad29cfc8c24ffe4a7323ed5629",
+      "settings.simple.themes.fixedHint": "f9f6d89b8466b6e648c56e78ab47cf53d6c9aea2b457efdaae0ed12f5de14220"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

@@ -1161,6 +1161,13 @@
 [data-reply-bubble] [data-table-card] thead {
   background: color-mix(in srgb, var(--color-card), var(--color-ink) 7%);
 }
+/* On Daylight's pale bubble the inset table steps back to a whisper of ink. */
+:root[data-skin="daylight"] [data-reply-bubble] [data-table-card] {
+  background: color-mix(in srgb, var(--color-card), var(--color-ink) 2%);
+}
+:root[data-skin="daylight"] [data-reply-bubble] [data-table-card] thead {
+  background: color-mix(in srgb, var(--color-card), var(--color-ink) 4%);
+}
 /* A section that opens right after a table keeps the space a heading gets elsewhere in the reply. */
 [data-reply-bubble] > [data-reply-table] + * .chat-md > .md-heading:first-child {
   margin-top: 6px;

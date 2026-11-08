@@ -237,11 +237,10 @@ describe("the model picker in Simple mode", () => {
     expect(renderToStaticMarkup(chip)).toContain(">Claude Sonnet 5</span>");
   });
 
-  it("names models without a second line; a blurb is only the row's tooltip", () => {
+  it("names models without a second line or a ranking claim, in the row and its tooltip", () => {
     const html = menu(open(bot()).html);
-    const blurb = "Fast and smart. Good for most work.";
-    expect(html).not.toContain(`>${blurb}<`);
-    expect(html).toContain(`title="Sonnet 5.5 · ${blurb}"`);
+    expect(html).not.toContain("Fast and smart. Good for most work.");
+    expect(html).toMatch(/title="Sonnet 5\.5( · [^"]+)?"/);
   });
 
   it("opens a provider's long list in place with Show all, and offers a search once the menu holds more than twelve models", () => {
