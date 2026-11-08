@@ -424,11 +424,34 @@ describe("longCommandsPrompt", () => {
       const text = longCommandsPrompt(kind);
       expect(text).toContain("`timeout` in milliseconds, up to 600000");
       expect(text).toContain("Never wait inside a command for CI, a deploy or any other job to finish (no sleep loops or repeated polls): check it once");
-      expect(text).toContain("tell the person what you made (with links), set wait_until or a one-time trigger to check back, and end your turn. When the person writes while you work, answer them first.");
+      expect(text).toContain("tell the person what you made (with links). Only on a turn the person started in their own chat, set wait_until or a one-time trigger to check back and end your turn");
+      expect(text).toContain("When the person writes while you work, answer them first.");
       expect(text).not.toContain("vm_exec");
     }
     for (const kind of ["vm-private", "vm-shared"] as const) {
       expect(longCommandsPrompt(kind)).toContain("vm_exec takes `timeout_seconds` instead (default 60, at most 300)");
+    }
+  });
+
+  it("keeps a long command in a tracked foreground session instead of detaching it", () => {
+    for (const kind of [null, "local", "vps", "box"] as const) {
+      const text = longCommandsPrompt(kind);
+      expect(text).toContain("keep the command in the foreground until it exits");
+      expect(text).toContain("until it reaches terminal exit or the timeout elapses");
+      expect(text).toContain("still running and unresolved");
+      expect(text).toContain("split it into shorter pieces that each finish within it");
+      expect(text).toContain("Do not detach a command with nohup");
+      expect(text).not.toContain("nohup <command>");
+      expect(text).toContain("require the command's own fresh exit code and output");
+      expect(text).toContain("cannot set a wait, so finish it in this turn");
+    }
+  });
+
+  it("keeps the Local VM's own detached path, where the container outlives the call", () => {
+    for (const kind of ["vm-private", "vm-shared"] as const) {
+      const text = longCommandsPrompt(kind);
+      expect(text).toContain("This is the exception to the no-detach rule above");
+      expect(text).toContain("start it detached inside the VM (`nohup <command> > /tmp/<job>.log 2>&1 &`)");
     }
   });
 });
