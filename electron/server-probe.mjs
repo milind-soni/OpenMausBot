@@ -36,6 +36,16 @@ function failureKind(error) {
   return "unreachable";
 }
 
+/** A desktop app's companion refusal is a small JSON body; anything larger or not shaped like it isn't one. */
+async function isDesktopAppRefusal(response) {
+  if (Number(response.headers?.get?.("content-length")) > 4_096) return false;
+  const text = await response.text().catch(() => "");
+  if (text.length > 4_096) return false;
+  let error;
+  try { error = JSON.parse(text)?.error; } catch { return false; }
+  return typeof error === "string" && DESKTOP_APP_REFUSAL.test(error);
+}
+
 async function describe(origin, fetchImpl, timeoutMs) {
   let response;
   try {
@@ -43,9 +53,10 @@ async function describe(origin, fetchImpl, timeoutMs) {
   } catch (error) {
     return { ok: false, kind: failureKind(error) };
   }
+  if (response.status === 401) return { ok: false, kind: await isDesktopAppRefusal(response) ? "desktopApp" : "notMausBot" };
+  if (!response.ok) return { ok: false, kind: "notMausBot" };
   const body = await response.json().catch(() => null);
-  if (response.status === 401 && DESKTOP_APP_REFUSAL.test(String(body?.error ?? ""))) return { ok: false, kind: "desktopApp" };
-  if (!response.ok || typeof body?.environmentId !== "string" || !body.environmentId) return { ok: false, kind: "notMausBot" };
+  if (typeof body?.environmentId !== "string" || !body.environmentId) return { ok: false, kind: "notMausBot" };
   return { ok: true, environmentId: body.environmentId, label: typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 60) : new URL(origin).host,
     version: typeof body.version === "string" ? body.version.slice(0, 32) : null };
 }
@@ -70,7 +81,7 @@ export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnv
     if (!found.ok) {
       // macOS 15 blocks an app from the local network until the person allows it, and the request then just fails.
       const blockedOnMac = platform === "darwin" && serverTransport(origin) === "private-http" && (found.kind === "unreachable" || found.kind === "timeout");
-      // Another computer's desktop app answered: keep that over a later candidate that just didn't answer.
+      // Once a candidate turned out to be another computer's desktop app, that's the problem to report.
       if (failure?.problem === "desktopApp") continue;
       failure = loopback ? { problem: "loopback", host } : blockedOnMac ? { problem: "localNetwork", host }
         : { problem: found.kind === "refused" || found.kind === "timeout" ? "unreachable" : found.kind, host, ...(found.kind === "refused" || found.kind === "timeout" ? { reason: found.kind } : {}) };

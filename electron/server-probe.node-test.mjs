@@ -81,4 +81,9 @@ test("another computer's desktop app (its Remote access answers 401) is named as
   // Any other refusal still reads as no MausBot server.
   const otherRefusal = () => new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
   assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": otherRefusal }).fetch })).problem, "notMausBot");
+  // A refusal whose error isn't a string, or a body far bigger than a refusal, is not a desktop app either.
+  const oddError = () => new Response(JSON.stringify({ error: { toString: null } }), { status: 401 });
+  assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": oddError }).fetch })).problem, "notMausBot");
+  const huge = () => new Response(JSON.stringify({ error: `pair this device from Remote access settings ${"x".repeat(5_000)}` }), { status: 401 });
+  assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": huge }).fetch })).problem, "notMausBot");
 });
