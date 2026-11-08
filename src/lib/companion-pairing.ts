@@ -216,7 +216,7 @@ export function companionPairingRoutePin(
 
 /** No silent substitution of another protected endpoint: a new transport needs a fresh pairing credential. */
 export function companionPairingRoutePinAvailable(
-  source: Pick<CompanionPairingRouteSource, "endpoints" | "routes">,
+  source: Pick<CompanionPairingRouteSource, "endpoints" | "routes" | "tailnetName">,
   pin: CompanionPairingRoutePin,
 ): boolean {
   if (!pin.protectedEndpoint) return true;
@@ -238,7 +238,11 @@ export function companionPairingRoutePinAvailable(
   // An advertised pin whose endpoint is gone has lost its basis; a pin rebuilt
   // from the saved name only needs that name to still match.
   if (pin.protectedEndpointAdvertised) return false;
-  return !!routeName && pinHost === routeName;
+  if (routeName) return pinHost === routeName;
+  // Without a saved name, a pin built from the legacy tailnetName only needs
+  // that name to still match.
+  const legacyName = source.tailnetName?.trim().toLowerCase().replace(/\.$/, "");
+  return !!legacyName && pinHost === legacyName;
 }
 
 const tailnetHostname = (url: string): string | undefined => {

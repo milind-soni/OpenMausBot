@@ -304,6 +304,15 @@ describe("companionPairingRoute", () => {
     expect(companionPairingRoutePinAvailable({ ...source, endpoints: [] }, pin!)).toBe(false);
   });
 
+  it("keeps a Tailscale pin built from a legacy tailnetName when routes and endpoints are absent", () => {
+    const source = { port: 8810, tailnetName: "mac.tail1234.ts.net" };
+    const pin = companionPairingRoutePin(source, "tailscale");
+    expect(pin).not.toBeNull();
+    expect(pin?.protectedEndpointAdvertised).toBe(false);
+    expect(companionPairingRoutePinAvailable(source, pin!)).toBe(true);
+    expect(companionPairingRoutePinAvailable({ ...source, tailnetName: "other.tail9999.ts.net" }, pin!)).toBe(false);
+  });
+
   it("refuses explicit local pairing when no LAN or Bonjour route exists", () => {
     expect(companionPairingRoute({
       port: 8810,
