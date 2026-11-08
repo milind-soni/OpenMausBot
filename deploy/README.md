@@ -118,6 +118,7 @@ Run through this before every production deploy:
 - [ ] **Convex env** (`npx convex env list`): `ORIGIN_INTEGRATION_SECRET` equal to the server's, `ORIGIN_SEALING_KEY` unchanged, `ORIGIN_PUBLIC_URL` is the HTTPS origin without a trailing slash, `ORIGIN_SIGNUP_MODE` as intended.
 - [ ] **Server `.env`:** `NEXT_PUBLIC_CONVEX_URL` and `NEXT_PUBLIC_CONVEX_SITE_URL` point at the verified live deployment (they are baked in at build time), same `ORIGIN_PUBLIC_URL` and `ORIGIN_INTEGRATION_SECRET`, GitHub variables when you use an existing App.
 - [ ] **`ORIGIN_TRUSTED_PROXY=1`** only when the proxy overwrites `X-Real-IP`; otherwise leave it unset.
+- [ ] **Runtime dependency audit:** review `npm audit --omit=dev` before cutover. Apply compatible security fixes and exercise the affected runtime behavior; do not use forced major upgrades merely to clear an audit count. Sanitizer version overrides must not restore a known-vulnerable release.
 - [ ] **`ORIGIN_ADMIN_EMAILS`** lists the operator accounts, and those accounts exist.
 - [ ] **`/data/origin`** is the persisted volume and has a current backup.
 - [ ] **Smoke after deploy:** sign in, open a project board and an issue, send a chat message, check that `https://origin.example.com/api/mcp` answers 401 without a token, and read the app and Convex logs for errors. The full list is in section 5.
