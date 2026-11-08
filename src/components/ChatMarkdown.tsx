@@ -334,14 +334,19 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
   const preview = useHtmlPreview(filePath, name ?? fileName(filePath), message);
   const revealMenu = useRevealOriginalMenu();
   const [opening, setOpening] = useState(false);
+  const [opened, setOpened] = useState(false);
   if (!message) {
     return <span title={t("chat.file.legacy")} className="break-words text-ink-secondary">{children}</span>;
   }
-  const label = save.state === "saving"
+  // While a folder link opens, and after it opened, an earlier failed save is no longer what the link shows.
+  const shown = opening ? "opening" : opened && save.state === "failed" ? "idle" : save.state;
+  const label = shown === "opening"
+    ? t("settings.updates.opening")
+    : shown === "saving"
     ? t("common.saving")
-    : save.state === "saved"
+    : shown === "saved"
       ? t("common.saved")
-      : save.state === "failed"
+      : shown === "failed"
         ? t("chat.retry")
         : null;
 
@@ -355,7 +360,8 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
         type="button"
         onClick={preview.html ? preview.show : () => {
           setOpening(true);
-          void openLinkedFolder(filePath).then((opened) => opened ? undefined : save.save()).finally(() => setOpening(false));
+          setOpened(false);
+          void openLinkedFolder(filePath).then((done) => done ? setOpened(true) : save.save()).finally(() => setOpening(false));
         }}
         disabled={!preview.html && (opening || save.state === "saving")}
         title={preview.html ? t("html.preview", { name: name ?? fileName(filePath) }) : t("chat.file.saveCopy")}
@@ -364,11 +370,11 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
         {children}
         {preview.html ? (
           <Eye size={12} className="shrink-0" aria-hidden="true" />
-        ) : save.state === "saving" ? (
+        ) : shown === "opening" || shown === "saving" ? (
           <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
-        ) : save.state === "saved" ? (
+        ) : shown === "saved" ? (
           <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
-        ) : save.state === "failed" ? (
+        ) : shown === "failed" ? (
           save.retryable && <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
         ) : (
           <Download size={12} className="shrink-0" aria-hidden="true" />
@@ -376,14 +382,14 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
       </button>
       {label && (
         <span
-          role={save.state === "failed" ? "alert" : "status"}
-          title={save.state === "saved" ? save.savedTo : undefined}
-          className={`text-[12px] ${save.state === "saved" ? "text-success" : save.state === "failed" ? "text-danger" : "text-ink-secondary"}`}
+          role={shown === "failed" ? "alert" : "status"}
+          title={shown === "saved" ? save.savedTo : undefined}
+          className={`text-[12px] ${shown === "saved" ? "text-success" : shown === "failed" ? "text-danger" : "text-ink-secondary"}`}
         >
-          {save.state === "failed" ? saveFailureText(save) : label}
+          {shown === "failed" ? saveFailureText(save) : label}
         </span>
       )}
-      {save.state === "failed" && save.outsideWorkspace && (
+      {shown === "failed" && save.outsideWorkspace && (
         <span className="inline-flex flex-wrap items-center gap-x-1.5 text-[12px]">
           <OutsideWorkspaceFile filePath={filePath} />
         </span>
