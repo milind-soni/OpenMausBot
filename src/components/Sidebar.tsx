@@ -2,13 +2,12 @@ import { OrganizationIdentity } from "./OrganizationIdentity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { createPortal } from "react-dom";
 import { Archive, Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderPlus, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Phone, Pin, Plus, Search, SquarePen, TextQuote, Trash2, Users, X } from "lucide-react";
-import { api, useStore, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
+import { api, useStore, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo } from "@/state/store";
 import { approvalModeFor } from "../../shared/approval-mode";
 import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
 import { SidebarWorkingStep } from "./SidebarWorkingStep";
 import { openBotRow } from "@/state/thread-navigation";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
-
 import { BotAvatar } from "./Avatar";
 import { BotEngineMark, BotModelBadge, botTooltip } from "./BotModelBadge"; import { SidebarBotRole } from "./BotRole";
 import { stateForBot } from "@/lib/mascot";
@@ -22,7 +21,6 @@ import { copyText } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
- 
 import { StackedMauses } from "./StackedMauses";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
@@ -85,14 +83,16 @@ import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BU
 import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
+import { useSidebarHoverThreads } from "@/lib/sidebar-hover-threads";
+import { RecentChatsPopup, useRecentChatsPopup } from "./SidebarRecentChats";
+import { currentArchivableBot, useVisibleMessages } from "./SidebarBotHelpers";
+export { currentArchivableBot, useVisibleMessages } from "./SidebarBotHelpers";
 import { useBotUnread } from "./unread-notice";
 import { attentionHasRunningWork, attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
 import { AvatarActivityDot, RowDot, RowStatusText, rowSurface } from "./SidebarRowMarkers";
-
-
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
 import { useLiveMedia } from "@/lib/live-call-media";
@@ -441,17 +441,11 @@ function RoomContextMenu({
   );
 }
 
-/** A confirmation may span live fleet updates; never authorize from its snapshot. */
-export function currentArchivableBot(bots: readonly Bot[], id: string): Bot | undefined {
-  const active = bots.filter((candidate) => !candidate.hidden);
-  if (active.length <= 1) return undefined;
-  return active.find((candidate) => candidate.id === id && !candidate.chiefOfStaff && !candidate.defaultBot);
-}
-
 const NO_FOLDERS: BotProject[] = [];
 
-export function BotThreadList({ bot, selected, query, pendingQueued, reveal, locale, generatedTitles, dispatch, activityLabel, hidden = false }: BotRowProps & {
+export function BotThreadList({ bot, selected, query, pendingQueued, reveal, locale, generatedTitles, dispatch, activityLabel, hidden = false, onThreadOpened }: BotRowProps & {
   activityLabel?: string;
+  onThreadOpened?: () => void;
   hidden?: boolean;
 }) {
   const now = useRelativeNow();
@@ -499,6 +493,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, reveal, loc
     onSelect: (task: { threadId: string }) => {
       if (task.threadId !== latest.current.threadId) dispatch({ type: "switchTask", botId, threadId: task.threadId });
       else dispatch({ type: "select", id: botId });
+      onThreadOpened?.();
     },
     ...threadRowActions(botId, dispatch, generatedTitles),
     onRefreshPermissions: (task: { threadId: string }) => {
@@ -511,7 +506,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, reveal, loc
       }
       dispatch({ type: "refreshTaskPermissions", botId, threadId: task.threadId });
     },
-  }), [botId, dispatch, generatedTitles]);
+  }), [botId, dispatch, generatedTitles, onThreadOpened]);
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);
     return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && task.threadId === bot.threadId} folders={projects}
@@ -689,15 +684,12 @@ export function botRowProps(
   };
 }
 
-export function useVisibleMessages(bot: Bot): Message[] {
-  const { messages, activeLeafId } = bot;
-  return useMemo(() => visibleMessages({ messages, activeLeafId }), [messages, activeLeafId]);
-}
-
 export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const advanced = useAdvancedMode();
   const { bot, selected, deleting, mascotMotion, reveal, pendingQueued, instances, liveCall, density, query, dispatch, onMenu, renameRequest, botDrag: drag, botDrop: drop, botDragging: dragging } = props;
   const showThreads = useShowThreads();
+  const hoverThreads = useSidebarHoverThreads();
+  const { popover, setPopover, rowRef, cancelClose, closeLater, openPopover } = useRecentChatsPopup();
   const liveMedia = useLiveMedia();
   const remoteClient = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
   const [renaming, setRenaming] = useState(false);
@@ -706,7 +698,8 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   useEffect(() => { if (reveal && showThreads) setThreadsOpen(true); }, [reveal, showThreads]);
   const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0 || Boolean(query);
   const iconOnly = density === "icons";
-  const expanded = showThreads && !iconOnly && threadsOpen && hasThreadList;
+  const popupMode = showThreads && hoverThreads && !iconOnly && ((bot.tasks?.filter((task) => !task.routineRunId).length ?? 0) > 0 || (bot.projects?.length ?? 0) > 0);
+  const expanded = showThreads && !popupMode && !iconOnly && threadsOpen && hasThreadList;
   useEffect(() => { if (iconOnly) setRenaming(false); }, [iconOnly]);
   const simpleRow = !advanced && !showThreads && density === "comfortable";
   const simpleList = !advanced && !iconOnly;
@@ -722,7 +715,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     iconOnly
       ? railTile ? "h-[54px] justify-center" : "justify-center px-1 py-1.5"
       : simpleRow ? "gap-2 rounded-[8px] py-2 pl-2 pr-2 md:h-[54px] md:py-0"
-        : cn(showThreads ? "gap-2 py-2" : "gap-3 py-2", showThreads ? "pl-6 pr-9 group-hover:pr-[5.75rem] group-focus-within:pr-[5.75rem] max-md:pr-9 touch:pr-[5.75rem]" : "pl-2.5 pr-9"),
+        : cn(showThreads ? "gap-2 py-2" : "gap-3 py-2", showThreads ? cn(popupMode ? "pl-2.5" : "pl-6", "pr-9 group-hover:pr-[5.75rem] group-focus-within:pr-[5.75rem] max-md:pr-9 touch:pr-[5.75rem]") : "pl-2.5 pr-9"),
     !iconOnly && "max-md:rounded-2xl max-md:py-2.5",
     selected ? "bg-raised" : "hover:bg-raised/50",
     simpleRow && rowSurface(selected),
@@ -855,7 +848,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
 
   return (
     <>
-    <div className={cn("group relative", railTile && "mx-auto w-[54px]", botRowDropClass(drop, dragging))} data-bot-drop={drop ?? undefined} {...(drag && !renaming ? drag.row(bot.id) : {})}
+    <div ref={rowRef} onMouseEnter={() => { if (popupMode) openPopover(); }} onMouseLeave={() => { if (popupMode) closeLater(); }} className={cn("group relative", railTile && "mx-auto w-[54px]", botRowDropClass(drop, dragging))} data-bot-drop={drop ?? undefined} {...(drag && !renaming ? drag.row(bot.id) : {})}
       title={railTile ? botTooltip(bot, instances) : iconOnly ? [bot.name, bot.title?.trim()].filter(Boolean).join(" · ") : undefined}><BotDropLine place={drop} />
       {/* Keep this wrapper mounted: replacing it remounts RenameTitle and leaves the row stuck in rename mode. */}
       <div
@@ -886,13 +879,16 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       >
         {body}
       </div>
-      {showThreads && !iconOnly && hasThreadList && <button
+      {showThreads && !popupMode && !iconOnly && hasThreadList && <button
         type="button"
         aria-label={t(threadsOpen ? "task.collapseNamed" : "task.expandNamed", { name: bot.name })}
         aria-expanded={threadsOpen}
         onClick={() => setThreadsOpen((open) => !open)}
         className="absolute left-0.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-ink-secondary outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent/60"
       ><ChevronRight aria-hidden="true" size={13} className={cn("transition-transform", threadsOpen && "rotate-90")} /></button>}
+      {popupMode && <button type="button" aria-label={t("task.expandNamed", { name: bot.name })} aria-expanded={Boolean(popover)}
+        onClick={(event) => { event.stopPropagation(); if (popover) setPopover(null); else openPopover(); }}
+        className="absolute left-0.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 focus-visible:opacity-100 touch:opacity-100 max-md:opacity-100"><span aria-hidden="true">⋯</span></button>}
       {!renaming && iconOnly && unread && (
         <span className={cn("pointer-events-none absolute size-2 rounded-full border border-panel bg-accent", railTile ? "right-1 top-1" : "bottom-1.5 right-1.5")} />
       )}
@@ -911,7 +907,10 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         </span>
       )}
     </div>
-    {advanced && !iconOnly && threadsOpen && hasThreadList && <BotThreadList {...props} hidden={!showThreads}
+    {popupMode && popover && <RecentChatsPopup botId={bot.id} position={popover} onEnter={cancelClose} onLeave={closeLater}>
+      <BotThreadList {...props} onThreadOpened={() => setPopover(null)} activityLabel={liveActivityLabel(sidebarMessage(last))} query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />
+    </RecentChatsPopup>}
+    {advanced && !popupMode && !iconOnly && threadsOpen && hasThreadList && <BotThreadList {...props} hidden={!showThreads}
       activityLabel={liveActivityLabel(sidebarMessage(last))}
       query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
     {(advanced || (!iconOnly && (waiting || unread || bot.tasks?.some(runningRoutineRun)))) && <SidebarBotActivity bot={bot} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} density={density} pendingQueued={pendingQueued} dispatch={dispatch} waitingOnly={!advanced} runsOnly={expanded} />}

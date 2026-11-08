@@ -1737,6 +1737,8 @@
   "settings.userBubbles.aria": "Color my messages with the bot's color",
   "settings.advancedMode.title": "Advanced mode",
   "settings.advancedMode.subtitle": "Show every technical control on this device: usage and tokens, the inspector and other tools for builders. Turn it off for a simpler app. Nothing is deleted either way.",
+  "settings.hoverThreads.title": "Show recent chats on hover",
+  "settings.hoverThreads.subtitle": "Show recent chats beside a bot instead of expanding them in the sidebar. Requires Threads to be enabled.",
   "settings.threadDisplay.title": "Threads",
   "settings.threadDisplay.subtitle": "Show thread lists and controls on this device only. Hiding them keeps all conversation history and running work; channels are unchanged. Turn this back on to access your threads again.",
   "settings.threadDisplay.show": "Show threads",
