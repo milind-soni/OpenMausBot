@@ -5594,7 +5594,7 @@
   "connectors.typeAria": "Plugin type",
   "connectors.tab.apps": "Connected apps",
   "connectors.tab.mcp": "MCP servers",
-  "connectors.stale": "Showing what was connected last time. This Mac's credential store couldn't be opened just now, so these couldn't be re-checked. Your apps are still connected. Restarting {app} usually clears this.",
+  "connectors.stale": "Showing what was connected last time. The credential store couldn't be opened just now, so these couldn't be re-checked. Your apps are still connected. Restarting {app} usually clears this.",
   "connectors.viewAria": "Connected apps view",
   "connectors.tab.marketplace": "Marketplace",
   "connectors.tab.connected": "Connected",

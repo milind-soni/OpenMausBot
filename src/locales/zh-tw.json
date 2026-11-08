@@ -5590,7 +5590,7 @@
   "connectors.typeAria": "外掛類型",
   "connectors.tab.apps": "已連線的應用程式",
   "connectors.tab.mcp": "MCP 伺服器",
-  "connectors.stale": "目前顯示的是上次連線的內容 — 剛才無法開啟這台 Mac 的憑證儲存區，因此無法重新檢查這些項目。你的應用程式仍在連線中；重新啟動 {app} 通常就能解決。",
+  "connectors.stale": "目前顯示的是上次連線的內容 — 剛才無法開啟憑證儲存區，因此無法重新檢查這些項目。你的應用程式仍在連線中；重新啟動 {app} 通常就能解決。",
   "connectors.viewAria": "已連線應用程式檢視",
   "connectors.tab.marketplace": "市集",
   "connectors.tab.connected": "已連線",
