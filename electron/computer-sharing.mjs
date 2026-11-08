@@ -138,11 +138,12 @@ export function cloudLendingVerdict(binding, current, env) {
   return { allow: true };
 }
 
-/** A server of the person's own, by this desktop's sign-in there: its admin (owner) pairing, and no Cloud, team or hosted
- * workspace. Lent only once the person allows it here (lendOwn), without the maintainer flag. Security: never a
- * non-admin pairing, a team's server or a Cloud (a Cloud is lent as one, by its own rules). */
+/** A server of the person's own, by this desktop's sign-in there: its admin (owner) pairing on a server nobody else signs
+ * in to, as the server says (`own`, server/own-home.ts), and no Cloud, team or hosted server. Lent only once the person
+ * allows it here (lendOwn), without the maintainer flag. Security: never a non-admin pairing, a server others sign in to,
+ * a team's server or a Cloud (a Cloud is lent as one, by its own rules). */
 export function ownServerSession(auth) {
-  return auth?.kind === "session" && Array.isArray(auth.scopes) && auth.scopes.includes("admin") && auth.cloudHome !== true && !auth.team && auth.hosted !== true;
+  return auth?.kind === "session" && auth.own === true && Array.isArray(auth.scopes) && auth.scopes.includes("admin") && auth.cloudHome !== true && !auth.team && auth.hosted !== true;
 }
 
 /** What a Cloud that keeps MCP servers for this computer hears: it runs them, and which installs here it is. */
@@ -196,6 +197,7 @@ export function lendsAsWanted(record, wanted) {
 }
 
 class Paused extends Error {}
+const UPDATE_SERVER = "Update this server to enable computer sharing";
 
 const LENT_PLATFORMS = new Set(["darwin", "win32", "linux"]);
 const RECONNECT_EVERY_MS = 15 * 60_000;
@@ -365,12 +367,14 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     if (!response.ok) throw Object.assign(new Error(response.status === 401 || response.status === 403 ? "Pair this desktop again before sharing computer access." : `Server request failed (${response.status}). Update the server if needed.`), { status: response.status });
     return json;
   };
-  const describe = async env => {
+  const describe = async (env, required = true) => {
     const [auth, descriptor] = await Promise.all([request(env, "/api/auth/session"), request(env, "/.well-known/openmausbot/environment")])
       .catch(error => { throw error.status === 401 || error.status === 403 ? Object.assign(error, { problem: "connect-first" }) : error; });
     if (auth.kind !== "session" || !uuid(auth.id) || !uuid(descriptor.environmentId)) throw Object.assign(new Error("Complete server pairing or sign-in first"), { problem: "connect-first" });
-    if (descriptor.capabilities?.sharedComputers !== true) throw new Error("Update this server to enable computer sharing");
-    return { auth, info: { sessionId: auth.id, environmentId: descriptor.environmentId }, details: descriptor.capabilities?.lendingDetails === true, link: descriptor.capabilities?.deviceLink === true, chrome: descriptor.capabilities?.myChromeLink === true, timeouts: descriptor.capabilities?.commandTimeouts === true, long: descriptor.capabilities?.longCommands === true, edits: descriptor.capabilities?.fileEdits === true, asks: descriptor.capabilities?.computerAsks === true, mcp: descriptor.capabilities?.lentMcp === true };
+    // A server of the person's own says what it takes from them in their own sign-in's answer (`lending`), never before pairing.
+    const offered = { ...descriptor.capabilities, ...(ownServerSession(auth) && auth.lending && typeof auth.lending === "object" ? auth.lending : {}) };
+    if (required && offered.sharedComputers !== true) throw new Error(UPDATE_SERVER);
+    return { supported: offered.sharedComputers === true, auth, info: { sessionId: auth.id, environmentId: descriptor.environmentId }, details: offered.lendingDetails === true, link: offered.deviceLink === true, chrome: offered.myChromeLink === true, timeouts: offered.commandTimeouts === true, long: offered.longCommands === true, edits: offered.fileEdits === true, asks: offered.computerAsks === true, mcp: offered.lentMcp === true };
   };
   const identity = async env => {
     await requireEnabled();
@@ -398,8 +402,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   };
   /** This desktop's sign-in on a server of the person's own, checked now (ownServerSession). */
   const ownIdentity = async env => {
-    const described = await describe(env);
+    const described = await describe(env, false);
     if (!ownServerSession(described.auth)) throw Object.assign(new Error(t("native.lend.notOwnServer")), { problem: "not-own" });
+    if (!described.supported) throw new Error(UPDATE_SERVER);
     takes(env, { ...described, link: false, chrome: false });
     return described.info;
   };

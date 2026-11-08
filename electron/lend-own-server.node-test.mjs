@@ -28,14 +28,17 @@ async function scratch(t) {
   return dir;
 }
 
-/** A self-hosted server as this desktop's sign-in there sees it: `scopes`, and whether it is a team's or a Cloud. */
-function selfHosted({ scopes = ["admin", "client"], extra = {}, mcp = true } = {}) {
+/** A self-hosted server as this desktop's sign-in there sees it: `scopes`, whether nobody else signs in there (`own`, which
+ * the server says only to its one owner, with what it takes from them), and whether it is a team's or a Cloud. Its public
+ * description offers no lending, as before pairing. */
+function selfHosted({ scopes = ["admin", "client"], own = true, extra = {}, mcp = true } = {}) {
   const json = (value, status = 200) => ({ ok: status < 400, status, headers: { get: () => null }, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
-  const state = { environmentId: randomUUID(), sessionId: randomUUID(), scopes, extra, connects: [], disconnects: [], polls: 0 };
+  const state = { environmentId: randomUUID(), sessionId: randomUUID(), scopes, own, extra, connects: [], disconnects: [], polls: 0 };
   state.fetch = async (url, init) => {
     const route = new URL(url).pathname;
-    if (route === "/api/auth/session") return json({ kind: "session", id: state.sessionId, scopes: state.scopes, ...state.extra });
-    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, lendingDetails: true, fileEdits: true, ...(mcp ? { lentMcp: true } : {}) } });
+    const owner = state.own && state.scopes.includes("admin");
+    if (route === "/api/auth/session") return json({ kind: "session", id: state.sessionId, scopes: state.scopes, ...(owner ? { own: true, lending: { sharedComputers: true, lendingDetails: true, fileEdits: true, ...(mcp ? { lentMcp: true } : {}) } } : {}), ...state.extra });
+    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { remoteSessions: true } });
     const body = init?.body ? JSON.parse(init.body) : {};
     if (route === "/api/shared-computers/connect") { state.connects.push(body); return json({ ok: true }); }
     if (route.endsWith("/poll")) {
@@ -63,8 +66,9 @@ async function desktop(t, server, { ownClouds = () => [] } = {}) {
 }
 
 test("only this desktop's admin pairing on a server that is no Cloud, team or hosted workspace counts as the person's own", () => {
-  const owner = { kind: "session", id: randomUUID(), scopes: ["admin", "client"] };
+  const owner = { kind: "session", id: randomUUID(), scopes: ["admin", "client"], own: true };
   assert.equal(ownServerSession(owner), true);
+  assert.equal(ownServerSession({ ...owner, own: undefined }), false, "a server others sign in to");
   assert.equal(ownServerSession({ ...owner, scopes: ["client"] }), false, "a narrower pairing");
   assert.equal(ownServerSession({ ...owner, scopes: undefined }), false);
   assert.equal(ownServerSession({ ...owner, team: { id: "t", role: "admin" } }), false, "a team's server");
@@ -93,8 +97,8 @@ test("once the person allows it, a server of their own gets the apps on the scre
   assert.equal(mac.summaries.at(-1).terminalSwitch, false, "the Clouds' terminal switch stays out of the menu without a Cloud");
 });
 
-test("a narrower pairing, a team's server or a Cloud is never asked about and is never lent", async t => {
-  for (const [what, server] of [["client scope", selfHosted({ scopes: ["client"] })], ["team", selfHosted({ extra: { team: { id: "t", role: "admin" } } })], ["Cloud", selfHosted({ extra: { cloudHome: true } })]]) {
+test("a narrower pairing, a server others sign in to, a team's server or a Cloud is never asked about and is never lent", async t => {
+  for (const [what, server] of [["client scope", selfHosted({ scopes: ["client"] })], ["others sign in there", selfHosted({ own: false })], ["team", selfHosted({ extra: { team: { id: "t", role: "admin" } } })], ["Cloud", selfHosted({ extra: { cloudHome: true } })]]) {
     const mac = await desktop(t, server);
     assert.equal(await mac.sharing.ownServer(garage), null, what);
     assert.equal(await mac.sharing.ownOffer(garage), false, what);
@@ -136,7 +140,7 @@ test("Stop ends it at once: the server is told, polling stops, and it stays off 
   assert.equal(await mac.sharing.ownOffer(garage), null, "Stop is an answer too");
 });
 
-test("a new pairing of the same server keeps lending; that server dropping the owner pairing, or another server behind the address, ends it", async t => {
+test("a new pairing of the same server keeps lending; that server getting other people, or another server behind the address, ends it", async t => {
   const server = selfHosted();
   const mac = await desktop(t, server);
   await mac.sharing.lendOwn(garage, { computer: true });
@@ -146,7 +150,7 @@ test("a new pairing of the same server keeps lending; that server dropping the o
   await until(() => server.connects.length === 2, "lending to go on after pairing again");
   assert.equal(JSON.parse(await readFile(mac.file, "utf8")).records.garage.sessionId, server.sessionId, "bound to the new pairing");
 
-  server.scopes = ["client"];
+  server.own = false;
   mac.restart();
   await until(() => mac.sharing.state(garage.id).problem === "not-own", "lending to end");
   assert.equal(mac.sharing.state(garage.id).enabled, false);

@@ -124,20 +124,28 @@ function desktop(token: string) {
   return { env, sharing };
 }
 
-it("a self-hosted server takes its owner's computer by default: the capability is there with no features block", async () => {
-  expect(await descriptorCapabilities()).toMatchObject({ sharedComputers: true });
-  const connect = await api("POST", "/api/shared-computers/connect", {});
-  expect(connect.status).toBe(403);
-  expect(connect.body).toEqual({ error: "Pair this desktop first" });
+it("before pairing, a server describes no lending and answers every shared-computer route the way a route this build never had answers", async () => {
+  expect(await descriptorCapabilities()).not.toHaveProperty("sharedComputers");
+  const absent = await api("POST", "/api/not-a-feature/connect");
+  expect(absent).toEqual({ status: 404, body: { error: "no route: POST /api/not-a-feature/connect" } });
+  for (const path of PUBLIC_ROUTES) expect(await api("POST", path, {}), path).toEqual({ status: 404, body: { error: `no route: POST ${path}` } });
+  expect(await api("GET", "/api/shared-computers")).toEqual({ status: 404, body: { error: "no route: GET /api/shared-computers" } });
 });
 
-it("takes a computer only from an admin (owner) pairing, never from a narrower one", async () => {
+it("while nothing is lent, the bot-facing route hides behind the unknown-endpoint answer", async () => {
+  expect(await internal("GET", "/api/internal/not-a-feature")).toEqual({ status: 404, body: { error: "unknown internal endpoint" } });
+  expect(await internal("GET", "/api/internal/shared-computers")).toEqual({ status: 404, body: { error: "unknown internal endpoint" } });
+  expect(await internal("POST", "/api/internal/shared-computers", { computer_id: "x", action: "list_files" })).toEqual({ status: 404, body: { error: "unknown internal endpoint" } });
+});
+
+it("on a server only its owner signs in to, only the owner's pairing hears what it takes and may lend; a narrower pairing is refused", async () => {
   const member = await paired(["client"]);
-  const refused = await connectAs(member.token);
-  expect(refused.status).toBe(403);
-  expect(String(refused.body.error)).toMatch(/Only this server's owner can share a computer/);
+  expect((await api("GET", "/api/auth/session", undefined, bearer(member.token))).body).not.toHaveProperty("lending");
+  expect(await connectAs(member.token)).toEqual({ status: 403, body: { error: "forbidden: this session lacks the admin scope" } });
   const owner = await paired(["admin", "client"]);
+  expect((await api("GET", "/api/auth/session", undefined, bearer(owner.token))).body).toMatchObject({ own: true, lending: { sharedComputers: true, lentMcp: true } });
   expect((await connectAs(owner.token)).status).toBe(200);
+  expect(await descriptorCapabilities(), "the public description stays as it was").not.toHaveProperty("sharedComputers");
 });
 
 it("the desktop lends to a server of the person's own once they allow it, with no maintainer flag anywhere, and Stop ends it at once", async () => {
@@ -152,6 +160,7 @@ it("the desktop lends to a server of the person's own once they allow it, with n
     const listed = async () => ((await api("GET", "/api/shared-computers", undefined, bearer(owner.token))).body.computers ?? []) as Array<{ online: boolean; scopes: { screen: boolean; terminal: boolean } }>;
     await vi.waitFor(async () => expect((await listed()).some((computer) => computer.online && computer.scopes.screen && !computer.scopes.terminal)).toBe(true), { timeout: 15_000 });
     expect(await sharing.ownOffer(env), "answered for this pairing: not asked again").toBeNull();
+    expect((await internal("GET", "/api/internal/shared-computers")).status, "the bots' route once a computer is lent").toBe(200);
     sharing.revoke(env);
     await vi.waitFor(async () => expect((await listed()).some((computer) => computer.online)).toBe(false), { timeout: 15_000 });
   } finally { sharing.close(); }
