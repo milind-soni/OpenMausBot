@@ -10,13 +10,14 @@ This document outlines the contributions made to **OpenMausBot** for Arch Linux 
 - **`electron-builder.yml`**:
   - Added the `pacman` target configuration under Linux distribution targets.
   - Specified Arch Linux system library dependencies (`fuse3`, `gtk3`, `nss`, `alsa-lib`, `libcups`, `mesa`) to ensure reliable installation on fresh Arch/EndeavourOS/CachyOS systems without missing runtime libraries.
+  - Configured `afterInstall` and `afterRemove` packaging hooks (`build/linux-after-install.sh` and `build/linux-after-remove.sh`) so package directory modes for the bundled CUA runtime (`0755`) are safely established and preserved across upgrades.
 - **`package.json`**:
   - Added dedicated packaging scripts:
     - `"package:arch"`: prepares dependencies and builds the native `.pacman` package.
     - `"package:pacman"`: alias targeting the pacman builder target.
 - **`docs/linux-desktop.md`**:
   - Documented building from source for Arch Linux via `pnpm package:arch`.
-  - Added installation instructions using `sudo pacman -U release/OpenMausBot-*.pacman`.
+  - Added installation instructions using explicit package path syntax: `sudo pacman -U release/OpenMausBot-<version>-x64.pacman`.
 
 ### B. Desktop Environment Verification on Arch / Wayland
 - Built and packaged the desktop bundle on an Arch Linux distribution (CachyOS) running KDE Plasma on Wayland (`kwin_wayland`).
@@ -25,14 +26,14 @@ This document outlines the contributions made to **OpenMausBot** for Arch Linux 
 
 ---
 
-## 2. Security Vulnerability Audit Report
+## 2. Security Vulnerability Audit Report (Informational Summary)
 
-A source code security review was performed across the codebase's main trust boundaries. Below is a summary of identified areas for hardening:
+> **Note**: This section documents findings from a source code security review conducted across trust boundaries. These findings represent hardening opportunities for future follow-up issues/PRs and are not modified in this packaging PR.
 
 ### Finding 1: Single-Pass Path Sanitization in Static File Serving
 - **File**: `server/static-files.ts` (`serveStatic`)
-- **Detail**: Path traversal filtering uses a single-pass `path.replace(/\.\./g, "")` before `join(staticDir, safe)`. While the URL parser normalizes paths in typical queries, single-pass substring stripping is susceptible to nested patterns (e.g., `....//`).
-- **Recommendation**: Replace substring stripping with canonical path boundary verification (`realpathSync(target).startsWith(realpathSync(staticDir))`).
+- **Detail**: Path traversal filtering uses a single-pass `path.replace(/\.\./g, "")` before `join(staticDir, safe)`. Although URL parsing normalizes standard relative segments in typical queries, single-pass substring stripping is fragile for path boundary enforcement across varied inputs.
+- **Recommendation**: Validate canonical directory boundaries (e.g. verifying `const rel = path.relative(resolvedStaticDir, resolvedTargetPath);` and asserting `!rel.startsWith('..') && !path.isAbsolute(rel)`) rather than substring stripping or simple prefix checks (which could match sibling directories sharing a common prefix like `/srv/static-backup`).
 
 ### Finding 2: Unauthenticated Loopback Read Access in Desktop Mode
 - **File**: `server/request-auth.ts` (`mutatingPublicRoute`, `resolveRequestAuth`)
@@ -63,6 +64,6 @@ pnpm package:arch
 # 3. Verify generated pacman package
 ls -lh release/*.pacman
 
-# 4. Install locally on Arch Linux
-sudo pacman -U release/OpenMausBot-*.pacman
+# 4. Install locally on Arch Linux (specify exact built version)
+sudo pacman -U release/OpenMausBot-0.1.149-x64.pacman
 ```
