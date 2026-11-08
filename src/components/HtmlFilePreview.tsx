@@ -21,7 +21,7 @@ export function isMarkdownFile(name: string): boolean {
 // Lazy, so the chat's Markdown renderer (which uses this file's chips) is not imported back into it.
 const MarkdownFileContent = lazy(() => import("./MarkdownFilePreview"));
 
-// A failed import stays failed until the page reloads, and without a boundary it would replace the whole message.
+// React 19 caches a rejected lazy import until the page reloads; without a boundary it would replace the whole message.
 class MarkdownPreviewBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
 

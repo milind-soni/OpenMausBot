@@ -30,8 +30,9 @@ export default function MarkdownFileContent({ path, name, message }: { path: str
     })();
     return () => controller.abort();
   }, [path, message.threadId, message.messageId, attempt]);
-  if (error === "size") return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{t("markdown.tooLarge")}</p><button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-hairline px-3 py-2 hover:bg-raised" disabled={save.state === "saving"} onClick={() => void save.save()}><Download size={14} />{t("attach.saveAria", { name })}</button>{save.state === "failed" && <p role="alert" className="mt-2 text-[12px] text-danger">{save.reason}</p>}</div>;
-  if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{t("markdown.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>;
+  const retry = <button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button>;
+  if (error === "size") return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{t("markdown.tooLarge")}</p><div className="flex justify-center gap-2"><button type="button" className="inline-flex items-center gap-1.5 rounded-lg border border-hairline px-3 py-2 hover:bg-raised" disabled={save.state === "saving"} onClick={() => void save.save()}><Download size={14} />{t("attach.saveAria", { name })}</button>{retry}</div>{save.state === "failed" && <p role="alert" className="mt-2 text-[12px] text-danger">{save.reason}</p>}</div>;
+  if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{t("markdown.loadFailed")}</p>{retry}</div>;
   if (source === null) return <div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</div>;
   return <div className="flex flex-col gap-2">
     <div className="flex items-center justify-end gap-1">
