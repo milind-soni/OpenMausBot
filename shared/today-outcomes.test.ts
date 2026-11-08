@@ -38,6 +38,7 @@ const CASES: ReadonlyArray<[string, OutcomeCategory | null]> = [
   ["NOTION_QUERY_DATABASE", null],
   ["GOOGLESHEETS_BATCH_GET", null],
   ["HUBSPOT_CREATE_CONTACT", "lead"],
+  ["ZOHO_CRM_CREATE_CONTACT", "lead"],
   ["SALESFORCE_CREATE_LEAD", "lead"],
   ["PIPEDRIVE_ADD_A_PERSON", "lead"],
   ["APOLLO_PEOPLE_SEARCH", "lead"],
