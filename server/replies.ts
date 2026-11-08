@@ -76,7 +76,7 @@ const WIDGET_WORDS = {
 function promptWithWidget(text: string, target: ReplyTarget): string {
   const press = target.widgetPress;
   const excerpt = inFence(replyExcerpt(target.text ?? ""));
-  const words = target.serverCard ? WIDGET_WORDS.server : WIDGET_WORDS.bot;
+  const words = appCard(target) ? WIDGET_WORDS.server : WIDGET_WORDS.bot;
   if (!press) {
     return [
       `The current message is a reply to ${words.shown}. The person typed it; they did not press anything on the widget.`,
@@ -194,7 +194,7 @@ export function transcriptText(stored: Message, messagesById: ReadonlyMap<string
   const target = quoted ? { ...quoted, text: contextText(quoted) } : undefined;
   if (!target?.text) return message.text;
   const excerpt = replyExcerpt(target.text, 220);
-  if (appCard(target)) return `[answering a card shown in this chat]\n${cardRecords(excerpt)}\n${message.text}`;
+  if (appCard(target)) return `[${message.reaction ? `reacted ${message.reaction} to` : "answering"} a card shown in this chat]\n${cardRecords(excerpt)}\n${message.text}`;
   if (message.reaction) return `[reacted ${message.reaction} to ${replySpeaker(target, userName)}: “${excerpt}”]`;
   if (target.kind === "app") {
     return message.fromApp

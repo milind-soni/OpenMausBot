@@ -34,6 +34,15 @@ describe("the app's own add-a-key suggestion", () => {
     expect(replied).toContain("a card shown to the person in this chat, which you did not write");
     expect(replied).not.toContain("from Assistant");
   });
+
+  it("keeps the person's reaction, and stays a card the bot did not write when it is a widget", () => {
+    const card = message({ kind: "widget", text: "Want me to sort your email for free? Add a key.", setupSuggestion: { kind: "helperKey" } });
+    const reacted = message({ id: "m2", role: "user", text: "👍", replyToId: "m1", reaction: "👍" });
+    expect(transcriptText(reacted, new Map([["m1", card]]))).toMatch(/^\[reacted 👍 to a card shown in this chat\]\n\[Records from a card shown/);
+    const typed = promptWithReply("what is this?", card);
+    expect(typed).toContain("a card shown to the person in this chat, which you did not write");
+    expect(typed).not.toContain("a widget you showed");
+  });
 });
 
 describe("flat replies", () => {
