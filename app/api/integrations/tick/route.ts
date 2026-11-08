@@ -1,5 +1,5 @@
 import { integrationBridge, readIntegrationRequest } from "@/lib/integration-bridge";
-import { createProjectRepository, syncGitHubPage } from "@/lib/github-sync";
+import { createProjectRepository, reconcileGitHubLifecycle, syncGitHubPage } from "@/lib/github-sync";
 import { lockGitHubJob, saveGitHubJob } from "@/lib/github-workspace";
 import { after } from "next/server";
 import { flushChatNotifications } from "@/lib/localRealtime";
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   after(async () => {
     try {
       const pending = await integrationBridge<string[]>("pending", {});
-      await Promise.all([...(pending.length ? [createProjectRepository(pending[0])] : []), syncGitHubPage(), syncPRPage(), flushChatNotifications()]);
+      await Promise.all([...(pending.length ? [createProjectRepository(pending[0])] : []), syncGitHubPage(), reconcileGitHubLifecycle(), syncPRPage(), flushChatNotifications()]);
     } finally { saveGitHubJob("sync-lock", "done"); }
   });
   return Response.json({ accepted: true }, { status: 202 });

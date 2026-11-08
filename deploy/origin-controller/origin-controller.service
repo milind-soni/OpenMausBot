@@ -1,0 +1,25 @@
+[Unit]
+Description=Origin scoped execution controller tick
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+LoadCredential=service-token:/etc/origin-controller/service-token
+ExecStart=/usr/bin/python3 /opt/origin-controller/controller.py tick
+TimeoutStartSec=50
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=yes
+MemoryMax=128M

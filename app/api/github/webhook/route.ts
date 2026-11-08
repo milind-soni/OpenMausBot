@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     const lease = await integrationBridge<number | null>("githubDelivery", { deliveryId, fingerprint });
     if (lease === null) return Response.json({ accepted: true, duplicate: true });
     // Acknowledge only after syncing; a crash leaves a recoverable lease.
-    if (kind === "issues") await syncGitHubEvent(event.repoUrl, event.numbers[0]);
+    if (kind === "issues") await syncGitHubEvent(event.repoUrl, event.numbers[0], event.issueEvent);
     else await syncPREvent(event.repoUrl, event.numbers, event.headSha);
     await integrationBridge("githubDelivery", { deliveryId, fingerprint, finishLease: lease });
     return Response.json({ accepted: true });

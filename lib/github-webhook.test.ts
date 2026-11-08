@@ -7,7 +7,7 @@ const secret = "fixture-secret-not-a-real-credential";
 const pr = { number: 12, html_url: "https://github.com/test/prs/pull/12", node_id: "node-12", state: "open", draft: true, merged: false, updated_at: "2026-10-15T10:00:00Z", head: { ref: "origin/task", sha: "a".repeat(40), repo: { full_name: "test/prs" } }, base: { sha: "b".repeat(40), repo: { full_name: "test/prs" } }, mergeable: null };
 describe("signed GitHub webhook fixtures", () => {
   for (const kind of ["issues", "pull_request", "pull_request_review", "check_run", "check_suite"]) test(kind, () => {
-    const payload = { repository: { full_name: "test/prs" }, issue: { number: 42 }, pull_request: pr, check_run: { head_sha: pr.head.sha, pull_requests: [{ number: 12 }] }, check_suite: { head_sha: pr.head.sha, pull_requests: [{ number: 12 }] } };
+    const payload = { repository: { id: 1, full_name: "test/prs" }, issue: { number: 42, node_id: "fixture-issue", updated_at: pr.updated_at }, pull_request: pr, check_run: { head_sha: pr.head.sha, pull_requests: [{ number: 12 }] }, check_suite: { head_sha: pr.head.sha, pull_requests: [{ number: 12 }] } };
     const body = JSON.stringify(payload), signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
     expect(verifyGitHubSignature(body, signature, secret)).toBe(true);
     expect(verifyGitHubSignature(`${body} `, signature, secret)).toBe(false);

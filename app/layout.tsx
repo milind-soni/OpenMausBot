@@ -15,6 +15,7 @@ import "./styles/library.css";
 import "./styles/repo.css";
 import "./styles/feedback.css";
 import "./styles/settings.css";
+import "./styles/execution.css";
 import "./styles/auth.css";
 import "./styles/motion.css";
 import { Providers } from "./providers";

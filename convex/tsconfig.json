@@ -4,6 +4,7 @@
     "lib": ["ES2021", "dom"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "paths": { "@/*": ["../*"] },
     "allowSyntheticDefaultImports": true,
     "strict": true,
     "noEmit": true,

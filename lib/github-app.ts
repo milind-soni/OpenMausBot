@@ -22,19 +22,20 @@ export function repositoryPath(repoUrl: string) {
   if (!repo || [repo.owner, repo.repo].some(part => part === "." || part === "..")) throw new Error("GitHub repository required");
   return `/repos/${repo.owner}/${repo.repo}`;
 }
-export async function installationFor(repoUrl: string, account?: Account) {
+export async function installationFor(repoUrl: string, account?: Account, permissions: Record<string, string> = prPermissions) {
   const installation = await githubRequest<Installation>(`${repositoryPath(repoUrl)}/installation`, appJwt());
   if (account && (installation.account?.id !== account.id || installation.account.login.toLowerCase() !== account.login.toLowerCase())) throw new Error("Repository App installation does not belong to this workspace's connected GitHub account");
-  if (installation.suspended_at || Object.entries(prPermissions).some(([key, level]) => installation.permissions[key] !== level && installation.permissions[key] !== "write")) throw new Error(permissionNotice);
+  if (installation.suspended_at || Object.entries(permissions).some(([key, level]) => installation.permissions[key] !== level && installation.permissions[key] !== "write")) throw new Error(`${permissionNotice} Execution merges additionally require Commit statuses: read and Administration: read.`);
   return installation;
 }
 // Tokens are held only in process memory and expire in one hour (GitHub's lifetime).
 // Hosts revoke their push token immediately after git push. Never persist/return it to a model.
-export async function installationToken(repoUrl: string, pushOnly = false, account?: Account) {
+export async function installationToken(repoUrl: string, pushOnly = false, account?: Account, extra: Record<string, string> = {}) {
   const repo = parseGitHubRepo(repoUrl)!;
-  const installation = await installationFor(repoUrl, account);
+  const permissions = pushOnly ? { contents: "write" } : { ...prPermissions, ...extra };
+  const installation = await installationFor(repoUrl, account, permissions);
   const result = await githubRequest<{ token: string; expires_at: string; permissions: Record<string, string>; repositories: { full_name: string }[] }>(`/app/installations/${installation.id}/access_tokens`, appJwt(), {
-    method: "POST", body: JSON.stringify({ repositories: [repo.repo], permissions: pushOnly ? { contents: "write" } : prPermissions }),
+    method: "POST", body: JSON.stringify({ repositories: [repo.repo], permissions }),
   });
   if (!result.token || !Number.isFinite(Date.parse(result.expires_at)) || Date.parse(result.expires_at) <= Date.now() || Date.parse(result.expires_at) > Date.now() + 65 * 60000 || result.repositories?.length !== 1 || result.repositories[0].full_name.toLowerCase() !== `${repo.owner}/${repo.repo}`.toLowerCase()) {
     if (result.token) await revokeInstallationToken(result.token);
@@ -42,9 +43,9 @@ export async function installationToken(repoUrl: string, pushOnly = false, accou
   }
   return { token: result.token, expiresAt: result.expires_at };
 }
-export async function projectInstallationToken(projectId: string, repoUrl: string, pushOnly = false) {
+export async function projectInstallationToken(projectId: string, repoUrl: string, pushOnly = false, extra: Record<string, string> = {}) {
   const account = await projectAccount(projectId, repoUrl);
-  const credentials = await installationToken(repoUrl, pushOnly, account);
+  const credentials = await installationToken(repoUrl, pushOnly, account, extra);
   try {
     const current = await projectAccount(projectId, repoUrl);
     if (current.id !== account.id || current.login.toLowerCase() !== account.login.toLowerCase()) throw new Error("GitHub connection changed during authorization");

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily stable Hermes check with optional administrator-enabled guarded application
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+Unit=origin-hermes-update-check.service
+
+[Install]
+WantedBy=timers.target

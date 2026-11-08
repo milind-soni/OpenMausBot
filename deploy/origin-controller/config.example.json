@@ -1,0 +1,5 @@
+{
+  "url": "https://origin.example.invalid/api/execution/controller",
+  "tailscaleBinary": "/usr/bin/tailscale",
+  "peers": []
+}

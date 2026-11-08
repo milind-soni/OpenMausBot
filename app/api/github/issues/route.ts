@@ -25,7 +25,8 @@ export async function POST(request: Request) {
       }
     }
     const task = await getConvexClient().query(api.tasks.details, { sessionToken, projectId: project._id, taskId: body.taskId as Id<"tasks"> });
+    const issue = await createGitHubTask(body.projectId, body.taskId);
     if (task.task.githubTaskMode === "pull_request" || (!task.task.githubTaskMode && project.githubTaskMode === "pull_request")) return Response.json(await createTaskPR(sessionToken, body.projectId, body.taskId));
-    return Response.json(await createGitHubTask(body.projectId, body.taskId));
+    return Response.json(issue);
   } catch (error) { return Response.json({ error: errorText(error, "GitHub issue creation failed") }, { status: error instanceof BodyTooLarge ? 413 : 400 }); }
 }

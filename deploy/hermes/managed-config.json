@@ -1,0 +1,50 @@
+{
+  "platform_toolsets": {
+    "cli": ["mcp-origin"],
+    "whatsapp": ["mcp-origin"],
+    "cron": [],
+    "api_server": [],
+    "webhook": []
+  },
+  "agent": {
+    "disabled_toolsets": ["terminal", "file", "code_execution", "delegation", "browser", "computer_use", "skills", "cronjob", "connections", "catalog", "kanban", "web", "search", "image_gen", "video_gen", "tts", "vision", "memory", "session_search"]
+  },
+  "auth": {"adopt_external_logins": false},
+  "security": {"allow_lazy_installs": false, "redact_secrets": true},
+  "plugins": {"auto_apply": false},
+  "fallback_providers": [],
+  "approvals": {"mode": "manual", "cron_mode": "deny", "single_query_mode": "deny", "unattended_mode": "deny"},
+  "unauthorized_dm_behavior": "ignore",
+  "whatsapp": {"unauthorized_dm_behavior": "ignore", "group_policy": "pairing", "send_read_receipts": false},
+  "platforms": {
+    "whatsapp": {
+      "enabled": true,
+      "extra": {
+        "bridge_port": 3000,
+        "bridge_script": "/opt/origin-hermes/current/scripts/whatsapp-bridge/bridge.js",
+        "dm_policy": "allowlist",
+        "allow_from": ["${WHATSAPP_ALLOWED_USERS}"],
+        "group_policy": "disabled",
+        "group_allow_from": [],
+        "allow_admin_from": ["origin-local-maintenance-only"],
+        "group_allow_admin_from": ["origin-local-maintenance-only"],
+        "user_allowed_commands": ["help", "whoami", "new", "reset", "status", "stop", "usage", "sessions", "resume"],
+        "group_user_allowed_commands": []
+      }
+    },
+    "api_server": {"enabled": false},
+    "webhook": {"enabled": false},
+    "whatsapp_cloud": {"enabled": false}
+  },
+  "mcp_servers": {
+    "origin": {
+      "url": "${ORIGIN_MCP_URL}",
+      "headers": {"Authorization": "Bearer ${ORIGIN_MCP_TOKEN}"},
+      "tools": {
+        "include": ["get_workspace", "list_projects", "list_issues", "get_issue", "get_inbox", "list_members", "create_issue", "update_issue", "move_issue", "delete_issue", "add_comment", "list_execution_hosts", "get_execution_usage", "list_execution_runs", "start_execution_run", "get_execution_run", "cancel_execution_run", "message_execution_run", "set_execution_policy"]
+      }
+    }
+  },
+  "updates": {"pre_update_backup": "full", "auto_switch_parked_branch": false},
+  "quick_commands": {}
+}

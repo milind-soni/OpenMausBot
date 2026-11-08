@@ -2,6 +2,8 @@
 .next
 .npm-cache
 node_modules
+**/__pycache__
+**/*.py[cod]
 out
 .origin-data*
 .convex

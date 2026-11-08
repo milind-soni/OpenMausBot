@@ -17,8 +17,9 @@ import { UserAvatar } from "./user-avatar";
 import { ContentSkeleton } from "./content-skeleton";
 import { NotificationPreferences } from "./notification-preferences";
 import { ConfirmButton, FormStatus, SettingSwitch, type FormNotice } from "./settings-controls";
+import { ExecutionSettings } from "./execution-settings";
 
-type Section = "profile" | "security" | "notifications" | "workspace" | "members" | "integrations" | "agents";
+type Section = "profile" | "security" | "notifications" | "workspace" | "members" | "integrations" | "agents" | "executionAccounts" | "machines" | "executionPolicy";
 const sections: { id: Section; label: string; icon: typeof User; group: "account" | "workspace" }[] = [
   { id: "profile", label: "My profile", icon: User, group: "account" },
   { id: "security", label: "Security", icon: Shield, group: "account" },
@@ -27,6 +28,9 @@ const sections: { id: Section; label: string; icon: typeof User; group: "account
   { id: "members", label: "Members & invites", icon: Users, group: "workspace" },
   { id: "integrations", label: "Integrations", icon: Plug, group: "workspace" },
   { id: "agents", label: "Agents", icon: Bot, group: "workspace" },
+  { id: "executionAccounts", label: "Accounts & usage", icon: Bot, group: "workspace" },
+  { id: "machines", label: "Machines", icon: Settings2, group: "workspace" },
+  { id: "executionPolicy", label: "Execution settings", icon: Shield, group: "workspace" },
 ];
 
 export function WorkspaceSettings({ sessionToken, profile, security, sound, onToggleSound, onClose, onLogout }: { sessionToken: string; profile: ReactNode; security: ReactNode; sound: boolean; onToggleSound: () => void; onClose: () => void; onLogout: () => void }) {
@@ -64,6 +68,9 @@ export function WorkspaceSettings({ sessionToken, profile, security, sound, onTo
         {tab === "members" && <WorkspaceMembers sessionToken={sessionToken} beforeOpenProfile={onClose} />}
         {tab === "integrations" && <IntegrationSettings sessionToken={sessionToken} />}
         {tab === "agents" && <AgentSettings sessionToken={sessionToken} />}
+        {tab === "executionAccounts" && <ExecutionSettings sessionToken={sessionToken} section="accounts" />}
+        {tab === "machines" && <ExecutionSettings sessionToken={sessionToken} section="machines" />}
+        {tab === "executionPolicy" && <ExecutionSettings sessionToken={sessionToken} section="policy" />}
       </div>
     </div>
   </Dialog>;

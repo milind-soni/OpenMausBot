@@ -10,7 +10,7 @@ vi.mock("./integration-bridge", () => ({ integrationBridge: vi.fn() }));
 vi.mock("./github-prs", () => ({ syncPREvent: vi.fn() }));
 vi.mock("./github-sync", () => ({ syncGitHubEvent: vi.fn() }));
 const event = (kind: string, id = "delivery-1", updated = "2026-10-15T10:00:00Z", signed = true) => {
-  const body = JSON.stringify({ repository: { full_name: "test/prs" }, issue: { number: 42 }, pull_request: { number: 1, updated_at: updated }, check_run: { head_sha: "a".repeat(40), pull_requests: [] } });
+  const body = JSON.stringify({ repository: { id: 1, full_name: "test/prs" }, issue: { number: 42, node_id: "fixture-issue", updated_at: updated }, pull_request: { number: 1, updated_at: updated }, check_run: { head_sha: "a".repeat(40), pull_requests: [] } });
   return new Request("http://localhost/api/github/webhook", { method: "POST", body, headers: { "x-github-event": kind, "x-github-delivery": id, "x-hub-signature-256": signed ? `sha256=${createHmac("sha256", "fixture-webhook-secret").update(body).digest("hex")}` : "invalid" } });
 };
 beforeEach(() => {
@@ -33,7 +33,7 @@ test("old lifecycle payload is only a refetch signal; issue sync and head-only c
   await POST(event("pull_request", "old-delivery", "2026-10-14T10:00:00Z"));
   expect(vi.mocked(syncPREvent).mock.calls[0]).toEqual(vi.mocked(syncPREvent).mock.calls[1]);
   expect((await POST(event("issues", "issue-delivery"))).status).toBe(200);
-  expect(syncGitHubEvent).toHaveBeenCalledWith("https://github.com/test/prs", 42);
+  expect(syncGitHubEvent).toHaveBeenCalledWith("https://github.com/test/prs", 42, { deleted: false, repoId: 1, nodeId: "fixture-issue", updatedAt: Date.parse("2026-10-15T10:00:00Z") });
   expect((await POST(event("check_run", "check-delivery"))).status).toBe(200);
   expect(syncPREvent).toHaveBeenLastCalledWith("https://github.com/test/prs", [], "a".repeat(40));
 });

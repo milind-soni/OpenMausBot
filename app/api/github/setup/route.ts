@@ -18,7 +18,7 @@ export async function POST(request: Request) {
       redirect_url: `${origin}/api/github/setup/callback`, callback_urls: [`${origin}/api/github/oauth/callback`],
       setup_url: `${origin}/api/github/oauth/install`, request_oauth_on_install: false,
       hook_attributes: { url: `${origin}/api/github/webhook`, active: true },
-      default_permissions: { administration: "write", issues: "write", contents: "write", pull_requests: "write", checks: "read", metadata: "read" },
+      default_permissions: { administration: "write", issues: "write", contents: "write", pull_requests: "write", checks: "read", statuses: "read", deployments: "read", metadata: "read" },
       default_events: ["issues", "pull_request", "pull_request_review", "check_suite", "check_run"],
     } });
     response.cookies.set("origin.github", browser, { httpOnly: true, secure: origin.startsWith("https:"), sameSite: "lax", path: "/api/github", maxAge: 900 });

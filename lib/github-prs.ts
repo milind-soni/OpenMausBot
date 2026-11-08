@@ -26,7 +26,7 @@ export async function readPRSnapshot(repoUrl: string, number: number, token: str
   return toSnapshot(latest, repo, checksSummary(checks.check_runs, [], checks.total_count > checks.check_runs.length), decision);
 }
 
-async function openPR(repoUrl: string, taskId: string, branch: string, title: string, body: string, token: string, draft: boolean, baseBranch?: string) {
+export async function openPR(repoUrl: string, taskId: string, branch: string, title: string, body: string, token: string, draft: boolean, baseBranch?: string) {
   const path = repositoryPath(repoUrl), repo = path.slice(7), owner = repo.split("/")[0];
   // URL-encode branch data, never concatenate it into a path or shell command.
   const metadata = await githubRequest<{ default_branch: string }>(path, token);

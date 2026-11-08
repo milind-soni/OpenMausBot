@@ -201,6 +201,12 @@ async function projectToken(ctx: ActionCtx, project: ProjectView, access: Access
   const found = await requireConnection(ctx, project.teamId);
   if (repo.owner.toLowerCase() !== found.row.accountLogin.toLowerCase()) throw new ConvexError(`${repo.owner}/${repo.repo} is outside ${found.row.accountLogin}, the GitHub account this workspace is connected to`);
   const minted = await installationToken(found.secrets.app, found.row.installationId, { ...PERMISSIONS[access], ...extra }, repo);
+  const current = await ctx.runQuery(internal.teamGitHub.projectView, { projectId: project._id });
+  const shared = await ctx.runQuery(internal.teamGitHub.connectionRow, { teamId: found.row.teamId });
+  if (!shared || shared.row.version !== found.row.version || !current.githubWorkspaceAccess || current.status !== "active" || current.repoUrl !== project.repoUrl || current.teamId !== project.teamId) {
+    await revokeInstallationToken(minted.token);
+    throw new ConvexError("GitHub repository authorization changed during credential issuance");
+  }
   return { token: minted.token, expiresAt: new Date(minted.expiresAt).toISOString(), repoUrl: repoUrlOf(repo), repo };
 }
 
@@ -211,7 +217,11 @@ function accessOf(value: unknown): Access {
 
 function extraOf(value: unknown): Record<string, string> {
   const extra = record(value);
-  for (const [name, level] of Object.entries(extra)) if (name !== "actions" || (level !== "read" && level !== "write")) throw new ConvexError("Only Actions permissions may be added");
+  for (const [name, level] of Object.entries(extra)) {
+    if (name === "actions" && (level === "read" || level === "write")) continue;
+    if (["statuses", "administration", "deployments"].includes(name) && level === "read") continue;
+    throw new ConvexError("Only Actions access and read-only status/protection/deployment inspection may be added");
+  }
   return extra as Record<string, string>;
 }
 
@@ -519,18 +529,6 @@ async function sessionOperation(ctx: ActionCtx, sessionToken: string, operation:
         const repoUrl = repoUrlOf(repo);
         await ctx.runMutation(internal.integrations.linkIssue, { projectId: project._id, taskId, repoUrl, number, issueUrl: `${repoUrl}/issues/${number}`, state: issue.state, updatedAt: Date.parse(issue.updated_at) });
       });
-      return null;
-    }
-    case "unlinkIssue": {
-      const { project } = await requireProject(ctx, sessionToken, args.projectId, "editor");
-      if (typeof args.taskId !== "string") throw new ConvexError("Issue required");
-      const number = numberOf(args.number, "Issue number");
-      const removed = await withReadToken(ctx, project, (token, repo) => github<{ state: "open" | "closed" }>(`/repos/${repo.owner}/${repo.repo}/issues/${number}`, token).then(
-        (issue) => issue.state === "closed",
-        (error: unknown) => { if (error instanceof GitHubError && [404, 410].includes(error.status)) return true; throw error; },
-      ));
-      if (!removed) throw new ConvexError("That GitHub issue is still open");
-      await ctx.runMutation(internal.integrations.unlinkIssue, { projectId: project._id, taskId: args.taskId as Id<"tasks">, number });
       return null;
     }
     case "webhookTargets": {

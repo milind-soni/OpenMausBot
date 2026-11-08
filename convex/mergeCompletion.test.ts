@@ -44,7 +44,7 @@ describe("GitHub issue state sync", () => {
     expect((await f.t.query(api.projects.get, f.scope)).openIssueCount).toBe(1);
   });
 
-  test("a GitHub close does not complete an issue first seen closed, one in Draft, or one reopened in Origin", async () => {
+  test("local unsent edits win over old remote state, but synchronized Draft issues complete normally", async () => {
     const f = await fixture();
     await f.link("closed", 1000);
     expect(await f.task()).toMatchObject({ githubIssueState: "closed", done: false });
@@ -52,7 +52,7 @@ describe("GitHub issue state sync", () => {
     await f.link("open", 2000);
     await f.t.mutation(api.tasks.moveTask, { ...f.scope, taskId: f.taskId, columnId: f.columns[0]!._id });
     await f.link("closed", 3000);
-    expect((await f.task()).done).toBe(false);
+    expect((await f.task()).done).toBe(true);
     await f.t.mutation(api.tasks.moveTask, { ...f.scope, taskId: f.taskId, columnId: f.columns[1]!._id });
     await f.link("open", 4000);
     await f.t.mutation(api.tasks.updateTask, { ...f.scope, taskId: f.taskId, done: true });
@@ -62,21 +62,21 @@ describe("GitHub issue state sync", () => {
     expect((await f.t.query(api.projects.get, f.scope)).openIssueCount).toBe(1);
   });
 
-  test("a pull-request-driven issue follows its pull request, not its GitHub issue", async () => {
+  test("a synchronized issue supports GitHub closure independently of its pull request mode", async () => {
     const f = await fixture();
     await f.t.run(ctx => ctx.db.patch(f.taskId, { githubTaskMode: "pull_request" }));
     await f.link("open", 1000);
     await f.link("closed", 2000);
-    expect((await f.task()).done).toBe(false);
+    expect((await f.task()).done).toBe(true);
   });
 
-  test("legacy snapshots never complete an issue just because GitHub reports closed", async () => {
+  test("repository snapshots import the actual closed state", async () => {
     const f = await fixture();
     await f.t.mutation(internal.github.upsertRepoSnapshot, { ...f.scope, repoUrl, issues: [{ number: 7, title: "Closed elsewhere", state: "closed", url: `${repoUrl}/issues/7`, updatedAt: 1000 }], pullRequests: [] });
-    expect((await f.t.query(api.tasks.board, f.scope)).tasks.every(task => !task.done)).toBe(true);
+    expect((await f.t.query(api.tasks.board, f.scope)).tasks.find(task => task.githubIssueNumber === 7)?.done).toBe(true);
   });
 
-  test("a trusted, repository-pinned merge receipt completes once and survives a retry", async () => {
+  test("a repository-pinned merge receipt completes once but cannot undo an explicit reopen on replay", async () => {
     const f = await fixture();
     await f.link("closed", 1000);
     expect(await f.complete()).toBe(true);
@@ -86,24 +86,24 @@ describe("GitHub issue state sync", () => {
     expect(await f.t.run(ctx => ctx.db.query("taskCompletions").collect())).toHaveLength(1);
     await f.t.mutation(api.tasks.updateTask, { ...f.scope, taskId: f.taskId, done: false });
     expect((await f.task()).completionPullRequest).toBeUndefined();
-    expect(await f.complete()).toBe(true);
-    expect((await f.task()).done).toBe(true);
+    expect(await f.complete()).toBe(false);
+    expect((await f.task()).done).toBe(false);
     expect(await f.t.run(ctx => ctx.db.query("taskCompletions").collect())).toHaveLength(1);
   });
 
-  test("Draft issues do not retain receipts, and stale repositories or mismatched issue numbers cannot complete", async () => {
+  test("Draft issues retain receipts while stale repositories and mismatched issue numbers cannot complete", async () => {
     const f = await fixture();
     await f.link("open", 1000);
     await f.t.mutation(api.tasks.moveTask, { ...f.scope, taskId: f.taskId, columnId: f.columns[0]!._id });
     expect(await f.complete()).toBe(false);
     expect((await f.task()).done).toBe(false);
-    expect((await f.task()).completionPullRequest).toBeUndefined();
+    expect((await f.task()).completionPullRequest).toMatchObject({ number: pullRequest.number });
     await f.t.mutation(api.tasks.moveTask, { ...f.scope, taskId: f.taskId, columnId: f.columns[1]!._id });
     await f.link("closed", 2000);
     await expect(f.t.mutation(internal.integrations.completeMergedIssue, { ...f.completion, issueNumber: 8 })).rejects.toThrow("Issue");
     await expect(f.t.mutation(internal.integrations.completeMergedIssue, { ...f.completion, repoUrl: "https://github.com/other/project" })).rejects.toThrow("Repository");
     await expect(f.t.mutation(internal.integrations.completeMergedIssue, { ...f.completion, pullRequest: { ...pullRequest, headSha: "invalid" } })).rejects.toThrow("merge");
-    expect((await f.task()).done).toBe(false);
+    expect((await f.task()).done).toBe(true);
   });
 
   test("a merge receipt recorded before GitHub closes the issue completes it once GitHub does", async () => {
@@ -123,7 +123,7 @@ describe("GitHub issue state sync", () => {
     await f.link("open", 1000);
     expect(await f.complete()).toBe(false);
     await f.t.mutation(api.projects.update, { ...f.scope, repoUrl: "https://github.com/fixture/replacement" });
-    await expect(f.link("closed", 2000)).rejects.toThrow("Repository changed");
+    await expect(f.link("closed", 2000)).rejects.toThrow(/Repository/);
     await expect(f.complete()).rejects.toThrow("Repository changed");
     expect((await f.task()).done).toBe(false);
   });
@@ -149,23 +149,23 @@ describe("GitHub issue state sync", () => {
     await f.t.mutation(api.tasks.updateTask, { ...f.scope, taskId: f.taskId, done: false });
     expect(await f.task()).toMatchObject({ done: false, githubIssueReopenRequested: true });
     const context = JSON.parse(await f.t.query(internal.integrations.context, { projectId: f.scope.projectId, taskId: f.taskId }));
-    expect(context.task.githubIssueReopenRequested).toBe(true);
+    expect(context.task.githubIssueState).toBe("closed");
     await f.link("open", 2000);
     expect((await f.task()).githubIssueReopenRequested).toBeUndefined();
   });
 
-  test("leaving Draft by movement or column deletion explicitly requests reopening", async () => {
+  test("leaving Draft or deleting its column preserves issue state and identity", async () => {
     const f = await fixture();
     await f.link("closed", 1000);
     await f.t.mutation(api.tasks.moveTask, { ...f.scope, taskId: f.taskId, columnId: f.columns[0]!._id });
     expect((await f.task()).githubIssueReopenRequested).toBeUndefined();
     await f.t.mutation(api.tasks.moveTask, { ...f.scope, taskId: f.taskId, columnId: f.columns[1]!._id });
-    expect((await f.task()).githubIssueReopenRequested).toBe(true);
+    expect((await f.task()).githubIssueReopenRequested).toBeUndefined();
     await f.link("open", 2000);
     await f.t.mutation(api.tasks.moveTask, { ...f.scope, taskId: f.taskId, columnId: f.columns[0]!._id });
     await f.link("closed", 3000);
     await f.t.mutation(api.tasks.deleteColumn, { ...f.scope, columnId: f.columns[0]!._id, moveToColumnId: f.columns[1]!._id });
-    expect((await f.task()).githubIssueReopenRequested).toBe(true);
+    expect(await f.task()).toMatchObject({ done: true, githubIssueNumber: 7, githubIssueState: "closed" });
   });
 
   test("legacy snapshot reopening clears trusted completion evidence before a later GitHub close", async () => {
