@@ -114,6 +114,7 @@
   "server.connect.secretHandoff": "Gib {label} sicher in OpenMausBot auf deinem Telefon oder Computer ein. Es wird nie in den Chat übernommen.",
   "server.connect.secretFile": "Die Befehle von {bot} können es 24 Stunden lang aus einer privaten Datei lesen; es wird nie in den Chat übernommen.",
   "server.connect.secretRef": "{bot} bekommt für die eigenen Werkzeuge von OpenMausBot einen Verweis, der nur einmal gilt, und sieht es nie.",
+  "server.connect.secretKept": "OpenMausBot bewahrt es sicher auf, damit {bot} es wieder nutzen kann, ohne dich erneut zu fragen.",
   "server.connect.secretNeverRead": "{bot} kann es verwenden, aber nie auslesen.",
   "server.connect.emailOutgoingLabel": "Postausgangsserver für {address}",
   "server.connect.emailOutgoingNote": "Gib ein, worüber es Mails versendet. {bot} sieht das Passwort nie.",

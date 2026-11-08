@@ -4,7 +4,7 @@
 // Nothing here is an HTTP answer, a log line or a chat message, and nothing is kept.
 import type { LoginBots } from "../shared/logins.ts";
 import { loginFingerprints, VERIFY_NONCE } from "./cloud-send-verify.ts";
-import type { LoginStore } from "./login-store.ts";
+import type { VaultStore } from "./vault-store.ts";
 import { ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED } from "./onepassword.ts";
 import type { TotpKey } from "./totp.ts";
 
@@ -73,7 +73,7 @@ function parse(raw: unknown): { requestId: string; what: Ask } | null {
   return null;
 }
 
-type HandoffStore = Pick<LoginStore, "changes" | "get" | "onePasswordToken" | "onePasswordGrants">;
+type HandoffStore = Pick<VaultStore, "changes" | "get" | "onePasswordToken" | "onePasswordGrants">;
 /** This computer's own 1Password problem, from its last read of the vaults (OnePasswordLogins.status().error). */
 type OnePasswordProblem = () => string | undefined;
 

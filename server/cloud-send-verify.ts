@@ -7,7 +7,7 @@ import { createHmac } from "node:crypto";
 
 import { itemKey } from "../electron/cloud-send-parts.mjs";
 import { canonicalJson } from "../shared/package-format.ts";
-import type { LoginStore } from "./login-store.ts";
+import type { VaultStore } from "./vault-store.ts";
 
 /** At least 32 random bytes, base64url. */
 export const VERIFY_NONCE = /^[A-Za-z0-9_-]{43,128}$/u;
@@ -15,7 +15,7 @@ export const VERIFY_NONCE = /^[A-Za-z0-9_-]{43,128}$/u;
 export const fingerprint = (nonce: string, value: unknown): string => createHmac("sha256", nonce).update(canonicalJson(value)).digest("hex");
 
 /** Each saved login, by the key Send to My Cloud compares it under, and 1Password's token. */
-export function loginFingerprints(nonce: string, store: Pick<LoginStore, "changes" | "get" | "onePasswordToken">): Record<string, string> {
+export function loginFingerprints(nonce: string, store: Pick<VaultStore, "changes" | "get" | "onePasswordToken">): Record<string, string> {
   const out: Record<string, string> = {};
   for (const { id } of store.changes()) {
     const login = store.get(id);
