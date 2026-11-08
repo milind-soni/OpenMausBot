@@ -92,15 +92,11 @@ export function companionPairingRoute(
     // The saved switch is the authority: a switched-off route is never
     // offered, even while the sidecar still advertises its old endpoint.
     if (source.routes?.tailscale?.on === false) return null;
-    let preferred = advertised.find((endpoint) => endpoint.kind === "tailnet") ?? null;
-    if (!preferred && source.tailnetName?.trim()) {
-      preferred = qrEndpoints([{
-        url: directHTTPOrigin(source.tailnetName.trim(), source.port),
-        kind: "tailnet",
-        priority: 0,
-      }])[0] ?? null;
-    }
-    if (!preferred && source.routes?.tailscale?.on) {
+    // The saved name is the authority too: after a rename the sidecar can
+    // still advertise the old hostname, and a pin built from it fails the
+    // availability check, which compares against the saved name.
+    let preferred: CompanionEndpoint | null = null;
+    if (source.routes?.tailscale?.on) {
       const routeName = source.routes.tailscale.name?.trim();
       if (routeName) {
         preferred = qrEndpoints([{
@@ -109,6 +105,14 @@ export function companionPairingRoute(
           priority: 0,
         }])[0] ?? null;
       }
+    }
+    preferred ??= advertised.find((endpoint) => endpoint.kind === "tailnet") ?? null;
+    if (!preferred && source.tailnetName?.trim()) {
+      preferred = qrEndpoints([{
+        url: directHTTPOrigin(source.tailnetName.trim(), source.port),
+        kind: "tailnet",
+        priority: 0,
+      }])[0] ?? null;
     }
     if (!preferred) return null;
 

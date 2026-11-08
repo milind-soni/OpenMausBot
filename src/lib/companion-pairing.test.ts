@@ -222,6 +222,37 @@ describe("companionPairingRoute", () => {
     expect(companionPairingRoutePinAvailable(source, pin!)).toBe(true);
   });
 
+  it("prefers the saved Tailscale route name over a stale advertised endpoint", () => {
+    const source = {
+      port: 8810,
+      tailnetName: "old.tail1234.ts.net",
+      routes: { tailscale: { on: true, name: "new.tail1234.ts.net" } },
+      endpoints: [
+        { url: "http://old.tail1234.ts.net:8810", kind: "tailnet" as const, priority: 100 },
+      ],
+    };
+    const route = companionPairingRoute(source, "tailscale");
+    expect(route?.address).toBe("new.tail1234.ts.net");
+    const pin = companionPairingRoutePin(source, "tailscale");
+    expect(pin?.protectedEndpoint).toEqual({
+      url: "http://new.tail1234.ts.net:8810",
+      kind: "tailnet",
+      priority: 0,
+    });
+    expect(companionPairingRoutePinAvailable(source, pin!)).toBe(true);
+  });
+
+  it("falls back to an advertised Tailscale endpoint when the saved name is not a MagicDNS name", () => {
+    const source = {
+      port: 8810,
+      routes: { tailscale: { on: true, name: "attacker.example" } },
+      endpoints: [
+        { url: "http://mac.tail1234.ts.net:8810", kind: "tailnet" as const, priority: 100 },
+      ],
+    };
+    expect(companionPairingRoute(source, "tailscale")?.address).toBe("mac.tail1234.ts.net");
+  });
+
   it("ignores a Tailscale route name that is switched off", () => {
     expect(companionPairingRoute({
       port: 8810,
@@ -381,3 +412,4 @@ describe("companionPairingAddressText", () => {
     expect(companionPairingAddressText({ address: "192.168.1.42", port: 8810 })).toBe("192.168.1.42:8810");
   });
 });
+
