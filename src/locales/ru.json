@@ -6463,6 +6463,8 @@
   "chat.preview.openTabNeedsLink": "Поделитесь страницей, чтобы открыть её в новой вкладке",
   "chat.preview.fullScreen": "Полноэкранный режим",
   "chat.preview.exitFullScreen": "Выйти из полноэкранного режима",
+  "chat.preview.openPage": "Открыть страницу",
+  "chat.preview.closePage": "Закрыть страницу",
   "chat.preview.pointedPart": "часть страницы",
   "chat.preview.removePoint": "Удалить {label}",
   "chat.preview.pointedAt": "Указано на {parts}",

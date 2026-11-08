@@ -4939,6 +4939,8 @@
   "chat.preview.openTabNeedsLink": "Yeni sekmede açmak için sayfayı paylaşın",
   "chat.preview.fullScreen": "Tam ekran",
   "chat.preview.exitFullScreen": "Tam ekrandan çık",
+  "chat.preview.openPage": "Sayfayı aç",
+  "chat.preview.closePage": "Sayfayı kapat",
   "chat.preview.pointedPart": "sayfanın bir bölümü",
   "chat.preview.removePoint": "{label} öğesini kaldır",
   "chat.preview.pointedAt": "Gösterilen: {parts}",
