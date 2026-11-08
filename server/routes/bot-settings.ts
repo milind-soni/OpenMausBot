@@ -20,7 +20,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { sawThread } from "../thread-presence.ts";
 import { refusalBody } from "../user-errors.ts";
-import { readThreadNotifications } from "./notifications.ts";
+import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
 
 export interface BotSettingsRouteDeps {
   store: Store;
@@ -34,6 +34,7 @@ export interface BotSettingsRouteDeps {
   supportsApprovalMode: ReturnType<typeof createApprovalModeSupport>;
   directTurnBots: { get(threadId: string): BotRecord | undefined };
   broadcast(payload: Record<string, unknown>): void;
+  notificationListed: NotificationListed;
   wireBot(bot: BotRecord): WireBot;
   cloudOwnerSession(auth: RequestAuth): boolean;
   /** On a Team Cloud a member who can edit the bot changes its profile as its owner would. */
@@ -56,7 +57,7 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
   const {
     store, cfg, registry, commandAllowlist,
     commandAllowlistDrivers: COMMAND_ALLOWLIST_DRIVERS, cloudHome: CLOUD_HOME, cloudOwnerProfileFields: CLOUD_OWNER_PROFILE_FIELDS,
-    hostedModels, supportsApprovalMode, directTurnBots, broadcast, wireBot, cloudOwnerSession, storedAvatarExists,
+    hostedModels, supportsApprovalMode, directTurnBots, broadcast, notificationListed, wireBot, cloudOwnerSession, storedAvatarExists,
     requestedTaskBot, threadBusy, activeGroupTurnForBot, checkedModelSelection, engineSwitchNeedsAsk, readCursor,
     canManageCommandAllowlist, commandAllowlistResponse, cardAnswerRefusal,
   } = deps;
@@ -169,7 +170,7 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       const task = store.taskByThread(current.id, current.threadId), cursor = readCursor(current.threadId);
       const changed = Boolean(task?.unread) || (cursor.lastReadMessageId !== undefined && task?.lastReadMessageId !== cursor.lastReadMessageId);
       if (changed) store.patchTask(current.id, current.threadId, { unread: false, ...cursor });
-      readThreadNotifications(current.threadId, broadcast, auth);
+      readThreadNotifications(current.threadId, broadcast, notificationListed(auth));
       const visible = wireBot(store.bot(current.id)!);
       if (changed) broadcast({ kind: "bot", bot: visible });
       return json(res, 200, { bot: visible });

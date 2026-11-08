@@ -8610,7 +8610,7 @@ describe("harness HTTP API", () => {
     expect(after).toEqual({ status: 200, body: { servers: [] } });
   });
 
-  it("lets a bot below Full access file an MCP server only as a disabled row", async () => {
+  it("lets a bot below Full access file a command server or a URL on the person's network only as a disabled row", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" })).status).toBe(200);
     const token = await mintTestCapability(BASE, bot.id, bot.threadId);
@@ -8645,7 +8645,7 @@ describe("harness HTTP API", () => {
 
       const remote = await fileServer({
         name: "botdocs",
-        url: "https://docs.example/mcp",
+        url: "https://docs.internal/mcp",
         type: "sse",
         headers: { Authorization: headerSecret },
         oauth: { clientId: "corp-app", clientSecret: oauthSecret },
@@ -8658,7 +8658,7 @@ describe("harness HTTP API", () => {
       expect(remoteText).not.toContain(oauthSecret);
       const savedRemote = JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botdocs;
       expect(savedRemote).toEqual({
-        type: "sse", url: "https://docs.example/mcp", headers: { Authorization: headerSecret },
+        type: "sse", url: "https://docs.internal/mcp", headers: { Authorization: headerSecret },
         oauth: { clientId: "corp-app", clientSecret: oauthSecret }, enabled: false,
       });
 
