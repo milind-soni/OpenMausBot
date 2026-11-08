@@ -44,6 +44,7 @@ const fixture = vi.hoisted(() => {
     apps: { phase: "ready", apps: [], connectedSlugs: [] } as BotApps,
     places: {} as Record<string, [boolean, boolean, string]>,
     mcp: { servers: null as McpServerSummary[] | null, error: false },
+    slackUrl: null as string | null,
   };
 });
 vi.mock("react", async (original) => ({
@@ -76,7 +77,7 @@ vi.mock("@/lib/memory", async (importOriginal) => ({
 }));
 // The server renderer cannot portal; the dialog's props are what these tests read.
 vi.mock("./ConfirmDialog", () => ({ ConfirmDialog: () => null }));
-vi.mock("./bot-settings/useSlackManagement", () => ({ useSlackManagementUrl: () => null }));
+vi.mock("./bot-settings/useSlackManagement", () => ({ useSlackManagementUrl: () => fixture.slackUrl }));
 vi.mock("./bot-settings/useBotSettingsDerived", () => ({ useBotSettingsDerived: () => fixture.derived }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./DesktopCapabilities")>()),
@@ -246,6 +247,7 @@ beforeEach(() => {
   fixture.advanced = false;
   fixture.setAdvanced = vi.fn();
   fixture.ownerOrAdmin = false;
+  fixture.slackUrl = null;
   fresh();
   fixture.index = 0;
   fixture.dispatch = vi.fn();
@@ -411,7 +413,7 @@ describe("the bot panel in Simple mode", () => {
     expect(shown(panel(makeBot(), "access"))).toEqual({ tab: "computer", page: undefined });
   });
 
-  it("shows no switch on any tab, and on Bot settings only Bot API's: memory, upkeep, browser, record steps and Work until done live elsewhere", () => {
+  it("shows no switch on any tab, and on Bot settings only Notifications and Bot API's: memory, upkeep, browser, record steps and Work until done live elsewhere", () => {
     const bot = makeBot();
     expect(switches(panel(bot).html)).toBe(0);
     expect(panel(bot).html).not.toContain('aria-label="Work until done"');
@@ -423,7 +425,8 @@ describe("the bot panel in Simple mode", () => {
     }
     click(find(panel(bot), "data-panel-gear"));
     const settings = panel(bot).html;
-    expect(switches(settings)).toBe(1);
+    expect(switches(settings)).toBe(2);
+    expect(settings).toContain('aria-label="Notifications"');
     expect(settings).toContain('aria-label="Let apps talk to this bot"');
   });
 });
@@ -650,13 +653,15 @@ describe("the Details tab", () => {
     expect(rowValue(botTab(makeBot()), "routines")).toBe("None");
   });
 
-  it("lists Find and Activity for this conversation as rows that run them, leaving Copy and Download to Share", () => {
+  it("lists Find, Activity and the Inspector for this conversation as rows that run them, leaving Copy and Download to Share", () => {
     const rendered = botTab(makeBot());
-    expect([...rendered.html.matchAll(/data-panel-item="(\w+)"/g)].map((match) => match[1])).toEqual(["find", "activity"]);
+    expect([...rendered.html.matchAll(/data-panel-item="(\w+)"/g)].map((match) => match[1])).toEqual(["find", "activity", "inspector"]);
     expect(rendered.html).toContain(">Find in conversation<");
     const run = (key: string) => (rendered.nodes.find((node) => (node.props.item as { key?: string } | undefined)?.key === key)!.props.item as { onSelect: () => void }).onSelect();
     run("activity");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleActivity" });
+    run("inspector");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleInspector" });
   });
 });
 
@@ -670,15 +675,77 @@ describe("the Bot settings page", () => {
     expect(patch).toHaveBeenCalledExactlyOnceWith({ soul: description, description: first });
   });
 
-  it("holds Instructions, Before it acts, Backup AIs, Call mode, Apps, Job and Hide, with every title on one edge", () => {
+  it("holds Instructions, Before it acts, Backup AIs, Call mode, Reply style, Notifications, Apps, Job and Hide, with every title on one edge", () => {
     const rendered = settingsPage(makeBot({ defaultBot: {} }));
-    const order = ['data-panel-edit="soul"', 'data-panel-row="approval"', 'data-panel-row="backups"', 'data-panel-row="call-mode"', 'data-panel-page="apps"', 'data-panel-row="job"', 'data-panel-row="default-bot-hide"']
+    const order = ['data-panel-edit="soul"', 'data-panel-row="approval"', 'data-panel-row="backups"', 'data-panel-row="call-mode"', 'data-panel-row="reply-style"',
+      'data-panel-row="notifications"', 'data-panel-page="apps"', 'data-panel-row="job"', 'data-panel-row="default-bot-hide"']
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(switches(rendered.html)).toBe(1);
+    expect(switches(rendered.html)).toBe(2);
     expect(rendered.html).toContain('aria-label="Let apps talk to this bot"');
-    expect(rendered.html.match(/pl-\[38px\]/g)).toHaveLength(4);
+    expect(rendered.html.match(/pl-\[38px\]/g)).toHaveLength(5);
+    for (const gone of ['data-panel-row="always-allow"', 'data-panel-row="slack"', 'data-panel-page="visibility"']) expect(rendered.html, gone).not.toContain(gone);
+  });
+
+  it("lists what the bot may do without asking under Before it acts, each with a button that takes it off", () => {
+    const rendered = settingsPage(makeBot({ alwaysAllow: ["Bash(git status)", "mcp__linear__list_issues"] }));
+    const html = rendered.html;
+    expect(html.indexOf('data-panel-row="always-allow"')).toBeGreaterThan(html.indexOf('data-panel-row="approval"'));
+    expect(html.indexOf('data-panel-row="always-allow"')).toBeLessThan(html.indexOf('data-panel-row="backups"'));
+    expect(html).toContain(">Always allowed<");
+    expect(html).toContain(">Bash(git status)<");
+    click(find(rendered, "data-panel-action", "always-allow:Bash(git status)"));
+    expect(patch).toHaveBeenLastCalledWith({ alwaysAllow: ["mcp__linear__list_issues"] });
+  });
+
+  it("chooses the reply style from two pills, the hint in each one's tooltip", () => {
+    const style = segment(settingsPage(makeBot()), "data-reply-style");
+    expect(style.options.map((option) => [option.value, option.label])).toEqual([["default", "Default"], ["conversational", "Conversational"]]);
+    expect(style.value).toBe("default");
+    style.onChange("conversational");
+    expect(patch).toHaveBeenLastCalledWith({ replyStyle: "conversational" });
+    expect(segment(settingsPage(makeBot({ replyStyle: "conversational" })), "data-reply-style").value).toBe("conversational");
+  });
+
+  it("turns this bot's notifications off and on, asking the system for permission only when turning them on", async () => {
+    const notify = await import("@/lib/notify");
+    const permission = vi.spyOn(notify, "requestNotificationPermission").mockResolvedValue("granted");
+    try {
+      const row = (bot: Bot) => find(settingsPage(bot), "data-panel-row", "notifications");
+      expect(row(makeBot()).props.checked).toBe(true);
+      (row(makeBot()).props.onChange as () => void)();
+      expect(patch).toHaveBeenLastCalledWith({ notifications: false });
+      expect(permission).not.toHaveBeenCalled();
+      (row(makeBot({ notifications: false })).props.onChange as () => void)();
+      expect(patch).toHaveBeenLastCalledWith({ notifications: true });
+      expect(permission).toHaveBeenCalledOnce();
+    } finally {
+      permission.mockRestore();
+    }
+  });
+
+  it("opens Who can see it for an owner or admin of a self-hosted web workspace, and for nobody on a team or the desktop", () => {
+    fixture.ownerOrAdmin = true;
+    const rendered = settingsPage(makeBot({ visibility: "admins" }));
+    expect(rowValue(rendered, "visibility")).toBe("Admins only");
+    click(find(rendered, "data-panel-page", "visibility"));
+    expect(onOpen).toHaveBeenLastCalledWith("visibility");
+    expect(rowValue(settingsPage(makeBot()), "visibility")).toBe("Everyone who can sign in");
+    fixture.storeState = { ...fixture.storeState, config: { team: { name: "Acme" } } };
+    expect(has(settingsPage(makeBot()), "data-panel-page", "visibility")).toBe(false);
+    fixture.storeState = { ...fixture.storeState, config: undefined };
+    fixture.ownerOrAdmin = false;
+    expect(has(settingsPage(makeBot()), "data-panel-page", "visibility")).toBe(false);
+    expect(capture(() => PageBody({ page: "visibility", bot: makeBot(), derived: derived() })).html).toContain("data-bot-visibility");
+  });
+
+  it("links to the bot's own Slack app once it has one", () => {
+    fixture.slackUrl = "https://admin.example.test/bots/scout/slack";
+    const html = settingsPage(makeBot()).html;
+    expect(html).toMatch(/data-panel-row="slack" href="https:\/\/admin\.example\.test\/bots\/scout\/slack" target="_blank" rel="noopener noreferrer"/);
+    expect(html).toContain(">Slack<");
+    expect(html.indexOf('data-panel-row="slack"')).toBeGreaterThan(html.indexOf('data-panel-row="job"'));
   });
 
   it("shows the first line of the instructions, or how to start, and edits them in place with Done", () => {

@@ -19,6 +19,7 @@ import { useWorkingFolder } from "../bot-settings/AccessSection";
 import { useBotEditor } from "../bot-settings/BotEditorContext";
 import { SkillReviewDialog, skillSwitchOn, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
 import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
+import { VisibilitySection } from "../bot-settings/VisibilitySection";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { RoutineList } from "../routines/RoutineList";
 import { BrowserLogins } from "./browser-logins";
@@ -447,6 +448,8 @@ export function PageBody({ page, onOpen, editingInstructions, onEditInstructions
       return <AppsPage {...context} />;
     case "routines":
       return <RoutinesPage {...context} />;
+    case "visibility":
+      return <VisibilitySection bot={context.bot} />;
     case "memory":
       return <MemoryPage {...context} />;
     case "skills":

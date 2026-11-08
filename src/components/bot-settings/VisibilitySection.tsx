@@ -47,6 +47,11 @@ const OPTIONS: Array<{ mode: VisibilityMode; key: "botSettings.visibility.everyo
   { mode: "people", key: "botSettings.visibility.people" },
 ];
 
+export function visibilityLabel(visibility: BotVisibility | undefined): string {
+  const { mode } = formFromVisibility(visibility);
+  return t(OPTIONS.find((option) => option.mode === mode)!.key);
+}
+
 export function VisibilitySection({ bot }: { bot: Bot }) {
   const { state } = useStore();
   const mixed = mixedRooms(bot, state.groups, state.bots);
