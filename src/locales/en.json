@@ -4556,6 +4556,7 @@
   "phone.signIn.tailnetNote": "The other device must be signed in to the same tailnet.",
   "phone.signIn.wifiInstead": "Pair on this Wi-Fi instead",
   "phone.signIn.wifiNote": "Both devices must be on a network that lets them see each other.",
+  "phone.signIn.tailscaleInstead": "Pair using Tailscale",
   "phone.verifying.local": "Preparing your pairing code",
   "phone.verifying.tailscale": "Preparing Tailscale pairing",
   "phone.verifying.secure": "Creating secure remote access",

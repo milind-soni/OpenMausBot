@@ -9,6 +9,8 @@ export interface CompanionPairingRouteSource {
   addresses?: string[];
   tailscale?: string;
   tailnetName?: string;
+  /** The per-route switches from Settings; the sidecar's tailnetName can lag them. */
+  routes?: { tailscale?: { on: boolean; name?: string | null } };
   lan?: string | null;
   hosts?: string[];
   endpoints?: CompanionEndpoint[];
@@ -92,6 +94,16 @@ export function companionPairingRoute(
         kind: "tailnet",
         priority: 0,
       }])[0] ?? null;
+    }
+    if (!preferred && source.routes?.tailscale?.on) {
+      const routeName = source.routes.tailscale.name?.trim();
+      if (routeName) {
+        preferred = qrEndpoints([{
+          url: directHTTPOrigin(routeName, source.port),
+          kind: "tailnet",
+          priority: 0,
+        }])[0] ?? null;
+      }
     }
     if (!preferred) return null;
 
@@ -192,12 +204,22 @@ export function companionPairingRoutePin(
 
 /** No silent substitution of another protected endpoint: a new transport needs a fresh pairing credential. */
 export function companionPairingRoutePinAvailable(
-  source: Pick<CompanionPairingRouteSource, "endpoints">,
+  source: Pick<CompanionPairingRouteSource, "endpoints" | "routes">,
   pin: CompanionPairingRoutePin,
 ): boolean {
   if (!pin.protectedEndpoint) return true;
-  return qrEndpoints(source.endpoints).some(
+  if (qrEndpoints(source.endpoints).some(
     (endpoint) => endpoint.kind === pin.protectedEndpoint?.kind
       && endpoint.url === pin.protectedEndpoint.url,
-  );
+  )) return true;
+  if (pin.protectedEndpoint.kind !== "tailnet") return false;
+  const routeName = source.routes?.tailscale?.on
+    ? source.routes.tailscale.name?.trim().toLowerCase().replace(/\.$/, "")
+    : undefined;
+  if (!routeName) return false;
+  try {
+    return new URL(pin.protectedEndpoint.url).hostname.toLowerCase().replace(/\.$/, "") === routeName;
+  } catch {
+    return false;
+  }
 }

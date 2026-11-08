@@ -4306,6 +4306,7 @@
   "phone.signIn.tailnetNote": "O outro dispositivo precisa estar na mesma tailnet.",
   "phone.signIn.wifiInstead": "Parear nesta rede Wi-Fi",
   "phone.signIn.wifiNote": "Os dois dispositivos precisam estar em uma rede que permita que eles se enxerguem.",
+  "phone.signIn.tailscaleInstead": "Parear usando o Tailscale",
   "phone.verifying.local": "Preparando seu código de pareamento",
   "phone.verifying.tailscale": "Preparando o pareamento por Tailscale",
   "phone.verifying.secure": "Criando o acesso remoto seguro",

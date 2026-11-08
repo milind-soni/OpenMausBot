@@ -200,6 +200,62 @@ describe("companionPairingRoute", () => {
     }, "tailscale")).toBeNull();
   });
 
+  it("uses the enabled Tailscale route name when the sidecar reports no tailnet endpoint or legacy name", () => {
+    const source = {
+      port: 8810,
+      routes: { tailscale: { on: true, since: 1, name: "mac.tail1234.ts.net" } },
+      lan: "192.168.1.42",
+      endpoints: [
+        { url: "http://192.168.1.42:8810", kind: "lan" as const, priority: 200 },
+      ],
+    };
+    const route = companionPairingRoute(source, "tailscale");
+    expect(route?.address).toBe("mac.tail1234.ts.net");
+    expect(route?.port).toBe(8810);
+    expect(route?.hosts).toEqual(["mac.tail1234.ts.net"]);
+    const pin = companionPairingRoutePin(source, "tailscale");
+    expect(pin?.protectedEndpoint).toEqual({
+      url: "http://mac.tail1234.ts.net:8810",
+      kind: "tailnet",
+      priority: 0,
+    });
+    expect(companionPairingRoutePinAvailable(source, pin!)).toBe(true);
+  });
+
+  it("ignores a Tailscale route name that is switched off", () => {
+    expect(companionPairingRoute({
+      port: 8810,
+      routes: { tailscale: { on: false, since: null, name: "mac.tail1234.ts.net" } },
+      endpoints: [],
+    }, "tailscale")).toBeNull();
+  });
+
+  it("ignores a non-MagicDNS name from the enabled Tailscale route", () => {
+    expect(companionPairingRoute({
+      port: 8810,
+      routes: { tailscale: { on: true, since: 1, name: "attacker.example" } },
+      endpoints: [],
+    }, "tailscale")).toBeNull();
+  });
+
+  it("does not keep a Tailscale pin when the enabled route name changes", () => {
+    const source = {
+      port: 8810,
+      routes: { tailscale: { on: true, since: 1, name: "mac.tail1234.ts.net" } },
+      endpoints: [],
+    };
+    const pin = companionPairingRoutePin(source, "tailscale");
+    expect(pin).not.toBeNull();
+    expect(companionPairingRoutePinAvailable({
+      ...source,
+      routes: { tailscale: { on: true, since: 1, name: "other.tail9999.ts.net" } },
+    }, pin!)).toBe(false);
+    expect(companionPairingRoutePinAvailable({
+      ...source,
+      routes: { tailscale: { on: false, since: null, name: "mac.tail1234.ts.net" } },
+    }, pin!)).toBe(false);
+  });
+
   it("refuses explicit local pairing when no LAN or Bonjour route exists", () => {
     expect(companionPairingRoute({
       port: 8810,
