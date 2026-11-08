@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { WIDGET_SAMPLES } from "../shared/widget-samples.ts";
 import { parseWidgetInput, widgetActions, widgetToText, type WidgetAction, type WidgetRoot } from "../shared/widget.ts";
+import { cardRecords } from "./records-block.ts";
 import { promptWithReply, replyExcerpt, replyTargetIn, transcriptText, type ReplyTarget } from "./replies.ts";
 import type { Message } from "./store.ts";
 
@@ -38,7 +39,7 @@ describe("the app's own add-a-key suggestion", () => {
   it("keeps the person's reaction, and stays a card the bot did not write when it is a widget", () => {
     const card = message({ kind: "widget", text: "Want me to sort your email for free? Add a key.", setupSuggestion: { kind: "helperKey" } });
     const reacted = message({ id: "m2", role: "user", text: "👍", replyToId: "m1", reaction: "👍" });
-    expect(transcriptText(reacted, new Map([["m1", card]]))).toMatch(/^\[reacted 👍 to a card shown in this chat\]\n\[Records from a card shown/);
+    expect(transcriptText(reacted, new Map([["m1", card]]))).toBe(`[reacted 👍 to a card shown in this chat]\n${cardRecords(card.text)}`);
     const typed = promptWithReply("what is this?", card);
     expect(typed).toContain("a card shown to the person in this chat, which you did not write");
     expect(typed).not.toContain("a widget you showed");

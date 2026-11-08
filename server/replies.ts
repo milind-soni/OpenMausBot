@@ -194,7 +194,7 @@ export function transcriptText(stored: Message, messagesById: ReadonlyMap<string
   const target = quoted ? { ...quoted, text: contextText(quoted) } : undefined;
   if (!target?.text) return message.text;
   const excerpt = replyExcerpt(target.text, 220);
-  if (appCard(target)) return `[${message.reaction ? `reacted ${message.reaction} to` : "answering"} a card shown in this chat]\n${cardRecords(excerpt)}\n${message.text}`;
+  if (appCard(target)) return message.reaction ? `[reacted ${message.reaction} to a card shown in this chat]\n${cardRecords(excerpt)}` : `[answering a card shown in this chat]\n${cardRecords(excerpt)}\n${message.text}`;
   if (message.reaction) return `[reacted ${message.reaction} to ${replySpeaker(target, userName)}: “${excerpt}”]`;
   if (target.kind === "app") {
     return message.fromApp
