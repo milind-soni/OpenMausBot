@@ -131,7 +131,6 @@ test("the rail's channels: the list only for the rail's own page, a circle only 
   r.w.beside = false;
   assert.deepEqual(await r.call("workspaces:places"), { places: [], add: { cloud: false, link: false, address: false, organization: false } });
   assert.throws(() => r.call("workspaces:open", "a"), /only available/);
-  assert.throws(() => r.call("workspaces:add", "link"), /only available/);
   assert.equal(typeof await r.call("cloud-add:state"), "object", "＋'s buying sheet still runs on a page main vouches for (this computer's own)");
   r.w.lists = true;
   r.call("workspaces:open", "a");
@@ -153,6 +152,19 @@ test("the rail's channels: the list only for the rail's own page, a circle only 
   r.w.beside = true;
   r.installed.changed();
   assert.deepEqual(r.sent.slice(2), ["page:workspaces:changed", "rail:workspaces:changed"], "the rail came beside the page (or went): the page reads it again");
+});
+
+test("Settings → Servers on this computer's own page looks a server up and connects to it; a page main doesn't vouch for can't (#4846)", () => {
+  const r = rail();
+  r.w.lists = false;
+  r.call("workspaces:probe", " 192.168.1.20:8799 ", " abcd-efgh-jklm ");
+  r.call("workspaces:add", "link", "192.168.1.20:8799", " abcd-efgh-jklm ");
+  assert.deepEqual(r.ran, [["probe", "192.168.1.20:8799", "abcd-efgh-jklm"], ["link", "192.168.1.20:8799", "abcd-efgh-jklm"]],
+    "the Connect sheet in Settings → Servers runs in the main window, beside the rail, not on it");
+  r.w.trusted = false;
+  assert.throws(() => r.call("workspaces:probe", "192.168.1.20:8799", "x"), /only available/, "a server's own page can't make main look anywhere up");
+  assert.throws(() => r.call("workspaces:add", "link", "192.168.1.20:8799", "x"), /only available/);
+  assert.equal(r.ran.length, 2);
 });
 
 test("buying another Cloud from a page: the plan must be on sale, the name is checked, and the page gets only what the sheet says", async () => {
