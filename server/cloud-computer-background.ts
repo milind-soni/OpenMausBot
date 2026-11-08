@@ -13,6 +13,7 @@ export const STATUS_WAIT_MAX_SECONDS = 60;
 export const STDOUT_TAIL_CHARS = 4_000;
 export const STDERR_TAIL_CHARS = 2_000;
 const POLL_MS = 2_000;
+const LAST_READ_WINDOW_MS = 250;
 /** Bounds what a forgotten background server can cost: Boat bills while a computer is on. */
 export const BACKGROUND_KEEPS_AWAKE_MS = 2 * 60 * 60_000;
 const MAX_TRACKED_PER_COMPUTER = 20;
@@ -138,17 +139,29 @@ export async function backgroundStatus(
   const processId = processIdFrom(boxId, args.process_id);
   if (processId === null) return text(OTHER_COMPUTER, true);
   const until = Date.now() + Math.min(args.wait_seconds ?? 0, STATUS_WAIT_MAX_SECONDS) * 1_000;
+  let firstRead = true;
   for (;;) {
     assertBoatNotDeleting(boxId);
-    const response = await boatFetch(cfg, `/sandboxes/${boxId}/commands/${processId}?tailBytes=${TAIL_BYTES}`, { signal });
-    const body: any = await response.json().catch(() => null);
+    const deadline = firstRead ? null : AbortSignal.timeout(Math.max(1, until - Date.now()));
+    const readSignal = deadline ? AbortSignal.any([signal, deadline]) : signal;
+    let response: Response, body: any;
+    try {
+      response = await boatFetch(cfg, `/sandboxes/${boxId}/commands/${processId}?tailBytes=${TAIL_BYTES}`, { signal: readSignal });
+      body = await response.json().catch(() => null);
+      readSignal.throwIfAborted();
+    } catch (error) {
+      signal.throwIfAborted();
+      if (deadline?.aborted) return text(STATUS_LATE, true);
+      throw error;
+    }
     if (response.status === 404) return text(UNKNOWN_PROCESS, true);
     if (!response.ok) return text(boatErrorMessage(response.status, "Reading the command's status", body, included(cfg)), true);
     if (typeof body?.running !== "boolean") return text("The cloud computer gave an unreadable answer about this command. Call exec_status again.", true);
     if (!body.running) untrack(boxId, processId);
     const remaining = until - Date.now();
-    if (!body.running || remaining <= 0) return describeStatus(args.process_id, body);
-    await delay(Math.min(POLL_MS, remaining), undefined, { signal });
+    if (!body.running || remaining <= LAST_READ_WINDOW_MS) return describeStatus(args.process_id, body);
+    await delay(Math.min(POLL_MS, remaining - LAST_READ_WINDOW_MS), undefined, { signal });
+    firstRead = false;
   }
 }
 

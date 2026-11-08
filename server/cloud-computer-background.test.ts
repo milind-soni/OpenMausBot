@@ -15,6 +15,7 @@ const processes = new Map<string, Process>();
 const calls: Array<{ method: string; path: string; query: string; body: any; authorization?: string }> = [];
 let nextProcessId = 41;
 let hold = false;
+let holdStatusAfterFirst = false;
 let syncReply: Record<string, unknown> = { exitCode: 0, stdout: "done", stderr: "" };
 let startReply: { status: number; body: unknown } | undefined;
 let statusReply: { status: number; body: unknown } | undefined;
@@ -42,6 +43,7 @@ beforeAll(async () => {
       if (statusReply) return send(statusReply.status, statusReply.body);
       const process = processes.get(`${box}:${pid}`);
       if (!process) return send(404, { ok: false, code: "not_found", message: "No such process." });
+      if (holdStatusAfterFirst && process.polls > 0) return;
       const running = process.polls++ < process.runningFor;
       return send(200, {
         ok: true, type: "command.status", success: true, processId: Number(pid), status: running ? "running" : process.lost ? "lost" : "exited", running,
@@ -58,7 +60,7 @@ beforeAll(async () => {
 });
 afterAll(async () => { vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
 beforeEach(() => {
-  calls.length = 0; processes.clear(); hold = false; startReply = undefined; statusReply = undefined;
+  calls.length = 0; processes.clear(); hold = false; holdStatusAfterFirst = false; startReply = undefined; statusReply = undefined;
   syncReply = { exitCode: 0, stdout: "done", stderr: "" };
 });
 
@@ -144,9 +146,31 @@ describe.each([
     Object.assign(processes.get(`${BOX}:${processId.split("-")[1]}`)!, { runningFor: finishes ? 1 : 100, exitCode: 3 });
     const began = Date.now();
     const result = json(await call("exec_status", { process_id: processId, wait_seconds: 1 }).done);
-    expect(Date.now() - began).toBeGreaterThanOrEqual(900);
+    expect(Date.now() - began).toBeGreaterThanOrEqual(700);
     expect(result).toMatchObject({ status: finishes ? "finished" : "running", exitCode: finishes ? 3 : null });
     expect(calls.filter(entry => entry.method === "GET")).toHaveLength(2);
+  });
+
+  it("bounds a stalled follow-up status read by the requested wait", async () => {
+    const processId = await start();
+    holdStatusAfterFirst = true;
+    const began = Date.now();
+    const result = await call("exec_status", { process_id: processId, wait_seconds: 1 }).done;
+    expect(Date.now() - began).toBeLessThan(3_000);
+    expect(result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("Nothing was changed; call exec_status again") }] });
+    expect(calls.filter(entry => entry.method === "GET")).toHaveLength(2);
+    server.closeAllConnections();
+  });
+
+  it("propagates cancellation during a follow-up status read", async () => {
+    const processId = await start();
+    holdStatusAfterFirst = true;
+    const controller = new AbortController();
+    const pending = background.backgroundStatus(cfg, BOX, { process_id: processId, wait_seconds: 1 }, controller.signal);
+    await expect.poll(() => calls.filter(entry => entry.method === "GET").length).toBe(2);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    server.closeAllConnections();
   });
 
   it("returns only the end of long output, and never half a character", async () => {
