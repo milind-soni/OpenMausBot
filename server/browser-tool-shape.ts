@@ -154,14 +154,18 @@ export function shapeBrowserToolResult(result: unknown, options: { toolName?: st
   const content = (result.content as unknown[]).map((part) => {
     if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") return part;
     textParts++;
-    if (result.isError === true) library ??= loaderMissingLibrary(part.text);
+    if (result.isError === true && process.platform === "linux") library ??= loaderMissingLibrary(part.text);
     const outcome = trimResultText({ text: withoutLifecycle(part.text), budget, toolName: options.toolName });
     return { ...part, text: outcome.trimmed ? outcome.text + BROWSER_NARROWING_HINT : outcome.text };
   });
   if (!textParts) return { ...result, content };
   // agent-browser launches Chrome itself, so a host missing system libraries
   // only shows the loader's words; say how to install them, as our own launch does.
-  if (library) content.push({ type: "text", text: new BrowserHostError("libraries", [library]).message });
+  // The advice joins the first text part: older Claude Code shows a bot only that one.
+  if (library) {
+    const first = content.find((part): part is { text: string } => isRecord(part) && part.type === "text" && typeof part.text === "string");
+    if (first) first.text += `\n\n${new BrowserHostError("libraries", [library]).message}`;
+  }
   return { ...Object.fromEntries(Object.entries(result).filter(([key]) => key !== "structuredContent")), content };
 }
 

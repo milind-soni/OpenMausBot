@@ -76,14 +76,25 @@ describe("browser tool shaping", () => {
 
   it("tells the bot the install command when Chrome cannot load a system library", () => {
     const launch = "Chrome exited early (exit code: 127) without writing DevToolsActivePort\nChrome stderr:\n  /home/maus/.agent-browser/browsers/chrome-157.0.8103.38/chrome: error while loading shared libraries: libatk-1.0.so.0: cannot open shared object file: No such file or directory";
-    const shaped = shapeBrowserToolResult({ content: [{ type: "text", text: launch }], isError: true }) as { content: Array<{ text: string }>; isError: boolean };
-    expect(shaped.isError).toBe(true);
-    expect(shaped.content[0].text).toBe(launch);
-    expect(shaped.content[1].text).toContain("libatk-1.0.so.0");
-    expect(shaped.content[1].text).toContain("`sudo openmausbot browser install --with-deps`");
-    // a page that merely mentions the loader's words, or another failure, gets no install advice
-    for (const result of [{ content: [{ type: "text", text: launch }] }, { content: [{ type: "text", text: "Chrome exited early (exit code: 1)" }], isError: true }]) {
-      expect((shapeBrowserToolResult(result) as { content: unknown[] }).content).toHaveLength(1);
+    const platform = process.platform;
+    const shape = (result: unknown) => shapeBrowserToolResult(result) as { content: Array<{ text: string }>; isError?: boolean };
+    try {
+      Object.defineProperty(process, "platform", { value: "linux" });
+      const shaped = shape({ content: [{ type: "text", text: launch }], isError: true });
+      expect(shaped.isError).toBe(true);
+      expect(shaped.content).toHaveLength(1);
+      expect(shaped.content[0].text.startsWith(launch)).toBe(true);
+      expect(shaped.content[0].text).toContain("missing libraries the browser needs (libatk-1.0.so.0)");
+      expect(shaped.content[0].text).toContain("`sudo openmausbot browser install --with-deps`");
+      // a page that merely mentions the loader's words, or another failure, gets no install advice
+      for (const result of [{ content: [{ type: "text", text: launch }] }, { content: [{ type: "text", text: "Chrome exited early (exit code: 1)" }], isError: true }]) {
+        expect(shape(result).content).toEqual(result.content);
+      }
+      // the install command is for Linux hosts only
+      Object.defineProperty(process, "platform", { value: "darwin" });
+      expect(shape({ content: [{ type: "text", text: launch }], isError: true }).content[0].text).toBe(launch);
+    } finally {
+      Object.defineProperty(process, "platform", { value: platform });
     }
   });
 
