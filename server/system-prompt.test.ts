@@ -437,6 +437,9 @@ describe("longCommandsPrompt", () => {
     for (const kind of [null, "local", "vps", "box"] as const) {
       const text = longCommandsPrompt(kind);
       expect(text).toContain("keep the command in the foreground until it exits");
+      expect(text).toContain("until it reaches terminal exit or the timeout elapses");
+      expect(text).toContain("still running and unresolved");
+      expect(text).toContain("split it into shorter pieces that each finish within it");
       expect(text).toContain("Do not detach a command with nohup");
       expect(text).not.toContain("nohup <command>");
       expect(text).toContain("require the command's own fresh exit code and output");
@@ -447,6 +450,7 @@ describe("longCommandsPrompt", () => {
   it("keeps the Local VM's own detached path, where the container outlives the call", () => {
     for (const kind of ["vm-private", "vm-shared"] as const) {
       const text = longCommandsPrompt(kind);
+      expect(text).toContain("This is the exception to the no-detach rule above");
       expect(text).toContain("start it detached inside the VM (`nohup <command> > /tmp/<job>.log 2>&1 &`)");
     }
   });
