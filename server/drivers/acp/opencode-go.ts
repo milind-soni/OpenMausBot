@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 
+import { writeFileAtomic } from "../../atomic.ts";
 import { ATTACHMENTS_DIR } from "../../attachments.ts";
 import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
@@ -309,16 +310,56 @@ export function surveyOpenCodeEfforts(
   return surveyModelVariants(request, session, budgetMs);
 }
 
+/** Session id -> when a probe opened it. Only ids in here are ever deleted, so another client's sessions in the
+ * discovery folder survive; a probe cut off by its timeout leaves its ids for the next probe to delete. */
+type ProbeSessionLedger = Record<string, number>;
+
+const probeLedgerPath = (cwd: string) => join(cwd, ".openmaus-probe-sessions.json");
+
+function readProbeLedger(cwd: string): ProbeSessionLedger {
+  try {
+    const ledger: unknown = JSON.parse(readFileSync(probeLedgerPath(cwd), "utf8"));
+    return ledger && typeof ledger === "object" && !Array.isArray(ledger) ? ledger as ProbeSessionLedger : {};
+  } catch {
+    return {};
+  }
+}
+
+function changeProbeLedger(cwd: string, change: (ledger: ProbeSessionLedger) => void): void {
+  const ledger = readProbeLedger(cwd);
+  change(ledger);
+  try {
+    writeFileAtomic(probeLedgerPath(cwd), JSON.stringify(ledger), { durable: false });
+  } catch {}
+}
+
+/** OpenCode (2.2.0, 2.2.6) keeps every ACP session, even one closed with session/close or whose process was killed,
+ * and lists it in the user's history; only session/delete removes it, and it answers {} for an id it does not know. */
+async function deleteProbeSessions(
+  request: (method: string, params: unknown) => Promise<unknown>,
+  cwd: string,
+  opened: string[],
+  timeoutMs: number,
+): Promise<void> {
+  const abandonedBefore = Date.now() - 2 * timeoutMs;
+  const abandoned = Object.entries(readProbeLedger(cwd))
+    .filter(([, openedAt]) => openedAt < abandonedBefore)
+    .map(([sessionId]) => sessionId);
+  await Promise.all([...new Set([...opened, ...abandoned])].map((sessionId) => request("session/delete", { sessionId }).then(
+    () => changeProbeLedger(cwd, (ledger) => delete ledger[sessionId]),
+    () => {},
+  )));
+}
+
 /** `settleMs` keeps the process open that long after it starts, then lists again: OpenCode 2's own catalog refresh
  * reaches a running process's later sessions only. */
 export async function probeOpenCodeSession(
   cli: string,
   environment: Record<string, string | undefined>,
-  folder?: string,
   timeoutMs = DISCOVERY_TIMEOUT_MS,
   settleMs = 0,
 ): Promise<OpenCodeSessionProbe> {
-  const cwd = folder ?? await discoveryDirectory();
+  const cwd = await discoveryDirectory();
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawnCli>;
@@ -397,22 +438,41 @@ export async function probeOpenCodeSession(
       pending.set(id, { resolve: resolveRequest, reject: rejectRequest });
       write({ jsonrpc: "2.0", id, method, params });
     });
+    let deletesSessions = false;
+    const opened: string[] = [];
+    const openSession = async () => {
+      const session = await request("session/new", { cwd, mcpServers: [] });
+      const sessionId = (session as { sessionId?: unknown } | null)?.sessionId;
+      if (deletesSessions && typeof sessionId === "string") {
+        opened.push(sessionId);
+        changeProbeLedger(cwd, (ledger) => { ledger[sessionId] = Date.now(); });
+      }
+      return session;
+    };
+    const cleanUp = () => deletesSessions ? deleteProbeSessions(request, cwd, opened, timeoutMs) : Promise.resolve();
     void (async () => {
-      await request("initialize", {
+      const initialized = await request("initialize", {
         protocolVersion: 1,
         clientInfo: { name: "openmausbot", version: "0.0.0" },
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-      });
-      const session = await request("session/new", { cwd, mcpServers: [] });
+      }) as { agentCapabilities?: { sessionCapabilities?: { delete?: unknown } } } | null;
+      deletesSessions = Boolean(initialized?.agentCapabilities?.sessionCapabilities?.delete);
+      const session = await openSession();
       listed = { session, efforts: new Map() };
       const budget = Math.min(EFFORT_SURVEY_MS, deadline - Date.now() - 1_000);
       const efforts = await surveyOpenCodeEfforts(request, session, budget);
       if (!settleMs) return { session, efforts };
       const wait = Math.min(settleMs, timeoutMs - 2_000) - (Date.now() - (deadline - timeoutMs));
       if (wait > 0) await new Promise((resolveWait) => setTimeout(resolveWait, wait));
-      const later = await request("session/new", { cwd, mcpServers: [] });
+      const later = await openSession();
       return { session: catalogFromOpenCodeSession(later) ? later : session, efforts };
-    })().then((result) => finish(null, result), (error: Error) => finish(error));
+    })().then(
+      (result) => {
+        listed = result;
+        return cleanUp().then(() => finish(null, result));
+      },
+      (error: Error) => cleanUp().then(() => finish(error)),
+    );
   });
 }
 
@@ -438,7 +498,7 @@ export async function discoverOpenCodeModels(
     : 0;
   // A listing ends long before a catalog refetch would: it reads the cache, unless it waits for OpenCode 2's own refetch.
   const listing = settleMs ? environment : { ...environment, OPENCODE_DISABLE_MODELS_FETCH: "1" };
-  const probeSession = () => probeOpenCodeSession(cli, listing, undefined, DISCOVERY_TIMEOUT_MS, settleMs);
+  const probeSession = () => probeOpenCodeSession(cli, listing, DISCOVERY_TIMEOUT_MS, settleMs);
   const readMetadata = () => runOpenCodeModelsVerbose(cli, listing).then(parseOpenCodeModels);
   let [session, verbose] = await Promise.allSettled([probeSession(), readMetadata()]);
   // Two OpenCode processes starting together in a fresh home race to create its database and one fails

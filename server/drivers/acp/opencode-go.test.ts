@@ -934,6 +934,80 @@ describe("OpenCode after a login added since its process started", () => {
 describe("OpenCode catalog probes", () => {
   afterEach(() => resetOpenCodeModelCache());
 
+  const rpcLines = (file: string) => readFileSync(file, "utf8").trim().split("\n")
+    .map((line) => JSON.parse(line) as { method: string; sessionId?: string; cwd?: string });
+
+  it("deletes only sessions a probe opened: its own, and those an earlier probe left behind", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-delete-"));
+    let ledger = "";
+    try {
+      const discover = async (rpc: string) => {
+        resetOpenCodeModelCache();
+        await discoverOpenCodeModels({
+          ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle",
+          FAKE_ACP_SESSION_DELETE: "1", FAKE_ACP_RPC_APPEND_FILE: rpc,
+        }, FAKE_CLI);
+        const lines = rpcLines(rpc);
+        ledger = join(lines.find((entry) => entry.method === "session/new")!.cwd!, ".openmaus-probe-sessions.json");
+        return lines.filter((entry) => entry.method === "session/delete").map((entry) => entry.sessionId).sort();
+      };
+      expect(await discover(join(scratch, "first.jsonl"))).toEqual(["fake-acp-session"]);
+      expect(JSON.parse(readFileSync(ledger, "utf8"))).toEqual({});
+
+      const stillOpening = Date.now();
+      writeFileSync(ledger, JSON.stringify({ ses_left_behind: Date.now() - 10 * 60_000, ses_other_probe: stillOpening }));
+      expect(await discover(join(scratch, "second.jsonl"))).toEqual(["fake-acp-session", "ses_left_behind"]);
+      expect(JSON.parse(readFileSync(ledger, "utf8"))).toEqual({ ses_other_probe: stillOpening });
+    } finally {
+      if (ledger) writeFileSync(ledger, "{}");
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("deletes a session whose probe OpenCode died under, once a later probe finds it stale", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-crashed-"));
+    let ledger = "";
+    try {
+      const environment = { ...process.env, HOME: scratch, FAKE_ACP_SESSION_DELETE: "1" };
+      const crashed = join(scratch, "crashed.jsonl");
+      await discoverOpenCodeModels({
+        ...environment, FAKE_ACP_MODELS: "opencode/big-pickle,opencode-go/minimax-m3", FAKE_ACP_SESSION_ID: "ses_crashed",
+        FAKE_ACP_EXIT_ON_MODEL: "opencode-go/minimax-m3", FAKE_ACP_RPC_APPEND_FILE: crashed,
+      }, FAKE_CLI);
+      const lines = rpcLines(crashed);
+      expect(lines.some((entry) => entry.method === "session/delete")).toBe(false);
+      ledger = join(lines.find((entry) => entry.method === "session/new")!.cwd!, ".openmaus-probe-sessions.json");
+      expect(Object.keys(JSON.parse(readFileSync(ledger, "utf8")))).toEqual(["ses_crashed"]);
+
+      writeFileSync(ledger, JSON.stringify({ ses_crashed: Date.now() - 10 * 60_000 }));
+      resetOpenCodeModelCache();
+      const next = join(scratch, "next.jsonl");
+      await discoverOpenCodeModels({
+        ...environment, FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_SESSION_ID: "ses_next", FAKE_ACP_RPC_APPEND_FILE: next,
+      }, FAKE_CLI);
+      expect(rpcLines(next).filter((entry) => entry.method === "session/delete").map((entry) => entry.sessionId).sort())
+        .toEqual(["ses_crashed", "ses_next"]);
+      expect(JSON.parse(readFileSync(ledger, "utf8"))).toEqual({});
+    } finally {
+      if (ledger) writeFileSync(ledger, "{}");
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("neither deletes nor records sessions when OpenCode cannot delete them", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-no-delete-"));
+    try {
+      const rpc = join(scratch, "rpc.jsonl");
+      await discoverOpenCodeModels({ ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_RPC_APPEND_FILE: rpc }, FAKE_CLI);
+      const lines = rpcLines(rpc);
+      expect(lines.some((entry) => entry.method === "session/delete")).toBe(false);
+      const ledger = join(lines.find((entry) => entry.method === "session/new")!.cwd!, ".openmaus-probe-sessions.json");
+      expect(existsSync(ledger) ? JSON.parse(readFileSync(ledger, "utf8")) : {}).toEqual({});
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
   it("runs in a folder that is its own git project", async () => {
     try {
       execFileSync("git", ["--version"], { stdio: "ignore" });
