@@ -316,6 +316,11 @@ export class RuntimeCoordinator implements Coordinator {
     return live.filter(a => a.parentId !== undefined && mine.has(a.parentId) && a.reply !== "none").map(a => this.project(a));
   }
 
+  runningIn(threadId: string): HandoffView[] {
+    this.ready();
+    return this.store.all({ nonTerminal: true, assigneeThreadId: threadId }).map(a => this.project(a)).filter(n => n.status === "running");
+  }
+
   beginTurn(req: BeginTurnRequest): HandoffView {
     this.ready();
     const existing = this.store.get(req.id);
