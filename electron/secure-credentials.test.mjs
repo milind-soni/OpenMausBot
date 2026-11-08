@@ -71,6 +71,7 @@ describe("resetUnreadableCredentials", () => {
   const resetDeps = (over = {}) => ({
     unreadable: true,
     confirm: vi.fn(async () => true),
+    quitting: () => false,
     exists: () => true,
     moveAside: vi.fn(),
     failed: vi.fn(async () => {}),
@@ -89,6 +90,13 @@ describe("resetUnreadableCredentials", () => {
     const d = resetDeps({ unreadable: false });
     await expect(resetUnreadableCredentials(d)).resolves.toBe("readable");
     expect(d.confirm).not.toHaveBeenCalled();
+    expect(d.moveAside).not.toHaveBeenCalled();
+    expect(d.restart).not.toHaveBeenCalled();
+  });
+
+  it("moves nothing when the app began to quit while the person was deciding", async () => {
+    const d = resetDeps({ quitting: () => true });
+    await expect(resetUnreadableCredentials(d)).resolves.toBe("quitting");
     expect(d.moveAside).not.toHaveBeenCalled();
     expect(d.restart).not.toHaveBeenCalled();
   });

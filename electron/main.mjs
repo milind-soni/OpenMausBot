@@ -2794,6 +2794,7 @@ ipcMain.handle("credential-store:reset", localOnly("credential-store:reset", (ev
     const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
     return response === 0;
   },
+  quitting: () => desktopShutdownStarted,
   exists: () => fs.existsSync(CREDENTIALS_FILE),
   moveAside: () => fs.renameSync(CREDENTIALS_FILE, `${CREDENTIALS_FILE}.unreadable-${Date.now()}`),
   failed: async (error) => {

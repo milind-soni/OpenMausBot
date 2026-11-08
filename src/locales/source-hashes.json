@@ -33572,7 +33572,8 @@
       "native.dialog.resetSavedKeys.detail": "9f72b7452bdcd91042c9679f05a5b6f2f6e3e7fdc7980c42a488fa3b01d6b3b0",
       "native.dialog.resetSavedKeys.button": "32910a15265787f53a3554f97da5787c04a7ada90822edcc7776a471b8ee3d8a",
       "native.dialog.resetSavedKeys.failed": "e663cbf1d28235aee568f1cd2b3c837697c355d0de071f557053f0c61bba2a54",
-      "connectors.resetSavedKeys": "764411710357197d3d55fbf646d0ea6249c4236cbc635e0b4212b8d92cf5dea6"
+      "connectors.resetSavedKeys": "764411710357197d3d55fbf646d0ea6249c4236cbc635e0b4212b8d92cf5dea6",
+      "connectors.savedKeysUnreadable": "6a639d5ea19bf20de5ce7551bea2ccc330cfbd5085d0906a3ec9ece6959c4470"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

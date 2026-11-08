@@ -5348,6 +5348,7 @@
   "connectors.tab.mcp": "Servidores MCP",
   "connectors.stale": "Mostrando as conexões da última vez. Não foi possível abrir o armazenamento de credenciais agora para verificá-las novamente. Seus apps continuam conectados. Reiniciar o app {app} costuma resolver.",
   "connectors.resetSavedKeys": "Redefinir chaves salvas",
+  "connectors.savedKeysUnreadable": "Não foi possível ler as chaves salvas neste computador.",
   "connectors.viewAria": "Visualização dos apps conectados",
   "connectors.tab.marketplace": "Marketplace",
   "connectors.tab.connected": "Conectados",

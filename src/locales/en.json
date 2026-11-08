@@ -5615,6 +5615,7 @@
   "connectors.tab.mcp": "MCP servers",
   "connectors.stale": "Showing what was connected last time. The credential store couldn't be opened just now, so these couldn't be re-checked. Your apps are still connected. Restarting {app} usually clears this.",
   "connectors.resetSavedKeys": "Reset saved keys",
+  "connectors.savedKeysUnreadable": "The keys saved on this computer couldn't be read.",
   "connectors.viewAria": "Connected apps view",
   "connectors.tab.marketplace": "Marketplace",
   "connectors.tab.connected": "Connected",
