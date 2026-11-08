@@ -68,8 +68,8 @@ restarts, and logs how many tools each server left out.
 
 Zen's free models have an allowance of their own, apart from any Go
 subscription on the same login. A free model that reaches it ("Free usage
-limit reached…") holds that model alone, never the account: new turns can
-still run on its other models, Go's included. A limit on the account's own
+limit reached…") holds that login's free models, never the account: new turns
+can still run on its paid models, Go's included. A limit on the account's own
 allowance (a Go limit, or a monthly one) holds the whole account until its
 window resets, as with the other engines.
 
