@@ -29,7 +29,7 @@ export function ItemRow({ item }: { item: SidebarMenuItem }) {
       onClick={item.onSelect}
       className={cn(rowCls, "w-full text-left enabled:hover:bg-ink/[0.03] disabled:cursor-default disabled:opacity-45")}
     >
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-ink/[0.05] text-ink-secondary [&_svg]:size-[15px]" aria-hidden="true">
+      <span className="flex size-4 shrink-0 items-center justify-center text-ink-secondary [&_svg]:size-4" aria-hidden="true">
         {item.icon}
       </span>
       <span className={cn("min-w-0 truncate text-[14px] font-medium", !wrapsValue && "flex-1", item.active ? "text-accent-text" : "text-ink")}>{item.label}</span>
@@ -67,7 +67,7 @@ export function DetailsTab({ bot, derived, onOpen }: {
       {derived.botRoutines.length === 0 ? (
         <section data-panel-empty="routines">
           <CardLabel>{t("botSettings.simple.routines")}</CardLabel>
-          <p className="mx-1 text-[13px] leading-[18px] text-ink-tertiary">
+          <p className="mx-3.5 text-[13px] leading-[18px] text-ink-tertiary">
             {t("botPanel.routines.emptyHint")}{" "}
             <button type="button" data-panel-automations onClick={() => dispatch({ type: "showRoutines", view: "list" })}
               className="rounded-[4px] font-medium text-ink-secondary underline decoration-ink/25 underline-offset-2 hover:text-ink hover:decoration-ink/60">

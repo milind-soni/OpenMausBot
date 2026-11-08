@@ -323,7 +323,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         {...(selectMode ? { role: "checkbox", "aria-checked": checked, "aria-disabled": !tickable, "aria-label": t("task.bulk.rowCheck", { title: displayTitle }) } : {})}
         onClick={choose} onDoubleClick={selectMode ? undefined : startRename} onContextMenu={contextMenu}
         onKeyDown={(event) => { if (opensRowMenuFromKey(event.key, event.shiftKey, selectMode)) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
-        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink", panel && "rounded-[8px] py-2 pl-3 text-[14px]", selectMode && "pl-1.5", selectMode && !tickable && "cursor-not-allowed opacity-60")}>
+        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink", panel && "rounded-[8px] py-2 pl-3.5 text-[14px]", selectMode && "pl-1.5", selectMode && !tickable && "cursor-not-allowed opacity-60")}>
         {selectMode && <span aria-hidden="true" title={tickable ? undefined : t("task.bulk.running")}
           className={cn("flex size-3.5 shrink-0 items-center justify-center rounded-[3px] border", checked ? "border-accent bg-accent text-white" : "border-ink-tertiary", !tickable && "opacity-50")}>
           {checked && <Check size={10} strokeWidth={3} />}

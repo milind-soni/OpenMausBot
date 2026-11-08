@@ -14,7 +14,7 @@ const hintCls = "mt-px text-[13px] leading-[1.35] text-ink-secondary";
 export const buttonCls =
   "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] bg-control px-3.5 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50";
 /** The panel's one action row: New conversation, Add a routine. */
-export const panelActionCls = "flex h-9 min-w-0 items-center gap-2.5 rounded-full bg-ink/[0.05] px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/[0.09]";
+export const panelActionCls = "flex h-9 min-w-0 items-center gap-2.5 rounded-full [&>svg]:size-4 bg-ink/[0.05] px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/[0.09]";
 export const chipCls = (on: boolean) =>
   cn(
     "rounded-full px-2.5 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
@@ -23,7 +23,7 @@ export const chipCls = (on: boolean) =>
 
 export function CardLabel({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
-    <div className="mx-1 mb-2 mt-5 flex min-h-5 items-center justify-between gap-3 text-[13px] font-semibold text-ink-secondary">
+    <div className="mx-3.5 mb-2 mt-5 flex min-h-5 items-center justify-between gap-3 text-[13px] font-semibold text-ink-secondary">
       <span className="min-w-0 truncate">{children}</span>
       {action}
     </div>
@@ -67,8 +67,8 @@ export function RowText({ title, hint }: { title: ReactNode; hint?: ReactNode })
 
 export function RowIcon({ icon: Icon }: { icon: LucideIcon }) {
   return (
-    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-ink/[0.05] text-ink-secondary max-md:size-8 max-md:rounded-full" aria-hidden="true">
-      <Icon size={15} />
+    <span className="flex size-4 shrink-0 items-center justify-center text-ink-secondary max-md:size-8 max-md:rounded-full max-md:bg-ink/[0.05]" aria-hidden="true">
+      <Icon size={16} />
     </span>
   );
 }

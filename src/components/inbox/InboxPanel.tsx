@@ -83,11 +83,11 @@ export function InboxPanel() {
         ) : (
           <>
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <label className="mx-[13px] my-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
+              {listedRows(view).length > 0 && <label className="mx-[13px] my-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
                 <Search size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
                 <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("inbox.search")} aria-label={t("inbox.search")}
                   className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary [&::-webkit-search-cancel-button]:hidden" />
-              </label>
+              </label>}
               <div role="list" data-inbox-list aria-label={t("inbox.panel.title")} className="space-y-0.5 px-1.5 pb-1.5">
                 {rows.length === 0
                   ? query.trim() && listedRows(view).length

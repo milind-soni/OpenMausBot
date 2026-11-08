@@ -79,7 +79,7 @@ export function SettingRow({
           <div id={titleId} className="text-[14px] font-medium text-ink in-data-[settings-look=simple]:font-normal in-data-[settings-look=simple]:leading-5">{title}</div>
           {subtitle && <div className="mt-1 text-[12px] leading-relaxed text-pretty text-ink-secondary in-data-[settings-look=simple]:mt-0 in-data-[settings-look=simple]:text-[13px] in-data-[settings-look=simple]:leading-[18px]">{subtitle}</div>}
         </div>
-        <div className="min-w-0 sm:max-w-[240px] in-data-[settings-look=simple]:ml-auto in-data-[settings-look=simple]:shrink-0 in-data-[settings-look=simple]:sm:max-w-none">{children}</div>
+        <div className="min-w-0 sm:max-w-[240px] in-data-[settings-look=simple]:ml-auto in-data-[settings-look=simple]:flex in-data-[settings-look=simple]:shrink-0 in-data-[settings-look=simple]:items-center in-data-[settings-look=simple]:sm:max-w-none">{children}</div>
       </div>
       {message && <div className="mt-2 text-[12px]">{message}</div>}
     </div>

@@ -25,6 +25,8 @@ import { SettingRow, SettingsDisclosureRow, SettingsGroup, SettingsRows } from "
 import { UsageSection } from "./UsageSection";
 import { PlanUsageSummary } from "./PlanUsage";
 import { SkinPicker } from "./SkinPicker";
+import { useSkinChoice } from "./ThemeRow";
+import { resolveSkin, SKINS } from "@/lib/skins";
 import { PlaceLookRows } from "./PlaceLookCard";
 import { ChromeRailRow } from "./ChromeRailToggle";
 import { WindowFrameRow } from "./WindowFrameRow";
@@ -68,9 +70,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
             <ChromeRailRow />
             <WindowFrameRow />
             <ColorUserBubblesRow simple />
-            <SettingRow title={t("settings.simple.looks.title")}>
-              <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.looks.change")}</button>
-            </SettingRow>
+            <LooksRow onLooks={onLooks} />
           </SettingsRows>
         </SettingsGroup>
       )}
@@ -106,6 +106,16 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
         <SettingsRows><AdvancedModeRow simple /></SettingsRows>
       </div>
     </>
+  );
+}
+
+function LooksRow({ onLooks }: { onLooks: () => void }) {
+  const current = SKINS.find((skin) => skin.id === resolveSkin(useSkinChoice()))?.name;
+  return (
+    <SettingRow title={t("settings.simple.looks.title")}>
+      {current && <span data-looks-current className="me-3 text-[13px] text-ink-tertiary">{current}</span>}
+      <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.looks.change")}</button>
+    </SettingRow>
   );
 }
 
