@@ -137,7 +137,8 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
     req.pipe(forwarded);
     res.on("close", () => forwarded.destroy());
   });
-  server.on("upgrade", (_req, socket) => { stats.refused += 1; socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); });
+  // Node removes its own error listener from a socket it hands to `upgrade`.
+  server.on("upgrade", (_req, socket) => { stats.refused += 1; socket.on("error", () => socket.destroy()); socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); });
 
   return new Promise((done, fail) => {
     server.once("error", fail);
