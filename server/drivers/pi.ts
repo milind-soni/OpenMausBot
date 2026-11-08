@@ -734,7 +734,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
               compactionObserved = true;
               deletePromptSplitReceipt("pi", JSON.stringify([threadId, sessionFile]));
             }
-            if (evt.type.endsWith("compaction_end") && (evt as { aborted?: boolean }).aborted !== true) emit({ ...base(threadId, turnId), type: "context.compacted" });
+            if (evt.type.endsWith("compaction_end") && !(evt as { aborted?: boolean }).aborted && !(evt as { errorMessage?: string }).errorMessage) emit({ ...base(threadId, turnId), type: "context.compacted" });
             return;
           }
           case "message_end":
