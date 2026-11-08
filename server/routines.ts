@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 
 import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
-import { OwnedFile } from "./atomic.ts"; import { saveSoon } from "./save-batch.ts";
+import { OwnedFile } from "./atomic.ts"; import { saveSoon } from "./save-batch.ts"; import { RunProgressSave } from "./routine-progress-save.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { activeRunsOf, nextDueOf, schedulerDueOf, wakeHoldOf } from "./routine-due.ts";
 import { startDueTimer, type DueTimer } from "./due-timer.ts";
@@ -320,7 +320,7 @@ export class RoutineManager {
   private unreadable = false; private malformedAttachments = false;
   private frozenPending = false;
   private readonly bootedAt: number;
-  private readonly checking = new Set<string>();
+  private readonly checking = new Set<string>(); private readonly progress = new RunProgressSave(() => this.file, () => this.save());
 
   constructor(options: RoutineManagerOptions) {
     this.options = options;
@@ -947,13 +947,13 @@ export class RoutineManager {
   }
 
   stop() {
-    this.timer?.stop();
-    this.timer = null;
+    this.timer?.stop(); this.timer = null;
+    try { this.progress.flush(); } catch (error) { console.error("routines: could not save run progress", error); }
   }
 
   /** At shutdown: a run whose turn the shutdown cuts stays running on disk, for the next start to pick up once. */
   close() {
-    this.closing = true;
+    this.closing = true; this.progress.atOnce();
     this.stop();
   }
 
@@ -1286,7 +1286,7 @@ export class RoutineManager {
     } else {
       return null;
     }
-    this.saveLater();
+    if (event.type === "turn.completed") this.saveLater(); else this.progress.soon();
     this.emitRun(run);
     if (event.type === "turn.completed") queueMicrotask(() => this.tickInBackground());
     return cloneRun(run);
@@ -1540,7 +1540,7 @@ export class RoutineManager {
   /** Lands at the end of the running save batch (server/save-batch.ts); what a caller rolls back on failure uses save. */
   private saveLater() { saveSoon(this, () => this.save()); }
   private save() {
-    if (this.unreadable) return;
+    this.progress.written(); if (this.unreadable) return;
     // Evict only terminal receipts: an active one owns cancellation, timeout and event routing.
     let excess = this.runs.length - MAX_RUNS;
     for (let index = 0; index < this.runs.length && excess > 0;) {

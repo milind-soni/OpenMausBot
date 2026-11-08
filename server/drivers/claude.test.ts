@@ -483,6 +483,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     delete process.env.FAKE_CLAUDE_PROMPTS;
     delete process.env.FAKE_CLAUDE_TRANSIENTS;
     delete process.env.FAKE_CLAUDE_PARTIAL_FAILS;
+    delete process.env.FAKE_CLAUDE_ANSWERED_FAILS;
     delete process.env.FAKE_CLAUDE_STATE;
     delete process.env.FAKE_CLAUDE_RETRY_SCALE;
     delete process.env.FAKE_CLAUDE_TEXT_HANG;
@@ -590,6 +591,18 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events[beat]).toMatchObject({ itemType: "tool" });
     expect(beat).toBeGreaterThan(types.indexOf("item.started"));
     expect(beat).toBeLessThan(types.lastIndexOf("item.completed"));
+  });
+
+  it("marks an image a tool's result returned as the tool's", async () => {
+    const data = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]).toString("base64");
+    await create(undefined, {
+      FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([{ name: "Read", input: { file_path: "brief.pdf" }, output: [{ type: "image", source: { type: "base64", media_type: "image/png", data } }] }]),
+    });
+    await instance.adapter.sendTurn({ threadId: "t-tool-image", text: "check the brief" });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "assistant_image")).toEqual([
+      expect.objectContaining({ data, fromTool: true }),
+    ]);
   });
 
   it("names the CLI process while a long tool runs, and no process once the turn is over", async () => {
@@ -3320,6 +3333,21 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.filter((e) => e.type === "turn.completed" && e.turnId === second.turnId))
       .toMatchObject([{ ok: true }]);
   });
+
+  it("never sends a turn again once one of its model calls answered, even when the exit reads transient", async () => {
+    process.env.FAKE_CLAUDE_TRANSIENTS = "1";
+    process.env.FAKE_CLAUDE_ANSWERED_FAILS = "1";
+    const state = join(scratch, "launches-answered");
+    process.env.FAKE_CLAUDE_STATE = state;
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-answered", text: "go" });
+
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "turn.retrying")).toEqual([]);
+    expect(recorder.events.filter((e) => e.type === "turn.completed")).toMatchObject([{ ok: false, stopReason: "exit_before_result" }]);
+    expect(readFileSync(state, "utf8")).toBe("1");
+  }, 20_000);
 
   it("stops retrying at the attempt cap and settles the turn as failed", async () => {
     process.env.FAKE_CLAUDE_TRANSIENTS = "9";

@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { Archive, Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderPlus, Library, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Phone, Pin, Plus, Search, TextQuote, Trash2, Users, X } from "lucide-react";
 import { api, useStore, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { approvalModeFor } from "../../shared/approval-mode";
-import { liveActivityLabel } from "@/lib/live-activity";
+import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
 import { SidebarWorkingStep } from "./SidebarWorkingStep";
 import { openBotRow } from "@/state/thread-navigation";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
@@ -912,7 +912,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       )}
     </div>
     {advanced && !iconOnly && threadsOpen && hasThreadList && <BotThreadList {...props} hidden={!showThreads}
-      activityLabel={liveActivityLabel(last)}
+      activityLabel={liveActivityLabel(sidebarMessage(last))}
       query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
     {(advanced || (!iconOnly && (waiting || unread || bot.tasks?.some(runningRoutineRun)))) && <SidebarBotActivity bot={bot} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} density={density} pendingQueued={pendingQueued} dispatch={dispatch} waitingOnly={!advanced} runsOnly={expanded} />}
     {showThreads && creatingProject && <BotProjectDialog bot={bot} onClose={() => setCreatingProject(false)} />}
@@ -1120,7 +1120,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   for (const group of sectionedRooms) {
     if (!sectionNames.includes(group.section!)) sectionNames.push(group.section!);
   }
-  const drops = botDrag.arrange({ enabled: sections.interactive && !phone, main: saved.unsectionedBots, sectioned: saved.sectionedBots, departments: sectionNames, bots: state.bots, taken: departmentNames(state) });
+  const drops = botDrag.arrange({ enabled: (sections.interactive || density === "icons") && !phone, withinList: density === "icons", main: saved.unsectionedBots, sectioned: saved.sectionedBots, departments: sectionNames, bots: state.bots, taken: departmentNames(state) });
   const naturalSectionIds = [
     ...(pinnedBots.length > 0 && !universalPins && !simpleDesk ? [PINNED_SECTION_ID] : []),
     ...(unsectionedRooms.length > 0 ? [CHANNELS_SECTION_ID] : []),
@@ -1435,7 +1435,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                 {density !== "icons" && !headless && (
                   <SidebarSectionHeader
                     name={sectionLabel(id)}
-                    line={simple}
+                    line={simple} reserveMenu={simple && !remoteClient}
                     count={simple ? sectionChiefItems.length + sectionBotItems.length + sectionGroupItems.length : undefined}
                     onMenu={simple && !remoteClient && sectionName ? (button) => {
                       const rect = button.getBoundingClientRect();

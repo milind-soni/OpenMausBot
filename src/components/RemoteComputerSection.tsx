@@ -23,7 +23,8 @@ export function isServerPairingLink(input: string): boolean {
   return read.ok && (read.code !== null || read.credential !== null);
 }
 
-export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhenUnavailable?: boolean }) {
+/** `legacyOnly`: only an installation already in client mode sees this card, to leave it before the mode ends. */
+export function RemoteComputerSection({ hideWhenUnavailable = false, legacyOnly = false }: { hideWhenUnavailable?: boolean; legacyOnly?: boolean }) {
   const bridge = window.ogb?.remoteClient;
   const environments = window.ogb?.environments;
   const [state, setState] = useState<DesktopRemoteClientState>({ active: bridge?.active === true });
@@ -92,6 +93,7 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
   };
 
   if (!bridge && !environments && hideWhenUnavailable) return null;
+  if (legacyOnly && !state.active) return null;
 
   return (
     <Card
@@ -113,6 +115,9 @@ export function RemoteComputerSection({ hideWhenUnavailable = false }: { hideWhe
           </div>
           <p className="text-[13px] leading-relaxed text-ink-secondary">
             {t("remote.client.mode")}
+          </p>
+          <p role="status" className="rounded-lg bg-inset px-3 py-2 text-[13px] leading-relaxed text-ink" data-legacy-client-notice="">
+            {t("remote.client.endsDec7")}
           </p>
           <button
             type="button"

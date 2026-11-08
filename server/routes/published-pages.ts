@@ -40,7 +40,7 @@ const UNPUBLISH_ROUTE = /^\/api\/published-pages\/([a-z0-9]{20,63})\/unpublish$/
 const APP_PUBLISH_ROUTE = /^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/app\/publish$/;
 const appPublishBody = z.object({ rev: z.number().int().min(0).max(1_000_000).optional() }).strict();
 const pageId = z.string().max(63).optional();
-const publishBody = z.object({ path: z.string().max(4096), title: z.string().max(1000), page_id: pageId });
+const publishBody = z.object({ path: z.string().max(4096), title: z.string().max(1000), page_id: pageId, live: z.boolean().optional() });
 const unpublishBody = z.object({ page_id: pageId, path: z.string().max(4096).optional() });
 
 /** A path inside the bot's Local VM workspace means the same file on this computer. */
@@ -57,9 +57,10 @@ export function createPagesInternalRoutes(publisher: PagePublisher) {
     let outcome;
     if (ctx.path === PUBLISH) {
       const body = publishBody.safeParse(raw ?? {});
-      if (!body.success) return void ctx.json(ctx.res, 400, { error: "publish_page takes path, title and optionally page_id, as text." });
+      if (!body.success) return void ctx.json(ctx.res, 400, { error: "publish_page takes path, title and optionally page_id (text) and live (true or false)." });
       outcome = await publisher.publish({ botId: ctx.botId, threadId: ctx.threadId, path: hostPath(body.data.path, vmWorkspace), title: body.data.title,
-        ...(body.data.page_id ? { pageId: body.data.page_id } : {}), roots: folders, post: ctx.post, call });
+        ...(body.data.page_id ? { pageId: body.data.page_id } : {}), ...(body.data.live !== undefined ? { live: body.data.live } : {}),
+        roots: folders, post: ctx.post, call });
     } else {
       const body = unpublishBody.safeParse(raw ?? {});
       if (!body.success) return void ctx.json(ctx.res, 400, { error: "unpublish_page takes page_id, or the path the page was published from." });

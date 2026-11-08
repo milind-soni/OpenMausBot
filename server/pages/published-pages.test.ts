@@ -29,13 +29,14 @@ function writeSite(folder: string, files: Record<string, string> = SITE) {
 }
 const signIn = () => applyIncludedPagesMessage({ type: "openmausbot:included-pages", access: { url: FAKE_TOKEN_URL, token: FAKE_DESKTOP_TOKEN } });
 
-function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean } = {}) {
+function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean; liveRoots?: (botId: string, threadId: string) => readonly string[] | null; paused?: () => boolean } = {}) {
   const service = fakePagesService({ quota: options.quota });
   const work = join(dir, "work"), data = join(dir, "data");
   mkdirSync(work, { recursive: true });
   const cards: Array<{ threadId: string; id: string; text: string; card: PublishedPageCard }> = [];
   let ids = 0;
   const pages = createPublishedPages({ dataDir: data, cloudHome: options.home ? FAKE_HOME : null, selfHosted: options.selfHosted, fetch: (input, init) => service.fetch(input, init),
+    ...(options.liveRoots ? { liveRoots: options.liveRoots } : {}), ...(options.paused ? { paused: options.paused } : {}),
     patch: (threadId, messageId, text, card) => { const shown = cards.find((each) => each.id === messageId && each.threadId === threadId); if (shown) Object.assign(shown, { text, card }); } });
   const post = (threadId: string) => (text: string, card: PublishedPageCard) => { const id = `m${++ids}`; cards.push({ threadId, id, text, card }); return id; };
   const publish = (input: { path: string; title?: string; pageId?: string; botId?: string; threadId?: string }) => pages.publisher.publish({
@@ -415,3 +416,97 @@ describe("pages access", () => {
     expect(pagesHomeSignature("s".repeat(43), "cm-test-home", "1792670400", "nonce-nonce-nonce-1", '{"action":"create"}')).toBe("smys7kDYS99REKsdwsd9OaXv6pH_hP1Wajaq3KrTiVo");
   });
 });
+
+describe("a live published page", () => {
+  const publishLive = (f: ReturnType<typeof setup>, live?: boolean) => f.pages.publisher.publish({
+    botId: "bot-1", threadId: "thread-1", path: "site", title: "Bake sale", roots: [f.work], post: () => "m1", ...(live !== undefined ? { live } : {}) });
+
+  it("carries a version and a reload check in its index.html, and is remembered as live", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    expect((await publishLive(f, true)).status).toBe(200);
+    const [page] = [...f.service.pages.keys()];
+    const html = f.service.pages.get(page!)!.files.get("index.html")!;
+    expect(html.startsWith("<!doctype html><meta name=\"omb-live\" content=\"")).toBe(true);
+    expect(html).toContain("location.reload()");
+    expect(html.endsWith("<h1>Bake sale</h1>")).toBe(true);
+    expect(f.service.pages.get(page!)!.files.get("style.css")).toBe(SITE["style.css"]);
+    expect(f.pages.store.get(page!)).toMatchObject({ live: true });
+  });
+
+  it("publishes again to the same link when its folder changes, at most once a minute, and never a page that isn't live", async () => {
+    const f = setup();
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    writeSite(join(f.work, "still"), { "index.html": "<p>Still</p>" });
+    await f.pages.publisher.publish({ botId: "bot-1", threadId: "thread-1", path: "still", title: "Still", roots: [f.work], post: () => "m2" });
+    const [page] = [...f.service.pages.keys()];
+    const version = () => /content="([^"]+)"/u.exec(f.service.pages.get(page!)!.files.get("index.html")!)?.[1];
+    const first = version();
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(0);
+    writeFileSync(join(site, "style.css"), "h1{color:blue}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 1_000)).toBe(0);
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
+    expect(f.service.pages.get(page!)!.files.get("style.css")).toBe("h1{color:blue}");
+    expect(version()).not.toBe(first);
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "create", "update"]);
+    expect(await f.pages.publisher.refreshLive(Date.now() + 130_000)).toBe(0);
+    // Publishing it again keeps it live unless told otherwise.
+    await publishLive(f);
+    expect(f.pages.store.get(page!)).toMatchObject({ live: true });
+    await publishLive(f, false);
+    expect(f.pages.store.get(page!)).not.toHaveProperty("live");
+    expect(f.service.pages.get(page!)!.files.get("index.html")).toBe(SITE["index.html"]);
+  });
+
+  it("stops being published again once its bot can no longer read the folder, and keeps its link", async () => {
+    let roots: readonly string[] | null = null;
+    const asked: string[] = [];
+    const f = setup({ liveRoots: (botId, threadId) => { asked.push(`${botId} ${threadId}`); return roots; } });
+    roots = [f.work];
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    const [page] = [...f.service.pages.keys()];
+    writeFileSync(join(site, "style.css"), "h1{color:blue}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
+    expect(asked).toContain("bot-1 thread-1");
+    roots = null;
+    writeFileSync(join(site, "style.css"), "h1{color:green}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 130_000)).toBe(0);
+    expect(f.pages.store.get(page!)).not.toHaveProperty("live");
+    expect(f.pages.store.get(page!)).toMatchObject({ url: expect.any(String) });
+    expect(f.service.pages.get(page!)!.files.get("style.css")).toBe("h1{color:blue}");
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "update"]);
+  });
+
+  it("waits while the workspace is backed up, restored or moved", async () => {
+    let paused = false;
+    const f = setup({ paused: () => paused });
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    writeFileSync(join(site, "style.css"), "h1{color:blue}");
+    paused = true;
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(0);
+    paused = false;
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
+  });
+
+  it("waits ten minutes before trying a folder that can't be published as it is", async () => {
+    const f = setup();
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    const start = Date.now();
+    rmSync(join(site, "index.html"));
+    expect(await f.pages.publisher.refreshLive(start + 61_000)).toBe(0);
+    writeFileSync(join(site, "index.html"), "<h1>Back</h1>");
+    expect(await f.pages.publisher.refreshLive(start + 130_000)).toBe(0);
+    expect(await f.pages.publisher.refreshLive(start + 662_000)).toBe(1);
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "update"]);
+  });
+});
+

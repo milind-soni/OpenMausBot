@@ -14,6 +14,7 @@ import {
   messageImagePreviewUrl,
   previewImage,
   previewKeyAction,
+  requestMessageFile,
   safeDownloadFilename,
   saveFailureText,
   wrappedImageIndex,
@@ -199,6 +200,26 @@ describe("a failed save", () => {
       .toBe("This file is outside this chat's working folder, so it can't be saved from here");
     expect(saveFailureText({ reason: "the linked file is unavailable", outsideWorkspace: false }))
       .toBe("the linked file is unavailable");
+  });
+});
+
+describe("a file over the download limit", () => {
+  it("shows the server's plain explanation and keeps its code, not the raw byte count", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: "file exceeds 524288000 bytes",
+      code: "file_too_large",
+      errorKey: "serverError.file.tooLarge",
+      errorParams: { size: "612 MB", limit: "500 MB", name: "reel.mp4" },
+    }), { status: 413, headers: { "content-type": "application/json" } })));
+    try {
+      await expect(requestMessageFile("reel.mp4", { threadId: "t", messageId: "m" }, new AbortController().signal))
+        .rejects.toMatchObject({
+          code: "file_too_large",
+          message: "This file is 612 MB, over the 500 MB limit for opening files from chat. The file itself is still saved as reel.mp4.",
+        });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

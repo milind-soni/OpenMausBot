@@ -291,7 +291,7 @@ describe("what the person reads about using this computer", () => {
     localComputerDisabledReason({ capabilities: { host: host("darwin"), localComputer: { available: false } } as DesktopCapabilities, providerSupportsLocal: true }),
     localComputerDisabledReason({ capabilities: { host: host("win32"), localComputer: { available: false } } as DesktopCapabilities, providerSupportsLocal: true }),
     localComputerDisabledReason({ capabilities: { host: host("other", "Browser"), localComputer: { available: false } } as DesktopCapabilities, providerSupportsLocal: true }),
-    ...["linux-wayland-seat-safety-blocked", "wayland-compositor-unsupported", undefined].map((reasonCode) =>
+    ...["linux-wayland-seat-safety-blocked", "wayland-compositor-unsupported", "linux-hyprland-plugin-required", undefined].map((reasonCode) =>
       localComputerDisabledReason({ capabilities: { host: host("linux"), localComputer: { available: false, enabled: reasonCode !== undefined, reasonCode } } as DesktopCapabilities, providerSupportsLocal: true })),
     localComputerDisabledReason({ capabilities: { host: host("linux"), localComputer: { available: false, enabled: true } } as DesktopCapabilities, providerSupportsLocal: true }),
   ];
@@ -300,6 +300,7 @@ describe("what the person reads about using this computer", () => {
     expect(reasons.every((reason) => typeof reason === "string" && reason.length > 0)).toBe(true);
     for (const reason of reasons) expect(reason, reason!).not.toMatch(JARGON);
     expect(reasons[3]).toBe("Only the MausBot app on this computer can let a bot use it. Open the app here to use it.");
+    expect(reasons[6]).toBe("Bots can use this computer on Omarchy once its Hyprland add-on is installed and turned on. Open Local control for the steps.");
   });
 
   it("keeps the same plain words in the questions and the place lines the app shows", () => {

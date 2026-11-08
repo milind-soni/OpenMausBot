@@ -92,7 +92,7 @@ test("a page changes only its own place's colour: a Cloud's on the Admin first, 
 
 test("main's own wiring: This computer's page reads and changes its own colour, kept with this app's saved places, no Admin asked", async () => {
   const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-  const start = source.indexOf("installPlaceLook({ ipcMain, guard: workspaceOnly"), end = source.indexOf('ipcMain.handle("sharing:state"', start);
+  const start = source.indexOf("installPlaceLook({ ipcMain, guard: workspaceOnly"), end = source.indexOf("const lendingDialogs = createLendingDialogs(", start);
   assert.ok(start >= 0 && end > start, "main installs the colour's channels");
   const handlers = new Map(), persisted = [];
   const context = vm.createContext({ installPlaceLook, nativeT: nativeText.englishText.t, savedPlace: environments.savedPlace, withPlaceColor: environments.withPlaceColor,

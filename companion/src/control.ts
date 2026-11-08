@@ -9,7 +9,8 @@ import type { DeviceRegistry, DeviceRoutes } from "./devices.ts";
 import type { E2EDescriptor } from "./e2e/descriptor.ts";
 import type { LiveRoute } from "./e2e/registry.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
-import { lanAddresses, lanInterfaces, tailnetName, tailscaleAddress } from "./listener.ts";
+import { directRoutes, routedAddresses } from "./direct-routes.ts";
+import { lanInterfaces, tailnetName, tailscaleAddress } from "./listener.ts";
 import { defaultHostName } from "./mdns.ts";
 import { publicNetworks } from "./windows-network.ts";
 
@@ -33,7 +34,8 @@ export interface ControlOptions {
   disconnectDevice?: (deviceId: string) => void;
   /** Revoked, not merely changed: the harness ends the Live call that phone holds. */
   revoked?: (deviceId: string) => void;
-  refreshTailscale?: () => Promise<void>;
+  /** `PUT /routes` from the desktop app: which direct ways in are on, and the tailnet name it learned. */
+  setDirectRoutes?: (body: unknown) => boolean;
   publicNetworks?: () => ReadonlySet<string>;
   /** End-to-end status; absent or `enabled: false` while it is off. */
   e2e?: () => E2EStatus;
@@ -171,8 +173,9 @@ const currentHostedUrl = (options: Pick<ControlOptions, "hostedUrl">): string | 
  * name, which resolves only while it runs. The bare tailnet address is absent:
  * iOS refuses plain HTTP to 100.64/10. */
 export function hostCandidates(
-  addresses: string[] = lanAddresses(),
+  addresses: string[] = routedAddresses(),
   magicDnsName: string | null = tailnetName(),
+  bonjourHost: string | null = directRoutes().wifi ? defaultHostName() : null,
 ): string[] {
   const tailscale = tailscaleAddress(addresses);
   const out: string[] = [];
@@ -180,13 +183,14 @@ export function hostCandidates(
   for (const address of addresses) {
     if (address !== tailscale) out.push(address);
   }
-  out.push(defaultHostName());
+  if (bonjourHost) out.push(bonjourHost);
   return out;
 }
 
 /** Recomputed per request: addresses change when you join another network. */
 export function companionState(options: Omit<ControlOptions, "controlToken">) {
-  const interfaces = lanInterfaces();
+  const routed = new Set(routedAddresses());
+  const interfaces = lanInterfaces().filter((entry) => routed.has(entry.address));
   const addresses = interfaces.map((entry) => entry.address);
   const tailscale = tailscaleAddress(addresses);
   const lead = interfaces.find((entry) => entry.address !== tailscale) ?? null;
@@ -197,6 +201,7 @@ export function companionState(options: Omit<ControlOptions, "controlToken">) {
     ? lead.name
     : null;
   const secretPublicKey = options.secretPublicKey?.() ?? null;
+  const routes = directRoutes();
   return {
     // Lets a parent tell this sidecar from an unrelated process on the control port.
     pid: process.pid,
@@ -204,6 +209,7 @@ export function companionState(options: Omit<ControlOptions, "controlToken">) {
     addresses,
     ...(tailscale ? { tailscale } : {}),
     ...(tailscale && name ? { tailnetName: name } : {}),
+    directRoutes: { wifi: routes.wifi, tailscale: routes.tailscale },
     lan: lead?.address ?? null,
     // Windows has this network as Public, so its firewall likely drops a phone.
     ...(publicNetwork ? { publicNetwork } : {}),
@@ -260,10 +266,11 @@ export function createControlServer(options: ControlOptions): Server {
       return json(res, 403, { error: "forbidden: open the companion's control page from the link it printed" });
     }
     if (method === "GET" && path === "/state") return json(res, 200, companionState(options));
-    if (method === "POST" && path === "/tailscale/refresh" && options.refreshTailscale) {
-      void options.refreshTailscale().then(
-        () => json(res, 200, companionState(options)),
-        () => json(res, 500, { error: "could not refresh Tailscale" }),
+    const setRoutes = options.setDirectRoutes;
+    if (method === "PUT" && path === "/routes" && setRoutes) {
+      readSmallJson(req).then(
+        (body) => (setRoutes(body) ? json(res, 200, companionState(options)) : json(res, 400, { error: "routes must name wifi and tailscale as booleans" })),
+        (error: Error) => json(res, 400, { error: error.message }),
       );
       return;
     }
@@ -447,7 +454,7 @@ function render(s) {
       : "<p class=dim>No network address yet.</p>") +
     (s.tailnetName && s.lan ? "<p class=dim>On this network only: <code>" + esc(s.lan) + ":" + s.port + "</code></p>" : "") +
     (s.tailscale && !s.tailnetName
-      ? "<p class=dim>On a tailnet, but this computer's MagicDNS name could not be read from Tailscale — either MagicDNS is off, or its command line tool is not where we looked. iPhones cannot connect to a bare tailnet address; the console output lists what was tried.</p>"
+      ? "<p class=dim>On a tailnet, but this computer's MagicDNS name could not be read from Tailscale — either MagicDNS is off, or nobody gave it one. iPhones cannot connect to a bare tailnet address: turn Tailscale on in the desktop app, or set OMB_COMPANION_TAILNET_NAME.</p>"
       : "") +
     (!s.tailscale
       ? "<p class=dim>Reachable on this network only. Install Tailscale on both this computer and your phone to reach it from anywhere — including networks that stop devices from seeing each other.</p>"

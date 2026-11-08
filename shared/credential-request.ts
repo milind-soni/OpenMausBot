@@ -56,7 +56,7 @@ export const CREDENTIAL_TARGETS = {
     label: "Composio API key",
     description: "Connects apps such as Gmail, Slack and GitHub through your own Composio project.",
     placeholder: "ak_…",
-    helpUrl: "https://dashboard.composio.dev",
+    helpUrl: "https://dashboard.composio.dev/~/project/settings/api-keys",
   },
   openaiApiKey: {
     label: "OpenAI API key",

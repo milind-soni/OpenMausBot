@@ -270,7 +270,7 @@ it("while the person uses the PC, background calls run and a call that would tak
   expect(listing.isError, said(listing)).toBeFalsy();
   expect((await screenCall("launch_app", { name: "Google Chrome", urls: [pageUrl] })).isError).toBeFalsy();
   expect(said(await screenCall("get_window_state", { pid: 4242, window_id: 7 }))).toContain("Total: 42.00 EUR");
-  expect((await screenCall("click", { pid: 4242, window_id: 7, element_index: 3 })).isError).toBeFalsy();
+  expect((await screenCall("click", { pid: 4242, window_id: 7, element_token: "s1-e3" })).isError).toBeFalsy();
   const front = await screenCall("click", { x: 10, y: 10 });
   expect(front.isError).toBe(true);
   expect(said(front)).toBe(personActiveText("click"));

@@ -215,7 +215,7 @@ const click = (node: Node) => (node.props.onClick as () => void)();
 const change = (node: Node, value: string) => (node.props.onChange as (event: unknown) => void)({ target: { value } });
 const submit = (node: Node) => (node.props.onSubmit as (event: unknown) => void)({ preventDefault: () => {} });
 const key = (node: Node, name: string) => {
-  const event = { key: name, defaultPrevented: false, target: null, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+  const event = { key: name, nativeEvent: { isComposing: false, keyCode: 0 }, defaultPrevented: false, target: null, preventDefault: vi.fn(), stopPropagation: vi.fn() };
   (node.props.onKeyDown as (event: unknown) => void)(event);
   return event;
 };
@@ -654,6 +654,15 @@ describe("the Details tab", () => {
 });
 
 describe("the Bot settings page", () => {
+  it.each(["整理文件。", "整理檔案。"])("migrates the full SOUL while retaining only %s as the description", (first) => {
+    const description = `${first}${"遵守安全要求。".repeat(80)}`;
+    const rendered = capture(() => SoulField({ bot: makeBot({ description, soul: "" }), onPatch: patch }));
+    const migrate = rendered.nodes.find((node) => node.type === "button" && node.props.children === "Move instructions into SOUL.md");
+    expect(migrate).toBeDefined();
+    click(migrate!);
+    expect(patch).toHaveBeenCalledExactlyOnceWith({ soul: description, description: first });
+  });
+
   it("holds Instructions, Before it acts, Backup AIs, Call mode, Apps, Job and Hide, with every title on one edge", () => {
     const rendered = settingsPage(makeBot({ defaultBot: {} }));
     const order = ['data-panel-edit="soul"', 'data-panel-row="approval"', 'data-panel-row="backups"', 'data-panel-row="call-mode"', 'data-panel-page="apps"', 'data-panel-row="job"', 'data-panel-row="default-bot-hide"']
@@ -891,10 +900,11 @@ describe("the Where it works page", () => {
     .map((node) => [node.props["data-panel-choice"], node.props.title, Boolean(node.props.disabled), node.props.checked]);
   const choose = (rendered: Rendered, value: string) => click(find(rendered, "data-panel-choice", value));
 
-  it("offers Let it choose, this computer, the bot's browser and the Cloud desktop, with the chosen one checked", () => {
+  it("offers Let it choose, this computer, the bot's browser, the Cloud desktop and the private desktop, with the chosen one checked", () => {
     // The tests run on no platform in particular, so this computer is a PC; a Mac says This Mac.
     expect(choices(where(makeBot()))).toEqual([
       ["auto", "Let it choose", false, true], ["local", "This PC", false, false], ["browser", "Browser", false, false], ["cloud", "Cloud desktop", false, false],
+      ["vm", "Private desktop", false, false],
     ]);
     expect(where(makeBot()).html).toContain('role="radiogroup"');
   });
@@ -907,6 +917,8 @@ describe("the Where it works page", () => {
     expect(patch).toHaveBeenLastCalledWith({ computer: "local" });
     choose(rendered, "browser");
     expect(patch).toHaveBeenLastCalledWith({ computer: "browser", browser: true });
+    choose(rendered, "vm");
+    expect(patch).toHaveBeenLastCalledWith({ computer: "vm" });
     choose(where(makeBot({ computer: "cloud" })), "auto");
     expect(patch).toHaveBeenLastCalledWith({ computer: null });
     patch.mockReset();
@@ -914,10 +926,10 @@ describe("the Where it works page", () => {
     expect(patch).not.toHaveBeenCalled();
   });
 
-  it.each([["vm", "Private desktop"], ["off", "Off"]] as const)("shows a bot kept on %s as a last, checked choice it cannot pick again", (place, label) => {
-    const rendered = where(makeBot({ computer: place }));
-    expect(choices(rendered).at(-1)).toEqual([place, label, true, true]);
-    choose(rendered, place);
+  it("shows a bot kept Off as a last, checked choice it cannot pick again", () => {
+    const rendered = where(makeBot({ computer: "off" }));
+    expect(choices(rendered).at(-1)).toEqual(["off", "Off", true, true]);
+    choose(rendered, "off");
     expect(patch).not.toHaveBeenCalled();
     choose(rendered, "auto");
     expect(patch).toHaveBeenLastCalledWith({ computer: null });
@@ -927,7 +939,10 @@ describe("the Where it works page", () => {
     fixture.places.cloud = [true, false, "Not ready"];
     expect(find(where(makeBot()), "data-panel-choice", "cloud").props).toMatchObject({ disabled: true, hint: "Not ready." });
     fixture.places.cloud = [false, false, "Not offered"];
+    fixture.places.vm = [false, false, "Not offered"];
     expect(choices(where(makeBot())).map(([value]) => value)).toEqual(["auto", "local", "browser"]);
+    // A bot already kept on the private desktop still shows it, checked.
+    expect(choices(where(makeBot({ computer: "vm" }))).at(-1)).toEqual(["vm", "Private desktop", true, true]);
     fixture.places.local = [false, false, "Not offered"];
     fixture.places.browser = [false, false, "Not offered"];
     expect(choices(where(makeBot())).map(([value]) => value)).toEqual(["auto"]);
@@ -1291,4 +1306,34 @@ describe("the panel's switches", () => {
     expect(html).toContain("background-color:#377FE6");
     expect(Switch).toBeDefined();
   });
+});
+
+describe("the hero while an input method is composing", () => {
+  const hero = (bot: Bot) => capture(() => PanelHero({ bot, activeState: "idle", patch, editorOpen: false, onToggleEditor: vi.fn() }));
+  const composingKey = (node: Node, name: string, nativeEvent: { isComposing: boolean; keyCode: number }) => {
+    const event = { key: name, nativeEvent, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    (node.props.onKeyDown as (event: unknown) => void)(event);
+    return event;
+  };
+
+  for (const [field, open, input] of [
+    ["name", "data-panel-rename", "data-panel-rename-input"],
+    ["label", "data-panel-label", "data-panel-label-input"],
+  ] as const) {
+    it(`keeps the ${field} field open, and the panel where it is, when Enter or Escape belongs to the input method`, () => {
+      const bot = makeBot();
+      click(find(hero(bot), open));
+      change(find(hero(bot), input), "Ni");
+      for (const nativeEvent of [{ isComposing: true, keyCode: 13 }, { isComposing: false, keyCode: 229 }]) {
+        for (const name of ["Enter", "Escape"]) {
+          const event = composingKey(find(hero(bot), input), name, nativeEvent);
+          expect(event.preventDefault).not.toHaveBeenCalled();
+          // The panel goes back a page on an Escape that reaches it.
+          expect(event.stopPropagation).toHaveBeenCalled();
+        }
+      }
+      expect(patch).not.toHaveBeenCalled();
+      expect(find(hero(bot), input).props.value).toBe("Ni");
+    });
+  }
 });

@@ -1,6 +1,6 @@
 // ~/.openmausbot/config.json, with env vars overriding its credentials.
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
-import { homedir } from "node:os";
+import { dataHome } from "./data-dir.ts";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
@@ -674,10 +674,10 @@ export function builtInBrowserEnabled(cfg: AppConfig, _env: NodeJS.ProcessEnv = 
   return cfg.features?.browser !== false;
 }
 
-/** Security: off unless true because a read-only folder grant can still be escalated to a shell. */
-export function sharedComputersEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.sharedComputers === true;
-}
+/** Security: every paired session may lend its computer only when true, because a read-only folder grant can still be escalated to a shell. */
+export function sharedComputersEnabled(cfg: AppConfig): boolean { return cfg.features?.sharedComputers === true; }
+/** A self-hosted server's own admin pairings may lend their computer unless this is false (each desktop asks its person first). */
+export function ownerLendingEnabled(cfg: AppConfig): boolean { return cfg.features?.sharedComputers !== false; }
 
 export function claudeUserMcpEnabled(cfg: Pick<AppConfig, "features">): boolean {
   return cfg.features?.claudeUserMcp === true;
@@ -710,8 +710,8 @@ export function changedInstanceIds(before: Record<string, unknown>, after: Recor
     .filter((id) => !isDeepStrictEqual(before[id], after[id]));
 }
 
-export const DATA_DIR = process.env.OMB_DATA_DIR ?? join(homedir(), ".openmausbot");
-const LEGACY_DATA_DIR = join(homedir(), ".opengrokbot");
+export const DATA_DIR = process.env.OMB_DATA_DIR || join(dataHome(), ".openmausbot");
+const LEGACY_DATA_DIR = join(dataHome(), ".opengrokbot");
 export const EVENTS_DIR = join(DATA_DIR, "events");
 export const NATIVE_DIR = join(DATA_DIR, "native");
 

@@ -8,6 +8,9 @@ import { createPagesClient } from "./client.ts";
 import { createPagePublisher } from "./publisher.ts";
 import { PublishedPagesStore } from "./store.ts";
 
+/** How often live published pages' folders are checked for changes. */
+const LIVE_EVERY_MS = 15_000;
+
 /** Pages bots publish to a link: the bot tools' internal routes, the card's Unpublish, the desktop's sign-in message, and
  * the chat's page cards, which show a published page and its link. */
 export function createPublishedPages(options: {
@@ -17,6 +20,9 @@ export function createPublishedPages(options: {
   /** True for `openmausbot serve`: no desktop app hands over a MausBot sign-in and there is no Cloud home. */
   selfHosted?: boolean;
   patch: (threadId: string, messageId: string, text: string, card: PublishedPageCard) => void;
+  /** Live pages stop when their bot can no longer read the folder, and wait while the workspace is backed up or moved. */
+  liveRoots?(botId: string, threadId: string): readonly string[] | null;
+  paused?(): boolean;
   fetch?: typeof fetch;
   apps?: {
     chat: Pick<ChatApps, "publishablePage" | "showPublishedPage">;
@@ -34,7 +40,10 @@ export function createPublishedPages(options: {
     if (pageRow(threadId, messageId)) apps!.store.patchMessage(threadId, messageId, { publishedPage: card });
     else options.patch(threadId, messageId, text, card);
   };
-  const publisher = createPagePublisher({ client, store, patch });
+  const publisher = createPagePublisher({ client, store, patch, liveRoots: options.liveRoots, paused: options.paused });
+  // Live pages whose folders changed are published again; each at most once a minute (the publisher's own limit).
+  const liveTimer = setInterval(() => { void publisher.refreshLive(); }, LIVE_EVERY_MS);
+  liveTimer.unref?.();
   const appPages = apps ? {
     botOf: (threadId: string) => (apps.store.groupByThread(threadId) ? null : apps.store.botByThread(threadId) ?? null),
     page: (threadId: string, messageId: string, rev?: number) => apps.chat.publishablePage(threadId, messageId, rev),

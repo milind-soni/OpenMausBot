@@ -3,7 +3,7 @@
 Run the isolated regression fixtures:
 
 ```sh
-pnpm exec vitest run server/vps-routing.test.ts server/vps-computer.test.ts server/vps-computer.runner.test.ts server/vps-ssh.test.ts server/vps-container-mcp.test.ts server/mcp-bridge.test.ts server/vps-inventory.test.ts server/kill-tree.test.ts
+pnpm exec vitest run server/vps-routing.test.ts server/vps-computer.test.ts server/vps-computer.runner.test.ts server/vps-ssh.test.ts server/vps-ssh-init.test.ts server/vps-container-mcp.test.ts server/mcp-bridge.test.ts server/vps-inventory.test.ts server/kill-tree.test.ts
 ```
 
 `server/vps-routing.test.ts` launches the real server and a fake engine in a temporary home.
@@ -27,6 +27,10 @@ The other fixtures cover:
 - Real disposable processes simulate Docker with a stubborn SSH child. Timeout and
   stdin failure must reap the owned child, leave an unrelated detached process alone,
   and allow the next command to succeed.
+- Concurrent desktop joins share one pending tunnel. Expiry and close callbacks cannot stop a replacement.
+- Close-all cancels pending desktop joins before they can publish a tunnel.
+- A synthetic SSH executable holds cold authentication while sixteen Docker commands wait.
+  Initialization failure starts no Docker work. Failed mutations are never replayed.
 - OpenSSH parses paths with spaces and long data directories without contacting a VPS.
 - The bot's MCP transport and watchdog use the same SSH settings as the preview.
 

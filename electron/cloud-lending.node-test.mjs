@@ -300,7 +300,7 @@ test("while the person uses this computer, background screen calls run and one t
   // Listing the tools never touches the screen, so it takes no screen lock.
   assert.notEqual((await run({ action: "computer_tools" })).isError, true);
   assert.deepEqual(leases, []);
-  assert.notEqual((await run({ action: "computer_call", tool_name: "click", arguments: { pid: 42, window_id: 7, element_index: 3 } })).isError, true);
+  assert.notEqual((await run({ action: "computer_call", tool_name: "click", arguments: { pid: 42, window_id: 7, element_token: "s1-e3" } })).isError, true);
   for (const args of [{ x: 5, y: 5 }, { pid: 42, window_id: 7, x: 5, y: 5, delivery_mode: "foreground" }]) {
     const refused = await run({ action: "computer_call", tool_name: "click", arguments: args });
     assert.equal(refused.isError, true);
@@ -360,7 +360,7 @@ test("Pause is instant: the Cloud is told, running work is cancelled, nothing mo
   home.push({ action: "computer_call", tool_name: "click", arguments: {} });
   await delay(300);
   assert.equal((await readFile(driver.calls, "utf8")).trim(), "drag");
-  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], waiting: [], using: [], paused: true, terminal: false, busy: null, screen: null });
+  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], waiting: [], using: [], paused: true, terminal: false, terminalSwitch: true, busy: null, screen: null });
   assert.equal(sharing.cloudState(env).problem, "paused");
 });
 

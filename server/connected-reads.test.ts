@@ -108,4 +108,57 @@ describe("a check's reads", () => {
     const calendar = await session.events(0, 1).catch((error: unknown) => error);
     expect(calendar).toMatchObject({ app: "googlecalendar", signedOut: false });
   });
+
+  it("names the account the host chose for an app with several, asking once per session, and says so when it fails", async () => {
+    const { deps, frames } = relay({
+      GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "new@x.test" } }),
+      GMAIL_FETCH_EMAILS: () => ({ successful: false, error: "Backend error 500" }),
+      GOOGLECALENDAR_LIST_CALENDARS: () => ({ successful: true, data: { items: [] } }),
+      GOOGLECALENDAR_EVENTS_LIST: () => ({ successful: true, data: { items: [] } }),
+    });
+    let asked = 0;
+    const session = createConnectedReads({ ...deps, accounts: async () => { asked += 1; return { gmail: "ca_newest" }; } }).session();
+    expect(await session.address()).toBe("new@x.test");
+    const mail = await session.emails(0, 5).catch((error: unknown) => error);
+    expect(mail).toMatchObject({ app: "gmail", signedOut: false, severalAccounts: true });
+    await session.events(0, 1);
+    expect(asked).toBe(1);
+    for (const frame of frames.filter((one) => one.slug?.startsWith("GMAIL_"))) expect(frame.item!.account).toBe("ca_newest");
+    for (const frame of frames.filter((one) => one.slug?.startsWith("GOOGLECALENDAR_"))) expect(frame.item).not.toHaveProperty("account");
+  });
+
+  it("asks again for the account after a failed lookup, and a relay error is not blamed on the named account", async () => {
+    const { deps, frames } = relay({ GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "new@x.test" } }) });
+    let asked = 0;
+    const accounts = async () => {
+      asked += 1;
+      if (asked === 1) throw new Error("inventory down");
+      return { gmail: "ca_newest" };
+    };
+    let broken = false;
+    const session = createConnectedReads({ ...deps, accounts, relay: async (payload, transport) =>
+      broken ? { status: 502, bytes: new Uint8Array() } : deps.relay(payload, transport) }).session();
+    expect(await session.address()).toBe("new@x.test");
+    expect(await session.address()).toBe("new@x.test");
+    expect(asked).toBe(2);
+    expect(frames.filter((one) => one.slug === "GMAIL_GET_PROFILE").map((one) => one.item!.account)).toEqual([undefined, "ca_newest"]);
+    broken = true;
+    const error = await session.address().catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ app: "gmail", severalAccounts: false });
+  });
+
+  it("gives up on an account lookup that outlasts the read's time limit, and asks again on the next read", async () => {
+    const { deps, frames } = relay({ GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "new@x.test" } }) });
+    let asked = 0;
+    const accounts = () => {
+      asked += 1;
+      return asked === 1 ? new Promise<never>(() => {}) : Promise.resolve({ gmail: "ca_newest" });
+    };
+    const session = createConnectedReads({ ...deps, accounts, readTimeoutMs: 50 }).session();
+    const error = await session.address().catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ app: "gmail", message: expect.stringMatching(/did not answer within/) });
+    expect(await session.address()).toBe("new@x.test");
+    expect(asked).toBe(2);
+    expect(frames.filter((one) => one.slug === "GMAIL_GET_PROFILE").map((one) => one.item!.account)).toEqual(["ca_newest"]);
+  });
 });

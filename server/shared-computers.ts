@@ -205,6 +205,8 @@ export class SharedComputers {
     if (!entry || !this.sessionLive(session) || !/^[a-f0-9]{64}$/.test(secret) || !timingSafeEqual(Buffer.from(secret), Buffer.from(entry.secret))) throw failure("Shared computer is disconnected or not authorized", 403);
     return entry;
   }
+  /** Some computer is lent here, online or away: only then do the bots of a server that takes its admins' computers see the tools. */
+  anyLent(): boolean { return this.computers.size > 0 || (this.lent?.any() ?? false); }
   list(principal: string | null) {
     if (!principal) return [];
     return [...this.computers.values()].filter(entry => entry.owner.person === principal && this.online(entry)).map(({ registration: { platform, ...rest } }) => ({ ...rest, ...(platform ? { device: deviceWord(platform) } : {}) }));

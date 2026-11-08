@@ -111,8 +111,6 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
   const requestFn = options.request;
 
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    const socket = req.socket;
-    if (!sockets.has(socket)) { sockets.add(socket); socket.once("close", () => sockets.delete(socket)); }
     const refuse = (status: number, error: string) => { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify({ error })); req.resume(); };
     const match = /^\/b\/([^/]+)\/([^/?]+)(\/[^?]*)?(\?.*)?$/.exec(req.url ?? "");
     if (!match) return refuse(404, "not_found");
@@ -137,7 +135,12 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
     req.pipe(forwarded);
     res.on("close", () => forwarded.destroy());
   });
-  server.on("upgrade", (_req, socket) => { stats.refused += 1; socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
+  // Node removes its own error listener from a socket it hands to `upgrade`.
+  server.on("upgrade", (_req, socket) => { stats.refused += 1; socket.on("error", () => socket.destroy()); socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n"); });
 
   return new Promise((done, fail) => {
     server.once("error", fail);
