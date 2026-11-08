@@ -29,7 +29,14 @@ chmodSync(home, 0o700);
 
 // A real Xorg desktop always runs a window manager, and Cua Driver 0.41 sends foreground input only to the window the
 // manager reports active (_NET_ACTIVE_WINDOW). A bare Xvfb has none, so start a small EWMH one first.
-const windowManager = spawn("openbox", ["--sm-disable"], { env: process.env, stdio: "ignore" });
+const windowManager = spawn("openbox", ["--sm-disable"], { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+let windowManagerOutput = "";
+for (const stream of [windowManager.stdout, windowManager.stderr]) {
+  stream.setEncoding("utf8");
+  stream.on("data", (chunk) => {
+    windowManagerOutput += chunk;
+  });
+}
 windowManager.once("error", (error) => {
   console.error(`[smoke-cua-x11-input] openbox could not start (install it): ${error.message}`);
   process.exit(1);
@@ -108,7 +115,9 @@ async function until(probe, description, timeout = 10_000) {
     }
     await delay(25);
   }
-  throw new Error(`timed out waiting for ${description}\n${driverError}\n${xevOutput}`);
+  const x11 = async (command, args) => (await execFileAsync(command, args).catch((error) => ({ stdout: String(error) }))).stdout;
+  throw new Error(`timed out waiting for ${description}\n${driverError}\n${xevOutput}\nopenbox:\n${windowManagerOutput}\n` +
+    `${await x11("xprop", ["-root"])}\n${await x11("xwininfo", ["-root", "-tree"])}`);
 }
 
 function driverRequest(method) {
