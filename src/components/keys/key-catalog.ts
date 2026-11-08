@@ -154,7 +154,7 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     target: { patch: (value) => ({ composio: { apiKey: value } }), slot: "composioApiKey", verifiedOnSave: true,
       saved: (config) => ({ ...flag((config.composio?.mode ?? "self-hosted") === "self-hosted" ? config.composio : undefined),
         ...(config.composio?.mode === "managed" ? { included: true } : {}) }),
-      placeholder: "ak_…", href: "https://dashboard.composio.dev", analytics: "composio", shape: /^ak_/ } },
+      placeholder: "ak_…", href: "https://dashboard.composio.dev/~/project/settings/api-keys", analytics: "composio", shape: /^ak_/ } },
   { id: "treg", section: "apps", labelKey: "keys.treg.label", purposeKey: "keys.purpose.treg", name: "treg", env: ["OMB_TREG_KEY"],
     words: ["treg", "research", "x", "twitter", "companies", "people", "funding", "news"], mark: { icon: Search }, kind: "key",
     target: { ...providerKey("treg", { slot: "tregApiKey", placeholder: "…", placeholderKey: "keys.treg.placeholder", href: "https://treg.to", test: "treg", analytics: "treg" }),
