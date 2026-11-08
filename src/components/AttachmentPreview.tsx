@@ -925,7 +925,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
         >
           <FileText size={14} className="shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>
-          {preview.html ? <Eye size={13} className="shrink-0" /> : save.state === "saving" ? (
+          {preview.opens ? <Eye size={13} className="shrink-0" /> : save.state === "saving" ? (
             <LoaderCircle size={13} className="shrink-0 animate-spin" />
           ) : save.state === "saved" ? (
             <Check size={13} className="shrink-0 text-success" />
@@ -935,7 +935,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
             <Download size={13} className="shrink-0" />
           )}
         </button>
-        {preview.html ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}
+        {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}
         {preview.dialog}
       </div>
       {save.state !== "idle" && (
@@ -996,7 +996,7 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
         >
           <FileText size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
           {name}
-          {preview.html ? <Eye size={13} strokeWidth={1.75} className="shrink-0" aria-hidden="true" /> : save.state === "saving" ? (
+          {preview.opens ? <Eye size={13} strokeWidth={1.75} className="shrink-0" aria-hidden="true" /> : save.state === "saving" ? (
             <LoaderCircle size={13} className="shrink-0 animate-spin" aria-hidden="true" />
           ) : save.state === "saved" ? (
             <Check size={13} className="shrink-0 text-success" aria-hidden="true" />
@@ -1006,7 +1006,7 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
             <Download size={13} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
           )}
         </button>
-        {preview.html ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}
+        {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}
         {preview.dialog}
       </span>
       {save.state !== "idle" && save.state !== "saved" && (

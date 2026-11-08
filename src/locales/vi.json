@@ -5572,5 +5572,10 @@
   "remote.client.endsDec7": "Kiểu kết nối này kết thúc vào ngày 7 tháng 12. Sau đó, hãy ghép nối lại máy này từ Điện thoại và thiết bị trên máy kia.",
   "phone.code.pairingCode": "Mã ghép nối",
   "phone.code.typeIntro": "Mở ứng dụng {app} và nhập mã ghép nối này.",
-  "phone.signIn.emailCode": "Mã đăng nhập trong email của bạn"
+  "phone.signIn.emailCode": "Mã đăng nhập trong email của bạn",
+  "markdown.preview": "Xem trước: {name}",
+  "markdown.loading": "Đang mở tệp…",
+  "markdown.tooLarge": "Tệp này quá lớn để xem trước trong ứng dụng (2 MB). Hãy tải bản gốc để xem.",
+  "markdown.loadFailed": "Không thể mở tệp này. Kiểm tra kết nối rồi thử lại. Hỗ trợ tệp văn bản UTF-8.",
+  "markdown.rendered": "Xem có định dạng"
 }

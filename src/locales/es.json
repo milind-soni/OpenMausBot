@@ -6072,5 +6072,10 @@
   "remote.client.endsDec7": "Este tipo de conexión termina el 7 de diciembre. Después, vuelve a emparejar esta computadora desde Teléfono y dispositivos en la otra.",
   "phone.code.pairingCode": "Código de emparejamiento",
   "phone.code.typeIntro": "Abre la app de {app} y escribe este código de emparejamiento.",
-  "phone.signIn.emailCode": "Código de inicio de sesión de tu correo"
+  "phone.signIn.emailCode": "Código de inicio de sesión de tu correo",
+  "markdown.preview": "Vista previa: {name}",
+  "markdown.loading": "Abriendo archivo…",
+  "markdown.tooLarge": "Este archivo es demasiado grande para la vista previa en la app (2 MB). Descarga el original para verlo.",
+  "markdown.loadFailed": "No se pudo abrir este archivo. Revisa tu conexión e inténtalo de nuevo. Se admiten archivos de texto UTF-8.",
+  "markdown.rendered": "Ver con formato"
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Check, Code2, Download, ExternalLink, Eye, LoaderCircle, RotateCcw } from "lucide-react";
 import { requestMessageFile, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { TableDialog } from "./RichTable";
@@ -14,6 +14,13 @@ export function isHtmlFile(name: string): boolean {
   return /\.html?$/i.test(name);
 }
 
+export function isMarkdownFile(name: string): boolean {
+  return /\.(md|markdown)$/i.test(name);
+}
+
+// Lazy, so the chat's Markdown renderer (which uses this file's chips) is not imported back into it.
+const MarkdownFileContent = lazy(() => import("./MarkdownFilePreview"));
+
 /** Security: `<base target="_blank">` turns every link into a popup, which the empty sandbox blocks, so the frame never navigates. */
 export function htmlPreviewDocument(source: string): string {
   return `<meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_CSP}"><base target="_blank">${source}`;
@@ -26,19 +33,27 @@ export function htmlBrowserBridge(): ((source: string, name: string) => Promise<
   return ogb?.remoteClient?.active ? undefined : ogb?.openHtmlInBrowser;
 }
 
-/** The page preview dialog for an HTML file in a message, opened by the eye button or by the file's name. */
+/** The preview dialog for an HTML or Markdown file in a message, opened by the eye button or by the file's name. */
 export function useHtmlPreview(path: string, name: string, message?: MessageAttachmentContext) {
   const [open, setOpen] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
-  const html = message !== undefined && (isHtmlFile(name) || isHtmlFile(path));
+  const kind = message === undefined ? null
+    : isHtmlFile(name) || isHtmlFile(path) ? "html"
+      : isMarkdownFile(name) || isMarkdownFile(path) ? "markdown" : null;
+  const key = message ? `${message.threadId}:${message.messageId}:${path}` : "";
   return {
-    html,
+    opens: kind !== null,
+    label: t(kind === "markdown" ? "markdown.preview" : "html.preview", { name }),
     show: (event: { currentTarget: HTMLElement }) => {
       opener.current = event.currentTarget;
       setOpen(true);
     },
-    dialog: html && open && message
-      ? <TableDialog title={name} returnFocus={opener.current} onClose={() => setOpen(false)}><HtmlFileContent key={`${message.threadId}:${message.messageId}:${path}`} path={path} name={name} message={message} /></TableDialog>
+    dialog: kind && open && message
+      ? <TableDialog title={name} returnFocus={opener.current} onClose={() => setOpen(false)}>
+        {kind === "html"
+          ? <HtmlFileContent key={key} path={path} name={name} message={message} />
+          : <Suspense fallback={<div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</div>}><MarkdownFileContent key={key} path={path} name={name} message={message} /></Suspense>}
+      </TableDialog>
       : null,
   };
 }
@@ -46,14 +61,14 @@ export function useHtmlPreview(path: string, name: string, message?: MessageAtta
 export function HtmlFileButton({ path, name, message }: { path: string; name: string; message: MessageAttachmentContext }) {
   const preview = useHtmlPreview(path, name, message);
   return <>
-    <button type="button" className="table-action" title={t("html.preview", { name })} aria-label={t("html.preview", { name })} onClick={preview.show}><Eye size={14} /></button>
+    <button type="button" className="table-action" title={preview.label} aria-label={preview.label} onClick={preview.show}><Eye size={14} /></button>
     {preview.dialog}
   </>;
 }
 
-/** A file chip's name button: an HTML file's name opens its preview, any other file's name saves it. */
+/** A file chip's name button: an HTML or Markdown file's name opens its preview, any other file's name saves it. */
 export function chipNameAction(preview: ReturnType<typeof useHtmlPreview>, save: ReturnType<typeof useLocalFileSave>, name: string, retryable: boolean) {
-  if (preview.html) return { onClick: preview.show, disabled: false, "aria-label": t("html.preview", { name }) };
+  if (preview.opens) return { onClick: preview.show, disabled: false, "aria-label": preview.label };
   return { onClick: () => void save.save(), disabled: save.state === "saving", "aria-label": retryable ? t("attach.retrySaveAria", { name }) : t("attach.saveAria", { name }) };
 }
 
