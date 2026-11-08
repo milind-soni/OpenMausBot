@@ -27,6 +27,9 @@ export interface ProbeSpec {
   marker: string;
   canaryPid: number;
   serverPid: number;
+  /** When each started (processStart): a process of the box's own may have the same pid number, never the same start. */
+  canaryStart?: string | null;
+  serverStart?: string | null;
   hostTmpFile: string;
   harnessPort: number;
   egressPort: number;
@@ -45,6 +48,21 @@ export interface ProbeSpec {
 }
 
 export interface ProbeResult { id: string; ok: boolean; detail: string }
+
+/** A process's start, in clock ticks since boot: field 22 of /proc/<pid>/stat, counted after the command's last ")". */
+export function processStart(pid: number | "self", read: (path: string) => string = (path) => readFileSync(path, "utf8")): string | null {
+  try {
+    const stat = read(`/proc/${pid}/stat`);
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** The box's /proc shows that very process, not one of its own that got the same pid. */
+export function seesProcess(pid: number, start: string | null | undefined, startOf: (pid: number) => string | null = processStart): boolean {
+  return start ? startOf(pid) === start : existsSync(`/proc/${pid}`);
+}
 
 const fails = (fn: () => unknown): { failed: boolean; code: string } => {
   try { fn(); return { failed: false, code: "ok" }; } catch (error) { return { failed: true, code: (error as NodeJS.ErrnoException).code ?? "error" }; }
@@ -118,10 +136,12 @@ export async function runProbe(spec: ProbeSpec, env: Record<string, string | und
   add("secret-not-in-env", inEnv.length === 0, inEnv.length ? `in ${inEnv.join(",")}` : "absent");
   const onDisk = scanForMarker(spec.dataDir, spec.marker, { files: 5_000 }) + scanForMarker("/tmp", spec.marker, { files: 5_000 }) + scanForMarker(spec.cwd, spec.marker, { files: 5_000 });
   add("secret-not-on-disk", onDisk === 0, `${onDisk} hits`);
-  add("other-pid-hidden", !existsSync(`/proc/${spec.canaryPid}`), existsSync(`/proc/${spec.canaryPid}`) ? "visible" : "absent");
+  const canaryVisible = seesProcess(spec.canaryPid, spec.canaryStart);
+  add("other-pid-hidden", !canaryVisible, canaryVisible ? "visible" : "absent");
   const environ = fails(() => readFileSync(`/proc/${spec.canaryPid}/environ`));
-  add("other-env-unreadable", environ.failed, environ.code);
-  add("server-pid-hidden", !existsSync(`/proc/${spec.serverPid}`), existsSync(`/proc/${spec.serverPid}`) ? "visible" : "absent");
+  add("other-env-unreadable", !canaryVisible || environ.failed, canaryVisible ? environ.code : "absent");
+  const serverVisible = seesProcess(spec.serverPid, spec.serverStart);
+  add("server-pid-hidden", !serverVisible, serverVisible ? "visible" : "absent");
   const own = fails(() => { writeFileSync(join(spec.cwd, ".box-probe"), "ok"); if (readFileSync(join(spec.cwd, ".box-probe"), "utf8") !== "ok") throw new Error("mismatch"); });
   add("own-cwd-rw", !own.failed, own.code);
   const folder = fails(() => writeFileSync(join(spec.botFolder, ".box-probe"), "ok"));

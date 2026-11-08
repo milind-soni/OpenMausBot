@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import type { BeginTurnRequest, Coordinator, CoordinatorHost, CoordinatorOptions, HandoffOptions, HandoffView, HostTurnResult, LiveHandoffEdge, RoomAddress } from "./coordinator.ts";
+import type { BeginTurnRequest, Coordinator, CoordinatorHost, CoordinatorOptions, HandoffLimit, HandoffOptions, HandoffView, HostTurnResult, LiveHandoffEdge, RoomAddress } from "./coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
 import { composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, continuationLine, envelopeNote } from "./runtime/envelope.ts";
 import { Runtime } from "./runtime/runtime.ts";
@@ -135,6 +135,7 @@ const JOINED_NOTE = "Another teammate asked this a moment ago, so it was answere
 
 export class RuntimeCoordinator implements Coordinator {
   private readonly host: CoordinatorHost;
+  private readonly handoffLimit: HandoffLimit | undefined;
   private readonly store: RuntimeStore;
   private readonly runtime: Runtime;
   private readonly legacyFile: string | undefined;
@@ -149,6 +150,7 @@ export class RuntimeCoordinator implements Coordinator {
 
   constructor(options: CoordinatorOptions) {
     this.host = options.host;
+    this.handoffLimit = options.handoffLimit;
     this.legacyDir = options.dataDir === ":memory:" ? undefined : options.dataDir;
     this.legacyFile = this.legacyDir === undefined ? undefined : join(this.legacyDir, "room-handoffs.json");
     this.legacyThreads = options.legacyThreads;
@@ -241,6 +243,8 @@ export class RuntimeCoordinator implements Coordinator {
     const siblings = this.store.children(parent.id);
     const existing = siblings.findLast(c => c.assignee.botId === target.botId && c.assignee.destination.groupId === target.groupId && c.brief === brief && c.mode === mode);
     if (existing && !(rework && isTerminal(existing))) return { node: view(existing, parent), duplicate: true };
+    const limited = this.handoffLimit?.refusal(target.botId, () => this.live().filter(a => a.parentId !== undefined).length);
+    if (limited) throw new Error(limited);
     if (mode === "work" && !rework && siblings.some(c => c.mode === "work" && kindOf(c.assignee.destination.groupId, parent) === kind &&
       c.assignee.destination.groupId === target.groupId && c.assignee.botId === target.botId && c.status === "completed")) throw new Error(ALREADY_COMPLETED);
     if (kind === "work" && target.groupId && lineage.some(n => n.assignee.destination.groupId === target.groupId)) throw new Error(ROOM_ANCESTOR);
@@ -314,6 +318,11 @@ export class RuntimeCoordinator implements Coordinator {
     const live = this.live();
     const mine = new Set(live.filter(a => a.assignee.destination.threadId === threadId).map(a => a.id));
     return live.filter(a => a.parentId !== undefined && mine.has(a.parentId) && a.reply !== "none").map(a => this.project(a));
+  }
+
+  runningIn(threadId: string): HandoffView[] {
+    this.ready();
+    return this.store.all({ nonTerminal: true, assigneeThreadId: threadId }).map(a => this.project(a)).filter(n => n.status === "running");
   }
 
   beginTurn(req: BeginTurnRequest): HandoffView {

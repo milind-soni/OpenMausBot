@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
+  existsSync,
   fsyncSync,
   linkSync,
   mkdirSync,
@@ -13,6 +14,7 @@ import {
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 
+import { cliPrefix } from "./cli-invocation.ts";
 import { SERVER_ROOT } from "./proxy-paths.ts";
 
 export interface EnvironmentDescriptor {
@@ -39,6 +41,8 @@ export interface EnvironmentDescriptor {
     longCommands?: true;
     /** A lent computer may say it takes edit_file, append_file and delete_file; only then does this server send them. */
     fileEdits?: true;
+    /** A lent computer may say it runs the MCP servers saved here that run on it (mcp_tools, mcp_call). Never a team Cloud. */
+    lentMcp?: true;
     /** A person's own OMB Cloud home. */
     cloudHome?: true;
     /** A team's Cloud home: `label` is the team's name. */
@@ -49,6 +53,8 @@ export interface EnvironmentDescriptor {
     move?: 1;
     /** Who can update the server: the desktop app that runs it, or the operator. */
     selfUpdate: "desktop-managed" | "operator";
+    /** For an operator's server: how it was installed, so a client offers the update command that fits it. */
+    install?: ServerInstall;
     /** Whether /pair offers "sign in with your email" (an allow-list is set). */
     emailSignIn?: boolean;
     /** GET /api/threads/:id/job answers, long-polled (the headless CLI needs it). */
@@ -140,10 +146,25 @@ export function serverVersion(root = SERVER_ROOT): string {
   return "unknown";
 }
 
+export type ServerInstall = "npx" | "global" | "docker" | "source";
+
+/** How this server was started: the Docker image (OMB_CLI_PREFIX, or Docker's own /.dockerenv), a checkout, npx, or a
+ * global install. */
+export function serverInstall(env: NodeJS.ProcessEnv = process.env, script = process.argv[1] ?? "", docker = () => existsSync("/.dockerenv")): ServerInstall {
+  const prefix = cliPrefix(env, script);
+  if (prefix.includes("docker") || docker()) return "docker";
+  if (prefix === "pnpm omb" || script.endsWith(".ts")) return "source";
+  return prefix === "npx openmausbot" ? "npx" : "global";
+}
+
+/** What a server only its one owner signs in to takes from that owner's own desktop by default: told in the owner's own
+ * /api/auth/session answer, never in the description anyone may read before pairing. */
+export const OWNER_LENDING = Object.freeze({ sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, lentMcp: true } as const);
+
 export function environmentDescriptor(input: { environmentId: string; desktopManaged: boolean; emailSignIn?: boolean; sharedComputers?: boolean; cloudHome?: boolean; cloudTeam?: boolean; ownHome?: boolean; label?: string }): EnvironmentDescriptor {
   return {
     environmentId: input.environmentId,
-    label: input.label?.trim() || process.env.OMB_ENVIRONMENT_LABEL?.trim() || hostname(),
+    label: input.label?.trim() || process.env.OMB_ENVIRONMENT_LABEL?.trim() || process.env.OMB_SERVER_NAME?.trim() || hostname(),
     platform: process.platform,
     version: serverVersion(),
     capabilities: {
@@ -152,11 +173,13 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
       // lendingDetails: a lent computer may say its platform, and this server remembers what was lent to it.
       ...(input.sharedComputers === true ? { sharedComputers: true as const, lendingDetails: true as const, commandTimeouts: true as const, longCommands: true as const, fileEdits: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true ? { deviceLink: true as const } : {}),
+      ...(input.sharedComputers === true && input.cloudTeam !== true ? { lentMcp: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true && input.cloudTeam !== true ? { myChromeLink: true as const, computerAsks: true as const } : {}),
       ...(input.cloudHome === true ? { cloudHome: true as const, move: 1 as const } : {}),
       ...(input.ownHome === true && input.cloudHome !== true ? { move: 1 as const } : {}),
       ...(input.cloudHome === true && input.cloudTeam === true ? { cloudTeam: true as const } : {}),
       selfUpdate: input.desktopManaged ? "desktop-managed" : "operator",
+      ...(input.desktopManaged ? {} : { install: serverInstall() }),
       emailSignIn: input.emailSignIn === true,
       jobs: true,
     },

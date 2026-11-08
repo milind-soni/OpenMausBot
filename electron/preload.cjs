@@ -154,8 +154,9 @@ const bridge = {
     places: () => ipcRenderer.invoke("workspaces:places"),
     open: (id) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("workspaces:open", String(id)) : Promise.reject(new Error("Choose a place to open it.")),
-    add: (choice, link) => isLocalPage || navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("workspaces:add", String(choice), ...(typeof link === "string" ? [link] : [])) : Promise.reject(new Error("Choose what to add.")),
+    add: (choice, link, code) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("workspaces:add", String(choice), ...(typeof link === "string" ? [link, ...(typeof code === "string" ? [code] : [])] : [])) : Promise.reject(new Error("Choose what to add.")),
+    probe: (address, code) => ipcRenderer.invoke("workspaces:probe", String(address ?? ""), String(code ?? "")),
     // The colour of the place this page is (never another's): read, and changed only from the person's click.
     look: () => ipcRenderer.invoke("workspaces:look"),
     color: (swatch) => isLocalPage || navigator.userActivation?.isActive === true
@@ -173,6 +174,23 @@ const bridge = {
       const handler = () => cb();
       ipcRenderer.on("workspaces:changed", handler);
       return () => ipcRenderer.removeListener("workspaces:changed", handler);
+    },
+    // A workspace of this computer's own, from a click on the rail's page or this computer's own page (main refuses any
+    // other): a new one by its name and colour, and a name, colour or removal for one the rail lists.
+    local: {
+      create: (name, color) => isLocalPage || navigator.userActivation?.isActive === true
+        ? ipcRenderer.invoke("workspaces:local-new", String(name), color === null || color === undefined ? null : String(color)) : Promise.reject(new Error("Choose a name.")),
+      edit: (id, changes) => isLocalPage || navigator.userActivation?.isActive === true
+        ? ipcRenderer.invoke("workspaces:local-edit", String(id), typeof changes?.name === "string" ? { name: changes.name } : { color: changes?.color === null || changes?.color === undefined ? null : String(changes.color) })
+        : Promise.reject(new Error("Choose a change.")),
+      remove: (id) => isLocalPage || navigator.userActivation?.isActive === true
+        ? ipcRenderer.invoke("workspaces:local-remove", String(id)) : Promise.reject(new Error("Choose Remove.")),
+    },
+    // The Server menu's New workspace on this computer, for this computer's own page to ask its name.
+    onNewLocal: (cb) => {
+      const handler = () => cb();
+      ipcRenderer.on("workspaces:new-local", handler);
+      return () => ipcRenderer.removeListener("workspaces:new-local", handler);
     },
   },
   // The window's own rail (this app's page at /rail, beside every place's page): while a sheet of its own is open it
@@ -243,14 +261,19 @@ const bridge = {
   },
   companion: {
     state: () => ipcRenderer.invoke("companion:state"),
-    start: () => ipcRenderer.invoke("companion:start"),
+    start: (routes) => ipcRenderer.invoke("companion:start", Array.isArray(routes) ? routes.filter((route) => typeof route === "string") : undefined),
     stop: () => ipcRenderer.invoke("companion:stop"),
     keepAwake: (enabled) => ipcRenderer.invoke("companion:keep-awake", enabled),
     refreshTailscale: () => ipcRenderer.invoke("companion:refresh-tailscale"),
+    setTailscale: (on) => ipcRenderer.invoke("companion:tailscale", on === true),
+    setRoute: (route, on) => ipcRenderer.invoke("companion:route", String(route), on === true),
+    dismissNotice: (route) => ipcRenderer.invoke("companion:notice-dismiss", String(route)),
     pairing: (open, expectedToken) => ipcRenderer.invoke("companion:pairing", open, expectedToken),
     cloudDesktop: (deviceId, allowed) => ipcRenderer.invoke("companion:cloud-desktop", deviceId, allowed),
     browserControl: (deviceId, allowed) => ipcRenderer.invoke("companion:browser-control", deviceId, allowed),
     revoke: (deviceId) => ipcRenderer.invoke("companion:revoke", deviceId),
+    renewPairing: () => ipcRenderer.invoke("companion:pairing-renew"),
+    routes: (deviceId, routes) => ipcRenderer.invoke("companion:routes", deviceId, routes),
   },
   routines: {
     wakeState: () => ipcRenderer.invoke("routines:wake-state"),
@@ -420,6 +443,13 @@ const bridge = {
     create: (name, dataDir) => ipcRenderer.invoke("environments:create", name, dataDir),
     pickDir: () => ipcRenderer.invoke("environments:pick-dir"),
     forget: (id, purge) => ipcRenderer.invoke("environments:forget", id, purge === true),
+    status: () => ipcRenderer.invoke("environments:status"),
+    retry: (id) => ipcRenderer.invoke("environments:retry", ...(typeof id === "string" ? [id] : [])),
+    onStatus: (cb) => {
+      const handler = () => cb();
+      ipcRenderer.on("environments:status-changed", handler);
+      return () => ipcRenderer.removeListener("environments:status-changed", handler);
+    },
     onOpenSettings: (cb) => {
       const handler = (_event, computerId) => cb(computerId);
       ipcRenderer.on("workspaces:open-settings", handler);
@@ -605,6 +635,10 @@ const bridge = {
     save: (id, grant) => ipcRenderer.invoke("sharing:save", id, grant),
     revoke: id => ipcRenderer.invoke("sharing:revoke", id),
     activity: id => ipcRenderer.invoke("sharing:activity", id),
+    servers: () => ipcRenderer.invoke("sharing:servers"),
+    allow: id => ipcRenderer.invoke("sharing:allow", id),
+    pause: () => ipcRenderer.invoke("sharing:pause"),
+    resume: () => ipcRenderer.invoke("sharing:resume"),
   },
   confirm: message => ipcRenderer.invoke("dialog:confirm", message),
   /** The window onto My Cloud once it is the person's home: this computer's screen while My Cloud can't be opened, and

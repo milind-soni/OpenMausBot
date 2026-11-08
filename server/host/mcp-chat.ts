@@ -9,6 +9,7 @@ import { appendDecision } from "../decision-log.ts";
 import { json } from "../harness/http.ts";
 import type { ManagedDesktopPolicy } from "../managed-policy.ts";
 import { mcpOAuthRedirectUri, type McpOAuthManager } from "../mcp-oauth.ts";
+import type { LentMcp } from "../lent-mcp.ts";
 import { listMcpServers } from "../mcp-registry.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { applyMcpChange, showMcpActivity, type InternalMcpDeps } from "../routes/internal-mcp.ts";
@@ -42,6 +43,8 @@ export interface McpChatDeps {
   broadcast(payload: Record<string, unknown>): void;
   publicOrigins(): ReadonlyArray<string | null | undefined>;
   threadVisible(auth: RequestAuth, threadId: string): boolean;
+  /** MCP servers that run on a computer lent here. Built after this module, so read when used. */
+  lending?(): Pick<LentMcp, "place" | "principal">;
 }
 
 const mcpServerUrl = (server: object) => ("url" in server && typeof server.url === "string" ? server.url : undefined);
@@ -108,7 +111,16 @@ export function createMcpChat(deps: McpChatDeps) {
       usedBy: (name) => store.bots.filter((bot) => bot.id !== sender.id && !bot.hidden && Object.hasOwn(mcpServersHost.mounted(bot), name) && canUseMcpServer(bot.toolScope, name)).map((bot) => bot.name),
       requestApproval: ({ action, name, subtitle, targetHash, fields }) => mcpRequests.propose({ action, name, botId: sender.id, threadId, targetHash }, subtitle, fields, from),
       requestSignIn: (name, server) => mcpSignInCards.request({ bot: sender, threadId, ...(from ? { from } : {}) }, name, server),
+      ...lentDeps(sender, threadId, generation),
     };
+  }
+
+  /** In a live turn, whose lent computers it may use, and where a server it adds that needs the person's computer runs. */
+  function lentDeps(sender: BotRecord, threadId: string, generation: string | undefined): Pick<InternalMcpDeps, "lender" | "place"> {
+    const lending = deps.lending?.();
+    if (!lending || !generation) return {};
+    const lender = () => lending.principal({ botId: sender.id, threadId, generation });
+    return { lender, place: (server, computer) => lending.place(server, { principal: lender(), ...(computer ? { computer } : {}) }) };
   }
 
   function mcpServerResponse() {

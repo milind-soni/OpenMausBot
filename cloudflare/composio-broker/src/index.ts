@@ -69,8 +69,8 @@ const sessionWireSchema = z.object({
 });
 type SessionWire = z.infer<typeof sessionWireSchema>;
 
-// A Session reaches a toolkit Composio doesn't manage auth for (HighLevel, a
-// BYO OAuth app) only if created with the project's auth config id under
+// A Session reaches a toolkit Composio doesn't manage auth for (a BYO OAuth
+// app) only if created with the project's auth config id under
 // `auth_configs`.
 const authConfigItemSchema = z.object({
   id: z.string().optional(),

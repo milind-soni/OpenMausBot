@@ -213,9 +213,15 @@ describe("explicit local video preview", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("video", {
       headers: { "content-type": "video/mp4", "content-length": String(FILE_MAX_BYTES + 1) },
     })));
-    await expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toThrow("25 MB");
+    await expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toMatchObject({
+      code: "file_too_large",
+      message: "This file is 25.1 MB, over the 25 MB preview limit. You can still download it below.",
+    });
     vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(FILE_MAX_BYTES + 1), { headers: { "content-type": "video/mp4" } })));
-    await expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toThrow("25 MB");
+    await expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toMatchObject({
+      code: "file_too_large",
+      message: "Preview is limited to 25 MB.",
+    });
   });
 
   it("cancels a partially read video when the preview is closed", async () => {

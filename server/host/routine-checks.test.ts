@@ -18,17 +18,18 @@ function setup(options: { fenced?: boolean; may?: (app: ReadApp) => boolean } = 
   const inbox: EmailHeader[] = [];
   const events: CalendarEvent[] = [];
   const failing: Partial<Record<ReadApp, string>> = {};
+  const several = new Set<ReadApp>();
   const calls: string[] = [];
   const runs: RoutineRun[] = [];
   const reports: CheckReport[] = [];
   const reads: ConnectedReads = {
     connected: async () => ({ gmail: true, googlecalendar: true }),
     session: () => ({
-      async address() { calls.push("address"); if (failing.gmail) throw new SourceError("gmail", failing.gmail); return "me@x.test"; },
-      async events() { calls.push("events"); if (failing.googlecalendar) throw new SourceError("googlecalendar", failing.googlecalendar); return events; },
+      async address() { calls.push("address"); if (failing.gmail) throw new SourceError("gmail", failing.gmail, several.has("gmail")); return "me@x.test"; },
+      async events() { calls.push("events"); if (failing.googlecalendar) throw new SourceError("googlecalendar", failing.googlecalendar, several.has("googlecalendar")); return events; },
       async emails(since, limit) {
         calls.push("emails");
-        if (failing.gmail) throw new SourceError("gmail", failing.gmail);
+        if (failing.gmail) throw new SourceError("gmail", failing.gmail, several.has("gmail"));
         const found = inbox.filter((email) => email.at >= since).sort((a, b) => b.at - a.at);
         return { emails: found.slice(0, limit), more: found.length > limit };
       },
@@ -58,7 +59,7 @@ function setup(options: { fenced?: boolean; may?: (app: ReadApp) => boolean } = 
     events.push(event);
     return event;
   };
-  return { checks, routine, mail, meeting, failing, calls, runs, reports, inbox, sorted, advance: (ms: number) => { now += ms; }, now: () => now, file: join(dir, CHECKS_FILE) };
+  return { checks, routine, mail, meeting, failing, several, calls, runs, reports, inbox, sorted, advance: (ms: number) => { now += ms; }, now: () => now, file: join(dir, CHECKS_FILE) };
 }
 
 const run = (key: string, status: RoutineRun["status"], deliver?: "brief"): RoutineRun => ({
@@ -130,6 +131,16 @@ describe("a routine's checks", () => {
     delete s.failing.gmail;
     s.advance(15 * MINUTE);
     expect((await s.checks.check(s.routine({ checks: ["mail"] }), { manual: false })).run).toBeDefined();
+  });
+
+  it("a refused read of one of several accounts points to Connected apps, not a later try", async () => {
+    const s = setup();
+    s.mail("a", 5);
+    s.several.add("gmail");
+    s.failing.gmail = "Backend error 500";
+    const result = await s.checks.check(s.routine({ checks: ["mail"] }), { manual: false });
+    expect(result).toEqual({ trouble: "Couldn't read Gmail. Several accounts are connected, so I read the newest one; check or reconnect it in Connected apps." });
+    expect(s.reports.at(-1)!.trouble).toEqual([{ app: "gmail", signedOut: false, severalAccounts: true }]);
   });
 
   it("reads nothing from an app the bot may not use", async () => {

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { cloudScreen, HOME_SCREEN_PATH, installHomeWindowIpc, OPEN_MS } from "./home-window.mjs";
-import { CLIENT, CLIENT_A, CLOUD, connected, LOCAL, world } from "./fixtures/home-window-world.mjs";
+import { ACME, CLIENT, CLIENT_A, CLOUD, connected, LOCAL, TEAM, world } from "./fixtures/home-window-world.mjs";
 
 const ENDED_HOME = { ...CLIENT_A, id: "c-home", name: "My Cloud", color: null, origin: CLOUD, primary: true, status: "ended", deleteAfter: 1_900_000_000_000, removable: true };
 test("My Cloud that ended, asked for before the move: its own screen with the day its files go and Remove from list; its address is never looked up", async () => {
@@ -159,4 +159,24 @@ test("Sign in never dead-ends: another account's sign-in ends first, then the br
   const opening = world({ state: { status: "connecting", account: null } });
   await opening.home.signIn();
   assert.deepEqual(opening.signIns, ["reopen"]);
+});
+
+test("what a launch may open now, by the session's word alone: a running Cloud or team yes; one ended, set up, held, gone or without an address no; nothing while signed out", async () => {
+  const w = world({ state: { ...connected(), teams: [ACME], clouds: [CLIENT_A, { ...CLIENT_A, id: "c-ended", status: "ended" }, { ...CLIENT_A, id: "c-setup", status: "setting_up", origin: null, setup: { step: "starting" } }] } });
+  await w.home.refresh();
+  assert.equal(w.home.opensNow("cloud"), true);
+  assert.equal(w.home.opensNow({ cloud: "c-a" }), true);
+  assert.equal(w.home.opensNow({ team: ACME.id }), true);
+  for (const ask of [{ cloud: "c-ended" }, { cloud: "c-setup" }, { cloud: "c-gone" }, { team: "team-gone" }]) assert.equal(w.home.opensNow(ask), false, JSON.stringify(ask));
+  assert.deepEqual([w.fetched, w.pairs], [[], 0], "nothing looked up");
+  const held = world({ state: { ...connected(), teams: [{ ...ACME, machine: { status: "stopped", origin: TEAM } }] } });
+  await held.home.refresh();
+  assert.equal(held.home.opensNow({ team: ACME.id }), false, "a team's stopped Cloud");
+  const ended = world({ state: { ...connected({ status: "stopped" }), clouds: [{ ...CLIENT_A, id: "c-home", origin: CLOUD, primary: true, status: "ended" }] } });
+  await ended.home.refresh();
+  assert.equal(ended.home.opensNow("cloud"), false, "My Cloud ended");
+  const out = world({ state: { status: "signed-out" } });
+  await out.home.refresh();
+  assert.equal(out.home.opensNow("cloud"), null);
+  assert.equal(out.home.opensNow({ team: ACME.id }), null);
 });

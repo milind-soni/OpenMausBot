@@ -4,7 +4,13 @@ export interface SharingState {
   folders: SharedFolder[];
   terminal: boolean;
   computer: boolean;
+  /** Lent to a server of the person's own, which they allowed here: no maintainer flag, and Pause holds it. */
+  own?: boolean;
+  /** Lending is paused from the OpenMausBot icon's menu or Settings. */
+  paused?: boolean;
   connected?: boolean;
+  /** Why it is not connected: "paused", or "not-own" / "machine-changed" once lending to that server ended. */
+  problem?: string;
   error?: string;
 }
 interface Workspace { id: string; name: string; origin: string }
@@ -69,6 +75,8 @@ export interface LendingSummary {
   using: string[];
   paused: boolean;
   terminal?: boolean;
+  /** The menu shows the Clouds' terminal switch: a Cloud of the person's own is signed in here. */
+  terminalSwitch?: boolean;
   busy: { env: string; action: string } | null;
   /** Computer control's latest state, null until it is first read. */
   screen: ScreenStatus | null;
@@ -83,11 +91,15 @@ export function lendsAsWanted(record: unknown, wanted: AutomaticGrant): boolean;
 export function isHomeFolder(target: string): Promise<boolean>;
 export function existingFolders<T>(folders: unknown[], validate: (folders: unknown[]) => Promise<T[]>): Promise<T[]>;
 export function validateSharedFolders(folders: unknown, options?: { homeEdits?: boolean }): Promise<SharedFolder[]>;
+/** The sign-in a server answers with (/api/auth/session) is this desktop's admin pairing on a server of the person's own. */
+export function ownServerSession(auth: unknown): boolean;
 export function validSharedOperation(operation: unknown, computerId: string): boolean;
 export function createComputerSharing(options: {
   file: string;
   fetch: (url: string, init: RequestInit) => Promise<Response>;
   environments: () => Workspace[];
+  /** This computer's own OpenMausBot installs, by environment id: what an MCP server kept for it on a Cloud names. */
+  localEnvironments?: () => string[];
   enabled?: () => Promise<boolean>;
   protectedPaths?: string[];
   /** The desktop's cua connection, or why it did not start (`reason` stays on this computer). */
@@ -142,6 +154,15 @@ export function createComputerSharing(options: {
   decline(env: Workspace, identity: Identity): void;
   save(env: Workspace, input: Pick<SharingState, "folders" | "terminal" | "computer">, identity: Identity): Promise<SharingState>;
   revoke(env: Workspace): SharingState;
+  /** `env` is a server of the person's own, checked now: its identity, else null. */
+  ownServer(env: Workspace): Promise<Identity | null>;
+  /** A server of the person's own whose pairing here was never asked about: its identity, for the popup; null once asked;
+   * false when it is not a server of the person's own. */
+  ownOffer(env: Workspace): Promise<Identity | null | false>;
+  /** The person allowed a server of their own to use this computer. */
+  lendOwn(env: Workspace, input: Partial<Pick<SharingState, "folders" | "terminal" | "computer">>): Promise<SharingState>;
+  /** Not now: nothing is lent, and this pairing is not asked again. */
+  declineOwn(env: Workspace, identity: Identity): void;
   forget(env: Workspace): void;
   cloudState(env: Workspace | null | undefined): CloudLendingState;
   /** The folders lent to My Cloud, for Files' copies of them (electron/lent-folders.mjs). */
@@ -160,6 +181,8 @@ export function createComputerSharing(options: {
   /** Every Cloud stops using this computer, across restarts too, until resume(). */
   pause(): void;
   resume(): Promise<void> | undefined;
+  /** Whether every Cloud of the signed-in account's own may run commands here as this user, across restarts too. */
+  lendTerminal(on: boolean): Promise<void> | undefined;
   screenChanged(): Promise<void>;
   cloudChanged(): void;
   start(options?: { maintainer?: boolean }): void;

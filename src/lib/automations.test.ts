@@ -197,6 +197,8 @@ describe("order and the grey line", () => {
     expect(statusLine(automation([run("completed", at(0, 11, 50))], { ...watch, checkedAt: at(0, 11, 45) }), NOW)).toBe("On · last ran today 11:50 AM · next: today 12:15 PM · reads and drafts only");
     const trouble = automation([], { ...watch, checkTrouble: "Couldn't read Gmail. Reconnect it in Connected apps." });
     expect(automationStatus(trouble, NOW)).toEqual({ state: "needs-you", reason: "Couldn't read Gmail. Reconnect it in Connected apps.", fix: "reconnect" });
+    const several = "Couldn't read Gmail. Several accounts are connected, so I read the newest one; check or reconnect it in Connected apps.";
+    expect(automationStatus(automation([], { ...watch, checkTrouble: several }), NOW)).toMatchObject({ fix: "reconnect" });
     const failed = automation([], { ...watch, checkTrouble: "The checks could not run; they try again at the next check.", checkTroubleCode: "routines.server.checksFailed" });
     expect(automationStatus(failed, NOW)).toMatchObject({ reason: "The checks could not run; they try again at the next check." });
     setLocale("pt-br");

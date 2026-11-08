@@ -67,6 +67,15 @@ describe("CodexDriver.decodeConfig", () => {
       .toMatchObject({ authMode: "chatgpt-plan", authFlow: "device" });
     expect(() => CodexDriver.decodeConfig({ authFlow: "pkce" })).toThrow("Unknown Codex sign-in flow.");
   });
+
+  it("keeps direct API configuration and refuses mixed authentication modes", () => {
+    expect(CodexDriver.decodeConfig({ endpoint: { url: "https://gateway.example/v1", models: ["gateway-model"] } }))
+      .toMatchObject({ endpoint: { url: "https://gateway.example/v1", models: ["gateway-model"] } });
+    expect(() => CodexDriver.decodeConfig({ endpoint: { url: "http://gateway.example/v1", models: ["m"] } })).toThrow();
+    expect(() => CodexDriver.decodeConfig({ authMode: "chatgpt-plan", endpoint: { url: "https://gateway.example", models: ["m"] } })).toThrow();
+    expect(() => CodexDriver.decodeConfig({ managed: {}, endpoint: {} })).toThrow();
+  });
+
   it("defaults to the codex binary with fullAuto off", () => {
     expect(CodexDriver.decodeConfig({})).toEqual({ cli: "codex", fullAuto: false });
     expect(CodexDriver.decodeConfig(undefined)).toEqual({ cli: "codex", fullAuto: false });
@@ -141,7 +150,7 @@ describe("CodexDriver turns (fake app-server)", () => {
   let scratch: string;
 
   const create = async (
-    opts: { mode?: string; fullAuto?: boolean; environment?: Record<string, string>; managed?: boolean; authMode?: "chatgpt-plan"; authFlow?: "device"; cli?: string } = {},
+    opts: { mode?: string; fullAuto?: boolean; environment?: Record<string, string>; managed?: boolean; endpoint?: boolean; authMode?: "chatgpt-plan"; authFlow?: "device"; cli?: string } = {},
   ) => {
     if (opts.mode) process.env.FAKE_CODEX_MODE = opts.mode;
     instance = await CodexDriver.create({
@@ -149,6 +158,7 @@ describe("CodexDriver turns (fake app-server)", () => {
       displayName: "Codex Test",
       environment: {
         ...(opts.managed ? { HOME: scratch, USERPROFILE: scratch, CODEX_HOME: join(scratch, ".codex"), OPENMAUSBOT_COMPANY_API_KEY: "synthetic-company-fixture" } : {}),
+        ...(opts.endpoint ? { CODEX_HOME: join(scratch, "endpoint"), OPENMAUSBOT_CODEX_API_KEY: "synthetic-endpoint-key" } : {}),
         ...opts.environment,
       },
       enabled: true,
@@ -157,6 +167,7 @@ describe("CodexDriver turns (fake app-server)", () => {
         fullAuto: opts.fullAuto ?? false,
         ...(opts.authMode ? { authMode: opts.authMode } : {}),
         ...(opts.authFlow ? { authFlow: opts.authFlow } : {}),
+        ...(opts.endpoint ? { endpoint: { url: "http://127.0.0.1:1/v1", models: ["gateway-model"] } } : {}),
         ...(opts.managed ? { managed: { url: "http://127.0.0.1:1/v1", models: ["company-codex-model"] } } : {}),
       },
     });
@@ -1823,6 +1834,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv.join(" ")).toContain("mcp_servers.computer.command");
+    // Codex would end a cloud computer file copy after its own 60 s default.
+    expect(seen.argv).toContain("mcp_servers.computer.tool_timeout_sec=560");
     expect(seen.argv.join(" ")).toContain("/tmp/container-mcp.js");
     expect(seen.argv.join(" ")).toContain("OMB_VM_TOKEN");
     expect(seen.argv.join(" ")).not.toContain("vm-secret");
@@ -1952,6 +1965,10 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       ["gpt-5.6-sol", "gpt-5.6-sol", "openai_chatgpt_plan"],
       ["gpt-6.1-sol", "gpt-6.1-sol", "openai_chatgpt_plan"],
     ] },
+    { name: "Direct API", opts: { endpoint: true }, selections: [
+      ["gateway-model", "gateway-model", "openmaus_endpoint"],
+      ["gateway-model", "gateway-model", "openmaus_endpoint"],
+    ] },
     { name: "Company", opts: { managed: true }, selections: [
       ["company-codex-model", "company-codex-model", "openmaus_company"],
       ["company-codex-model", "company-codex-model", "openmaus_company"],
@@ -1979,6 +1996,15 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       const seen = JSON.parse(readFileSync(dump, "utf8"));
       pids.add(seen.pid);
       const plan = "authMode" in opts;
+      if ("endpoint" in opts) {
+        expect(instance.startAuthentication).toBeUndefined();
+        expect(instance.signOut).toBeUndefined();
+        expect(seen.env.OPENMAUSBOT_CODEX_API_KEY).toBe("synthetic-endpoint-key");
+        expect(JSON.stringify({ argv: seen.argv, calls: seen.calls })).not.toContain("synthetic-endpoint-key");
+        expect(seen.argv).toContain("features.tool_search=false");
+        expect(seen.argv).toContain("model_providers.openmaus_endpoint.supports_websockets=false");
+      }
+
       expect(seen.env.OPENAI_API_KEY).toBeUndefined();
       expect(seen.env.OPENMAUSBOT_CHATGPT_TOKEN).toBe(plan ? "synthetic-chatgpt-token" : undefined);
       expect(JSON.stringify({ argv: seen.argv, calls: seen.calls })).not.toContain("synthetic-chatgpt-token");
@@ -1990,6 +2016,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       const threadCalls = seen.calls.filter((call: { method: string }) => ["thread/start", "thread/resume"].includes(call.method));
       expect(threadCalls).toHaveLength(1);
       if (plan) expect(threadCalls[0].params.config["shell_environment_policy.exclude"]).toEqual(["OPENMAUSBOT_CHATGPT_TOKEN"]);
+      if ("endpoint" in opts) expect(threadCalls[0].params.config["shell_environment_policy.exclude"]).toContain("OPENMAUSBOT_CODEX_API_KEY");
       expect(threadCalls[0]).toMatchObject({
         method: index ? "thread/resume" : "thread/start",
         params: { model: expectedModel, modelProvider, ...(index ? { threadId: "codex-thread-1" } : {}) },
@@ -2271,6 +2298,69 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(calls.map((call: { method: string }) => call.method)).toEqual(["initialize", "initialized", "config/read", "thread/resume", "thread/unarchive", "thread/start", "turn/start"]);
     expect(calls.find((call: { method: string }) => call.method === "turn/start").params.input).toEqual([{ type: "text", text: recoveryText }]);
     expect(recorder.events.filter((e) => e.type === "session.started")).toMatchObject([{ sessionId: "codex-thread-1", rebuilt: true }]);
+  });
+
+  // codex-cli 0.167.0's words for a session saved under another provider than the one Codex runs on.
+  const PROVIDER_MISMATCH = {
+    code: -32600,
+    data: { type: "modelProviderMismatch", modelProvider: "custom", currentModelProvider: "magpie" },
+    message: "This chat uses custom, but your current provider is magpie. Switch to custom to continue.",
+  };
+
+  it("rebuilds a thread Codex keeps under another provider, once, from the chat", async () => {
+    await create({ mode: "resume" });
+    const dump = join(scratch, "provider-mismatch.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_RESUME_ERROR = JSON.stringify(PROVIDER_MISMATCH);
+    const recoveryText = "History\nUser: go on";
+    await instance.adapter.sendTurn({ threadId: "t-provider-moved", text: "go on", resumeCursor: "custom-thread", recoveryText, model: "magpie::m1" });
+    await expect(recorder.until((e) => e.type === "turn.completed")).resolves.toMatchObject({ ok: true });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.map((call: { method: string }) => call.method)).toEqual(["initialize", "initialized", "config/read", "thread/resume", "thread/start", "turn/start"]);
+    expect(calls.find((call: { method: string }) => call.method === "thread/start").params).toMatchObject({ model: "m1", modelProvider: "magpie" });
+    expect(calls.find((call: { method: string }) => call.method === "turn/start").params.input).toEqual([{ type: "text", text: recoveryText }]);
+    expect(recorder.events.filter((e) => e.type === "session.started")).toMatchObject([{ rebuilt: true }]);
+  });
+
+  it.each([
+    { ...PROVIDER_MISMATCH, data: undefined },
+    { ...PROVIDER_MISMATCH, code: -32603 },
+    { ...PROVIDER_MISMATCH, data: { type: "somethingElse" } },
+  ])("does not rebuild on a resume rejection that is not a provider mismatch: %j", async (error) => {
+    await create({ mode: "resume" });
+    const dump = join(scratch, "not-provider-mismatch.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_RESUME_ERROR = JSON.stringify(error);
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+    await instance.adapter.sendTurn({ threadId: "t-not-mismatch", text: "go on", resumeCursor: "custom-thread", recoveryText: "History\nUser: go on", model: "magpie::m1" });
+    await expect(recorder.until((e) => e.type === "turn.completed")).resolves.toMatchObject({ ok: false });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.some((call: { method: string }) => ["thread/start", "turn/start"].includes(call.method))).toBe(false);
+  });
+
+  it.each([
+    ["custom::m1", "custom"],
+    ["gpt-6-luna", "openai"],
+  ])("starts Codex on the provider of the chosen model %s, not config.toml's", async (model, provider) => {
+    await create();
+    const dump = join(scratch, "launch-provider.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-launch-provider", text: "hi", model });
+    await expect(recorder.until((e) => e.type === "turn.completed")).resolves.toMatchObject({ ok: true });
+    const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[]; calls: Array<{ method: string; params: any }> };
+    const override = `model_provider=${JSON.stringify(provider)}`;
+    expect(seen.argv[seen.argv.indexOf(override) - 1]).toBe("-c");
+    expect(seen.calls.find((call) => call.method === "thread/start")?.params).toMatchObject({ modelProvider: provider });
+  });
+
+  it("leaves Codex on config.toml's provider when no model is chosen", async () => {
+    await create();
+    const dump = join(scratch, "launch-no-model.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-launch-no-model", text: "hi" });
+    await expect(recorder.until((e) => e.type === "turn.completed")).resolves.toMatchObject({ ok: true });
+    const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[] };
+    expect(seen.argv.some((arg) => arg.startsWith("model_provider="))).toBe(false);
   });
 
   it("completes a turn whose process exit could not be confirmed without waiting for the stall watchdog", async () => {

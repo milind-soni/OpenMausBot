@@ -44,6 +44,17 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, "/root/.ssh/id_ed25519")).toBe("none");
   });
 
+  it("a process the bot's conversations share sees all of that bot's conversation folders and uploads, and no other bot's", () => {
+    const plan = planBox(setup(), { command: "opencode", args: ["acp"], cwd, env: { HOME: home }, botThreads: true });
+    expect(plan.botId).toBe("bot-a");
+    for (const own of ["task-workspaces/bot-a/thread-1/a.md", "task-workspaces/bot-a/thread-2/notes.md", "workspaces/bot-a/MEMORY.md"]) expect(visibleInBox(plan, join(dataDir, own)), own).toBe("rw");
+    expect(visibleInBox(plan, join(dataDir, "box-uploads", "bot-a", "thread-2", "photo.png"))).toBe("ro");
+    for (const hidden of ["task-workspaces/bot-b/thread-9/notes.md", "workspaces/bot-b/MEMORY.md", "box-uploads/bot-b/thread-9/x.png", "messages.db"]) {
+      expect(visibleInBox(plan, join(dataDir, hidden)), hidden).toBe("none");
+    }
+    expect(visibleInBox(turn(), join(dataDir, "box-uploads", "bot-a", "thread-2", "photo.png")), "one conversation's box keeps only its own uploads").toBe("none");
+  });
+
   it("writes the bubblewrap argv in mount order, with its own namespaces and the bridged sockets", () => {
     const args = bwrapArgs(turn());
     const text = args.join(" ");
@@ -110,6 +121,17 @@ linuxBox("the box plan", () => {
     expect(bwrapArgs(plan).join(" ")).not.toContain("/run/omb");
     expect(visibleInBox(plan, "/data/.openmausbot/browser/profiles/p1/Default")).toBe("rw");
     expect(visibleInBox(plan, "/data/.openmausbot/messages.db")).toBe("none");
+  });
+
+  it("a relay socket goes in at /run/omb/relay.sock only for a box with its own network", () => {
+    const relay = `${dataDir}/box/relay-ab12.sock`;
+    const plan = planBox(setup(), { command: "/usr/bin/agy", args: [], cwd, env: { HOME: home }, relay });
+    expect(bwrapArgs(plan).join(" ")).toContain(`--bind ${relay} /run/omb/relay.sock`);
+    expect(visibleInBox(plan, "/run/omb/relay.sock")).toBe("rw");
+    expect(visibleInBox(plan, relay)).toBe("none");
+    expect(visibleInBox(plan, `${dataDir}/box/egress.sock`)).toBe("none");
+    const shared = planBox(setup(), { command: "/opt/chrome", args: [], env: {}, net: "shared", relay });
+    expect(bwrapArgs(shared).join(" ")).not.toContain(relay);
   });
 
   it("has the machine's CPU list read-only and nothing else of /sys, so a TCMalloc runtime (Antigravity) can start", () => {

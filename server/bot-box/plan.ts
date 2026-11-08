@@ -16,7 +16,8 @@
 //   - of /sys, only the machine's CPU list, read-only;
 //   - a network namespace with loopback only. Two loopback ports inside are bridged to unix sockets bound in from outside:
 //     the egress gate (every connection to the internet goes through it) and the harness gate (only /api/internal/
-//     routes of this server). Nothing else on the server's loopback is reachable.
+//     routes of this server). Nothing else on the server's loopback is reachable. A box that waits for a sign-in callback
+//     also dials out to one more socket, through which the server reaches the box's own loopback, never the other way.
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export type BoxNet = "isolated" | "shared";
@@ -67,10 +68,16 @@ export interface BoxRequest {
   net?: BoxNet;
   /** The bot whose own folder (workspaces/<bot>) is put back; derived from a task-workspace cwd when absent. */
   botId?: string;
+  /** One process serves every conversation of the bot (a shared OpenCode process): all of the bot's conversation folders
+   * are read-write and all of their uploads read-only, in place of only the starting conversation's. */
+  botThreads?: boolean;
   /** A Team Cloud audience's engine home, bound read-write in place of the server's HOME, none of which the box then has. */
   home?: string;
   /** Files bound read-write over their names in `home`: the team's engine sign-ins. */
   shared?: ReadonlyArray<{ source: string; target: string }>;
+  /** A host unix socket the box dials out to, so the server can reach a port the engine listens on inside the box's own
+   * network, such as a sign-in's callback. Only an isolated box has one. */
+  relay?: string;
 }
 
 export interface BoxPlan {
@@ -84,6 +91,7 @@ export interface BoxPlan {
 }
 
 export const IN_BOX_SOCKET_DIR = "/run/omb";
+export const RELAY_SOCKET_NAME = "relay";
 export const BOX_HOSTNAME = "omb-box";
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -174,6 +182,8 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   const cwd = request.cwd ? resolve(request.cwd) : null;
   const ids = cwd ? taskWorkspaceIds(cwd, dataDir) : null;
   const botId = request.botId ?? ids?.botId ?? null;
+  const threads = request.botThreads && ids ? ids.botId : null;
+  if (threads) rw(join(dataDir, "task-workspaces", threads));
   if (cwd && !covered(cwd)) rw(cwd);
   if (botId && ID.test(botId)) {
     const own = join(dataDir, "workspaces", botId);
@@ -201,7 +211,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   }
   // The person's uploads for this conversation, after every read-write line: readable, but never writable or swappable.
   if (ids) {
-    const shown = boxUploadsDir(dataDir, ids.botId, ids.threadId);
+    const shown = threads ? join(dataDir, "box-uploads", threads) : boxUploadsDir(dataDir, ids.botId, ids.threadId);
     mounts.push({ kind: "ro", source: shown, target: shown, optional: true });
   }
   const readOnly = new Set<string>();
@@ -221,6 +231,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     options.push("--unshare-net");
     mounts.push({ kind: "dir", target: IN_BOX_SOCKET_DIR });
     for (const bridge of setup.bridges) mounts.push({ kind: "bind", source: bridge.socket, target: join(IN_BOX_SOCKET_DIR, `${bridge.name}.sock`) });
+    if (request.relay) mounts.push({ kind: "bind", source: resolve(request.relay), target: inBoxSocket(RELAY_SOCKET_NAME) });
   }
   if (cwd) options.push("--chdir", cwd);
   return { mounts, options, net, writable, botId };

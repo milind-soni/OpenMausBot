@@ -178,6 +178,13 @@ describe("the limit-reset routes", () => {
     expect(await call("POST", "/api/limit-resets/continue", { botId: "scout" })).toMatchObject({ status: 400 });
   });
 
+  it("Continue takes ids exactly as sent, so a padded id cannot slip past a check made on the raw one", async () => {
+    const { call, routines } = routes();
+    expect(await call("POST", "/api/limit-resets/continue", { botId: "scout", threadId: " thread-1 " })).toMatchObject({ status: 400 });
+    expect(await call("POST", "/api/limit-resets/continue", { botId: "scout ", threadId: "thread-1" })).toMatchObject({ status: 400 });
+    expect(routines.listRoutines()).toHaveLength(0);
+  });
+
   it("lists each engine's limit and moves one automation past the reset", async () => {
     const { call, routines } = routes();
     expect((await call("GET", "/api/limit-resets"))!.body.engines).toEqual([expect.objectContaining({ engine: "claude", blocked: true, resetsAt: NOW + 2 * HOUR })]);

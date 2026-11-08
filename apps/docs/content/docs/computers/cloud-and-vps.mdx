@@ -20,6 +20,15 @@ at native resolution; tool approvals and **Take control** still apply. A model
 without computer tools can't use the cloud computer: choose another model, or set
 **Works on** to Auto.
 
+A bot can copy files between the Boat and its working folder: `copy_from_computer`
+brings back one file (for example a result to load in the Data tab or use in a
+page), and `copy_to_computer` sends one. Each copy moves one file of up to 2 GiB
+directly between the Boat and the computer the bot runs on, and may take up to 9
+minutes. A download is refused when the working folder's disk can't hold it with
+256 MiB to spare, and a half-finished copy never replaces a file on either side.
+On the Boat, files live under `/home/user` or `/tmp`. Both work with your own
+Boat key and with the cloud computers included in a Cloud plan.
+
 On **Auto**, a conversation works on the Boat only after the bot moves it there
 (it asks to switch with `select_computer`). Auto by itself never reads, wakes or
 creates a Boat, so it adds no cloud computer calls to an ordinary message.
@@ -29,6 +38,16 @@ Reddit link a bot asks for, and a MausBot Cloud's built-in browser doesn't open
 Reddit at all. Reddit blocks bots that browse from cloud computers and can ban
 the account, so the bot is told to use the Reddit connected app or ask you to do
 it on your own computer.
+
+A bot's `exec` call waits for its command to finish, so a long one (a big
+download, a build, a data job) can run out of time while it keeps going on the
+Boat. For those, the bot starts the command with `background: true`, which
+answers at once with a process id, and follows it with `exec_status`, which shows
+whether it is still running, its exit code and the end of its output. The Boat
+doesn't go to sleep while a background command runs, for up to two hours after it
+started. When a plain `exec` runs out of time, the bot is told the command may
+still be running, so it checks instead of starting a second copy. This works with
+your own Boat key and with the cloud computers included in a Cloud plan.
 
 ## Bring your own VPS
 

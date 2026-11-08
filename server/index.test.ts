@@ -1,5 +1,4 @@
 // The config pins one deliberately unknown driver, so the suite is deterministic with or without agent CLIs installed.
-import { HIGHLEVEL_TOOLS } from "./highlevel/tools.js";
 import { EMAIL_TOOLS } from "./email/tools.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -2729,7 +2728,7 @@ describe("harness HTTP API", () => {
         await mintTestCapability(BASE, chief.id, chief.threadId);
         const expired = await held.finish();
         expect(expired.status).toBe(401);
-        expect(expired.body.error).toMatch(/expired/);
+        expect(expired.body.error).toMatch(/turn has already ended/);
         held.close();
         held = undefined;
         token = await mintTestCapability(BASE, chief.id, chief.threadId, { kind: "connectors" });
@@ -2780,7 +2779,7 @@ describe("harness HTTP API", () => {
 
       const rejected = await held.finish();
       expect(rejected.status).toBe(401);
-      expect(rejected.body.error).toMatch(/expired/i);
+      expect(rejected.body.error).toMatch(/turn has already ended/i);
       const state = (await api("GET", "/api/bots?messages=0")).body;
       expect(state.bots.some((bot: { name: string }) => bot.name === lateName)).toBe(false);
     } finally {
@@ -6748,8 +6747,9 @@ describe("harness HTTP API", () => {
       expect(first.status).toBe(201);
       const firstCard = (await first.json()) as { messageId: string };
 
-      // A second connection holds the database write lock, so the fresh card's append fails mid-request.
-      const lockDb = new DatabaseSync(join(home, ".openmausbot", "messages.db"));
+      // A second connection holds the database write lock, so the fresh card's append fails mid-request. It waits for
+      // a write the harness may still be finishing from the first card instead of failing at once.
+      const lockDb = new DatabaseSync(join(home, ".openmausbot", "messages.db"), { timeout: 5_000 });
       lockDb.exec("BEGIN IMMEDIATE");
       try {
         const failed = await request("needed for the second task");
@@ -10069,7 +10069,7 @@ describe("harness HTTP API", () => {
     { mode: "size", sizes: [25 * 1024 * 1024 + 1], message: "Uploads are limited to 25 MiB per file.", status: 200 },
     { mode: "batch", sizes: Array(5).fill(21 * 1024 * 1024) as number[], message: "Uploads are limited to 100 MiB per batch.", status: 200 },
     { mode: "changed", sizes: [1024], message: expect.stringContaining("changed while staging"), status: 200 },
-    { mode: "stop", sizes: [1024], message: "the internal turn capability has expired", status: 401 },
+    { mode: "stop", sizes: [1024], message: expect.stringContaining("turn has already ended"), status: 401 },
     { mode: "disk", sizes: [1024], message: expect.stringMatching(/ENOTDIR|EEXIST/), status: 500 },
   ])("returns the correct browser upload result for $mode", async ({ mode, sizes, message, status }) => {
     const bot = (await api("POST", "/api/bots")).body.bot;
@@ -12382,7 +12382,7 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
         composio: true,
         connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL"] } },
-        outbound: { policy: "allow", dailyCap: 10 },
+        outbound: { policy: "allow" },
       })).status).toBe(200);
       const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
       const call = async (frame: unknown, bearer = token) => {
@@ -12446,7 +12446,7 @@ describe("harness HTTP API", () => {
         expect((await api("PATCH", `/api/bots/${legacy.id}`, {
           composio: true,
           approvalMode: "ask",
-          outbound: { policy: "allow", dailyCap: 10 },
+          outbound: { policy: "allow" },
         })).status).toBe(200);
         const legacyToken = await mintTestCapability(BASE, legacy.id, legacy.threadId, { kind: "connectors" });
         const legacyCall = await call(
@@ -12642,9 +12642,7 @@ describe("harness HTTP API", () => {
           { name: "GMAIL_SEND_EMAIL", description: "Send an email" },
         ],
         slack: [{ name: "SLACK_POST_MESSAGE", description: "a".repeat(240) }],
-        // HighLevel's tools are listed whenever its relay is configured, so grants can be set before connecting.
-        highlevel: HIGHLEVEL_TOOLS.map(({ name, description }) => ({ name, description })),
-        // So are email's, wherever a mailbox can be connected here.
+        // Email's tools are listed wherever a mailbox can be connected here, so grants can be set before connecting.
         email: EMAIL_TOOLS.map(({ name, description }) => ({ name, description })),
       },
     });
@@ -13938,6 +13936,32 @@ describe("message pages", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ path: linkedFile }),
     })).status).toBe(404);
+  });
+
+  it("downloads a linked file over the 25 MB preview limit, but not an inline image that big or a file over 500 MB", async () => {
+    const threadId = "test-linked-file-room-thread";
+    const linkedFile = join(home, ".openmausbot", "workspaces", "test-bot-a", "phone report.md");
+    const linkedImage = join(home, ".openmausbot", "workspaces", "test-bot-a", "preview.png");
+    const [fileBytes, imageBytes] = [readFileSync(linkedFile), readFileSync(linkedImage)];
+    const reel = 26 * 1024 * 1024;
+    try {
+      truncateSync(linkedFile, reel);
+      const download = await fetch(`${BASE}/api/threads/${threadId}/messages/linked-file-message/file`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: linkedFile }),
+      });
+      expect(download.status).toBe(200);
+      expect(download.headers.get("content-length")).toBe(String(reel));
+      await download.body?.cancel();
+
+      truncateSync(linkedImage, reel);
+      expect((await fetch(`${BASE}/api/threads/${threadId}/messages/linked-image-message/file?preview=1&ref=0`)).status).toBe(413);
+
+      truncateSync(linkedFile, 500 * 1024 * 1024 + 1);
+      expect((await api("POST", `/api/threads/${threadId}/messages/linked-file-message/file`, { path: linkedFile })).status).toBe(413);
+    } finally {
+      writeFileSync(linkedFile, fileBytes);
+      writeFileSync(linkedImage, imageBytes);
+    }
   });
 
   it("downloads a structured generated image from an image-only reply", async () => {

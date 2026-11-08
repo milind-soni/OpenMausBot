@@ -32,7 +32,7 @@ export function credentialProvider(target: unknown): KeyProvider | "other" {
 
 export const ENGINE = [
   "claude", "codex", "gemini", "cursor", "opencode", "qwen", "hermes", "cline", "custom_acp", "pi", "openai_compat", "grok",
-  "grok_api", "kimi", "droid", "antigravity", "minimax", "mistral", "cerebras", "groq", "greenference", "meta", "muse_code", "deepseek", "copilot",
+  "grok_api", "kimi", "droid", "antigravity", "minimax", "mistral", "cerebras", "groq", "greenference", "meta", "muse_code", "deepseek", "copilot", "command_code", "kiro",
 ] as const;
 export type Engine = (typeof ENGINE)[number];
 
@@ -41,7 +41,7 @@ const ENGINE_BY_DRIVER = new Map<string, Engine>(Object.entries({
   qwenAgent: "qwen", hermesAgent: "hermes", clineAgent: "cline", customAcp: "custom_acp", piAgent: "pi",
   "openai-compat": "openai_compat", grokAgent: "grok", grok: "grok_api", kimiAgent: "kimi", droidAgent: "droid",
   antigravityAgent: "antigravity", minimax: "minimax", mistral: "mistral", cerebras: "cerebras", groq: "groq", greenference: "greenference",
-  meta: "meta", museCode: "muse_code", deepseekAgent: "deepseek", copilotAgent: "copilot",
+  meta: "meta", museCode: "muse_code", deepseekAgent: "deepseek", copilotAgent: "copilot", commandCodeAgent: "command_code", kiroAgent: "kiro",
 } satisfies Record<string, Engine>));
 
 export function engineForDriver(driverKind: unknown): Engine | "other" {

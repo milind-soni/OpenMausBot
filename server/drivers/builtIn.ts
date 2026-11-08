@@ -15,6 +15,8 @@ import { HermesAgentDriver } from "./acp/hermes.ts";
 import { DeepSeekAgentDriver } from "./acp/deepseek.ts";
 import { ClineAgentDriver } from "./acp/cline.ts";
 import { CopilotAgentDriver } from "./acp/copilot.ts";
+import { CommandCodeAgentDriver } from "./acp/command-code.ts";
+import { KiroAgentDriver } from "./acp/kiro.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { PiDriver } from "./pi.ts";
 import { MistralDriver } from "./mistral.ts";
@@ -37,6 +39,8 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   HermesAgentDriver,
   ClineAgentDriver,
   CopilotAgentDriver,
+  CommandCodeAgentDriver,
+  KiroAgentDriver,
   CustomAcpDriver,
   PiDriver,
   OpenAICompatDriver,

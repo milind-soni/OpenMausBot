@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import {
   DESKTOP_COMPANION_FIELD,
+  MANAGED_COMPANION_HOST_SUFFIXES,
+  NEXT_MANAGED_COMPANION_HOST_SUFFIX,
   desktopCompanionAccess,
   desktopCompanionRendererArguments,
   desktopCompanionProxyTarget,
@@ -101,6 +103,32 @@ describe("desktop companion endpoint", () => {
       `https://www.${LABEL}.mausbot.si`,
     ]) {
       expect(normalizeDesktopCompanionEndpoint(endpoint), endpoint).toBe("");
+    }
+  });
+
+  it("accepts one c-<32 hex> label under each listed domain, and only those", () => {
+    // The third domain is a one-line change; until the owner names it, nothing new is accepted.
+    expect(NEXT_MANAGED_COMPANION_HOST_SUFFIX).toBe("");
+    expect(MANAGED_COMPANION_HOST_SUFFIXES).toEqual(["openmausbot.com", "mausbot.si"]);
+    expect(Object.isFrozen(MANAGED_COMPANION_HOST_SUFFIXES)).toBe(true);
+    for (const suffix of MANAGED_COMPANION_HOST_SUFFIXES) {
+      expect(suffix).toMatch(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/);
+      expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.${suffix}`)).toBe(`https://${LABEL}.${suffix}`);
+      expect(normalizeDesktopCompanionEndpoint(`${LABEL.toUpperCase().replace("C-", "c-")}.${suffix}`))
+        .toBe(`https://${LABEL}.${suffix}`);
+      for (const near of [
+        `https://${LABEL}.${suffix}.`,
+        `https://${LABEL}.x${suffix}`,
+        `https://${LABEL}.sub.${suffix}`,
+        `https://${LABEL.slice(0, -1)}g.${suffix}`,
+        `https://${LABEL}.${suffix}.example.net`,
+        `https://c-.${suffix}`,
+      ]) {
+        expect(normalizeDesktopCompanionEndpoint(near), near).toBe("");
+      }
+    }
+    for (const unlisted of ["example.net", "openmausbot.net", "mausbot.com", "si", "com", ""]) {
+      expect(normalizeDesktopCompanionEndpoint(`https://${LABEL}.${unlisted}`), unlisted).toBe("");
     }
   });
 

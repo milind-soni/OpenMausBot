@@ -370,12 +370,12 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage + verified CUA runtime
 | Packaged app, embedded harness, local agent CLIs | Supported | Beta | Beta |
 | Composio and Boat/cloud computers | Supported | Beta | Beta |
 | Explicit preview-only local screen capture | Supported | Beta | Beta |
-| Bot control of this computer | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate |
+| Bot control of this computer | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate (Omarchy with Cua's Hyprland plugin: experimental) |
 | Native on-device dictation | Supported | Planned | Planned |
 | Dictation and Take turns calls through Fish Audio (needs a Fish Audio key) | Not used, on-device instead | Supported | Supported |
 
 The Linux preview is user-initiated and never enables local bot control or Auto routing. On Xorg, the reviewed Cua
-Driver 0.19.3 runtime starts only after explicit opt-in and without its full-screen cursor overlay. On Wayland the
+Driver 0.41.3 runtime starts only after explicit opt-in and without its full-screen cursor overlay. On Wayland the
 app never starts it and clears legacy opt-ins while that real-seat safety gate remains unresolved. Chat, preview,
 Cloud, and Local VM remain available on both sessions. See the [Ubuntu Desktop guide](docs/linux-desktop.md) and tracking
 issues [#29](https://github.com/milind-soni/OpenMausBot/issues/29),
@@ -508,13 +508,15 @@ saved as plaintext, not encrypted, in private `config.json` (`0600` on Unix).
 See the [short setup guide](docs/cli-onboarding.md) for account differences,
 phone choices, credential storage, and cancellation.
 
-For a background service on a VPS or an always-on computer, use
-`npx openmausbot serve` with explicit remote options: `--tunnel` after
-`npx openmausbot login` for a managed public address, `--tailscale` for your
-tailnet, or the Docker stack for your own domain. These are separate from
-AI-provider sign-in. Devices pair once with a short code. The deployment guide is
-[docs/deploy-vps.md](docs/deploy-vps.md); the reference is
-[docs/self-hosting.md](docs/self-hosting.md).
+For a server on a VPS or an always-on computer, run `npx openmausbot serve`
+with one way in: `--public-url` behind your own cloudflared, Caddy or nginx,
+`--domain` for a certificate on your own domain, `--tailscale` for your
+tailnet, `--lan` for this network only, or `--tunnel` (after
+`npx openmausbot login`) for a free MausBot web address. It prints one
+pairing link; paste it into the desktop app under **＋ → Connect to a
+server**. The short path for each install method (npx, Docker, a service) is
+at the top of [docs/self-hosting.md](docs/self-hosting.md); a server from
+scratch is [docs/deploy-vps.md](docs/deploy-vps.md).
 
 ## License
 

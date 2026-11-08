@@ -28,6 +28,12 @@ const cfg = () => ({
 }) as never;
 
 describe("custom Claude endpoint", () => {
+  it("uses the official Anthropic API key header without a bearer token", () => {
+    const { instanceId, instances } = newClaudeEndpoint(cfg(), { ...BASE, baseUrl: "https://api.anthropic.com", model: "claude-sonnet-5" });
+    expect(instances[instanceId].environment?.ANTHROPIC_API_KEY).toBe(BASE.token);
+    expect(instances[instanceId].environment?.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+  });
+
   it("creates its own instance with the endpoint's routing, its own directory and no parent credentials", () => {
     const source = cfg();
     const { instanceId, instances } = newClaudeEndpoint(source, { ...BASE, opusModel: "deepseek-reasoner", sonnetModel: "" });
@@ -109,6 +115,15 @@ describe("custom Claude endpoint", () => {
     expect(updated.instances.claude).toEqual(instances.claude);
   });
 
+  it("keeps a discovered catalog when only a model mapping changes", () => {
+    const { instanceId, instances } = newClaudeEndpoint(cfg(), { ...BASE, model: undefined });
+    (instances[instanceId].config as { endpointModels: string[] }).endpointModels = ["model-a", "model-b"];
+    for (const opusModel of ["model-b", ""]) {
+      const entry = updateClaudeEndpoint({ instances }, instanceId, { opusModel }).instances[instanceId];
+      expect((entry.config as { endpointModels: string[] }).endpointModels).toEqual(["model-a", "model-b"]);
+    }
+  });
+
   it("requires the token again when the address changes", () => {
     const { instanceId, instances } = newClaudeEndpoint(cfg(), BASE);
     expect(() => updateClaudeEndpoint({ instances }, instanceId, { baseUrl: "https://api.example.test/anthropic" }))
@@ -140,6 +155,7 @@ describe("custom Claude endpoint", () => {
       { ...BASE, token: "has\nnewline" },
       { ...BASE, model: "has space" },
       { ...BASE, model: "" },
+      { ...BASE, model: "default" },
       { ...BASE, displayName: "Bad\nname" },
       { ...BASE, environment: { ANTHROPIC_BASE_URL: "https://x.test" } },
     ]) {

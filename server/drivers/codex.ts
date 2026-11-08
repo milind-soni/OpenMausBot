@@ -1,3 +1,5 @@
+import { decodeRoutedCodexConfig, managedCodexArgs, endpointCodexArgs, type CodexEndpointConfig } from "./codex-endpoint-config.ts";
+export { managedCodexArgs, endpointCodexArgs } from "./codex-endpoint-config.ts";
 import { codexActionFailure } from "./codex-action-notice.ts";
 import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 import { codexShellDisabled, GUEST_CONFINED_CODEX_ARGS } from "./codex-guest.ts";
@@ -38,7 +40,7 @@ import type {
   TextGenerationOptions,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
-import { decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
+import { codexSelectedProviderArgs, decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 import { codexLocalProviderArgs } from "./local-inject.ts";
 import { codexBackgroundRoute, runCodexBackgroundRoute, runCodexOneShot } from "./codex-background-text.ts";
 import { augmentedPath } from "../env-path.ts";
@@ -52,7 +54,7 @@ import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail, codexHome } from "./codex-identity.ts";
 import { containsControlCharacter, mcpAppApprovalForm, mcpAppApprovalText, mcpElicitationDeclined, plainRecord } from "./codex-app-approval.ts";
-import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
+import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, codexProviderMismatch, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
 import { codexLoginCheck, codexLoginKind, codexLoginStatus, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
@@ -61,7 +63,7 @@ import { parseProtocolAskQuestions, questionChoices } from "../../shared/ask-que
 import { codexQuestionReply, openAsyncQuestion, type CodexAsk } from "./codex-questions.ts";
 import { codexReleaseUpdate, codexUpdateCommand } from "./codex-update.ts";
 export { codexUpdateCommand };
-import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-approval-config.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts";
+import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-approval-config.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts"; import { COMPUTER_PROXY_TIMEOUT_MS } from "../harness-budget.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
@@ -80,7 +82,8 @@ export interface CodexConfig {
    * delegated access (`3p_delegated_access_policy_denied`): Codex stays the sole owner of
    * its credentials, so there is no token-sharing scope to refuse and no refresh overlap. */
   authFlow?: "device";
-  managed?: { url: string; models: string[] };
+  managed?: CodexEndpointConfig;
+  endpoint?: CodexEndpointConfig;
 }
 
 function decodeConfig(raw: unknown): CodexConfig {
@@ -88,12 +91,14 @@ function decodeConfig(raw: unknown): CodexConfig {
   if (o.authMode !== undefined && o.authMode !== "chatgpt-plan") throw new Error("Unknown Codex sign-in mode.");
   if (o.authFlow !== undefined && o.authFlow !== "device") throw new Error("Unknown Codex sign-in flow.");
   if (o.authMode && o.managed) throw new Error("ChatGPT plan and Company billing cannot be combined.");
+  if (o.endpoint && (o.authMode || o.managed)) throw new Error("Direct API, ChatGPT plan and Company billing cannot be combined.");
   return {
     cli: typeof o.cli === "string" ? o.cli : "codex",
     fullAuto: o.fullAuto === true,
     ...(o.authMode === "chatgpt-plan" ? { authMode: "chatgpt-plan" as const } : {}),
     ...(o.authFlow === "device" ? { authFlow: "device" as const } : {}),
-    ...(o.managed && typeof o.managed === "object" ? { managed: decodeManagedCodex(o.managed) } : {}),
+    ...(o.endpoint ? { endpoint: decodeRoutedCodexConfig(o.endpoint as object, "Direct API") } : {}),
+    ...(o.managed && typeof o.managed === "object" ? { managed: decodeRoutedCodexConfig(o.managed) } : {}),
   };
 }
 
@@ -112,33 +117,6 @@ export function chatgptPlanCodexArgs(): string[] {
     "-c", "features.tool_search=false",
     "-c", "shell_environment_policy.ignore_default_excludes=false",
     // OPENMAUSBOT_CHATGPT_TOKEN is excluded via extendShellExclusions: a `-c exclude` here would replace the lower layers' list.
-  ];
-}
-
-function decodeManagedCodex(raw: object): NonNullable<CodexConfig["managed"]> {
-  const value = raw as { url?: unknown; models?: unknown };
-  if (typeof value.url !== "string" || !Array.isArray(value.models) || !value.models.length || value.models.some(model => typeof model !== "string" || !/^[\w][\w./+-]*$/.test(model))) {
-    throw new Error("Invalid Company Codex configuration.");
-  }
-  const url = new URL(value.url);
-  // Plain HTTP leaks the Company API key; allow it only on loopback.
-  const loopback = url.hostname === "localhost" || url.hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(url.hostname);
-  if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))) throw new Error("Invalid Company Codex endpoint.");
-  return { url: url.href.replace(/\/$/, ""), models: value.models as string[] };
-}
-
-export function managedCodexArgs(config: NonNullable<CodexConfig["managed"]>): string[] {
-  // Credential stays in the instance environment, never argv or config.toml.
-  // https://learn.chatgpt.com/docs/config-file/config-reference
-  return [
-    "-c", 'model_provider="openmaus_company"',
-    "-c", 'model_providers.openmaus_company.name="Company"',
-    "-c", `model_providers.openmaus_company.base_url=${JSON.stringify(config.url)}`,
-    "-c", 'model_providers.openmaus_company.env_key="OPENMAUSBOT_COMPANY_API_KEY"',
-    "-c", 'model_providers.openmaus_company.wire_api="responses"',
-    "-c", "model_providers.openmaus_company.requires_openai_auth=false",
-    "-c", 'cli_auth_credentials_store="ephemeral"',
-    "-c", "shell_environment_policy.ignore_default_excludes=false",
   ];
 }
 
@@ -372,6 +350,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
   async create(input: DriverCreateInput<CodexConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
+    const routed = config.endpoint ?? config.managed;
+    const routedProvider = config.endpoint ? "openmaus_endpoint" : "openmaus_company";
     const plan = config.authMode === "chatgpt-plan";
     const planUnavailable = plan && (hostedWorkspaceConfigured() || cloudHomeConfigured())
       ? "ChatGPT plan sign-in for hosted Pro requires OpenAI's hosted-app approval. Use a Company model or API key until that integration is approved; the local desktop flow cannot be used here."
@@ -388,6 +368,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       delete env.OPENAI_API_KEY;
       stripWorkspaceCredentialEnv(env);
       delete env.OPENMAUSBOT_CHATGPT_TOKEN;
+      delete env.OPENMAUSBOT_CODEX_API_KEY;
+      if (config.endpoint) {
+        env.OPENMAUSBOT_CODEX_API_KEY = input.environment.OPENMAUSBOT_CODEX_API_KEY;
+        env.CODEX_HOME = input.environment.CODEX_HOME;
+      }
       if (plan) env.CODEX_HOME = join(planDirectory, "codex");
       return env;
     };
@@ -435,9 +420,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (error && typeof code !== "number") reject(error); else resolve(typeof code === "number" ? code : 0);
       });
     });
-    let models = plan ? { default: "", options: [] } : config.managed ? { default: config.managed.models[0], options: config.managed.models.map(id => ({ id, label: id })) } : STATIC_CODEX_MODELS;
+    let models = plan ? { default: "", options: [] } : routed ? { default: routed.models[0], options: routed.models.map(id => ({ id, label: id, ...(config.endpoint ? { custom: true } : {}) })) } : STATIC_CODEX_MODELS;
     const refreshModels = async (preserveExisting = false) => {
-      if (config.managed) return;
+      if (routed) return;
       if (planAuth) planLane = await detectPlanLane();
       if (planAuth && planLane === "maus") {
         const generation = planGeneration;
@@ -477,7 +462,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     // Codex's model list ships with the CLI: updating 0.155.1 to 0.162.1 in place adds gpt-6.1-sol.
     let modelsCliVersion: string | null = null;
     let startupModelRefresh: Promise<void> | null = null;
-    if (config.managed) {
+    if (routed) {
       await refreshModels();
     } else {
       startupModelRefresh = (await openStartupModelCatalog({
@@ -493,7 +478,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     }
     // OpenAI can refuse Codex's own ChatGPT login while `codex login status` still reports it. Only a
     // stored ChatGPT login is marked: an API-key login cannot be fixed by a ChatGPT sign-in.
-    const ownLogin = !plan && !config.managed;
+    const ownLogin = !plan && !routed;
     const loginCheck = codexLoginCheck(config.cli);
     const loginMark = (): [string, string] | null => {
       const env = childEnv();
@@ -570,6 +555,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         }
         mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
       }
+      if (config.endpoint) {
+        if (!turn.model || !config.endpoint.models.includes(turn.model)) throw new Error("Select a model configured for this direct API endpoint.");
+        if (!input.environment.OPENMAUSBOT_CODEX_API_KEY || !input.environment.CODEX_HOME) throw new Error("Direct API key or isolated Codex home is missing. Edit the endpoint in Settings.");
+        mkdirSync(input.environment.CODEX_HOME, { recursive: true, mode: 0o700 });
+      }
       if (config.managed) {
         if (!turn.model) {
           throw new Error("Company model access is unavailable: no model is selected. Reconnect your organization; personal billing will not be used.");
@@ -635,7 +625,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const env = childEnv();
         const launchedLogin = chatgptTurn ? storedCodexLogin(env) : null;
         if (planToken) env.OPENMAUSBOT_CHATGPT_TOKEN = planToken;
-        const appServerArgs = ["app-server", ...(plan && planLane === "maus" ? chatgptPlanCodexArgs() : config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs(),
+        const appServerArgs = ["app-server", ...(plan && planLane === "maus" ? chatgptPlanCodexArgs() : config.endpoint ? endpointCodexArgs(config.endpoint) : config.managed ? managedCodexArgs(config.managed) : codexSelectedProviderArgs(env, turn.model)), ...codexToolSurfaceArgs(),
           // Native shell snapshots can restore variables the shell policy removed.
           ...(turn.toolScope === undefined ? [] : ["-c", "features.shell_snapshot=false"]),
           // A guest-driven turn: no shell, no file reads (-c wins over config files).
@@ -687,12 +677,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           mountSelected("agents", "agents", turn.integrations.agents, "approve"); if (selectedMcp.has("agents")) appServerArgs.push("-c", `mcp_servers.agents.tool_timeout_sec=${AGENTS_TOOL_TIMEOUT_SECONDS}`);
         }
         if (turn.integrations?.localComputer) {
-          mountSelected("computer", "computer", turn.integrations.localComputer);
+          mountSelected("computer", "computer", turn.integrations.localComputer); if (selectedMcp.has("computer")) appServerArgs.push("-c", `mcp_servers.computer.tool_timeout_sec=${COMPUTER_PROXY_TIMEOUT_MS / 1_000 + 10}`);
         }
         if (turn.integrations?.browser) {
           mountSelected("browser", "browser", turn.integrations.browser);
         }
-        for (const name of ["data", "highlevel", "email", "device"] as const) if (turn.integrations?.[name]) mountSelected(name, name, turn.integrations[name]);
+        for (const name of ["data", "email", "device"] as const) if (turn.integrations?.[name]) mountSelected(name, name, turn.integrations[name]);
         // A `-c` override merges with a same-named server in config.toml, and stdio over url is
         // "invalid configuration" that kills the turn, so such a server mounts under its own name.
         const codexConfig = codexConfigMcp(env), declaredInCodexConfig = codexConfig.names;
@@ -727,6 +717,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const mountedEnv = [...mountedNames].filter((name) => env[name] !== undefined && !SHELL_ESSENTIALS.has(name) && !name.startsWith("LC_")
           && (name === "ELECTRON_RUN_AS_NODE" || baseEnv.get(name) !== env[name]));
         const privateEnv = [...new Set([
+          ...(config.endpoint ? ["OPENMAUSBOT_CODEX_API_KEY"] : []),
           ...(turn.toolScope !== undefined ? ["OMB_GATE_CONFIG_*"] : []),
           ...PRIVATE_ENV_FAMILIES.filter((family) => mountedEnv.some((name) => name.startsWith(family))).map((family) => `${family}*`),
           ...mountedEnv.filter((name) => !PRIVATE_ENV_FAMILIES.some((family) => name.startsWith(family))).sort(),
@@ -1466,8 +1457,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // Codex's `never` means "do not ask to escalate", not "grant every requested permission":
         // only Full may synthesize approvals.
         autoAcceptPermissions = approvalMode === "full";
-        const selection = config.managed
-          ? { model: turn.model, modelProvider: "openmaus_company" }
+        const selection = routed
+          ? { model: turn.model, modelProvider: routedProvider }
           : config.authMode === "chatgpt-plan" && planLane === "maus"
             ? { model: turn.model, modelProvider: "openai_chatgpt_plan" }
             : decodeCodexSelection(turn.model);
@@ -1509,8 +1500,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               producedOutput: state.sawStreamDelta,
             });
             if (recoveredMissingSession || stopRequested || state.settled ||
-                !turn.recoveryText?.trim() || !(missingNativeCodexThread(error, cursor) || archivedNativeCodexThread(error, cursor)) || !mayReplay(failure)) throw error;
-            // Codex no longer has the thread: rebuild once, or every later turn fails the same way.
+                !turn.recoveryText?.trim() || !(missingNativeCodexThread(error, cursor) || archivedNativeCodexThread(error, cursor) || codexProviderMismatch(error)) || !mayReplay(failure)) throw error;
+            // Codex no longer has the thread, or keeps it under another provider: rebuild once, or every later turn fails the same way.
             recoveredMissingSession = true;
             const rebuild = recoveryPromptFor({ recoveryText: turn.recoveryText, currentText: turn.text, failure });
             rebuiltFromReplay = rebuild.replayed;
@@ -1653,6 +1644,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       return { state: "available", version, chatgptPlan: true, billing: "subscription", ...await planAuth.snapshot(), update: await codexReleaseUpdate(version, config.cli),
       ...(planWarning ? { warning: { title: "Check ChatGPT connection", message: planWarning } } : {}) };
     }
+    if (config.endpoint) return { state: "available", version, authenticated: Boolean(input.environment.OPENMAUSBOT_CODEX_API_KEY && input.environment.CODEX_HOME), billing: "metered" };
     if (config.managed) return { state: "available", version, authenticated: Boolean(input.environment.OPENMAUSBOT_COMPANY_API_KEY && input.environment.CODEX_HOME), billing: "metered" };
     const previousCliVersion = modelsCliVersion;
     modelsCliVersion = version;
@@ -1694,7 +1686,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       }
       if (planSigningOut || disposed) throw new Error("This ChatGPT account is being disconnected.");
       mkdirSync(join(planDirectory, "codex"), { recursive: true, mode: 0o700 });
-
+    } else if (config.endpoint) {
+      if (!input.environment.OPENMAUSBOT_CODEX_API_KEY || !input.environment.CODEX_HOME) throw new Error("Direct API key or isolated Codex home is missing. Edit the endpoint in Settings.");
+      mkdirSync(input.environment.CODEX_HOME, { recursive: true, mode: 0o700 });
+      providerArgs = endpointCodexArgs(config.endpoint);
     } else if (config.managed) {
       if (!input.environment.OPENMAUSBOT_COMPANY_API_KEY || !input.environment.CODEX_HOME) {
         throw new Error("Company model access is unavailable. Reconnect your organization; personal billing will not be used.");
@@ -1704,12 +1699,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     const route = codexBackgroundRoute(models, smallModelsUsable(), options.fallback);
     if (!route) throw new Error("Codex lists no model for background calls. Refresh models in Settings → Model providers → Codex.");
     return runCodexBackgroundRoute(route, (id) => {
-      const selection = planAuth || config.managed ? { model: id, modelProvider: null } : decodeCodexSelection(id);
+      const selection = planAuth || routed ? { model: id, modelProvider: null } : decodeCodexSelection(id);
       return runCodexOneShot({
         spawn: spawnCli, kill: killCliTree, cli: config.cli, env, prompt, options,
         model: selection.model ?? id,
         modelProvider: selection.modelProvider,
-        providerArgs: planAuth || config.managed ? providerArgs : codexLocalProviderArgs(env, id),
+        providerArgs: planAuth || routed ? providerArgs : codexLocalProviderArgs(env, id),
         describeError: (message) => {
           const route: CodexRoute = planAuth ? "plan" : selection.modelProvider === OFFICIAL_CODEX_PROVIDER ? "own" : "other";
           hidePlanRefusedModel(selection.model ?? id, message, route);
@@ -1732,6 +1727,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     ...(startupModelRefresh ? { startupModelRefresh } : {}),
     generateMemoryText,
     ...(plan ? { authenticationMethod: (config.authFlow === "device" ? "device-code" : "browser-pkce") as "browser-pkce" | "device-code" } : {}),
+    ...(!config.endpoint ? {
     startAuthentication: async () => {
       if (planUnavailable) throw new Error(planUnavailable);
       if (planSigningOut || disposed) throw new Error("This account is being disconnected. Wait before signing in again.");
@@ -1792,6 +1788,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         }
       } finally { planSigningOut = false; }
     },
+    } : {}),
     snapshot,
     adapter: {
       provider: DRIVER_KIND,
@@ -1806,7 +1803,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       customMcp: true,
         phoneMcp: true,
         browserMcp: true,
-        dataMcp: true, highlevelMcp: true, deviceMcp: true,
+        dataMcp: true, emailMcp: true, deviceMcp: true,
         images: true,
         nativeImageInput: true,
         effortLevels: ["low", "medium", "high", "xhigh", "max"],

@@ -106,7 +106,7 @@ async function answer(response) {
  *   journalFile(): string,
  *   tempRoot(): string,
  *   lend?(projects: string[]): Promise<unknown>,
- *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
+ *   phone?: { paired(): boolean, start(): Promise<void> },
  *   openHome?(): void,
  *   openLocal?(): void,
  *   restart?(): void,
@@ -294,7 +294,7 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
     holding: () => { const bot = teamMove.view()?.phase; return home.moving() || (bot && !["done", "failed"].includes(bot)) ? "moving" : null; },
     /** Goes on with the move, and with any bot moving into a team: at launch, and whenever the MausBot Cloud sign-in changes. */
     kick: () => { void teamMove.kick(); return home.kick(); },
-    /** Home is My Cloud: this computer's own server is frozen for good, and its phone link stays off. */
+    /** Home is My Cloud: this computer's own server is frozen for good. */
     away: () => home.away(),
     view: () => home.view(),
     close: () => { teamMove.close(); home.close(); report.close(); void moveSession.end(); },

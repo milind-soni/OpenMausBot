@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PublishedPageCard } from "../../shared/published-page.ts";
 import { FAKE_DESKTOP_TOKEN, FAKE_HOME, FAKE_TOKEN_URL, fakePagesService } from "../testing/fake-pages.ts";
 import { applyIncludedPagesMessage, pagesHomeSignature } from "./access.ts";
-import { PageBundleError, readPageBundle } from "./bundle.ts";
+import { PageBundleError, readPageBundle, skippedNote } from "./bundle.ts";
 import { PublishedPagesStore } from "./store.ts";
 import { createPublishedPages } from "./service.ts";
 import { createPagesInternalRoutes, createPublishedPageRoutes, type AppPages } from "../routes/published-pages.ts";
@@ -29,13 +29,14 @@ function writeSite(folder: string, files: Record<string, string> = SITE) {
 }
 const signIn = () => applyIncludedPagesMessage({ type: "openmausbot:included-pages", access: { url: FAKE_TOKEN_URL, token: FAKE_DESKTOP_TOKEN } });
 
-function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean } = {}) {
+function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean; liveRoots?: (botId: string, threadId: string) => readonly string[] | null; paused?: () => boolean } = {}) {
   const service = fakePagesService({ quota: options.quota });
   const work = join(dir, "work"), data = join(dir, "data");
   mkdirSync(work, { recursive: true });
   const cards: Array<{ threadId: string; id: string; text: string; card: PublishedPageCard }> = [];
   let ids = 0;
   const pages = createPublishedPages({ dataDir: data, cloudHome: options.home ? FAKE_HOME : null, selfHosted: options.selfHosted, fetch: (input, init) => service.fetch(input, init),
+    ...(options.liveRoots ? { liveRoots: options.liveRoots } : {}), ...(options.paused ? { paused: options.paused } : {}),
     patch: (threadId, messageId, text, card) => { const shown = cards.find((each) => each.id === messageId && each.threadId === threadId); if (shown) Object.assign(shown, { text, card }); } });
   const post = (threadId: string) => (text: string, card: PublishedPageCard) => { const id = `m${++ids}`; cards.push({ threadId, id, text, card }); return id; };
   const publish = (input: { path: string; title?: string; pageId?: string; botId?: string; threadId?: string }) => pages.publisher.publish({
@@ -85,7 +86,7 @@ describe("publishing a page", () => {
     const url = `https://${page}.mausbot.page/`;
     expect(outcome.text).toContain(`Published “Bake sale” at ${url}`);
     expect(outcome.text).toContain("This account now has 1 of 5 pages.");
-    expect(outcome.text).toContain("Free pages carry a small “Made with MausBot” badge.");
+    expect(outcome.text.split("\n").at(-1)).toBe("Free pages carry a small “Made with MausBot” badge.");
     expect(f.cards).toEqual([{ threadId: "thread-1", id: "m1", text: `Published “Bake sale”: ${url} (1 of 5 pages)`,
       card: { state: "live", title: "Bake sale", pageId: page, url, usage: { pages: 1, limit: 5 } } }]);
     expect(Object.fromEntries(f.service.pages.get(page!)!.files)).toEqual(SITE);
@@ -172,19 +173,31 @@ describe("publishing a page", () => {
     writeFileSync(join(dir, "secret.txt"), "outside");
     symlinkSync(join(dir, "secret.txt"), join(site, "linked.txt"));
     const outcome = await f.publish({ path: "site" });
-    expect(outcome.text).toContain("Left out 2 files a page can't serve: app.py, node_modules/");
+    expect(outcome.text.split("\n").at(-1))
+      .toBe("Left out app.py (pages can't carry .py files), linked.txt (links a page can't follow), node_modules/ (package and cache folders) and .env, .git/ (hidden).");
     const published = [...f.service.pages.values()][1]!;
     expect([...published.files.keys()].sort()).toEqual(["img/logo.svg", "index.html", "style.css"]);
   });
 
-  it("publishes a dashboard's csv, parquet and arrow data with it, and leaves out a wasm file", async () => {
+  it("publishes a dashboard's csv, parquet, arrow and map data with it, and leaves out a wasm file", async () => {
     const f = setup();
     signIn();
-    writeSite(join(f.work, "dash"), { "index.html": "<p>Sales</p>", "data.parquet": "PAR1", "data/backup.csv": "a\n1\n", "data/live.arrow": "ARROW1", "duckdb.wasm": "x" });
+    writeSite(join(f.work, "dash"), { "index.html": "<p>Sales</p>", "data.parquet": "PAR1", "data/backup.csv": "a\n1\n", "data/live.arrow": "ARROW1",
+      "data/land.geojson": "{}", "duckdb.wasm": "x" });
     const outcome = await f.publish({ path: "dash" });
-    expect(outcome.text).toContain("Left out 1 file a page can't serve: duckdb.wasm");
+    expect(outcome.text).toContain("Left out duckdb.wasm (pages can't carry .wasm files).");
     const [published] = [...f.service.pages.values()];
-    expect([...published!.files.keys()].sort()).toEqual(["data.parquet", "data/backup.csv", "data/live.arrow", "index.html"]);
+    expect([...published!.files.keys()].sort()).toEqual(["data.parquet", "data/backup.csv", "data/land.geojson", "data/live.arrow", "index.html"]);
+  });
+
+  it("says why each file was left out, a few names per reason, and how many more", async () => {
+    const site = writeSite(join(dir, "site"), { "index.html": "<p>x</p>", "page#2.js": "x", [`${"d/".repeat(10)}deep.js`]: "x" });
+    expect((await readPageBundle(site, [dir])).skipped).toEqual([{ path: "d/".repeat(10), why: "deep" }, { path: "page#2.js", why: "name" }]);
+    expect(skippedNote([])).toBe("");
+    const py = ["a.py", "b.py", "c.py", "d.py", "e.py"].map((path) => ({ path, why: "type" as const }));
+    expect(skippedNote([{ path: ".env", why: "hidden" }, ...py, { path: "x.foo", why: "type" }, { path: "Makefile", why: "type" }, { path: "a#b.js", why: "name" }]))
+      .toBe("Left out a.py, b.py, c.py and 2 more (pages can't carry .py files), x.foo (pages can't carry .foo files), " +
+        "Makefile (pages can't carry files without an extension), a#b.js (names with characters a page can't hold) and 1 more.");
   });
 
   it("refuses a folder over a page's bytes or files before asking for a token", async () => {
@@ -403,3 +416,97 @@ describe("pages access", () => {
     expect(pagesHomeSignature("s".repeat(43), "cm-test-home", "1792670400", "nonce-nonce-nonce-1", '{"action":"create"}')).toBe("smys7kDYS99REKsdwsd9OaXv6pH_hP1Wajaq3KrTiVo");
   });
 });
+
+describe("a live published page", () => {
+  const publishLive = (f: ReturnType<typeof setup>, live?: boolean) => f.pages.publisher.publish({
+    botId: "bot-1", threadId: "thread-1", path: "site", title: "Bake sale", roots: [f.work], post: () => "m1", ...(live !== undefined ? { live } : {}) });
+
+  it("carries a version and a reload check in its index.html, and is remembered as live", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    expect((await publishLive(f, true)).status).toBe(200);
+    const [page] = [...f.service.pages.keys()];
+    const html = f.service.pages.get(page!)!.files.get("index.html")!;
+    expect(html.startsWith("<!doctype html><meta name=\"omb-live\" content=\"")).toBe(true);
+    expect(html).toContain("location.reload()");
+    expect(html.endsWith("<h1>Bake sale</h1>")).toBe(true);
+    expect(f.service.pages.get(page!)!.files.get("style.css")).toBe(SITE["style.css"]);
+    expect(f.pages.store.get(page!)).toMatchObject({ live: true });
+  });
+
+  it("publishes again to the same link when its folder changes, at most once a minute, and never a page that isn't live", async () => {
+    const f = setup();
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    writeSite(join(f.work, "still"), { "index.html": "<p>Still</p>" });
+    await f.pages.publisher.publish({ botId: "bot-1", threadId: "thread-1", path: "still", title: "Still", roots: [f.work], post: () => "m2" });
+    const [page] = [...f.service.pages.keys()];
+    const version = () => /content="([^"]+)"/u.exec(f.service.pages.get(page!)!.files.get("index.html")!)?.[1];
+    const first = version();
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(0);
+    writeFileSync(join(site, "style.css"), "h1{color:blue}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 1_000)).toBe(0);
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
+    expect(f.service.pages.get(page!)!.files.get("style.css")).toBe("h1{color:blue}");
+    expect(version()).not.toBe(first);
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "create", "update"]);
+    expect(await f.pages.publisher.refreshLive(Date.now() + 130_000)).toBe(0);
+    // Publishing it again keeps it live unless told otherwise.
+    await publishLive(f);
+    expect(f.pages.store.get(page!)).toMatchObject({ live: true });
+    await publishLive(f, false);
+    expect(f.pages.store.get(page!)).not.toHaveProperty("live");
+    expect(f.service.pages.get(page!)!.files.get("index.html")).toBe(SITE["index.html"]);
+  });
+
+  it("stops being published again once its bot can no longer read the folder, and keeps its link", async () => {
+    let roots: readonly string[] | null = null;
+    const asked: string[] = [];
+    const f = setup({ liveRoots: (botId, threadId) => { asked.push(`${botId} ${threadId}`); return roots; } });
+    roots = [f.work];
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    const [page] = [...f.service.pages.keys()];
+    writeFileSync(join(site, "style.css"), "h1{color:blue}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
+    expect(asked).toContain("bot-1 thread-1");
+    roots = null;
+    writeFileSync(join(site, "style.css"), "h1{color:green}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 130_000)).toBe(0);
+    expect(f.pages.store.get(page!)).not.toHaveProperty("live");
+    expect(f.pages.store.get(page!)).toMatchObject({ url: expect.any(String) });
+    expect(f.service.pages.get(page!)!.files.get("style.css")).toBe("h1{color:blue}");
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "update"]);
+  });
+
+  it("waits while the workspace is backed up, restored or moved", async () => {
+    let paused = false;
+    const f = setup({ paused: () => paused });
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    writeFileSync(join(site, "style.css"), "h1{color:blue}");
+    paused = true;
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(0);
+    paused = false;
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
+  });
+
+  it("waits ten minutes before trying a folder that can't be published as it is", async () => {
+    const f = setup();
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    const start = Date.now();
+    rmSync(join(site, "index.html"));
+    expect(await f.pages.publisher.refreshLive(start + 61_000)).toBe(0);
+    writeFileSync(join(site, "index.html"), "<h1>Back</h1>");
+    expect(await f.pages.publisher.refreshLive(start + 130_000)).toBe(0);
+    expect(await f.pages.publisher.refreshLive(start + 662_000)).toBe(1);
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "update"]);
+  });
+});
+

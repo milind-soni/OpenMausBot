@@ -31,6 +31,14 @@ FROM caddy:2.10.2 AS edge
 # capability (and the build user's ownership).
 RUN cp /usr/bin/caddy /caddy
 
+# The Cloudflare tunnel's connector, for a Cloud home on a server with no
+# inbound port: the release pinned in scripts/prepare-cloudflared.mjs, checked
+# against its digest and run once on the image's own CPU before it is copied.
+FROM node:24-bookworm-slim AS tunnel
+COPY scripts/prepare-cloudflared.mjs /stage/prepare-cloudflared.mjs
+RUN node /stage/prepare-cloudflared.mjs --current --root /stage \
+ && cp /stage/dist-native/cloudflared/linux-*/cloudflared /cloudflared
+
 # The JavaScript build is the same for every CPU, so it runs once on the build
 # host's own; only the Data engine's native tree below follows the image's CPU.
 FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS build
@@ -142,6 +150,9 @@ RUN apt-get update \
 # Caddy and Grok are pinned, so they sit beneath the engines, which change
 # more often.
 COPY --from=edge /caddy /usr/local/bin/caddy
+COPY --from=tunnel /cloudflared /usr/local/bin/cloudflared
+# cloudflared's own user: its token rides its environment, which maus can't read.
+RUN useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin omb-tunnel
 # Grok Build, the grok.com subscription engine: xAI's own installer, pinned to
 # the version the Grok driver is verified against (server/drivers/acp/grok.ts).
 # People sign it in from the app with a device code; its login lands in
@@ -169,7 +180,7 @@ ARG ENGINES_CACHE_TAG=""
 RUN echo "engines: ${CLOUD_HOME_ENGINES:-none} ${ENGINES_CACHE_TAG}" \
   && if [ -n "$CLOUD_HOME_ENGINES" ]; then HOME=/tmp/omb-build-home npm install -g $CLOUD_HOME_ENGINES; fi \
   && rm -rf /tmp/omb-build-home /tmp/node-compile-cache
-COPY deploy/fly/Caddyfile /app/cloud/Caddyfile
+COPY deploy/fly/Caddyfile deploy/fly/Caddyfile.tls deploy/fly/Caddyfile.tunnel deploy/fly/edge-routes.caddy /app/cloud/
 # The root supervisor runs /app's code and hands the server its secrets, so
 # no file there may be one `maus` can change: unlike the server image's, these
 # copies stay root's. Only the /data volume is maus's; the launcher refuses to
@@ -181,11 +192,14 @@ COPY --from=build /src/dist ./dist
 # The bundled skills (server/skill-library.ts reads ./skills from /app).
 COPY --from=build /src/skills ./skills
 RUN export HOME=/tmp/omb-build-home \
- && chmod go-w /app/cloud /app/cloud/Caddyfile \
+ && chmod go-w /app/cloud /app/cloud/Caddyfile /app/cloud/Caddyfile.tls /app/cloud/Caddyfile.tunnel /app/cloud/edge-routes.caddy \
  && caddy version \
+ && cloudflared version \
  && OMB_CLOUD_PUBLIC_HOST=validate.fly.dev caddy validate --config /app/cloud/Caddyfile --adapter caddyfile \
+ && OMB_CLOUD_PUBLIC_HOST=validate.example.com OMB_CLOUD_EDGE_STORAGE=/tmp/omb-build-home/edge caddy validate --config /app/cloud/Caddyfile.tls --adapter caddyfile \
+ && OMB_CLOUD_PUBLIC_HOST=validate.example.com caddy validate --config /app/cloud/Caddyfile.tunnel --adapter caddyfile \
  && test -f /app/dist-server/cloud-home-start.js \
- && untrusted="$(find /app /usr/local/bin/caddy \( ! -user root -o ! -type l -perm /022 \) -print)" \
+ && untrusted="$(find /app /usr/local/bin/caddy /usr/local/bin/cloudflared \( ! -user root -o ! -type l -perm /022 \) -print)" \
  && if [ -n "$untrusted" ]; then echo "not root's, or writable by others:" >&2; echo "$untrusted" >&2; exit 1; fi \
  && rm -rf /tmp/omb-build-home
 ENV HOME=/data
@@ -210,7 +224,10 @@ COPY --from=build --chown=maus:maus /src/dist-native/duckdb/target ./duckdb
 COPY --from=build --chown=maus:maus /src/dist-server ./dist-server
 COPY --from=build --chown=maus:maus /src/dist ./dist
 COPY --from=build --chown=maus:maus /src/skills ./skills
-ENV HOME=/data
+# `docker compose exec omb openmausbot pair`: the commands the CLI prints start the same way.
+RUN printf '#!/bin/sh\nexec node /app/dist-server/openmausbot.js "$@"\n' > /usr/local/bin/openmausbot && chmod 0755 /usr/local/bin/openmausbot
+ENV HOME=/data \
+    OMB_CLI_PREFIX="docker compose exec omb openmausbot"
 VOLUME ["/data"]
 USER maus
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
