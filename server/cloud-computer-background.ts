@@ -138,11 +138,11 @@ export async function backgroundStatus(
 ): Promise<CloudComputerResult> {
   const processId = processIdFrom(boxId, args.process_id);
   if (processId === null) return text(OTHER_COMPUTER, true);
-  const until = Date.now() + Math.min(args.wait_seconds ?? 0, STATUS_WAIT_MAX_SECONDS) * 1_000;
-  let firstRead = true;
+  const waitMs = Math.min(args.wait_seconds ?? 0, STATUS_WAIT_MAX_SECONDS) * 1_000;
+  const until = Date.now() + waitMs;
   for (;;) {
     assertBoatNotDeleting(boxId);
-    const deadline = firstRead ? null : AbortSignal.timeout(Math.max(1, until - Date.now()));
+    const deadline = waitMs ? AbortSignal.timeout(Math.max(1, until - Date.now())) : null;
     const readSignal = deadline ? AbortSignal.any([signal, deadline]) : signal;
     let response: Response, body: any;
     try {
@@ -161,7 +161,6 @@ export async function backgroundStatus(
     const remaining = until - Date.now();
     if (!body.running || remaining <= LAST_READ_WINDOW_MS) return describeStatus(args.process_id, body);
     await delay(Math.min(POLL_MS, remaining - LAST_READ_WINDOW_MS), undefined, { signal });
-    firstRead = false;
   }
 }
 
