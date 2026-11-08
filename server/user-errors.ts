@@ -42,6 +42,7 @@ export const USER_ERROR = {
   "serverError.page.fromMcp": "That app came from an MCP server; only a page a bot made can be published.",
   "serverError.page.versionGone": "That version of the page is no longer kept.",
   "serverError.page.notStored": "This app's page is not stored on this computer.",
+  "serverError.page.downloadHasFiles": "This page has files beside it, so it can't be saved as one file. Share it for a link instead.",
   "serverError.department.notFound": "No such department",
   "serverError.department.missing": "no such department",
   "serverError.department.nameLength": "Department name must be 1 to 60 characters",

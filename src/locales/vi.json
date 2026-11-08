@@ -985,6 +985,8 @@
   "settings.profile.name": "Tên của bạn",
   "settings.profile.aboutMe": "Giới thiệu về tôi",
   "settings.profile.aboutMeHelp": "Được chia sẻ với mọi bot trong cuộc trò chuyện riêng tư và group chat. Tự động lưu.",
+  "settings.profile.everyBotRules": "Quy tắc cho mọi bot",
+  "settings.profile.everyBotRulesPlaceholder": "Mọi bot đều làm theo. Khi khác nhau, chỉ dẫn riêng của bot được ưu tiên.",
   "settings.profile.saving": "Đang lưu…",
   "settings.profile.saved": "Đã lưu",
   "settings.profile.saveError": "Không thể lưu. Các thay đổi của bạn vẫn còn ở đây.",
@@ -4936,6 +4938,9 @@
   "chat.preview.updatedLink": "Đã cập nhật ở cùng liên kết",
   "chat.preview.publishFailed": "Không đăng được trang này. Hãy thử lại sau giây lát.",
   "chat.preview.openTab": "Mở trong thẻ mới",
+  "chat.preview.save": "Lưu vào thiết bị",
+  "chat.preview.saveFailed": "Không thể lưu trang.",
+  "serverError.page.downloadHasFiles": "Trang này có tệp đi kèm nên không thể lưu thành một tệp. Hãy chia sẻ để lấy liên kết.",
   "chat.preview.openTabNeedsLink": "Chia sẻ trang để mở nó trong thẻ mới",
   "chat.preview.fullScreen": "Toàn màn hình",
   "chat.preview.exitFullScreen": "Thoát toàn màn hình",
@@ -5574,5 +5579,9 @@
   "remote.client.endsDec7": "Kiểu kết nối này kết thúc vào ngày 7 tháng 12. Sau đó, hãy ghép nối lại máy này từ Điện thoại và thiết bị trên máy kia.",
   "phone.code.pairingCode": "Mã ghép nối",
   "phone.code.typeIntro": "Mở ứng dụng {app} và nhập mã ghép nối này.",
-  "phone.signIn.emailCode": "Mã đăng nhập trong email của bạn"
+  "phone.signIn.emailCode": "Mã đăng nhập trong email của bạn",
+  "botPanel.heavy": "Bot này tải rất nhiều mỗi lượt.",
+  "botPanel.tidyMemory": "Dọn bộ nhớ",
+  "memory.journal.instructions": "chỉ dẫn",
+  "memory.journal.actor.teamSetup": "Thiết lập nhóm"
 }
