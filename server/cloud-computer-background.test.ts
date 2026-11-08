@@ -91,6 +91,9 @@ describe.each([
     const result = await started.done;
     expect(result.isError).not.toBe(true);
     expect(json(result)).toMatchObject({ processId: expect.stringMatching(new RegExp(background.PROCESS_ID_PATTERN)), status: "running" });
+    expect(json(result).next).toContain("completion will not automatically resume this turn or notify a delegator");
+    expect(json(result).next).toContain("use exec_status with wait_seconds in this turn");
+    expect(json(result).next).toContain("report it as unfinished with the process_id");
     expect([started.gated(), started.checks()]).toEqual([1, 2]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ method: "POST", path: `${root}/${BOX}/commands`, authorization, body: { detached: true } });
@@ -109,6 +112,14 @@ describe.each([
     expect(json(finished)).toEqual({ processId, status: "finished", exitCode: 3, stdout: "rows: 1200\n", stderr: "warning: slow disk\n" });
     const reads = calls.filter(entry => entry.method === "GET");
     expect(reads.map(entry => [entry.path, entry.query, entry.authorization])).toEqual(Array(2).fill([`${root}/${BOX}/commands/${processId.split("-")[1]}`, "?tailBytes=12000", authorization]));
+  });
+
+  it.each([0, 3])("keeps one background command through terminal exit %i", async (exitCode) => {
+    const processId = await start();
+    Object.assign(processes.get(`${BOX}:${processId.split("-")[1]}`)!, { runningFor: 1, exitCode, stdout: "receipt" });
+    expect(json(await call("exec_status", { process_id: processId }).done)).toMatchObject({ status: "running", exitCode: null });
+    expect(json(await call("exec_status", { process_id: processId, wait_seconds: 1 }).done)).toMatchObject({ status: "finished", exitCode, stdout: "receipt" });
+    expect(calls.filter(entry => entry.method === "POST")).toHaveLength(1);
   });
 
   it("waits for the command to finish when asked, polling the computer rather than the bot", async () => {

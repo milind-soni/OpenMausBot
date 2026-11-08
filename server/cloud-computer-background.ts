@@ -113,7 +113,7 @@ export async function startInBackground(cfg: AppConfig, boxId: string, command: 
   if (Number.isInteger(body?.exitCode) && processId === undefined) return ranInForeground(body);
   if (!Number.isSafeInteger(processId) || processId < 1) return text(`The cloud computer did not say which process it started. The command may have started. ${CHECK_BEFORE_RERUN}.`, true);
   track(boxId, processId);
-  return text(JSON.stringify({ processId: processIdOn(boxId, processId), status: "running", next: "It keeps running after this call. Follow it with exec_status." }));
+  return text(JSON.stringify({ processId: processIdOn(boxId, processId), status: "running", next: "It keeps running after this call, but its completion will not automatically resume this turn or notify a delegator. If its result is needed for this task, use exec_status with wait_seconds in this turn until it finishes, then check its exit code and output. If you cannot finish checking in this turn, report it as unfinished with the process_id; do not start another copy blindly." }));
 }
 
 function describeStatus(processId: string, body: any): CloudComputerResult {
