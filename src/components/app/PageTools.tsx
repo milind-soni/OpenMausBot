@@ -87,7 +87,8 @@ async function saveToDevice(file: File): Promise<void> {
     }
     return;
   }
-  const url = URL.createObjectURL(file);
+  // Security: octet-stream, so a browser that ignores download never renders the bot's HTML as the app's own page.
+  const url = URL.createObjectURL(new Blob([file], { type: "application/octet-stream" }));
   const link = document.createElement("a");
   link.href = url;
   link.download = file.name;
