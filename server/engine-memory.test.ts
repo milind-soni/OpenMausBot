@@ -621,6 +621,82 @@ describe("an engine's adapter on a Cloud home", () => {
   });
 });
 
+describe("a plan's limit on turns at once", () => {
+  const signal = () => new AbortController().signal;
+  const capped = (most: number | undefined, waitsOnOthers: (threadId: string) => boolean = () => false) => {
+    const h = host();
+    h.memory.useCap({ most: () => most, waitsOnOthers });
+    h.memory.useWaits({ text: (_threadId, wait) => `limit ${wait.limit} ahead ${wait.ahead}`, began: () => {}, changed: () => {} });
+    return h;
+  };
+
+  it("runs the plan's number of turns, whatever memory allows, and the next starts once one ends, saying why it waits", async () => {
+    const h = capped(2);
+    expect(h.memory.limited()).toBe(true);
+    expect(await h.memory.admit("a", signal(), () => {}, "turn")).toBe(true);
+    expect(await h.memory.admit("b", signal(), () => {}, "turn")).toBe(true);
+    const said: string[] = [];
+    let third: boolean | null = null;
+    void h.memory.admit("c", signal(), (text) => said.push(text), "turn").then((admitted) => { third = admitted; });
+    await settle();
+    expect([third, said]).toEqual([null, ["limit 2 ahead 0"]]);
+    h.memory.turnEnded("a");
+    await settle();
+    expect(third).toBe(true);
+  });
+
+  it("lets two woken together take only the places there are", async () => {
+    const h = capped(2);
+    await h.memory.admit("a", signal(), () => {}, "turn");
+    const admitted: string[] = [];
+    for (const threadId of ["b", "c"]) void h.memory.admit(threadId, signal(), () => {}, "turn").then(() => admitted.push(threadId));
+    await settle();
+    expect(admitted).toEqual(["b"]);
+  });
+
+  it("holds no place for a turn waiting on work it handed out, so that work runs", async () => {
+    const waiting = new Set(["a", "b"]);
+    const h = capped(2, (threadId) => waiting.has(threadId));
+    await h.memory.admit("a", signal(), () => {}, "turn");
+    await h.memory.admit("b", signal(), () => {}, "turn");
+    expect(await h.memory.admit("child", signal(), () => {}, "turn")).toBe(true);
+  });
+
+  it("limits nothing where the plan sets no number", async () => {
+    const h = capped(undefined);
+    expect(h.memory.limited()).toBe(false);
+    for (const threadId of ["a", "b", "c", "d"]) expect(await h.memory.admit(threadId, signal(), () => {}, "turn")).toBe(true);
+  });
+
+  it("makes a turn wait for a place even when its thread's engine is still running", async () => {
+    const h = capped(1);
+    h.memory.turnStarted("t1"); h.spawn("t1"); h.memory.turnEnded("t1");
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const fake = fakeInstance();
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "again" } as SendTurnInput);
+    await settle();
+    expect(fake.sent).toEqual([]);
+    h.memory.turnEnded("busy");
+    expect(await turn).toEqual({ turnId: "turn-t1" });
+    expect(fake.sent).toEqual(["t1"]);
+  });
+
+  it("gives the place back when a turn is stopped while it waits for memory", async () => {
+    const h = capped(2);
+    h.state.available = 300 * MB;
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const fake = fakeInstance();
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    await settle();
+    await decorated.adapter.interruptTurn("t1");
+    await expect(turn).rejects.toBeInstanceOf(TurnNotStartedError);
+    expect(h.memory.busy()).toBe(1);
+    expect(await h.memory.admit("t2", signal(), () => {}, "turn")).toBe(true);
+  });
+});
+
 describe("engines that run several threads' sessions", () => {
   it("lets a session into a running engine where a whole new engine would not fit", async () => {
     // One busy engine on 1.6 GB: 900 MB free less the 410 MB kept back fits a 200 MB session but not a 700 MB engine.
