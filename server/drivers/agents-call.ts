@@ -789,8 +789,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     };
   }
   if (member === "session_read") {
-    const threadId = String(args.thread_id ?? "").trim();
-    const messageId = String(args.message_id ?? "").trim();
+    // Only a string is an id: a provider that fills these with false or a number must not read a thread named "false".
+    const threadId = typeof args.thread_id === "string" ? args.thread_id.trim() : "";
+    const messageId = typeof args.message_id === "string" ? args.message_id.trim() : "";
     if (!threadId || !messageId) {
       return { text: "Reading a message needs both thread_id and message_id, copied from a session_search hit.", isError: true };
     }
