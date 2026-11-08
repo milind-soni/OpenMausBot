@@ -22,7 +22,7 @@ export function unreadDividerFor(threadId: string, messages: readonly Line[], la
 }
 
 export function placeUnreadDivider(divider: UnreadDivider | null, threadId: string, messages: readonly Line[], hasMore: boolean): UnreadDivider | null {
-  if (divider?.threadId !== threadId || divider.messageId) return divider;
+  if (!divider || divider.threadId !== threadId || divider.messageId) return divider;
   return unreadDividerFor(threadId, messages, divider.lastReadMessageId, hasMore);
 }
 
