@@ -4770,6 +4770,7 @@
   "connectors.tab.apps": "Połączone aplikacje",
   "connectors.tab.mcp": "Serwery MCP",
   "connectors.stale": "Pokazuję stan połączeń z ostatniego razu — nie udało się teraz otworzyć magazynu poświadczeń tego Maca, więc nie można było ich ponownie sprawdzić. Aplikacje są nadal połączone; ponowne uruchomienie {app} zazwyczaj to rozwiązuje.",
+  "connectors.stalePc": "Pokazuję stan połączeń z ostatniego razu — nie udało się teraz otworzyć magazynu poświadczeń tego PC, więc nie można było ich ponownie sprawdzić. Aplikacje są nadal połączone; ponowne uruchomienie {app} zazwyczaj to rozwiązuje.",
   "connectors.viewAria": "Widok połączonych aplikacji",
   "connectors.tab.marketplace": "Marketplace",
   "connectors.tab.connected": "Połączone",

@@ -38,6 +38,7 @@ import { mergeCompleteConnectorStatus, mergeCurrentConnectorStatus, onlyLatestCo
 import { openBotSettings } from "./bot-panel/panel-link";
 import { openKeySettings } from "./keys/key-focus";
 import { lacksAdminScope } from "@/lib/admin-scope";
+import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ServiceIcon, type ToolkitCard } from "./ServiceIcon"; import { AppsSection } from "./AppsSection";
 export { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
@@ -75,6 +76,10 @@ export function botsWithLimitedServiceTools(bots: Bot[], instances: InstanceInfo
 export function hasUsableConnectedApps(configured: boolean, phase: ConnectorInventoryPhase, stale: boolean, status: Record<string, ConnectorStatus>): boolean {
   return configured && phase === "ready" && !stale && Object.values(status).some((service) => service.connected);
 }
+
+/** The unreadable-store notice names the computer as the app does elsewhere: This Mac on a Mac, This PC everywhere else. */
+export const staleNoticeKey = (platform: string | undefined): LocaleKey =>
+  platform === "darwin" ? "connectors.stale" : "connectors.stalePc";
 
 /** Whether a hosted app's card shows: it matches the search, and the filter is All, or Connected and it isn't known to be
  * disconnected (unknown while its servers load). */
@@ -121,6 +126,7 @@ export function botsUsingService(bots: Bot[], instances: InstanceInfo[], slug: s
 }
 
 export function PluginsPanel() {
+  const { capabilities } = useDesktopCapabilities();
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -587,7 +593,7 @@ export function PluginsPanel() {
             <div className="mb-3 flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-[13px] text-warning">
               <TriangleAlert size={14} className="mt-px shrink-0" />
               <span>
-                {t("connectors.stale")}
+                {t(staleNoticeKey(capabilities.host.platform))}
               </span>
             </div>
           )}

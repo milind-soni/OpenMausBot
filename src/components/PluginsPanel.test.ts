@@ -6,6 +6,7 @@ import {
   hasUsableConnectedApps,
   connectorSetupNotice,
   disconnectAccountConfirmation,
+  staleNoticeKey,
 } from "./PluginsPanel";
 import { mergeCompleteConnectorStatus, mergeCurrentConnectorStatus, onlyLatestConnectorResponses } from "@/lib/connector-status-merge";
 import {
@@ -333,5 +334,13 @@ describe("connected apps setup notice", () => {
   it("says nothing when apps work or the stale banner already explains", () => {
     expect(connectorSetupNotice({ ...base, configured: true, setup: "ready" })).toBeNull();
     expect(connectorSetupNotice({ ...base, stale: true, setup: "needs-setup" })).toBeNull();
+  });
+});
+
+describe("unreadable credential store notice", () => {
+  it("calls the computer a Mac only on a Mac", () => {
+    expect(staleNoticeKey("darwin")).toBe("connectors.stale");
+    expect(staleNoticeKey("win32")).toBe("connectors.stalePc");
+    expect(staleNoticeKey("linux")).toBe("connectors.stalePc");
   });
 });
