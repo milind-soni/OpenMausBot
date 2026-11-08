@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
 
 const hooks = vi.hoisted(() => ({
   beforeRead: null as ((input: number) => void) | null,
@@ -122,7 +123,7 @@ it.skipIf(process.platform === "win32")("rejects an oversized sparse file before
   dirs.push(base);
   const source = join(base, "large.bin");
   fs.writeFileSync(source, "");
-  fs.truncateSync(source, 25 * 1024 * 1024 + 1);
+  fs.truncateSync(source, FILE_MAX_BYTES + 1);
   let read = false;
   hooks.beforeRead = () => { read = true; };
   await expect(async () => namedUploadPaths([{ file: source, name: "Large.bin" }], join(base, "uploads"))).rejects.toThrow(/limit/i);

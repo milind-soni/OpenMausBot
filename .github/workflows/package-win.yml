@@ -20,6 +20,10 @@ on:
         required: false
         type: string
 
+# least privilege: the build only reads the checkout, it never writes back
+permissions:
+  contents: read
+
 jobs:
   package:
     name: NSIS installer

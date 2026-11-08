@@ -1452,6 +1452,24 @@ describe("ACP turns (fake CLI)", () => {
     });
   });
 
+  it("tells the person where to turn tool selection off when Grok has its own MCP server", async () => {
+    const rpcFile = join(scratch, "grok-native-mcp-rpc.json");
+    process.env.FAKE_ACP_RPC_DUMP = rpcFile;
+    process.env.FAKE_ACP_GROK_NATIVE_MCP = "github";
+    try {
+      await create(GrokAgentDriver);
+      await instance.adapter.sendTurn({ threadId: "t-grok-native-mcp", text: "go", toolScope: { allow: ["native:*"] } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: false });
+      expect(recorder.events.find((event) => event.type === "runtime.error")).toMatchObject({
+        message: "Grok has an MCP connection outside the bot's selection. Remove the MCP servers from Grok's own settings, "
+          + "or set Tool selection back to all tools in this bot's settings (Access). No prompt was sent.",
+      });
+      expect(JSON.parse(readFileSync(rpcFile, "utf8"))).not.toContain("session/prompt");
+    } finally {
+      delete process.env.FAKE_ACP_GROK_NATIVE_MCP;
+    }
+  });
+
   it("keeps a tool selection's gate in front of the connector", async () => {
     const strict = await startFakeHttpMcp({ strictInitialize: "http-400", tools: [{ name: "report", inputSchema: { type: "object" } }, { name: "campaigns", inputSchema: { type: "object" } }] });
     try {
