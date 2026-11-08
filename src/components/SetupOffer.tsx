@@ -125,13 +125,13 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
           </div>
         ))}
       </div> : <div key={choices.join("\n")} data-setup-updating={updating ? "" : undefined}
-        className={cn("mt-2 flex flex-col gap-1", updating ? "motion-safe:animate-pulse" : waitedOnce.current && "motion-safe:animate-msg-in")}>
+        className={cn("mt-2 flex flex-col", updating ? "motion-safe:animate-pulse" : waitedOnce.current && "motion-safe:animate-msg-in")}>
         {options.map((option, index) => (
           <button key={option.label} type="button" data-ask-choice="" disabled={quiet || busy} onClick={option.pick}
             className={cn("group flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-start",
-              quiet ? "cursor-default" : "bg-ink/[0.05] hover:bg-ink/[0.09] disabled:cursor-default")}>
-            <kbd className={cn("flex size-6 shrink-0 items-center justify-center rounded-md font-sans text-[12px] font-medium",
-              quiet ? "bg-ink/[0.04] text-ink-tertiary" : "bg-ink/[0.07] text-ink-secondary group-hover:bg-ink/[0.1]")}>
+              quiet ? "cursor-default" : "hover:bg-ink/[0.05] disabled:cursor-default")}>
+            {/* The letter picks the row from the keyboard; a quiet hint, not a keycap competing with the words. */}
+            <kbd className="w-3 shrink-0 text-center font-sans text-[12px] font-medium text-ink-tertiary">
               {LETTERS[index]}
             </kbd>
             <span dir="auto" className={cn("min-w-0 break-words text-[14px] leading-5", quiet ? "text-ink-tertiary" : "text-ink")}>{option.label}</span>

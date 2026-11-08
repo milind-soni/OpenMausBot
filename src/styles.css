@@ -1149,24 +1149,20 @@
 [data-reply-bubble] {
   padding: 12px 16px;
 }
-/* A table inside a reply sits on the bubble as an inset card, like a code block. */
-[data-reply-bubble] [data-table-card],
-[data-reply-bubble] [data-table-card] thead {
-  background: color-mix(in srgb, var(--color-card), var(--color-ink) 4%);
-}
+/* A table inside a reply is drawn in lines on the bubble, not as another grey box: a hairline edge, a faint header. */
 [data-reply-bubble] [data-table-card] {
   width: 100%;
   border-radius: 12px;
+  background: transparent;
+  /* An outline, not a border or inset shadow, so the header's fill can't paint over the top edge. */
+  outline: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+  outline-offset: -1px;
 }
 [data-reply-bubble] [data-table-card] thead {
-  background: color-mix(in srgb, var(--color-card), var(--color-ink) 7%);
-}
-/* On Daylight's pale bubble the inset table steps back to a whisper of ink. */
-:root[data-skin="daylight"] [data-reply-bubble] [data-table-card] {
-  background: color-mix(in srgb, var(--color-card), var(--color-ink) 2%);
+  background: color-mix(in srgb, var(--color-card), var(--color-ink) 4%);
 }
 :root[data-skin="daylight"] [data-reply-bubble] [data-table-card] thead {
-  background: color-mix(in srgb, var(--color-card), var(--color-ink) 4%);
+  background: color-mix(in srgb, var(--color-card), var(--color-ink) 3%);
 }
 /* A section that opens right after a table keeps the space a heading gets elsewhere in the reply. */
 [data-reply-bubble] > [data-reply-table] + * .chat-md > .md-heading:first-child {

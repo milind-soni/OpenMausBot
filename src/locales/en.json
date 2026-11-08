@@ -4273,7 +4273,7 @@
   "botPanel.tab.library": "Library",
   "botPanel.routines.empty": "Routines are recurring tasks this bot runs on a schedule. Ask it in chat to set one up.",
   "botPanel.routines.emptyHint": "Jobs this bot runs on a schedule, like a news roundup every morning.",
-  "botPanel.routines.seeAll": "View all routines in Automations",
+  "botPanel.routines.seeAll": "All routines",
   "botPanel.routines.add": "Add a routine",
   "botPanel.library.empty": "Pages, files, and apps this bot makes show up here",
   "botPanel.library.pages": "Pages",
@@ -7531,7 +7531,7 @@
   "chat.savedSteps.forgotten": "Forgotten",
   "chat.savedSteps.forgetFailed": "Couldn't forget these steps. Try again.",
   "chat.setupCard.title": "What should I help you with first?",
-  "chat.setupCard.hint": "Choose a focus for this bot, or type your own below. You can change it later.",
+  "chat.setupCard.hint": "Pick one and this bot sets itself up for it, or type your own below.",
   "chat.setupCard.heading": "Pick a starting point",
   "chat.setupCard.other": "Something else",
   "chat.setupCard.answer": "Your answer",
@@ -9830,5 +9830,7 @@
   "remote.client.endsDec7": "This connection type ends Dec 7. After that, pair this computer again from the other computer's Phone & devices.",
   "phone.code.pairingCode": "Pairing code",
   "phone.code.typeIntro": "Open the {app} app and type this pairing code.",
-  "phone.signIn.emailCode": "Sign-in code from your email"
+  "phone.signIn.emailCode": "Sign-in code from your email",
+  "settings.simple.account.noNameHint": "Not set yet",
+  "settings.simple.account.yourName": "Your name"
 }

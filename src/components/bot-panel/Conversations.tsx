@@ -121,7 +121,19 @@ export function BotConversations({ bot }: { bot: Bot }) {
 
   return (
     <section data-panel-card="conversations" aria-label={t("botPanel.conversations.title")}>
-      <CardLabel>{t("botPanel.conversations.title")}</CardLabel>
+      <CardLabel action={listed && (
+        <button
+          type="button"
+          data-conversations-search
+          aria-label={t("botPanel.conversations.search")}
+          title={t("botPanel.conversations.search")}
+          aria-pressed={searching}
+          onClick={() => (searching ? stopSearching() : setSearching(true))}
+          className={cn("-me-1 flex size-6 shrink-0 items-center justify-center rounded-[6px] text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink", searching && "bg-ink/[0.06] text-ink")}
+        >
+          <Search size={14} aria-hidden="true" />
+        </button>
+      )}>{t("botPanel.conversations.title")}</CardLabel>
       <div className={cn("flex items-center gap-2", listed && "mb-2")}>
         {bot.yourAccess !== "view" && (
           <button
@@ -133,19 +145,6 @@ export function BotConversations({ bot }: { bot: Bot }) {
           >
             <SquarePen size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
             <span className="truncate">{t("botPanel.conversations.new")}</span>
-          </button>
-        )}
-        {listed && (
-          <button
-            type="button"
-            data-conversations-search
-            aria-label={t("botPanel.conversations.search")}
-            title={t("botPanel.conversations.search")}
-            aria-pressed={searching}
-            onClick={() => (searching ? stopSearching() : setSearching(true))}
-            className={cn("flex size-9 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary transition-colors hover:bg-ink/[0.09] hover:text-ink", searching && "bg-ink/[0.09] text-ink")}
-          >
-            <Search size={15} aria-hidden="true" />
           </button>
         )}
       </div>

@@ -7337,7 +7337,7 @@
   "botPanel.tab.library": "Biblioteca",
   "botPanel.routines.empty": "Rotinas são tarefas recorrentes que este bot executa em horários definidos. Peça no chat para ele criar uma.",
   "botPanel.routines.emptyHint": "Tarefas que este bot executa em um horário, como um resumo de notícias toda manhã.",
-  "botPanel.routines.seeAll": "Ver todas as rotinas em Automações",
+  "botPanel.routines.seeAll": "Todas as rotinas",
   "botPanel.routines.add": "Adicionar uma rotina",
   "botPanel.library.empty": "As páginas, os arquivos e os apps que este bot cria aparecem aqui",
   "botPanel.library.pages": "Páginas",
@@ -7458,7 +7458,7 @@
   "voice.libraryHint": "A voz que você escolher entra na sua lista de vozes.",
   "voice.adding": "Adicionando…",
   "chat.setupCard.title": "Com o que devo ajudar primeiro?",
-  "chat.setupCard.hint": "Escolha um foco para este bot ou digite o seu abaixo. Você pode mudar depois.",
+  "chat.setupCard.hint": "Escolha uma opção e este bot se configura para ela, ou escreva a sua abaixo.",
   "chat.setupCard.heading": "Escolha um ponto de partida",
   "chat.setupCard.other": "Outra coisa",
   "chat.setupCard.answer": "Sua resposta",
@@ -9830,5 +9830,7 @@
   "remote.client.endsDec7": "Este tipo de conexão termina em 7 de dezembro. Depois disso, pareie este computador de novo em Celular e dispositivos no outro computador.",
   "phone.code.pairingCode": "Código de pareamento",
   "phone.code.typeIntro": "Abra o app do {app} e digite este código de pareamento.",
-  "phone.signIn.emailCode": "Código de login do seu e-mail"
+  "phone.signIn.emailCode": "Código de login do seu e-mail",
+  "settings.simple.account.noNameHint": "Ainda não definido",
+  "settings.simple.account.yourName": "Seu nome"
 }

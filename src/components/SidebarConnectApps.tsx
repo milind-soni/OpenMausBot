@@ -83,7 +83,8 @@ export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
     >
       {circle ? <Puzzle size={18} strokeWidth={1.5} aria-hidden="true" /> : <>
         <span className="min-w-0 truncate">{label}</span>
-        <span aria-hidden="true" className="flex shrink-0 items-center">
+        {/* The logos stay grey until the pill is hovered, so the sidebar's loudest colour is never an ad. */}
+        <span aria-hidden="true" className="flex shrink-0 items-center opacity-75 grayscale motion-safe:transition-[filter,opacity] group-hover/apps:opacity-100 group-hover/apps:grayscale-0 group-focus-visible/apps:opacity-100 group-focus-visible/apps:grayscale-0">
           {faces.map((face, index) => <AppFaceIcon key={face.slug} face={face}
             className={cn(index > 0 && "-ms-1.5", faces.length > 1 && FAN[index === 0 ? 0 : index === faces.length - 1 ? 2 : 1], "motion-safe:transition-transform motion-safe:duration-150")} />)}
         </span>

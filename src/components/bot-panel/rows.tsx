@@ -30,7 +30,7 @@ export function CardLabel({ children, action }: { children: ReactNode; action?: 
   );
 }
 
-export function LabelAction({ children, onClick, ...rest }: { children: ReactNode; onClick: () => void; "aria-label"?: string; "data-panel-action"?: string }) {
+export function LabelAction({ children, onClick, ...rest }: { children: ReactNode; onClick: () => void; "aria-label"?: string; "data-panel-action"?: string; "data-panel-automations"?: string }) {
   return (
     <button type="button" {...rest} onClick={onClick} className="shrink-0 rounded-[6px] px-1 py-px text-[13px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink">
       {children}
