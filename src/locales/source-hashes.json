@@ -9502,7 +9502,10 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
+      "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -23693,7 +23696,10 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
+      "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -33567,7 +33573,10 @@
       "mascot.body.jalebi": "2e200e92c49eb6d51ca76db4516d1fe7a39430862e5b8ebb5fa30071dc5ccc63",
       "mascot.body.katli": "28670af54fcc50cd51c5983623672ed0d63c3355b5be96ef666812b0da6b6bf5",
       "mascot.body.karanji": "dc2ff0fdc7d7ce51f05cd1dd8d6f0f8ff444c82da36304373561c9cf246c32a4",
-      "skins.tagline.diwali": "92af77174824ccd4267be3745deb99c28cd2ddd21e761e2afcd438bded98405c"
+      "skins.tagline.diwali": "92af77174824ccd4267be3745deb99c28cd2ddd21e761e2afcd438bded98405c",
+      "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
+      "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -41207,7 +41216,10 @@
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
       "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
-      "task.untitledChat": "4d4e126c2185da5e86b7478f0f12fc30009339941ef0d8627959aeb4641b6f69"
+      "task.untitledChat": "4d4e126c2185da5e86b7478f0f12fc30009339941ef0d8627959aeb4641b6f69",
+      "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
+      "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -51019,7 +51031,10 @@
       "backup.serverRestarting": "87acdeac7f4a0d79c9991c75c303459ab5fe9ab8171d762f0a92a8368c447ad8",
       "backup.serverRestartSlow": "6c3051a9ea04b2e6157c376b2359866c0038915ce7f77064b3e792d38d3cfb9c",
       "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
-      "task.untitledChat": "4d4e126c2185da5e86b7478f0f12fc30009339941ef0d8627959aeb4641b6f69"
+      "task.untitledChat": "4d4e126c2185da5e86b7478f0f12fc30009339941ef0d8627959aeb4641b6f69",
+      "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
+      "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -60181,7 +60196,10 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
+      "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -65757,7 +65775,10 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
+      "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72595,7 +72616,10 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
+      "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -79495,7 +79519,10 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
+      "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -86195,7 +86222,10 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
+      "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -93617,7 +93647,10 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
+      "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
     }
   }
 }
