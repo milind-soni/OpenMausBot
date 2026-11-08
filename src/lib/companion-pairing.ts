@@ -89,12 +89,7 @@ export function companionPairingRoute(
 
   const advertised = qrEndpoints(source.endpoints);
   if (mode === "tailscale") {
-    // The saved switch is the authority: a switched-off route is never
-    // offered, even while the sidecar still advertises its old endpoint.
     if (source.routes?.tailscale?.on === false) return null;
-    // The saved name is the authority too: after a rename the sidecar can
-    // still advertise the old hostname, and a pin built from it fails the
-    // availability check, which compares against the saved name.
     let preferred: CompanionEndpoint | null = null;
     if (source.routes?.tailscale?.on) {
       const routeName = source.routes.tailscale.name?.trim();
