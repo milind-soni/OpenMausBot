@@ -15094,7 +15094,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 200, {
         configured: composio.configured(cfg),
         mode: composio.connectionMode(cfg),
-        setup: composio.connectorSetup(cfg, DESKTOP_MANAGED || CLOUD_HOME !== null),
+        setup: composio.connectorSetup(cfg, CLOUD_HOME !== null ? "cloud-home" : DESKTOP_MANAGED ? "desktop" : "server"),
         source,
         cards,
         ...(pagination ? { pagination } : {}),

@@ -180,15 +180,17 @@ export function connectorAvailability(
   return storeState === "unavailable" ? "unreadable" : "unconfigured";
 }
 
-/** Only a host the managed service comes with (the desktop app, OMB_DESKTOP_PARENT=1, or a Cloud home) calls a missing one an outage. */
+/** Only a Cloud home calls a missing service an outage: its managed service registers itself, so a missing one means the service is down. A desktop host without a key is missing setup the person can add in Settings. */
 export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
+
+export type ConnectorSetupHost = "desktop" | "cloud-home" | "server";
 
 export function connectorSetup(
   cfg: AppConfig,
-  managedHost: boolean = process.env.OMB_DESKTOP_PARENT === "1",
+  host: ConnectorSetupHost = "server",
 ): ConnectorSetup {
   if (configured(cfg)) return "ready";
-  return managedHost ? "service-unavailable" : "needs-setup";
+  return host === "cloud-home" ? "service-unavailable" : "needs-setup";
 }
 
 async function brokerRequest(path: string, init?: RequestInit, broker = brokerAccess()): Promise<Response> {
