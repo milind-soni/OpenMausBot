@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { APP_LIMITS } from "../shared/app.ts";
 import { JSX_PAGE_LIBRARIES, JSX_PAGE_MODULES } from "../shared/app-frame/jsx-page.ts";
@@ -148,5 +149,37 @@ describe("bundled data-dashboards skill", () => {
     for (const url of urls.filter((each) => each.includes("/npm/"))) expect(url, url).toMatch(/\/npm\/(@[\w-]+\/)?[\w.-]+@\d+\.\d+\.\d+\//);
     expect(template).toContain('id="embedded-data"');
     expect(Buffer.byteLength(template)).toBeLessThan(APP_LIMITS.htmlBytes / 4);
+  });
+});
+
+describe("the shipped skill pack", () => {
+  const skillsRoot = () => fileURLToPath(new URL("../skills", import.meta.url));
+
+  it("loads every pack the repo ships, so a broken or half-added pack fails here instead of at runtime", () => {
+    const root = skillsRoot();
+    const directories = readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+    expect(directories.length).toBeGreaterThan(0);
+    expect(loadBundledSkills(root).map((skill) => skill.manifest.id)).toEqual(directories);
+  });
+
+  it("the guard catches a pack whose manifest does not parse, instead of throwing at runtime only", () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-skills-guard-"));
+    try {
+      mkdirSync(join(root, "good-pack"));
+      writeFileSync(join(root, "good-pack", "manifest.json"), JSON.stringify({
+        id: "good-pack", name: "Good Pack", version: "1.0.0", description: "A healthy pack.",
+        defaultEnabled: true, triggerTerms: ["term"], requiredCapabilities: [],
+      }));
+      writeFileSync(join(root, "good-pack", "SKILL.md"), "---\nname: good-pack\ndescription: test\n---\nBody.");
+      mkdirSync(join(root, "bad-pack"));
+      writeFileSync(join(root, "bad-pack", "manifest.json"), JSON.stringify({
+        id: "bad-pack", name: "Bad Pack", version: "1.0.0", description: "A pack without trigger terms.",
+        defaultEnabled: true, triggerTerms: [], requiredCapabilities: [],
+      }));
+      writeFileSync(join(root, "bad-pack", "SKILL.md"), "---\nname: bad-pack\ndescription: test\n---\nBody.");
+      expect(() => loadBundledSkills(root)).toThrow(/bad-pack/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
