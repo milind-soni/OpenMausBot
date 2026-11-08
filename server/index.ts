@@ -440,14 +440,14 @@ import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BROWSER_UPLOAD_TOOL, browserRuntimeEnv } from "./browser-runtime.ts";
 import { BrowserUploadRefusal, uploadableFiles } from "./browser-upload.ts";
 import { listSignedInSites, signOutOfSites } from "./browser-sites.ts";
-import { HeldSecrets, LoginStore } from "./login-store.ts";
+import { HeldSecrets, VaultStore } from "./vault-store.ts";
 import { OnePasswordLogins, onePasswordUnavailable, sdkOnePasswordClient, type OnePasswordSdk } from "./onepassword.ts";
 import { nativeRequire } from "./data/engine.ts";
 import { createFillLoginTurn } from "./host/fill-login-turn.ts";
 import { BotLogins, cardLoginPlace, cardSignInElsewhere, observeSignInPage, type ObservedPage } from "./bot-logins.ts";
 import { relayFrame } from "./browser-relay.ts";
 import { browserEvidence, stepContext } from "./browser-steps.ts";
-import { parseLoginFields, parseTotpField, createLoginRoutes } from "./routes/logins.ts";
+import { parseLoginFields, parseTotpField, createLoginRoutes } from "./routes/logins.ts"; import { createVaultRoutes } from "./routes/vault.ts";
 import { loginSite } from "../shared/logins.ts";
 import { browserRestartRefusal } from "./browser-live.ts";
 import { browserEngineStatus } from "./browser-engine.ts";
@@ -733,8 +733,8 @@ if (CLOUD_HOME && Object.keys(CLOUD_SECRETS).length === 0) {
 }
 const threadStarters = new ThreadStarters(join(DATA_DIR, "thread-starters.json"));
 const commandAllowlist = new CommandAllowlistStore(join(DATA_DIR, "command-allowlist.json"));
-// Every saved login value is scrubbed from whatever a bot or a transcript can read.
-const logins = new LoginStore({ dataDir: DATA_DIR });
+// Every value saved in the Vault is scrubbed from whatever a bot or a transcript can read.
+const logins = new VaultStore({ dataDir: DATA_DIR });
 removeRetiredAppFiles(DATA_DIR); const emailService = createEmailService({ dataDir: DATA_DIR, publicOnly: Boolean(CLOUD_HOME), refusal: CLOUD_TEAM ? "Email isn't on a Team Cloud yet: every bot there would read the same mailbox." : null }); addHeldSecretScrubber((text) => emailService.scrub(text));
 const heldSecrets = new HeldSecrets(logins);
 addHeldSecretScrubber((text) => heldSecrets.scrub(text));
@@ -11542,7 +11542,7 @@ function claimPhoneSecretBotDeletion(botId: string): (() => void) | null {
   };
 }
 
-const secretCards = createSecretCards({ store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, followCard: (threadId, from, to) => coordinator.followCard(threadId, from, to), threadLanguage, email: { connect: (request, reading) => emailService.connect(request, reading), refusal: () => emailService.status().reason, connected: (address) => { const one = emailService.store.get(address); return Boolean(one && !one.problem); }, sendingProblem: (address) => emailService.sendingProblem(address), account: (address) => emailService.status().accounts.find((one) => one.address.toLowerCase() === address.toLowerCase()), checkOutgoing: (address, fields) => emailService.checkOutgoing(address, fields), profileAddress: () => cfg.profile?.email?.trim() || undefined }, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
+const secretCards = createSecretCards({ store, cfg, botLogins, vaultStore: logins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, followCard: (threadId, from, to) => coordinator.followCard(threadId, from, to), threadLanguage, email: { connect: (request, reading) => emailService.connect(request, reading), refusal: () => emailService.status().reason, connected: (address) => { const one = emailService.store.get(address); return Boolean(one && !one.problem); }, sendingProblem: (address) => emailService.sendingProblem(address), account: (address) => emailService.status().accounts.find((one) => one.address.toLowerCase() === address.toLowerCase()), checkOutgoing: (address, fields) => emailService.checkOutgoing(address, fields), profileAddress: () => cfg.profile?.email?.trim() || undefined }, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
 ROUTES.push(createSecretCardRoutes({ cards: secretCards, phoneSecretSubmissions, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), answerContext: (auth, botId, threadId) => ({ personalCloud: Boolean(CLOUD_PERSONAL), shared: sharedMembership(), owner: (CLOUD_TEAM ? teamOwners.routing.askedPerson(botId, threadId) : null) ?? threadStarters.get(threadId) ?? null, person: auth.kind === "session" ? personKey(auth.session) : null }) }));
 
 // By design OpenMausBot never receives a website password: the person signs in where the bot works, and the bot uses that session.
@@ -12341,7 +12341,7 @@ ROUTES.push(createBrowserSiteRoutes({
   signOut: (target, site) => signOutOfSites(target, site),
 }));
 ROUTES.push(createBrowserEvidenceRoutes({ evidence: browserEvidence.attach({ onChange: (listener) => store.onChange(listener), threadExists: (id) => Boolean(threadOwner(id)) }), threadExists: (id) => Boolean(threadOwner(id)) }));
-ROUTES.push(createLoginRoutes(botLogins.routes((id) => Boolean(store.bot(id)))));
+const loginRoutes = botLogins.routes((id) => Boolean(store.bot(id))); ROUTES.push(createLoginRoutes(loginRoutes), createVaultRoutes({ logins: loginRoutes, secrets: logins }));
 ROUTES.push(createUsageRoutes({
   dataDir: DATA_DIR, prices: operatorPrices,
   budget: () => spendState(cfg, DATA_DIR),

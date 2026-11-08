@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,6 +10,7 @@ import { createSecretCards } from "./secret-cards.ts";
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
 import { redactBotAuthored } from "../message-redaction.ts";
 import { redactSecretsInText } from "../redact.ts";
+import { VaultStore } from "../vault-store.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -20,26 +21,28 @@ function fixture(language?: string) {
   const lines: Message[] = [];
   let ids = 0;
   const store = {
-    activePath: () => lines,
+    activePath: () => [...lines],
     messagesFor: () => lines,
     appendMessage: (_threadId: string, message: Omit<Message, "id" | "at">) => {
       const full = { id: `m${++ids}`, at: Date.now(), ...message } as Message;
       lines.push(full);
       return full;
     },
-    patchMessage: () => null,
+    patchMessage: (_threadId: string, id: string, patch: Partial<Message>) => Object.assign(lines.find((one) => one.id === id)!, patch),
     botByThread: () => null,
     groupByThread: () => undefined,
     onChange: () => () => {},
   };
   const bot = { id: "ledger", name: "Ledger" } as BotRecord;
+  const vaultStore = new VaultStore({ dataDir });
+  const resumed: string[] = [];
   const cards = createSecretCards({
-    store: store as never, cfg: {} as never, botLogins: { credentialConfig: (config) => ({ ...config, onePassword: { connected: false } }) },
-    phoneSecrets: { provide: async () => {}, open: () => {} } as never, phoneSecretSubmissions: {} as never,
-    connectorThread: () => ({ bot, group: undefined }), answerCardNode: () => true, followCard: () => {}, dataDir, providerKeysRefused: false,
+    store: store as never, cfg: {} as never, botLogins: { credentialConfig: (config) => ({ ...config, onePassword: { connected: false } }) }, vaultStore,
+    phoneSecrets: { provide: async () => {}, open: () => {} } as never, phoneSecretSubmissions: { has: () => false } as never,
+    connectorThread: () => ({ bot, group: undefined }), answerCardNode: (_thread, _id, text) => { resumed.push(text); return true; }, followCard: () => {}, dataDir, providerKeysRefused: false,
     layerFolder: () => dataDir, turnVm: () => undefined, ...(language ? { threadLanguage: () => language } : {}),
   });
-  return { cards, lines, bot };
+  return { cards, lines, bot, vaultStore, resumed, dataDir };
 }
 
 describe("the card a bot asks for a key or secret with", () => {
@@ -81,14 +84,71 @@ describe("the card a bot asks for a key or secret with", () => {
     ]);
     expect(lines[0]!.secret!.description).toBe("Used by the built-in Grok provider. Ledger kann es verwenden, aber nie auslesen.");
     expect(lines[1]!.secret!.description)
-      .toBe("Für Testzahlungen. Die Befehle von Ledger können es 24 Stunden lang aus einer privaten Datei lesen; es wird nie in den Chat übernommen.");
+      .toBe("Für Testzahlungen. Die Befehle von Ledger können es 24 Stunden lang aus einer privaten Datei lesen; es wird nie in den Chat übernommen. OpenMausBot bewahrt es sicher auf, damit Ledger es wieder nutzen kann, ohne dich erneut zu fragen.");
   });
 
   it("asks in English where no language is known", () => {
     const { cards, lines, bot } = fixture();
     cards.requestCredential(bot, "ledger-main", { label: "Notion token", reason: "For Notion's MCP server.", delivery: "ref" });
     expect(lines[0]!.text).toBe("Securely provide the Notion token from OpenMausBot on your phone or computer. It is never added to chat.");
-    expect(lines[0]!.secret!.description).toBe("For Notion's MCP server. Ledger gets a one-use reference for OpenMausBot's own tools and never sees it.");
+    expect(lines[0]!.secret!.description).toBe("For Notion's MCP server. Ledger gets a one-use reference for OpenMausBot's own tools and never sees it. OpenMausBot keeps it safely, so Ledger can use it again without asking you.");
+  });
+});
+
+describe("a secret a card saves to the Vault", () => {
+  const KEY = "sk_test_fake-card-vault-1";
+  const ask = (one: ReturnType<typeof fixture>, threadId: string, extra: Record<string, unknown> = {}) =>
+    one.cards.requestCredential(one.bot, threadId, { label: "Stripe secret key", reason: "For test charges.", delivery: "ref", ...extra });
+  const refIn = (text: unknown) => /secret-ref:[0-9a-f]{32}/u.exec(String(text))?.[0];
+
+  it("is kept for the asking bot, and its next ask, in any conversation and after any ref is spent, gets a fresh one with no card", () => {
+    const one = fixture();
+    const card = ask(one, "t1");
+    expect(card.status).toBe(201);
+    expect(one.cards.saveCustomSecret("ledger", "t1", String(card.body.messageId), `  ${KEY} `).status).toBe(200);
+    expect(one.vaultStore.listSecrets()).toMatchObject([{ name: "Stripe secret key", source: "card", bots: ["ledger"], refOnly: true }]);
+    const fromCard = refIn(one.resumed[0]);
+    expect(fromCard).toBeDefined();
+    const spent = one.cards.redeemMcpServer({ env: { STRIPE_SECRET_KEY: fromCard } }, "ledger", "t1");
+    if (spent.ok) spent.commit();
+    const again = ask(one, "t2", { label: "stripe-secret-key" });
+    expect(again.status).toBe(200);
+    const fresh = refIn(again.body.text);
+    expect(fresh).toBeDefined();
+    expect(fresh).not.toBe(fromCard);
+    expect(one.lines.filter((line) => line.kind === "secret")).toHaveLength(1);
+    const used = one.cards.redeemMcpServer({ env: { STRIPE_SECRET_KEY: fresh } }, "ledger", "t2");
+    expect(used.ok && used.value).toEqual({ env: { STRIPE_SECRET_KEY: KEY } });
+    expect(one.vaultStore.listSecrets()[0]!.lastUsedAt).toBeGreaterThan(0);
+    expect(JSON.stringify([one.lines, one.resumed, again, one.vaultStore.listSecrets()])).not.toContain(KEY);
+  });
+
+  it("is not another bot's, and a file for one saved for OpenMausBot's tools only needs its own card", () => {
+    const one = fixture();
+    one.vaultStore.saveSecret({ name: "Stripe secret key", value: KEY, source: "card", bots: ["ledger"], refOnly: true });
+    expect(one.cards.requestCredential({ ...one.bot, id: "quill", name: "Quill" }, "t9", { label: "Stripe secret key", reason: "r", delivery: "ref" }).status).toBe(201);
+    expect(ask(one, "t1", { delivery: "file" })).toMatchObject({ status: 201, body: { savedAs: "ref" } });
+  });
+
+  it("is written to a file for the bot's commands, which the Vault remakes when asked again", () => {
+    const one = fixture();
+    const item = one.vaultStore.saveSecret({ name: "Stripe secret key", value: KEY, source: "settings", bots: "all" });
+    const answer = ask(one, "t1", { delivery: "file" });
+    const file = join(one.dataDir, ".openmausbot-secrets", "t1", `vault-${item.id}`);
+    expect(answer).toMatchObject({ status: 200, body: { text: expect.stringContaining(`to the file ${file}`) } });
+    expect(readFileSync(file, "utf8")).toBe(KEY);
+    rmSync(file);
+    ask(one, "t1", { delivery: "file" });
+    expect(readFileSync(file, "utf8")).toBe(KEY);
+  });
+
+  it("is asked for again when the bot says the saved one is wrong, and the new value replaces it", () => {
+    const one = fixture();
+    one.vaultStore.saveSecret({ name: "Stripe secret key", value: KEY, source: "card", bots: ["ledger"], refOnly: true });
+    const card = ask(one, "t1", { replace: true });
+    expect(card.status).toBe(201);
+    one.cards.saveCustomSecret("ledger", "t1", String(card.body.messageId), "sk_test_fake-card-vault-2");
+    expect(one.vaultStore.secretValues()).toEqual(["sk_test_fake-card-vault-2"]);
   });
 });
 
@@ -114,7 +174,7 @@ describe("the mailbox card", () => {
     const resumed: string[] = [];
     const bot = { id: "ledger", name: "Ledger" } as BotRecord;
     const cards = createSecretCards({
-      store: store as never, cfg: {} as never, botLogins: { credentialConfig: (config) => ({ ...config, onePassword: { connected: false } }) },
+      store: store as never, cfg: {} as never, botLogins: { credentialConfig: (config) => ({ ...config, onePassword: { connected: false } }) }, vaultStore: new VaultStore({ dataDir }),
       phoneSecrets: { provide: async () => {}, open: async () => PASSWORD } as never, phoneSecretSubmissions: { has: () => false, run: async (_card: unknown, _op: unknown, work: () => Promise<void>) => work() } as never,
       connectorThread: () => ({ bot, group: undefined }), answerCardNode: (_thread, _id, text) => { resumed.push(text); return true; }, followCard: () => {}, dataDir, providerKeysRefused: false,
       layerFolder: () => dataDir, turnVm: () => undefined,

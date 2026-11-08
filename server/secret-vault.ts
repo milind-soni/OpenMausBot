@@ -1,4 +1,4 @@
-// Values a person typed into a bot's card for a secret OpenMausBot does not keep itself.
+// How a bot is handed a secret from a card or the Vault without seeing it.
 // Security: a `ref` value stays in this process's memory, behind a one-use reference bound to the asking bot and
 // conversation that only OpenMausBot's own tools accept. A `file` value goes to an owner-only file in a private folder
 // of that bot's own workspace (or the Local VM workspace its turn runs in); nothing that syncs, backs up, moves, links,
@@ -8,16 +8,16 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, closeSync, constants, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync, writeSync } from "node:fs";
 import { join } from "node:path";
 
-import { secretForms } from "./login-store.ts";
+import { SECRET_VALUE_MAX_BYTES } from "../shared/vault.ts";
+import { secretForms } from "./vault-store.ts";
 import { HELD_SECRET_MASK } from "./redact.ts";
 import { inSecretFolder, SECRET_FOLDER } from "./secret-folder.ts";
 
-export { inSecretFolder, SECRET_FOLDER };
+export { inSecretFolder, SECRET_FOLDER, SECRET_VALUE_MAX_BYTES };
 /** From saving: room for a resume queued behind other work and the tool call after it, short enough that a ref the bot
  * never used is soon gone. A restart forgets every unused ref. */
 export const SECRET_REF_TTL_MS = 60 * 60 * 1000;
 export const SECRET_FILE_TTL_MS = 24 * 60 * 60 * 1000;
-export const SECRET_VALUE_MAX_BYTES = 4_096;
 
 const REF = /secret-ref:[0-9a-f]{32}/g;
 const ID = /^[\w-]{1,128}$/;
@@ -78,6 +78,8 @@ export class SecretVault {
   private readonly refs = new Map<string, RefEntry>();
   private readonly used = new Map<string, number>();
   private readonly byCard = new Map<string, { ref: string } | { file: string; until: number }>();
+  /** "<thread>/<file name>" → until when, for files made from a Vault item rather than a card. */
+  private readonly minted = new Map<string, number>();
   private held: Array<{ forms: string[]; until: number }> = [];
   private readonly now: () => number;
 
@@ -89,10 +91,16 @@ export class SecretVault {
   saveRef(owner: SecretOwner, messageId: string, label: string, value: string): string {
     const existing = this.savedFor(messageId);
     if (existing && "ref" in existing) return existing.ref;
+    const ref = this.mintRef(owner, label, value);
+    this.byCard.set(messageId, { ref });
+    return ref;
+  }
+
+  /** A new one-use ref with no card behind it, for a value the Vault holds. */
+  mintRef(owner: SecretOwner, label: string, value: string): string {
     const ref = `secret-ref:${randomBytes(16).toString("hex")}`;
     const now = this.now();
     this.refs.set(ref, { owner: { ...owner }, label, value, expiresAt: now + SECRET_REF_TTL_MS });
-    this.byCard.set(messageId, { ref });
     this.hold(value, now + SECRET_FILE_TTL_MS);
     return ref;
   }
@@ -100,13 +108,28 @@ export class SecretVault {
   /** Writes the card's value to `<home>/.openmausbot-secrets/<thread>/<card>` (0600, in 0700 folders); returns its path
    * as the bot's commands see it. */
   saveFile(owner: SecretOwner, messageId: string, value: string, home: SecretFileHome): string {
-    if (!ID.test(owner.threadId) || !ID.test(messageId)) throw new Error("invalid conversation or card id");
+    const saved = this.writeFile(owner, messageId, value, home);
+    this.byCard.set(messageId, saved);
+    return saved.file;
+  }
+
+  /** Writes a Vault item's value to `<home>/.openmausbot-secrets/<thread>/vault-<item>`, replacing that conversation's
+   * earlier copy, for another 24 hours. */
+  mintFile(owner: SecretOwner, itemId: string, value: string, home: SecretFileHome): string {
+    const name = `vault-${itemId}`;
+    const saved = this.writeFile(owner, name, value, home);
+    this.minted.set(`${owner.threadId}/${name}`, saved.until);
+    return saved.file;
+  }
+
+  private writeFile(owner: SecretOwner, name: string, value: string, home: SecretFileHome): { file: string; until: number } {
+    if (!ID.test(owner.threadId) || !ID.test(name)) throw new Error("invalid conversation or file name");
     privateFolder(home.host, "all");
     const folder = join(home.host, SECRET_FOLDER);
     privateFolder(folder, "one");
     const threadFolder = join(folder, owner.threadId);
     privateFolder(threadFolder, "one");
-    const file = join(threadFolder, messageId);
+    const file = join(threadFolder, name);
     rmSync(file, { force: true });
     const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
     const fd = openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow, 0o600);
@@ -116,11 +139,10 @@ export class SecretVault {
     } finally {
       closeSync(fd);
     }
-    const shown = home.shown === home.host ? file : [home.shown, SECRET_FOLDER, owner.threadId, messageId].join("/");
+    const shown = home.shown === home.host ? file : [home.shown, SECRET_FOLDER, owner.threadId, name].join("/");
     const until = this.now() + SECRET_FILE_TTL_MS;
-    this.byCard.set(messageId, { file: shown, until });
     this.hold(value, until);
-    return shown;
+    return { file: shown, until };
   }
 
   /** What this card's save gave the bot, while it still works; null after a restart, its use or its expiry. */
@@ -193,7 +215,8 @@ export class SecretVault {
     };
   }
 
-  /** Removes every secret file past its day or whose card is gone, and every value whose conversation is gone.
+  /** Removes every secret file past its day, or whose card is gone and no Vault item made it, and every value whose
+   * conversation is gone.
    * `savedAt` reads the card, so touching a file never keeps it longer. */
   sweep(bases: readonly string[], savedAt: (threadId: string, messageId: string) => number | null, threadExists: (threadId: string) => boolean): void {
     const now = this.now();
@@ -221,7 +244,8 @@ export class SecretVault {
           for (const card of readdirSync(threadFolder)) {
             const file = join(threadFolder, card);
             const at = ID.test(card) ? savedAt(thread, card) : null;
-            if (at === null || now - at >= SECRET_FILE_TTL_MS || !lstatSync(file).isFile()) rmSync(file, { recursive: true, force: true });
+            const live = at === null ? (this.minted.get(`${thread}/${card}`) ?? 0) > now : now - at < SECRET_FILE_TTL_MS;
+            if (!live || !lstatSync(file).isFile()) rmSync(file, { recursive: true, force: true });
           }
           if (readdirSync(threadFolder).length === 0) rmSync(threadFolder, { recursive: true, force: true });
         } catch {
@@ -231,6 +255,7 @@ export class SecretVault {
     }
     for (const [ref, entry] of this.refs) if (entry.expiresAt <= now || !threadExists(entry.owner.threadId)) this.refs.delete(ref);
     for (const [ref, at] of this.used) if (now - at >= SECRET_FILE_TTL_MS) this.used.delete(ref);
+    for (const [file, until] of this.minted) if (until <= now) this.minted.delete(file);
     for (const [card, saved] of this.byCard) if (("until" in saved && saved.until <= now) || ("ref" in saved && !this.refs.has(saved.ref))) this.byCard.delete(card);
     this.held = this.held.filter((entry) => entry.until > now);
   }

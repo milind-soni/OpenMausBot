@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { browserMatesOf, loginHeldBackFor } from "../shared/logins.ts";
 import { BotLogins, cardLoginPlace, cardSignInElsewhere, observeSignInPage } from "./bot-logins.ts";
-import { LoginStore } from "./login-store.ts";
+import { VaultStore } from "./vault-store.ts";
 import type { OnePasswordLogins } from "./onepassword.ts";
 import { FakeLoginPage, LOGIN_FORM } from "./testing/fake-login-page.ts";
 
@@ -58,7 +58,7 @@ describe("a login kept to some bots, and bots that share a browser", () => {
   ];
   const onePassword = { fresh: async () => {}, sitesFor: () => [], candidates: () => [], markUsed: () => {} } as unknown as OnePasswordLogins;
   const world = () => {
-    const store = new LoginStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-bot-logins-")) });
+    const store = new VaultStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-bot-logins-")) });
     const logins = new BotLogins(store, onePassword, () => bots);
     const place = { site: "capacity.example", hosts: ["capacity.example"], exactHost: false };
     return { store, logins, place };
