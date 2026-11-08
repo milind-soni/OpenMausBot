@@ -2,6 +2,7 @@ import { t } from "@/lib/i18n";
 import type { InstalledPackageMetadata } from "../../shared/wire";
 import type { PackageDocument } from "../../shared/package-format";
 import { teamImportPreview, type PendingTeamImport } from "./team-import";
+import { sharedSkillFiles } from "./skill-files";
 
 export interface OrgLibraryPackage {
   packageId: string;
@@ -112,6 +113,7 @@ export function orgPackagePreview(document: PackageDocument): PendingTeamImport 
     routines: 0,
     apps: pkg.requirements.apps.map((app) => ({ label: app.label, optional: app.optional === true })),
     skills: [],
+    skillFiles: sharedSkillFiles(document),
     offeredSkills: (pkg.skills?.entries ?? []).map((skill) => skill.name),
     connections: [],
     notes: 0,

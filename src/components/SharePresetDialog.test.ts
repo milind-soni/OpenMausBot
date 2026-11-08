@@ -25,6 +25,7 @@ describe("Share as preset", () => {
       presetDescription: undefined, release: undefined, notes: undefined, includeMemory: true, dryRun: true,
     });
     expect(presetShareBody({ name: "Sky", includeNotes: false, picture: "data:image/png;base64,AAAA" })).toMatchObject({ includeMemory: false, presetAvatar: "data:image/png;base64,AAAA" });
+    expect(presetShareBody({ name: "Sky", includeNotes: false, includeBinarySkillFiles: true })).toMatchObject({ includeBinarySkillFiles: true });
   });
 
   it("shows what the preset file holds, what never travels, and what was removed or left out", () => {
@@ -52,7 +53,7 @@ describe("Share as preset", () => {
       skipped: [{ part: `skills[${name}].files[script.sh]`, reason: "skill_file_type" }] };
     const words = text(renderToStaticMarkup(createElement(SharePresetContents, { preview, localSkips: [] })));
     expect(words).toContain(`Included skill files ${name} · references/guide.md`);
-    expect(words).toContain(`${name} · script.sh — only UTF-8 Markdown files are shared`);
+    expect(words).toContain(`${name} · script.sh — this file type cannot be shared safely`);
   });
 
   it("counts preset bots in a team file", () => {

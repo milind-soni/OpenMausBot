@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
@@ -179,7 +179,7 @@ it("never leaves Share team stuck on skills, and keeps keys out of connection ad
   }
 }, 120_000);
 
-it("round-trips Markdown companions with redaction and reports omitted assets", async () => {
+it("round-trips reviewed skill folders, redacts text and requires opt-in for binary assets", async () => {
   const fixture = await launchVerificationServer();
   console.log(JSON.stringify({ fixture: fixture.info }));
   const call = async (method: string, path: string, body?: unknown) => {
@@ -192,28 +192,51 @@ it("round-trips Markdown companions with redaction and reports omitted assets", 
   try {
     const source = (await call("POST", "/api/bots", { name: "Bundle source", section: "Bundle desk", useDefaults: false })).bot;
     const text = "---\nname: runbook\ndescription: Fixture runbook.\n---\nRead references/guide.md.\n";
+    const executionMarker = join(fixture.info.dataDir, "skill-executed");
+    const script = `#!/bin/sh\nprintf executed > '${executionMarker}'\n`;
     await call("POST", `/api/bots/${source.id}/skill-template`, { name: "runbook", description: "Fixture runbook.", source: "fixture", text, enabled: true, warnings: [],
-      files: [{ path: "references/guide.md", content: "password=Fixture-Secret-123456\nKeep this line.\n" }, { path: "README.md", content: "Open the guide.\n" }] });
+      files: [
+        { path: "references/guide.md", content: "password=Fixture-Secret-123456\nKeep this line.\n" },
+        { path: "README.md", content: "Open the guide.\n" },
+        { path: "scripts/render.sh", content: script, executable: true },
+        { path: "assets/fixture.bin", binary: { base64: "AP8BAg==" } },
+        { path: "template.html", content: "<h1>Shared template</h1>" },
+      ] });
     const dir = join(fixture.info.dataDir, "workspaces", source.id, "skills", "runbook");
     const { writeFileSync, symlinkSync } = await import("node:fs");
-    writeFileSync(join(dir, "template.html"), "<h1>not shared</h1>");
     if (process.platform !== "win32") symlinkSync(join(dir, "README.md"), join(dir, "link.md"));
     const body = { format: "package", version: 2, team: "Bundle desk", dryRun: true };
     const preview = await call("POST", "/api/teams/export", body);
-    expect(preview.document.package.skills.version).toBe(2);
-    const shared = preview.document.package.skills.entries[0];
-    expect(shared.files.map((f: any) => f.path)).toEqual(["README.md", "references/guide.md"]);
-    expect(preview.skipped).toEqual(expect.arrayContaining([{ part: "skills[runbook].files[template.html]", reason: "skill_file_type" }]));
+    expect(preview.document.package.skills.version).toBe(3);
+    expect(preview.document.package.skills.entries[0].files.map((f: any) => f.path)).toEqual(["README.md", "references/guide.md", "scripts/render.sh", "template.html"]);
+    expect(preview.skipped).toEqual(expect.arrayContaining([{ part: "skills[runbook].files[assets/fixture.bin]", reason: "skill_file_binary" }]));
     if (process.platform !== "win32") expect(preview.skipped).toContainEqual({ part: "skills[runbook].files[link.md]", reason: "skill_file_unsafe" });
     expect(preview.redacted).toContain("skills[runbook].files[1].content");
     expect(JSON.stringify(preview.document)).not.toContain("Fixture-Secret-123456");
-    const imported = await call("POST", "/api/teams/import", preview.document);
+    const approved = await call("POST", "/api/teams/export", { ...body, includeBinarySkillFiles: true });
+    expect(existsSync(executionMarker)).toBe(false);
+    const shared = approved.document.package.skills.entries[0];
+    expect(shared.files.find((f: any) => f.path === "assets/fixture.bin")).toEqual({ path: "assets/fixture.bin", binary: { base64: "AP8BAg==" } });
+    const unreviewed = await fetch(`${fixture.info.url}/api/teams/export`, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, dryRun: false, includeBinarySkillFiles: true }) });
+    expect(unreviewed.status).toBe(409);
+    writeFileSync(join(dir, "template.html"), "<h1>Changed after preview</h1>");
+    const refused = await fetch(`${fixture.info.url}/api/teams/export`, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, dryRun: false, includeBinarySkillFiles: true, reviewedSkillHash: approved.skillReviewHash }) });
+    expect(refused.status).toBe(409);
+    writeFileSync(join(dir, "template.html"), "<h1>Shared template</h1>");
+    const saved = await call("POST", "/api/teams/export", { ...body, dryRun: false, includeBinarySkillFiles: true, reviewedSkillHash: approved.skillReviewHash });
+    const imported = await call("POST", "/api/teams/import", saved.document);
     const copy = imported.bots[0];
     const copiedDir = join(fixture.info.dataDir, "workspaces", copy.id, "skills", "runbook");
     expect(readFileSync(join(copiedDir, "README.md"), "utf8")).toBe("Open the guide.\n");
     expect(readFileSync(join(copiedDir, "references", "guide.md"), "utf8")).toContain("Keep this line.");
     expect(readFileSync(join(copiedDir, "references", "guide.md"), "utf8")).not.toContain("Fixture-Secret-123456");
-    expect(existsSync(join(copiedDir, "template.html"))).toBe(false);
+    expect(readFileSync(join(copiedDir, "template.html"), "utf8")).toBe("<h1>Shared template</h1>");
+    expect(readFileSync(join(copiedDir, "assets", "fixture.bin"))).toEqual(Buffer.from([0, 255, 1, 2]));
+    expect(readFileSync(join(copiedDir, "scripts", "render.sh"), "utf8")).toBe(script);
+    if (process.platform !== "win32") expect(statSync(join(copiedDir, "scripts", "render.sh")).mode & 0o100).toBe(0o100);
     expect((await call("GET", `/api/bots/${copy.id}/skills`)).skills[0].enabled).toBe(false);
+    expect(existsSync(executionMarker)).toBe(false);
   } finally { await fixture.close(); }
 }, 120_000);

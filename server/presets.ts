@@ -7,7 +7,9 @@ import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import type { NewBotDefaults } from "./new-bot-defaults.ts";
-import type { ExportablePackageSkill, TeamExportSkip } from "./package-export.ts";
+import { skillSectionVersion, type ExportablePackageSkill, type TeamExportSkip } from "./package-export.ts";
+import { portableFilesForDisk, selectPortableFiles } from "./portable-skill-files.ts";
+import type { SkillFolderFile } from "./skill-folder.ts";
 import type { OrgImportContext } from "./package-import.ts";
 import { pair, skillReleaseValue } from "./package-parts.ts";
 import type { SkillListing, SkillPackageStamp } from "./skills.ts";
@@ -116,7 +118,7 @@ function resolveRow(row: StoredPreset, content: InstallContent | undefined): Res
         setupMinutes: 1,
         requirements: { apps: [], capabilities: [] },
         presets: [storedPresetObject(row)],
-        ...(skills.length ? { skills: { version: skills.some((skill) => skill.files?.length) ? 2 : 1, entries: skills } } : {}),
+        ...(skills.length ? { skills: { version: skillSectionVersion(skills), entries: skills } } : {}),
         ...(playbooks.length ? { playbooks } : {}),
       },
     }, { trust: "file" });
@@ -339,7 +341,7 @@ export function listBotPresets(store: Pick<PresetStore, "list" | "resolve">, sta
 export interface PresetApplyDeps {
   store: Pick<Store, "patchBot">;
   skills: {
-    install(botId: string, source: string, files: Array<{ path: string; content: string }>): SkillListing | { error: string };
+    install(botId: string, source: string, files: SkillFolderFile[]): SkillListing | { error: string };
     setEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string };
     installOrg(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp, files?: PackageSkill["files"]): SkillListing | { error: string };
   };
@@ -383,7 +385,7 @@ export function applyPresetToBot(botId: string, resolved: ResolvedPreset, deps: 
       const added = deps.skills.installOrg(botId, source, skill.instructions, stamp, skill.files);
       if ("error" in added) throw new Error(`The preset's skill "${name}" could not be added: ${added.error}`);
     } else {
-      const added = deps.skills.install(botId, source, [{ path: "SKILL.md", content: skill.instructions }, ...(skill.files ?? [])]);
+      const added = deps.skills.install(botId, source, [{ path: "SKILL.md", content: skill.instructions }, ...portableFilesForDisk(skill.files ?? [])]);
       if ("error" in added) throw new Error(`The preset's skill "${name}" could not be added: ${added.error}`);
       if (org) {
         const enabled = deps.skills.setEnabled(botId, name, true);
@@ -415,6 +417,7 @@ export function presetFromDefaults(defaults: NewBotDefaults | undefined, options
   name?: string;
   description?: string;
   includeNotes: boolean;
+  includeBinarySkillFiles?: boolean;
   avatar?: { mime: "image/png" | "image/jpeg" | "image/webp"; data: string } | null;
 }): { value: DefaultsPreset | null; skipped: TeamExportSkip[] } {
   const skipped: TeamExportSkip[] = [];
@@ -449,7 +452,9 @@ export function presetFromDefaults(defaults: NewBotDefaults | undefined, options
       skipped.push({ part: `${part}.skills[${template.name}]`, reason: "bot_skill_limit" });
       continue;
     }
-    for (const file of template.omittedFiles ?? []) skipped.push({ part: `skills[${template.name}].files[${redactSecretsInText(file.path)}]`, reason: file.reason });
+    for (const file of template.omittedFiles ?? []) skipped.push({ part: `${part}.skills[${template.name}].files[${redactSecretsInText(file.path)}]`, reason: file.reason });
+    const selectedFiles = selectPortableFiles(template.files ?? [], options.includeBinarySkillFiles === true);
+    skipped.push(...selectedFiles.skipped.map((file) => ({ part: `${part}.skills[${template.name}].files[${file.path}]`, reason: file.reason })));
     skills.push({
       name: parsed.name,
       description: parsed.description,
@@ -457,7 +462,7 @@ export function presetFromDefaults(defaults: NewBotDefaults | undefined, options
       ...(parsed.license ? { license: parsed.license } : {}),
       ...(parsed.compatibility ? { compatibility: parsed.compatibility } : {}),
       instructions: template.text,
-      ...(template.files?.length ? { files: template.files } : {}),
+      ...(selectedFiles.files.length ? { files: selectedFiles.files } : {}),
       enabled: template.enabled,
     });
   }

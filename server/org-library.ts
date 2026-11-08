@@ -22,6 +22,7 @@ import {
 import { pair, partHash, sha256Hex, skillReleaseValue, type PartPair, type TeamPart } from "./package-parts.ts";
 import { storedPresetObject, type StoredPreset } from "./presets.ts";
 import { applyUpdates, handleWithdrawn, type ReleaseContext } from "./org-library-releases.ts";
+import { createOrgSkillRetry } from "./org-skill-retry.ts";
 import type { RoutineManager } from "./routines.ts";
 import type { SkillListing, SkillPackageStamp } from "./skills.ts";
 import { sectionKey, type InstalledPackageMetadata, type Store, type StoreChange } from "./store.ts";
@@ -251,12 +252,14 @@ export interface OrgLibraryDeps {
     setEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string };
     installOrg(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp, files?: PackageSkill["files"]): SkillListing | { error: string };
     replaceOrg?(botId: string, source: string, skill: Pick<PackageSkill, "instructions" | "files">, stamp: SkillPackageStamp, expected: SkillPackageStamp):
-      { updated: true } | { stale: true } | { error: string };
+      { updated: true } | { stale: true } | { error: string; retryable?: boolean };
+    recoverOrg?(botId: string): { ok: true; pending?: true } | { error: string; retryable: true };
   };
   /** A team's brief, by its section; without it an update leaves the brief as it is. */
   sections?: { read(section: string): string; write(section: string, text: string): void };
   postState?: (message: OrgLibraryStateMessage) => void;
   now?: () => number;
+  retryDelayMs?: number;
   presets?: { list(): StoredPreset[] };
 }
 
@@ -311,6 +314,7 @@ export class OrgLibrary {
   private readonly verified = new Map<string, string>();
   private pending: Promise<void> = Promise.resolve();
   private recheck: ReturnType<typeof setTimeout> | null = null;
+  private readonly skillRetry: ReturnType<typeof createOrgSkillRetry>;
   private lastPosted: OrgLibraryStateMessage | null = null;
   private importing: string | null = null;
   private readonly unsubscribe: () => void;
@@ -321,11 +325,19 @@ export class OrgLibrary {
     this.state = this.load();
     if (this.rebuild()) this.save();
     this.unsubscribe = deps.store.onChange((change) => this.onStoreChange(change));
+    this.skillRetry = createOrgSkillRetry({ bots: () => deps.store.bots, recover: deps.skills.recoverOrg, delayMs: deps.retryDelayMs, retry: () => {
+      this.pending = this.pending.then(() => {
+        try { if (this.library) this.reconcile(this.library); else if (!this.skillRetry.recover()) this.skillRetry.schedule(); }
+        catch (error) { console.error(`[org-library] could not retry skill synchronization: ${error instanceof Error ? error.message : String(error)}`); this.skillRetry.schedule(); }
+      });
+    } });
+    if (!this.skillRetry.recover()) this.skillRetry.schedule();
   }
 
   dispose(): void {
     this.unsubscribe();
     if (this.recheck) clearTimeout(this.recheck);
+    this.skillRetry.dispose();
   }
 
   settled(): Promise<void> {
@@ -387,11 +399,17 @@ export class OrgLibrary {
   private reconcile(applied: AppliedLibrary): void {
     this.rebuild();
     const releases = this.releases();
-    if (releases) { handleWithdrawn(releases); applyUpdates(releases); }
+    let retry = !this.skillRetry.recover();
+    if (releases) {
+      handleWithdrawn(releases);
+      retry = applyUpdates(releases).retry || retry;
+      retry = !this.skillRetry.recover() || retry;
+    }
     this.state.source = { adminOrigin: applied.adminOrigin, organizationId: applied.organizationId };
     this.state.appliedDigest = applied.digest;
     this.save();
     this.report();
+    if (retry) this.skillRetry.schedule();
   }
 
 

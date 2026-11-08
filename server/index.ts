@@ -390,7 +390,8 @@ import { skillExport } from "./skill-export.ts";
 import { pickBotName } from "./names.ts";
 import { newBotDefaultsSchema } from "./new-bot-defaults.ts";
 import { defaultSkillTemplates } from "./default-skill-preview.ts";
-import { replaceOrganizationSkill } from "./org-skill-update.ts";
+import { recoverOrganizationSkillLinks, replaceOrganizationSkill } from "./org-skill-update.ts";
+import { setSkillUseGuard } from "./skill-use-guard.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { setupSuggestionsFor } from "./setup-suggestions.ts"; import { createSetupRequestRoutes } from "./routes/setup-request.ts";
 import { isSkillSwitchAction, type SkillRequestCardData } from "../shared/skill-request.ts"; import { createSkillSwitchHost } from "./host/skill-switch-host.ts";
@@ -2773,6 +2774,7 @@ function defaultsPresetFor(body: Record<string, unknown>, includeNotes: boolean)
     name: typeof body.presetName === "string" ? body.presetName : undefined,
     description: typeof body.presetDescription === "string" ? body.presetDescription : undefined,
     includeNotes,
+    includeBinarySkillFiles: body.includeBinarySkillFiles === true,
     avatar,
   });
   return { preset: built.value, skipped: [...skipped, ...built.skipped] };
@@ -8916,11 +8918,14 @@ if (CLOUD_HOME && CLOUD_OWNER_KEY && cloudRoutineAuthors) {
 }
 // Only now: an earlier owner key is the owner's once settled.
 routines.clearFrozenResultsThreads(); proactive.ensureWatch(); startFirstHour({ hooks: firstHourHooks, fresh: firstHourFresh, store, bus, cfg, dataDir: DATA_DIR, proactive, briefOn: () => proactive.briefOn(), ensureBrief: () => { proactive.ensureWatch(); }, composio, sessions, phones: () => phones.paired(), routines: () => routines, mainThread: botMainThread, threadBusy, startTurn, notify, wrote: markTaskContextExternallyUpdated, stale: shouldIgnoreProviderEvent, welcomeDone: () => { adminActorScope.exit(() => saveConfig(welcomeDonePatch(cfg.onboarding))); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } });
+setSkillUseGuard((botId) => botHasActiveTurn(botId) || Boolean(routines?.activeRunForBot(botId)) ||
+  [...directTurnBots.values()].some((bot) => bot.id === botId) ||
+  [...groupTurnOperations.values()].some((operations) => [...operations].some((operation) => operation.botIds.has(botId))));
 orgLibrary = new OrgLibrary({
   dataDir: DATA_DIR,
   store,
   routines: routines!,
-  skills: { list: listSkills, stamps: skillPackageStamps, setEnabled: setSkillEnabled, installOrg: installOrgSkill, replaceOrg: replaceOrganizationSkill },
+  skills: { list: listSkills, stamps: skillPackageStamps, setEnabled: setSkillEnabled, installOrg: installOrgSkill, replaceOrg: replaceOrganizationSkill, recoverOrg: recoverOrganizationSkillLinks },
   presets: presetStore, sections: { read: (section) => readSectionContext(section)?.text ?? "", write: (section, text) => void writeSectionContext(section, text) },
   postState: (message) => utilityParentPort?.postMessage(message),
 });

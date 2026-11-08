@@ -4,6 +4,7 @@ import type { SkillsLibrarySkillWire } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
 import { setImportedSkillEnabled } from "../imported-skills.ts";
 import { botSkillTemplateSchema } from "../new-bot-defaults.ts";
+import { portableFilesForDisk } from "../portable-skill-files.ts";
 import { fetchSkillFromSource } from "../skill-fetch.ts";
 import { skillImportSummary } from "../skill-folder.ts";
 import { installLibrarySkill, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillEveryBot, setLibrarySkillReviewState, skillsLibraryEnabled } from "../skill-library.ts";
@@ -35,7 +36,7 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
       const input = checked.data;
       const parsed = parseSkillMd(input.text);
       if ("error" in parsed || parsed.name !== input.name) return json(res, 400, { error: "Skill name does not match its contents" });
-      const installed = installSkill(m[1], input.source, [{ path: "SKILL.md", content: input.text }, ...(input.files ?? [])]);
+      const installed = installSkill(m[1], input.source, [{ path: "SKILL.md", content: input.text }, ...portableFilesForDisk(input.files ?? [])]);
       if ("error" in installed) return json(res, 422, { error: installed.error });
       if (input.enabled) {
         const enabled = setSkillEnabled(m[1], input.name, true);
@@ -122,6 +123,7 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
           ...(listing.license ? { license: listing.license } : {}),
           ...(listing.compatibility ? { compatibility: listing.compatibility } : {}),
           warnings: listing.warnings,
+          ...(listing.files?.length ? { files: listing.files } : {}),
           assignedBots: store.bots
             .filter((bot) => index[listing.name]?.everyBot === true || bot.assignedSkills?.includes(listing.name))
             .map((bot) => ({ id: bot.id, name: bot.name })),

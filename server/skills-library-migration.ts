@@ -57,6 +57,10 @@ export function migrateBotSkillsToLibrary(botId: string, root: string = skillsLi
   const outcomes: SkillMigrationOutcome[] = [];
   const assigned: string[] = [];
   for (const copy of listMigratableSkills(botId)) {
+    if (copy.pendingRetirement) {
+      outcomes.push({ botId, name: copy.name, outcome: "skipped", detail: "a previous skill revision is still being synchronized" });
+      continue;
+    }
     if (!copy.intact || !copy.directory) {
       outcomes.push({ botId, name: copy.name, outcome: "skipped", detail: "stored SKILL.md is missing or changed after review" });
       continue;

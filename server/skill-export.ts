@@ -3,6 +3,7 @@ import type { SkillsLibraryHost } from "./host/skills-library.ts";
 import type { ExportablePackageSkill, TeamExportSkip } from "./package-export.ts";
 import { isSkillName } from "./skills.ts";
 import type { BotRecord } from "./store.ts";
+import { selectPortableFiles } from "./portable-skill-files.ts";
 
 /** The skill side of bot and team package export: which names may be exported, and each bot's exportable copies. */
 export function skillExport(host: Pick<SkillsLibraryHost, "listBotSkills" | "readBotSkillFile" | "exportBotSkill">) {
@@ -63,6 +64,7 @@ export function skillExport(host: Pick<SkillsLibraryHost, "listBotSkills" | "rea
   function collectTeamSkills(
     bots: readonly BotRecord[],
     selection: unknown,
+    includeBinary = false,
   ): { ok: true; all: boolean; skillsByBot: Map<string, ExportablePackageSkill[]>; skipped: TeamExportSkip[]; available: string[] } | { ok: false; error: string; available: string[] } {
     const all = selection === undefined || selection === "all";
     const available = [...new Set(bots.flatMap((bot) => listBotSkills(bot).map((skill) => skill.name)))].sort();
@@ -85,6 +87,7 @@ export function skillExport(host: Pick<SkillsLibraryHost, "listBotSkills" | "rea
           if (!skipped.some((skip) => skip.part === part)) skipped.push({ part, reason: "skill_changed" });
           continue;
         }
+        const selectedFiles = selectPortableFiles(snapshot.files, includeBinary);
         assigned.push({
           name: listing.name,
           description: listing.description,
@@ -92,10 +95,10 @@ export function skillExport(host: Pick<SkillsLibraryHost, "listBotSkills" | "rea
           ...(listing.license ? { license: listing.license } : {}),
           ...(listing.compatibility ? { compatibility: listing.compatibility } : {}),
           instructions: snapshot.instructions,
-          ...(snapshot.files.length ? { files: snapshot.files } : {}),
+          ...(selectedFiles.files.length ? { files: selectedFiles.files } : {}),
           enabled: listing.enabled,
         });
-        for (const file of snapshot.skipped) {
+        for (const file of [...snapshot.skipped, ...selectedFiles.skipped]) {
           const part = `skills[${listing.name}].files[${file.path}]`;
           if (!skipped.some((skip) => skip.part === part && skip.reason === file.reason)) skipped.push({ part, reason: file.reason });
         }

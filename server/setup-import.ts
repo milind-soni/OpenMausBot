@@ -14,6 +14,7 @@ import { holdsCredential } from "../shared/redact.ts";
 import { parseSkillMd, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 import { importedSkillIntact, readImportedSkills, storeImportedSkills, type ImportedSkillEntry, type ImportedSkillInput } from "./imported-skills.ts";
 import { scanSkillFolder } from "./skill-folder.ts";
+import { secretName } from "./skill-secret-names.ts";
 import { importedMcpServerName, isRemoteMcpServer, MAX_MCP_SERVERS, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
 import { parseToml } from "./toml-lite.ts";
 
@@ -139,20 +140,7 @@ interface FoundSkill {
 
 const MAX_SKILL_FOLDERS = 500;
 
-const SECRET_WORDS = /(?:^|[^a-z])(?:o?auth|tokens?|sessions?|cookies?|passw\w*|secrets?|credentials?|api[-_]?keys?|keys?|bearer|storage[-_]?state|service[-_]?accounts?|private[-_]?keys?)(?:[^a-z]|$)/;
-const SECRET_FOLDERS = /^(?:secrets?|credentials?|sessions?|cookies?|tokens?|keys?|private[-_]?keys?|service[-_]?accounts?)$/;
-const KEY_STORES = /\.(?:pem|key|p12|pfx|jks|keystore|kdbx|ppk|keychain|keychain-db|sqlite3?|db|env)$|^id_(?:rsa|dsa|ecdsa|ed25519)/;
-/** Data formats a credential is kept in. Instructions and code may well be named after one (credentials.md, auth.py). */
-const DATA_EXTENSIONS = new Set(["json", "jsonc", "jsonl", "yaml", "yml", "toml", "ini", "cfg", "conf", "txt", "text", "csv", "tsv", "xml"]);
-
-/** A name inside a skill folder that holds a credential, a session or a key rather than instructions or code: it is left
- * out, decided before anything is opened. */
-export function secretName(name: string): boolean {
-  const lower = name.toLowerCase();
-  if (SECRET_FOLDERS.test(lower) || KEY_STORES.test(lower)) return true;
-  const dot = lower.lastIndexOf(".");
-  return dot > 0 && DATA_EXTENSIONS.has(lower.slice(dot + 1)) && SECRET_WORDS.test(lower.slice(0, dot));
-}
+export { secretName } from "./skill-secret-names.ts";
 
 /** Folders macOS asks the person about before an app looks inside. */
 const GUARDED_HOME_FOLDERS = new Set(["desktop", "documents", "downloads", "library", "movies", "music", "pictures"]);

@@ -932,7 +932,6 @@ export type SteerQueueReason = "capacity" | "group-turn";
 /** Pending steer-queue chips, as `queuedSteerSnapshot` emits them and the
  * `bot.queued` frame carries them: threadId → queued items. */
 export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason; /** The reason in plain words, shown as it is. */ why?: string }>>;
-
 /** Skills library browse surface: one row per library entry, with the bots
  * currently assigned to it. Version is null for locally imported skills. */
 export interface SkillsLibrarySkillWire {
@@ -947,6 +946,7 @@ export interface SkillsLibrarySkillWire {
   license?: string;
   compatibility?: string;
   warnings: string[];
+  files?: string[];
   assignedBots: Array<{ id: string; name: string }>;
 }
 

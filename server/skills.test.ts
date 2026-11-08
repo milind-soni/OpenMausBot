@@ -38,6 +38,7 @@ import {
   undoSkillWrite,
 } from "./skills.ts";
 import { parseSkillSource } from "./skill-fetch.ts";
+import { exportPrivateSkill } from "./portable-skill-private.ts";
 import { ensureTaskWorkspaceWithSkills, syncTaskSkillLinks } from "./skill-task-links.ts";
 import { buildSystemPrompt } from "./system-prompt.ts";
 import { ensureTaskWorkspace, TASK_WORKSPACES_DIR, workspaceDir } from "./workspace.ts";
@@ -375,6 +376,16 @@ describe("install → review → enable lifecycle", () => {
     expect(setSkillEnabled(bot, "guarded-folder", true)).toMatchObject({ enabled: true });
     rmSync(join(folder, "references", "deep", "table.md"));
     expect(listSkills(bot)[0]).toMatchObject({ enabled: false, warnings: [expect.stringContaining("changed after review")] });
+  });
+
+  it("does not share files added after a private skill was reviewed", () => {
+    installSkill(bot, "src", FOLDER("reviewed-folder"));
+    const root = join(workspaceDir(bot), "skills", "reviewed-folder");
+    writeFileSync(join(root, "references", "added.md"), "not reviewed");
+    const snapshot = exportPrivateSkill(bot, "reviewed-folder")!;
+    expect(snapshot.files.map((file) => file.path)).not.toContain("references/added.md");
+    expect(snapshot.skipped).toContainEqual({ path: "references/added.md", reason: "skill_file_unreviewed" });
+    expect(snapshot.files.map((file) => file.path)).toContain("references/guide.md");
   });
 
   it("records the GitHub folder and commit a skill came from", () => {

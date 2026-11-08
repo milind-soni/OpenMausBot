@@ -406,6 +406,10 @@ function SkillSourceDialog({ viewing, error, working, onClose, onEnable }: {
             </div>
             {viewing.review && <LibrarySkillMeta skill={viewing.skill} />}
             {viewing.skill.warnings.length > 0 && <div className="mt-2 text-[12px] text-warning">{viewing.skill.warnings.join(" · ")}</div>}
+            {Boolean(viewing.skill.files?.length) && <div className="mt-2 rounded-lg bg-warning/10 px-3 py-2 text-[12px] text-warning">
+              <p>{t("skills.reviewCompanions")}</p>
+              <ul className="mt-1 list-disc pl-5">{viewing.skill.files?.map((file) => <li key={file} className="break-all">{file}</li>)}</ul>
+            </div>}
             <pre
               tabIndex={0}
               aria-label={`${t("skills.library.view", { skill: viewing.skill.name })}`}

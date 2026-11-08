@@ -283,6 +283,35 @@ describe("sharing my New bot defaults as a preset", () => {
     expect(JSON.stringify(pkg)).not.toMatch(/enabled|opus|approval/);
   });
 
+  it("does not report a conflict when identical companion files are ordered differently", async () => {
+    const app = await installation();
+    const files = [{ path: "references/a.md", content: "A" }, { path: "references/b.md", content: "B" }];
+    const built = app.presets.presetFromDefaults(defaults({ skills: [{ name: "follow-up", description: "follow-up steps.",
+      source: "fixture", text: skillText("follow-up"), enabled: true, warnings: [], files: [...files].reverse() }] }), { includeNotes: true });
+    const bot = { id: "b1", threadId: "t1", name: "Morgan", color: "green", section: "Sales desk", createdAt: 1 } as BotRecord;
+    const exported = app.exporter.createTeamPackageExport({ team: "Sales desk", bots: [bot], groups: [], routines: [], published: null,
+      skillsByBot: new Map([["b1", [{ name: "follow-up", description: "follow-up steps.", instructions: skillText("follow-up"), source: "fixture", files }]]]),
+      preset: built.value });
+    expect(exported.document.package.presets![0]!.skills).toContain("follow-up");
+    expect(exported.skipped).not.toContainEqual(expect.objectContaining({ reason: "preset_skill_conflict" }));
+  });
+
+  it("attributes omitted files to a conflicting preset instead of the bot skill", async () => {
+    const app = await installation();
+    const built = app.presets.presetFromDefaults(defaults({ skills: [{ name: "follow-up", description: "follow-up steps.",
+      source: "fixture", text: skillText("follow-up", "Different."), enabled: true, warnings: [],
+      omittedFiles: [{ path: "references/guide.md", reason: "skill_file_unsafe" }] }] }), { includeNotes: true });
+    const bot = { id: "b1", threadId: "t1", name: "Morgan", color: "green", section: "Sales desk", createdAt: 1 } as BotRecord;
+    const exported = app.exporter.createTeamPackageExport({ team: "Sales desk", bots: [bot], groups: [], routines: [], published: null,
+      skillsByBot: new Map([["b1", [{ name: "follow-up", description: "follow-up steps.", instructions: skillText("follow-up"), source: "fixture",
+        files: [{ path: "references/guide.md", content: "bot guide" }] }]]]), preset: built.value, skipped: built.skipped });
+    expect(exported.document.package.skills!.entries[0]!.files).toEqual([{ path: "references/guide.md", content: "bot guide" }]);
+    expect(exported.skipped).toEqual(expect.arrayContaining([
+      { part: "presets[new-bot-defaults].skills[follow-up].files[references/guide.md]", reason: "skill_file_unsafe" },
+      { part: "presets[new-bot-defaults].skills[follow-up]", reason: "preset_skill_conflict" },
+    ]));
+  });
+
   it("saves a library file of the preset and its skills, redacted, with a stable id and the next release", async () => {
     const app = await installation();
     const built = app.presets.presetFromDefaults(defaults({ profile: { name: "Sky", soul: "Use password=Hunter2-Secret-99 for the portal.\n" } }), { name: "Support agent", includeNotes: true });

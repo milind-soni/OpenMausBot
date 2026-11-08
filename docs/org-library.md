@@ -71,7 +71,7 @@ the person changed keeps their version, now and in later releases.
 | Part | Updated |
 |---|---|
 | A bot's name, title, description, instructions and playbooks | yes; a new name another bot already has is kept back |
-| A bot's skills | each skill's instructions and included Markdown companions, and a skill new to that bot in this release (while the file of the release it had is still kept, which is how a new skill is told from one the person took off); never one the person took off, and a skill switched off stays off |
+| A bot's skills | each skill's instructions and included companions, and a skill new to that bot in this release (while the file of the release it had is still kept, which is how a new skill is told from one the person took off); never one the person took off, and a skill switched off stays off |
 | A group chat's name and bulletin | yes |
 | A routine's name, prompt and schedule | yes; whether it is on stays the person's |
 | The team brief | yes |
@@ -84,10 +84,19 @@ skill's stamp move to the new release. If a part can't be written, the parts
 written so far keep their new stamps, the install stays on its release, and
 the next catalog finishes it. An updated skill is staged as a complete folder
 before its manifest changes, so a failed write leaves the previous files in
-place. A reference-only change is an update; an edited, missing or extra local
-file blocks replacement of that skill. If an interrupted update left the old
-folder behind, the app cleans it up when the skill is removed or moved only
+place. An update waits for the bot's active turns to finish. If switching its
+native skill links fails, the previous revision stays and the app retries,
+including after restart. A task's link can keep an older revision available;
+the task gets the new link before its next turn, after which the old revision
+can be cleaned up. Up to 32 old revisions per skill can be retained this way;
+removing or moving that skill waits until its old links are cleared. This
+staging currently requires the workspace and protected skill state
+to be on the same filesystem; an update across filesystems is refused. A change
+to a file's path, bytes or executable bit is an update; an edited, missing or extra local
+file blocks replacement of that skill. Cleanup deletes an old folder only
 while its contents are unchanged; a changed folder is kept for you to move.
+If deletion stops partway, the remaining folder and its recovery record stay
+in protected skill state and cleanup reports that they need attention.
 If an updated organization's active skill folder has changed, removing the
 skill keeps that folder for recovery instead of deleting its local edits.
 

@@ -1,7 +1,7 @@
 // A skill folder brought in from outside: SKILL.md and every file beside it, written once into a fresh folder and
 // checked by hash whenever it is used, never read or written through a link.
 import { createHash } from "node:crypto";
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { z } from "zod";
 
@@ -9,6 +9,7 @@ import type { SkillImportSummary, SkippedSkillFile, SkippedSkillFileReason } fro
 export type { GitHubSkillOrigin } from "../shared/skill-import.ts";
 import { parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 import { directoryEntryState } from "./skill-storage.ts";
+import { readBoundedSkillFile } from "./bounded-skill-read.ts";
 
 /** `depth` counts path segments, file name included. */
 export const SKILL_FOLDER_LIMITS = { files: 200, bytes: 16 * 1024 * 1024, fileBytes: 2 * 1024 * 1024, depth: 8 } as const;
@@ -192,19 +193,7 @@ export function writeSkillFolder(
 }
 
 function readNoFollow(path: string): Buffer | null {
-  let fd: number | null = null;
-  try {
-    fd = openSync(path, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW));
-    return fstatSync(fd).isFile() ? readFileSync(fd) : null;
-  } catch {
-    return null;
-  } finally {
-    if (fd !== null) {
-      try {
-        closeSync(fd);
-      } catch {}
-    }
-  }
+  return readBoundedSkillFile(path, SKILL_FOLDER_LIMITS.fileBytes);
 }
 
 const digests = new Map<string, { key: string; sha256: string }>();

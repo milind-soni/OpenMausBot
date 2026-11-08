@@ -62,8 +62,9 @@ describe("skills brought in from this computer", () => {
       cfg: {} as AppConfig, appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
     });
     const record = { id: bot } as BotRecord;
-    expect(host.exportBotSkill(record, "bundle")).toMatchObject({ files: [{ path: "references/guide.md", content: "imported guide" }],
-      skipped: [{ path: "script.sh", reason: "skill_file_type" }] });
+    expect(host.exportBotSkill(record, "bundle")).toMatchObject({ files: [
+      { path: "references/guide.md", content: "imported guide" }, { path: "script.sh", content: "echo hi", executable: true },
+    ], skipped: [] });
     installSkill(bot, "private", [{ path: "SKILL.md", content: skillMd("bundle") }, { path: "README.md", content: "private guide" }]);
     expect(host.exportBotSkill(record, "bundle")?.files).toEqual([{ path: "README.md", content: "private guide" }]);
     writeFileSync(join(DATA_DIR, "workspaces", bot, "skills", "bundle", "README.md"), "changed");

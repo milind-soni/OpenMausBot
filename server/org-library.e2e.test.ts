@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
-import { launchVerificationServer } from "../scripts/control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { canonicalJson, parsePackageDocument } from "../shared/package-format.ts";
 
 const FIXTURES = join(import.meta.dirname, "..", "shared", "package-fixtures");
@@ -152,5 +152,46 @@ it("brings an added team to a newer release, keeping what the person changed", a
   } finally {
     await fixture.close();
   }
+}, 120_000);
+
+it("keeps an active task's skill available and retries the organization update after its turn", async () => {
+  const key = randomBytes(32).toString("hex");
+  const fixture = await launchVerificationServer({ ...process.env, OMB_TEST_ORG_LIBRARY_KEY: key, FAKE_CLAUDE_MODE: "hang" });
+  const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const response = await fetch(`${fixture.info.url}${path}`, { method, headers: { "content-type": "application/json", ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: response.status, body: await response.json() as any };
+  };
+  const offer = async (rel: ReturnType<typeof release>, version: number) => {
+    const blobs = join(fixture.info.dataDir, "org-library", "blobs"); mkdirSync(blobs, { recursive: true });
+    writeFileSync(join(blobs, `${rel.sha256}.json`), rel.bytes, { mode: 0o600 });
+    const catalog = JSON.stringify({ format: "openmaus.org-library", version: 1, libraryVersion: version,
+      organization: { id: ORG, name: "Customer Co" }, packages: [entry(TEAM_ID, rel)] });
+    return call("POST", "/api/testing/org-library", { library: { adminOrigin: "https://admin.example.com", organizationId: ORG,
+      organizationName: "Customer Co", digest: sha(catalog), catalog } }, { "x-openmausbot-test-org-library": key });
+  };
+  try {
+    await offer(release("full-team.v2.json"), 1);
+    const added = await call("POST", "/api/org-library/add", { packageId: TEAM_ID });
+    expect(added.status).toBe(201);
+    const bots = async () => (await call("GET", "/api/bots")).body.bots as any[];
+    const lead = (await bots()).find((bot) => bot.installedPackage?.agentKey === "lead")!;
+    await runControlOmb(["send", "--url", fixture.info.url, "--bot", lead.id, "--text", "Stay active."]);
+    await expect.poll(() => existsSync(fixture.fixtureDumpPath), { timeout: 30_000 }).toBe(true);
+    const taskSkill = join(fixture.info.dataDir, "task-workspaces", lead.id, lead.threadId, ".claude", "skills", "pricing-policy", "SKILL.md");
+    const original = readFileSync(taskSkill, "utf8");
+    const next = release("full-team.v2.json", (document) => {
+      document.package.release = "1.4.0";
+      document.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").instructions += "\nNew reviewed release.";
+    });
+    const deferred = await offer(next, 2);
+    expect(deferred.body.report.packages[0].release).toBe("1.3.0");
+    expect(readFileSync(taskSkill, "utf8")).toBe(original);
+    await runControlOmb(["interrupt", "--url", fixture.info.url, "--bot", lead.id]);
+    await expect.poll(async () => (await bots()).find((bot) => bot.id === lead.id)?.busy, { timeout: 30_000 }).toBe(false);
+    await expect.poll(() => JSON.parse(readFileSync(join(fixture.info.dataDir, "org-library", "state.json"), "utf8"))
+      .installs[added.body.installId].release, { timeout: 30_000 }).toBe("1.4.0");
+    expect(readFileSync(taskSkill, "utf8")).toBe(original);
+  } finally { await fixture.close(); }
 }, 120_000);
 

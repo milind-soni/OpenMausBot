@@ -45,8 +45,11 @@ it.skipIf(process.platform === "win32")("answers a bot's plain reads of its own 
     await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" });
     const own = join(dataDir, "workspaces", bot.id);
     const revision = join(own, "skills", ".revisions", "a".repeat(64));
-    mkdirSync(revision, { recursive: true });
+    mkdirSync(join(revision, "references", "deep"), { recursive: true });
+    mkdirSync(join(revision, "scripts"));
     writeFileSync(join(revision, "SKILL.md"), "# Morning email\n");
+    writeFileSync(join(revision, "references", "deep", "guide.md"), "Fixture guide\n");
+    writeFileSync(join(revision, "scripts", "render.sh"), "#!/bin/sh\necho fixture\n");
     writeFileSync(join(own, "MEMORY.md"), "notes\n");
     const soul = join(dataDir, "bots", bot.id, "SOUL.md");
     await expect.poll(() => existsSync(soul)).toBe(true);
@@ -62,16 +65,18 @@ it.skipIf(process.platform === "win32")("answers a bot's plain reads of its own 
       ["Bash", { command: `head -n 20 ${join(revision, "SKILL.md")}` }],
       ["Bash", { command: `grep -rn "notes" ${own}` }],
       ["Read", { file_path: soul }],
+      ["Read", { file_path: join(revision, "references", "deep", "guide.md") }],
     ] as const) {
       const asked = await ask(socket, tool, input);
       expect(await asked.reply, `${tool} ${JSON.stringify(input)}`).toMatchObject({ id: asked.id, behavior: "allow" });
       expect(await card(bot.threadId, asked.id)).toBeUndefined();
     }
-    await expect.poll(async () => (await api("GET", "/api/decisions")).decisions.filter((row: any) => row.source === "own-files").length).toBe(4);
+    await expect.poll(async () => (await api("GET", "/api/decisions")).decisions.filter((row: any) => row.source === "own-files").length).toBe(5);
 
     for (const [tool, input] of [
       ["Bash", { command: `cat ${join(dataDir, "config.json")}` }],
       ["Bash", { command: `cat ${soul} | sh` }],
+      ["Bash", { command: `sh ${join(revision, "scripts", "render.sh")}` }],
       ["Read", { file_path: join(dataDir, "config.json") }],
     ] as const) {
       const asked = await ask(socket, tool, input);

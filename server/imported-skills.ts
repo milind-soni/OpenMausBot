@@ -10,7 +10,7 @@
 // skills", Codex with the person's own CODEX_HOME) leaves the copy out, so no engine sees a skill twice.
 import { createHash, randomUUID } from "node:crypto";
 import {
-  closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync,
+  lstatSync, mkdirSync, opendirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync,
   statSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -23,6 +23,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { directoryEntryState, entryExistsWithoutFollowing } from "./skill-storage.ts";
 import { snapshotPortableSkill } from "./portable-skill-files.ts";
+import { readBoundedSkillFile } from "./bounded-skill-read.ts";
 import { INDEX_MAX_BYTES, INDEX_MAX_SKILLS, type SkillListing } from "./skills.ts";
 
 export const IMPORTED_SKILLS_DIR = join(DATA_DIR, "imported-skills");
@@ -97,18 +98,7 @@ export function listedImportedSkills<T extends { name: string; description: stri
 }
 
 export function readFileNoFollow(path: string): Buffer | null {
-  let fd: number | null = null;
-  try {
-    fd = openSync(path, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW));
-    if (!fstatSync(fd).isFile()) return null;
-    return readFileSync(fd);
-  } catch {
-    return null;
-  } finally {
-    if (fd !== null) {
-      try { closeSync(fd); } catch {}
-    }
-  }
+  return readBoundedSkillFile(path, 2 * 1024 * 1024);
 }
 
 interface Digest {
@@ -118,6 +108,7 @@ interface Digest {
 }
 
 const MAX_DIGEST_DEPTH = 16;
+const MAX_DIGEST_ENTRIES = 2048, MAX_DIGEST_BYTES = 16 * 1024 * 1024, MAX_DIGEST_FILE_BYTES = 2 * 1024 * 1024;
 const digests = new Map<string, Digest>();
 
 /** One hash over every entry below `dir`, each file with its executable bit and content; null when anything there is
@@ -125,13 +116,24 @@ const digests = new Map<string, Digest>();
 function folderDigest(dir: string): Digest | null {
   const stats: string[] = [];
   const entries: Array<{ path: string; full: string; executable: boolean } | { path: string; folder: true }> = [];
+  let visited = 0, bytes = 0;
   const note = (path: string, info: { ino: number; size: number; mtimeMs: number; ctimeMs: number; mode: number }) =>
     stats.push(`${path}\0${info.ino}\0${info.size}\0${info.mtimeMs}\0${info.ctimeMs}\0${info.mode}`);
   const walk = (folder: string, prefix: string, depth: number): boolean => {
     if (depth > MAX_DIGEST_DEPTH) return false;
     let names: string[];
     try {
-      names = readdirSync(folder).sort();
+      names = [];
+      const handle = opendirSync(folder);
+      try {
+        for (;;) {
+          const item = handle.readSync();
+          if (!item) break;
+          if (++visited > MAX_DIGEST_ENTRIES) return false;
+          names.push(item.name);
+        }
+      } finally { handle.closeSync(); }
+      names.sort();
     } catch {
       return false;
     }
@@ -149,6 +151,7 @@ function folderDigest(dir: string): Digest | null {
         entries.push({ path, folder: true });
         if (!walk(full, path, depth + 1)) return false;
       } else if (info.isFile()) {
+        if (info.size > MAX_DIGEST_FILE_BYTES || (bytes += info.size) > MAX_DIGEST_BYTES) return false;
         entries.push({ path, full, executable: (info.mode & 0o100) !== 0 });
       } else {
         return false;

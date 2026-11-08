@@ -50,7 +50,7 @@ describe("Share team", () => {
     for (const line of [
       "Bots 3 · Morgan, Scout, Quill", "Skills · arrive switched off 3", "Playbooks 1", "Group chats 1", "Routines · arrive paused 2",
       "Shared instructions Included", "Chief of Staff Morgan", "Connections · addresses only 1", "Pictures 1", "Starter notes 2",
-      "Never included: chat history, keys and passwords, model choices, computers, and who can see each bot.",
+      "Chat history, model choices, computers and who can see each bot are not included. Recognized secrets in text are redacted.",
       "Removed what looked like a key or password from: Scout · standing instructions",
       "Quill · picture — picture is larger than 64 KB",
       "local-tool · connection — runs a command on this computer, so it is not shared",
@@ -70,8 +70,30 @@ describe("Share team", () => {
       redacted: [`skills[${name}].files[0].content`], skipped: [{ part: `skills[${name}].files[template.html]`, reason: "skill_file_type" }] };
     const words = text(renderToStaticMarkup(createElement(ShareTeamContents, { preview, includeMemory: false, localSkips: [] })));
     expect(words).toContain(`Included skill files ${name} · references/guide.md`);
-    expect(words).toContain(`${name} · template.html — only UTF-8 Markdown files are shared`);
+    expect(words).toContain(`${name} · template.html — this file type cannot be shared safely`);
     expect(words).toContain(`Removed what looked like a key or password from: ${name} · references/guide.md`);
+  });
+
+  it("identifies binary files and scripts in both sharing and import previews", () => {
+    const source = fixture();
+    source.package.skills.version = 3;
+    source.package.skills.entries[0].files = [
+      { path: "assets/example.bin", binary: { base64: "AP8=" } },
+      { path: "scripts/render.sh", content: "echo fixture\n<script>fixture()</script>", executable: true },
+    ];
+    const document = parsePackageDocument(source);
+    const name = document.package.skills!.entries[0]!.name;
+    const preview: ShareResponse = { document, filename: "f", summary: packageSummary(document), choices: { skills: [] }, redacted: [], skipped: [] };
+    const shared = text(renderToStaticMarkup(createElement(ShareTeamContents, { preview, includeMemory: false, localSkips: [] })));
+    const imported = text(renderToStaticMarkup(createElement(TeamImportDetails, { pending: teamImportPreview(document), importedNames: ["Morgan", "Scout", "Quill"] })));
+    for (const words of [shared, imported]) {
+      expect(words).toContain(`${name} · assets/example.bin · binary, not scanned`);
+      expect(words).toContain(`${name} · scripts/render.sh · script or executable`);
+      expect(words).toContain("echo fixture");
+    }
+    const markup = renderToStaticMarkup(createElement(TeamImportDetails, { pending: teamImportPreview(document), importedNames: ["Morgan", "Scout", "Quill"] }));
+    expect(markup).toContain("&lt;script&gt;fixture()&lt;/script&gt;");
+    expect(markup).not.toContain("<script>fixture()</script>");
   });
 
   it("keeps every skill box when a 31-skill bot's exact choice is refused", () => {

@@ -20,7 +20,7 @@ import {
   type ShareResponse,
   type ShareView,
 } from "@/lib/team-share";
-import { api, useStore } from "@/state/store";
+import { api, ApiError, useStore } from "@/state/store";
 import type { NewBotDefaults } from "../../shared/new-bot-defaults";
 import { SharedSkillFiles } from "./SharedSkillFiles";
 
@@ -73,7 +73,7 @@ export function ShareTeamContents({ preview, includeMemory, localSkips }: {
       ) : null}
       <p className="mt-3 flex items-start gap-2 text-[13px] leading-relaxed text-ink-secondary">
         <ShieldCheck size={15} className="mt-0.5 shrink-0 text-success" />
-        <span>{t("teamShare.never")}</span>
+        <span>{t("teamShare.folderSafety")}</span>
       </p>
       {preview.redacted.length > 0 && (
         <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
@@ -132,6 +132,8 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
   const [notes, setNotes] = useState("");
   const [includePictures, setIncludePictures] = useState<boolean>(SHARE_DIALOG_DEFAULTS.includePictures);
   const [includeMemory, setIncludeMemory] = useState<boolean>(SHARE_DIALOG_DEFAULTS.includeMemory);
+  const [includeBinarySkillFiles, setIncludeBinarySkillFiles] = useState(false);
+  const [previewRevision, setPreviewRevision] = useState(0);
   const [includePreset, setIncludePreset] = useState(false);
   const [presetPicture, setPresetPicture] = useState<{ dataUrl?: string } | null>(null);
   const [skillChoice, setSkillChoice] = useState<Set<string> | null>(null);
@@ -178,10 +180,11 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
     notes,
     skills: requestedSkills(skillChoice, available),
     includeMemory,
+    includeBinarySkillFiles,
     ...(includePictures && pictures ? { avatars: pictures.avatars } : {}),
     ...(includePreset ? { includeDefaultsPreset: true, ...(includePictures && presetPicture?.dataUrl ? { presetAvatar: presetPicture.dataUrl } : {}) } : {}),
     dryRun,
-  }), [team, name, tagline, summary, release, notes, skillChoice, available, includeMemory, includePictures, pictures, includePreset, presetPicture]);
+  }), [team, name, tagline, summary, release, notes, skillChoice, available, includeMemory, includeBinarySkillFiles, includePictures, pictures, includePreset, presetPicture]);
 
   useEffect(() => {
     if (!pictures) return;
@@ -202,18 +205,23 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
     }, 250);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pictures, skillChoice, includeMemory, includePictures, includePreset, presetPicture]);
+  }, [pictures, skillChoice, includeMemory, includeBinarySkillFiles, includePictures, includePreset, presetPicture, previewRevision]);
 
   const save = async () => {
     if (saving) return;
     setSaving(true);
     setError("");
     try {
-      const result = await api<ShareResponse>("/api/teams/export", { method: "POST", body: JSON.stringify(shareRequestBody(choices(false))) });
+      const result = await api<ShareResponse>("/api/teams/export", { method: "POST", body: JSON.stringify({
+        ...shareRequestBody(choices(false)), ...(preview?.skillReviewHash ? { reviewedSkillHash: preview.skillReviewHash } : {}),
+      }) });
       saveShareFile(result.filename, result.document);
       setSaved(result);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      if (cause instanceof ApiError && cause.body?.code === "skill_preview_stale") {
+        request.current += 1; setView((current) => ({ ...current, preview: null })); setPreviewRevision((current) => current + 1);
+      }
     } finally {
       setSaving(false);
     }
@@ -282,6 +290,13 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
                 {t("teamShare.includeNotes")}
               </label>
               <p className="pl-6 text-[12px] leading-relaxed text-ink-secondary">{notesLine(includeMemory)}</p>
+              <label className="flex items-start gap-2">
+                <input type="checkbox" className="mt-0.5 size-4 accent-accent" checked={includeBinarySkillFiles} onChange={(event) => {
+                  request.current += 1; setView((current) => ({ ...current, preview: null })); setIncludeBinarySkillFiles(event.target.checked);
+                }} />
+                {t("teamShare.includeBinarySkillFiles")}
+              </label>
+              <p className="pl-6 text-[12px] leading-relaxed text-ink-secondary">{t("teamShare.binarySkillWarning")}</p>
               <ShareSkillChoices available={available ?? []} ticked={ticked} counted={available !== null} onToggle={toggleSkill} />
               <label className="flex items-center gap-2 pt-1">
                 <input type="checkbox" className="size-4 accent-accent" checked={includePreset} onChange={(event) => setIncludePreset(event.target.checked)} />

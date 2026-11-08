@@ -297,6 +297,67 @@ describe("portable skill companions", () => {
     doc.package.skills.version = 1;
     expect(() => parsePackageDocument(doc)).toThrow("Skill files require skills version 2");
   });
+  it("does not allow an older skills section to discard Markdown file mode", () => {
+    const doc = bundle();
+    doc.package.skills.entries[0].files = [{ path: "run.md", content: "instructions", executable: true }];
+    expect(() => parsePackageDocument(doc)).toThrow("These skill files require skills version 3");
+    doc.package.skills.version = 3;
+    expect(parsePackageDocument(doc).package.skills!.entries[0]!.files).toEqual(doc.package.skills.entries[0].files);
+  });
+  it("uses a new section version for scripts and opaque bytes, redacting only text", () => {
+    const doc = bundle();
+    doc.package.skills.version = 3;
+    const binary = Buffer.from("password=unscannable-fixture\0", "utf8").toString("base64");
+    doc.package.skills.entries[0].files = [
+      { path: "scripts/render.sh", content: "password=fixture-secret-123456\n", executable: true },
+      { path: "assets/data.bin", binary: { base64: binary } },
+      { path: "template.html", content: "<p>Template</p>" },
+    ];
+    const parsed = parsePackageDocument(doc);
+    const redacted = redactPackageSecrets(parsed);
+    const files = redacted.document.package.skills!.entries[0]!.files!;
+    expect(files.find((file) => file.path === "assets/data.bin")).toEqual({ path: "assets/data.bin", binary: { base64: binary } });
+    expect(redacted.redacted).toContain("skills[pricing-policy].files[1].content");
+    expect(JSON.stringify(files)).not.toContain("fixture-secret-123456");
+    expect(parsePackageDocument(redacted.document)).toEqual(redacted.document);
+    doc.package.skills.version = 2;
+    expect(() => parsePackageDocument(doc)).toThrow("These skill files require skills version 3");
+  });
+  it("rejects malformed, unsafe or oversized folder files", () => {
+    const invalid = [
+      { path: "../outside.sh", content: "echo no" },
+      { path: "a\\b", content: "x" },
+      { path: "AUX", content: "x" },
+      { path: "assets/image.bin", binary: { base64: "AB==" } },
+      { path: "assets/image.bin", binary: { base64: "SGVsbG8=" } },
+      { path: "assets/image.bin", binary: { base64: "AA==" }, executable: true },
+      { path: "assets/image.bin", binary: { base64: "AA==" }, content: "x" },
+      { path: "large.txt", content: "x".repeat(512 * 1024 + 1) },
+    ];
+    for (const file of invalid) {
+      const doc = bundle(); doc.package.skills.version = 3; doc.package.skills.entries[0].files = [file];
+      expect(() => parsePackageDocument(doc), JSON.stringify(file).slice(0, 120)).toThrow();
+    }
+    for (const files of [
+      [{ path: "É.txt", content: "a" }, { path: "e\u0301.txt", content: "b" }],
+      Array.from({ length: 5 }, (_, index) => ({ path: `${index}.txt`, content: "x".repeat(500 * 1024) })),
+      Array.from({ length: 129 }, (_, index) => ({ path: `${index}.txt`, content: "x" })),
+    ]) {
+      const doc = bundle(); doc.package.skills.version = 3; doc.package.skills.entries[0].files = files;
+      expect(() => parsePackageDocument(doc)).toThrow();
+    }
+  });
+  it.each([2, 3])("rejects path collisions that the folder installer cannot represent in skills version %i", (version) => {
+    for (const files of [
+      [{ path: "SKILL.md/guide.md", content: "x" }],
+      [{ path: "a.md", content: "a" }, { path: "a.md-other.md", content: "b" }, { path: "a.md/child.md", content: "c" }],
+      [{ path: "Docs/a.md", content: "a" }, { path: "docs/b.md", content: "b" }],
+      [{ path: "É/a.md", content: "a" }, { path: "e\u0301/b.md", content: "b" }],
+    ]) {
+      const doc = bundle(); doc.package.skills.version = version; doc.package.skills.entries[0].files = files;
+      expect(() => parsePackageDocument(doc)).toThrow();
+    }
+  });
   it.each(["../escape.md", "/absolute.md", "x/../../escape.md", "x\\escape.md", ".hidden.md", "folder/.hidden/x.md", "CON.md", "skill.md", "x/a.txt", "x/", "x/one./two.md"]) (
     "refuses unsafe path %s", (path) => {
       const doc = bundle();

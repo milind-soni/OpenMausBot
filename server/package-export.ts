@@ -17,6 +17,7 @@ import {
   pictureMatchesMime,
   RELEASE_NOTES_MAX,
   redactPackageSecrets,
+  skillCompanionsSchema,
   SEED_FILE_MAX_BYTES,
   SEED_MAX_BYTES,
   SEED_MAX_FILES,
@@ -76,9 +77,15 @@ export interface ExportablePackageSkill extends Omit<BotPackageSkill, "name" | "
 }
 
 function sameSkill(a: ExportablePackageSkill, b: ExportablePackageSkill): boolean {
+  const ordered = (files: PackageSkill["files"]) => [...files ?? []].sort((x, y) => x.path < y.path ? -1 : x.path > y.path ? 1 : 0);
   return a.instructions === b.instructions && a.description === b.description &&
     a.source === b.source && a.license === b.license && a.compatibility === b.compatibility &&
-    canonicalJson(a.files ?? []) === canonicalJson(b.files ?? []);
+    canonicalJson(ordered(a.files)) === canonicalJson(ordered(b.files));
+}
+
+export function skillSectionVersion(skills: Iterable<Pick<ExportablePackageSkill, "files">>): 1 | 2 | 3 {
+  const files = [...skills].flatMap((skill) => skill.files?.length ? [skill.files] : []);
+  return !files.length ? 1 : files.every((entries) => skillCompanionsSchema.safeParse(entries).success) ? 2 : 3;
 }
 
 function assignPlaybooks(bots: readonly BotRecord[], idToKey: ReadonlyMap<string, string>) {
@@ -275,6 +282,8 @@ export type TeamExportSkipReason =
   | "skill_file_type"
   | "skill_file_unsafe"
   | "skill_file_limit"
+  | "skill_file_binary"
+  | "skill_file_unreviewed"
   | "skill_conflict"
   | "bot_skill_limit"
   | "team_skill_limit"
@@ -691,7 +700,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
   if (routines.length) definition.routines = routines;
   if (playbooks.length) definition.playbooks = playbooks;
   if (input.preset) definition.presets = [withPresetSkills(input.preset, packageSkills, skipped)];
-  if (packageSkills.size) definition.skills = { version: [...packageSkills.values()].some((skill) => skill.files?.length) ? 2 : 1, entries: [...packageSkills.values()].map((skill) => ({ ...skill })) };
+  if (packageSkills.size) definition.skills = { version: skillSectionVersion(packageSkills.values()), entries: [...packageSkills.values()].map((skill) => ({ ...skill })) };
   if (connections.length) definition.connections = connections;
 
   const { document: redactedDocument, redacted } = redactPackageSecrets({
@@ -802,7 +811,7 @@ export function createLibraryPackageExport(input: LibraryExportInput): LibraryEx
     agents: [],
     presets: [preset],
   };
-  if (packageSkills.size) definition.skills = { version: [...packageSkills.values()].some((skill) => skill.files?.length) ? 2 : 1, entries: [...packageSkills.values()].map((skill) => ({ ...skill })) };
+  if (packageSkills.size) definition.skills = { version: skillSectionVersion(packageSkills.values()), entries: [...packageSkills.values()].map((skill) => ({ ...skill })) };
   const { document: redactedDocument, redacted } = redactPackageSecrets({
     format: PACKAGE_FORMAT, version: PACKAGE_VERSION, package: definition,
   } as PackageDocument);

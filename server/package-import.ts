@@ -9,6 +9,8 @@ import {
 } from "./package-parts.ts";
 import type { BotLimit } from "./host/starter-bot-limit.ts";
 import type { PresetRegistry } from "./presets.ts";
+import { portableFilesForDisk } from "./portable-skill-files.ts";
+import type { SkillFolderFile } from "./skill-folder.ts";
 import type { Routine, RoutineInput, RoutineManager } from "./routines.ts";
 import type { SkillListing, SkillPackageStamp } from "./skills.ts";
 import type { BotRecord, GroupRecord, InstalledPackageMetadata, Store } from "./store.ts";
@@ -48,7 +50,7 @@ export interface PackageImportDeps {
   store: Store;
   routines: Pick<RoutineManager, "create" | "remove"> & Partial<Pick<RoutineManager, "stampInstalledPackage">>;
   skills: {
-    install(botId: string, source: string, files: Array<{ path: string; content: string }>): SkillListing | { error: string };
+    install(botId: string, source: string, files: SkillFolderFile[]): SkillListing | { error: string };
     setEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string };
     installOrg?(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp, files?: PackageSkill["files"]): SkillListing | { error: string };
   };
@@ -346,7 +348,7 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
         const added = org
           ? deps.skills.installOrg!(created.id, `org:${org.ref}@${pkg!.release}`, skill.instructions,
               { installId: org.installId, key: skill.name, release: pkg!.release, ...pair(skillReleaseValue(skill), skillReleaseValue(skill)) }, skill.files)
-          : deps.skills.install(created.id, skill.source ?? `package:${pkg!.id}`, [{ path: "SKILL.md", content: skill.instructions }, ...(skill.files ?? [])]);
+          : deps.skills.install(created.id, skill.source ?? `package:${pkg!.id}`, [{ path: "SKILL.md", content: skill.instructions }, ...portableFilesForDisk(skill.files ?? [])]);
         if ("error" in added) throw new Error(`Package skill "${skillName}" could not be imported: ${added.error}`);
       }
       for (const [path, text] of Object.entries(agent?.seed?.memory ?? {})) {

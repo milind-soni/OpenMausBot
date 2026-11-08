@@ -20,7 +20,9 @@ export function defaultSkillTemplates(fetched: readonly FetchedSkill[]) {
     }))].slice(0, 200);
     const skippedWarnings = omittedFiles.map((file) => `${file.path} was left out of this preset skill`);
     const template = botSkillTemplateSchema.safeParse({ name: parsed.name, description: parsed.description, source: skill.source, text,
-      enabled: false, warnings: [...scanSkillText(text), ...companions.files.flatMap((file) => scanSkillText(file.content).map((warning) => `${file.path}: ${warning}`)), ...skippedWarnings].slice(0, 100),
+      enabled: false, warnings: [...scanSkillText(text), ...companions.files.flatMap((file) => "content" in file
+        ? scanSkillText(file.content).map((warning) => `${file.path}: ${warning}`)
+        : [`${file.path}: binary content cannot be scanned for secrets`]), ...skippedWarnings].slice(0, 100),
       ...(companions.files.length ? { files: companions.files } : {}), ...(omittedFiles.length ? { omittedFiles } : {}) });
     if (!template.success) return { error: template.error.message };
     skills.push(template.data);

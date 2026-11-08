@@ -170,5 +170,11 @@ describe("part names", () => {
       .toBe("Scout · skill · step-31 — a bot can share at most 30 skills (switched-on skills go first)");
     expect(describeSkip({ part: "skills[pricing]", reason: "skill_conflict" }, document)).toBe("pricing · skill — two bots have different skills with this name");
     expect(describeSkip({ part: "skills[extra]", reason: "team_skill_limit" }, document)).toBe("extra · skill — a department can share at most 60 skills");
+    expect(describeSkip({ part: "skills[example].files[assets/a]b.bin]", reason: "skill_file_binary" }, document))
+      .toBe("example · assets/a]b.bin — binary file left out until you choose to include it");
+    expect(describeSkip({ part: "skills[pricing-policy].files[0]", reason: "skill_file_binary" }, document))
+      .toBe("pricing-policy · 0 — binary file left out until you choose to include it");
+    expect(describeSkip({ part: "presets[new-bot-defaults].skills[pricing-policy].files[assets/a]b.bin]", reason: "skill_file_binary" }, document))
+      .toBe("New bot defaults preset · pricing-policy · assets/a]b.bin — binary file left out until you choose to include it");
   });
 });

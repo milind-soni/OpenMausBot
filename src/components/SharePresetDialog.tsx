@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 
 import { t, tFromServer } from "@/lib/i18n";
 import { describePart, describeSkip, preparePictures, saveShareFile, type ShareSkip } from "@/lib/team-share";
-import { api } from "@/state/store";
+import { api, ApiError } from "@/state/store";
 import type { NewBotDefaults } from "../../shared/new-bot-defaults";
 import type { PackageDocument, PackageSummary } from "../../shared/package-format";
 import { SharedSkillFiles } from "./SharedSkillFiles";
@@ -15,6 +15,7 @@ export interface PresetShareResponse {
   redacted: string[];
   skipped: ShareSkip[];
   summary: PackageSummary;
+  skillReviewHash?: string;
 }
 
 export interface PresetShareChoices {
@@ -23,6 +24,7 @@ export interface PresetShareChoices {
   release?: string;
   notes?: string;
   includeNotes: boolean;
+  includeBinarySkillFiles?: boolean;
   picture?: string;
   dryRun?: boolean;
 }
@@ -39,6 +41,7 @@ export function presetShareBody(choices: PresetShareChoices): Record<string, unk
     release: text(choices.release),
     notes: text(choices.notes),
     includeMemory: choices.includeNotes,
+    ...(choices.includeBinarySkillFiles ? { includeBinarySkillFiles: true } : {}),
     ...(choices.picture ? { presetAvatar: choices.picture } : {}),
     ...(choices.dryRun ? { dryRun: true } : {}),
   };
@@ -96,6 +99,8 @@ export function SharePresetDialog({ onClose }: { onClose: () => void }) {
   const [release, setRelease] = useState("");
   const [notes, setNotes] = useState("");
   const [includeNotes, setIncludeNotes] = useState(true);
+  const [includeBinarySkillFiles, setIncludeBinarySkillFiles] = useState(false);
+  const [previewRevision, setPreviewRevision] = useState(0);
   const [includePicture, setIncludePicture] = useState(true);
   const [picture, setPicture] = useState<{ dataUrl?: string; skipped: string[] } | null>(null);
   const [preview, setPreview] = useState<PresetShareResponse | null>(null);
@@ -121,7 +126,7 @@ export function SharePresetDialog({ onClose }: { onClose: () => void }) {
   }, []);
 
   const choices = (dryRun: boolean): PresetShareChoices => ({
-    name, description, release, notes, includeNotes, dryRun,
+    name, description, release, notes, includeNotes, includeBinarySkillFiles, dryRun,
     ...(includePicture && picture?.dataUrl ? { picture: picture.dataUrl } : {}),
   });
 
@@ -144,18 +149,23 @@ export function SharePresetDialog({ onClose }: { onClose: () => void }) {
     }, 250);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picture, includeNotes, includePicture]);
+  }, [picture, includeNotes, includePicture, includeBinarySkillFiles, previewRevision]);
 
   const save = async () => {
     if (saving) return;
     setSaving(true);
     setError("");
     try {
-      const result = await api<PresetShareResponse>("/api/teams/export", { method: "POST", body: JSON.stringify(presetShareBody(choices(false))) });
+      const result = await api<PresetShareResponse>("/api/teams/export", { method: "POST", body: JSON.stringify({
+        ...presetShareBody(choices(false)), ...(preview?.skillReviewHash ? { reviewedSkillHash: preview.skillReviewHash } : {}),
+      }) });
       saveShareFile(result.filename, result.document);
       setSaved(result);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      if (cause instanceof ApiError && cause.body?.code === "skill_preview_stale") {
+        request.current += 1; setPreview(null); setPreviewRevision((current) => current + 1);
+      }
     } finally {
       setSaving(false);
     }
@@ -214,6 +224,13 @@ export function SharePresetDialog({ onClose }: { onClose: () => void }) {
                   <input type="checkbox" className="size-4 accent-accent" checked={includeNotes} onChange={(event) => setIncludeNotes(event.target.checked)} />
                   {t("presetShare.includeNotes")}
                 </label>
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" className="mt-0.5 size-4 accent-accent" checked={includeBinarySkillFiles} onChange={(event) => {
+                    request.current += 1; setPreview(null); setIncludeBinarySkillFiles(event.target.checked);
+                  }} />
+                  {t("teamShare.includeBinarySkillFiles")}
+                </label>
+                <p className="pl-6 text-[12px] leading-relaxed text-ink-secondary">{t("teamShare.binarySkillWarning")}</p>
               </fieldset>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <label className="block text-[13px] text-ink-secondary">{t("presetShare.name")}

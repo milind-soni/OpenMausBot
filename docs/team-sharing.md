@@ -13,14 +13,19 @@ the department name), or from **Templates → Share**.
   64 KB; the dialog stops adding pictures after about 2 MB of them).
 - **Skills.** All skills on the team's bots by default, or the ones you tick.
   The goal is a portable skill directory containing every asset needed to run
-  the skill. Currently `SKILL.md` and UTF-8 Markdown companions travel, including
-  sibling files and nested `references/` files. The preview lists included and
-  omitted files. Scripts, HTML, images, other non-Markdown files, symlinks and
-  hard links and unsafe paths are left out, so check the list before sharing a skill that needs
-  them. Companions are limited to 32 files, 64 KiB each and 512 KiB total per
-  skill, within the existing package size limit. Package text redaction applies
-  to companions too. A source folder above 512 entries, 16 MiB total, or with
-  a file over 2 MiB cannot be safely snapshotted and its skill is left out. A file
+  the skill. UTF-8 text files, including HTML, nested references and scripts,
+  travel with `SKILL.md`; executable bits on text files are retained. Binary
+  companions are left out unless you explicitly choose **Include binary skill
+  files**. Binary files cannot be scanned or redacted for secrets or metadata;
+  inspect them before sharing. The preview lists included and omitted files and
+  identifies scripts and binary files. Links, binary files marked executable,
+  unsafe paths, generated folders, unreviewed additions and credential-like file names are left out. Check the list
+  before sharing a skill that needs them. Companions are limited to 128 files,
+  512 KiB each and 2 MiB total per skill, within the 4 MiB package size limit.
+  Package text redaction applies to text companions too, and can change their
+  contents. Text companions can be opened in the preview. The app checks an
+  expanded bundle against the reviewed preview before saving. A source folder above 512 entries,
+  or with reviewed files above 16 MiB total or 2 MiB each, cannot be safely snapshotted and its skill is left out. A file
   holds at most 30 skills per bot and 60 per team, and one skill per name.
   When you have not chosen, the dialog puts in what fits (switched-on skills
   first) and lists the rest under **Left out**, including a name two bots
@@ -60,24 +65,27 @@ the department name), or from **Templates → Share**.
 
 ## What never goes in the file
 
-Chat history, keys and passwords, model choices, computers, and who can see
-each bot. The file format has no field for any of them. Local MCP servers
-that run a command on this computer are left out, as are routine attachments.
+Chat history, model choices, computers, and who can see each bot. The file
+format has no credential fields. Local MCP servers that run a command on this
+computer are left out, as are routine attachments.
 
 Text can still contain a secret someone typed into it. Before the file is
 written, every text part is checked with the same detectors the app uses for
 its logs. Anything that looks like a key or password is replaced with a
-marker, and the dialog lists which parts were changed. The Admin upload runs
-the same check again and refuses a file that still contains one.
+marker, and the dialog lists which parts were changed. This detection is not
+complete; inspect the text before sharing. Binary companions, if you choose
+them, are not scanned and can contain secrets or metadata. The Admin upload
+runs the same text check again and refuses a file that still contains a match.
 
 The dialog shows, before you save, exactly what the file holds (counted by the
 server from the same export), and afterwards what was removed or left out.
 There is no confirmation step: **Save file** is the decision.
 
-Files with companions use `skills.version: 2` inside the existing package
-envelope. Older readers reject that section rather than silently dropping the
+Markdown-only companions within the original limits use `skills.version: 2`;
+expanded folders use `skills.version: 3` inside the existing package envelope.
+Older readers reject an unsupported section rather than silently dropping its
 files; both the receiving app and an organization's Admin must support it.
-Text-only files keep `skills.version: 1` and their existing stamps. The older
+Skills without companions keep `skills.version: 1` and their existing stamps. The older
 BotMRR export cannot carry companions and refuses such a selection;
 use department sharing to review its included and omitted files.
 
@@ -197,7 +205,11 @@ names), `includeMemory` (default `false` over the API), `avatars` (data URLs
 by bot id) and `dryRun` (count without recording keys). The response is
 `{document, filename, redacted, skipped, summary, choices}`. With
 `skills: "all"` the export puts in the skills that fit and lists the rest in
-`skipped`; a list of names is shared exactly or refused. Every `400` from a
+`skipped`; a list of names is shared exactly or refused. Expanded skill
+folders return `skillReviewHash` on a dry run. Send it as `reviewedSkillHash`
+when saving; a changed folder or missing hash returns `409` without saving.
+Set `includeBinarySkillFiles: true` only after choosing to share unscanned
+binary files. Every `400` from a
 version 2 body also carries `choices: {skills}` (every skill name on the
 team's bots), so a client can offer a different choice. `includeDefaultsPreset:
 true` adds the New bot defaults preset, and `kind: "library"` (instead of

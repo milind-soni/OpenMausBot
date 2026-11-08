@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import { redactSecretsInText } from "./redact.ts";
-import { createBotPackageExport, createTeamPackageExport, shareableAddress, TEAM_TOO_LARGE_MESSAGE, TeamExportError } from "./package-export.ts";
+import { createBotPackageExport, createTeamPackageExport, shareableAddress, skillSectionVersion, TEAM_TOO_LARGE_MESSAGE, TeamExportError } from "./package-export.ts";
 import { parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import type { Routine } from "./routines.ts";
 import type { BotRecord, GroupRecord } from "./store.ts";
 import { includedSkills, requestedSkills, startingTicks } from "../src/lib/team-share-skills.ts";
 
 describe("package export", () => {
+  it("requires the new skills section when a Markdown file carries executable metadata", () => {
+    expect(skillSectionVersion([{}])).toBe(1);
+    expect(skillSectionVersion([{ files: [{ path: "run.md", content: "instructions" }] }])).toBe(2);
+    expect(skillSectionVersion([{ files: [{ path: "run.md", content: "instructions", executable: true }] }])).toBe(3);
+  });
+
   it("preserves the exact cron and timezone through export and import", () => {
     const schedule = { type: "cron" as const, expression: "0 9 L * *", timeZone: "America/New_York" };
     const exported = createBotPackageExport({

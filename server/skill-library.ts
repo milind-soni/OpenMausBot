@@ -10,6 +10,7 @@ import { DATA_DIR, type AppConfig } from "./config.ts";
 import { githubSkillOriginSchema, skillFolderDigest, skillFolderRecordSchema, writeSkillFolder } from "./skill-folder.ts";
 import { entryExistsWithoutFollowing } from "./skill-storage.ts";
 import { snapshotPortableSkill } from "./portable-skill-files.ts";
+import { readBoundedSkillFile } from "./bounded-skill-read.ts";
 import type { GitHubSkillOrigin } from "../shared/skill-import.ts";
 import { isSkillName, parseSkillMd, SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
 import type { SkillPackageStamp } from "./skills.ts";
@@ -274,7 +275,8 @@ function sha256Hex(text: string): string {
 function libraryContentMatches(root: string, entry: SkillLibraryEntry): boolean {
   try {
     const file = join(librarySkillDirectory(root, entry.name), "SKILL.md");
-    if (!existsSync(file) || sha256Hex(readFileSync(file, "utf8")) !== entry.sha256) return false;
+    const bytes = readBoundedSkillFile(file, SKILL_FILE_MAX_BYTES);
+    if (!bytes || sha256Hex(bytes.toString("utf8")) !== entry.sha256) return false;
     return !entry.filesSha256 || skillFolderDigest(librarySkillDirectory(root, entry.name), entry.files ?? []) === entry.filesSha256;
   } catch {
     return false;
@@ -424,7 +426,9 @@ export function readLibrarySkillFile(name: string, root: string = skillsLibraryR
   const entry = readSkillLibraryIndex(root)[name];
   if (!entry) return null;
   try {
-    const text = readFileSync(join(librarySkillDirectory(root, name), "SKILL.md"), "utf8");
+    const bytes = readBoundedSkillFile(join(librarySkillDirectory(root, name), "SKILL.md"), SKILL_FILE_MAX_BYTES);
+    if (!bytes) return null;
+    const text = bytes.toString("utf8");
     return sha256Hex(text) === entry.sha256 ? text : null;
   } catch {
     return null;
@@ -435,7 +439,7 @@ export function exportLibrarySkill(name: string, root: string = skillsLibraryRoo
   if (!isSkillName(name)) return null;
   const entry = readSkillLibraryIndex(root)[name];
   if (!entry) return null;
-  return snapshotPortableSkill(librarySkillDirectory(root, name), () => libraryContentMatches(root, entry) ? readLibrarySkillFile(name, root) : null);
+  return snapshotPortableSkill(librarySkillDirectory(root, name), () => libraryContentMatches(root, entry) ? readLibrarySkillFile(name, root) : null, entry.files ?? []);
 }
 
 export function setLibrarySkillReviewState(

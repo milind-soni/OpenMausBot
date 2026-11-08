@@ -786,7 +786,7 @@ export function TeamLibraryPanel({
 
               {tab === "share" && (
                 <div>
-                  <p className="max-w-2xl text-[13px] leading-relaxed text-ink-secondary">{t("teamLibrary.shareIntro")}</p>
+                  <p className="max-w-2xl text-[13px] leading-relaxed text-ink-secondary">{t("teamLibrary.shareFolderIntro")}</p>
                   {shareableTeams.length === 0 ? (
                     <p className="mt-6 text-[13px] text-ink-secondary">{t("teamLibrary.shareEmpty")}</p>
                   ) : (

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +21,7 @@ const ADMIN = "https://admin.example.com";
 
 let home: string;
 const homes: string[] = [];
+const libraries: Array<{ dispose(): void }> = [];
 
 function release(name: string, edit?: (document: any) => void) {
   const document: any = parsePackageDocument(fixture(name), { trust: "file" });
@@ -81,7 +82,10 @@ async function installation(from?: string) {
   const { Store } = await import("./store.ts");
   const { RoutineManager } = await import("./routines.ts");
   const skills = await import("./skills.ts");
-  const { replaceOrganizationSkill } = await import("./org-skill-update.ts");
+  const { replaceOrganizationSkill, recoverOrganizationSkillLinks } = await import("./org-skill-update.ts");
+  const { setSkillUseGuard } = await import("./skill-use-guard.ts");
+  let skillInUse = false;
+  setSkillUseGuard(() => skillInUse);
   const workspace = await import("./workspace.ts");
   const sections = await import("./section-context.ts");
   const { saveImage } = await import("./attachments.ts");
@@ -112,26 +116,32 @@ async function installation(from?: string) {
   };
   const posted: any[] = [];
   const stamps = vi.fn(skills.skillPackageStamps);
-  const open = (over: { installOrg?: typeof skills.installOrgSkill; replaceOrg?: typeof replaceOrganizationSkill } = {}) => new OrgLibrary({
+  const open = (over: { installOrg?: typeof skills.installOrgSkill; replaceOrg?: typeof replaceOrganizationSkill } = {}) => {
+    const library = new OrgLibrary({
     dataDir: DATA_DIR,
     store,
     routines,
     skills: { list: skills.listSkills, stamps, setEnabled: skills.setSkillEnabled, installOrg: over.installOrg ?? skills.installOrgSkill,
-      replaceOrg: over.replaceOrg ?? replaceOrganizationSkill },
+      replaceOrg: over.replaceOrg ?? replaceOrganizationSkill, recoverOrg: recoverOrganizationSkillLinks },
     sections: { read: (section) => sections.readSectionContext(section)?.text ?? "", write: (section, text) => void sections.writeSectionContext(section, text) },
     presets: presetStore,
     postState: (message) => posted.push(structuredClone(message)),
+    retryDelayMs: 25,
   });
+    libraries.push(library);
+    return library;
+  };
   const writeBlob = (bytes: string | Buffer, name = sha(bytes)) => {
     mkdirSync(join(DATA_DIR, "org-library", "blobs"), { recursive: true });
     writeFileSync(join(DATA_DIR, "org-library", "blobs", `${name}.json`), bytes);
   };
   const statePath = join(DATA_DIR, "org-library", "state.json");
   const readState = () => JSON.parse(readFileSync(statePath, "utf8"));
-  return { store, routines, skills, replaceOrganizationSkill, stamps, parts, sections, DATA_DIR, importDeps, mcp, posted, open, writeBlob, statePath, readState, parseOrgLibraryCatalog };
+  return { store, routines, skills, replaceOrganizationSkill, recoverOrganizationSkillLinks, setSkillInUse: (value: boolean) => { skillInUse = value; }, stamps, parts, sections, DATA_DIR, importDeps, mcp, posted, open, writeBlob, statePath, readState, parseOrgLibraryCatalog };
 }
 
 afterEach(async () => {
+  for (const library of libraries.splice(0)) library.dispose();
   const { closeMessageDb } = await import("./message-db.ts");
   closeMessageDb();
   vi.unstubAllEnvs();
@@ -1008,6 +1018,155 @@ describe("a newer release of an added team", () => {
     return { app, library, first, installId: added.value.result.installId as string, botOf, routineOf, update };
   }
 
+  it("waits for an active task before updating and retries without another catalog", async () => {
+    const { app, library, botOf, update, installId } = await addedTeam();
+    const lead = botOf("lead");
+    const { ensureTaskWorkspaceWithSkills } = await import("./skill-task-links.ts");
+    const task = ensureTaskWorkspaceWithSkills(lead.id, "active-task");
+    const taskSkill = join(task, ".claude", "skills", "pricing-policy", "SKILL.md");
+    const previous = readFileSync(taskSkill, "utf8");
+    const oldDirectory = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    app.setSkillInUse(true);
+    await update();
+    expect(readFileSync(taskSkill, "utf8")).toBe(previous);
+    expect(existsSync(oldDirectory)).toBe(true);
+    expect(app.readState().installs[installId].release).toBe("1.3.0");
+    expect(app.skills.removeSkill(lead.id, "pricing-policy")).toHaveProperty("error");
+    app.setSkillInUse(false);
+    await vi.waitFor(() => expect(app.readState().installs[installId].release).toBe("1.4.0"));
+    await library.settled();
+    // The old link remains usable even after the turn; a later turn refreshes it before dispatch.
+    expect(readFileSync(taskSkill, "utf8")).toBe(previous);
+    expect(existsSync(oldDirectory)).toBe(true);
+    ensureTaskWorkspaceWithSkills(lead.id, "active-task");
+    expect(readFileSync(taskSkill, "utf8")).toContain("Seats are 59 from January.");
+    await vi.waitFor(() => expect(existsSync(oldDirectory)).toBe(false));
+  });
+
+  it("can apply another release while an old task link pins a previous revision", async () => {
+    const { app, botOf, update, installId } = await addedTeam();
+    const lead = botOf("lead");
+    const { ensureTaskWorkspaceWithSkills } = await import("./skill-task-links.ts");
+    const task = ensureTaskWorkspaceWithSkills(lead.id, "old-task");
+    const taskSkill = join(task, ".claude", "skills", "pricing-policy", "SKILL.md");
+    const previous = readFileSync(taskSkill, "utf8"), oldDirectory = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    await update();
+    const next = release("full-team.v2.json", (doc) => {
+      NEXT(doc); doc.package.release = "1.5.0";
+      doc.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").instructions += "\nSecond revision.";
+    });
+    await update(next);
+    expect(app.readState().installs[installId].release).toBe("1.5.0");
+    expect(readFileSync(taskSkill, "utf8")).toBe(previous);
+    expect(existsSync(oldDirectory)).toBe(true);
+    ensureTaskWorkspaceWithSkills(lead.id, "old-task");
+    expect(readFileSync(taskSkill, "utf8")).toContain("Second revision.");
+    await vi.waitFor(() => expect(existsSync(oldDirectory)).toBe(false));
+  });
+
+  it("refuses a new revision when the retained-revision cap is reached", async () => {
+    const { app, botOf, update, installId } = await addedTeam();
+    const lead = botOf("lead");
+    const { ensureTaskWorkspaceWithSkills } = await import("./skill-task-links.ts");
+    const task = ensureTaskWorkspaceWithSkills(lead.id, "pinned-task");
+    const taskSkill = join(task, ".claude", "skills", "pricing-policy", "SKILL.md");
+    const original = readFileSync(taskSkill, "utf8");
+    await update();
+    const manifest = app.skills.orgSkillStorage.readManifest(lead.id), skill = manifest["pricing-policy"]!;
+    const held = skill.pendingRetirements![0]!;
+    skill.pendingRetirements = Array.from({ length: 32 }, () => ({ ...held }));
+    app.skills.orgSkillStorage.writeManifest(lead.id, manifest);
+    await update(release("full-team.v2.json", (doc) => {
+      NEXT(doc); doc.package.release = "1.5.0";
+      doc.package.skills.entries.find((entry: any) => entry.name === "pricing-policy").instructions += "\nAnother revision.";
+    }));
+    expect(app.readState().installs[installId].release).toBe("1.4.0");
+    expect(app.skills.skillPackageStamps(lead.id).find((entry) => entry.name === "pricing-policy")!.stamp.release).toBe("1.4.0");
+    expect(readFileSync(taskSkill, "utf8")).toBe(original);
+  });
+
+  it("retries a failed native link switch even after the skill stamp was written", async () => {
+    const { app, library, botOf, update, installId } = await addedTeam();
+    const lead = botOf("lead");
+    const oldDirectory = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    const link = join(app.DATA_DIR, "workspaces", lead.id, ".claude", "skills", "pricing-policy");
+    rmSync(link); mkdirSync(link); writeFileSync(join(link, "keep.txt"), "user data");
+    await update();
+    expect(app.skills.skillPackageStamps(lead.id).find((skill) => skill.name === "pricing-policy")!.stamp.release).toBe("1.4.0");
+    expect(app.readState().installs[installId].release).toBe("1.3.0");
+    expect(existsSync(oldDirectory)).toBe(true);
+    expect(readFileSync(join(link, "keep.txt"), "utf8")).toBe("user data");
+    expect(app.skills.removeSkill(lead.id, "pricing-policy")).toHaveProperty("error");
+    // The owner removes the obstacle; no catalog or new release is relayed.
+    rmSync(link, { recursive: true });
+    await vi.waitFor(() => expect(app.readState().installs[installId].release).toBe("1.4.0"));
+    await library.settled();
+    expect(existsSync(oldDirectory)).toBe(false);
+    expect(readFileSync(join(link, "SKILL.md"), "utf8")).toContain("Seats are 59 from January.");
+  });
+
+  it("recovers an interrupted link switch after restart without a new catalog", async () => {
+    const { app, library, botOf, update } = await addedTeam();
+    const lead = botOf("lead");
+    const oldDirectory = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    const interrupted = vi.spyOn(app.skills.orgSkillStorage, "syncSkillLinks").mockReturnValue(false);
+    await update();
+    expect(existsSync(oldDirectory)).toBe(true);
+    library.dispose(); interrupted.mockRestore();
+    const restarted = await installation(home);
+    restarted.open();
+    expect(existsSync(oldDirectory)).toBe(false);
+    expect(restarted.skills.skillPackageStamps(lead.id).find((skill) => skill.name === "pricing-policy")!.stamp.release).toBe("1.4.0");
+  });
+
+  it("does not retire an old revision if the bot becomes busy during link synchronization", async () => {
+    const { app, botOf, update } = await addedTeam();
+    const lead = botOf("lead");
+    const oldDirectory = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    const originalSync = app.skills.orgSkillStorage.syncSkillLinks;
+    const changing = vi.spyOn(app.skills.orgSkillStorage, "syncSkillLinks").mockImplementation((...args) => {
+      const result = originalSync(...args); app.setSkillInUse(true); return result;
+    });
+    await update();
+    expect(existsSync(oldDirectory)).toBe(true);
+    expect(app.skills.listSkills(lead.id).find((skill) => skill.name === "pricing-policy")!.warnings).toContainEqual(expect.stringContaining("waiting for safe link"));
+    changing.mockRestore(); app.setSkillInUse(false);
+    await vi.waitFor(() => expect(existsSync(oldDirectory)).toBe(false));
+  });
+
+  it("preserves a disabled state while a failed switch recovers", async () => {
+    const { app, botOf, update, installId } = await addedTeam();
+    const lead = botOf("lead");
+    const oldDirectory = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    const interrupted = vi.spyOn(app.skills.orgSkillStorage, "syncSkillLinks").mockReturnValue(false);
+    await update();
+    expect(app.skills.setSkillEnabled(lead.id, "pricing-policy", false)).toMatchObject({ enabled: false });
+    expect(existsSync(oldDirectory)).toBe(true);
+    interrupted.mockRestore();
+    await vi.waitFor(() => expect(app.readState().installs[installId].release).toBe("1.4.0"));
+    expect(app.skills.listSkills(lead.id).find((skill) => skill.name === "pricing-policy")!.enabled).toBe(false);
+    expect(existsSync(oldDirectory)).toBe(false);
+  });
+
+  it("keeps a pinned old task link until the turn ends, then removes it when the skill is disabled", async () => {
+    const { app, botOf, update } = await addedTeam();
+    const lead = botOf("lead");
+    const { ensureTaskWorkspaceWithSkills } = await import("./skill-task-links.ts");
+    const task = ensureTaskWorkspaceWithSkills(lead.id, "disabled-task"), link = join(task, ".claude", "skills", "pricing-policy");
+    const original = readFileSync(join(link, "SKILL.md"), "utf8");
+    const oldDirectory = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    await update();
+    app.setSkillInUse(true);
+    expect(app.skills.setSkillEnabled(lead.id, "pricing-policy", false)).toMatchObject({ enabled: false });
+    expect(readFileSync(join(link, "SKILL.md"), "utf8")).toBe(original);
+    expect(existsSync(oldDirectory)).toBe(true);
+    app.setSkillInUse(false);
+    ensureTaskWorkspaceWithSkills(lead.id, "disabled-task");
+    expect(existsSync(link)).toBe(false);
+    await vi.waitFor(() => expect(existsSync(oldDirectory)).toBe(false));
+    expect(app.skills.listSkills(lead.id).find((skill) => skill.name === "pricing-policy")!.enabled).toBe(false);
+  });
+
   it("updates reference-only releases, restores the whole bundle on failure and preserves disabled state", async () => {
     const bundle = (version: string, content: string) => release("full-team.v2.json", (doc) => {
       doc.package.release = version;
@@ -1049,6 +1208,104 @@ describe("a newer release of an added team", () => {
     expect(app.skills.listSkills(lead.id).find((s) => s.name === "pricing-policy")!.enabled).toBe(false);
     expect(app.skills.removeSkill(lead.id, "pricing-policy")).toEqual({ removed: true });
     expect(existsSync(directory)).toBe(false);
+  });
+
+  it("tracks binary-only release changes and keeps the old folder on failed updates or local edits", async () => {
+    const bundle = (version: string, binary: string) => release("full-team.v2.json", (doc) => {
+      doc.package.release = version;
+      doc.package.skills.version = 3;
+      doc.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").files = [
+        { path: "assets/example.bin", binary: { base64: binary } },
+        { path: "scripts/render.sh", content: "#!/bin/sh\necho fixture\n", executable: true },
+      ];
+    });
+    let fail = true;
+    const { app, botOf, update } = await addedTeam({ replaceOrg: (botId, source, skill, stamp, expected) =>
+      app.replaceOrganizationSkill(botId, source, skill, stamp, expected, fail ? { writeManifest: () => { throw new Error("fixture disk failure"); } } : {})
+    }, bundle("1.3.0", "AP8="));
+    const lead = botOf("lead");
+    app.skills.setSkillEnabled(lead.id, "pricing-policy", false);
+    const first = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    expect(readFileSync(join(first, "assets", "example.bin"))).toEqual(Buffer.from([0, 255]));
+    await update(bundle("1.4.0", "AAE="));
+    expect(readFileSync(join(first, "assets", "example.bin"))).toEqual(Buffer.from([0, 255]));
+    expect(app.skills.skillPackageStamps(lead.id).find((s) => s.name === "pricing-policy")!.stamp.release).toBe("1.3.0");
+    fail = false;
+    await update(bundle("1.4.0", "AAE="));
+    const second = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    expect(readFileSync(join(second, "assets", "example.bin"))).toEqual(Buffer.from([0, 1]));
+    expect(readFileSync(join(second, "scripts", "render.sh"), "utf8")).toContain("echo fixture");
+    expect(app.skills.listSkills(lead.id).find((s) => s.name === "pricing-policy")!.enabled).toBe(false);
+    writeFileSync(join(second, "assets", "example.bin"), Buffer.from([0, 2]));
+    await update(bundle("1.5.0", "AAM="));
+    expect(readFileSync(join(second, "assets", "example.bin"))).toEqual(Buffer.from([0, 2]));
+    expect(app.skills.skillPackageStamps(lead.id).find((s) => s.name === "pricing-policy")!.stamp.release).toBe("1.4.0");
+  });
+
+  it("keeps the previous bundle and disabled state when publication crosses filesystems", async () => {
+    const bundle = (version: string, content: string) => release("full-team.v2.json", (doc) => {
+      doc.package.release = version;
+      doc.package.skills.version = 2;
+      doc.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").files = [{ path: "references/pricing.md", content }];
+    });
+    let problem = "";
+    const { app, botOf, update } = await addedTeam({ replaceOrg: (botId, source, skill, stamp, expected) => {
+      const result = app.replaceOrganizationSkill(botId, source, skill, stamp, expected, { moveRevision: () => {
+        throw Object.assign(new Error("cross-device link"), { code: "EXDEV" });
+      } });
+      if ("error" in result) problem = result.error;
+      return result;
+    } }, bundle("1.3.0", "old"));
+    const lead = botOf("lead");
+    const { ensureTaskWorkspaceWithSkills } = await import("./skill-task-links.ts");
+    const task = ensureTaskWorkspaceWithSkills(lead.id, "cross-fs-task");
+    const taskReference = join(task, ".claude", "skills", "pricing-policy", "references", "pricing.md");
+    app.skills.setSkillEnabled(lead.id, "pricing-policy", false);
+    const root = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    await update(bundle("1.4.0", "new"));
+    expect(problem).toContain("different filesystems");
+    expect(readFileSync(join(root, "references", "pricing.md"), "utf8")).toBe("old");
+    expect(readFileSync(taskReference, "utf8")).toBe("old");
+    expect(app.skills.listSkills(lead.id).find((skill) => skill.name === "pricing-policy")!.enabled).toBe(false);
+    expect(app.skills.skillPackageStamps(lead.id).find((skill) => skill.name === "pricing-policy")!.stamp.release).toBe("1.3.0");
+    expect(readdirSync(join(app.DATA_DIR, "skill-state", lead.id, "org-skill-staging"))).toEqual([]);
+    expect(readdirSync(join(app.DATA_DIR, "workspaces", lead.id, "skills", ".revisions"))).toEqual([]);
+  });
+
+  it.skipIf(process.platform === "win32")("tracks path-only and mode-only releases and protects a locally changed mode", async () => {
+    const bundle = (version: string, executable: boolean, path = "scripts/render.sh") => release("full-team.v2.json", (doc) => {
+      doc.package.release = version;
+      doc.package.skills.version = 3;
+      doc.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").files = [
+        { path, content: "#!/bin/sh\necho fixture\n", ...(executable ? { executable: true } : {}) },
+      ];
+    });
+    let fail = false;
+    const { app, botOf, update } = await addedTeam({ replaceOrg: (botId, source, skill, stamp, expected) =>
+      app.replaceOrganizationSkill(botId, source, skill, stamp, expected, fail ? { writeManifest: () => { throw new Error("fixture disk failure"); } } : {})
+    }, bundle("1.3.0", false));
+    const lead = botOf("lead");
+    app.skills.setSkillEnabled(lead.id, "pricing-policy", false);
+    const first = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    await update(bundle("1.4.0", false, "scripts/renamed.sh"));
+    const renamed = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    expect(renamed).not.toBe(first);
+    expect(existsSync(join(renamed, "scripts", "render.sh"))).toBe(false);
+    expect(statSync(join(renamed, "scripts", "renamed.sh")).mode & 0o100).toBe(0);
+    fail = true;
+    await update(bundle("1.5.0", true, "scripts/renamed.sh"));
+    expect(statSync(join(renamed, "scripts", "renamed.sh")).mode & 0o100).toBe(0);
+    expect(app.skills.skillPackageStamps(lead.id).find((s) => s.name === "pricing-policy")!.stamp.release).toBe("1.4.0");
+    fail = false;
+    await update(bundle("1.5.0", true, "scripts/renamed.sh"));
+    const second = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    const script = join(second, "scripts", "renamed.sh");
+    expect(statSync(script).mode & 0o100).toBe(0o100);
+    expect(app.skills.listSkills(lead.id).find((s) => s.name === "pricing-policy")!.enabled).toBe(false);
+    chmodSync(script, 0o600);
+    await update(bundle("1.6.0", false, "scripts/renamed.sh"));
+    expect(statSync(script).mode & 0o100).toBe(0);
+    expect(app.skills.skillPackageStamps(lead.id).find((s) => s.name === "pricing-policy")!.stamp.release).toBe("1.5.0");
   });
 
   it("keeps a newly added local file if the skill changes while an update is staged", async () => {
@@ -1127,26 +1384,27 @@ describe("a newer release of an added team", () => {
     await update();
     interrupted.mockRestore();
     writeFileSync(join(oldDirectory, "local.md"), "Keep my notes\n");
-    expect(app.skills.removeSkill(lead.id, "pricing-policy")).toHaveProperty("error", expect.stringContaining("previous skill folder changed"));
+    expect(app.recoverOrganizationSkillLinks(lead.id)).toHaveProperty("error", expect.stringContaining("previous skill folder changed"));
+    expect(app.skills.removeSkill(lead.id, "pricing-policy")).toHaveProperty("error", expect.stringContaining("previous skill revision"));
     expect(readFileSync(join(oldDirectory, "local.md"), "utf8")).toBe("Keep my notes\n");
     expect(app.skills.listSkills(lead.id).some((skill) => skill.name === "pricing-policy")).toBe(true);
   });
 
-  it("keeps a locally changed older revision when the active organization skill is removed", async () => {
+  it("keeps a locally changed older revision and defers removal until recovery", async () => {
     const { app, botOf, update } = await addedTeam();
     const lead = botOf("lead");
     await update();
     const older = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
     const sync = app.skills.orgSkillStorage.syncSkillLinks;
     const changing = vi.spyOn(app.skills.orgSkillStorage, "syncSkillLinks").mockImplementation((...args) => {
-      sync(...args); writeFileSync(join(older, "local.md"), "Keep my notes\n");
+      const result = sync(...args); writeFileSync(join(older, "local.md"), "Keep my notes\n"); return result;
     });
     await update(release("full-team.v2.json", (doc) => {
       NEXT(doc); doc.package.release = "1.5.0";
       doc.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").instructions += "\nAnother revision.";
     }));
     changing.mockRestore();
-    expect(app.skills.removeSkill(lead.id, "pricing-policy")).toEqual({ removed: true });
+    expect(app.skills.removeSkill(lead.id, "pricing-policy")).toHaveProperty("error", expect.stringContaining("previous skill revision"));
     expect(readFileSync(join(older, "local.md"), "utf8")).toBe("Keep my notes\n");
   });
 
@@ -1158,11 +1416,12 @@ describe("a newer release of an added team", () => {
     await update();
     interrupted.mockRestore();
     if (changed) writeFileSync(join(oldDirectory, "local.md"), "Keep my notes\n");
+    else expect(app.recoverOrganizationSkillLinks(lead.id)).toEqual({ ok: true });
     const { migrateBotSkillsToLibrary } = await import("./skills-library-migration.ts");
     const report = migrateBotSkillsToLibrary(lead.id);
     const outcome = report.outcomes.find((item) => item.name === "pricing-policy");
     if (changed) {
-      expect(outcome).toMatchObject({ outcome: "skipped", detail: expect.stringContaining("previous skill folder changed") });
+      expect(outcome).toMatchObject({ outcome: "skipped", detail: expect.stringContaining("previous skill revision") });
       expect(readFileSync(join(oldDirectory, "local.md"), "utf8")).toBe("Keep my notes\n");
       expect(app.skills.listSkills(lead.id).some((skill) => skill.name === "pricing-policy")).toBe(true);
     } else {

@@ -71,8 +71,9 @@ function switchOff(deps: OrgLibraryDeps, installId: string): void {
 }
 
 /** Brings each added team up to its catalog release; the ids of the installs it moved to a new release. */
-export function applyUpdates(context: ReleaseContext): string[] {
+export function applyUpdates(context: ReleaseContext): { updated: string[]; retry: boolean } {
   const updated: string[] = [];
+  let retry = false;
   for (const [installId, install] of Object.entries(context.installs)) {
     if (context.currentInstallId(install.packageId) !== installId || install.status !== "installed" || install.kind !== "team") continue;
     const entry = context.entries.find((candidate) => candidate.packageId === install.packageId);
@@ -89,6 +90,7 @@ export function applyUpdates(context: ReleaseContext): string[] {
       update.brief();
     } catch (error) {
       // The parts written so far carry their new stamps, so the next catalog picks up from here.
+      if ((error as { retryable?: boolean } | null)?.retryable) retry = true;
       console.warn(`[org-library] could not finish updating ${install.name || install.packageId}: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
@@ -97,7 +99,7 @@ export function applyUpdates(context: ReleaseContext): string[] {
     install.updatedAt = context.now();
     updated.push(installId);
   }
-  return updated;
+  return { updated, retry };
 }
 
 /** The parts the update writes; the others stay as they were added (see docs/org-library.md). */
@@ -174,7 +176,7 @@ class InstallUpdate {
         if (partHash(value) === have.stamp.r || !this.deps.skills.replaceOrg) continue;
         const result = this.deps.skills.replaceOrg(bot.id, source, skill, stamp, have.stamp);
         if ("stale" in result) continue;
-        if ("error" in result) throw new Error(`skill ${name} could not be updated: ${result.error}`);
+        if ("error" in result) throw Object.assign(new Error(`skill ${name} could not be updated: ${result.error}`), { retryable: result.retryable === true });
         changed = true;
       } else if (before && !before.includes(name) && !this.deps.skills.list(bot.id).some((listed) => listed.name === name)) {
         const added = this.deps.skills.installOrg(bot.id, source, skill.instructions, stamp, skill.files);

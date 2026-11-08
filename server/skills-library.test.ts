@@ -29,6 +29,9 @@ describe("skills library store", () => {
     library.installLibrarySkill({ name: "bundle", instructions: SKILL("bundle"), source: "fixture", root, reviewState: "approved",
       files: [{ path: "references/guide.md", content: "library guide" }] });
     expect(library.exportLibrarySkill("bundle", root)?.files).toEqual([{ path: "references/guide.md", content: "library guide" }]);
+    writeFileSync(join(root, "skills", "bundle", "added.md"), "not reviewed");
+    expect(library.exportLibrarySkill("bundle", root)).toMatchObject({ files: [{ path: "references/guide.md", content: "library guide" }],
+      skipped: [{ path: "added.md", reason: "skill_file_unreviewed" }] });
     writeFileSync(join(root, "skills", "bundle", "references", "guide.md"), "changed");
     expect(library.exportLibrarySkill("bundle", root)).toBeNull();
   });
