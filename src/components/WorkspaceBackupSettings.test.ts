@@ -168,6 +168,8 @@ describe("Settings full backups", () => {
       fixture.api.mockResolvedValueOnce({ busy: false, pendingRestore: false, lastRestoreId: "stage-id" });
       await vi.advanceTimersByTimeAsync(3_000);
       expect(window.location.reload).toHaveBeenCalledOnce();
+      // A poll that hangs across the restart times out instead of stopping the wait.
+      expect(fixture.api.mock.calls.filter(([path, init]) => path === "/api/workspace-backup/status" && init?.timeoutMs === 10_000)).toHaveLength(3);
       await vi.advanceTimersByTimeAsync(9_000);
       expect(window.location.reload).toHaveBeenCalledOnce();
       stop();
