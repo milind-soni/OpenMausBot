@@ -985,6 +985,8 @@
   "settings.profile.name": "Adınız",
   "settings.profile.aboutMe": "Hakkımda",
   "settings.profile.aboutMeHelp": "Özel ve grup sohbetlerinde her botla paylaşılır. Otomatik olarak kaydedilir.",
+  "settings.profile.everyBotRules": "Tüm botlar için kurallar",
+  "settings.profile.everyBotRulesPlaceholder": "Her bot bunlara uyar. Farklı olduklarında botun kendi talimatları geçerlidir.",
   "settings.profile.saving": "Kaydediliyor…",
   "settings.profile.saved": "Kaydedildi",
   "settings.profile.saveError": "Kaydedilemedi. Değişiklikleriniz hâlâ burada.",
@@ -5572,5 +5574,9 @@
   "remote.client.endsDec7": "Bu bağlantı türü 7 Aralık'ta sona eriyor. Sonrasında bu bilgisayarı diğer bilgisayarın Telefon ve cihazlar bölümünden yeniden eşleştirin.",
   "phone.code.pairingCode": "Eşleştirme kodu",
   "phone.code.typeIntro": "{app} uygulamasını açın ve bu eşleştirme kodunu yazın.",
-  "phone.signIn.emailCode": "E-postanızdaki oturum açma kodu"
+  "phone.signIn.emailCode": "E-postanızdaki oturum açma kodu",
+  "botPanel.heavy": "Bu bot her turda çok şey yüklüyor.",
+  "botPanel.tidyMemory": "Belleği düzenle",
+  "memory.journal.instructions": "talimatlar",
+  "memory.journal.actor.teamSetup": "Ekip kurulumu"
 }

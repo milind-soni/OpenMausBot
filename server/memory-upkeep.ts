@@ -559,7 +559,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const first = readRaw(botId, "MEMORY.md") ?? "";
     const candidates = organizeCandidates(first, today, core);
     if (!candidates.length) return 0;
-    const answer = await askModel(engine, organizePrompt(candidates, memoryTopicIndex(botId)));
+    const answer = await askModel(engine, organizePrompt(candidates, memoryTopicIndex(botId), today));
     if (answer === null || cancelled(started) || !upkeepEnabled(deps.bot(botId))) return 0;
     const before = readRaw(botId, "MEMORY.md") ?? "";
     if (before !== first) return 0;
