@@ -344,6 +344,56 @@ describe("openFolder for a folder a chat links to", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.deepEqual(opened, []);
   });
+
+  it("gives up on a link lookup that never answers and opens nothing when it answers late", async () => {
+    const { opened, open } = shell();
+    let answer;
+    const fsp = {
+      realpath: (target) => new Promise((resolve) => { answer = () => resolve(target); }),
+      stat: async (target) => {
+        if (target.endsWith("Info.plist")) throw Object.assign(new Error("gone"), { code: "ENOENT" });
+        return { isFile: () => false, isDirectory: () => true };
+      },
+    };
+    assert.equal(await openFolder("/Volumes/stale/Reports", { open, fsp, checkMs: 20 }), "not-folder");
+    answer();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(opened, []);
+  });
+
+  it("refuses a drive path that links to a network share", async () => {
+    const { opened, open } = shell();
+    const fsp = {
+      realpath: async () => "\\\\server\\share\\Reports",
+      stat: () => assert.fail("a network share must not be looked up"),
+    };
+    assert.equal(await openFolder("C:\\Users\\Maus\\Reports", { open, fsp, pathApi: path.win32 }), "not-folder");
+    assert.deepEqual(opened, []);
+  });
+
+  it("treats a bundle check it can't make (no permission) as a bundle", async () => {
+    const { opened, open } = shell();
+    const fsp = {
+      realpath: async (target) => target,
+      stat: async (target) => {
+        if (target.endsWith("Info.plist")) throw Object.assign(new Error("gone"), { code: "EACCES" });
+        return { isFile: () => false, isDirectory: () => true };
+      },
+    };
+    assert.equal(await openFolder("/Users/maus/Locked", { open, fsp }), "not-folder");
+    assert.deepEqual(opened, []);
+  });
+
+  it("counts an open the system never answers as done", async () => {
+    const fsp = {
+      realpath: async (target) => target,
+      stat: async (target) => {
+        if (target.endsWith("Info.plist")) throw Object.assign(new Error("gone"), { code: "ENOENT" });
+        return { isFile: () => false, isDirectory: () => true };
+      },
+    };
+    assert.equal(await openFolder("/home/maus/Reports", { open: () => new Promise(() => {}), fsp, openMs: 20 }), "opened");
+  });
 });
 
 describe("openLogsFolder", () => {
