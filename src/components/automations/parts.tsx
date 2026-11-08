@@ -26,7 +26,8 @@ export function FixButton({ automation, status, actions, onEdit, className }: {
   const fix = status.fix;
   const waiting = fix === "answer" ? automation.runs.find((run) => run.status === "waiting") : undefined;
   const onClick = () => {
-    if (fix === "answer" || fix === "sign-in") actions.openRun(automation, automation.runs.find((run) => run.status !== "queued"));
+    if (fix === "answer") actions.openRun(automation, waiting);
+    else if (fix === "sign-in") actions.openRun(automation, automation.runs.find((run) => run.status !== "queued"));
     else if (fix === "usage") dispatch({ type: "toggleAppSettings", open: true, section: "usage" });
     else if (fix === "edit") onEdit();
     else if (fix === "reconnect") dispatch({ type: "togglePlugins", open: true, surface: "apps" });
