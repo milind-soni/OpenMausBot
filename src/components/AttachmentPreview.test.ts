@@ -33,6 +33,8 @@ describe("attachment image navigation", () => {
     expect(previewKeyAction("ArrowRight", 3)).toBe("next");
     expect(previewKeyAction("ArrowRight", 1)).toBeNull();
     expect(previewKeyAction("Enter", 3)).toBeNull();
+    expect(previewKeyAction("ArrowLeft", 3, true)).toBe("next");
+    expect(previewKeyAction("ArrowRight", 3, true)).toBe("previous");
   });
 
   it("uses compact responsive grids for one, two, and many images", () => {

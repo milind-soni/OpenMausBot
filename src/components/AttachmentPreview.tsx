@@ -66,10 +66,10 @@ export function wrappedImageIndex(index: number, step: -1 | 1, count: number): n
 
 export type PreviewKeyAction = "close" | "previous" | "next" | null;
 
-export function previewKeyAction(key: string, count: number): PreviewKeyAction {
+export function previewKeyAction(key: string, count: number, rtl = false): PreviewKeyAction {
   if (key === "Escape") return "close";
-  if (count > 1 && key === "ArrowLeft") return "previous";
-  if (count > 1 && key === "ArrowRight") return "next";
+  if (count > 1 && key === (rtl ? "ArrowRight" : "ArrowLeft")) return "previous";
+  if (count > 1 && key === (rtl ? "ArrowLeft" : "ArrowRight")) return "next";
   return null;
 }
 
@@ -490,7 +490,7 @@ export function AttachmentPreviewDialog({
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialogRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
-      const action = previewKeyAction(event.key, items.length);
+      const action = previewKeyAction(event.key, items.length, getComputedStyle(dialogRef.current ?? document.documentElement).direction === "rtl");
       if (action) {
         event.preventDefault();
         event.stopPropagation();
@@ -637,7 +637,7 @@ export function AttachmentPreviewDialog({
                 aria-label={t("attach.previous")}
                 className="absolute start-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm hover:bg-black/75 hover:text-white sm:start-4"
               >
-                <ChevronLeft size={21} />
+                <ChevronLeft size={21} className="rtl:-scale-x-100" />
               </button>
               <button
                 type="button"
@@ -645,7 +645,7 @@ export function AttachmentPreviewDialog({
                 aria-label={t("attach.next")}
                 className="absolute end-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm hover:bg-black/75 hover:text-white sm:end-4"
               >
-                <ChevronRight size={21} />
+                <ChevronRight size={21} className="rtl:-scale-x-100" />
               </button>
             </>
           )}

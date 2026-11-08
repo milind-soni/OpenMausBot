@@ -67,7 +67,7 @@ it("marks the place on screen with a pill on the rail's edge, a short one on hov
   const pill = (id: string) => host.querySelector(`[data-rail-place="${id}"] [data-rail-pill]`);
   expect(pill("home")?.getAttribute("data-rail-pill")).toBe("page");
   expect(pill("home")?.getAttribute("class")).toEqual(expect.stringContaining("h-4"));
-  expect(pill("home")?.getAttribute("class"), "on the rail's left edge, outside the tile").toEqual(expect.stringContaining("-left-1.5"));
+  expect(pill("home")?.getAttribute("class"), "on the rail's left edge, outside the tile").toEqual(expect.stringContaining("-start-1.5"));
   expect(pill("a")?.getAttribute("data-rail-pill")).toBe("hover");
   expect(pill("a")?.getAttribute("class")).toEqual(expect.stringContaining("group-hover/tile:opacity-100"));
   expect(pill("pending:c-b"), "nothing to open yet: no pill").toBeNull();

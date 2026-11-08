@@ -106,9 +106,7 @@ export function cloudEngineChoices(engines: CloudEngineChoices, { handing = fals
       return (
         <div id="cloud-sign-in-panel" className="step-open mt-3">
           <div className="relative rounded-2xl border border-hairline/50 bg-card px-4 pb-4 pt-4">
-            <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)]" style={{ transform: `translateX(${(index / choices.length) * 100}%)` }}>
-              <span className="absolute top-0 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border-s border-t border-hairline/50 bg-card" style={{ left: `${50 / choices.length}%` }} />
-            </span>
+            <span aria-hidden="true" className="pointer-events-none absolute top-0 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border-l border-t border-hairline/50 bg-card transition-[inset-inline-start] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] rtl:translate-x-1/2" style={{ insetInlineStart: `${((index + 0.5) / choices.length) * 100}%` }} />
             <div key={open} className="animate-rise">
               {instance
                 ? <EngineSetup instance={instance} unframed />

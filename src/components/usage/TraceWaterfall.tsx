@@ -221,11 +221,11 @@ export function TraceWaterfall({ detail, now, actions }: { detail: TraceDetail; 
       <div role="tree" aria-label={t("trace.spans")} className="border-t border-hairline/40">
         <div className="grid grid-cols-1 border-b border-hairline/40 sm:grid-cols-[minmax(220px,38%)_1fr]">
           <div className="hidden px-5 py-2.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary sm:block">{t("trace.span")}</div>
-          <div ref={track} className="relative mx-4 h-9 sm:ms-0 sm:me-6 sm:border-s sm:border-hairline/40">
+          <div ref={track} className="relative mx-4 h-9 sm:ml-0 sm:mr-6 sm:border-l sm:border-hairline/40">
             {axis.ticks.map((tick, index) => (
               <span
                 key={tick}
-                className={cn("absolute top-1/2 -translate-y-1/2 text-[12px] tabular-nums text-ink-tertiary", index === axis.ticks.length - 1 ? "-translate-x-full" : index > 0 && "-translate-x-1/2", index === 0 && "ps-2")}
+                className={cn("absolute top-1/2 -translate-y-1/2 text-[12px] tabular-nums text-ink-tertiary", index === axis.ticks.length - 1 ? "-translate-x-full" : index > 0 && "-translate-x-1/2", index === 0 && "pl-2")}
                 style={{ left: `${(tick / axis.max) * 100}%` }}
               >{formatTick(tick)}</span>
             ))}
@@ -245,7 +245,7 @@ export function TraceWaterfall({ detail, now, actions }: { detail: TraceDetail; 
                 title={tokens ?? undefined}
                 data-kind={row.node.kind}
               >
-                <div className="flex h-9 min-w-0 items-center gap-2 pe-3" style={{ paddingLeft: 12 + row.depth * 18 }}>
+                <div className="flex h-9 min-w-0 items-center gap-2 pe-3" style={{ paddingInlineStart: 12 + row.depth * 18 }}>
                   {row.expandable ? (
                     <button
                       type="button"
@@ -259,7 +259,7 @@ export function TraceWaterfall({ detail, now, actions }: { detail: TraceDetail; 
                   <RowName row={row} models={state.instances} />
                   {rowFailed(row.node) && row.node.kind === "turn" && <X size={13} className="shrink-0 text-danger" aria-label={t("trace.failed")} />}
                 </div>
-                <div className="relative mx-4 h-7 sm:ms-0 sm:me-6 sm:h-9 sm:border-s sm:border-hairline/40" style={grid}>
+                <div className="relative mx-4 h-7 sm:ml-0 sm:mr-6 sm:h-9 sm:border-l sm:border-hairline/40" style={grid}>
                   <RowBar row={row} origin={origin} axisMax={axis.max} badges={badges} now={now} trackPx={trackPx} />
                   {nowPct !== null && <span className="absolute inset-y-0 w-px bg-accent/70" style={{ left: `${nowPct}%` }} />}
                 </div>

@@ -171,7 +171,7 @@ describe("the Simple composer in a bot chat", () => {
   it("sets the composer on plain canvas from its top edge down, with no fade above it", () => {
     render({ bot });
     const backdrop = container.querySelector("[data-composer-backdrop]")!.className.split(" ");
-    expect(backdrop).toEqual(expect.arrayContaining(["bg-app", "top-0", "-bottom-4", "-left-5", "-right-5"]));
+    expect(backdrop).toEqual(expect.arrayContaining(["bg-app", "top-0", "-bottom-4", "-start-5", "-end-5"]));
     expect(backdrop.some((name) => /gradient|blur|^from-|^to-|^opacity/.test(name))).toBe(false);
   });
 
@@ -366,7 +366,7 @@ describe("the Advanced composer", () => {
       type("Okay I have done my outreach.\nAnother line of text.");
       expect(classes(".mention-editor")).toEqual(expect.arrayContaining(["order-first", "basis-full"]));
       expect(classes("[data-composer-row]")).toContain("flex-wrap");
-      expect(classes("[data-composer-actions]")).toContain("ml-auto");
+      expect(classes("[data-composer-actions]")).toContain("ms-auto");
       type("Okay I have done my outreach.");
       expect(stacked()).toBe(false);
       expect(classes("[data-composer-row]")).not.toContain("flex-wrap");

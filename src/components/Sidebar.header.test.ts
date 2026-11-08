@@ -117,7 +117,7 @@ describe("sidebar top row", () => {
     expect(buttons).toBeGreaterThan(switcher);
     expect(row.slice(buttons).match(/<button/g)).toHaveLength(1);
     const rowClasses = classesOf(row, "data-sidebar-top-row");
-    expect(rowClasses).toEqual(expect.arrayContaining(["relative", "pl-4", "pr-2"]));
+    expect(rowClasses).toEqual(expect.arrayContaining(["relative", "ps-4", "pe-2"]));
     expect(rowClasses).not.toContain("px-4");
     expect(classesOf(row, "data-sidebar-top-slot")).toEqual(expect.arrayContaining(["@container/sidebar-top", "min-w-0", "flex-1"]));
     expect(row).toContain('<div data-sidebar-top-spacer="true" class="min-w-0 flex-1 @min-[96px]/sidebar-top:min-w-6"></div>');
@@ -165,7 +165,7 @@ describe("sidebar top row", () => {
       const row = topRow(html);
       expect(row).not.toContain("data-traffic-light-space");
       expect(row).not.toContain("bg-[#ff5f57]");
-      expect(classesOf(row, "data-sidebar-top-row")).toEqual(expect.arrayContaining(["relative", "h-12", "pl-4", "pr-2"]));
+      expect(classesOf(row, "data-sidebar-top-row")).toEqual(expect.arrayContaining(["relative", "h-12", "ps-4", "pe-2"]));
       const { slot, spacer, switcher, buttons } = order(row);
       expect(slot).toBeGreaterThan(-1);
       expect(spacer).toBeGreaterThan(slot);

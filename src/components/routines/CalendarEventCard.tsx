@@ -135,7 +135,7 @@ export function CalendarEventCard({
         height: `${height}px`,
         background: `color-mix(in srgb, ${color} ${paused ? 6 : 16}%, var(--color-card))`,
         borderColor: `color-mix(in srgb, ${color} 40%, transparent)`,
-        borderLeftColor: color,
+        borderInlineStartColor: color,
         color: `color-mix(in srgb, ${color} 55%, var(--color-ink))`,
       }}
     >

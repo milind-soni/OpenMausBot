@@ -34,7 +34,7 @@ describe("screen words", () => {
 
   it("know a secret field in each language", () => {
     for (const label of ["Password", "Enter your PIN", "One‑time code", "Passwort", "Contraseña", "Mot de passe", "Codice PIN", "Senha", "Hasło", "Пароль", "Пін-код",
-      "Şifre", "Mật khẩu", "पासवर्ड", "비밀번호", "암호", "인증번호", "パスワード", "暗証番号", "密码", "验证码", "密碼", "كلمة المرور", "رمز التحقق", "رقم البطاقة"]) {
+      "Şifre", "Mật khẩu", "पासवर्ड", "비밀번호", "암호", "인증번호", "パスワード", "暗証番号", "密码", "验证码", "密碼", "كلمة المرور", "كلمة مرور", "رمز التحقق", "رقم البطاقة"]) {
       expect(namesSecret(label), label).toBe(true);
     }
     for (const label of ["Username", "Email", "Search", "Pinned", "Shopping list", "Benutzername", "Имя пользователя", "Notes", "اسم المستخدم", "البريد الإلكتروني", ""]) {
