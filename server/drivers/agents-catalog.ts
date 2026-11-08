@@ -743,11 +743,11 @@ const TOOL_DEFINITIONS = [
   {
     name: "skills_list",
     description:
-      "List this bot's skills (enabled and disabled) and any staged skill writes still waiting for the user's decision, or pass query to find the enabled skills that fit a task, including ones not listed in your prompt. Use this before skill_manage to avoid duplicate names. Listing does not enable anything.",
+      "List this bot's skills (enabled and disabled) and any staged skill writes still waiting for the user's decision; pass query to find enabled skills for a task. Use this before skill_manage to avoid duplicate names. Listing does not enable anything.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      properties: { query: { type: "string", maxLength: 300, description: "A few words about the task: returns the best matching skills, what each does and where to read it." } },
+      properties: { query: { type: "string", maxLength: 300, description: "Words about the task; returns the best matches and where to read each." } },
     },
   },
   {
