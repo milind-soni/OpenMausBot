@@ -60,12 +60,28 @@ export function agentBrowserReleaseVersion(asset: AgentBrowserReleaseAsset | nul
   return asset?.version ?? AGENT_BROWSER_VERSION;
 }
 
+/**
+ * The Linux-family key for this platform, or null when Vercel publishes nothing usable.
+ *
+ * Android is not musl: Termux runs the platform's bionic loader, so neither
+ * `linux-<arch>` (glibc) nor `linux-musl-<arch>` describes it. What actually works
+ * there is the statically linked musl build, which carries its own libc and needs no
+ * interpreter at all. Keying Android to `linux-musl-<arch>` therefore picks the one
+ * asset that runs, instead of reporting a build that does exist as missing.
+ */
+function linuxFamilyKey(platform: NodeJS.Platform, arch: string, musl: boolean): string {
+  if (platform === "android") return `linux-musl-${arch}`;
+  if (platform === "linux" && musl) return `linux-musl-${arch}`;
+  return `${platform}-${arch}`;
+}
+
 /** The asset for this machine, or null where Vercel publishes none. */
 export function resolveAgentBrowserReleaseAsset(
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
   musl = false,
 ): AgentBrowserReleaseAsset | null {
-  const key = platform === "linux" && musl ? `linux-musl-${arch}` : `${platform}-${arch}`;
-  return RELEASES.get(key) ?? null;
+  return RELEASES.get(linuxFamilyKey(platform, arch, musl)) ?? null;
 }
+
+export { linuxFamilyKey };
