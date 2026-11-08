@@ -215,7 +215,7 @@ const click = (node: Node) => (node.props.onClick as () => void)();
 const change = (node: Node, value: string) => (node.props.onChange as (event: unknown) => void)({ target: { value } });
 const submit = (node: Node) => (node.props.onSubmit as (event: unknown) => void)({ preventDefault: () => {} });
 const key = (node: Node, name: string) => {
-  const event = { key: name, defaultPrevented: false, target: null, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+  const event = { key: name, nativeEvent: { isComposing: false, keyCode: 0 }, defaultPrevented: false, target: null, preventDefault: vi.fn(), stopPropagation: vi.fn() };
   (node.props.onKeyDown as (event: unknown) => void)(event);
   return event;
 };
@@ -1307,4 +1307,34 @@ describe("the panel's switches", () => {
     expect(html).toContain("background-color:#377FE6");
     expect(Switch).toBeDefined();
   });
+});
+
+describe("the hero while an input method is composing", () => {
+  const hero = (bot: Bot) => capture(() => PanelHero({ bot, activeState: "idle", patch, editorOpen: false, onToggleEditor: vi.fn() }));
+  const composingKey = (node: Node, name: string, nativeEvent: { isComposing: boolean; keyCode: number }) => {
+    const event = { key: name, nativeEvent, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    (node.props.onKeyDown as (event: unknown) => void)(event);
+    return event;
+  };
+
+  for (const [field, open, input] of [
+    ["name", "data-panel-rename", "data-panel-rename-input"],
+    ["label", "data-panel-label", "data-panel-label-input"],
+  ] as const) {
+    it(`keeps the ${field} field open, and the panel where it is, when Enter or Escape belongs to the input method`, () => {
+      const bot = makeBot();
+      click(find(hero(bot), open));
+      change(find(hero(bot), input), "Ni");
+      for (const nativeEvent of [{ isComposing: true, keyCode: 13 }, { isComposing: false, keyCode: 229 }]) {
+        for (const name of ["Enter", "Escape"]) {
+          const event = composingKey(find(hero(bot), input), name, nativeEvent);
+          expect(event.preventDefault).not.toHaveBeenCalled();
+          // The panel goes back a page on an Escape that reaches it.
+          expect(event.stopPropagation).toHaveBeenCalled();
+        }
+      }
+      expect(patch).not.toHaveBeenCalled();
+      expect(find(hero(bot), input).props.value).toBe("Ni");
+    });
+  }
 });

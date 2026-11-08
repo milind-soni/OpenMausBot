@@ -3,6 +3,7 @@ import { Crown, Pencil } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { imeComposing } from "@/lib/send-key";
 import type { MausState } from "@/lib/mascot";
 import type { Bot } from "@/state/store";
 import { BOT_PROFILE_LIMITS } from "../../../shared/bot-profile";
@@ -33,6 +34,8 @@ function useInlineEdit(save: (value: string) => void) {
     setDraft(null);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    // Enter and Escape that pick or cancel an input-method candidate belong to the IME, not to this field or the panel.
+    if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; }
     if (event.key === "Enter") {
       event.preventDefault();
       settled.current = true;

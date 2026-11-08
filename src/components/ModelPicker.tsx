@@ -440,7 +440,7 @@ export function ModelPicker({
   const follows = threadId ? profile.tasks?.find((task) => task.threadId === threadId)?.followsBotModel : undefined;
   const botModelInstance = state.instances.find((instance) => instance.instanceId === profile.modelSelection.instanceId);
   const botModelName = botModelInstance ? `${engineDisplayName(botModelInstance)} · ${modelLabel(botModelInstance, profile.modelSelection.model)}${variantSuffix(botModelInstance, profile.modelSelection.model, profile.modelSelection.variant)}` : profile.modelSelection.model;
-  const busyUpdatesBotDefault = Boolean(threadId) && (simpleView ? simpleUpdatesBotDefault : scope === "bot")
+  const busyUpdatesBotDefault = Boolean(threadId) && simpleUpdatesBotDefault && (simpleView || scope === "bot")
     && bot.modelSelection.instanceId === profile.modelSelection.instanceId && bot.modelSelection.model === profile.modelSelection.model;
   const ownModelThreads = threadsOnOwnModel(profile.modelSelection, profile.tasks ?? []).length;
 
@@ -466,7 +466,7 @@ export function ModelPicker({
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
     if (variant !== undefined) nextSelection.variant = variant;
-    const updateBotDefault = !threadId || (simpleView ? simpleUpdatesBotDefault : scope === "bot");
+    const updateBotDefault = !threadId || (simpleUpdatesBotDefault && (simpleView || scope === "bot"));
     const targets = [currentTaskBot(profile, threadId ?? bot.threadId), ...(updateBotDefault ? [profile] : [])];
     if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
       state.instances.find((candidate) => candidate.instanceId === target.modelSelection.instanceId)?.driverKind,
@@ -701,7 +701,7 @@ export function ModelPicker({
           onAddApiKeys={remote ? undefined : openApiKeys} />}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-          {threadId && (
+          {threadId && simpleUpdatesBotDefault && (
             <div className="shrink-0 border-b-[0.5px] border-ink/10 px-3.5 py-2">
               <div role="group" aria-label={t("model.scope.label")} className="flex gap-1">
                 {(["thread", "bot"] as const).map((value) => (
@@ -886,7 +886,7 @@ export function ModelPicker({
                   compact
                   bot={shown}
                   threadId={threadId}
-                  updateBotDefault={Boolean(threadId && scope === "bot")}
+                  updateBotDefault={Boolean(threadId && simpleUpdatesBotDefault && scope === "bot")}
                   className="shrink-0 border-t-[0.5px] border-ink/10 px-3.5 py-[5px]"
                   label={<span className="text-[13px] leading-[18px] text-ink">{active?.capabilities?.modelVariants ? t("model.simple.reasoning") : t("model.section.effort")}</span>}
                 />

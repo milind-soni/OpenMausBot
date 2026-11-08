@@ -68,4 +68,9 @@ describe("skin overlay chrome", () => {
     expect(skinChrome("halloween")).toEqual({ color: "#110d16", symbolColor: "#c2b3cc" });
     expect(isKnownSkin("halloween")).toBe(true);
   });
+
+  it("paints Aurora's near-black ground behind the caption buttons", () => {
+    expect(skinChrome("aurora")).toEqual({ color: "#0b0c0b", symbolColor: "#b4bab4" });
+    expect(skinIsLight("aurora")).toBe(false);
+  });
 });

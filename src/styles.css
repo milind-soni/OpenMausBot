@@ -1005,6 +1005,69 @@
   --identity-chrome: #B3BAC4;
 }
 
+[data-skin="aurora"] {
+  --code-color-scheme: dark;
+  --color-app: #0b0c0b;
+  --color-panel: #131413;
+  --color-frame: var(--color-panel);
+  --color-raised: #1d1f1d;
+  --color-raised-hover: #272a27;
+  --color-composer: #161816;
+  --color-composer-ring: #2c302c;
+  --color-card: #1a1c1a;
+  --color-menu: #1a1c1a;
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
+  --color-inset: #151715;
+  --color-control: #242724;
+  --color-hairline: #343834;
+
+  --color-ink: #f2f5f2;
+  --color-ink-secondary: #f2f5f2a8;
+  --color-ink-tertiary: #f2f5f291;
+
+  --color-accent: #3ccf73;
+  --color-accent-border: #5ad98a;
+  --color-accent-text: #6ee69a;
+  --color-focus: #5ad98a;
+  --color-accent-ink: #04170b;
+  --color-bubble-user: #18432c;
+  --color-bubble-user-ink: #ecfff2;
+
+  --color-success: #4ade80;
+  --color-danger: #ff5f6d;
+  --color-danger-ink: #2a0508;
+  --color-success-ink: #052e16;
+  --color-warning: #f5a524;
+  --color-scrollbar: #343834;
+  --color-maus-line: #f2f5f2;
+
+  --color-edge: #f2f5f20f;
+
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", system-ui, sans-serif;
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 14px;
+  --radius-3xl: 16px;
+  --radius-4xl: 18px;
+  --identity-green: #009957;
+  --identity-blue: #377FE6;
+  --identity-red: #D94B52;
+  --identity-orange: #E78531;
+  --identity-purple: #8a65cd;
+  --identity-cyan: #0EA5C6;
+  --identity-pink: #D84F8B;
+  --identity-yellow: #D8A729;
+  --identity-teal: #01A492;
+  --identity-coral: #E5634E;
+  --identity-silver: #A8ADB4;
+  --identity-chrome: #B3BAC4;
+}
+
 /* Every popover and menu in the menu tone, flat in Midnight and on a soft lift in Daylight. A popover's rim is its
    border, never a ring, so clearing box-shadow leaves the rim. */
 .popover-surface {
@@ -2896,6 +2959,53 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   }
 }
 
+/* Fixed to the window, so the band runs on unbroken from one pane to the next. Its dots are drawn at one CSS pixel
+   each, so the field scales up pixelated; the pane's contents scale as usual. */
+@scope ([data-skin="aurora"]:not([data-skin-preview])) to ([data-skin]) {
+  main.bg-app {
+    background-image: var(--aurora-field, none);
+    background-size: var(--aurora-field-size, cover);
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    image-rendering: pixelated;
+  }
+  main.bg-app > * {
+    image-rendering: auto;
+  }
+}
+
+@media (prefers-reduced-transparency: no-preference) and (forced-colors: none) {
+  @scope ([data-skin="aurora"]:not([data-skin-preview])) to ([data-skin]) {
+    main.bg-app :is(.bg-card, .bg-composer, .bg-bubble-user) {
+      -webkit-backdrop-filter: blur(28px) saturate(150%);
+      backdrop-filter: blur(28px) saturate(150%);
+    }
+    main.bg-app .glass-bar[data-glass-fade]::before,
+    main.bg-app [data-composer-backdrop] {
+      background: color-mix(in srgb, var(--color-app) 35%, transparent);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      backdrop-filter: blur(20px) saturate(140%);
+    }
+    main.bg-app .glass-bar[data-glass-fade]::before {
+      mask-image: linear-gradient(to bottom, black 40%, transparent);
+    }
+    main.bg-app [data-composer-backdrop] {
+      mask-image: linear-gradient(to bottom, transparent, black 20px);
+    }
+  }
+  /* In Tailwind's own layer, at a utility's weight, so hover and expanded fills still win over the glass. */
+  @layer utilities {
+    @scope ([data-skin="aurora"]:not([data-skin-preview])) to ([data-skin]) {
+      :where(main.bg-app) :is(.bg-card, .bg-composer) {
+        background-color: color-mix(in srgb, var(--color-card) 62%, transparent);
+      }
+      :where(main.bg-app) .bg-bubble-user {
+        background-color: color-mix(in srgb, var(--color-bubble-user) 78%, transparent);
+      }
+    }
+  }
+}
+
 /* Disabled buttons.
    Upstream fades them with `disabled:opacity-40`. On a dark ground that holds:
    the button stays darker than the page and the white label survives. On a
@@ -3046,7 +3156,7 @@ button:disabled.bg-danger {
   outline-offset: -1.5px;
 }
 :root,
-:is([data-skin="midnight"], [data-skin="foundry"], [data-skin="graphite"], [data-skin="dusk"], [data-skin="halloween"]) {
+:is([data-skin="midnight"], [data-skin="foundry"], [data-skin="graphite"], [data-skin="dusk"], [data-skin="halloween"], [data-skin="aurora"]) {
   --radius-menu: 12px;
   --menu-shadow: 0 14px 32px -10px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.35);
 }

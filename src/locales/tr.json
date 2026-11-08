@@ -3859,7 +3859,7 @@
   "connectors.typeAria": "Eklenti türü",
   "connectors.tab.apps": "Bağlı uygulamalar",
   "connectors.tab.mcp": "MCP sunucuları",
-  "connectors.stale": "Son bağlantı durumu gösteriliyor — bu Mac'in kimlik bilgisi deposu az önce açılamadı, bu nedenle bunlar tekrar kontrol edilemedi. Uygulamalarınız hâlâ bağlıdır; {app}'u yeniden başlatmak genellikle bu sorunu çözer.",
+  "connectors.stale": "Son bağlantı durumu gösteriliyor — kimlik bilgisi deposu az önce açılamadı, bu nedenle bunlar tekrar kontrol edilemedi. Uygulamalarınız hâlâ bağlıdır; {app}'u yeniden başlatmak genellikle bu sorunu çözer.",
   "connectors.viewAria": "Bağlı uygulamalar görünümü",
   "connectors.tab.marketplace": "Marketplace",
   "connectors.tab.connected": "Bağlandı",
