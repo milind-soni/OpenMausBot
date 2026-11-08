@@ -6003,6 +6003,7 @@
   "backup.replace": "Replace installation",
   "backup.restoring": "Preparing replacement…",
   "backup.serverRestarting": "The backup is ready to restore. {app} is restarting to finish it. This page carries on by itself in a minute or two.",
+  "backup.serverRestartSlow": "This is taking longer than usual. If this page has not carried on in a few more minutes, reload it.",
   "backup.restart": "The backup is ready to restore. Fully quit {app} and reopen it to finish. For a self-hosted server, restart the server process, then reload this browser. Do not just close this window.",
   "backup.restartDesktop": "Your backup is ready. Restart {app} to finish restoring it. Closing this window will not restart the server.",
   "backup.restartAction": "Restart and restore",

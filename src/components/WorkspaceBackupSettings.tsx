@@ -16,6 +16,7 @@ const validPassword = (value: string) => value.length >= 12 && value.length <= 1
 export function WorkspaceBackupRestartNotice({ onRetry, serverRestarts = false }: { onRetry?: () => void; serverRestarts?: boolean } = {}) {
   const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState(false);
+  const [slow, setSlow] = useState(false);
   const lock = useRef(false);
   const retry = useRef(onRetry);
   retry.current = onRetry;
@@ -33,10 +34,13 @@ export function WorkspaceBackupRestartNotice({ onRetry, serverRestarts = false }
       else window.location.reload();
     });
     timer = setTimeout(check, 3_000);
-    return () => { alive = false; clearTimeout(timer); };
+    // Keeps waiting (and keeps the restore marker), but says so when the restart takes much longer than usual.
+    const slowTimer = setTimeout(() => { if (alive) setSlow(true); }, 180_000);
+    return () => { alive = false; clearTimeout(timer); clearTimeout(slowTimer); };
   }, [serverRestarts]);
   if (serverRestarts) return <div role="status" className="flex max-w-lg items-center gap-3 text-[14px]">
-    <Loader2 aria-hidden="true" size={15} className="animate-spin" /><p>{t("backup.serverRestarting")}</p>
+    <Loader2 aria-hidden="true" size={15} className="shrink-0 animate-spin" />
+    <div className="flex flex-col gap-2"><p>{t("backup.serverRestarting")}</p>{slow && <p>{t("backup.serverRestartSlow")}</p>}</div>
   </div>;
   const relaunch = typeof window !== "undefined" && !window.ogb?.remoteClient?.active ? window.ogb?.relaunch : undefined;
   const restart = async () => {

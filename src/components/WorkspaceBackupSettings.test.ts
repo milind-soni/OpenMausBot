@@ -175,6 +175,21 @@ describe("Settings full backups", () => {
     expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
   });
 
+  it("on a server that restarts itself, says so when the restart takes much longer, and keeps waiting", async () => {
+    storage.set("omb-pending-workspace-restore", "stage-id");
+    vi.useFakeTimers();
+    try {
+      expect(render("cloud").html).not.toContain("longer than usual");
+      const stop = fixture.effects[0]() as () => void;
+      fixture.api.mockRejectedValue(new Error("Server unavailable"));
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(render("cloud").html).toContain("longer than usual");
+      expect(window.location.reload).not.toHaveBeenCalled();
+      stop();
+    } finally { vi.useRealTimers(); }
+    expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
+  });
+
   it("on a server that restarts itself, reloads to sign-in when the restored workspace does not know this browser", async () => {
     vi.useFakeTimers();
     try {

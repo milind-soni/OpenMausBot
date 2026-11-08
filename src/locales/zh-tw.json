@@ -6004,6 +6004,8 @@
   "backup.restartDesktop": "你的備份已準備就緒。請重新啟動 {app} 以完成還原。關閉這個視窗不會重新啟動伺服器。",
   "backup.restartAction": "重新啟動並還原",
   "backup.restartFailed": "無法重新啟動 {app}。請完全結束應用程式後重新開啟，以完成還原。",
+  "backup.serverRestarting": "備份已準備好還原。{app} 正在重新啟動以完成還原。此頁面會在一兩分鐘內自動繼續。",
+  "backup.serverRestartSlow": "這比平常花更久的時間。如果此頁面在幾分鐘後仍未繼續，請重新載入。",
   "backup.recovering": "正在還原此瀏覽器已儲存的草稿與偏好設定…",
   "backup.skipDrafts": "繼續，但不還原草稿",
   "backup.skipDraftsHint": "保留此瀏覽器目前的草稿與偏好設定。這不會復原安裝實例的還原。",
