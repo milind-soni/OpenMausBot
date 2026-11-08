@@ -285,7 +285,12 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     delete canonical.groupId;
     delete canonical.doneWhen;
     if (canonical.bot_ids === undefined) canonical.bot_ids = args.botIds;
-    if (canonical.group_id === undefined) canonical.group_id = args.groupId;
+    // Both destination spellings are accepted and the documented group_id wins, but a blank group_id must not mask a
+    // nonblank groupId from an older tool list.
+    const snakeBlank = canonical.group_id === undefined || canonical.group_id === null
+      || (typeof canonical.group_id === "string" && canonical.group_id.trim() === "");
+    // A non-text groupId still fails the check below, as it always has.
+    if (snakeBlank && args.groupId != null && !(typeof args.groupId === "string" && args.groupId.trim() === "")) canonical.group_id = args.groupId;
     if (canonical.done_when === undefined) canonical.done_when = args.doneWhen;
     const ids = canonical.bot_ids;
     const optional = (key: string, type: "boolean" | "string") => canonical[key] === undefined || typeof canonical[key] === type;
@@ -294,7 +299,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       && (canonical.thread === undefined || (typeof canonical.thread === "string" && /^[\w-]{1,128}$/.test(canonical.thread)))
       && (canonical.reply === undefined || canonical.reply === "resume" || canonical.reply === "none")
       && optional("consult", "boolean") && optional("in_my_folder", "boolean")
-      && optional("done_when", "string") && optional("reason", "string") && optional("title", "string") && optional("answers", "string");
+      && optional("done_when", "string") && optional("reason", "string") && optional("title", "string") && optional("answers", "string")
+      && (canonical.group_id === undefined || canonical.group_id === null || typeof canonical.group_id === "string");
     if (!usable) {
       return {
         text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
@@ -302,7 +308,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       };
     }
     const r = await api("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
-      groupId: canonical.group_id, botIds: ids, message: canonical.message,
+      groupId: typeof canonical.group_id === "string" && canonical.group_id.trim() ? canonical.group_id.trim() : undefined, botIds: ids, message: canonical.message,
       reason: typeof canonical.reason === "string" && canonical.reason.trim() ? canonical.reason.trim() : undefined,
       rework: canonical.rework,
       thread: canonical.thread, reply: canonical.reply,

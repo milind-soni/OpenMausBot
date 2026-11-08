@@ -26,6 +26,12 @@ describe("recall terms and query", () => {
     expect(recallTerms("What is my balance, -10 or 10? Do you remember C++ v2.1!")).toEqual(["balance", "-10", "10", "c++", "v2.1"]);
   });
 
+  it("splits selected CJK punctuation without breaking signs, symbols or versions", () => {
+    expect(recallTerms("「本季度预算审批结果？」、【采购计划】；《项目安排》：（预算，审批。进度！）-10、C++、v2.1")).toEqual([
+      "本季度预算审批结果", "采购计划", "项目安排", "预算", "审批", "进度", "-10", "c++", "v2.1",
+    ]);
+  });
+
   it("drops greetings, so a hello never recalls a bot's own greeting", () => {
     expect(recallTerms("Hi! Quick intro: I'm Omkar")).toEqual(["intro", "omkar"]);
     expect(recallQuery("hello there, thanks!")).toBeNull();

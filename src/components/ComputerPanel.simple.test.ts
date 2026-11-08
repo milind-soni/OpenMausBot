@@ -102,6 +102,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 
 const { ComputerPanel } = await import("./ComputerPanel");
+const { FullScreenButton } = await import("./FullScreenButton");
 const { ComputerFilesPane } = await import("./ComputerFilesPane");
 const { CloudBackendPicker } = await import("./CloudBackendPicker");
 const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
@@ -117,6 +118,12 @@ function nodes(value: ReactNode): Node[] {
     return [node, ...nodes(node.props.children)];
   });
 }
+/** The action row's buttons by label; Full screen is its own component (watch-only until control is held). */
+function actionLabels(row: Node): string[] {
+  return nodes(row.props.children).filter((node) => node.type === "button" || node.type === FullScreenButton)
+    .map((node) => node.type === FullScreenButton ? "Full screen" : text(node.props.children));
+}
+
 function text(value: ReactNode): string {
   return Children.toArray(value).map((child) => {
     if (typeof child === "string" || typeof child === "number") return String(child);
@@ -604,7 +611,7 @@ describe("Technical controls", () => {
     fixture.seed = { phase: "ready", resolved: { botId: "scout", threadId: "thread-scout", computer: "cloud", cloudBackend: "box" } };
     const simple = render(cloud());
     const row = simple.nodes.find((node) => node.props["data-testid"] === "computer-actions")!;
-    expect(nodes(row.props.children).filter((node) => node.type === "button").map((node) => text(node.props.children)))
+    expect(actionLabels(row))
       .toEqual(["Take control", "Full screen", "Sleep"]);
 
     fixture.advanced = true;
@@ -629,7 +636,7 @@ describe("Technical controls", () => {
     expect(simple.html).not.toContain("Open two desktops");
     expect(simple.html).not.toContain("Delete this bot");
     const row = simple.nodes.find((node) => node.props["data-testid"] === "computer-actions")!;
-    expect(nodes(row.props.children).filter((node) => node.type === "button").map((node) => text(node.props.children)))
+    expect(actionLabels(row))
       .toEqual(["Take control", "Full screen"]);
 
     fixture.advanced = true;

@@ -483,6 +483,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     delete process.env.FAKE_CLAUDE_PROMPTS;
     delete process.env.FAKE_CLAUDE_TRANSIENTS;
     delete process.env.FAKE_CLAUDE_PARTIAL_FAILS;
+    delete process.env.FAKE_CLAUDE_ANSWERED_FAILS;
     delete process.env.FAKE_CLAUDE_STATE;
     delete process.env.FAKE_CLAUDE_RETRY_SCALE;
     delete process.env.FAKE_CLAUDE_TEXT_HANG;
@@ -3320,6 +3321,21 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.filter((e) => e.type === "turn.completed" && e.turnId === second.turnId))
       .toMatchObject([{ ok: true }]);
   });
+
+  it("never sends a turn again once one of its model calls answered, even when the exit reads transient", async () => {
+    process.env.FAKE_CLAUDE_TRANSIENTS = "1";
+    process.env.FAKE_CLAUDE_ANSWERED_FAILS = "1";
+    const state = join(scratch, "launches-answered");
+    process.env.FAKE_CLAUDE_STATE = state;
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-answered", text: "go" });
+
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "turn.retrying")).toEqual([]);
+    expect(recorder.events.filter((e) => e.type === "turn.completed")).toMatchObject([{ ok: false, stopReason: "exit_before_result" }]);
+    expect(readFileSync(state, "utf8")).toBe("1");
+  }, 20_000);
 
   it("stops retrying at the attempt cap and settles the turn as failed", async () => {
     process.env.FAKE_CLAUDE_TRANSIENTS = "9";
