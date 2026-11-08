@@ -912,6 +912,7 @@ const support = (
       || await canRunOpenCode(env, config.cli, loadCatalog);
   },
   classifyError: classifyOpenCodeError,
+  limitScope: openCodeLimitScope,
   describeAccountError: describeOpenCodeAccountError,
   resolveModels: async (environment, config, instanceId, fresh) => {
     if (fresh) markOpenCodeCatalogRefreshed(instanceId, (sources.now ?? Date.now)());
@@ -932,6 +933,15 @@ const ACCOUNT_ERROR_TEXT: ReadonlyArray<readonly [RegExp, AccountErrorCode]> = [
   // "User not found." is OpenRouter's refusal of an unknown key (opencode 1.18.27).
   [/invalid api key|api key (?:is )?(?:invalid|missing|revoked|expired)|incorrect api key|unauthori[sz]ed|\b401\b|authentication (?:failed|required)|(?:^|internal error: )user not found\b/iu, "invalid_credentials"],
 ];
+
+/** A usage limit that only OpenCode's free models met: the paid Go and Zen models on the same login still work, so the
+ * refusal holds that model and leaves the account available. */
+const FREE_MODEL_LIMIT = /\bfree(?:UsageLimitError|\s+usage\s+limit)\b/iu;
+
+/** How far a usage limit OpenCode reported reaches: a free model's own allowance, or the whole account. */
+export function openCodeLimitScope(text: string): "engine" | "model" {
+  return FREE_MODEL_LIMIT.test(text) ? "model" : "engine";
+}
 
 export function classifyOpenCodeError(error: unknown): ProviderErrorCode | undefined {
   const value = error && typeof error === "object" ? error as Record<string, unknown> : {};

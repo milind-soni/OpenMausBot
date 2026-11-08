@@ -17,6 +17,7 @@ import {
   describeOpenCodeAccountError,
   discoverOpenCodeModels,
   openCodeFreeFallback,
+  openCodeLimitScope,
   openCodeOwnedDirectories,
   OpenCodeDriver,
   openCodeProviderKeysAllowed,
@@ -322,6 +323,19 @@ describe("OpenCode catalog", () => {
     "Internal error: 429 Too Many Requests: rate limit has been exceeded, retry in 20s",
   ])("leaves a transient rate limit unclassified: %s", (message) => {
     expect(classifyOpenCodeError(apiError(message))).toBeUndefined();
+  });
+
+  // A Go subscriber can still run out of Zen's free models: the paid Go and Zen models on the same login keep working,
+  // so that refusal holds only the free model, never the whole OpenCode account.
+  it.each([
+    ['AI_APICallError: Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go', "model"],
+    ["Internal error: FreeUsageLimitError: free models are limited today", "model"],
+    ['OpenCode reached a usage limit (“Free usage limit reached. Free models work in OpenCode”) and is waiting it out without replying, so this turn was stopped.', "model"],
+    ["Internal error: Monthly usage limit reached for this key", "engine"],
+    ["Internal error: GoUsageLimitError: the Go allowance is used up", "engine"],
+    ["GoUsageLimitError: usage limit reached", "engine"],
+  ] as const)("reads how far the usage limit reaches: %s", (message, expected) => {
+    expect(openCodeLimitScope(message)).toBe(expected);
   });
 
   it("classifies OpenCode 2's authentication refusal and leaves real internal errors alone", () => {
@@ -828,6 +842,28 @@ describe("OpenCode turns without a sign-in gate", () => {
       const { done, events } = await f.run("t-go-limit", "opencode/big-pickle");
       expect(done).toMatchObject({ ok: false, stopReason: "quota" });
       expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ limit: "engine", message: expect.stringMatching(/usage limit/i) });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.restoreAllMocks();
+    }
+  });
+
+  // Recorded from opencode 1.18.27 with a `-free` model on an account that still has Go allowance: the refusal is Zen's
+  // free-tier limit, so it holds that model alone and the account stays usable on a Go model.
+  it("holds only the free model a Go account's free allowance limited, not the account", async () => {
+    vi.spyOn(quietStatus, "sampleProcessTree").mockResolvedValue({ cpuMs: 0, connections: 0 });
+    vi.stubEnv("OMB_ACP_QUIET_NOTICE_MS", "300");
+    vi.stubEnv("OMB_ACP_QUIET_TICK_MS", "50");
+    vi.stubEnv("OMB_ACP_LIMIT_QUIET_MS", "400");
+    const row = `timestamp=2026-11-07T10:13:43.366Z level=ERROR run=fixture_run message="stream error" providerID=opencode modelID=deepseek-v4.1-flash-free session.id={session} small=false agent=build mode=primary error.error="AI_APICallError: Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go"`;
+    const f = await open("opencode-go-free-limit", () => ({
+      FAKE_ACP_MODE: "quiet-then-answer", FAKE_ACP_QUIET_MS: "30000", FAKE_ACP_MODELS: "opencode/deepseek-v4.1-flash-free",
+      FAKE_ACP_OPENCODE_LOG: JSON.stringify([row]),
+    }));
+    try {
+      const { done, events } = await f.run("t-go-free-limit", "opencode/deepseek-v4.1-flash-free");
+      expect(done).toMatchObject({ ok: false, stopReason: "quota" });
+      expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ limit: "model", message: expect.stringMatching(/usage limit/i) });
     } finally {
       vi.unstubAllEnvs();
       vi.restoreAllMocks();
