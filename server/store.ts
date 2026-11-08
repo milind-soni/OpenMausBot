@@ -1192,18 +1192,20 @@ export class Store {
     if (!anchorExists || t.activeLeafId === anchorId) return this.appendMessage(threadId, message);
     const full: Message = { id: newId(), at: Date.now(), ...redactBotAuthored(message), parentId: anchorId };
     const children = t.messages.filter((m) => m.parentId === anchorId);
-    t.messages.push(full);
-    mdb.insertMessage(threadId, full);
-    if (full.kind === "screen") {
-      for (const pruned of this.pruneScreenFrames(t)) {
-        mdb.updateMessage(threadId, pruned);
-        this.emit({ type: "message.patch", threadId, message: pruned });
-      }
-    }
+    const childIds = new Set(children.map((child) => child.id));
+    const next = { messages: [...t.messages.map((m) => childIds.has(m.id)
+      ? { ...m, parentId: full.id }
+      : full.kind === "screen" && m.kind === "screen" ? { ...m } : m), full] };
+    const pruned = full.kind === "screen" ? this.pruneScreenFrames(next) : [];
+    const updates = next.messages.filter((m) => childIds.has(m.id) || pruned.includes(m));
+    mdb.insertMessageWithUpdates(threadId, full, updates);
+    t.messages = next.messages;
     this.noteThreadActivity(threadId, full.at, movesThreadToTop(full), full.turnCompletedAt ?? full.at);
     this.emit({ type: "message", threadId, message: full });
     // After the insert, so no client ever sees two siblings claiming the same parent.
-    for (const child of children) this.patchMessage(threadId, child.id, { parentId: full.id });
+    for (const message of updates) {
+      this.emit({ type: "message.patch", threadId, message });
+    }
     return full;
   }
 
@@ -1248,9 +1250,9 @@ export class Store {
       ...(sender ? { sender } : {}),
       ...(dataContext ? { dataContext } : {}),
     };
+    mdb.appendMessage(threadId, full);
     t.messages.push(full);
     t.activeLeafId = full.id;
-    mdb.appendMessage(threadId, full);
     this.noteThreadActivity(threadId, full.at, true);
     this.emit({ type: "message", threadId, message: full });
     // A client adopts a new message as its leaf only when it chains onto its leaf; a sibling needs this pointer.
@@ -1267,8 +1269,8 @@ export class Store {
       if (!children.length) break;
       cur = children.reduce((a, b) => (b.at >= a.at ? b : a)).id;
     }
-    t.activeLeafId = cur;
     mdb.setActiveLeaf(threadId, cur);
+    t.activeLeafId = cur;
     this.emit({ type: "thread", threadId, activeLeafId: cur });
     return cur;
   }
