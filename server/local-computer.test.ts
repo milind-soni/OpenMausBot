@@ -59,7 +59,7 @@ function linuxDescriptor(userData: string, { session = "x11" }: { session?: "x11
     generation: "01234567-89ab-cdef-0123-456789abcdef",
     driver: {
       path: binary,
-      version: "0.19.3",
+      version: "0.41.3",
       source: "environment",
       manifestSchema: "1",
       fileIdentity,
@@ -67,7 +67,7 @@ function linuxDescriptor(userData: string, { session = "x11" }: { session?: "x11
     daemon: {
       socketPath: socket,
       pid: process.pid,
-      contractVersion: "0.6.0",
+      contractVersion: "0.8.0",
       toolsListSchemaVersion: "1",
       capabilityVersion: "1",
       mcpProtocolVersion: "2025-06-18",

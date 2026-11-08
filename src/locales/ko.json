@@ -5076,7 +5076,7 @@
   "computer.preview.cantConnect": "화면에 연결하지 못했어요.",
   "computer.preview.retry": "미리보기 다시 시도",
   "computer.linux.title": "로컬 제어",
-  "computer.linux.meta": "베타 · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.19.3",
+  "computer.linux.meta": "베타 · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.41.3",
   "computer.linux.ready": "준비됨",
   "computer.linux.waylandBadge": "Wayland에서는 사용 불가",
   "computer.linux.waylandBefore": "로컬 제어는 Ubuntu Xorg에서 쓸 수 있어요. Wayland에서는 입력 안전 경계가 검증될 때까지 꺼져 있어요. 이 컴퓨터를 쓰려면 로그아웃한 뒤",

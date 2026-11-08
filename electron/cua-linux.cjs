@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const CERTIFIED_DRIVER_VERSION = "0.19.3";
+const CERTIFIED_DRIVER_VERSION = "0.41.3";
 const CERTIFIED_MANIFEST_SCHEMA = "1";
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 512 * 1024;

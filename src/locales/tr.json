@@ -3741,7 +3741,7 @@
   "computer.preview.cantConnect": "Ekrana bağlanılamadı.",
   "computer.preview.retry": "Önizlemeyi tekrar dene",
   "computer.linux.title": "Yerel kontrol",
-  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.19.3",
+  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.41.3",
   "computer.linux.ready": "Hazır",
   "computer.linux.waylandBadge": "Wayland üzerinde kullanılamaz",
   "computer.linux.waylandBefore": "Yerel kontrol Ubuntu Xorg üzerinde kullanılabilir. Giriş güvenliği sınırı doğrulanana kadar Wayland üzerinde devre dışı kalır. Oturumu kapatın ve",

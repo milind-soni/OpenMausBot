@@ -1877,7 +1877,7 @@
   "computer.preview.cantConnect": "स्क्रीन से नहीं जुड़ सके।",
   "computer.preview.retry": "प्रिव्यू फिर आज़माएँ",
   "computer.linux.title": "स्थानीय नियंत्रण",
-  "computer.linux.meta": "बीटा · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.19.3",
+  "computer.linux.meta": "बीटा · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.41.3",
   "computer.linux.ready": "तैयार",
   "computer.linux.waylandBadge": "Wayland पर उपलब्ध नहीं",
   "computer.linux.waylandBefore": "स्थानीय नियंत्रण Ubuntu Xorg पर उपलब्ध है। Wayland पर यह तब तक बंद रहेगा जब तक इसकी इनपुट-सुरक्षा सीमा जाँची न जाए। साइन आउट करें और चुनें",

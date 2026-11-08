@@ -207,10 +207,10 @@ describe("Linux CUA release staging", () => {
       "node_modules",
       ".cache",
       "openmausbot",
-      "cua-driver-rs-0.19.3-linux-x86_64-binary.tar.gz",
+      "cua-driver-rs-0.41.3-linux-x86_64-binary.tar.gz",
     );
     fs.mkdirSync(path.dirname(cache), { recursive: true });
-    fs.writeFileSync(cache, "cua-driver 0.19.3 but not the release bytes");
+    fs.writeFileSync(cache, "cua-driver 0.41.3 but not the release bytes");
     const fetchImpl = vi.fn();
 
     await expect(

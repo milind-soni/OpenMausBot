@@ -4713,7 +4713,7 @@
   "computer.preview.cantConnect": "Не удалось подключиться к экрану.",
   "computer.preview.retry": "Повторить предпросмотр",
   "computer.linux.title": "Локальное управление",
-  "computer.linux.meta": "Бета · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.19.3",
+  "computer.linux.meta": "Бета · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.41.3",
   "computer.linux.ready": "Готово",
   "computer.linux.waylandBadge": "Недоступно на Wayland",
   "computer.linux.waylandBefore": "Локальное управление доступно в Ubuntu Xorg. На Wayland оно остаётся отключённым, пока не проверена граница безопасности ввода. Выйдите из сеанса и выберите",

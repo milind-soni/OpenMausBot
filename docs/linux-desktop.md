@@ -193,7 +193,7 @@ fail-closed on Wayland. XWayland's `DISPLAY` never bypasses the Wayland safety g
 
 ## Enable local control
 
-Installed `.deb` and AppImage builds include the certified **Cua Driver 0.19.3** CLI and cursor-theme sidecar.
+Installed `.deb` and AppImage builds include the certified **Cua Driver 0.41.3** CLI and cursor-theme sidecar.
 On GNOME Xorg, open Settings, choose **Enable local control (Beta)**, wait for **Ready**, then explicitly assign a bot
 to **This computer**. No driver download, terminal command, `chmod`, or daemon setup is required. The owned daemon
 starts with `--no-overlay`, so Cua's decorative full-screen X11 cursor surface is never created. OpenMausBot also
@@ -211,19 +211,19 @@ file permissions. Sign out and choose **Ubuntu on Xorg** from the login-screen s
 preview-only capture, Cloud, or Local VM. Wayland re-enablement requires its own real-seat evidence and will not be
 controlled by an environment override.
 
-The upstream release has no signature or GitHub artifact attestation and is not immutable, so the build uses an
-explicit reviewed digest as its trust anchor:
+Upstream release assets are mutable, so the build uses an explicit reviewed digest as its trust anchor (the release's
+own `checksums.txt` and Sigstore bundles were checked when the digest was reviewed, but the build does not depend on them):
 
-- source commit: `a1672e7b11951275ecfba3384264d4530185d0db`;
-- archive SHA-256: `3db9d4257d84bacaf7eb104d225f85613ce67edbb20d6eeb83c1384b6d8a5b10`;
-- packaged driver SHA-256: `ed5844fadf07b9b72c4a3b3802e1c47233c166d66d6198608d5991f807aab4ac`;
-- packaged cursor-theme SHA-256: `e589b2b7521bbfeaf9e2bfce668a38e80ed1b9790b1327b13d374fc331d8312a`.
+- source commit: `bd0e299c67dec6397b3d41a259452b2ea13a1cd5`;
+- archive SHA-256: `a00a7bc4a648adbcbc93bfbf5a058daf71ce8838ee172e33b197aaf649ecee14`;
+- packaged driver SHA-256: `83030028e7c9e3f4d753b3b27025135d44eb8d52f562cce0aaaf95777bc1b41f`;
+- packaged cursor-theme SHA-256: `d39efb960d207e7328d7a9dd48e3b6565f74be073f9c2ca8dcba86a4d0f28312`.
 
 Packaging verifies the exact archive size, checksum, member names/types/sizes, and inner hashes before extracting
 only those two executables. The app performs no runtime driver download or self-update. Cua's MIT license, the
 embedded Inter font's SIL OFL 1.1 notice, full dependency license texts, MPL source locations, and a CycloneDX
 inventory ship beside the binary; the reviewed source records live in [`third_party/cua-driver`](../third_party/cua-driver/).
-The reviewed native runtime adds roughly 11–13 MiB to a compressed Ubuntu artifact. The ELF
+The reviewed native runtime adds roughly 14–21 MiB to a compressed Ubuntu artifact. The ELF
 requires glibc 2.30 or newer plus the standard Ubuntu X11/XInput/xkbcommon libraries already present on the supported
 Ubuntu 24.04 desktop; the package verifier executes the exact binary from every artifact layout.
 

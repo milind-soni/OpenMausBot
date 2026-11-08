@@ -1933,7 +1933,7 @@
   "computer.preview.cantConnect": "Verbindung zum Bildschirm fehlgeschlagen.",
   "computer.preview.retry": "Vorschau erneut versuchen",
   "computer.linux.title": "Lokale Steuerung",
-  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.19.3",
+  "computer.linux.meta": "Beta · Ubuntu 24.04 GNOME/{session} · Cua Driver 0.41.3",
   "computer.linux.ready": "Bereit",
   "computer.linux.waylandBadge": "Auf Wayland nicht verfügbar",
   "computer.linux.waylandBefore": "Lokale Steuerung ist unter Ubuntu Xorg verfügbar. Unter Wayland bleibt sie deaktiviert, bis ihre Eingabe-Sicherheitsgrenze geprüft ist. Melde dich ab und wähl",
