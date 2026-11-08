@@ -21,7 +21,8 @@ Operator sequence from this directory (these commands mutate the target host):
   sudo python3 /opt/origin-hermes-admin/manage.py health
   sudo systemctl enable --now origin-hermes-update-check.timer
 
-login launches native `hermes model` in the isolated service account. Select
+login requires the gateway already stopped and launches native `hermes model`
+in the isolated service account's protected default-profile mount namespace. Select
 ChatGPT or Codex Subscription, authorize the displayed device code yourself,
 and choose an actual model from that account. This is a SEPARATE Hetzner Hermes
 login; existing native coding CLI credentials on NixOS/Mac are never copied.
@@ -43,7 +44,7 @@ https://hermes-agent.nousresearch.com/docs/integrations/providers
 
 Deploy runtime_repair.py alongside this supervisor. The reviewed WhatsApp repair
 is hash-guarded and applied only to a newly built immutable stage, never live
-node_modules. For an unpaired deployment whose gateway is already stopped:
+node_modules. For a deployment whose gateway is already stopped:
   sudo python3 /opt/origin-hermes-admin/manage.py repair-offline --release /opt/origin-hermes-admin/release.json --maintenance
 This requires the SAME upstream pin and no service-user processes. It probes
 the candidate before activation, retains the previous runtime, never changes
@@ -69,15 +70,21 @@ inspect /opt/origin-hermes-admin/quarantine/ before an explicit manual retry.
 Candidates stage with an empty isolated home and no access to live credentials
 BEFORE downtime. Fresh authenticated health and explicit idle activity, confirmed
 drain, stopped service and a read-back backup precede activation and preflight.
-The supported upstream named-profile layout keeps Python/tools/dependency facts
-under root-owned release ancestors; only the coordinator profile links to private
-data. PM locks/leases are the sole writable runtime paths, never executable roots.
+The dedicated account uses its private DATA as the native default profile.
+A read-only install index binds there; its root-owned symlinks retain original
+PM paths and HERMES_RUNTIME_DIR selects the original immutable tool store.
+The data root itself is bind-mounted against replacement. Only PM locks/leases
+are writable in runtime storage. Native owner maintenance uses the same mounts
+with the gateway stopped. No --force, --replace or deprecated standalone flag
+is used. Hidden build probes and historical profile aliases are never served.
 The managed WhatsApp bridge_script also points into the immutable release; its
 npm dependencies are staged and stamped before startup, never installed live.
 Staging is retained intact across rollback for explicit administrator retry.
-Older deployments must first perform a manual pinned update into this layout
-(the same current release is allowed) before automatic enablement. Recovery can
-still restore the original legacy layout; it does not certify that old layout.
+For existing supervised stages, stop the idle gateway, deploy manage.py,
+runtime_repair.py and the service unit, run repair-offline with the current pin,
+then daemon-reload and start the service. Index entries retain rollback stages.
+Rollback requires a validated supervised stage; unprepared legacy installs are
+not eligible for automatic activation or recovery.
 Deploy the reviewed managed-config baseline/bridge_script setting as administrator
 while retaining the explicitly chosen chat model; missing policy fails preflight.
 Failed health restores old home and release; failed rollback leaves the service
@@ -195,9 +202,8 @@ def as_user(args, **kwargs):
 
 def hermes(*args):
     destination = (BASE / 'current').resolve(strict=True)
-    env = runtime_environment(destination)
-    return as_user(['env', *[key + '=' + value for key, value in env.items()],
-                    destination / '.hermes/bin/hermes', *args], cwd=HOME)
+    return runtime_run(destination, [destination / '.hermes/bin/hermes', *args],
+                       interactive=sys.stdin.isatty())
 
 
 def root_required():
@@ -521,6 +527,40 @@ def runtime_state(destination):
     return destination.parent / 'build-home/.hermes/installs' / key
 
 
+def runtime_index(destination, create=False):
+    """Protected indirection preserves native PM's canonical absolute paths."""
+    trusted(BASE)
+    if create:
+        validate_stage(destination)
+    target = runtime_state(destination)
+    stage_directory(target, destination.parent)
+    index = BASE / 'runtime-installs'
+    if create and not index.exists() and not index.is_symlink():
+        index.mkdir(mode=0o755)
+        index.chmod(0o755)
+    stage_directory(index, BASE)
+    entry = index / target.name
+    if create and not entry.exists() and not entry.is_symlink():
+        entry.symlink_to(target)
+    info = entry.lstat()
+    if (not stat.S_ISLNK(info.st_mode) or info.st_uid != ADMIN_UID
+            or os.readlink(entry) != str(target)):
+        raise ValueError('Runtime install index does not select the immutable stage')
+    return index
+
+
+def validate_runtime_projection(destination):
+    index = runtime_index(destination)
+    projected = DATA / 'installs'
+    # These configured paths contain no mountinfo escape characters. Checking
+    # mountinfo is necessary: ismount() cannot reliably identify same-fs binds.
+    mounts = {line.split()[4] for line in Path('/proc/self/mountinfo').read_text().splitlines()}
+    if (str(DATA) not in mounts or str(projected) not in mounts
+            or not os.path.samefile(index, projected)
+            or not os.statvfs(projected).f_flag & os.ST_RDONLY):
+        raise ValueError('Default-profile data and install index are not protected mounts')
+
+
 def runtime_locks(destination):
     state_root = runtime_state(destination)
     return (state_root / '.install.lock', state_root / 'pm-runtime/.prepare.lock')
@@ -556,11 +596,11 @@ def prepare_runtime_locks(destination):
 
 
 def prepare_runtime(destination):
-    """Upstream's supported named-profile layout separates state from runtime.
+    """Keep code, tools and facts immutable; hide the disposable build probe.
 
-    hermes_constants._hermes_root_of and pm.environments.dependency_home_root
-    keep tools/installs at the immutable default root; only the coordinator
-    profile points at the machine-local private data. No invented override.
+    Live commands use the dedicated default data root. Their mount namespace
+    projects a protected install index while HERMES_RUNTIME_DIR selects the
+    original tool-store path; neither changes the installed dependency facts.
     """
     root = destination.parent
     bridge = destination / 'scripts/whatsapp-bridge'
@@ -588,10 +628,6 @@ def prepare_runtime(destination):
         managed.mkdir(mode=0o755)
         managed.chmod(0o755)
     stage_directory(managed, root)
-    coordinator = profiles / 'coordinator'
-    if coordinator.exists() or coordinator.is_symlink():
-        raise ValueError('Builder supplied the reserved live profile path')
-    coordinator.symlink_to(DATA)
     atomic(build_home / '.gitconfig', '[safe]\n\tdirectory = ' + str(destination) + '\n', mode=0o644)
     prepare_runtime_locks(destination)
 
@@ -656,7 +692,7 @@ def validate_stage(destination):
                 raise ValueError('Executable runtime ownership changed')
             if stat.S_ISLNK(info.st_mode):
                 if item == coordinator and os.readlink(item) == str(DATA):
-                    continue  # Data-only profile; never used as a runtime root.
+                    continue  # Historical stage metadata, never the live runtime home.
                 target = item.resolve(strict=True)
                 if target in locks or (target.is_relative_to(state_root) and '.leases' in target.relative_to(state_root).parts):
                     raise ValueError('Executable symlink points into mutable lock/lease storage')
@@ -681,35 +717,62 @@ def runtime_environment(destination):
         'XDG_STATE_HOME': str(HOME / '.local/state'),
         'HERMES_GATEWAY_LOCK_DIR': str(HOME / '.local/state/hermes/gateway-locks'),
     }
-    if not (destination.parent / 'origin-stage.json').exists():
-        # Recovery of a pre-supervisor installation uses its original layout.
-        return {'HOME': str(HOME), 'HERMES_HOME': str(DATA), **state_environment}
     validate_stage(destination)
     build_home = destination.parent / 'build-home'
-    return {'HOME': str(build_home), 'HERMES_HOME': str(build_home / '.hermes/profiles/coordinator'), **state_environment}
+    return {'HOME': str(build_home), 'HERMES_HOME': str(DATA),
+            'HERMES_RUNTIME_DIR': str(build_home / '.hermes/tools'), **state_environment}
+
+
+def runtime_run(destination, args, *, interactive=False, **kwargs):
+    """Owner maintenance shares the gateway's protected default-profile layout."""
+    root_required()
+    require_offline()
+    index = runtime_index(destination, create=True)
+    if DATA.is_symlink() or not DATA.is_dir() or (DATA / 'installs').is_symlink():
+        raise ValueError('Private runtime mountpoints must not be symlinks')
+    environment = {'PATH': '/usr/local/bin:/usr/bin:/bin', 'USER': USER, 'LOGNAME': USER,
+                   'TERM': os.environ.get('TERM', 'xterm-256color'),
+                   'HERMES_MANAGED_DIR': str(MANAGED), 'HERMES_SUPERVISED_CHILD': '1',
+                   'PYTHONDONTWRITEBYTECODE': '1', **runtime_environment(destination)}
+    return run(['systemd-run', '--quiet', '--wait', '--collect',
+                '--pty' if interactive else '--pipe',
+                '--unit=origin-hermes-maintenance-' + str(time.time_ns()),
+                '--property=User=' + USER, '--property=Group=' + USER,
+                '--property=UMask=0077', '--property=NoNewPrivileges=yes',
+                '--property=ProtectSystem=strict', '--property=ProtectHome=yes',
+                '--property=PrivateTmp=yes', '--property=PrivateDevices=yes',
+                '--property=CapabilityBoundingSet=', '--property=RestrictSUIDSGID=yes',
+                '--property=ReadWritePaths=' + str(HOME) + ' ' + str(runtime_state(destination).parent),
+                '--property=BindPaths=' + str(DATA),
+                '--property=BindReadOnlyPaths=' + str(index) + ':' + str(DATA / 'installs'),
+                '--property=WorkingDirectory=' + str(HOME), '--property=RuntimeMaxSec=1800',
+                '--property=MemoryMax=2G', '--property=CPUQuota=100%', '--property=TasksMax=128',
+                '/usr/bin/env', '-i', *[key + '=' + value for key, value in environment.items()],
+                *args], **kwargs)
 
 
 def gateway():
     if os.geteuid() != pwd.getpwnam(USER).pw_uid or os.geteuid() == 0:
         raise ValueError('Gateway must run as the unprivileged service account')
     destination = (BASE / 'current').resolve(strict=True)
+    validate_runtime_projection(destination)
     environment = {'PATH': '/usr/local/bin:/usr/bin:/bin', 'USER': USER, 'LOGNAME': USER,
                    'HERMES_MANAGED_DIR': str(MANAGED), 'HERMES_SUPERVISED_CHILD': '1',
                    'PYTHONDONTWRITEBYTECODE': '1', **runtime_environment(destination)}
-    os.execve(destination / '.hermes/bin/hermes', [str(destination / '.hermes/bin/hermes'), 'gateway'], environment)
+    os.execve(destination / '.hermes/bin/hermes',
+              [str(destination / '.hermes/bin/hermes'), 'gateway', 'run', '--external-supervisor'],
+              environment)
 
 
 def activate(destination):
     # Services are stopped throughout activation/recovery. Keep a separate
     # root-owned runtime pointer so systemd paths need no lexical ".." traversal.
     runtime = BASE / 'current-runtime'
-    if (destination.parent / 'origin-stage.json').exists():
-        pending_runtime = BASE / 'current-runtime.new'
-        pending_runtime.unlink(missing_ok=True)
-        pending_runtime.symlink_to(destination.parent / 'build-home/.hermes')
-        os.replace(pending_runtime, runtime)
-    else:
-        runtime.unlink(missing_ok=True)  # Explicit recovery of a legacy install.
+    runtime_index(destination, create=True)
+    pending_runtime = BASE / 'current-runtime.new'
+    pending_runtime.unlink(missing_ok=True)
+    pending_runtime.symlink_to(destination.parent / 'build-home/.hermes')
+    os.replace(pending_runtime, runtime)
     temporary = BASE / 'current.new'
     temporary.unlink(missing_ok=True)
     temporary.symlink_to(destination)
@@ -963,6 +1026,7 @@ def rollback(journal):
         print('Previous immutable runtime restored; gateway remains stopped; private HOME untouched.')
         return
     try:
+        validate_stage(Path(journal['previous']))
         stopped()
         if 'archive' in journal:
             archive = Path(journal['archive'])

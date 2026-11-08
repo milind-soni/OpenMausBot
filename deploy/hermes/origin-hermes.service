@@ -20,7 +20,7 @@ Environment=HERMES_SUPERVISED_CHILD=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 WorkingDirectory=/var/lib/origin-hermes
 ExecStartPre=/usr/bin/python3 /opt/origin-hermes-admin/manage.py preflight
-# The supervisor selects the reviewed immutable runtime and private data profile.
+# The supervisor uses the dedicated default data profile and immutable runtime.
 ExecStart=/usr/bin/python3 /opt/origin-hermes-admin/manage.py gateway
 Restart=on-failure
 RestartSec=10
@@ -31,6 +31,9 @@ UMask=0077
 NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=/var/lib/origin-hermes
+# Pin the data root against rename; PM entries resolve to their original paths.
+BindPaths=/var/lib/origin-hermes/.hermes
+BindReadOnlyPaths=/opt/origin-hermes/runtime-installs:/var/lib/origin-hermes/.hermes/installs
 # Root owns code/facts and every ancestor. Only precreated locks/lease directories
 # grant the service account write permission within this optional runtime subtree.
 ReadWritePaths=-/opt/origin-hermes/current-runtime/installs

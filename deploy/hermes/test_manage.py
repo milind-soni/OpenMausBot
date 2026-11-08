@@ -79,7 +79,7 @@ class MaintenanceTests(unittest.TestCase):
         original_trusted = manage.trusted
         # /tmp is intentionally mutable; exercise the actual subtree checks
         # using this test account as administrator, not a deployed /opt ancestor.
-        for item in (patch.object(manage, 'trusted', side_effect=lambda path: None if path == root else original_trusted(path)),
+        for item in (patch.object(manage, 'trusted', side_effect=lambda path: None if path in (root, self.base) else original_trusted(path)),
                      patch.object(manage.pwd, 'getpwnam', return_value=account)):
             item.start()
             self.addCleanup(item.stop)
@@ -282,32 +282,36 @@ class MaintenanceTests(unittest.TestCase):
         mocks['drain'].assert_not_called()
         mocks['stopped'].assert_not_called()
 
-    def test_rollback_restores_private_home_and_code(self):
+    def test_rollback_restores_private_home_and_prepared_runtime(self):
         home = self.root / 'home'
         home.mkdir()
-        (home / '.hermes').mkdir()
-        (home / '.hermes/auth.json').write_text('private-original')
+        self.data = home / '.hermes'
+        self.data.mkdir()
+        (self.data / 'auth.json').write_text('private-original')
         archive = self.root / 'home.tar.gz'
         with tarfile.open(archive, 'w:gz') as target:
             target.add(home, arcname='.')
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-        (home / '.hermes/auth.json').write_text('bad-migration')
-        candidate = self.staged_release()
-        facts = manage.runtime_state(candidate) / 'facts.json'
-        original_facts = facts.read_bytes()
-        manage.activate(candidate)
-        manage.JOURNAL.write_text('{}')
+        (self.data / 'auth.json').write_text('bad-migration')
         account = type('Account', (), {'pw_uid': os.getuid(), 'pw_gid': os.getgid()})()
         def extract(args, **kwargs):
             return subprocess.run([str(arg) for arg in args], check=True, **kwargs)
-        with patch.object(manage, 'HOME', home), patch.object(manage, 'DATA', home / '.hermes'), \
+        with patch.object(manage, 'HOME', home), patch.object(manage, 'DATA', self.data), \
              patch.object(manage, 'stopped'), patch.object(manage, 'run'), \
              patch.object(manage, 'as_user', side_effect=extract), \
              patch.object(manage.pwd, 'getpwnam', return_value=account), \
              patch.object(manage, 'preflight'), patch.object(manage, 'wait_healthy'):
-            manage.rollback({'previous': str(self.previous), 'archive': str(archive), 'sha256': digest})
-        self.assertEqual((home / '.hermes/auth.json').read_text(), 'private-original')
-        self.assertEqual((self.base / 'current').resolve(), self.previous)
+            previous = self.staged_release()
+            self.pin = {**self.pin, 'commit': 'c' * 40, 'tag': 'v0.23.2'}
+            candidate = self.staged_release()
+            facts = manage.runtime_state(candidate) / 'facts.json'
+            original_facts = facts.read_bytes()
+            manage.activate(candidate)
+            manage.JOURNAL.write_text('{}')
+            manage.rollback({'previous': str(previous), 'archive': str(archive), 'sha256': digest})
+        self.assertEqual((self.data / 'auth.json').read_text(), 'private-original')
+        self.assertEqual((self.base / 'current').resolve(), previous)
+        self.assertEqual((self.base / 'current-runtime').resolve(), previous.parent / 'build-home/.hermes')
         self.assertFalse(manage.JOURNAL.exists())
         self.assertEqual(facts.read_bytes(), original_facts)
 
@@ -536,28 +540,44 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual((profiles / '.origin-probe').resolve(), root / 'probe-data')
         manage.validate_stage(destination)
 
-    def test_private_home_replacement_cannot_redirect_runtime_or_dependency_facts(self):
+    def test_runtime_index_rejects_private_home_redirection(self):
         destination = self.staged_release()
-        environment_before = manage.runtime_environment(destination)
-        facts = manage.runtime_state(destination) / 'facts.json'
-        facts_before = facts.read_bytes()
-        interpreter = Path(json.loads(facts.read_text())['packages']['venv']['environment']) / 'bin/python'
-        interpreter_before = interpreter.read_bytes()
-        self.data.rename(self.data.with_name('original-data'))
-        self.data.mkdir()
-        (self.data / 'tools').mkdir()
-        (self.data / 'tools/python').write_text('attacker-controlled interpreter')
-        (self.data / 'installs').mkdir()
-        (self.data / 'installs/facts.json').write_text('attacker-controlled dependency selection')
-        self.assertEqual(manage.runtime_environment(destination), environment_before)
-        self.assertEqual(facts.read_bytes(), facts_before)
-        self.assertEqual(interpreter.read_bytes(), interpreter_before)
-        self.assertTrue(interpreter.is_relative_to(destination.parent))
-        self.assertFalse(interpreter.is_relative_to(self.data))
-        runtime_home = Path(environment_before['HOME'])
-        runtime_home.chmod(0o775)
+        index = manage.runtime_index(destination, create=True)
+        target = manage.runtime_state(destination)
+        entry = index / target.name
+        entry.unlink()
+        entry.symlink_to(self.data)
         with self.assertRaises(ValueError):
-            manage.runtime_environment(destination)
+            manage.runtime_index(destination)
+        with self.assertRaises(ValueError):
+            manage.runtime_index(destination, create=True)
+        self.assertEqual(entry.resolve(), self.data)
+
+    def test_runtime_index_rejects_replaceable_parent(self):
+        destination = self.staged_release()
+        index = manage.runtime_index(destination, create=True)
+        index.chmod(0o777)
+        with self.assertRaises(ValueError):
+            manage.runtime_index(destination)
+
+    def test_runtime_index_refuses_symlinked_storage_without_writing_target(self):
+        destination = self.staged_release()
+        (self.base / 'runtime-installs').symlink_to(self.data)
+        before = set(self.data.iterdir())
+        with self.assertRaises(ValueError):
+            manage.runtime_index(destination, create=True)
+        self.assertEqual(set(self.data.iterdir()), before)
+
+    def test_runtime_index_remains_traversable_under_private_umask(self):
+        destination = self.staged_release()
+        previous = os.umask(0o077)
+        try:
+            index = manage.runtime_index(destination, create=True)
+        finally:
+            os.umask(previous)
+        self.assertEqual(index.stat().st_mode & 0o777, 0o755)
+        self.assertEqual((index / manage.runtime_state(destination).name).resolve(),
+                         manage.runtime_state(destination))
 
     def test_executable_symlink_into_private_home_is_rejected(self):
         destination = self.staged_release()
@@ -596,6 +616,10 @@ class MaintenanceTests(unittest.TestCase):
             selected = Path(json.loads((manage.runtime_state(candidate) / 'facts.json').read_text())['packages']['venv']['environment'])
             self.assertTrue(selected.resolve().is_relative_to(candidate.parent))
             self.assertFalse(selected.resolve().is_relative_to(self.data))
+            index = manage.runtime_index(candidate)
+            for retained in (first, candidate):
+                target = manage.runtime_state(retained)
+                self.assertEqual((index / target.name).resolve(), target)
         self.assertEqual(first_facts.read_bytes(), first_content)
         self.assertTrue(second_facts.is_file())
 
@@ -607,6 +631,7 @@ class MaintenanceTests(unittest.TestCase):
         candidate.mkdir(parents=True)
         (candidate.parent / 'build-home/.hermes').mkdir(parents=True)
         (candidate.parent / 'origin-stage.json').write_text('{"layout":3}')
+        manage.runtime_state(candidate).mkdir(parents=True)
         (self.data / 'private-state').write_text('keep-private-state')
         mocks = {}
         for name, value in {
