@@ -68,7 +68,7 @@ const keepsFromSaving = (event: RuntimeEvent): boolean =>
 
 export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
   const platform = deps.platform ?? process.platform;
-  // Linux ships cua-driver 0.19.3 and Windows its 0.28.2 Rust build; neither is known to answer list_windows and elements_complete as replay needs.
+  // Linux and Windows ship the cua-driver 0.41.3 Rust build; neither has been shown to answer list_windows and elements_complete as replay needs.
   const enabled = () => platform === "darwin" && deps.enabled();
   const journal = new ComputerJournal();
   const now = deps.now ?? Date.now;

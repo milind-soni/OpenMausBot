@@ -258,6 +258,19 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     expect(w.coordinator.active()).toEqual([]);
   });
 
+  it("runningIn() is active()'s running nodes in that thread", async () => {
+    const w = world(hold);
+    const same = () => { for (const threadId of ["chief-chat", node.threadId, "nobody"]) expect(w.coordinator.runningIn(threadId)).toEqual(w.coordinator.active().filter(n => n.threadId === threadId && n.status === "running")); };
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    same();
+    w.coordinator.tick(); await flush();
+    same(); expect(w.coordinator.runningIn(node.threadId).map(n => n.id)).toContain(node.id);
+    ended(w, "gen-1"); w.coordinator.tick(); await flush();
+    same();
+    w.coordinator.tick(); await flush();
+    same();
+  });
+
   it("active() never reads an ended row: one that no longer parses stops all(), not active() (#2765)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "runtime-coordinator-active-"));
     try {

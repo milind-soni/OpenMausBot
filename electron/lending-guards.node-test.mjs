@@ -216,7 +216,7 @@ test("the lent screen's arguments are allow-listed: no tool argument ever names 
     { tool_name: "get_window_state", arguments: { pid: 1, window_id: 2, include_screenshot: true } },
     { tool_name: "click", arguments: { x: 1, y: 2, window_id: 3, modifier: ["cmd"] } },
     { tool_name: "launch_app", arguments: { bundle_id: "com.apple.Safari", urls: ["https://example.com/page"] } },
-    { tool_name: "set_agent_cursor_motion", arguments: { cursor_icon: "arrow" } },
+    { tool_name: "set_agent_cursor_motion", arguments: { glide_duration_ms: 400 } },
     { tool_name: "browser_navigate", arguments: { target_id: "t", tab_id: "1", url: "https://example.com" } },
   ];
   const { results, sharing } = await lend(t, dir, {
@@ -260,8 +260,21 @@ test("every lent screen argument is one the driver itself defines, with the same
     }
   }
   const dropped = Object.entries(LENT_SCREEN_ARGUMENTS).flatMap(([tool, args]) => Object.keys(driver[tool].properties).filter(key => !(key in args)).map(key => `${tool}.${key}`));
-  assert.deepEqual(dropped.sort(), ["click.debug_image_out", "get_desktop_state.screenshot_out_file", "get_window_state.screenshot_out_file",
-    "launch_app.additional_arguments", "launch_app.webkit_inspector_port", "set_agent_cursor_style.image_path"]);
+  // Arguments that name a path, a command line or a port are never lent; the rest arrived in newer drivers and stay
+  // refused until someone reviews them, so a driver upgrade lends nothing new by itself.
+  const pathsAndCommands = ["click.debug_image_out", "get_desktop_state.screenshot_out_file", "get_window_state.screenshot_out_file",
+    "launch_app.additional_arguments", "launch_app.webkit_inspector_port"];
+  const notYetLent = ["bring_to_front.session", "browser_click.delivery_mode", "browser_pointer.delivery_mode", "browser_type.replace",
+    "click.capture_id", "click.post_action_wait", "click.target", "double_click.post_action_wait", "drag.post_action_wait", "drag.target",
+    "get_accessibility_tree.session", "get_desktop_state.max_image_dimension", "get_window_state.display_only", "get_window_state.full_output",
+    "get_window_state.include_accessibility_tree", "get_window_state.max_dimension", "get_window_state.max_image_dimension",
+    "get_window_state.screenshot_format", "get_window_state.screenshot_quality", "get_window_state.since", "get_window_state.timeout_ms",
+    "get_window_state.tree_format", "get_window_state.verbose", "hotkey.element_token", "hotkey.post_action_wait", "hotkey.target",
+    "launch_app.session", "list_apps.session", "list_windows.app", "list_windows.session", "move_cursor.delivery_mode", "move_cursor.target",
+    "press_key.post_action_wait", "press_key.target", "right_click.post_action_wait", "scroll.post_action_wait", "scroll.target",
+    "set_agent_cursor_motion.effects", "set_agent_cursor_motion.style", "set_agent_cursor_motion.timing", "set_value.post_action_wait",
+    "start_session.cursor_motion", "start_session.cursor_theme", "type_text.post_action_wait", "type_text.target", "zoom.session"];
+  assert.deepEqual(dropped.sort(), [...pathsAndCommands, ...notYetLent].sort());
   assert.equal(lentScreenArguments("get_desktop_state", undefined).arguments !== undefined, true);
   assert.match(lentScreenArguments("get_desktop_state", { screenshot_out_file: "/tmp/x" }).error, /not allowed/);
 });

@@ -308,6 +308,18 @@ describe("who goes first when memory holds several", () => {
     await finish(h, "running");
     expect(order[0]).toBe("handoff");
   });
+
+  it("asks who goes first once per waiter, since every waiter orders the queue on each wake", async () => {
+    const h = await full(["person"]);
+    const asked: string[] = [];
+    h.memory.useTurnOrder((threadId) => { asked.push(threadId); return threadId === "person"; });
+    for (const threadId of ["handoff-1", "handoff-2", "person"]) void waiting(h, threadId, []);
+    await settle();
+    asked.length = 0;
+    const order = (h.memory as unknown as { order(): { threadId: string }[] }).order();
+    expect(order.map((waiter) => waiter.threadId)).toEqual(["person", "handoff-1", "handoff-2"]);
+    expect(asked).toEqual(["handoff-1", "handoff-2", "person"]);
+  });
 });
 
 describe("running short", () => {

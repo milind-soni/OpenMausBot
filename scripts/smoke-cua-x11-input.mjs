@@ -27,6 +27,25 @@ mkdirSync(home, { mode: 0o700 });
 chmodSync(runtime, 0o700);
 chmodSync(home, 0o700);
 
+// A real Xorg desktop always runs a window manager, and Cua Driver 0.41 sends foreground input only to the window the
+// manager reports active (_NET_ACTIVE_WINDOW). A bare Xvfb has none, so start a small EWMH one first.
+const windowManager = spawn("openbox", ["--sm-disable"], { env: process.env, stdio: "ignore" });
+windowManager.once("error", (error) => {
+  console.error(`[smoke-cua-x11-input] openbox could not start (install it): ${error.message}`);
+  process.exit(1);
+});
+{
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const { stdout } = await execFileAsync("xprop", ["-root", "_NET_SUPPORTING_WM_CHECK"]).catch(() => ({ stdout: "" }));
+    if (/window id #/.test(stdout)) break;
+    if (windowManager.exitCode !== null || Date.now() > deadline) {
+      throw new Error("the window manager did not start on this display");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 const title = `OpenMausBot CUA input safety ${process.pid}`;
 const xev = spawn(
   "xev",
@@ -203,7 +222,7 @@ try {
     },
     "the overlay-free driver handshake",
   );
-  if (metadata.driver_version !== "0.19.3" || metadata.embedded !== true) {
+  if (metadata.driver_version !== "0.41.3" || metadata.embedded !== true) {
     throw new Error(`unexpected driver metadata: ${JSON.stringify(metadata)}`);
   }
 
@@ -221,7 +240,7 @@ try {
   proxy.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
   const listed = await rpc("tools/list");
   const toolNames = new Set(listed.tools.map(({ name }) => name));
-  for (const required of ["start_session", "click", "type_text"]) {
+  for (const required of ["start_session", "get_window_state", "click", "type_text"]) {
     if (!toolNames.has(required)) throw new Error(`Cua MCP did not expose ${required}`);
   }
 
@@ -243,6 +262,14 @@ try {
     scope: "window",
     delivery_mode: "foreground",
   };
+  // Cua Driver 0.41 takes window x,y only from that window's own screenshot in this session: read it first.
+  assertToolResult(
+    await rpc("tools/call", {
+      name: "get_window_state",
+      arguments: { session, pid: target.pid, window_id: target.window_id },
+    }),
+    "get_window_state",
+  );
   assertToolResult(
     await rpc("tools/call", { name: "click", arguments: target }),
     "click",
@@ -262,5 +289,6 @@ try {
   if (proxy) await stop(proxy);
   await stop(driverProcess);
   if (xev.exitCode === null && xev.signalCode === null) xev.kill("SIGTERM");
+  if (windowManager.exitCode === null && windowManager.signalCode === null) windowManager.kill("SIGTERM");
   rmSync(sandbox, { recursive: true, force: true });
 }
