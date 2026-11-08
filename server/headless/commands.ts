@@ -36,7 +36,8 @@ async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
   if (tooOld) problems.push(`OpenMausBot ${server!.version ?? "(unknown version)"} is too old for the headless commands: it cannot report a conversation's job`);
   if (isOmb && !availableEngines.length) problems.push("no engine is available: set one up with `openmausbot engine set KIND --key-env VAR`");
   if (session?.kind === "session" && typeof session.expiresAt === "number" && session.expiresAt - Date.now() < 14 * DAY) {
-    warnings.push(`this session expires in ${Math.max(0, Math.floor((session.expiresAt - Date.now()) / DAY))} days: get a new one with openmausbot connect`);
+    const days = Math.max(0, Math.floor((session.expiresAt - Date.now()) / DAY));
+    warnings.push(`this session expires in ${days} day${days === 1 ? "" : "s"}: get a new one with openmausbot connect`);
   }
   const browser = config?.browserEngine ?? null;
   if (browser && browser.kind !== "engine") warnings.push(`bots have no built-in browser here: ${browser.reason ?? "not installed"}${browser.installable ? " (install it with `openmausbot browser install`)" : ""}`);
