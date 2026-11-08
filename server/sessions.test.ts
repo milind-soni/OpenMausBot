@@ -168,7 +168,7 @@ describe("pairing codes", () => {
     expect(normalizePairingCode("0O1I")).toBe("OOII");
   });
 
-  it("exchange once, then never again, and expire after five minutes", () => {
+  it("exchange once, then never again, and expire after ten minutes", () => {
     const { code } = registry.openPairing({ label: "phone" });
     const first = registry.exchange({ code: formatPairingCode(code).toLowerCase(), label: "", source: "a" });
     expect(first.ok).toBe(true);
