@@ -478,7 +478,7 @@ import { createOutboundHold, OUTBOUND_HOLD_MS, type OutboundHoldAnswer } from ".
 import { connectorCallsIn, outboundCallsIn } from "../shared/outbound.ts";
 import { connectorAccessDecision, describeConnectorScopes } from "../shared/connector-scopes.ts";
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
-import { listenWebhookIngress, type WebhookIngress } from "./webhook-ingress.ts"; import { createBotApiHost } from "./bot-api-host.ts"; import { BOT_API_PARTS, BOT_API_REFUSAL, BOT_API_TOOLS, botApiRouteRefused } from "./bot-api-fence.ts";
+import { listenWebhookIngress, type WebhookIngress } from "./webhook-ingress.ts"; import { createBotApiHost } from "./bot-api-host.ts"; import { createChannelHosts } from "./channels/hosts.ts"; import { BOT_API_PARTS, BOT_API_REFUSAL, BOT_API_TOOLS, botApiRouteRefused } from "./bot-api-fence.ts";
 import { addressFor } from "./webhook-address.ts";
 import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -5072,7 +5072,7 @@ bus.subscribe((event: RuntimeEvent) => {
   else if (event.type === "turn.wait_started") watchdog.setWaitingOnComputer(event.threadId, true);
   else if (event.type === "turn.wait_ended") watchdog.setWaitingOnComputer(event.threadId, false);
   else if (event.type === "turn.completed") {
-    watchdog.settle(event.threadId);
+    watchdog.settle(event.threadId); void phoneChats.noteTurnCompleted(event.threadId);
     revokeInternalCapabilityForProviderEvent(event);
     if (event.turnId && store.botByThread(event.threadId)) {
       const reply = event.ok ? store.messagesFor(event.threadId).findLast(message =>
@@ -8416,7 +8416,7 @@ async function beginTurn(
         { id: "skills", label: "Skills index", text: privateWorkspace ? skillsHost.skillsIndex(store.bot(bot.id) ?? bot, threadId, instance) : "" },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
-        { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : opts?.automationSource === "api" ? BOT_API_PROMPT : "" },
+        { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : opts?.automationSource === "api" ? BOT_API_PROMPT : "" }, { id: "phone-chats", label: "Phone chats", text: phoneChats.prompt(threadId) },
         { id: "automation-reply", label: "Automation reply", text: opts?.automationSource && automationReports.reportsElsewhere(threadId) ? AUTOMATION_REPLY_PROMPT : "" },
         { id: "mentions", label: "Mentions", text: (tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : "") + placesElsewhere.mentioned(providerText, store.bots) },
       ].filter((part) => (apiFenced ? BOT_API_PARTS.has(part.id) : !confined || READ_AND_DRAFT_PARTS.has(part.id))), integrations.agents, { replyStyle: liveBot?.replyStyle ?? bot.replyStyle });
@@ -9553,7 +9553,7 @@ const webhookIngressStatus = () => ({
   baseUrl: webhookIngress?.baseUrl ?? `http://127.0.0.1:${WEBHOOK_PORT}`,
   ...(webhookIngressError ? { error: webhookIngressError } : {}),
 });
-ROUTES.push(createWebhookRoutes({ webhooks, ingress: webhookIngressStatus, visible: (auth) => visibleTo(viewerFor(auth)) }), botApi.routes);
+const phoneChats = createChannelHosts({ dataDir: DATA_DIR, teamCloud: Boolean(CLOUD_TEAM), store, deliver: async (botId, threadId, text, sendId) => { await acceptDirectSend({ botId, threadId, text, sendId, trigger: { kind: "owner" }, personPresent: true }); }, needsInput: requestNeedsInput, log: (line) => console.log(line) }); ROUTES.push(createWebhookRoutes({ webhooks, ingress: webhookIngressStatus, visible: (auth) => visibleTo(viewerFor(auth)) }), botApi.routes, phoneChats.routes);
 
 const RUNTIME_KEEP_MS = 30 * 24 * 60 * 60_000;
 let runtimePrunedAt = 0;
@@ -12088,9 +12088,9 @@ const workspaceBackupAccess = {
       !computerProviderConfigTransitions.size &&
       teamComputers.list().every(computer => !teamComputerInUse(computer)) &&
       store.bots.every((bot) => !botHasActiveTurn(bot.id) && !routines?.activeRunForBot(bot.id) && !botComputerControlSnapshot(bot.id).held) &&
-      store.groups.every((group) => !groupIsWorking(group)),
-    pause: () => { routines?.stop(); calendarCalls?.stop(); botWaits.stop(); watchdog.stop(); memoryUpkeep.pause(); },
-    resume: () => { if (!moveFreeze.frozen()) { routines?.start(); calendarCalls?.start(); botWaits.start(); } watchdog.start(); memoryUpkeep.resume(); },
+      store.groups.every((group) => !groupIsWorking(group)) && !phoneChats.busy(),
+    pause: () => { routines?.stop(); calendarCalls?.stop(); botWaits.stop(); watchdog.stop(); memoryUpkeep.pause(); phoneChats.pause(); },
+    resume: () => { if (!moveFreeze.frozen()) { routines?.start(); calendarCalls?.start(); botWaits.start(); } watchdog.start(); memoryUpkeep.resume(); phoneChats.resume(); },
     flush: async () => {
       await Promise.all([chatApps.settleLive(), flushAllProfileHistory(), flushAllMemoryJournals(), flushUsageLedger(DATA_DIR), flushDecisionLog(DATA_DIR), flushAdminActivity(DATA_DIR)]);
       // Writers gated and work idle: release the WAL connection for a consistent snapshot; Store reopens it lazily.
@@ -15513,8 +15513,7 @@ server.listen(PORT, listenHost(server), async () => {
   }
   // Only once every registry is initialized and the endpoint listens: earlier dispatch can hit uninitialized bindings.
   moveFreeze.hold(() => { routines!.start(); botWaits.start(); proactive.start(); }, () => { routines!.stop(); botWaits.stop(); proactive.stop(); });
-  limitClock.start();
-  moveFreeze.hold(() => memoryUpkeep.start(), () => memoryUpkeep.stop());
+  limitClock.start(); moveFreeze.hold(() => { memoryUpkeep.start(); phoneChats.start(); }, () => { memoryUpkeep.stop(); phoneChats.stop(); });
 });
 
 // Tunnel requests have no peer address, which request-auth treats as proxied: a session is required, never loopback trust.
@@ -15575,7 +15574,7 @@ const gracefulShutdown = createGracefulShutdown({
       watchdog.stop();
       routines?.close(); void appTriggers.stop();
       calendarCalls?.stop(); botWaits.stop();
-      memoryUpkeep.stop();
+      memoryUpkeep.stop(); phoneChats.stop();
       cacheKeepWarm.dispose(); warmSummaries.dispose();
       skillReview.stop();
       webhookIngress?.server.close();
