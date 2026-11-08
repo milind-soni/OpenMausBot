@@ -33555,7 +33555,20 @@
       "chat.setupCard.hint": "d7bbe8e1ab022e478f36b7338b2b278b9ad5b2d421eced2fd24b157b5df8db74",
       "chat.setupCard.heading": "c55d59f402bbe025ee81dbf0efa20086040334938ed8617f340ab81db478b196",
       "settings.simple.account.noNameHint": "488c9a6a017d6ea2f145c838bee156e762ffcebdaddc173135f4d0590f0b6271",
-      "settings.simple.account.yourName": "2c6b2e253c01fb2ed7209c15766745ccee92a35ac8209f544789bdf9500e0944"
+      "settings.simple.account.yourName": "2c6b2e253c01fb2ed7209c15766745ccee92a35ac8209f544789bdf9500e0944",
+      "hostedMcp.keyLabel": "58b23fd272fffe547e990d74037e55ba0984d571b5efafe689e3912d6b643d14",
+      "hostedMcp.keyPlaceholder": "bc8e4d10bdc9a2d4ecfaf08d3aaf1526b99c87e87b20ec5e76eb15df653e1b41",
+      "hostedMcp.getKey": "f5064267f85e35969a446cbec8e8760a689d192d5da8b3e6b4e79574580e5ff2",
+      "hostedMcp.keyRefused": "0f399a9ca5bf66dfa856e8a82bab31aada65666b2f47c5a518ec3bb91c5550c3",
+      "hostedMcp.keyTestFailed": "e7d9a3f4940fdc84c28e5338b0e726440c0f25ecf9bd67dc5ce2fbaf6e884cb1",
+      "agentmail.description": "ae35ab685967fa0ae0dbd4b476711a7464120cd73625e0d84650eca9bb7f1b3d",
+      "agentmail.notice": "c986413c0f93c430eaac879e75a2618ede54ca5496b41372b4b9b68c3bc56094",
+      "vapi.description": "631929205ec98208d972ae9dbaef2b831821481ebc9966de3e7f78c751245938",
+      "vapi.notice": "0f819950c9f4501ce567c046ffac4b8d14c8eb39fc48ba5a8b0f510195ad5a4d",
+      "telnyx.description": "4b02d2d422286c046c3ffbaa4d83f3b42e8def0f3eb279fb08040b0221cf86f7",
+      "telnyx.notice": "8710af95ca9d5af26a5608ba387929e3ad4e4fba0d0164c51d12e41ae9c4210a",
+      "agentphone.description": "fd0c2e2cc850cc0439ecf46aca21f73860b79d21ac12221b61df0ef502bae1e4",
+      "agentphone.notice": "25fcaa284967d833308a69a422cf36f2965f3042e1a37fbb5ec711ff143552e7"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
