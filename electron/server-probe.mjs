@@ -20,6 +20,7 @@ export const CONNECT_PROBLEM_KEYS = Object.freeze({
   certificate: "native.connect.certificate",
   notMausBot: "native.connect.notMausBot",
   loopback: "native.connect.loopback",
+  localNetwork: "native.connect.localNetwork",
 });
 
 /** Chromium's net errors (Electron 43 `session.fetch`) and Node's (undici) for the same causes. */
@@ -51,7 +52,7 @@ async function describe(origin, fetchImpl, timeoutMs) {
  * certificate, notMausBot, loopback (an address on this computer that is this app's own workspace, or nothing at all).
  * `ownEnvironmentId()`: this app's own local workspace, so a "this computer" link copied off a server is caught.
  */
-export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnvironmentId = async () => null, timeoutMs = 6_000 }) {
+export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnvironmentId = async () => null, timeoutMs = 6_000, platform = process.platform }) {
   const parsed = parseServerInput(address, code);
   if (!parsed.ok) {
     const { ok: _ok, ...problem } = parsed;
@@ -63,7 +64,10 @@ export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnv
     const loopback = isLoopbackHost(new URL(origin).hostname);
     const found = await describe(origin, fetchImpl, timeoutMs);
     if (!found.ok) {
-      failure = loopback ? { problem: "loopback", host } : { problem: found.kind === "refused" || found.kind === "timeout" ? "unreachable" : found.kind, host, ...(found.kind === "refused" || found.kind === "timeout" ? { reason: found.kind } : {}) };
+      // macOS 15 blocks an app from the local network until the person allows it, and the request then just fails.
+      const blockedOnMac = platform === "darwin" && serverTransport(origin) === "private-http" && (found.kind === "unreachable" || found.kind === "timeout");
+      failure = loopback ? { problem: "loopback", host } : blockedOnMac ? { problem: "localNetwork", host }
+        : { problem: found.kind === "refused" || found.kind === "timeout" ? "unreachable" : found.kind, host, ...(found.kind === "refused" || found.kind === "timeout" ? { reason: found.kind } : {}) };
       continue;
     }
     if (loopback && found.environmentId === await ownEnvironmentId().catch(() => null)) return { outcome: "problem", problem: "loopback", host };
