@@ -6286,7 +6286,7 @@
   "settings.simple.themes.browse": "Ver temas",
   "settings.simple.themes.hint": "Seguir o sistema alterna entre Daylight e Midnight. Outros temas ficam fixos até você mudar.",
   "settings.simple.themes.followHint": "Segue o seu computador: Daylight quando está claro, Midnight quando está escuro.",
-  "settings.simple.themes.fixedHint": "Usando {name}. Escolha Seguir o sistema para alternar entre Daylight e Midnight sozinho.",
+  "settings.simple.themes.fixedHint": "Fica como está. Escolha Seguir o sistema para alternar entre Daylight e Midnight sozinho.",
   "settings.simple.looks.back": "Voltar",
   "settings.simple.theme.system": "Seguir o sistema",
   "settings.simple.language.system": "Seguir o sistema",

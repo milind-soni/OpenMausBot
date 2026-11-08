@@ -6552,7 +6552,7 @@
   "settings.simple.themes.browse": "Browse themes",
   "settings.simple.themes.hint": "Follow system switches between Daylight and Midnight. Other themes stay fixed until you change them.",
   "settings.simple.themes.followHint": "Follows your computer: Daylight when it is light, Midnight when it is dark.",
-  "settings.simple.themes.fixedHint": "Using {name}. Choose Follow system to switch between Daylight and Midnight on its own.",
+  "settings.simple.themes.fixedHint": "Stays as it is. Choose Follow system to switch between Daylight and Midnight on its own.",
   "settings.simple.looks.back": "Back",
   "settings.simple.theme.system": "Follow system",
   "settings.simple.language.system": "Follow system",

@@ -112,7 +112,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
 function LooksRow({ onLooks }: { onLooks: () => void }) {
   const choice = useSkinChoice();
   const current = SKINS.find((skin) => skin.id === resolveSkin(choice))?.name;
-  const hint = choice === "system" ? t("settings.simple.themes.followHint") : t("settings.simple.themes.fixedHint", { name: current ?? "" });
+  const hint = choice === "system" ? t("settings.simple.themes.followHint") : t("settings.simple.themes.fixedHint");
   return (
     <SettingRow title={current ? `${t("settings.theme.title")} · ${current}` : t("settings.theme.title")} subtitle={hint}>
       <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.themes.browse")}</button>
