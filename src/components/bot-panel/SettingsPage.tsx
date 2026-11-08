@@ -9,7 +9,6 @@ import { callCapabilityHelp } from "@/lib/call-capability";
 import { fishListeningReady, listensHere, speechBridge } from "@/lib/speech";
 import { requestNotificationPermission } from "@/lib/notify";
 import { firstSentence } from "@/lib/soul";
-import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { currentTaskBot, useStore, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
 import { BOT_PROFILE_LIMITS } from "../../../shared/bot-profile";
@@ -18,10 +17,9 @@ import { ApprovalChip } from "../ComposerPlusMenu";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { DefaultBotHideRow } from "../DefaultBotControls";
 import { SoulField } from "../SoulField";
-import { useTeamName } from "../bot-access/ShareBotButton";
 import { BotApiCard } from "../bot-settings/BotApiCard";
 import { REPLY_STYLE_LABELS } from "../bot-settings/ReplyStyleField";
-import { visibilityLabel } from "../bot-settings/VisibilitySection";
+import { useChoosesVisibility, visibilityLabel } from "../bot-settings/VisibilitySection";
 import { useBotApps } from "../bot-settings/useBotApps";
 import { useSlackManagementUrl } from "../bot-settings/useSlackManagement";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
@@ -56,8 +54,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
   const approval = useThreadApproval(currentTaskBot(bot));
   const storedCallMode = useCallMode();
   const slackUrl = useSlackManagementUrl(bot.id);
-  const ownerOrAdmin = useOwnerOrAdmin();
-  const teamName = useTeamName();
+  const choosesVisibility = useChoosesVisibility();
   const [jobDraft, setJobDraft] = useState<string | null>(null);
   const { patch, approvalMode, engine } = derived;
   const name = bot.name;
@@ -102,7 +99,6 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
     patch({ notifications: enabled });
   };
   const alwaysAllow = bot.alwaysAllow ?? [];
-  const choosesVisibility = !window.ogb && ownerOrAdmin === true && !teamName;
 
   const soulOpen = editingInstructions || Boolean(bot.soulDrift);
   const enabledApps = [

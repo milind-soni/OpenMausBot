@@ -238,7 +238,10 @@ export function SettingsModal() {
     const open = q !== "" || (folds[id] ?? SIMPLE_FOLDED[requested] === id);
     return { id, open, onToggle: () => setFolds((current) => ({ ...current, [id]: !open })) };
   };
-  const [subPage, setSubPage] = useState<"looks" | "more" | null>(null);
+  const [openSubPage, setOpenSubPage] = useState<{ view: "looks" | "more"; for: AppSettingsSection } | null>(null);
+  const subPage = openSubPage?.for === requested ? openSubPage.view : null;
+  const setSubPage = (view: "looks" | "more" | null, at: AppSettingsSection = requested) => setOpenSubPage(view && { view, for: at });
+  useEffect(() => { setOpenSubPage((current) => current?.for === requested ? current : null); }, [requested]);
   const [reveal, setReveal] = useState<string | null>(null);
   const advancedMatches = advanced || !q ? [] : SIMPLE_ADVANCED_ONLY.filter((key) => t(key).toLowerCase().includes(q));
   const moreSections = availableSections.filter((entry) => SIMPLE_HIDDEN_SECTIONS.includes(entry.id));
@@ -439,7 +442,7 @@ export function SettingsModal() {
     }
   };
 
-  const openMore = () => { openSection("general"); setSubPage("more"); };
+  const openMore = () => { openSection("general"); setSubPage("more", "general"); };
   const renderSimplePage = (page: SimpleSettingsPage) => {
     const has = (id: AppSettingsSection) => page.sections.includes(id);
     switch (page.id) {

@@ -725,19 +725,24 @@ describe("the Bot settings page", () => {
     }
   });
 
-  it("opens Who can see it for an owner or admin of a self-hosted web workspace, and for nobody on a team or the desktop", () => {
+  it("opens Who can see it for an owner or admin of a self-hosted web workspace, once its config is in, and for nobody on a team", () => {
     fixture.ownerOrAdmin = true;
+    const visibilityPage = () => renderToStaticMarkup(createElement(PageBody, { page: "visibility", bot: makeBot(), derived: derived() }));
+    expect(has(settingsPage(makeBot()), "data-panel-page", "visibility")).toBe(false);
+    expect(visibilityPage()).toBe("");
+    fixture.storeState = { ...fixture.storeState, config: {} };
     const rendered = settingsPage(makeBot({ visibility: "admins" }));
     expect(rowValue(rendered, "visibility")).toBe("Admins only");
     click(find(rendered, "data-panel-page", "visibility"));
     expect(onOpen).toHaveBeenLastCalledWith("visibility");
     expect(rowValue(settingsPage(makeBot()), "visibility")).toBe("Everyone who can sign in");
+    expect(visibilityPage()).toContain("data-bot-visibility");
     fixture.storeState = { ...fixture.storeState, config: { team: { name: "Acme" } } };
     expect(has(settingsPage(makeBot()), "data-panel-page", "visibility")).toBe(false);
-    fixture.storeState = { ...fixture.storeState, config: undefined };
+    expect(visibilityPage()).toBe("");
+    fixture.storeState = { ...fixture.storeState, config: {} };
     fixture.ownerOrAdmin = false;
     expect(has(settingsPage(makeBot()), "data-panel-page", "visibility")).toBe(false);
-    expect(capture(() => PageBody({ page: "visibility", bot: makeBot(), derived: derived() })).html).toContain("data-bot-visibility");
   });
 
   it("links to the bot's own Slack app once it has one", () => {

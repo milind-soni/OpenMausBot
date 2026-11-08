@@ -5,13 +5,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), scrolled: [] as Element[] }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), scrolled: [] as Element[], section: "general" }));
 vi.mock("@/lib/scroll-within", () => ({ scrollWithin: (_scroller: unknown, target: Element) => { fixture.scrolled.push(target); }, scrollParent: () => null }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   api: vi.fn(async () => ({})),
   useStore: () => ({
-    state: { appSettingsSection: "general", instances: [], bots: [], config: { features: {}, composio: { mode: "self" }, rooms: { turnTimeoutMinutes: 5 } }, appSettingsCloudLink: 0, appSettingsPhonePairing: 0 },
+    state: { appSettingsSection: fixture.section, instances: [], bots: [], config: { features: {}, composio: { mode: "self" }, rooms: { turnTimeoutMinutes: 5 } }, appSettingsCloudLink: 0, appSettingsPhonePairing: 0 },
     dispatch: fixture.dispatch,
     refreshInstances: vi.fn(),
   }),
@@ -28,6 +28,7 @@ for (const [path, name] of [
   ["./CustomDomainSettings", "CustomDomainSettings"], ["./LoginsSettings", "LoginsSettings"], ["./PlanUsage", "PlanUsageSummary"],
 ] as const) vi.doMock(path, async (importOriginal) => ({ ...await importOriginal<Record<string, unknown>>(), [name]: () => null }));
 
+const { SettingsModal } = await import("./SettingsModal");
 let host: HTMLDivElement;
 let root: Root;
 const scrolled = fixture.scrolled;
@@ -38,13 +39,13 @@ beforeAll(() => {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  fixture.section = "general";
   setLocale("en");
   scrolled.length = 0;
   vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  const { SettingsModal } = await import("./SettingsModal");
   flushSync(() => root.render(createElement(SettingsModal)));
 });
 
@@ -95,6 +96,21 @@ describe("Settings search in Simple mode", () => {
     flushSync(() => [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Back")!.click());
     expect(heading()).toBe("General");
     expect(scrolled.map((element) => element.getAttribute("data-settings-block"))).toContain("more");
+  });
+
+  it("leaves More settings when a link opens another setting, even one back on General", () => {
+    flushSync(() => host.querySelector<HTMLButtonElement>("[data-settings-more]")!.click());
+    expect(host.querySelector('[data-settings-block="limits"]')).not.toBeNull();
+    const follow = (section: string) => {
+      fixture.section = section;
+      flushSync(() => root.render(createElement(SettingsModal)));
+    };
+    follow("appearance");
+    expect(host.querySelector("h2")!.textContent).toBe("General");
+    expect(host.querySelector('[data-settings-block="limits"]')).toBeNull();
+    follow("general");
+    expect(host.querySelector('[data-settings-block="limits"]')).toBeNull();
+    expect(host.querySelector("[data-settings-more]")).not.toBeNull();
   });
 
   it("finds a hidden page and a limit as More settings, and opens each where it lives", () => {

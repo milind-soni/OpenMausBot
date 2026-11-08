@@ -4,11 +4,6 @@ import { ipcErrorText } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
 import { Switch } from "./SettingsPrimitives";
 
-/**
- * Settings → MausBot Cloud, for someone with a Cloud of their own the move applies to: "Keep this computer's bots on this
- * computer". Turned on once this computer's bots live on My Cloud, it asks first, since they come back here; while they
- * are on their way it can't be turned back.
- */
 export function CloudKeepHere({ bridge }: { bridge: CloudSendPageBridge | undefined }) {
   const read = bridge?.keepHere, write = bridge?.setKeepHere;
   return bridge && read && write ? <KeepHereSwitch bridge={bridge} read={read} write={write} /> : null;
