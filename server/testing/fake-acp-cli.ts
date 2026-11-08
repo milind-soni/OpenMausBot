@@ -63,6 +63,7 @@
 //   FAKE_ACP_CURSOR_FAST=1  a `fast` select ("true") once initialize declares _meta.parameterizedModelPicker, as Cursor CLI 2026.10.19; =stuck acknowledges set_config_option but keeps "true"
 //   FAKE_ACP_SESSION_CLOSE=1  initialize advertises sessionCapabilities.close (OpenCode 1.19); session/close answers {}
 //     after FAKE_ACP_SESSION_CLOSE_MS; =error advertises it and answers every session/close with an error
+//   FAKE_ACP_SESSION_ID  the first session's id (default fake-acp-session); later ones add -2, -3, …
 //   FAKE_ACP_SESSION_DELETE=1  initialize advertises sessionCapabilities.delete (OpenCode 2.2.6); session/delete always answers {}
 //   FAKE_ACP_IGNORE_CANCEL=1  session/cancel is ignored: a hanging prompt keeps running
 //   FAKE_ACP_TOOL_LIMIT  session/prompt lists the session's MCP tools and refuses, as OpenCode Zen does, past this many;
@@ -760,7 +761,8 @@ function handle(msg: any) {
       const opts = configOptions();
       const mdls = sessionModels();
       sessionsOpened += 1;
-      liveSession = sessionsOpened === 1 ? "fake-acp-session" : `fake-acp-session-${sessionsOpened}`;
+      const firstSession = process.env.FAKE_ACP_SESSION_ID ?? "fake-acp-session";
+      liveSession = sessionsOpened === 1 ? firstSession : `${firstSession}-${sessionsOpened}`;
       resultAndConfigUpdates(msg.id, {
         sessionId: liveSession,
         ...(opts ? { configOptions: opts } : {}),

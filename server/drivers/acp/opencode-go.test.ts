@@ -964,6 +964,36 @@ describe("OpenCode catalog probes", () => {
     }
   });
 
+  it("deletes a session whose probe OpenCode died under, once a later probe finds it stale", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-crashed-"));
+    let ledger = "";
+    try {
+      const environment = { ...process.env, HOME: scratch, FAKE_ACP_SESSION_DELETE: "1" };
+      const crashed = join(scratch, "crashed.jsonl");
+      await discoverOpenCodeModels({
+        ...environment, FAKE_ACP_MODELS: "opencode/big-pickle,opencode-go/minimax-m3", FAKE_ACP_SESSION_ID: "ses_crashed",
+        FAKE_ACP_EXIT_ON_MODEL: "opencode-go/minimax-m3", FAKE_ACP_RPC_APPEND_FILE: crashed,
+      }, FAKE_CLI);
+      const lines = rpcLines(crashed);
+      expect(lines.some((entry) => entry.method === "session/delete")).toBe(false);
+      ledger = join(lines.find((entry) => entry.method === "session/new")!.cwd!, ".openmaus-probe-sessions.json");
+      expect(Object.keys(JSON.parse(readFileSync(ledger, "utf8")))).toEqual(["ses_crashed"]);
+
+      writeFileSync(ledger, JSON.stringify({ ses_crashed: Date.now() - 10 * 60_000 }));
+      resetOpenCodeModelCache();
+      const next = join(scratch, "next.jsonl");
+      await discoverOpenCodeModels({
+        ...environment, FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_SESSION_ID: "ses_next", FAKE_ACP_RPC_APPEND_FILE: next,
+      }, FAKE_CLI);
+      expect(rpcLines(next).filter((entry) => entry.method === "session/delete").map((entry) => entry.sessionId).sort())
+        .toEqual(["ses_crashed", "ses_next"]);
+      expect(JSON.parse(readFileSync(ledger, "utf8"))).toEqual({});
+    } finally {
+      if (ledger) writeFileSync(ledger, "{}");
+      await removeTempDir(scratch);
+    }
+  });
+
   it("neither deletes nor records sessions when OpenCode cannot delete them", async () => {
     const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-no-delete-"));
     try {

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 
+import { writeFileAtomic } from "../../atomic.ts";
 import { ATTACHMENTS_DIR } from "../../attachments.ts";
 import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
@@ -328,7 +329,7 @@ function changeProbeLedger(cwd: string, change: (ledger: ProbeSessionLedger) => 
   const ledger = readProbeLedger(cwd);
   change(ledger);
   try {
-    writeFileSync(probeLedgerPath(cwd), JSON.stringify(ledger));
+    writeFileAtomic(probeLedgerPath(cwd), JSON.stringify(ledger), { durable: false });
   } catch {}
 }
 
