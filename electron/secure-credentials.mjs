@@ -39,3 +39,18 @@ export async function readSecureCredentials({
   }
   return { status: "unavailable", credentials: {}, error: lastError };
 }
+
+/** "Reset saved keys" for a store that cannot be read: after the person confirms, the file is moved aside (kept, not
+ * deleted) and the app restarts with an empty store it can write again. A store that was read is never touched. */
+export async function resetUnreadableCredentials({ unreadable, confirm, exists, moveAside, failed, restart }) {
+  if (!unreadable) return "readable";
+  if (!(await confirm())) return "cancelled";
+  try {
+    if (exists()) moveAside();
+  } catch (error) {
+    await failed(error);
+    return "failed";
+  }
+  restart();
+  return "reset";
+}

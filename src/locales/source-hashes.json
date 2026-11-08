@@ -33567,7 +33567,12 @@
       "mascot.body.jalebi": "2e200e92c49eb6d51ca76db4516d1fe7a39430862e5b8ebb5fa30071dc5ccc63",
       "mascot.body.katli": "28670af54fcc50cd51c5983623672ed0d63c3355b5be96ef666812b0da6b6bf5",
       "mascot.body.karanji": "dc2ff0fdc7d7ce51f05cd1dd8d6f0f8ff444c82da36304373561c9cf246c32a4",
-      "skins.tagline.diwali": "92af77174824ccd4267be3745deb99c28cd2ddd21e761e2afcd438bded98405c"
+      "skins.tagline.diwali": "92af77174824ccd4267be3745deb99c28cd2ddd21e761e2afcd438bded98405c",
+      "native.dialog.resetSavedKeys.title": "09a032a1b21411b300becf306038111d2975ab78b24c441565a726eff5d684b4",
+      "native.dialog.resetSavedKeys.detail": "9f72b7452bdcd91042c9679f05a5b6f2f6e3e7fdc7980c42a488fa3b01d6b3b0",
+      "native.dialog.resetSavedKeys.button": "32910a15265787f53a3554f97da5787c04a7ada90822edcc7776a471b8ee3d8a",
+      "native.dialog.resetSavedKeys.failed": "e663cbf1d28235aee568f1cd2b3c837697c355d0de071f557053f0c61bba2a54",
+      "connectors.resetSavedKeys": "764411710357197d3d55fbf646d0ea6249c4236cbc635e0b4212b8d92cf5dea6"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { readSecureCredentials } from "./secure-credentials.mjs";
+import { readSecureCredentials, resetUnreadableCredentials } from "./secure-credentials.mjs";
 
 const transient = () =>
   new Error("safeStorage.decryptStringAsync is temporarily unavailable. Please try again.");
@@ -64,5 +64,54 @@ describe("readSecureCredentials", () => {
     const result = await readSecureCredentials(deps({ decrypt }));
     expect(result.status).toBe("unavailable");
     expect(decrypt).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("resetUnreadableCredentials", () => {
+  const resetDeps = (over = {}) => ({
+    unreadable: true,
+    confirm: vi.fn(async () => true),
+    exists: () => true,
+    moveAside: vi.fn(),
+    failed: vi.fn(async () => {}),
+    restart: vi.fn(),
+    ...over,
+  });
+
+  it("moves the unreadable file aside and restarts once the person confirms", async () => {
+    const d = resetDeps();
+    await expect(resetUnreadableCredentials(d)).resolves.toBe("reset");
+    expect(d.moveAside).toHaveBeenCalledTimes(1);
+    expect(d.restart).toHaveBeenCalledTimes(1);
+  });
+
+  it("never touches a store that was read, and does not even ask", async () => {
+    const d = resetDeps({ unreadable: false });
+    await expect(resetUnreadableCredentials(d)).resolves.toBe("readable");
+    expect(d.confirm).not.toHaveBeenCalled();
+    expect(d.moveAside).not.toHaveBeenCalled();
+    expect(d.restart).not.toHaveBeenCalled();
+  });
+
+  it("changes nothing when the person cancels", async () => {
+    const d = resetDeps({ confirm: vi.fn(async () => false) });
+    await expect(resetUnreadableCredentials(d)).resolves.toBe("cancelled");
+    expect(d.moveAside).not.toHaveBeenCalled();
+    expect(d.restart).not.toHaveBeenCalled();
+  });
+
+  it("tells the person and does not restart when the file cannot be moved aside", async () => {
+    const busy = new Error("EBUSY: resource busy or locked");
+    const d = resetDeps({ moveAside: vi.fn(() => { throw busy; }) });
+    await expect(resetUnreadableCredentials(d)).resolves.toBe("failed");
+    expect(d.failed).toHaveBeenCalledWith(busy);
+    expect(d.restart).not.toHaveBeenCalled();
+  });
+
+  it("still restarts when the file is already gone", async () => {
+    const d = resetDeps({ exists: () => false });
+    await expect(resetUnreadableCredentials(d)).resolves.toBe("reset");
+    expect(d.moveAside).not.toHaveBeenCalled();
+    expect(d.restart).toHaveBeenCalledTimes(1);
   });
 });
