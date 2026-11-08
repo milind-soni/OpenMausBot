@@ -137,12 +137,11 @@ export function CommandCodeMark({ size = 16, className }: IconProps) {
 }
 
 export function KiroMark({ size = 16, className }: IconProps) {
-  // Kiro's ghost, drawn plainly in white on a rounded square in Kiro's purple.
+  // Kiro's ghost, drawn plainly in Kiro's purple, which reads on light and dark; its eyes are holes onto the panel.
   return <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
-    <rect width="24" height="24" rx="6" fill="#7B3FE4" />
-    <path fill="#FFFFFF" d="M12 4.5a5.5 5.5 0 0 0-5.5 5.5v9.5l1.83-1.3 1.84 1.3L12 18.2l1.83 1.3 1.84-1.3 1.83 1.3V10A5.5 5.5 0 0 0 12 4.5Z" />
-    <circle cx="10" cy="10.5" r="1.1" fill="#7B3FE4" />
-    <circle cx="14" cy="10.5" r="1.1" fill="#7B3FE4" />
+    <path fill="#7B3FE4" d="M12 2a7.5 7.5 0 0 0-7.5 7.5V22l2.5-1.8 2.5 1.8 2.5-1.8 2.5 1.8 2.5-1.8 2.5 1.8V9.5A7.5 7.5 0 0 0 12 2Z" />
+    <circle cx="9.3" cy="10" r="1.5" fill="var(--color-panel)" />
+    <circle cx="14.7" cy="10" r="1.5" fill="var(--color-panel)" />
   </svg>;
 }
 
