@@ -33308,7 +33308,9 @@
       "remote.client.endsDec7": "5d9f8b310cc70fd59233acccd00c4fd201e3b33ef2ed79e4fc3aa491c95f8f35",
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
-      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128"
+      "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
+      "chat.notice.acpMcpAppsFailed": "d4e7b2a8d9464e8365bf1842d5e0eea17f602dc29834f58cd2d4d8b258387fba",
+      "chat.notice.acpMcpServerFailed": "0691e7f2e00e744d7a8092a5ff69a6be41fc3d998c0cd996bdf4ff6e31560bdd"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
