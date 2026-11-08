@@ -11,6 +11,7 @@ import type { BotKept, BotMcpServerAdd } from "../mcp-bot-servers.ts";
 import { BOT_STRIPPED_KEYS, botChangeLines, botListing, botMayChange, botServerTarget, isSecretRef, mcpOwner, mergeBotUpdate } from "../mcp-bot-rules.ts";
 import type { McpAuthState, McpOAuthManager } from "../mcp-oauth.ts";
 import type { McpProbeResult } from "../mcp-probe.ts";
+import { publicMcpUrl, type HostLookup } from "../mcp-public-url.ts";
 import { isRemoteMcpServer, parseMcpServerMutation, parseStoredMcpServer, type StoredMcpServer, type StoredRemoteMcpServer, type StoredStdioMcpServer } from "../mcp-registry.ts";
 import { serverLine, type ServerLineKey } from "../server-lines.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -80,6 +81,8 @@ export interface InternalMcpDeps {
   /** A server this bot adds that needs the person's own computer, marked as running on the one of theirs lent now
    * (`computer`: the one the bot names, by its name), or why it can't be added yet. */
   place?(server: StoredMcpServer, computer: string | undefined): Promise<{ ok: true; server: StoredMcpServer } | { ok: false; error: string }>;
+  /** Resolves a server's host name to tell a public address from the person's own network; DNS when left out. */
+  lookupHost?: HostLookup;
 }
 
 type Deps = Omit<InternalMcpDeps, "readBody">;
@@ -218,9 +221,10 @@ async function add(deps: Deps, name: string, fields: Record<string, unknown>, si
   redeemed.commit();
   const where = folderText(deps, server, added.moved ?? []);
 
-  // Security: below Full access, turning on a command server (it runs a program) or a server on the person's own
-  // computer needs their yes; a URL server elsewhere only connects to an address.
-  if (!deps.fullAccess() && (!isRemoteMcpServer(server) || server.runsOn)) {
+  // Security: below Full access, only a server at a public https address turns on without the person's yes. A command
+  // server runs a program, and a URL on their computer or network (loopback, a LAN address, a local name) reaches it.
+  const open = deps.fullAccess() || (isRemoteMcpServer(server) && !server.runsOn && await publicMcpUrl(server.url, deps.lookupHost));
+  if (!open) {
     say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.switchedOff"]);
     const card = deps.requestApproval({ action: "enable", name, subtitle: turnOnText(deps, server), targetHash: targetHash(server) });
     return { status: 201, text: `Saved MCP server ${name} switched off.${where} ${card.text}` };

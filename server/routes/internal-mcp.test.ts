@@ -32,6 +32,8 @@ const PATH_TOKEN = "Zk9QxW2mT7aBcD4eF6gH8jK1";
 const USER_TOKEN = "tok3n9876userinfo";
 const zapier = { type: "http", url: `https://mcp.zapier.com/api/mcp/s/${PATH_TOKEN}/mcp`, headers: { "X-Api-Key": "zap-header-value" }, enabled: true };
 const userinfo = `https://ada:${USER_TOKEN}@mcp.example.com/mcp-server-production/mcp`;
+/** The fixture's DNS: a public name, a name on the person's network, and one that resolves to both. Others fail. */
+const DNS: Record<string, string[]> = { "mcp.linear.app": ["34.117.59.81"], "intranet.example": ["10.0.0.5"], "split.example": ["34.117.59.81", "192.168.1.9"] };
 
 interface Options {
   full?: boolean;
@@ -124,6 +126,11 @@ function fixture(options: Options = {}) {
     },
     ...(options.lender !== undefined ? { lender: () => options.lender ?? null } : {}),
     ...(options.place ? { place: options.place } : {}),
+    lookupHost: async (host) => {
+      const addresses = DNS[host];
+      if (!addresses) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: "ENOTFOUND" });
+      return addresses.map((address) => ({ address }));
+    },
   };
   const route = createInternalMcpRoutes(deps);
   const ref = (value: string) => vault.saveRef(owner, `card-${value}`, "Key", value);
@@ -650,6 +657,22 @@ describe("internal mcp_server route, below Full access", () => {
     expect(decided).toEqual([{ summary: "Added MCP server linear and turned it on", applied: "level" }]);
     expect(lines).toEqual(["Added MCP server linear · Turned on · Test: 1 tool"]);
     expect(chat).toHaveLength(0);
+  });
+
+  it.each([
+    "http://localhost:3000/mcp", "https://192.168.1.5/mcp", "http://docs.example/mcp", "https://127.0.0.1:8799/mcp",
+    "https://printer.local/mcp", "https://intranet.example/mcp", "https://split.example/mcp", "https://nowhere.example/mcp",
+  ])("a non-Full add of %s, not a public https address, saves it off and posts a Turn on card", async (url) => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const { post, stored, chat, card, decided } = fixture({ full: false });
+    const { status, body } = await post({ action: "add", name: "local", type: "http", url });
+    expect(status).toBe(201);
+    expect(stored("local")?.enabled).toBe(false);
+    expect(probe).not.toHaveBeenCalled();
+    expect(body.text).toContain(PROPOSED);
+    expect(decided).toEqual([]);
+    expect(chat).toHaveLength(1);
+    expect(card()).toMatchObject({ title: "Turn on local?", options: ["Turn on", "Cancel"], mcpRequest: { action: "enable", name: "local" } });
   });
 
   it("a non-Full add of a command server saves it off and posts a Turn on card, since turning it on runs a program", async () => {
