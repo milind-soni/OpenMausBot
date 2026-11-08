@@ -15,6 +15,7 @@ import { useStore, type Bot } from "@/state/store";
 import type { AppDocument } from "../../shared/app";
 import { AppDocumentError, fetchAppDocument } from "./app/app-api";
 import { AppFrame, type AppFrameHandle } from "./app/AppFrame";
+import { AppPlaceholder } from "./app/AppChrome";
 
 const LOAD_TIMEOUT_MS = 10_000;
 
@@ -108,7 +109,10 @@ function storedPageVersion(bots: readonly Bot[] | undefined, page: PinnedChatPag
 
 function PinnedChatPageView({ panel, page, panels }: { panel: WebPanel; page: PinnedChatPage; panels: readonly WebPanel[] }) {
   const { state, dispatch } = useStore();
-  const version = storedPageVersion(state.bots, page);
+  // Only a new stored version means the page changed: while its chat is not loaded (switching threads) it stays put.
+  const stored = storedPageVersion(state.bots, page);
+  const [version, setVersion] = useState(stored);
+  if (stored && stored !== version) setVersion(stored);
   const [reloads, setReloads] = useState(0);
   const [load, setLoad] = useState<PageLoad | null>(null);
   const handle = useRef<AppFrameHandle | null>(null);
@@ -150,7 +154,6 @@ function PinnedChatPageView({ panel, page, panels }: { panel: WebPanel; page: Pi
       {load && "doc" in load ? (
         <div className="relative min-h-0 flex-1">
           <AppFrame
-            key={`${reloads}:${version}`}
             doc={load.doc}
             botId={page.botId}
             threadId={page.threadId}
@@ -168,7 +171,11 @@ function PinnedChatPageView({ panel, page, panels }: { panel: WebPanel; page: Pi
           <p className="text-[14px] font-medium text-ink">{t("webPanels.page.pageGone")}</p>
           <p className="max-w-sm text-[13px] text-ink-secondary">{load.failure}</p>
         </div>
-      ) : null}
+      ) : (
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <AppPlaceholder height={120} loading />
+        </div>
+      )}
     </main>
   );
 }
