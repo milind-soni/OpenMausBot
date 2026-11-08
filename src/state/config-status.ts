@@ -139,6 +139,8 @@ export interface ConfigStatus {
   };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string; aboutMe?: string; avatarUrl?: string };
+  /** Rules every bot follows, ahead of its department's context and its own instructions; sent to admins only. */
+  everyBotRules?: string;
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** What a paired phone calls this computer; "" uses the default. */

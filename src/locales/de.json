@@ -2518,9 +2518,14 @@
   "chat.preview.updatedLink": "Unter demselben Link aktualisiert",
   "chat.preview.publishFailed": "Die Seite konnte nicht veröffentlicht werden. Versuche es gleich noch einmal.",
   "chat.preview.openTab": "In neuem Tab öffnen",
+  "chat.preview.save": "Auf Gerät speichern",
+  "chat.preview.saveFailed": "Die Seite konnte nicht gespeichert werden.",
+  "serverError.page.downloadHasFiles": "Neben dieser Seite liegen weitere Dateien, daher kann sie nicht als eine Datei gespeichert werden. Teile sie stattdessen als Link.",
   "chat.preview.openTabNeedsLink": "Teile die Seite, um sie in einem neuen Tab zu öffnen",
   "chat.preview.fullScreen": "Vollbild",
   "chat.preview.exitFullScreen": "Vollbild schließen",
+  "chat.preview.openPage": "Seite öffnen",
+  "chat.preview.closePage": "Seite schließen",
   "chat.preview.pointedPart": "ein Teil der Seite",
   "chat.preview.removePoint": "{label} entfernen",
   "chat.preview.pointedAt": "Gezeigt auf {parts}",
@@ -3424,5 +3429,11 @@
   "remote.client.endsDec7": "Diese Verbindungsart endet am 7. Dezember. Koppeln Sie diesen Computer danach erneut über Telefon & Geräte auf dem anderen Computer.",
   "phone.code.pairingCode": "Kopplungscode",
   "phone.code.typeIntro": "Öffnen Sie die {app}-App und geben Sie diesen Kopplungscode ein.",
-  "phone.signIn.emailCode": "Anmeldecode aus Ihrer E-Mail"
+  "phone.signIn.emailCode": "Anmeldecode aus Ihrer E-Mail",
+  "settings.profile.everyBotRules": "Regeln für alle Bots",
+  "settings.profile.everyBotRulesPlaceholder": "Alle Bots halten sich daran. Wo sie abweichen, gelten die eigenen Anweisungen eines Bots.",
+  "botPanel.heavy": "Dieser Bot lädt bei jedem Zug sehr viel.",
+  "botPanel.tidyMemory": "Gedächtnis aufräumen",
+  "memory.journal.instructions": "die Anweisungen",
+  "memory.journal.actor.teamSetup": "Die Team-Einrichtung"
 }

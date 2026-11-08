@@ -27,6 +27,7 @@ import { SettingsPage } from "./SettingsPage";
 import { panelMemoryNotes, withMemoryNote, withoutMemoryNote, type PanelMemoryNote } from "./memory-notes";
 import type { SimplePageId } from "./page-registry";
 import { BotSwitch, buttonCls, Card, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, SwitchRow, TextRow, TrashButton } from "./rows";
+import { MemoryUpkeepCards } from "./MemoryUpkeepCards";
 import { useMemoryDoc } from "./use-memory-doc";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
@@ -241,6 +242,7 @@ export function MemoryPage({ bot }: PageContext) {
           />
         </Card>
       )}
+      {memoryOn && !memory.mine && <MemoryUpkeepCards bot={bot} onChanged={memory.reload} />}
     </>
   );
 }
