@@ -45,6 +45,11 @@ export async function changeLogin(id: string, change: { password?: string; totp?
   })).login;
 }
 
+/** Which bots may use one 1Password item; null hands it back to its vault's choice. */
+export async function grantItem(itemId: string, bots: LoginBots | null): Promise<void> {
+  await api(`/api/logins/1password/items/${encodeURIComponent(itemId)}`, { method: "PATCH", body: JSON.stringify({ bots }) });
+}
+
 /** Which bots may use the logins in one 1Password vault. */
 export async function grantVault(vaultId: string, bots: LoginBots): Promise<OnePasswordStatus> {
   return (await api<{ onePassword: OnePasswordStatus }>(`/api/logins/1password/vaults/${encodeURIComponent(vaultId)}`, {

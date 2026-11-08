@@ -34,7 +34,8 @@ async function serve() {
   const { sdk } = fakeOnePasswordSdk({ token: TOKEN, vaults: { v1: { title: "Shared with OMB", items: [
     { id: "i1", title: "Example", urls: ["https://vault.example.com"], username: "vault-user", password: VAULT_PASSWORD },
   ] } } });
-  const onePassword = new OnePasswordLogins({ token: () => store.onePasswordToken(), grants: () => store.onePasswordGrants(), connect: (token) => sdkOnePasswordClient(sdk, token, "0.0.0") });
+  const onePassword = new OnePasswordLogins({ token: () => store.onePasswordToken(), grants: () => store.onePasswordGrants(), itemGrants: () => store.onePasswordItemGrants(),
+    connect: (token) => sdkOnePasswordClient(sdk, token, "0.0.0") });
   const logins = new BotLogins(store, onePassword);
   const routes = [createLoginRoutes(logins.routes((id) => ["pepper", "quill"].includes(id)))];
   const answers: string[] = [];
@@ -149,6 +150,23 @@ describe("Settings → Logins routes", () => {
     expect((await call("PATCH", "/api/logins/1password/vaults/v1", { bots: "all" })).body.onePassword.vaults[0].bots).toBe("all");
     expect(store.onePasswordGrants()).toEqual({});
     expect((await logins.candidates("pepper", "vault.example.com")).map((login) => login.username)).toEqual(["vault-user"]);
+  });
+
+  it("keeps one 1Password login to the bots chosen for it, over its vault's choice, until handed back", async () => {
+    const { store, logins, call } = await serve();
+    await call("POST", "/api/logins/1password", { token: TOKEN });
+    await call("PATCH", "/api/logins/1password/vaults/v1", { bots: [] });
+    expect(await logins.candidates("quill", "vault.example.com")).toEqual([]);
+    expect(await call("PATCH", "/api/logins/1password/items/i1", { bots: ["quill"] })).toMatchObject({ status: 200, body: { ok: true } });
+    expect((await logins.candidates("quill", "vault.example.com")).map((login) => login.username)).toEqual(["vault-user"]);
+    expect(await logins.candidates("pepper", "vault.example.com")).toEqual([]);
+    expect((await call("GET", "/api/logins")).body.logins[0]).toMatchObject({ bots: ["quill"], onePassword: { itemId: "i1", ownBots: true } });
+    expect((await call("PATCH", "/api/logins/1password/items/i1", { bots: ["nobody"] })).body).toEqual({ error: LOGIN_ERRORS.bots });
+    expect((await call("PATCH", "/api/logins/1password/items/i1", {})).status).toBe(400);
+    expect((await call("PATCH", "/api/logins/1password/items/i1", { bots: null })).status).toBe(200);
+    expect(store.onePasswordItemGrants()).toEqual({});
+    expect(await logins.candidates("quill", "vault.example.com")).toEqual([]);
+    expect(requiredScope("PATCH", "/api/logins/1password/items/i1")).toBe("admin");
   });
 
   it("takes changes as JSON only, so another page's form cannot post one", async () => {

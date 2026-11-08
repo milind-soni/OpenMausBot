@@ -35,7 +35,7 @@ export interface CloudSendSources {
   /** The stored picture's bytes, or null when it is gone. */
   picture(avatarUrl: string): Uint8Array | null;
   logins(): ReadonlyArray<{ id: string; site: string; hosts: readonly string[]; exactHost: boolean; username: string; updatedAt: number }>;
-  onePassword(): { connectedAt: number; grants: Record<string, LoginBots> } | null;
+  onePassword(): { connectedAt: number; grants: Record<string, LoginBots>; itemGrants?: Record<string, LoginBots> } | null;
   settings(): { profile?: { name?: string; email?: string; aboutMe?: string }; language?: string };
   /** What only a move carries, of the bots it carries (cloud-send-kinds.ts), and a bot's parts only a move compares.
    * `only`: a move of that one bot into a team. */
@@ -123,7 +123,8 @@ export function cloudSendSummary(sources: CloudSendSources, { move = false, bot:
   const onePassword = sources.onePassword();
   if (onePassword) {
     items.push({ key: itemKey.onePassword(), kind: "1password", label: "1Password",
-      parts: { token: partHash(onePassword.connectedAt), vaults: partHash(onePassword.grants) } });
+      parts: { token: partHash(onePassword.connectedAt), vaults: partHash(onePassword.grants),
+        ...(Object.keys(onePassword.itemGrants ?? {}).length ? { items: partHash(onePassword.itemGrants) } : {}) } });
   }
   const { profile = {}, language } = sources.settings();
   items.push({ key: itemKey.setting("profile"), kind: "setting", label: "profile",

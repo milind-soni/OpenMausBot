@@ -22,6 +22,7 @@ export function BotPickerList({
       {bots.map((b) => (
         <button
           key={b.id}
+          type="button"
           onClick={() => onToggle(b.id)}
           role="checkbox"
           aria-label={teamBotName(b, team)}

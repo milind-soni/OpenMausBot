@@ -79,7 +79,7 @@ describe("Settings → Logins", () => {
     await type("username", "team");
     await type("password", "fake-typed-pass");
     await act(async () => { [...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')][1]!.click(); });
-    await act(async () => { host.querySelector<HTMLInputElement>('fieldset input[type="checkbox"]')!.click(); });
+    await act(async () => { host.querySelector<HTMLButtonElement>('fieldset [role="checkbox"]')!.click(); });
     await submit();
     expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins", { method: "POST", body: JSON.stringify({ site: "crm.example.org", username: "team", password: "fake-typed-pass", bots: ["pepper"] }) });
     expect(host.querySelector("[data-login-form]")).toBeNull();
@@ -171,12 +171,46 @@ describe("Settings → Logins", () => {
     expect(row().textContent).toContain("2 logins · All bots");
     await click("Change who can use Shared with OMB");
     await act(async () => { [...row().querySelectorAll<HTMLInputElement>('input[type="radio"]')][1]!.click(); });
-    await act(async () => { [...row().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')][1]!.click(); });
+    await act(async () => { [...row().querySelectorAll<HTMLButtonElement>('[role="checkbox"]')][1]!.click(); });
     await click("Save changes");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/1password/vaults/v1", { method: "PATCH", body: JSON.stringify({ bots: ["quill"] }) });
     expect(row().textContent).toContain("2 logins · Quill");
     expect(host.querySelector('[data-login-row="example.com"]')!.textContent).toContain("From 1Password · Quill");
+  });
+
+  it("keeps one 1Password login to its own bots, and hands it back to its vault", async () => {
+    const on = { connected: true, vaults: [{ id: "v1", title: "Shared with OMB", items: 1, bots: [] }], items: 1 };
+    const item = { ...VAULT_LOGIN, bots: [], onePassword: { itemId: "i1", ownBots: false } };
+    fixture.api
+      .mockResolvedValueOnce({ logins: [item], onePassword: on })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ logins: [{ ...item, bots: ["pepper"], onePassword: { itemId: "i1", ownBots: true } }], onePassword: on })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ logins: [item], onePassword: on });
+    await render();
+    const row = () => host.querySelector('[data-login-row="example.com"]')!;
+    expect(row().textContent).toContain("From 1Password · No bots");
+    await click("Change who can use the 1Password login for example.com");
+    expect(row().textContent).not.toContain("Use the vault's choice");
+    await act(async () => { [...row().querySelectorAll<HTMLButtonElement>('[role="checkbox"]')][0]!.click(); });
+    await click("Save changes");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/1password/items/i1", { method: "PATCH", body: JSON.stringify({ bots: ["pepper"] }) });
+    expect(row().textContent).toContain("From 1Password · Pepper");
+    await click("Change who can use the 1Password login for example.com");
+    await click("Use the vault's choice");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(fixture.api).toHaveBeenNthCalledWith(4, "/api/logins/1password/items/i1", { method: "PATCH", body: JSON.stringify({ bots: null }) });
+    expect(row().textContent).toContain("From 1Password · No bots");
+  });
+
+  it("says how many 1Password logins were skipped, and what each lacks", async () => {
+    const on = { connected: true, vaults: [{ id: "v1", title: "OMB", items: 0, bots: "all", skipped: { website: 2, password: 1 } }], items: 0 };
+    fixture.api.mockResolvedValueOnce({ logins: [], onePassword: on });
+    await render();
+    expect(host.querySelector('[data-vault-skipped="website"]')!.textContent).toBe("2 skipped: no website. In 1Password, add the sign-in address to the item's website field, then Refresh.");
+    expect(host.querySelector('[data-vault-skipped="password"]')!.textContent).toBe("1 skipped: no password. In 1Password, fill in the item's password, then Refresh.");
   });
 
   it("says why 1Password refused a token", async () => {

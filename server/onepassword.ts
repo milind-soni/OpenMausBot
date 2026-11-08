@@ -60,7 +60,7 @@ export async function sdkOnePasswordClient(sdk: OnePasswordSdk, token: string, v
   return {
     vaults: async () => (await client.vaults.list()).map((vault) => ({ id: vault.id, title: vault.title })),
     loginItems: async (vaultId) => (await client.items.list(vaultId))
-      .filter((item) => item.category === "Login" && (item.websites?.length ?? 0) > 0)
+      .filter((item) => item.category === "Login")
       .map((item) => ({ id: item.id, title: item.title, urls: (item.websites ?? []).map((site) => site.url) })),
     fields: async (vaultId, itemIds) => {
       const found = new Map<string, OnePasswordItemFields>();
@@ -119,6 +119,7 @@ export class OnePasswordLogins {
   private readonly token: () => string | null;
   private readonly connect: (token: string) => Promise<OnePasswordClient>;
   private readonly grants: () => Record<string, LoginBots>;
+  private readonly itemGrants: () => Record<string, LoginBots>;
   private readonly now: () => number;
   private client: { token: string; client: OnePasswordClient } | null = null;
   private entries: Entry[] = [];
@@ -129,15 +130,27 @@ export class OnePasswordLogins {
   private refreshing: Promise<OnePasswordStatus> | null = null;
   private readonly lastUsed = new Map<string, number>();
 
-  constructor(options: { token: () => string | null; connect: (token: string) => Promise<OnePasswordClient>; grants?: () => Record<string, LoginBots>; now?: () => number }) {
+  constructor(options: {
+    token: () => string | null;
+    connect: (token: string) => Promise<OnePasswordClient>;
+    grants?: () => Record<string, LoginBots>;
+    itemGrants?: () => Record<string, LoginBots>;
+    now?: () => number;
+  }) {
     this.token = options.token;
     this.connect = options.connect;
     this.grants = options.grants ?? (() => ({}));
+    this.itemGrants = options.itemGrants ?? (() => ({}));
     this.now = options.now ?? Date.now;
   }
 
   private botsFor(vaultId: string): LoginBots {
     return this.grants()[vaultId] ?? "all";
+  }
+
+  /** An item's own choice, else its vault's. */
+  private itemBots(entry: Entry): LoginBots {
+    return this.itemGrants()[entry.itemId] ?? this.botsFor(entry.vaultId);
   }
 
   private connected(): OnePasswordStatus {
@@ -177,22 +190,26 @@ export class OnePasswordLogins {
       const counted: Array<Omit<OnePasswordVault, "bots">> = [];
       for (const vault of vaults) {
         let items = 0;
-        const logins = (await client.loginItems(vault.id)).slice(0, MAX_ITEMS);
-        for (let start = 0; start < logins.length; start += FIELDS_BATCH) {
-          const batch = logins.slice(start, start + FIELDS_BATCH);
+        const skipped = { website: 0, password: 0 };
+        const logins = (await client.loginItems(vault.id)).slice(0, MAX_ITEMS)
+          .map((item) => ({ ...item, hosts: new Set(item.urls.flatMap((url) => normalizeLoginHost(url) ?? [])) }));
+        const placed = logins.filter((item) => item.hosts.size > 0);
+        skipped.website = logins.length - placed.length;
+        for (let start = 0; start < placed.length; start += FIELDS_BATCH) {
+          const batch = placed.slice(start, start + FIELDS_BATCH);
           // The password in this answer is dropped here and read again at fill.
           const fields = await client.fields(vault.id, batch.map((item) => item.id));
           for (const item of batch) {
             const found = fields.get(item.id);
-            if (!found?.password) continue;
+            if (!found?.password) { skipped.password++; continue; }
             items++;
-            for (const [site, hosts] of bySite(new Set(item.urls.flatMap((url) => normalizeLoginHost(url) ?? [])))) {
+            for (const [site, hosts] of bySite(item.hosts)) {
               entries.push({ id: `${ID_PREFIX}${vault.id}:${item.id}:${site}`, vaultId: vault.id, itemId: item.id, site, hosts, exactHost: false,
                 username: found.username, hasTotp: Boolean(found.totp && parseTotpKey(found.totp)) });
             }
           }
         }
-        counted.push({ id: vault.id, title: vault.title, items });
+        counted.push({ id: vault.id, title: vault.title, items, ...(skipped.website || skipped.password ? { skipped } : {}) });
       }
       this.entries = entries.sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username));
       this.vaults = counted.sort((a, b) => a.title.localeCompare(b.title));
@@ -227,13 +244,14 @@ export class OnePasswordLogins {
     if (!this.token()) return [];
     return this.entries.map((entry) => ({
       id: entry.id, site: entry.site, hosts: [...entry.hosts], exactHost: false, username: entry.username, hasTotp: entry.hasTotp, source: "1password",
-      bots: this.botsFor(entry.vaultId), createdAt: 0, ...(this.lastUsed.has(entry.itemId) ? { lastUsedAt: this.lastUsed.get(entry.itemId)! } : {}),
+      bots: this.itemBots(entry), createdAt: 0, ...(this.lastUsed.has(entry.itemId) ? { lastUsedAt: this.lastUsed.get(entry.itemId)! } : {}),
+      onePassword: { itemId: entry.itemId, ownBots: entry.itemId in this.itemGrants() },
     }));
   }
 
-  /** A vault narrowed to other bots is invisible to this one. */
+  /** An item kept to other bots is invisible to this one. */
   private usable(botId: string | readonly string[]): Entry[] {
-    return this.token() ? this.entries.filter((entry) => loginUsableBy({ bots: this.botsFor(entry.vaultId) }, botId)) : [];
+    return this.token() ? this.entries.filter((entry) => loginUsableBy({ bots: this.itemBots(entry) }, botId)) : [];
   }
 
   sitesFor(botId: string | readonly string[]): Array<LoginPlace & { username: string }> {

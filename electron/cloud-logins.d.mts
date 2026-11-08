@@ -9,7 +9,7 @@ interface PrivateProcess { postMessage(message: unknown): void }
 export function botsOnCloud(bots: unknown, cloudBotIds: ReadonlySet<string>): "all" | string[];
 export function createLoginHandoffClient(options?: { timeoutMs?: number; randomId?: () => string }): {
   request(proc: PrivateProcess | null | undefined, what: HandoffWhat | ConnectionAsk): Promise<{
-    onePassword?: { token: string; grants: Record<string, unknown> }; login?: Record<string, unknown>;
+    onePassword?: { token: string; grants: Record<string, unknown>; itemGrants?: Record<string, unknown> }; login?: Record<string, unknown>;
     connection?: Record<string, any>; digest?: string; share?: { code: string }; release?: { released?: true; changed?: true };
     secrets?: Record<string, string>;
   }>;

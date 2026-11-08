@@ -5,6 +5,8 @@ import type { LoginBots } from "../../shared/logins";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LoginFieldsInput } from "@/lib/logins";
+import type { Bot } from "@/state/store";
+import { BotPickerList } from "./BotPickerList";
 
 // Security: the browser is asked not to fill or remember these fields, what was typed is dropped once saved, and a
 // saved password is never shown.
@@ -105,11 +107,14 @@ export function LoginForm({
 export function LoginBotPicker({ value, onChange, bots, disabled = false }: {
   value: LoginBots;
   onChange: (value: LoginBots) => void;
-  bots: ReadonlyArray<{ id: string; name: string }>;
+  bots: Bot[];
   disabled?: boolean;
 }) {
   const name = useId();
+  const [query, setQuery] = useState("");
   const chosen = value === "all" ? [] : value;
+  const many = bots.length > 6;
+  const shown = query.trim() ? bots.filter((bot) => bot.name.toLowerCase().includes(query.trim().toLowerCase())) : bots;
   return (
     <fieldset className="flex flex-col gap-1.5" disabled={disabled}>
       <legend className="mb-1 text-[12px] font-medium text-ink-secondary">{t("settings.logins.whoCanUse")}</legend>
@@ -122,14 +127,18 @@ export function LoginBotPicker({ value, onChange, bots, disabled = false }: {
         {t("settings.logins.onlyThese")}
       </label>
       {value !== "all" && (
-        <div className={cn("ms-6 flex flex-col gap-1", bots.length > 6 && "max-h-40 overflow-y-auto")}>
-          {bots.map((bot) => (
-            <label key={bot.id} className="flex items-center gap-2 text-[13px] text-ink">
-              <input type="checkbox" checked={chosen.includes(bot.id)}
-                onChange={(event) => onChange(event.target.checked ? [...chosen, bot.id] : chosen.filter((id) => id !== bot.id))} />
-              <span className="truncate">{bot.name}</span>
-            </label>
-          ))}
+        <div className="ms-6 flex flex-col gap-1.5" data-bot-picker>
+          {many && (
+            <div className="flex items-center gap-2">
+              <input type="search" value={query} onChange={(event) => setQuery(event.target.value)}
+                aria-label={t("settings.logins.findBot")} placeholder={t("settings.logins.findBot")} className={cn(FIELD, "flex-1")} />
+              <span className="shrink-0 text-[12px] text-ink-tertiary" data-bot-picker-count>
+                {t("settings.logins.botsChosen", { count: String(chosen.length), total: String(bots.length) })}
+              </span>
+            </div>
+          )}
+          <BotPickerList bots={shown} picked={new Set(chosen)} emptyHint={t("settings.logins.noBotMatch")}
+            onToggle={(id) => onChange(chosen.includes(id) ? chosen.filter((other) => other !== id) : [...chosen, id])} />
         </div>
       )}
     </fieldset>

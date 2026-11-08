@@ -354,6 +354,30 @@ test("1Password refused on My Cloud is told in words for this computer, not My C
   assert.equal(busy.result.failed[0].final, undefined, "any other refusal can be tried again");
 });
 
+test("1Password goes with each login's own bots, and a login My Cloud alone narrowed is handed back to its vault", async () => {
+  const sides = fakeSides({ localItems: [{ key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t" } }] });
+  sides.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: { v1: [] }, itemGrants: { i1: "all" } } });
+  const session = await sides.deps.cloud.open();
+  const call = session.call;
+  const bodies = [];
+  session.call = async (method, route, body) => {
+    if (route.startsWith("/api/logins/1password/")) bodies.push([route, body]);
+    if (method === "GET" && route === "/api/logins") {
+      await call(method, route);
+      return { status: 200, ok: true, body: { logins: [{ onePassword: { itemId: "i2", ownBots: true } }, { onePassword: { itemId: "i1", ownBots: true } }, { onePassword: { itemId: "i3", ownBots: false } }] } };
+    }
+    return call(method, route, body);
+  };
+  sides.deps.cloud.open = async () => session;
+  const outcome = await createCloudSend(sides.deps).send();
+  assert.deepEqual(outcome.result.failed, []);
+  assert.deepEqual(bodies, [
+    ["/api/logins/1password/vaults/v1", { bots: [] }],
+    ["/api/logins/1password/items/i1", { bots: "all" }],
+    ["/api/logins/1password/items/i2", { bots: null }],
+  ]);
+});
+
 test("chats by row: the cursor moves only past what My Cloud took; one removed there is never sent again; one being answered waits", async () => {
   const rows = { "t-a": [{ id: "a1", at: 1 }, { id: "a2", at: 2 }], "t-b": [{ id: "b1", at: 1 }], "t-c": [{ id: "c1", at: 1 }] };
   const heads = () => Object.entries(rows).map(([threadId, list]) => ({ bot: "ember", threadId, last: list.length, lastId: list.at(-1).id, busy: threadId === "t-c" }));

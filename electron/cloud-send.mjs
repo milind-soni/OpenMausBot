@@ -878,6 +878,15 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const granted = await ctx.session.call("PATCH", `/api/logins/1password/vaults/${encodeURIComponent(vault)}`, { bots: botsOnCloud(bots, ctx.cloudBots) });
       if (!granted.ok && granted.status !== 404) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its vaults to the same bots.");
     }
+    const itemGrants = record(onePassword.itemGrants) ? onePassword.itemGrants : {};
+    const there = await ctx.session.call("GET", "/api/logins");
+    const ownThere = (Array.isArray(there.body?.logins) ? there.body.logins : []).flatMap((login) => login?.onePassword?.ownBots ? [login.onePassword.itemId] : []);
+    const items = [...Object.entries(itemGrants), ...[...new Set(ownThere)].filter((id) => !Object.hasOwn(itemGrants, id)).map((id) => [id, null])];
+    for (const [item, bots] of items) {
+      if (!VAULT_ID.test(item)) continue;
+      const granted = await ctx.session.call("PATCH", `/api/logins/1password/items/${encodeURIComponent(item)}`, { bots: bots === null ? null : botsOnCloud(bots, ctx.cloudBots) });
+      if (!granted.ok) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its logins to the same bots.");
+    }
     done(ctx, row.key);
     ctx.result.onePassword = true;
   }

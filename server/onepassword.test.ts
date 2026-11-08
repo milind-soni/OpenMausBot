@@ -12,7 +12,7 @@ const TOKEN = "ops_fake-service-account-token";
 const VAULT_PASSWORD = "fake-1P-Passw0rd";
 const KEY = "otpauth://totp/Example:alice?secret=JBSWY3DPEHPK3PXP&issuer=Example";
 
-function setup(options: { token?: string | null; fail?: () => Error | null; now?: () => number; grants?: Record<string, LoginBots> } = {}) {
+function setup(options: { token?: string | null; fail?: () => Error | null; now?: () => number; grants?: Record<string, LoginBots>; itemGrants?: Record<string, LoginBots> } = {}) {
   const { sdk, calls } = fakeOnePasswordSdk({
     token: TOKEN,
     fail: options.fail,
@@ -31,7 +31,8 @@ function setup(options: { token?: string | null; fail?: () => Error | null; now?
   });
   let token: string | null = options.token === undefined ? TOKEN : options.token;
   const grants = options.grants ?? {};
-  const source = new OnePasswordLogins({ token: () => token, grants: () => grants, connect: (value) => sdkOnePasswordClient(sdk, value, "9.9.9"), now: options.now });
+  const itemGrants = options.itemGrants ?? {};
+  const source = new OnePasswordLogins({ token: () => token, grants: () => grants, itemGrants: () => itemGrants, connect: (value) => sdkOnePasswordClient(sdk, value, "9.9.9"), now: options.now });
   return { source, calls, setToken: (value: string | null) => { token = value; } };
 }
 
@@ -59,11 +60,11 @@ describe("the 1Password SDK adapter", () => {
 });
 
 describe("1Password logins", () => {
-  it("lists every Login item with a website and a password by site, read-only, with each vault for every bot", async () => {
+  it("lists every Login item with a website and a password by site, read-only, with each vault for every bot and what it skipped", async () => {
     const { source, calls } = setup();
     expect(await source.refresh()).toEqual({ connected: true, items: 3, vaults: [
       { id: "v2", title: "Finance", items: 1, bots: "all" },
-      { id: "v1", title: "Shared with OMB", items: 2, bots: "all" },
+      { id: "v1", title: "Shared with OMB", items: 2, skipped: { website: 1, password: 1 }, bots: "all" },
     ] });
     expect(calls).toEqual(["createClient OpenMausBot", "vaults.list", "items.list v2", "items.getAll v2 f1", "items.list v1", "items.getAll v1 i1,i2,i5"]);
     const rows = source.list();
@@ -94,7 +95,7 @@ describe("1Password logins", () => {
     await source.refresh();
     expect(source.status().vaults).toEqual([
       { id: "v2", title: "Finance", items: 1, bots: ["quill"] },
-      { id: "v1", title: "Shared with OMB", items: 2, bots: [] },
+      { id: "v1", title: "Shared with OMB", items: 2, skipped: { website: 1, password: 1 }, bots: [] },
     ]);
     expect(source.candidates("bank.example.net", "pepper")).toEqual([]);
     expect(source.candidates("accounts.example.com", "pepper")).toEqual([]);
@@ -104,6 +105,19 @@ describe("1Password logins", () => {
     expect(source.list().find((row) => row.site === "example.net")?.bots).toEqual(["quill"]);
     expect(source.hasVault("v2")).toBe(true);
     expect(source.hasVault("v9")).toBe(false);
+  });
+
+  it("lets an item's own bots override its vault's, so a closed vault can open one login", async () => {
+    const { source } = setup({ grants: { v1: [] }, itemGrants: { i2: ["pepper"], f1: ["quill"] } });
+    await source.refresh();
+    expect(source.sitesFor("pepper").map((login) => login.site)).toEqual(["example.org"]);
+    expect(source.candidates("accounts.example.com", "pepper")).toEqual([]);
+    expect(source.candidates("crm.example.org", "pepper").map((candidate) => candidate.username)).toEqual(["team"]);
+    expect(source.candidates("bank.example.net", "pepper")).toEqual([]);
+    expect(source.candidates("bank.example.net", "quill").map((candidate) => candidate.username)).toEqual(["treasurer"]);
+    const rows = source.list();
+    expect(rows.find((row) => row.site === "example.org")).toMatchObject({ bots: ["pepper"], onePassword: { itemId: "i2", ownBots: true } });
+    expect(rows.find((row) => row.site === "example.com")).toMatchObject({ bots: [], onePassword: { itemId: "i1", ownBots: false } });
   });
 
   it("is filled through the same path as a saved login: same origin rule, same TOTP, nothing back to the bot", async () => {

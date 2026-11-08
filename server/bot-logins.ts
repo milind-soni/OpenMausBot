@@ -120,6 +120,7 @@ export class BotLogins {
           this.store.setOnePasswordGrant(vaultId, bots);
           return this.onePassword.status();
         },
+        grantItem: (itemId, bots) => this.store.setOnePasswordItemGrant(itemId, bots),
       },
     };
   }

@@ -188,6 +188,13 @@ it("connects a 1Password service account on a Cloud home, and says plainly what 
   const connected = await api("POST", "/api/logins/1password", { token: TOKEN });
   expect(connected, log).toMatchObject({ status: 200, body: { onePassword: { connected: true, vaults: [{ id: "v1", title: "Shared with OpenMausBot", items: 1 }], items: 1 } } });
   expect((await api("GET", "/api/logins")).body.logins).toEqual([expect.objectContaining({ site: "example.test", username: "person@example.test", source: "1password" })]);
+  const itemId = (await api("GET", "/api/logins")).body.logins[0].onePassword.itemId;
+  expect((await api("PATCH", "/api/logins/1password/vaults/v1", { bots: [] })).status).toBe(200);
+  expect((await api("PATCH", `/api/logins/1password/items/${itemId}`, { bots: "all" })).status).toBe(200);
+  expect((await api("GET", "/api/logins")).body.logins[0]).toMatchObject({ bots: "all", onePassword: { itemId, ownBots: true } });
+  expect((await api("PATCH", `/api/logins/1password/items/${itemId}`, { bots: null })).status).toBe(200);
+  expect((await api("GET", "/api/logins")).body.logins[0]).toMatchObject({ bots: [], onePassword: { itemId, ownBots: false } });
+  expect((await api("PATCH", "/api/logins/1password/vaults/v1", { bots: "all" })).status).toBe(200);
   expect(log).not.toContain("SDK did not load");
   expect(log).not.toContain("not available in this build");
   for (const where of [...answers, log]) {

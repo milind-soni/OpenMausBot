@@ -3,10 +3,10 @@ import { KeyRound, Loader2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Trash2 } 
 
 import { loginHeldBackFor, type LoginBots, type LoginSummary, type OnePasswordStatus, type OnePasswordVault } from "../../shared/logins";
 import { t } from "@/lib/i18n";
-import { addLogin, changeLogin, connectOnePassword, deleteLogin, disconnectOnePassword, grantVault, listLogins, refreshOnePassword } from "@/lib/logins";
+import { addLogin, changeLogin, connectOnePassword, deleteLogin, disconnectOnePassword, grantItem, grantVault, listLogins, refreshOnePassword } from "@/lib/logins";
 import { relativeTime } from "@/lib/memory";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { useStore } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
 import { LoginBotPicker, LoginForm } from "./LoginForm";
 import { Card } from "./SettingsPrimitives";
 
@@ -23,7 +23,7 @@ const ROW_BUTTON = "flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[
 export function LoginsSettings() {
   const { state } = useStore();
   const ownerOrAdmin = useOwnerOrAdmin();
-  const bots = state.bots.map((bot) => ({ id: bot.id, name: bot.name }));
+  const bots = state.bots;
   const [logins, setLogins] = useState<LoginSummary[] | null>(null);
   const [onePassword, setOnePassword] = useState<OnePasswordStatus>({ connected: false });
   const [error, setError] = useState<string | null>(null);
@@ -107,6 +107,10 @@ export function LoginsSettings() {
                       </div>
                     )}
                   </div>
+                  {login.onePassword && editing !== login.id && (
+                    <button type="button" className={ROW_BUTTON} disabled={busy} onClick={() => startEdit(login)}
+                      aria-label={t("settings.logins.onePassword.changeItem", { site: login.site })}>{t("settings.logins.change")}</button>
+                  )}
                   {login.source !== "1password" && (
                     <div className="flex shrink-0 gap-1">
                       <button type="button" className={ROW_BUTTON} disabled={busy} onClick={() => startEdit(login)}
@@ -118,7 +122,11 @@ export function LoginsSettings() {
                     </div>
                   )}
                 </div>
-                {editing === login.id && (
+                {editing === login.id && login.onePassword && (
+                  <ItemAccess itemId={login.onePassword.itemId} ownBots={login.onePassword.ownBots} value={editBots} onChange={setEditBots} bots={bots}
+                    onDone={async () => { setEditing(null); await load(); }} />
+                )}
+                {editing === login.id && !login.onePassword && (
                   <div className="ms-6 rounded-lg bg-inset/60 p-3">
                     <LoginForm username={false} replacing submitLabel={t("settings.logins.saveChange")} autoFocus
                       onCancel={() => setEditing(null)}
@@ -190,9 +198,40 @@ function ExactHostChoice({ checked, onChange, label }: { checked: boolean; onCha
   );
 }
 
+/** Who may use one 1Password item, chosen for the item or left to its vault. */
+function ItemAccess({ itemId, ownBots, value, onChange, bots, onDone }: {
+  itemId: string;
+  ownBots: boolean;
+  value: LoginBots;
+  onChange: (value: LoginBots) => void;
+  bots: Bot[];
+  onDone: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async (next: LoginBots | null) => {
+    setBusy(true);
+    setError(null);
+    try { await grantItem(itemId, next); await onDone(); }
+    catch (cause) { setError(cause instanceof Error && cause.message ? cause.message : t("settings.logins.onePassword.error")); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="ms-6 flex flex-col gap-2 rounded-lg bg-inset/60 p-3" data-item-access>
+      <LoginBotPicker value={value} onChange={onChange} bots={bots} disabled={busy} />
+      {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
+      <div className="flex flex-wrap justify-end gap-2">
+        {ownBots && <button type="button" className="ui-button ui-button-md me-auto" disabled={busy} onClick={() => void save(null)}>{t("settings.logins.onePassword.useVault")}</button>}
+        <button type="button" className="ui-button ui-button-md" disabled={busy} onClick={() => void onDone()}>{t("logins.cancel")}</button>
+        <button type="button" className="ui-button ui-button-md ui-button-primary" disabled={busy} onClick={() => void save(value)}>{t("settings.logins.saveChange")}</button>
+      </div>
+    </div>
+  );
+}
+
 function VaultAccess({ vault, bots, botNames, disabled, onChange }: {
   vault: OnePasswordVault;
-  bots: ReadonlyArray<{ id: string; name: string }>;
+  bots: Bot[];
   botNames: (value: LoginBots) => string;
   disabled: boolean;
   onChange: (status: OnePasswordStatus) => Promise<void>;
@@ -214,6 +253,16 @@ function VaultAccess({ vault, bots, botNames, disabled, onChange }: {
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium text-ink">{vault.title}</div>
           <div className="text-[12px] text-ink-tertiary">{t("settings.logins.onePassword.vaultUse", { count: String(vault.items), who: botNames(vault.bots) })}</div>
+          {!!vault.skipped?.website && (
+            <div className="text-[12px] leading-snug text-warning" data-vault-skipped="website">
+              {t("settings.logins.onePassword.skippedWebsite", { count: String(vault.skipped.website) })}
+            </div>
+          )}
+          {!!vault.skipped?.password && (
+            <div className="text-[12px] leading-snug text-warning" data-vault-skipped="password">
+              {t("settings.logins.onePassword.skippedPassword", { count: String(vault.skipped.password) })}
+            </div>
+          )}
         </div>
         {!editing && (
           <button type="button" className={ROW_BUTTON} disabled={disabled || busy} onClick={() => { setValue(vault.bots); setEditing(true); }}
@@ -237,7 +286,7 @@ function VaultAccess({ vault, bots, botNames, disabled, onChange }: {
 function OnePasswordConnection({ status, disabled, bots, botNames, onChange }: {
   status: OnePasswordStatus;
   disabled: boolean;
-  bots: ReadonlyArray<{ id: string; name: string }>;
+  bots: Bot[];
   botNames: (value: LoginBots) => string;
   onChange: (status: OnePasswordStatus) => Promise<void>;
 }) {

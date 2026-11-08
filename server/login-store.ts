@@ -48,6 +48,8 @@ const fileSchema = z.object({
   onePassword: z.object({ token: z.string().min(1), connectedAt: z.number() }).optional(),
   /** Vault id → the bots that may use its logins; a vault not named here is for every bot. Kept across reconnects. */
   onePasswordGrants: z.record(z.string(), botsSchema).optional(),
+  /** 1Password item id → the bots that may use it, in place of its vault's choice. Kept across reconnects. */
+  onePasswordItemGrants: z.record(z.string(), botsSchema).optional(),
 });
 
 type DiskLogin = z.infer<typeof diskLoginSchema>;
@@ -255,11 +257,24 @@ export class LoginStore {
 
   /** "all" opens a vault to every bot again. */
   setOnePasswordGrant(vaultId: string, bots: LoginBots): void {
+    this.setGrant("onePasswordGrants", vaultId, bots === "all" ? null : bots);
+  }
+
+  onePasswordItemGrants(): Record<string, LoginBots> {
+    return this.read().onePasswordItemGrants ?? {};
+  }
+
+  /** Null hands the item back to its vault's choice. */
+  setOnePasswordItemGrant(itemId: string, bots: LoginBots | null): void {
+    this.setGrant("onePasswordItemGrants", itemId, bots);
+  }
+
+  private setGrant(field: "onePasswordGrants" | "onePasswordItemGrants", id: string, bots: LoginBots | null): void {
     const data = this.read();
-    const { [vaultId]: _previous, ...others } = data.onePasswordGrants ?? {};
-    const grants = bots === "all" ? others : { ...others, [vaultId]: bots };
-    const { onePasswordGrants: _grants, ...rest } = data;
-    this.write(Object.keys(grants).length ? { ...rest, onePasswordGrants: grants } : rest);
+    const { [id]: _previous, ...others } = data[field] ?? {};
+    const grants = bots === null ? others : { ...others, [id]: bots };
+    const { [field]: _grants, ...rest } = data;
+    this.write(Object.keys(grants).length ? { ...rest, [field]: grants } : rest);
   }
 
   secretValues(): string[] {

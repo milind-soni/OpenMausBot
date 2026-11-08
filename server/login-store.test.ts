@@ -156,6 +156,11 @@ describe("the saved logins store", () => {
     expect(new LoginStore({ dataDir: dir }).onePasswordGrants()).toEqual({ v1: ["pepper"], v2: [] });
     store.setOnePasswordGrant("v1", "all");
     expect(new LoginStore({ dataDir: dir }).onePasswordGrants()).toEqual({ v2: [] });
+    store.setOnePasswordItemGrant("i1", "all");
+    store.setOnePasswordItemGrant("i2", []);
+    store.setOnePasswordItemGrant("i1", null);
+    expect(new LoginStore({ dataDir: dir }).onePasswordItemGrants()).toEqual({ i2: [] });
+    expect(new LoginStore({ dataDir: dir }).onePasswordGrants()).toEqual({ v2: [] });
   });
 });
 

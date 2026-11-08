@@ -37,7 +37,7 @@ export interface HandedLogin {
 }
 
 export type LoginHandoffAnswer =
-  | { ok: true; onePassword: { token: string; grants: Record<string, LoginBots> } }
+  | { ok: true; onePassword: { token: string; grants: Record<string, LoginBots>; itemGrants: Record<string, LoginBots> } }
   | { ok: true; login: HandedLogin }
   | { ok: true; secrets: Record<string, string> }
   | { ok: false; error: string };
@@ -73,7 +73,7 @@ function parse(raw: unknown): { requestId: string; what: Ask } | null {
   return null;
 }
 
-type HandoffStore = Pick<LoginStore, "changes" | "get" | "onePasswordToken" | "onePasswordGrants">;
+type HandoffStore = Pick<LoginStore, "changes" | "get" | "onePasswordToken" | "onePasswordGrants" | "onePasswordItemGrants">;
 /** This computer's own 1Password problem, from its last read of the vaults (OnePasswordLogins.status().error). */
 type OnePasswordProblem = () => string | undefined;
 
@@ -86,7 +86,7 @@ export function answerLoginHandoff(store: HandoffStore, what: Exclude<LoginHando
     // 1Password itself refused this token here: My Cloud would only refuse it too, in words meant for its own page.
     const problem = onePasswordProblem();
     if (problem === ONE_PASSWORD_REFUSED || problem === ONE_PASSWORD_MALFORMED) return { ok: false, error: ONE_PASSWORD_DEAD_HERE };
-    return { ok: true, onePassword: { token, grants: store.onePasswordGrants() } };
+    return { ok: true, onePassword: { token, grants: store.onePasswordGrants(), itemGrants: store.onePasswordItemGrants() } };
   }
   const login = store.get(what.id);
   if (!login) return { ok: false, error: "This login is no longer saved on this computer." };
