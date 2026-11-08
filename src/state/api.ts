@@ -2,7 +2,7 @@
 // (src/lib/cloud-power.ts), and a page out of sight sends none at all.
 import { asleepAnswer, BACKGROUND_HEADER, cloudAsleep, markCloudAsleep, markCloudAwake, pageHidden, pageShown } from "../lib/cloud-power";
 import { lacksAdminScope } from "../lib/admin-scope";
-import { isBotLimitRefusal, showBotLimit } from "../lib/bot-limit";
+import { isBotLimitRefusal, isBotPausedRefusal, showBotLimit } from "../lib/bot-limit";
 import { noteRefusedRequest } from "../lib/session-ended";
 import { serverErrorText } from "../lib/server-error";
 
@@ -51,6 +51,7 @@ export async function api<T = any>(path: string, init?: ApiInit): Promise<T> {
     const refused = new ApiError(serverErrorText(body, message), res.status, body);
     if (res.status === 401 || (res.status === 403 && !lacksAdminScope(refused))) noteRefusedRequest();
     if (res.status === 409 && isBotLimitRefusal(refused)) showBotLimit();
+    if (res.status === 409 && isBotPausedRefusal(refused)) showBotLimit("paused");
     throw refused;
   }
   return body;

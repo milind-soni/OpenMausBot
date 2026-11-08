@@ -62,6 +62,12 @@ export interface ConfigStatus {
   botLimit?: number;
   /** A task on this Cloud is waiting for memory right now. */
   waitingForRoom?: boolean;
+  /** On Starter: the turns it runs at once and the hand-offs it holds waiting, and when work was last refused for a limit. */
+  planTurns?: { running: number; waiting: number; refusedAt?: number; refused?: "tasks" | "paused" };
+  /** On Starter: how many bots stay awake; absent when every bot does. */
+  awakeLimit?: number;
+  /** Bots paused for the plan's limit: kept, but taking no turns. */
+  pausedBots?: string[];
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
