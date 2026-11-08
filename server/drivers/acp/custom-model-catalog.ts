@@ -209,7 +209,8 @@ export async function discoverAcpModels(
     if (modelOption.options.length > MAX_MODELS) throw new Error("The ACP model catalog exceeded the discovery limit.");
     const mark = discovery.custom ? { custom: true } : {};
     const { passthrough } = discovery;
-    const options: ModelCatalog["options"] = passthrough ? [{ ...passthrough, ...mark }] : [];
+    const passthroughOption = passthrough !== undefined && usableDiscoveredId(passthrough.id) ? { ...passthrough, ...mark } : undefined;
+    const options: ModelCatalog["options"] = passthroughOption ? [passthroughOption] : [];
     let discovered = 0;
     for (const model of modelOption.options) {
       if (model.id === passthrough?.id) continue;
@@ -249,7 +250,7 @@ export async function discoverAcpModels(
     if (!discovered) throw new Error("The ACP agent did not advertise any usable models. The previous catalog was kept.");
     const preferred = discovery.default && options.some((option) => option.id === discovery.default) ? discovery.default : undefined;
     const current = usableDiscoveredId(modelOption.currentValue) ? modelOption.currentValue : undefined;
-    catalog = { default: passthrough?.id ?? preferred ?? current ?? options[0].id, options };
+    catalog = { default: passthroughOption?.id ?? preferred ?? current ?? options[0].id, options };
   } catch (error) {
     thrown = error;
   } finally {
