@@ -27,6 +27,25 @@ mkdirSync(home, { mode: 0o700 });
 chmodSync(runtime, 0o700);
 chmodSync(home, 0o700);
 
+// A real Xorg desktop always runs a window manager, and Cua Driver 0.41 sends foreground input only to the window the
+// manager reports active (_NET_ACTIVE_WINDOW). A bare Xvfb has none, so start a small EWMH one first.
+const windowManager = spawn("openbox", ["--sm-disable"], { env: process.env, stdio: "ignore" });
+windowManager.once("error", (error) => {
+  console.error(`[smoke-cua-x11-input] openbox could not start (install it): ${error.message}`);
+  process.exit(1);
+});
+{
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const { stdout } = await execFileAsync("xprop", ["-root", "_NET_SUPPORTING_WM_CHECK"]).catch(() => ({ stdout: "" }));
+    if (/window id #/.test(stdout)) break;
+    if (windowManager.exitCode !== null || Date.now() > deadline) {
+      throw new Error("the window manager did not start on this display");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 const title = `OpenMausBot CUA input safety ${process.pid}`;
 const xev = spawn(
   "xev",
@@ -270,5 +289,6 @@ try {
   if (proxy) await stop(proxy);
   await stop(driverProcess);
   if (xev.exitCode === null && xev.signalCode === null) xev.kill("SIGTERM");
+  if (windowManager.exitCode === null && windowManager.signalCode === null) windowManager.kill("SIGTERM");
   rmSync(sandbox, { recursive: true, force: true });
 }
