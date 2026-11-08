@@ -4994,6 +4994,8 @@
   "computer.tab.files": "파일",
   "computer.tabsAria": "봇 패널 보기",
   "computer.fullScreen": "전체 화면",
+  "computer.watchFullScreenTitle": "전체 화면으로 보기. 봇은 계속 작업합니다",
+  "computer.watchingBotWorks": "보는 중 · 봇은 계속 작업합니다",
   "computer.browserOff.title": "브라우저가 꺼져 있어요",
   "computer.browserOff.body": "내장 브라우저를 켜면 {name}이(가) 웹을 탐색하는 모습을 보고 언제든 넘겨받을 수 있어요.",
   "computer.browserOff.turnOn": "브라우저 켜기",

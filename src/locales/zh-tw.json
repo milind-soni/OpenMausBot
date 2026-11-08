@@ -5388,6 +5388,8 @@
   "computer.tab.files": "檔案",
   "computer.tabsAria": "機器人面板檢視",
   "computer.fullScreen": "全螢幕",
+  "computer.watchFullScreenTitle": "觀看整個畫面；機器人會繼續工作",
+  "computer.watchingBotWorks": "觀看中 · 機器人繼續工作",
   "computer.browserOff.title": "瀏覽器已關閉",
   "computer.browserOff.body": "開啟內建瀏覽器，即可觀看 {name} 瀏覽網頁，並隨時接手控制。",
   "computer.browserOff.turnOn": "開啟瀏覽器",

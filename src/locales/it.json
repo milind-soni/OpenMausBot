@@ -4493,6 +4493,8 @@
   "computer.tab.files": "File",
   "computer.tabsAria": "Vista del pannello del bot",
   "computer.fullScreen": "Schermo intero",
+  "computer.watchFullScreenTitle": "Guarda tutto lo schermo; il bot continua a lavorare",
+  "computer.watchingBotWorks": "Stai guardando · il bot continua a lavorare",
   "computer.browserOff.title": "Il browser è spento",
   "computer.browserOff.body": "Attiva il browser integrato per guardare {name} navigare sul web e prendere il controllo quando vuoi.",
   "computer.browserOff.turnOn": "Attiva il browser",

@@ -1827,6 +1827,8 @@
   "computer.viewerTitle": "Bureau en direct de {name}",
   "computer.openLiveDesktopAria": "Ouvrir le bureau en direct de {name}",
   "computer.openLiveDesktop": "Ouvrir le bureau en direct",
+  "computer.watchFullScreenTitle": "Regarder tout l'écran ; le bot continue de travailler",
+  "computer.watchingBotWorks": "Vous regardez · le bot continue de travailler",
   "computer.open": "Ouvrir",
   "computer.watchOnly": "Aperçu en lecture seule",
   "computer.waitingFrame": "En attente de la première image…",

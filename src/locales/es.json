@@ -4234,6 +4234,8 @@
   "computer.tab.files": "Archivos",
   "computer.tabsAria": "Vista del panel del bot",
   "computer.fullScreen": "Pantalla completa",
+  "computer.watchFullScreenTitle": "Ver toda la pantalla; el bot sigue trabajando",
+  "computer.watchingBotWorks": "Mirando · el bot sigue trabajando",
   "computer.browserOff.title": "El navegador está desactivado",
   "computer.browserOff.body": "Activa el navegador integrado para ver cómo {name} navega por la web y tomar el control cuando quieras.",
   "computer.browserOff.turnOn": "Activar el navegador",

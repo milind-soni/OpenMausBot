@@ -5185,6 +5185,8 @@
   "computer.tab.files": "文件",
   "computer.tabsAria": "机器人面板视图",
   "computer.fullScreen": "全屏",
+  "computer.watchFullScreenTitle": "观看整个屏幕；机器人会继续工作",
+  "computer.watchingBotWorks": "观看中 · 机器人继续工作",
   "computer.browserOff.title": "浏览器已关闭",
   "computer.browserOff.body": "开启内置浏览器，即可观看 {name} 浏览网页，并随时接管。",
   "computer.browserOff.turnOn": "开启浏览器",
