@@ -329,6 +329,21 @@ describe("openFolder for a folder a chat links to", () => {
     assert.equal(await openFolder("C:\\Users\\Maus\\Reports\\..\\Reports", { open, fsp, pathApi: path.win32 }), "opened");
     assert.deepEqual(opened, ["C:\\Users\\Maus\\Reports"]);
   });
+
+  it("gives up on a check that never answers (dead mount) and opens nothing when it answers late", async () => {
+    const { opened, open } = shell();
+    let answer;
+    const fsp = {
+      realpath: async (target) => target,
+      stat: (target) => target.endsWith("Info.plist")
+        ? new Promise((resolve, reject) => { answer = () => reject(Object.assign(new Error("gone"), { code: "ENOENT" })); })
+        : Promise.resolve({ isFile: () => false, isDirectory: () => true }),
+    };
+    assert.equal(await openFolder("/Volumes/stale/Reports", { open, fsp, checkMs: 20 }), "not-folder");
+    answer();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(opened, []);
+  });
 });
 
 describe("openLogsFolder", () => {

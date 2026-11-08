@@ -139,23 +139,33 @@ export async function revealInFolder(rawPath, { reveal, fsp = fs.promises, pathA
 
 // shell.openPath runs whatever it is given, so only a plain folder may reach it: never a file, a Mac app bundle
 // (Name.app, or a folder with Contents/Info.plist), or a link to either.
-export async function openFolder(rawPath, { open, fsp = fs.promises, pathApi = path }) {
+// A dead network mount can leave these checks pending: past checkMs the link falls back, and a late answer opens nothing.
+export async function openFolder(rawPath, { open, fsp = fs.promises, pathApi = path, checkMs = 3_000 }) {
   const target = localTarget(rawPath, pathApi);
   if (!target) return "invalid";
+  let timer;
+  const checked = await Promise.race([
+    plainFolder(target, fsp, pathApi),
+    new Promise((resolve) => { timer = setTimeout(() => resolve({ problem: "not-folder" }), checkMs); }),
+  ]).finally(() => clearTimeout(timer));
+  if (checked.problem) return checked.problem;
+  let error = "";
+  try { error = await open(checked.real); } catch (failure) { error = failure?.message ?? String(failure); }
+  return error ? "failed" : "opened";
+}
+
+async function plainFolder(target, fsp, pathApi) {
   let real;
   let stats;
   try {
     real = await fsp.realpath(target);
     stats = await fsp.stat(real);
   } catch {
-    return "missing";
+    return { problem: "missing" };
   }
-  if (!stats.isDirectory() || /.\.[^.]+$/.test(pathApi.basename(real))) return "not-folder";
+  if (!stats.isDirectory() || /.\.[^.]+$/.test(pathApi.basename(real))) return { problem: "not-folder" };
   const bundle = await fsp.stat(pathApi.join(real, "Contents", "Info.plist")).then(() => true, () => false);
-  if (bundle) return "not-folder";
-  let error = "";
-  try { error = await open(real); } catch (failure) { error = failure?.message ?? String(failure); }
-  return error ? "failed" : "opened";
+  return bundle ? { problem: "not-folder" } : { real };
 }
 
 /** This app's own logs folder in Explorer or Finder, made first if nothing has been logged yet. The folder is main's
