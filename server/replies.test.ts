@@ -23,6 +23,19 @@ describe("a card the server built", () => {
   });
 });
 
+describe("the app's own add-a-key suggestion", () => {
+  it("replays as a card the bot did not write, never as the bot's own words, and so does a reply or reaction to it", () => {
+    const card = message({ text: "Want me to sort your email for free? Add a key.", setupSuggestion: { kind: "helperKey" } });
+    expect(transcriptText(card, new Map())).toMatch(/^\[Records from a card shown to the person in this chat/);
+    const reply = message({ id: "m2", role: "user", text: "what is this?", replyToId: "m1" });
+    expect(transcriptText(reply, new Map([["m1", card]]))).toContain("[answering a card shown in this chat]\n[Records from a card shown");
+    expect(promptWithReply("👍", { ...card, reactedWith: "👍" })).toContain("[Records from a card shown to the person in this chat");
+    const replied = promptWithReply("what is this?", card);
+    expect(replied).toContain("a card shown to the person in this chat, which you did not write");
+    expect(replied).not.toContain("from Assistant");
+  });
+});
+
 describe("flat replies", () => {
   it("bounds and cleans quoted attachment text", () => {
     expect(replyExcerpt('<attached-image path="/tmp/shot.png" />  hello\nworld')).toBe("[image] hello world");
