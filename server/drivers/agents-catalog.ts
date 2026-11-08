@@ -296,7 +296,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "start_thread",
     description:
-      "Open a separate job on yourself: one conversation with its own history and its own run, shown to the person as a row under you, without switching the person's selected conversation. Use it only when the user requests independent jobs (for example one review per pull request, \"review each pull request\" — one thread per pull request) instead of doing them inside this conversation. The title becomes the row's name, so make it short and specific, and write it as #Title when you mention it to the person; give complete instructions, since the run will not see this conversation. You can open at most five per turn; a self-opened job cannot open more jobs. This is not a teammate handoff: use coordinate_bots for teammates (thread \"new\" opens a fresh thread on them) and their automatic replies. If a call is refused, do not retry it: say what you still wanted opened.",
+      "Open a separate job on yourself: one conversation with its own history and its own run, shown to the person as a row under you, without switching the person's selected conversation. Use it only when the user requests independent jobs (for example one review per pull request, \"review each pull request\" — one thread per pull request) instead of doing them inside this conversation, or a second opinion from another model (model_selection from list_models, report_back true). The title becomes the row's name, so make it short and specific, and write it as #Title when you mention it to the person; give complete instructions, since the run will not see this conversation. You can open at most five per turn; a self-opened job cannot open more jobs. This is not a teammate handoff: use coordinate_bots for teammates (thread \"new\" opens a fresh thread on them) and their automatic replies. If a call is refused, do not retry it: say what you still wanted opened.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -307,12 +307,22 @@ const TOOL_DEFINITIONS = [
         model_selection: {
           type: "object",
           additionalProperties: false,
-          properties: { instanceId: { type: "string", minLength: 1 }, model: { type: "string", minLength: 1 } },
+          properties: { instanceId: { type: "string", minLength: 1 }, model: { type: "string", minLength: 1 }, effort: { type: "string", minLength: 1 } },
           required: ["instanceId", "model"],
-          description: "Optional: an engine instance and model id you can already use, as in propose_model. Leave out for this conversation's model.",
+          description: "Optional: ids (and effort) exactly as list_models gives them. Default: this conversation's model.",
         },
+        report_back: { type: "boolean", description: "True: its result resumes you here; end your turn. Not in a room." },
       },
       required: ["title", "message"],
+    },
+  },
+  {
+    name: "list_models",
+    description: "The ids start_thread's model_selection takes, a short list per engine; current is yours. more counts what search finds. unusable says why not; unavailable engines can't run now. Copy ids exactly.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: { search: { type: "string", maxLength: 200, description: "Words to match instead of the short list." } },
     },
   },
   {
