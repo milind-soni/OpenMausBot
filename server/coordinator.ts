@@ -217,9 +217,17 @@ export interface Coordinator {
   awaitingAnswer(threadId: string): boolean;
 }
 
+/** A plan's limit on handing out work. */
+export interface HandoffLimit {
+  /** Why handing work to this bot is refused now, in words for the model that asked; null when it may go. `open` counts the
+   * hand-offs not yet ended. */
+  refusal(botId: string, open: () => number): string | null;
+}
+
 export interface CoordinatorOptions {
   dataDir: string;
   host: CoordinatorHost;
+  handoffLimit?: HandoffLimit;
   now?: () => number;
   runtimeLimits?: Partial<Limits>;
   log?: (line: string) => void;
