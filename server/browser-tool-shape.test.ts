@@ -74,6 +74,19 @@ describe("browser tool shaping", () => {
     expect(shapeBrowserToolResult({ error: "x" })).toEqual({ error: "x" });
   });
 
+  it("tells the bot the install command when Chrome cannot load a system library", () => {
+    const launch = "Chrome exited early (exit code: 127) without writing DevToolsActivePort\nChrome stderr:\n  /home/maus/.agent-browser/browsers/chrome-157.0.8103.38/chrome: error while loading shared libraries: libatk-1.0.so.0: cannot open shared object file: No such file or directory";
+    const shaped = shapeBrowserToolResult({ content: [{ type: "text", text: launch }], isError: true }) as { content: Array<{ text: string }>; isError: boolean };
+    expect(shaped.isError).toBe(true);
+    expect(shaped.content[0].text).toBe(launch);
+    expect(shaped.content[1].text).toContain("libatk-1.0.so.0");
+    expect(shaped.content[1].text).toContain("`sudo openmausbot browser install --with-deps`");
+    // a page that merely mentions the loader's words, or another failure, gets no install advice
+    for (const result of [{ content: [{ type: "text", text: launch }] }, { content: [{ type: "text", text: "Chrome exited early (exit code: 1)" }], isError: true }]) {
+      expect((shapeBrowserToolResult(result) as { content: unknown[] }).content).toHaveLength(1);
+    }
+  });
+
   it("cuts oversized text to the budget and says how to narrow the next call", () => {
     const text = "line of accessibility tree\n".repeat(4_000);
     const shaped = shapeBrowserToolResult({ content: [{ type: "text", text }], structuredContent: {} }, { toolName: "agent_browser_snapshot" }) as { content: Array<{ text: string }> };

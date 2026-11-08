@@ -1,5 +1,6 @@
 // agent-browser 0.37.0's core profile advertises 29 tools at ~12.5k tokens, mostly fifteen launch/session parameters
 // repeated on every tool, and every result arrives twice (text plus a 3-5x larger structuredContent that Codex keeps in history).
+import { BrowserHostError, loaderMissingLibrary } from "./browser/chrome/host-setup.ts";
 import { trimResultText } from "./mcp-trim.ts";
 
 /** A model must never set these: `session` reaches another bot's browser, `extraArgs`/`caCert`/`headed`/`webgpu`/`webmcp`
@@ -149,13 +150,18 @@ export function shapeBrowserToolResult(result: unknown, options: { toolName?: st
   if (!isRecord(result) || !Array.isArray(result.content)) return result;
   const budget = options.budget ?? DEFAULT_BROWSER_RESULT_BUDGET;
   let textParts = 0;
+  let library: string | undefined;
   const content = (result.content as unknown[]).map((part) => {
     if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") return part;
     textParts++;
+    if (result.isError === true) library ??= loaderMissingLibrary(part.text);
     const outcome = trimResultText({ text: withoutLifecycle(part.text), budget, toolName: options.toolName });
     return { ...part, text: outcome.trimmed ? outcome.text + BROWSER_NARROWING_HINT : outcome.text };
   });
   if (!textParts) return { ...result, content };
+  // agent-browser launches Chrome itself, so a host missing system libraries
+  // only shows the loader's words; say how to install them, as our own launch does.
+  if (library) content.push({ type: "text", text: new BrowserHostError("libraries", [library]).message });
   return { ...Object.fromEntries(Object.entries(result).filter(([key]) => key !== "structuredContent")), content };
 }
 
