@@ -378,6 +378,17 @@ test("1Password goes with each login's own bots, and a login My Cloud alone narr
   ]);
 });
 
+test("1Password is not reported sent when My Cloud's logins cannot be read, or My Cloud is too old for a login's own bots", async () => {
+  const unread = fakeSides({ localItems: [{ key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t" } }],
+    refuse: { "/api/logins": { status: 500, error: "busy" } } });
+  unread.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {}, itemGrants: {} } });
+  assert.equal((await createCloudSend(unread.deps).send()).result.failed[0]?.key, "1password");
+  const old = fakeSides({ localItems: [{ key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t" } }],
+    refuse: { "/api/logins/1password/items/i1": { status: 405, error: "method not allowed" } } });
+  old.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {}, itemGrants: { i1: [] } } });
+  assert.equal((await createCloudSend(old.deps).send()).result.failed[0]?.error, "My Cloud is too old to keep a 1Password login to its own bots. Update My Cloud, then send again.");
+});
+
 test("chats by row: the cursor moves only past what My Cloud took; one removed there is never sent again; one being answered waits", async () => {
   const rows = { "t-a": [{ id: "a1", at: 1 }, { id: "a2", at: 2 }], "t-b": [{ id: "b1", at: 1 }], "t-c": [{ id: "c1", at: 1 }] };
   const heads = () => Object.entries(rows).map(([threadId, list]) => ({ bot: "ember", threadId, last: list.length, lastId: list.at(-1).id, busy: threadId === "t-c" }));

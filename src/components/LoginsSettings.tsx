@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { KeyRound, Loader2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 
-import { loginHeldBackFor, type LoginBots, type LoginSummary, type OnePasswordStatus, type OnePasswordVault } from "../../shared/logins";
+import { loginHeldBackFor, ONE_PASSWORD_VAULT_MAX, type LoginBots, type LoginSummary, type OnePasswordStatus, type OnePasswordVault } from "../../shared/logins";
+import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { addLogin, changeLogin, connectOnePassword, deleteLogin, disconnectOnePassword, grantItem, grantVault, listLogins, refreshOnePassword } from "@/lib/logins";
 import { relativeTime } from "@/lib/memory";
@@ -17,6 +18,13 @@ const SOURCE_KEYS = {
   settings: "settings.logins.source.settings",
   "1password": "settings.logins.source.1password",
 } as const;
+
+const SKIPPED = [
+  ["website", "settings.logins.onePassword.skippedWebsite"],
+  ["password", "settings.logins.onePassword.skippedPassword"],
+  ["unread", "settings.logins.onePassword.skippedUnread"],
+  ["limit", "settings.logins.onePassword.skippedLimit"],
+] as const;
 
 const ROW_BUTTON = "flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50";
 
@@ -123,8 +131,9 @@ export function LoginsSettings() {
                   )}
                 </div>
                 {editing === login.id && login.onePassword && (
-                  <ItemAccess itemId={login.onePassword.itemId} ownBots={login.onePassword.ownBots} value={editBots} onChange={setEditBots} bots={bots}
-                    onDone={async () => { setEditing(null); await load(); }} />
+                  <AccessEditor className="ms-6" initial={login.bots} bots={bots} onCancel={() => setEditing(null)}
+                    onSave={async (next) => { await grantItem(login.onePassword!.itemId, next); setEditing(null); await load(); }}
+                    canUseVault={login.onePassword.ownBots} />
                 )}
                 {editing === login.id && !login.onePassword && (
                   <div className="ms-6 rounded-lg bg-inset/60 p-3">
@@ -198,31 +207,31 @@ function ExactHostChoice({ checked, onChange, label }: { checked: boolean; onCha
   );
 }
 
-/** Who may use one 1Password item, chosen for the item or left to its vault. */
-function ItemAccess({ itemId, ownBots, value, onChange, bots, onDone }: {
-  itemId: string;
-  ownBots: boolean;
-  value: LoginBots;
-  onChange: (value: LoginBots) => void;
+function AccessEditor({ initial, bots, onSave, onCancel, canUseVault = false, className }: {
+  initial: LoginBots;
   bots: Bot[];
-  onDone: () => Promise<void>;
+  onSave: (value: LoginBots | null) => Promise<void>;
+  onCancel: () => void;
+  canUseVault?: boolean;
+  className?: string;
 }) {
+  const [value, setValue] = useState<LoginBots>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = async (next: LoginBots | null) => {
     setBusy(true);
     setError(null);
-    try { await grantItem(itemId, next); await onDone(); }
+    try { await onSave(next); }
     catch (cause) { setError(cause instanceof Error && cause.message ? cause.message : t("settings.logins.onePassword.error")); }
     finally { setBusy(false); }
   };
   return (
-    <div className="ms-6 flex flex-col gap-2 rounded-lg bg-inset/60 p-3" data-item-access>
-      <LoginBotPicker value={value} onChange={onChange} bots={bots} disabled={busy} />
+    <div className={cn("flex flex-col gap-2 rounded-lg bg-inset/60 p-3", className)}>
+      <LoginBotPicker value={value} onChange={setValue} bots={bots} disabled={busy} />
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
-        {ownBots && <button type="button" className="ui-button ui-button-md me-auto" disabled={busy} onClick={() => void save(null)}>{t("settings.logins.onePassword.useVault")}</button>}
-        <button type="button" className="ui-button ui-button-md" disabled={busy} onClick={() => void onDone()}>{t("logins.cancel")}</button>
+        {canUseVault && <button type="button" className="ui-button ui-button-md me-auto" disabled={busy} onClick={() => void save(null)}>{t("settings.logins.onePassword.useVault")}</button>}
+        <button type="button" className="ui-button ui-button-md" disabled={busy} onClick={onCancel}>{t("logins.cancel")}</button>
         <button type="button" className="ui-button ui-button-md ui-button-primary" disabled={busy} onClick={() => void save(value)}>{t("settings.logins.saveChange")}</button>
       </div>
     </div>
@@ -237,47 +246,26 @@ function VaultAccess({ vault, bots, botNames, disabled, onChange }: {
   onChange: (status: OnePasswordStatus) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState<LoginBots>(vault.bots);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const save = async () => {
-    setBusy(true);
-    setError(null);
-    try { await onChange(await grantVault(vault.id, value)); setEditing(false); }
-    catch (cause) { setError(cause instanceof Error && cause.message ? cause.message : t("settings.logins.onePassword.error")); }
-    finally { setBusy(false); }
-  };
   return (
     <li className="flex flex-col gap-2 py-2" data-vault={vault.title}>
       <div className="flex min-w-0 items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium text-ink">{vault.title}</div>
           <div className="text-[12px] text-ink-tertiary">{t("settings.logins.onePassword.vaultUse", { count: String(vault.items), who: botNames(vault.bots) })}</div>
-          {!!vault.skipped?.website && (
-            <div className="text-[12px] leading-snug text-warning" data-vault-skipped="website">
-              {t("settings.logins.onePassword.skippedWebsite", { count: String(vault.skipped.website) })}
+          {SKIPPED.map(([reason, key]) => !!vault.skipped?.[reason] && (
+            <div key={reason} className="text-[12px] leading-snug text-warning" data-vault-skipped={reason}>
+              {t(key, { count: String(vault.skipped[reason]), max: String(ONE_PASSWORD_VAULT_MAX) })}
             </div>
-          )}
-          {!!vault.skipped?.password && (
-            <div className="text-[12px] leading-snug text-warning" data-vault-skipped="password">
-              {t("settings.logins.onePassword.skippedPassword", { count: String(vault.skipped.password) })}
-            </div>
-          )}
+          ))}
         </div>
         {!editing && (
-          <button type="button" className={ROW_BUTTON} disabled={disabled || busy} onClick={() => { setValue(vault.bots); setEditing(true); }}
+          <button type="button" className={ROW_BUTTON} disabled={disabled} onClick={() => setEditing(true)}
             aria-label={t("settings.logins.onePassword.changeVault", { vault: vault.title })}>{t("settings.logins.change")}</button>
         )}
       </div>
       {editing && (
-        <div className="flex flex-col gap-2 rounded-lg bg-inset/60 p-3">
-          <LoginBotPicker value={value} onChange={setValue} bots={bots} disabled={busy} />
-          {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
-          <div className="flex flex-wrap justify-end gap-2">
-            <button type="button" className="ui-button ui-button-md" disabled={busy} onClick={() => setEditing(false)}>{t("logins.cancel")}</button>
-            <button type="button" className="ui-button ui-button-md ui-button-primary" disabled={busy} onClick={() => void save()}>{t("settings.logins.saveChange")}</button>
-          </div>
-        </div>
+        <AccessEditor initial={vault.bots} bots={bots} onCancel={() => setEditing(false)}
+          onSave={async (next) => { await onChange(await grantVault(vault.id, next ?? "all")); setEditing(false); }} />
       )}
     </li>
   );

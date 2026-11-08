@@ -48,8 +48,9 @@ export interface OnePasswordVault {
   title: string;
   /** Its Login items with a website and a password. */
   items: number;
-  /** Its Login items left out, by what they lack; absent when none were. */
-  skipped?: { website: number; password: number };
+  /** Its Login items left out: no website, no password, not read from 1Password, or past the most a vault shows.
+   * Absent when none were. */
+  skipped?: { website: number; password: number; unread: number; limit: number };
   bots: LoginBots;
 }
 
@@ -62,6 +63,9 @@ export interface OnePasswordStatus {
   items?: number;
   error?: string;
 }
+
+/** The most Login items one 1Password vault shows. */
+export const ONE_PASSWORD_VAULT_MAX = 500;
 
 /** The longest username or password a form takes. */
 export const LOGIN_FIELD_MAX = 512;

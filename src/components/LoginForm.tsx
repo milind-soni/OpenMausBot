@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LoginFieldsInput } from "@/lib/logins";
 import type { Bot } from "@/state/store";
+import { teamBotName, useTeamPeople } from "@/state/team-people";
 import { BotPickerList } from "./BotPickerList";
 
 // Security: the browser is asked not to fill or remember these fields, what was typed is dropped once saved, and a
@@ -112,9 +113,11 @@ export function LoginBotPicker({ value, onChange, bots, disabled = false }: {
 }) {
   const name = useId();
   const [query, setQuery] = useState("");
+  const team = useTeamPeople();
   const chosen = value === "all" ? [] : value;
   const many = bots.length > 6;
-  const shown = query.trim() ? bots.filter((bot) => bot.name.toLowerCase().includes(query.trim().toLowerCase())) : bots;
+  const needle = query.trim().toLowerCase();
+  const shown = needle ? bots.filter((bot) => teamBotName(bot, team).toLowerCase().includes(needle)) : bots;
   return (
     <fieldset className="flex flex-col gap-1.5" disabled={disabled}>
       <legend className="mb-1 text-[12px] font-medium text-ink-secondary">{t("settings.logins.whoCanUse")}</legend>
@@ -133,7 +136,7 @@ export function LoginBotPicker({ value, onChange, bots, disabled = false }: {
               <input type="search" value={query} onChange={(event) => setQuery(event.target.value)}
                 aria-label={t("settings.logins.findBot")} placeholder={t("settings.logins.findBot")} className={cn(FIELD, "flex-1")} />
               <span className="shrink-0 text-[12px] text-ink-tertiary" data-bot-picker-count>
-                {t("settings.logins.botsChosen", { count: String(chosen.length), total: String(bots.length) })}
+                {t("settings.logins.botsChosen", { count: String(bots.filter((bot) => chosen.includes(bot.id)).length), total: String(bots.length) })}
               </span>
             </div>
           )}

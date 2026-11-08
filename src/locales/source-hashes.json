@@ -9509,7 +9509,9 @@
       "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
       "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
-      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d",
+      "settings.logins.onePassword.skippedUnread": "3becc34cbc89c3e7c37062af7b180f57c8c96f17b520ae424ebe67ac0833bbf8",
+      "settings.logins.onePassword.skippedLimit": "0e1886b07856d5fcd399ab4473ceb9347b4bc51a983aa1b862ada53aa41b1318"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -23707,7 +23709,9 @@
       "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
       "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
-      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d",
+      "settings.logins.onePassword.skippedUnread": "3becc34cbc89c3e7c37062af7b180f57c8c96f17b520ae424ebe67ac0833bbf8",
+      "settings.logins.onePassword.skippedLimit": "0e1886b07856d5fcd399ab4473ceb9347b4bc51a983aa1b862ada53aa41b1318"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -33588,7 +33592,9 @@
       "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
       "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
-      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d",
+      "settings.logins.onePassword.skippedUnread": "3becc34cbc89c3e7c37062af7b180f57c8c96f17b520ae424ebe67ac0833bbf8",
+      "settings.logins.onePassword.skippedLimit": "0e1886b07856d5fcd399ab4473ceb9347b4bc51a983aa1b862ada53aa41b1318"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -41235,7 +41241,9 @@
       "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
       "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
-      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d",
+      "settings.logins.onePassword.skippedUnread": "3becc34cbc89c3e7c37062af7b180f57c8c96f17b520ae424ebe67ac0833bbf8",
+      "settings.logins.onePassword.skippedLimit": "0e1886b07856d5fcd399ab4473ceb9347b4bc51a983aa1b862ada53aa41b1318"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -51054,7 +51062,9 @@
       "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
       "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
-      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d",
+      "settings.logins.onePassword.skippedUnread": "3becc34cbc89c3e7c37062af7b180f57c8c96f17b520ae424ebe67ac0833bbf8",
+      "settings.logins.onePassword.skippedLimit": "0e1886b07856d5fcd399ab4473ceb9347b4bc51a983aa1b862ada53aa41b1318"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -60223,7 +60233,9 @@
       "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
       "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
-      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d",
+      "settings.logins.onePassword.skippedUnread": "3becc34cbc89c3e7c37062af7b180f57c8c96f17b520ae424ebe67ac0833bbf8",
+      "settings.logins.onePassword.skippedLimit": "0e1886b07856d5fcd399ab4473ceb9347b4bc51a983aa1b862ada53aa41b1318"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -65806,7 +65818,9 @@
       "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
       "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
-      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d",
+      "settings.logins.onePassword.skippedUnread": "3becc34cbc89c3e7c37062af7b180f57c8c96f17b520ae424ebe67ac0833bbf8",
+      "settings.logins.onePassword.skippedLimit": "0e1886b07856d5fcd399ab4473ceb9347b4bc51a983aa1b862ada53aa41b1318"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72651,7 +72665,9 @@
       "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
       "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
-      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d",
+      "settings.logins.onePassword.skippedUnread": "3becc34cbc89c3e7c37062af7b180f57c8c96f17b520ae424ebe67ac0833bbf8",
+      "settings.logins.onePassword.skippedLimit": "0e1886b07856d5fcd399ab4473ceb9347b4bc51a983aa1b862ada53aa41b1318"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -79558,7 +79574,9 @@
       "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
       "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
-      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d",
+      "settings.logins.onePassword.skippedUnread": "3becc34cbc89c3e7c37062af7b180f57c8c96f17b520ae424ebe67ac0833bbf8",
+      "settings.logins.onePassword.skippedLimit": "0e1886b07856d5fcd399ab4473ceb9347b4bc51a983aa1b862ada53aa41b1318"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -86265,7 +86283,9 @@
       "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
       "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
-      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d",
+      "settings.logins.onePassword.skippedUnread": "3becc34cbc89c3e7c37062af7b180f57c8c96f17b520ae424ebe67ac0833bbf8",
+      "settings.logins.onePassword.skippedLimit": "0e1886b07856d5fcd399ab4473ceb9347b4bc51a983aa1b862ada53aa41b1318"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -93694,7 +93714,9 @@
       "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
       "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
       "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
-      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d",
+      "settings.logins.onePassword.skippedUnread": "3becc34cbc89c3e7c37062af7b180f57c8c96f17b520ae424ebe67ac0833bbf8",
+      "settings.logins.onePassword.skippedLimit": "0e1886b07856d5fcd399ab4473ceb9347b4bc51a983aa1b862ada53aa41b1318"
     }
   }
 }

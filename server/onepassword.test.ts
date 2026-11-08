@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { LoginBots } from "../shared/logins.ts";
+import { ONE_PASSWORD_VAULT_MAX, type LoginBots } from "../shared/logins.ts";
 import { fillLogin, type FillCandidate } from "./login-fill.ts";
 import { loginFields, ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED, OnePasswordLogins, onePasswordProblem, onePasswordUnavailable, OnePasswordUnavailableError, sdkOnePasswordClient } from "./onepassword.ts";
 import { FakeLoginPage, LOGIN_FORM } from "./testing/fake-login-page.ts";
@@ -64,7 +64,7 @@ describe("1Password logins", () => {
     const { source, calls } = setup();
     expect(await source.refresh()).toEqual({ connected: true, items: 3, vaults: [
       { id: "v2", title: "Finance", items: 1, bots: "all" },
-      { id: "v1", title: "Shared with OMB", items: 2, skipped: { website: 1, password: 1 }, bots: "all" },
+      { id: "v1", title: "Shared with OMB", items: 2, skipped: { website: 1, password: 1, unread: 0, limit: 0 }, bots: "all" },
     ] });
     expect(calls).toEqual(["createClient OpenMausBot", "vaults.list", "items.list v2", "items.getAll v2 f1", "items.list v1", "items.getAll v1 i1,i2,i5"]);
     const rows = source.list();
@@ -95,7 +95,7 @@ describe("1Password logins", () => {
     await source.refresh();
     expect(source.status().vaults).toEqual([
       { id: "v2", title: "Finance", items: 1, bots: ["quill"] },
-      { id: "v1", title: "Shared with OMB", items: 2, skipped: { website: 1, password: 1 }, bots: [] },
+      { id: "v1", title: "Shared with OMB", items: 2, skipped: { website: 1, password: 1, unread: 0, limit: 0 }, bots: [] },
     ]);
     expect(source.candidates("bank.example.net", "pepper")).toEqual([]);
     expect(source.candidates("accounts.example.com", "pepper")).toEqual([]);
@@ -105,6 +105,20 @@ describe("1Password logins", () => {
     expect(source.list().find((row) => row.site === "example.net")?.bots).toEqual(["quill"]);
     expect(source.hasVault("v2")).toBe(true);
     expect(source.hasVault("v9")).toBe(false);
+  });
+
+  it("counts a Login item 1Password did not return apart from one with no password, and the ones past a vault's limit", async () => {
+    const many = Array.from({ length: ONE_PASSWORD_VAULT_MAX + 2 }, (_, index) => ({ id: `m${index}`, title: `M${index}`, urls: [`https://s${index}.example.com`], username: "u", password: "fake-pass" }));
+    const { sdk } = fakeOnePasswordSdk({ token: TOKEN, vaults: {
+      v1: { title: "Big", items: [{ id: "x0", title: "No site", urls: [] }, ...many] },
+      v2: { title: "Flaky", items: [{ id: "u1", title: "Unread", urls: ["https://u.example.com"], password: "fake-pass", unreadable: true }] },
+    } });
+    const source = new OnePasswordLogins({ token: () => TOKEN, connect: (value) => sdkOnePasswordClient(sdk, value, "9.9.9") });
+    const status = await source.refresh();
+    expect(status.vaults).toEqual([
+      { id: "v1", title: "Big", items: ONE_PASSWORD_VAULT_MAX, bots: "all", skipped: { website: 1, password: 0, unread: 0, limit: 2 } },
+      { id: "v2", title: "Flaky", items: 0, bots: "all", skipped: { website: 0, password: 0, unread: 1, limit: 0 } },
+    ]);
   });
 
   it("lets an item's own bots override its vault's, so a closed vault can open one login", async () => {

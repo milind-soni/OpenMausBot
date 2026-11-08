@@ -11,6 +11,8 @@ export interface FakeItem {
   password?: string;
   /** The one-time-password field's value (an otpauth:// address or secret). */
   totp?: string;
+  /** items.getAll answers this item with an error. */
+  unreadable?: boolean;
 }
 
 export function fakeOnePasswordSdk(options: { token: string; vaults: Record<string, { title: string; items: FakeItem[] }>; fail?: () => Error | null }) {
@@ -33,6 +35,7 @@ export function fakeOnePasswordSdk(options: { token: string; vaults: Record<stri
             return { individualResponses: itemIds.map((id) => {
               const item = options.vaults[vaultId]?.items.find((candidate) => candidate.id === id);
               if (!item) return { error: { type: "itemNotFound" } };
+              if (item.unreadable) return { error: { type: "internal" } };
               return { content: { id, fields: [
                 ...field("username", "username", "Text", item.username),
                 ...field("password", "password", "Concealed", item.password),

@@ -3,7 +3,7 @@
 // WebAssembly core it reads from beside itself, so it is never bundled: it is
 // required on first use, and only when a token exists.
 import type { LoginBots, LoginPlace, LoginSummary, OnePasswordStatus, OnePasswordVault } from "../shared/logins.ts";
-import { loginMatchesHost, loginSite, loginUsableBy, normalizeLoginHost } from "../shared/logins.ts";
+import { loginMatchesHost, loginSite, loginUsableBy, normalizeLoginHost, ONE_PASSWORD_VAULT_MAX } from "../shared/logins.ts";
 import type { FillCandidate } from "./login-fill.ts";
 import { parseTotpKey } from "./totp.ts";
 
@@ -83,7 +83,6 @@ interface Entry extends LoginPlace {
 }
 
 const ID_PREFIX = "1password:";
-const MAX_ITEMS = 500;
 const FIELDS_BATCH = 50;
 const STALE_MS = 10 * 60_000;
 
@@ -148,7 +147,6 @@ export class OnePasswordLogins {
     return this.grants()[vaultId] ?? "all";
   }
 
-  /** An item's own choice, else its vault's. */
   private itemBots(entry: Entry): LoginBots {
     return this.itemGrants()[entry.itemId] ?? this.botsFor(entry.vaultId);
   }
@@ -190,18 +188,21 @@ export class OnePasswordLogins {
       const counted: Array<Omit<OnePasswordVault, "bots">> = [];
       for (const vault of vaults) {
         let items = 0;
-        const skipped = { website: 0, password: 0 };
-        const logins = (await client.loginItems(vault.id)).slice(0, MAX_ITEMS)
+        const skipped = { website: 0, password: 0, unread: 0, limit: 0 };
+        const logins = (await client.loginItems(vault.id))
           .map((item) => ({ ...item, hosts: new Set(item.urls.flatMap((url) => normalizeLoginHost(url) ?? [])) }));
-        const placed = logins.filter((item) => item.hosts.size > 0);
-        skipped.website = logins.length - placed.length;
+        const withSite = logins.filter((item) => item.hosts.size > 0);
+        skipped.website = logins.length - withSite.length;
+        const placed = withSite.slice(0, ONE_PASSWORD_VAULT_MAX);
+        skipped.limit = withSite.length - placed.length;
         for (let start = 0; start < placed.length; start += FIELDS_BATCH) {
           const batch = placed.slice(start, start + FIELDS_BATCH);
           // The password in this answer is dropped here and read again at fill.
           const fields = await client.fields(vault.id, batch.map((item) => item.id));
           for (const item of batch) {
             const found = fields.get(item.id);
-            if (!found?.password) { skipped.password++; continue; }
+            if (!found) { skipped.unread++; continue; }
+            if (!found.password) { skipped.password++; continue; }
             items++;
             for (const [site, hosts] of bySite(item.hosts)) {
               entries.push({ id: `${ID_PREFIX}${vault.id}:${item.id}:${site}`, vaultId: vault.id, itemId: item.id, site, hosts, exactHost: false,
@@ -209,7 +210,7 @@ export class OnePasswordLogins {
             }
           }
         }
-        counted.push({ id: vault.id, title: vault.title, items, ...(skipped.website || skipped.password ? { skipped } : {}) });
+        counted.push({ id: vault.id, title: vault.title, items, ...(Object.values(skipped).some(Boolean) ? { skipped } : {}) });
       }
       this.entries = entries.sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username));
       this.vaults = counted.sort((a, b) => a.title.localeCompare(b.title));

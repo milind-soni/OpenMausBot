@@ -3733,6 +3733,8 @@
   "settings.logins.onePassword.useVault": "依照保險庫的設定",
   "settings.logins.onePassword.skippedWebsite": "已略過 {count} 個：沒有網站。請在 1Password 項目的網站欄位加入登入網址，然後按「重新整理」。",
   "settings.logins.onePassword.skippedPassword": "已略過 {count} 個：沒有密碼。請在 1Password 填入項目的密碼，然後按「重新整理」。",
+  "settings.logins.onePassword.skippedUnread": "已略過 {count} 個：1Password 沒有傳回這些項目。請按「重新整理」再試一次。",
+  "settings.logins.onePassword.skippedLimit": "已略過 {count} 個：一個保險庫最多顯示 {max} 個登入資訊。請將部分項目移到服務帳號可讀取的其他保險庫。",
   "settings.logins.onePassword.error": "無法連上 1Password。請檢查網路連線和權杖，然後再試一次。",
   "settings.logins.onePassword.note": "權杖會在執行 {app} 的電腦上加密，且不會再次顯示。1Password 的登入資訊會出現在上方清單中，以相同方式填入，並在 1Password 中變更。除非你為保險庫選擇特定機器人，否則每個機器人都能使用。",
   "settings.logins.cloudOwn": "這些是 Cloud 自己的登入資訊。當那台電腦上的 {app} 把你的機器人移到這裡時，你電腦上的登入資訊也會自動傳過來。",

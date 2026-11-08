@@ -206,11 +206,13 @@ describe("Settings → Logins", () => {
   });
 
   it("says how many 1Password logins were skipped, and what each lacks", async () => {
-    const on = { connected: true, vaults: [{ id: "v1", title: "OMB", items: 0, bots: "all", skipped: { website: 2, password: 1 } }], items: 0 };
+    const on = { connected: true, vaults: [{ id: "v1", title: "OMB", items: 0, bots: "all", skipped: { website: 2, password: 1, unread: 3, limit: 4 } }], items: 0 };
     fixture.api.mockResolvedValueOnce({ logins: [], onePassword: on });
     await render();
     expect(host.querySelector('[data-vault-skipped="website"]')!.textContent).toBe("2 skipped: no website. In 1Password, add the sign-in address to the item's website field, then Refresh.");
     expect(host.querySelector('[data-vault-skipped="password"]')!.textContent).toBe("1 skipped: no password. In 1Password, fill in the item's password, then Refresh.");
+    expect(host.querySelector('[data-vault-skipped="unread"]')!.textContent).toBe("3 skipped: 1Password did not return them. Refresh to try again.");
+    expect(host.querySelector('[data-vault-skipped="limit"]')!.textContent).toBe("4 skipped: a vault shows at most 500 logins. Move some to another vault the service account can read.");
   });
 
   it("says why 1Password refused a token", async () => {

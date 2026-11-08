@@ -29,6 +29,11 @@ describe("the login bot picker", () => {
     expect(host.querySelector('input[type="search"]')).toBeNull();
   });
 
+  it("counts only bots that still exist", async () => {
+    await show(["b1", "gone", "b2"], bots(8));
+    expect(host.querySelector("[data-bot-picker-count]")!.textContent).toBe("2 of 8 chosen");
+  });
+
   it("finds a bot by name among many, says how many are chosen, and keeps the choice while searching", async () => {
     const onChange = await show(["b2", "b40"], bots(100));
     expect(host.querySelector("[data-bot-picker-count]")!.textContent).toBe("2 of 100 chosen");

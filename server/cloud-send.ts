@@ -123,8 +123,8 @@ export function cloudSendSummary(sources: CloudSendSources, { move = false, bot:
   const onePassword = sources.onePassword();
   if (onePassword) {
     items.push({ key: itemKey.onePassword(), kind: "1password", label: "1Password",
-      parts: { token: partHash(onePassword.connectedAt), vaults: partHash(onePassword.grants),
-        ...(Object.keys(onePassword.itemGrants ?? {}).length ? { items: partHash(onePassword.itemGrants) } : {}) } });
+      parts: { token: partHash(onePassword.connectedAt), vaults: partHash(Object.keys(onePassword.itemGrants ?? {}).length
+        ? { vaults: onePassword.grants, items: onePassword.itemGrants } : onePassword.grants) } });
   }
   const { profile = {}, language } = sources.settings();
   items.push({ key: itemKey.setting("profile"), kind: "setting", label: "profile",

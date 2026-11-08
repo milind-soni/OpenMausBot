@@ -2598,6 +2598,8 @@
   "settings.logins.onePassword.useVault": "Kasanın seçimini kullan",
   "settings.logins.onePassword.skippedWebsite": "{count} atlandı: web sitesi yok. 1Password'de öğenin web sitesi alanına giriş adresini ekleyin, sonra Yenile'ye basın.",
   "settings.logins.onePassword.skippedPassword": "{count} atlandı: parola yok. 1Password'de öğenin parolasını doldurun, sonra Yenile'ye basın.",
+  "settings.logins.onePassword.skippedUnread": "{count} atlandı: 1Password bunları döndürmedi. Yeniden denemek için Yenile'ye basın.",
+  "settings.logins.onePassword.skippedLimit": "{count} atlandı: bir kasa en fazla {max} giriş gösterir. Bazılarını hizmet hesabının okuyabildiği başka bir kasaya taşıyın.",
   "settings.logins.onePassword.note": "Belirteç, {app}'un çalıştığı bilgisayarda şifrelenir ve bir daha gösterilmez. 1Password giriş bilgileri yukarıdaki listede görünür, aynı şekilde doldurulur ve 1Password'de değiştirilir. Bir kasa, siz onun için bot seçmedikçe tüm botlar içindir.",
   "settings.logins.cloudOwn": "Bunlar Cloud'un kendi girişleridir. O bilgisayardaki {app} botlarınızı buraya taşıdığında bilgisayarınızın girişleri de buraya kendiliğinden gelir.",
   "settings.sites.loading": "Kontrol ediliyor…",

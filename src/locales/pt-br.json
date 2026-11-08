@@ -3615,6 +3615,8 @@
   "settings.logins.onePassword.useVault": "Usar a escolha do cofre",
   "settings.logins.onePassword.skippedWebsite": "{count} ignorados: sem site. No 1Password, adicione o endereço de login no campo de site do item e clique em Atualizar.",
   "settings.logins.onePassword.skippedPassword": "{count} ignorados: sem senha. No 1Password, preencha a senha do item e clique em Atualizar.",
+  "settings.logins.onePassword.skippedUnread": "{count} ignorados: o 1Password não os retornou. Clique em Atualizar para tentar de novo.",
+  "settings.logins.onePassword.skippedLimit": "{count} ignorados: um cofre mostra no máximo {max} logins. Mova alguns para outro cofre que a conta de serviço possa ler.",
   "settings.logins.onePassword.error": "Não foi possível acessar o 1Password. Confira a conexão com a internet e o token e tente novamente.",
   "settings.logins.onePassword.note": "O token é criptografado no computador onde o app {app} roda e nunca mais é exibido. Os logins do 1Password aparecem na lista acima e são preenchidos da mesma forma. Edite-os no 1Password. Um cofre fica disponível para todos os bots, a menos que você escolha quais podem usá-lo.",
   "settings.logins.cloudOwn": "Estes são os logins do próprio Cloud. Os logins do seu computador vêm automaticamente quando o app {app} instalado nele move os bots para cá.",

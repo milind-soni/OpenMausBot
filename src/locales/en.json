@@ -3749,6 +3749,8 @@
   "settings.logins.onePassword.useVault": "Use the vault's choice",
   "settings.logins.onePassword.skippedWebsite": "{count} skipped: no website. In 1Password, add the sign-in address to the item's website field, then Refresh.",
   "settings.logins.onePassword.skippedPassword": "{count} skipped: no password. In 1Password, fill in the item's password, then Refresh.",
+  "settings.logins.onePassword.skippedUnread": "{count} skipped: 1Password did not return them. Refresh to try again.",
+  "settings.logins.onePassword.skippedLimit": "{count} skipped: a vault shows at most {max} logins. Move some to another vault the service account can read.",
   "settings.logins.onePassword.error": "Couldn't reach 1Password. Check your internet connection and the token, then try again.",
   "settings.logins.onePassword.note": "The token is encrypted on the computer {app} runs on and never shown again. 1Password logins appear in the list above, filled the same way, and are changed in 1Password. A vault is for every bot unless you choose bots for it.",
   "settings.logins.cloudOwn": "These are the Cloud's own logins. Your computer's logins come here by themselves when the {app} app on that computer moves your bots here.",

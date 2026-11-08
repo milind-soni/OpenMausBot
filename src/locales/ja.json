@@ -3543,6 +3543,8 @@
   "settings.logins.onePassword.useVault": "保管庫の設定に従う",
   "settings.logins.onePassword.skippedWebsite": "{count}件をスキップ：ウェブサイトがありません。1Passwordで項目のウェブサイト欄にサインインのアドレスを追加し、「更新」を押してください。",
   "settings.logins.onePassword.skippedPassword": "{count}件をスキップ：パスワードがありません。1Passwordで項目のパスワードを入力し、「更新」を押してください。",
+  "settings.logins.onePassword.skippedUnread": "{count}件をスキップ：1Passwordから取得できませんでした。「更新」を押して再試行してください。",
+  "settings.logins.onePassword.skippedLimit": "{count}件をスキップ：1つの保管庫に表示できるログインは最大{max}件です。サービスアカウントが読める別の保管庫に一部を移してください。",
   "settings.logins.onePassword.error": "1Password に接続できませんでした。インターネット接続とトークンを確認して、もう一度お試しください。",
   "settings.logins.onePassword.note": "トークンは、{app}が動作しているコンピューター上で暗号化され、再表示されることはありません。1Passwordのログイン情報は上のリストに表示され、同じ方法で入力されます。変更は1Passwordで行ってください。ボットを指定しない限り、Vaultはすべてのボットが使用できます。",
   "settings.logins.cloudOwn": "これは Cloud 自身のログイン情報です。そのコンピューターの {app} がボットをここへ移すと、お使いのコンピューターのログイン情報も自動でここに届きます。",

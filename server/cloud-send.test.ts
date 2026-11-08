@@ -37,6 +37,16 @@ describe("what a server reports for Send to My Cloud", () => {
     expect(botParts(bot({ cwd: "/Users/amit/work" }), () => null)).toEqual(parts);
   });
 
+  it("changes 1Password's vaults part when a login's own bots are chosen or handed back, and not when there are none", () => {
+    const vaults = (itemGrants?: Record<string, "all" | string[]>) => cloudSendSummary(sources({ onePassword: () => ({ connectedAt: 7, grants: { v1: ["ember-0001"] }, ...(itemGrants ? { itemGrants } : {}) }) }))
+      .items.find((item) => item.kind === "1password")!.parts.vaults;
+    expect(vaults({})).toBe(vaults());
+    expect(vaults({})).toBe(partHash({ v1: ["ember-0001"] }));
+    expect(vaults({ i1: ["ember-0001"] })).not.toBe(vaults({}));
+    expect(vaults({ i1: "all" })).not.toBe(vaults({ i1: ["ember-0001"] }));
+    expect(vaults({ i1: [], i2: [] })).not.toBe(vaults({ i1: [] }));
+  });
+
   it("lists bots, their skills, logins, 1Password and settings, without a secret or a picture's bytes", () => {
     const summary = cloudSendSummary(sources());
     expect(summary.items.map((item) => item.key)).toEqual([

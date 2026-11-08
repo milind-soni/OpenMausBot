@@ -880,11 +880,13 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     }
     const itemGrants = record(onePassword.itemGrants) ? onePassword.itemGrants : {};
     const there = await ctx.session.call("GET", "/api/logins");
+    if (!there.ok) throw refusedError("refused", there, "My Cloud connected 1Password but could not list its logins to keep them to the same bots.");
     const ownThere = (Array.isArray(there.body?.logins) ? there.body.logins : []).flatMap((login) => login?.onePassword?.ownBots ? [login.onePassword.itemId] : []);
     const items = [...Object.entries(itemGrants), ...[...new Set(ownThere)].filter((id) => !Object.hasOwn(itemGrants, id)).map((id) => [id, null])];
     for (const [item, bots] of items) {
       if (!VAULT_ID.test(item)) continue;
       const granted = await ctx.session.call("PATCH", `/api/logins/1password/items/${encodeURIComponent(item)}`, { bots: bots === null ? null : botsOnCloud(bots, ctx.cloudBots) });
+      if (granted.status === 405) throw new CloudSendError("refused", "My Cloud is too old to keep a 1Password login to its own bots. Update My Cloud, then send again.");
       if (!granted.ok) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its logins to the same bots.");
     }
     done(ctx, row.key);
