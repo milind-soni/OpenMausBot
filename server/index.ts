@@ -9581,7 +9581,7 @@ handoffTicks.start({ pace: () => enginesRead || parkedNodesToReconcile.size > 0 
 function reconcileParkedRoots(): void {
   for (const node of coordinator.active()) if (!reconcileParkedNode(node) && node.status === "waiting" && node.cards?.length && !anyCardLive(store, node.threadId, node.cards)) coordinator.releaseParked(node.id, WAIT_CARD_CLOSED_REASON);
 }
-const MAX_GROUP_HOPS = 1;
+const MAX_GROUP_HOPS = 3;
 
 type GroupMemberTurnOutcome = GoalStepOutcome;
 type GroupTurnOrchestration = {
@@ -10551,9 +10551,11 @@ async function runClaimedGroupMemberTurn(
         },
       });
     }
+    // A bot that spoke earlier answers this direct mention again; one that already answered since this reply does not.
+    const spokeBeforeReply = new Set(spoken);
     for (const next of roomResponders(replyText, members, { kind: "mentions" })) {
       if (isCancelled?.()) return false;
-      if (spoken.has(next.id)) continue;
+      if (spoken.has(next.id) && !spokeBeforeReply.has(next.id)) continue;
       if (operation) {
         const verdict = await waitForChatRoomMember(operation, threadId, next);
         if (verdict === "stop") return false;

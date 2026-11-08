@@ -566,6 +566,25 @@ it("R8 runs a chained @mention as a root of its own, with the hop recorded", () 
   expect((await f.roomView(room.id))).toMatchObject({ working: false, busyBotId: null });
 }), hostTimeout(60_000));
 
+it("R8 answers a direct bot @mention again for a bot that already spoke, up to three hops", () => scenario(async (f) => {
+  const mira = await f.bot("Mira", "Engineering");
+  const room = await f.room("Engineering", [f.clive.id, mira.id], { kind: "member", botId: f.clive.id });
+  f.script(f.clive.id,
+    { key: "C0", match: ["R8B-JOB"], reply: "R8B-C0: @Mira please check the total." },
+    { key: "C2", match: ["R8B-M1"], reply: "R8B-C2: @Mira and the tax line?" },
+    { key: "C-EXTRA", repeat: true, match: ["R8B"], reply: "R8B-EXTRA" });
+  f.script(mira.id,
+    { key: "M1", match: ["R8B-C0"], reply: "R8B-M1: 42. @Clive anything else?" },
+    { key: "M3", match: ["R8B-C2"], reply: "R8B-M3: tax is 4. @Clive done." },
+    { key: "M-EXTRA", repeat: true, match: ["R8B"], reply: "R8B-EXTRA" });
+  await f.post(room, "R8B-JOB: what is the week's total?");
+  await f.final(room.threadId, "R8B-M3");
+  await expect.poll(() => f.roomRoots(room.threadId).map((row: any) => row.status), { timeout: 15_000 }).toEqual(["completed", "completed", "completed", "completed"]);
+  expect(f.roomRoots(room.threadId).map((row: any) => row.brief.split(":")[0])).toEqual(["R8B-JOB", "Mentioned by Clive (hop 1)", "Mentioned by Mira (hop 2)", "Mentioned by Clive (hop 3)"]);
+  expect(f.turns().map((record: any) => record.planKey)).toEqual(["C0", "M1", "C2", "M3"]);
+  expect(nothingLive(f)).toEqual([]);
+}), hostTimeout(90_000));
+
 const goalDone = (detail: string) => `<openmaus-goal>${JSON.stringify({ status: "completed", detail })}</openmaus-goal>`;
 const sendGoal = (f: any, bot: { id: string; threadId: string }, text: string) =>
   f.api("POST", `/api/bots/${bot.id}/messages`, { text, mode: "goal", threadId: bot.threadId });
