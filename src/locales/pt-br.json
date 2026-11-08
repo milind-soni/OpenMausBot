@@ -9304,6 +9304,7 @@
   "serverError.computer.notReadyMacPermission": "O OpenMausBot ainda não consegue usar este computador. Motivo: {reason}. Abra o OpenMausBot novamente depois de conceder a permissão do macOS que falta.",
   "chat.notice.copilotAccountRefused": "O GitHub Copilot recusou este pedido para a conta conectada. Confira o plano do Copilot e a franquia de pedidos premium e tente novamente.",
   "chat.notice.commandCodeAccountRefused": "O Command Code recusou este pedido para a conta conectada. Confira o plano e os créditos em commandcode.ai e tente novamente.",
+  "chat.notice.kiroAccountRefused": "O Kiro recusou este pedido para a conta conectada. Confira o plano e os créditos do Kiro e tente novamente.",
   "chat.notice.acpQuietUsageLimit": "{name} atingiu um limite de uso{said} e está esperando a restrição acabar, sem responder. Por isso, esta sessão foi interrompida.",
   "chat.notice.acpQuietStuck": "{name} ficou {quiet} sem enviar nada. Não havia ferramenta em execução, pedido aberto ao modelo nem uso de CPU, então a sessão foi interrompida por estar travada. Envie a mensagem de novo para tentar novamente.",
   "chat.notice.acpModelRequestFailed": "O pedido de {name} ao modelo falhou: “{message}”. {name} pode tentar novamente ou parar. Sem resposta há {quiet}.",
