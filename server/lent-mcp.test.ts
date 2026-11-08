@@ -13,7 +13,7 @@ const notes = { command: "/Users/ada/bin/notes-mcp", args: [], env: { NOTES_TOKE
 const here = (over: Partial<HereChecks> = {}): HereChecks => ({ exists: () => false, program: () => true, answers: async () => false, ...over });
 
 type Online = NonNullable<ReturnType<SharedComputers["runsOn"]>["online"]>;
-function fixture(options: { online?: Partial<Online> | null; known?: { lent: boolean } | null; principal?: string | null; servers?: Record<string, unknown>; mcpServers?: string[]; toolScope?: unknown; answer?: (operation: Record<string, unknown>) => unknown; lenders?: ReturnType<SharedComputers["mcpLenders"]>; here?: HereChecks } = {}) {
+function fixture(options: { online?: Partial<Online> | null; known?: { lent: boolean } | null; principal?: string | null; servers?: Record<string, unknown>; mcpServers?: string[]; toolScope?: unknown; answer?: (operation: Record<string, unknown>) => unknown; lenders?: ReturnType<SharedComputers["mcpLenders"]>; here?: HereChecks; personal?: boolean; place?: string } = {}) {
   const requests: Array<{ operation: Record<string, unknown>; principal: string | null }> = [];
   const online = options.online === null ? null : { id: "mac-1", name: "Ada's Mac", platform: "darwin" as const, terminal: false, mcpServers: true, ...options.online };
   const computers: LentMcpDeps["computers"] = {
@@ -38,8 +38,8 @@ function fixture(options: { online?: Partial<Online> | null; known?: { lent: boo
     mint: () => { minted.push("token"); return "turn-bearer"; },
     active: () => true,
     origin: "http://127.0.0.1:4242",
-    personal: true,
-    place: "My Cloud",
+    personal: options.personal ?? true,
+    place: options.place ?? "My Cloud",
     here: options.here ?? here(),
   });
   return { lent, requests, minted };
@@ -102,6 +102,18 @@ describe("a server that runs on the person's computer, in a turn", () => {
     expect(say({ online: null, known: null })[1]).toMatchObject({ local: "local runs on Ada's Mac, which isn't lent to My Cloud: it works once OpenMausBot is open on that computer and signed in to My Cloud." });
     expect(say({ online: { mcpServers: false } })[1]).toMatchObject({ local: "local runs on your Mac (Ada's Mac), whose OpenMausBot is too old to run it for My Cloud: update OpenMausBot on that Mac." });
     expect(say({})).toEqual([["local"], { notes: "notes starts a program on your Mac (Ada's Mac), which doesn't let My Cloud run programs right now: turn on \"Let Clouds run commands on this Mac\" from the OpenMausBot icon on that Mac." }]);
+  });
+
+  it("an address with no port of its own, 1024 or higher, is refused here in plain words before any job goes out", async () => {
+    const line = (name: string) => `${name} runs on your Mac (Ada's Mac), which reaches only an MCP server on its own port, 1024 or higher, at that Mac's address: save ${name} with the port its server listens on.`;
+    const servers = { local, web: { ...local, url: "http://127.0.0.1/mcp" }, tls: { ...local, url: "https://localhost/mcp" }, low: { ...local, url: "http://[::1]:1023/mcp" } };
+    const { lent, requests } = fixture({ servers });
+    expect(Object.keys(lent.mounts({ id: "kiwi" }, TURN))).toEqual(["local"]);
+    expect(Object.fromEntries(lent.lines({ id: "kiwi" }, TURN))).toEqual({ web: line("web"), tls: line("tls"), low: line("low") });
+    const called = await route(lent, `${LENT_MCP_PATH}web`, rpc("tools/call", { name: "search" }));
+    expect(called.json.mock.calls[0]![2].result).toEqual({ content: [{ type: "text", text: line("web") }], isError: true });
+    expect(await lent.test("low", servers.low, "cloud-home", new AbortController().signal)).toEqual({ status: 409, error: line("low") });
+    expect(requests.map((request) => (request.operation.server as { url: string }).url)).toEqual(["http://127.0.0.1:19501/mcp"]);
   });
 
   it("a bot with no server on another computer costs its turn nothing: the lending gate isn't asked", () => {
@@ -200,7 +212,26 @@ describe("Test, and adding a server that needs the person's computer", () => {
     expect(await one.lent.place(address, { principal: null }), "a team Cloud, or a turn that can't use the computer").toEqual({ ok: true, server: address });
     const kept = { ...address, runsOn: { environmentId: "22222222-2222-4222-8222-222222222222", label: "Studio" } };
     expect(await one.lent.place(kept, { principal: "cloud-home" })).toEqual({ ok: true, server: kept });
-    expect(await fixture().lent.place(address, { principal: "cloud-home" }), "nothing lent now: it stays as added").toEqual({ ok: true, server: address });
+  });
+
+  it("with no computer lent, refuses a server that needs one and still saves one My Cloud answers", async () => {
+    const none = fixture();
+    expect(await none.lent.place(address, { principal: "cloud-home" })).toEqual({ ok: false, error: "That address is on the person's own computer, and no computer is lent to My Cloud now. Ask them to lend their Mac or PC, then add it again." });
+    const command = { command: "notes-mcp", args: [], env: {}, enabled: true };
+    const missing = fixture({ here: here({ program: () => false }) });
+    expect(await missing.lent.place(command, { principal: "cloud-home" })).toEqual({ ok: false, error: "This command runs on the person's own computer, and no computer is lent to My Cloud now. Ask them to lend their Mac or PC with its terminal, then add it again." });
+    const answered = fixture({ here: here({ answers: async () => true }) });
+    expect(await answered.lent.place(address, { principal: "cloud-home" })).toEqual({ ok: true, server: address });
+    const server = fixture({ personal: false, place: "this server" });
+    expect(await server.lent.place(address, { principal: "cloud-home" }), "a desktop or self-hosted server runs on a computer of its own").toEqual({ ok: true, server: address });
+  });
+
+  it("refuses a loopback address for the lent computer on a port below 1024 or with none, saying how to add it", async () => {
+    const one = fixture({ lenders: [lender("Ada's Mac", "s-mac", MAC.environmentId, 2)] });
+    for (const url of ["http://127.0.0.1/mcp", "http://localhost:80/mcp", "https://[::1]/mcp", "http://127.0.0.1:1023/mcp"]) {
+      expect(await one.lent.place({ ...address, url }, { principal: "cloud-home" }), url).toEqual({ ok: false, error: "This server runs on the person's own computer, which reaches only an MCP server on its own port, 1024 or higher: add it again with the port its server listens on in its address." });
+    }
+    expect(await one.lent.place({ ...address, url: "http://localhost:19501/mcp" }, { principal: "cloud-home" })).toMatchObject({ ok: true, server: { runsOn: MAC } });
   });
 
   it("with several lent: the one named, else the one the adder is on, else the newest for the person, else the bot asks", async () => {

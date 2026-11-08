@@ -12109,7 +12109,7 @@ const workspaceBackupAccess = {
   }, keepLocked),
   status: () => ({ busy: workspaceMaintenance.active, pendingRestore: workspaceMaintenance.pendingRestore }),
 };
-const workspaceCopyAccess = { dataDir: DATA_DIR, appVersion: serverVersion(), readBody, restored: workspaceRestore, ...workspaceBackupAccess };
+const workspaceCopyAccess = { dataDir: DATA_DIR, appVersion: serverVersion(), readBody, restored: workspaceRestore, ...workspaceBackupAccess, ...(CLOUD_HOME ? { restart: () => { restartRequested = true; gracefulShutdown(); } } : {}) };
 const workspaceBackupRoutes = createWorkspaceBackupRoutes(workspaceCopyAccess);
 let restartRequested = false;
 const cloudMoveRoutes = createCloudMoveRoutes();

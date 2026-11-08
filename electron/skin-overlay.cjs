@@ -14,6 +14,7 @@ const SKIN_CHROME = Object.freeze({
   meadow: Object.freeze({ color: "#ffffff", symbolColor: "#4d5a52" }),
   pop: Object.freeze({ color: "#fdf5ea", symbolColor: "#3a322d" }),
   halloween: Object.freeze({ color: "#110d16", symbolColor: "#c2b3cc" }),
+  aurora: Object.freeze({ color: "#0b0c0b", symbolColor: "#b4bab4" }),
 });
 
 const DEFAULT_SKIN = "midnight";
