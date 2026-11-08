@@ -1005,6 +1005,63 @@
   --identity-chrome: #B3BAC4;
 }
 
+[data-skin="diwali"] {
+  --code-color-scheme: dark;
+  --color-app: #100d1f;
+  --color-panel: #161229;
+  --color-raised: #282142;
+  --color-raised-hover: #30284d;
+  --color-composer: #1c1732;
+  --color-composer-ring: #342b52;
+  --color-card: #1f1936;
+  --color-menu: #1d1834;
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
+  --color-inset: #1a1530;
+  --color-control: #282142;
+  --color-hairline: #392f5a;
+
+  --color-ink: #fff3e0;
+  --color-ink-secondary: #cdbfdc;
+  --color-ink-tertiary: #ab9dc0;
+
+  --color-accent: #ffb22e;
+  --color-accent-border: #ffc04f;
+  --color-accent-text: #ffc861;
+  --color-focus: #ffc04f;
+  --color-accent-ink: #231402;
+  --color-bubble-user: #43301a;
+  --color-bubble-user-ink: #fff3e0;
+
+  --color-success: #7cc48f;
+  --color-danger: #f0727c;
+  --color-danger-ink: #240a0e;
+  --color-success-ink: #0d1a10;
+  --color-warning: #f2b45a;
+  --color-scrollbar: #392f5a;
+  --color-maus-line: #cdbfdc;
+
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
+  --radius-2xl: 16px; --radius-3xl: 24px; --radius-4xl: 32px;
+  --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  --identity-green: #009957;
+  --identity-blue: #377FE6;
+  --identity-red: #D94B52;
+  --identity-orange: #E78531;
+  --identity-purple: #8c68cd;
+  --identity-cyan: #0EA5C6;
+  --identity-pink: #D84F8B;
+  --identity-yellow: #D8A729;
+  --identity-teal: #01A492;
+  --identity-coral: #E5634E;
+  --identity-silver: #A8ADB4;
+  --identity-chrome: #B3BAC4;
+}
+
 /* Every popover and menu in the menu tone, flat in Midnight and on a soft lift in Daylight. A popover's rim is its
    border, never a ring, so clearing box-shadow leaves the rim. */
 .popover-surface {
@@ -2815,6 +2872,56 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   }
 }
 
+/* The main pane only, and never the picker miniature. Isolation keeps the
+   fireworks behind the conversation. */
+@scope ([data-skin="diwali"]:not([data-skin-preview])) to ([data-skin]) {
+  main.bg-app {
+    isolation: isolate;
+    background-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 34'%3E%3Cpath d='M0 4Q80 30 160 4' fill='none' stroke='%23fff3e0' stroke-opacity='.12'/%3E%3Cg fill-opacity='.42'%3E%3Ccircle cx='20' cy='10' r='2.6' fill='%23ffb22e'/%3E%3Ccircle cx='60' cy='16' r='2.6' fill='%23ff6f9c'/%3E%3Ccircle cx='100' cy='16' r='2.6' fill='%23ffb22e'/%3E%3Ccircle cx='140' cy='10' r='2.6' fill='%23ff6f9c'/%3E%3C/g%3E%3C/svg%3E"),
+      radial-gradient(60% 55% at 50% 100%, rgb(255 178 46 / 0.09), transparent 70%);
+    background-repeat: repeat-x, no-repeat;
+    background-position: 0 0, 0 0;
+    background-size: 160px 34px, 100% 100%;
+  }
+  main.bg-app::before,
+  main.bg-app::after {
+    content: "";
+    position: absolute;
+    top: 96px;
+    right: 12%;
+    width: 120px;
+    height: 120px;
+    z-index: -1;
+    pointer-events: none;
+    background: no-repeat center / contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Cpath d='M60.0 42.0L60.0 18.0M69.0 44.4L81.0 23.6M75.6 51.0L96.4 39.0M78.0 60.0L102.0 60.0M75.6 69.0L96.4 81.0M69.0 75.6L81.0 96.4M60.0 78.0L60.0 102.0M51.0 75.6L39.0 96.4M44.4 69.0L23.6 81.0M42.0 60.0L18.0 60.0M44.4 51.0L23.6 39.0M51.0 44.4L39.0 23.6' stroke='%23ffc861' stroke-opacity='.3' stroke-width='2.4' stroke-linecap='round'/%3E%3Cg fill='%23fff3e0' fill-opacity='.28'%3E%3Ccircle cx='73.5' cy='9.8' r='2.2'/%3E%3Ccircle cx='96.8' cy='23.2' r='2.2'/%3E%3Ccircle cx='110.2' cy='46.5' r='2.2'/%3E%3Ccircle cx='110.2' cy='73.5' r='2.2'/%3E%3Ccircle cx='96.8' cy='96.8' r='2.2'/%3E%3Ccircle cx='73.5' cy='110.2' r='2.2'/%3E%3Ccircle cx='46.5' cy='110.2' r='2.2'/%3E%3Ccircle cx='23.2' cy='96.8' r='2.2'/%3E%3Ccircle cx='9.8' cy='73.5' r='2.2'/%3E%3Ccircle cx='9.8' cy='46.5' r='2.2'/%3E%3Ccircle cx='23.2' cy='23.2' r='2.2'/%3E%3Ccircle cx='46.5' cy='9.8' r='2.2'/%3E%3C/g%3E%3C/svg%3E");
+    opacity: 0;
+    animation: diwali-burst 9s ease-out infinite;
+  }
+  main.bg-app::after {
+    top: 180px;
+    right: auto;
+    left: 14%;
+    width: 84px;
+    height: 84px;
+    animation-duration: 11s;
+    animation-delay: -5s;
+  }
+}
+
+@keyframes diwali-burst {
+  0%, 55% { opacity: 0; transform: scale(0.35); }
+  62% { opacity: 1; }
+  85%, 100% { opacity: 0; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-skin="diwali"] main.bg-app::before,
+  [data-skin="diwali"] main.bg-app::after {
+    display: none;
+  }
+}
+
 /* Disabled buttons.
    Upstream fades them with `disabled:opacity-40`. On a dark ground that holds:
    the button stays darker than the page and the white label survives. On a
@@ -2965,7 +3072,7 @@ button:disabled.bg-danger {
   outline-offset: -1.5px;
 }
 :root,
-:is([data-skin="midnight"], [data-skin="foundry"], [data-skin="graphite"], [data-skin="dusk"], [data-skin="halloween"]) {
+:is([data-skin="midnight"], [data-skin="foundry"], [data-skin="graphite"], [data-skin="dusk"], [data-skin="halloween"], [data-skin="diwali"]) {
   --radius-menu: 12px;
   --menu-shadow: 0 0 #0000;
 }
