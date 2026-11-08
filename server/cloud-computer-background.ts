@@ -143,15 +143,15 @@ function describeStatus(processId: string, body: any, observedAt?: number): Clou
   }));
 }
 
-function statusError(message: string, last?: { body: any; observedAt: number }): CloudComputerResult {
+function statusError(message: string, processId: string, last?: { body: any; observedAt: number }): CloudComputerResult {
   if (!last) return text(message, true);
   const stdout = tail(last.body.stdout, STDOUT_TAIL_CHARS), stderr = tail(last.body.stderr, STDERR_TAIL_CHARS);
   return text(JSON.stringify({
     error: message,
     lastObserved: {
-      observedAt: new Date(last.observedAt).toISOString(), stdout: stdout.text, stderr: stderr.text,
+      processId, status: "running", observedAt: new Date(last.observedAt).toISOString(), stdout: stdout.text, stderr: stderr.text,
       ...(stdout.cut || stderr.cut || last.body.stdoutTruncated === true || last.body.stderrTruncated === true ? { outputCut: CUT } : {}),
-      note: "These outputs were last observed at this time and may have changed.",
+      note: "This status and output were last observed at this time and may have changed.",
     },
   }), true);
 }
@@ -183,9 +183,9 @@ export async function backgroundStatus(
       if (deadline?.aborted) return last ? describeStatus(args.process_id, last.body, last.observedAt) : text(STATUS_LATE, true);
       throw error;
     }
-    if (response.status === 404) return statusError(UNKNOWN_PROCESS, last);
-    if (!response.ok) return statusError(boatErrorMessage(response.status, "Reading the command's status", body, included(cfg)), last);
-    if (typeof body?.running !== "boolean") return statusError("The cloud computer gave an unreadable answer about this command. Call exec_status again.", last);
+    if (response.status === 404) return statusError(UNKNOWN_PROCESS, args.process_id, last);
+    if (!response.ok) return statusError(boatErrorMessage(response.status, "Reading the command's status", body, included(cfg)), args.process_id, last);
+    if (typeof body?.running !== "boolean") return statusError("The cloud computer gave an unreadable answer about this command. Call exec_status again.", args.process_id, last);
     if (!body.running) untrack(boxId, processId);
     const observedAt = clock.now();
     last = { body, observedAt };

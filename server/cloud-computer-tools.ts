@@ -30,7 +30,7 @@ export const CLOUD_COMPUTER_TOOLS = [
   }, ["command"]),
   tool("exec_status", `Check a command started with exec and background: true: running or finished, its exit code, and the end of its stdout and stderr (the last ${STDOUT_TAIL_CHARS.toLocaleString("en-US")} and ${STDERR_TAIL_CHARS.toLocaleString("en-US")} characters).`, {
     process_id: { type: "string", pattern: PROCESS_ID_PATTERN },
-    wait_seconds: { type: "integer", minimum: 0, maximum: STATUS_WAIT_MAX_SECONDS, description: "Wait up to this many seconds for the command to finish before answering." },
+    wait_seconds: { type: "integer", minimum: 0, maximum: STATUS_WAIT_MAX_SECONDS, description: "Wait up to this many seconds for the command to finish before answering. A running result can arrive before the full interval because the last status read needs time to respond." },
   }, ["process_id"]),
   tool("copy_from_computer", "Copy one file of up to 2 GiB from the cloud computer into your working folder, for example to load it with data_load or use it in a page. A file already there is replaced.", {
     path: { type: "string", minLength: 1, maxLength: 4096, description: "The file on the cloud computer, under /home/user or /tmp." },

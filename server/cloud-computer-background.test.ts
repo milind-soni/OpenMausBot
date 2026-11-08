@@ -82,7 +82,7 @@ describe("background status deadlines", () => {
     expect(await pending).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("call exec_status again") }] });
   });
 
-  it.each(["finished", "running", "slow", "timeout", "not_found", "server_error", "malformed"] as const)("checks a short wait on a controlled clock: %s", async outcome => {
+  it.each(["finished", "running", "late", "slow", "timeout", "not_found", "server_error", "malformed"] as const)("checks a short wait on a controlled clock: %s", async outcome => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     const clock = {
@@ -99,7 +99,7 @@ describe("background status deadlines", () => {
       if (outcome === "slow") return new Promise<Response>(resolve => setTimeout(() => resolve(Response.json({ running: false, exitCode: 3, stdout: "final", stderr: "" })), 400));
       if (outcome === "not_found" || outcome === "server_error") return Response.json({ message: "unavailable" }, { status: outcome === "not_found" ? 404 : 503 });
       if (outcome === "malformed") return Response.json({});
-      if (outcome !== "timeout") return Response.json({ running: outcome === "running", exitCode: 3, stdout: "final", stderr: "" });
+      if (outcome !== "timeout") return Response.json({ running: outcome === "running" || (outcome === "late" && Date.now() < Date.parse("2026-01-01T00:00:00.700Z")), exitCode: 3, stdout: "final", stderr: "" });
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
       });
@@ -115,13 +115,12 @@ describe("background status deadlines", () => {
       expect(result).toMatchObject({ status: "running", exitCode: null, stdout: "partial", observedAt: "2026-01-01T00:00:00.000Z", note: expect.stringContaining("may have changed") });
     } else if (outcome === "not_found" || outcome === "server_error" || outcome === "malformed") {
       expect(raw.isError).toBe(true);
-      expect(result).toMatchObject({ error: expect.any(String), lastObserved: { observedAt: "2026-01-01T00:00:00.000Z", stdout: outcome === "server_error" ? "x".repeat(4_000) : "partial", stderr: "", note: expect.stringContaining("may have changed") } });
-      expect(result.lastObserved.status).toBeUndefined();
+      expect(result).toMatchObject({ error: expect.any(String), lastObserved: { processId, status: "running", observedAt: "2026-01-01T00:00:00.000Z", stdout: outcome === "server_error" ? "x".repeat(4_000) : "partial", stderr: "", note: expect.stringContaining("may have changed") } });
       if (outcome === "server_error") expect(result.lastObserved.outputCut).toContain("Only the end");
       if (outcome === "not_found") expect(result.error).toContain("no background command");
       if (outcome === "malformed") expect(result.error).toContain("unreadable answer");
     } else {
-      expect(result).toMatchObject({ status: outcome === "running" ? "running" : "finished", exitCode: outcome === "running" ? null : 3, stdout: "final" });
+      expect(result).toMatchObject({ status: outcome === "running" || outcome === "late" ? "running" : "finished", exitCode: outcome === "running" || outcome === "late" ? null : 3, stdout: "final" });
       expect(result.observedAt).toBeUndefined();
     }
   });
