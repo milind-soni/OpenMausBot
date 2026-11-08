@@ -279,6 +279,18 @@ test("signed out, an overtaken email is withdrawn before its replacement even af
   assert.deepEqual(k.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: k.now, email: "new@example.test", receipt: receiptOf("new@example.test") });
 });
 
+test("signed out, an overtaken receipt the Admin no longer knows is dropped, so the new email still reaches it", async t => {
+  const f = await world(t);
+  f.failWithdrawals = 2;
+  await overtake(f, { status: "opted_in", email: "old@example.test" }, { status: "opted_in", email: "new@example.test" });
+  assert.deepEqual(f.saved.updatesConsent.replacedReceipts, [receiptOf("old@example.test")]);
+  f.emails.delete("old@example.test");
+  f.launch();
+  await f.consent.sync();
+  assert.equal(f.emails.get("new@example.test"), "opted_in");
+  assert.deepEqual(f.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: f.now, email: "new@example.test", receipt: receiptOf("new@example.test") });
+});
+
 test("signed out, the same email opts in again: a failed submission keeps the active opt-in and its receipt", async t => {
   for (const email of [" Person@Example.TEST ", undefined]) await t.test(email ?? "saved email", async t => {
     const f = await world(t);

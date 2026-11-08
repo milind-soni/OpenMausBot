@@ -602,7 +602,7 @@ describe("restoring exactly one browser profile", () => {
 });
 
 describe("finding the browser engine", () => {
-  it("resolves Android to the statically linked Linux build instead of reporting it missing (#4868)", () => {
+  it("resolves Android to the statically linked Linux build instead of reporting it missing", () => {
     // Android is bionic, not musl, so isMusl() is false there; the asset that actually
     // runs is the statically linked musl build, which needs no interpreter.
     expect(isMusl("android")).toBe(false);

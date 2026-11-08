@@ -84,4 +84,3 @@ export function resolveAgentBrowserReleaseAsset(
   return RELEASES.get(linuxFamilyKey(platform, arch, musl)) ?? null;
 }
 
-export { linuxFamilyKey };

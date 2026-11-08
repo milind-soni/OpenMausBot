@@ -3400,7 +3400,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -9451,7 +9457,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -12718,7 +12730,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -15837,7 +15855,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -23565,7 +23589,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -33346,7 +33376,25 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "backup.serverRestarting": "87acdeac7f4a0d79c9991c75c303459ab5fe9ab8171d762f0a92a8368c447ad8",
+      "backup.serverRestartSlow": "6c3051a9ea04b2e6157c376b2359866c0038915ce7f77064b3e792d38d3cfb9c",
+      "computerSharing.ownIntro": "054fa8e486f6758f0b41505f99cceecc24bf68cb1cee5bdd9ac6d423d3407eee",
+      "computerSharing.pauseHint": "46aa1fa8bc0e2d4d8bafa163af32f1485d2373eaa99d0916ed206751a1e00e0d",
+      "computerSharing.paused": "8f4d6a8680cb5e9d62d4e82c774c604297d07ba87bd123959a40770379be5e71",
+      "computerSharing.pause": "858e4ba7a29fd38b630ed73a79e2738333b3fc6778fafa90252f5556c1262fdc",
+      "computerSharing.resume": "d640c7421da066618a39daf4266da5f61f66a9b1afcd626481b831a17064965d",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "skins.tagline.aurora": "ca1a84cb54e664d46ed9f9aff1205b6ee7dcef1b1fa1123675f331fcd922aa01",
+      "native.lend.own.title": "e0c0ec1959aef8a27ef00e5524990219d7e3d1f3d4ae97103b78e1e0469b9201",
+      "native.lend.own.detail": "6dbcd74c9c925e16d72b6e641fedcdfb27f2554697a843ff647050a5115cd293",
+      "native.lend.own.allow": "e213c161d5cefa520c8dd4155c9569076d9a40406111465136a6f1b207045761",
+      "native.lend.notOwnServer": "6ec1c2fc26d171727a4509b66ee7a9f4848733a2b4572c01b629a31c5a255cf0"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -40960,7 +41008,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -50736,7 +50790,24 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "backup.serverRestarting": "87acdeac7f4a0d79c9991c75c303459ab5fe9ab8171d762f0a92a8368c447ad8",
+      "backup.serverRestartSlow": "6c3051a9ea04b2e6157c376b2359866c0038915ce7f77064b3e792d38d3cfb9c",
+      "computerSharing.ownIntro": "054fa8e486f6758f0b41505f99cceecc24bf68cb1cee5bdd9ac6d423d3407eee",
+      "computerSharing.pauseHint": "46aa1fa8bc0e2d4d8bafa163af32f1485d2373eaa99d0916ed206751a1e00e0d",
+      "computerSharing.paused": "8f4d6a8680cb5e9d62d4e82c774c604297d07ba87bd123959a40770379be5e71",
+      "computerSharing.pause": "858e4ba7a29fd38b630ed73a79e2738333b3fc6778fafa90252f5556c1262fdc",
+      "computerSharing.resume": "d640c7421da066618a39daf4266da5f61f66a9b1afcd626481b831a17064965d",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "native.lend.own.title": "e0c0ec1959aef8a27ef00e5524990219d7e3d1f3d4ae97103b78e1e0469b9201",
+      "native.lend.own.detail": "6dbcd74c9c925e16d72b6e641fedcdfb27f2554697a843ff647050a5115cd293",
+      "native.lend.own.allow": "e213c161d5cefa520c8dd4155c9569076d9a40406111465136a6f1b207045761",
+      "native.lend.notOwnServer": "6ec1c2fc26d171727a4509b66ee7a9f4848733a2b4572c01b629a31c5a255cf0"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -54296,7 +54367,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59846,7 +59923,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -65396,7 +65479,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72209,7 +72298,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -79084,7 +79179,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -85759,7 +85860,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -93156,7 +93263,13 @@
       "computer.linux.hyprlandPlugin": "06ee1a5a576ac7a5f461914b632927e1a9bc0e499e5cf155d772f9ab9b3f35ac",
       "computer.linux.omarchyGuide": "3d9a19727d87f6bf4b9d0114b6d5388c94156f84ce5589ee70be453633f83ab4",
       "computer.linux.hyprlandReady": "b534b242784fd11035f4518ed297b0014cd14514a4c0d95e34eb1751f2b4c0d7",
-      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855"
+      "computer.problem.localHyprlandPlugin": "1311e4bdddbde6a209aa2fd0aa99af48183eb734d1a3eee207fbc4ff650c5855",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     }
   }
 }

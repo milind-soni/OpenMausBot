@@ -103,7 +103,9 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
 
   async function withdrawReplaced() {
     for (let receipt; (receipt = prefs.updatesConsent()?.replacedReceipts?.[0]);) {
-      await client().withdrawUpdatesConsent({ status: "withdrawn", receipt });
+      try { await client().withdrawUpdatesConsent({ status: "withdrawn", receipt }); }
+      // A receipt the Admin no longer knows has nothing left to withdraw: dropping it keeps later answers moving.
+      catch (error) { if (error?.code !== "unknown_receipt") throw error; }
       const latest = prefs.updatesConsent();
       if (latest?.replacedReceipts?.includes(receipt)) save(withReplacedReceipts(latest, [], receipt));
     }
