@@ -13,7 +13,7 @@ export function StatusMark({ status, className }: { status: AutomationStatus; cl
   return <span aria-hidden="true" className={cn("size-2.5 shrink-0 rounded-full", status.state === "working" ? "bg-success" : "bg-ink-tertiary/60", className)} />;
 }
 
-/** The one button that fixes what "Needs you" names. */
+/** The one button that fixes what "Needs you" names; a run that waits on the person can also be cancelled. */
 export function FixButton({ automation, status, actions, onEdit, className }: {
   automation: Automation;
   status: AutomationStatus;
@@ -24,6 +24,7 @@ export function FixButton({ automation, status, actions, onEdit, className }: {
   const { dispatch } = useStore();
   if (status.state !== "needs-you" || !status.fix) return null;
   const fix = status.fix;
+  const waiting = fix === "answer" ? automation.runs.find((run) => run.status === "waiting") : undefined;
   const onClick = () => {
     if (fix === "answer" || fix === "sign-in") actions.openRun(automation, automation.runs.find((run) => run.status !== "queued"));
     else if (fix === "usage") dispatch({ type: "toggleAppSettings", open: true, section: "usage" });
@@ -32,8 +33,15 @@ export function FixButton({ automation, status, actions, onEdit, className }: {
     else void actions.runNow(automation);
   };
   return (
-    <button type="button" onClick={onClick} disabled={Boolean(actions.busy)} className={cn("shrink-0 rounded-lg bg-warning/15 px-2.5 py-1 text-[12px] font-medium text-warning hover:bg-warning/25 disabled:opacity-50", className)}>
-      {t(AUTOMATION_FIX_LABEL[fix])}
-    </button>
+    <>
+      <button type="button" onClick={onClick} disabled={Boolean(actions.busy)} className={cn("shrink-0 rounded-lg bg-warning/15 px-2.5 py-1 text-[12px] font-medium text-warning hover:bg-warning/25 disabled:opacity-50", className)}>
+        {t(AUTOMATION_FIX_LABEL[fix])}
+      </button>
+      {waiting && (
+        <button type="button" data-automation-cancel-run onClick={() => void actions.cancelRun(automation, waiting)} disabled={Boolean(actions.busy)} className={cn("shrink-0 rounded-lg px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50", className)}>
+          {t("routines.drawer.cancelRun")}
+        </button>
+      )}
+    </>
   );
 }
