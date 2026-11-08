@@ -3668,6 +3668,8 @@
   "computer.tab.files": "Tệp",
   "computer.tabsAria": "Chế độ xem bảng bot",
   "computer.fullScreen": "Toàn màn hình",
+  "computer.watchFullScreenTitle": "Xem toàn màn hình; bot vẫn tiếp tục làm việc",
+  "computer.watchingBotWorks": "Đang xem · bot vẫn tiếp tục làm việc",
   "computer.browserOff.title": "Trình duyệt đang tắt",
   "computer.browserOff.body": "Bật trình duyệt tích hợp để xem {name} duyệt web, và tiếp quản bất cứ lúc nào.",
   "computer.browserOff.turnOn": "Bật trình duyệt",

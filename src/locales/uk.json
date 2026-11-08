@@ -2210,6 +2210,8 @@
   "computer.viewerTitle": "Живий стіл {name}",
   "computer.openLiveDesktopAria": "Відкрити живий стіл {name}",
   "computer.openLiveDesktop": "Відкрити живий стіл",
+  "computer.watchFullScreenTitle": "Дивитися на весь екран; бот продовжує працювати",
+  "computer.watchingBotWorks": "Перегляд · бот продовжує працювати",
   "computer.open": "Відкрити",
   "computer.watchOnly": "Перегляд лише для спостереження",
   "computer.waitingFrame": "Чекаємо на перший кадр…",

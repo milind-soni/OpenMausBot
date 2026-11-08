@@ -1828,6 +1828,8 @@
   "computer.viewerTitle": "{name} का लाइव डेस्कटॉप",
   "computer.openLiveDesktopAria": "{name} का लाइव डेस्कटॉप खोलें",
   "computer.openLiveDesktop": "लाइव डेस्कटॉप खोलें",
+  "computer.watchFullScreenTitle": "पूरी स्क्रीन देखें; बॉट काम करता रहता है",
+  "computer.watchingBotWorks": "देख रहे हैं · बॉट काम करता रहता है",
   "computer.open": "खोलें",
   "computer.watchOnly": "केवल देखने की प्रिव्यू",
   "computer.waitingFrame": "पहले फ़्रेम की प्रतीक्षा…",
