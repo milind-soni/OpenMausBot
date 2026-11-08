@@ -2452,6 +2452,8 @@
   "chat.preview.openTabNeedsLink": "नए टैब में खोलने के लिए पेज शेयर करें",
   "chat.preview.fullScreen": "पूरी स्क्रीन",
   "chat.preview.exitFullScreen": "पूरी स्क्रीन बंद करें",
+  "chat.preview.openPage": "पेज खोलें",
+  "chat.preview.closePage": "पेज बंद करें",
   "chat.preview.pointedPart": "पेज का एक हिस्सा",
   "chat.preview.removePoint": "{label} हटाएं",
   "chat.preview.pointedAt": "दिखाया: {parts}",

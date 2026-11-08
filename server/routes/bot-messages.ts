@@ -15,6 +15,7 @@ import { AppMessageRate, appContextBlock, prepareAppMessage } from "../chat-apps
 import { prepareWidgetPress, reopenCancelledPress } from "../chat-widgets.ts";
 import type { ModelSelection, RequestOutcome, SteerOutcome } from "../contracts.ts";
 import { parseDataContext, type DataContext } from "../data-context.ts";
+import { OPEN_PAGE_BAD, openPageBlock } from "../open-page.ts";
 import { preparePointed } from "../pointed.ts";
 import type { Handoffs } from "../delta-context.ts";
 import type { OneOnOneGoals } from "../host/one-on-one-goals.ts";
@@ -198,6 +199,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (pressed && fromAnApp) return json(res, 400, { error: "send widgetAction or appMessage, not both" });
       const pointing = body.pointed !== undefined && body.pointed !== null;
       if (pointing && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can carry what the person pointed at" });
+      const pageOpen = body.openPage !== undefined && body.openPage !== null;
+      if (pageOpen && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can carry the page the person has open" });
       const followUp = parseFollowUp(body.followUp);
       if (followUp === null) return json(res, 400, { error: "followUp must be steer, queue or restart" });
       const mentions = parseMentionPicks(body.mentions);
@@ -265,6 +268,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (appSent && !appSent.ok) return json(res, appSent.status, { error: appSent.error });
       const pointed = pointing ? preparePointed(store, threadId, body.pointed) : null;
       if (pointed && !pointed.ok) return json(res, pointed.status, refusalBody(pointed));
+      const openPage = pageOpen ? openPageBlock(store, threadId, body.openPage) : null;
+      if (openPage === false) return json(res, 400, { error: OPEN_PAGE_BAD });
       const text = press ? press.text : appSent ? appSent.text : typed;
       const target = resolveReplyTarget(threadId, press ? press.messageId : appSent ? appSent.messageId : body.replyToId);
       if (relayed && target?.role !== "bot") return json(res, 400, { error: "a relayed reaction answers a bot's message" });
@@ -287,7 +292,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (appSent && !slot) return json(res, 429, { error: "This app has sent too many messages. Wait a while, or type your message." });
       // A relay is not the person at this screen: it never carries what their apps last showed.
       const appContext = guarded || retried ? null : appContextBlock(store, threadId);
-      const context = `${appContext?.block ?? ""}${pointed?.block ?? ""}`;
+      const context = `${appContext?.block ?? ""}${openPage ?? ""}${pointed?.block ?? ""}`;
       const app = context || appSent || pointed
         ? {
             ...(context ? { context } : {}),

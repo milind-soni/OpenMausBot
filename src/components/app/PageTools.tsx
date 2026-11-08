@@ -1,5 +1,5 @@
 // A bot's page in the chat, artifact-style: its version stepper, Point, Share, Open in new tab and Full screen.
-import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { createContext, useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, Crosshair, Globe, Loader2, Maximize2, Pin, PinOff, Share2, Trash2, X } from "lucide-react";
 import { useStore } from "@/state/store";
@@ -133,7 +133,8 @@ export interface PageToolsProps {
   point: ReturnType<typeof usePagePoint>;
   share: ReturnType<typeof usePageShare>;
   ready: boolean;
-  fullScreen: { open: boolean; toggle(): void };
+  /** pane: the page opens in the chat's page pane, beside a usable message box, instead of covering the window. */
+  fullScreen: { open: boolean; toggle(): void; pane?: boolean };
   /** Shown in a room: view-only, so no Point and no Share. */
   room?: boolean;
   pin?: ReturnType<typeof usePagePin>;
@@ -176,8 +177,7 @@ export function PageToolbar({ version, point, share, ready, fullScreen, room, pi
           <ArrowUpRight size={15} />
         </button>
         <button type="button" className={TOOL} onClick={fullScreen.toggle} aria-pressed={fullScreen.open}
-          aria-label={fullScreen.open ? t("chat.preview.exitFullScreen") : t("chat.preview.fullScreen")}
-          title={fullScreen.open ? t("chat.preview.exitFullScreen") : t("chat.preview.fullScreen")}>
+          aria-label={fullScreenLabel(fullScreen)} title={fullScreenLabel(fullScreen)}>
           {fullScreen.open ? <X size={16} /> : <Maximize2 size={14} />}
         </button>
       </div>
@@ -230,6 +230,21 @@ export function PageNotes({ version, point, share, room, className }: Pick<PageT
 }
 
 /** The page over the whole chat. Esc stops Point first, then closes. */
+function fullScreenLabel({ open, pane }: PageToolsProps["fullScreen"]): string {
+  if (pane) return open ? t("chat.preview.closePage") : t("chat.preview.openPage");
+  return open ? t("chat.preview.exitFullScreen") : t("chat.preview.fullScreen");
+}
+
+/** The chat's page pane: the messages area, above the transcript and below the message box. null outside a bot chat. */
+export const PagePaneContext = createContext<HTMLElement | null>(null);
+
+/** How tall the compact card in the chat is when a page opens in the pane. */
+export const PAGE_PREVIEW_HEIGHT = 220;
+
+function typing(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || target.matches("input, textarea, select"));
+}
+
 export function PageFullScreen(props: PageToolsProps & {
   title: string;
   doc: AppDocument;
@@ -237,23 +252,29 @@ export function PageFullScreen(props: PageToolsProps & {
   threadId: string;
   handle: MutableRefObject<AppFrameHandle | null>;
   close(): void;
+  /** Open in this pane, leaving the message box usable, rather than over the whole window. */
+  pane?: HTMLElement | null;
 }) {
-  const { point, close } = props;
+  const { point, close, pane } = props;
   const closer = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      // Beside the message box, Esc while typing belongs to the box (it clears a reply), not to the page.
+      if (pane && typing(event.target)) return;
       event.preventDefault();
       if (point.pointing) point.stop();
       else close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [point, close]);
+  }, [point, close, pane]);
   useEffect(() => { closer.current?.querySelector<HTMLButtonElement>("[aria-pressed=true]")?.focus(); }, []);
   return createPortal(
-    <div role="dialog" aria-modal="true" aria-label={props.title} data-page-fullscreen={props.doc.messageId}
-      className="fixed inset-0 z-50 flex flex-col bg-panel">
+    <div {...(pane ? { role: "region", "data-page-pane": props.doc.messageId } : { role: "dialog", "aria-modal": true })}
+      aria-label={props.title} data-page-fullscreen={props.doc.messageId}
+      className={cn(pane ? "absolute inset-x-0 top-0 z-[1] bottom-[var(--page-pane-bottom,0px)] pt-[var(--glass-top,0px)]" : "fixed inset-0 z-50",
+        "flex flex-col bg-panel")}>
       <div ref={closer} className="flex flex-col gap-2 border-b border-hairline/40 px-4 pb-3 pt-3">
         <div className="truncate text-[15px] font-semibold text-ink" title={props.title}><bdi dir="auto">{props.title}</bdi></div>
         <PageToolbar {...props} />
@@ -264,6 +285,6 @@ export function PageFullScreen(props: PageToolsProps & {
           onHeight={() => {}} onProblem={() => {}} onTeardownRequested={close} fill />
       </div>
     </div>,
-    document.body,
+    pane ?? document.body,
   );
 }

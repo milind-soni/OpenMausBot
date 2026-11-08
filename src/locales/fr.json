@@ -2452,6 +2452,8 @@
   "chat.preview.openTabNeedsLink": "Partagez la page pour l’ouvrir dans un nouvel onglet",
   "chat.preview.fullScreen": "Plein écran",
   "chat.preview.exitFullScreen": "Quitter le plein écran",
+  "chat.preview.openPage": "Ouvrir la page",
+  "chat.preview.closePage": "Fermer la page",
   "chat.preview.pointedPart": "une partie de la page",
   "chat.preview.removePoint": "Retirer {label}",
   "chat.preview.pointedAt": "Montré : {parts}",

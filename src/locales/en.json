@@ -7446,6 +7446,8 @@
   "chat.preview.openTabNeedsLink": "Share the page to open it in a new tab",
   "chat.preview.fullScreen": "Full screen",
   "chat.preview.exitFullScreen": "Close full screen",
+  "chat.preview.openPage": "Open page",
+  "chat.preview.closePage": "Close page",
   "chat.preview.pointedPart": "a part of the page",
   "chat.preview.removePoint": "Remove {label}",
   "chat.preview.pointedAt": "Pointed at {parts}",
