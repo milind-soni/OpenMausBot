@@ -16,6 +16,12 @@ notifications disabled remains quiet. Otherwise it may emit:
 - **Finished** only when there is a non-empty result to summarize.
 - **Routine failed** when a scheduled or manual routine run cannot complete.
 
+A thread a bot opened (a teammate's assignment, a bot's own `start_thread`)
+sends no **Finished** and no **resumed with results** while the newest request
+in it is a bot's. The person's own message there is announced as anywhere
+else, and so is a Chief of Staff's report on a failure the person was not told
+of. Approvals, questions, sign-ins and failures notify in every thread.
+
 Every notification carries both the bot ID and the exact task thread ID. A
 click must select that bot **and switch to that task**, including a routine's
 detached task; opening whichever task happens to be active is a failure.
@@ -33,6 +39,7 @@ alone cannot provide closed-app delivery.
 | Contract | Test |
 |---|---|
 | Per-agent off means quiet; empty completions stay quiet; summaries are bounded | `server/notify.test.ts` |
+| A bot-opened thread stays quiet until the person asks in it | `server/notify.test.ts`, `server/notification-routing.e2e.test.ts`, `server/direct-coordination.e2e.test.ts` |
 | Browser click returns the exact bot/task target | `src/lib/notify.test.ts` |
 | Store navigation selects the bot and switches the task | `src/state/store.test.ts` |
 | Opening a conversation reads only its own feed entries, live in every open app | `server/notification-read.e2e.test.ts` |
