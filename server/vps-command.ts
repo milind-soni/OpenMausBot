@@ -2,6 +2,7 @@ import { DATA_DIR } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
 import { killCliTree, spawnCli } from "./procs.ts";
 import { ensureVpsSshMaster, prepareVpsSsh } from "./vps-ssh.ts";
+import { dockerCliStartMessage } from "./vps-hints.ts";
 
 // ssh + docker need this long to tear down a remote exec over a WAN; an orphaned exec keeps the driver socket busy.
 const COMMAND_TIMEOUT_TERM_GRACE_MS = 5_000;
@@ -91,8 +92,8 @@ export async function defaultRunner(args: string[], options: VpsCommandOptions =
     child.stdin.on("error", (error) => {
       fail(new Error(`Docker-over-SSH stdin failed: ${error.message}`));
     });
-    child.on("error", (error) => {
-      fail(new Error(`Docker-over-SSH could not start: ${error.message}`));
+    child.on("error", (error: Error) => {
+      fail(new Error(dockerCliStartMessage(error)));
     });
     child.on("close", (code, signal) => {
       if (failure) return;

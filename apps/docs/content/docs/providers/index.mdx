@@ -4,7 +4,7 @@ description: Use the agent subscriptions and CLIs you already have.
 icon: BrainCircuit
 ---
 
-OpenMausBot does not proxy every message through its own model account. It starts supported agent CLIs on your computer and normalizes their output through the local harness.
+MausBot does not proxy every message through its own model account. It starts supported agent CLIs on your computer and normalizes their output through the local harness.
 
 <ProductScreenshot name="docs-engine-detection" alt="The welcome's Connect an AI step, with the Claude sign-in first and the other ways folded under it" caption="When no engine works yet, the welcome offers one recommended sign-in without asking for executable paths. App settings → Agent engines shows every engine's install and sign-in state." />
 
@@ -29,7 +29,7 @@ OpenMausBot does not proxy every message through its own model account. It start
 
 Additional driver instances can be declared in local configuration. Unavailable engines remain visible with a reason instead of crashing the provider fleet.
 
-GitHub Copilot runs the official Copilot CLI (`npm install -g @github/copilot`) in its ACP mode and bills the signed-in Copilot plan, unless the CLI is set up to bring its own key: `COPILOT_PROVIDER_*` variables in the `githubCopilot` instance's `environment`, or a `providers.json` in the Copilot CLI home (`~/.copilot`, or `COPILOT_HOME`), send model requests to that provider, which bills them. A `GH_TOKEN` or `GITHUB_TOKEN` in OpenMausBot's own environment never reaches it, because either would take precedence over the CLI's login; put one in the `githubCopilot` instance's `environment` to use it. `COPILOT_ALLOW_ALL` is always removed, so tool approvals stay with OpenMausBot.
+GitHub Copilot runs the official Copilot CLI (`npm install -g @github/copilot`) in its ACP mode and bills the signed-in Copilot plan, unless the CLI is set up to bring its own key: `COPILOT_PROVIDER_*` variables in the `githubCopilot` instance's `environment`, or a `providers.json` in the Copilot CLI home (`~/.copilot`, or `COPILOT_HOME`), send model requests to that provider, which bills them. A `GH_TOKEN` or `GITHUB_TOKEN` in MausBot's own environment never reaches it, because either would take precedence over the CLI's login; put one in the `githubCopilot` instance's `environment` to use it. `COPILOT_ALLOW_ALL` is always removed, so tool approvals stay with MausBot.
 
 Command Code runs the official Command Code CLI (`npm install -g command-code`, Node.js 22 or newer) in its ACP mode (`command-code acp`) and bills the Command Code account `cmd login` signed in, or the key in `COMMAND_CODE_API_KEY`. Its picker lists every model the account offers, plus **Command Code default**, which keeps the model picked in Command Code itself. Ask runs Command Code's Standard mode, so each change it makes waits for approval in the app; Full access runs its Bypass Permissions mode.
 
@@ -37,7 +37,7 @@ Kiro runs the official Kiro CLI (`curl -fsSL https://cli.kiro.dev/install | bash
 
 To use OpenRouter, Fireworks AI, DeepSeek, Cline, or your own OpenAI- or Anthropic-compatible service, see [Other model providers](./model-providers.mdx).
 
-Codex models come from the signed-in CLI's live model list. If that list cannot be read, the picker shows an offline fallback that includes GPT-6 Astra, Sol, and Luna with availability marked unverified. An older CLI may not expose newer models; OpenMausBot checks for a newer stable Codex release and offers an update command for the configured executable. Updating the CLI does not grant model access to an account.
+Codex models come from the signed-in CLI's live model list. If that list cannot be read, the picker shows an offline fallback that includes GPT-6 Astra, Sol, and Luna with availability marked unverified. An older CLI may not expose newer models; MausBot checks for a newer stable Codex release and offers an update command for the configured executable. Updating the CLI does not grant model access to an account.
 
 ## Mistral API
 
@@ -49,7 +49,7 @@ For a server deployment, set `MISTRAL_API_KEY` or save `mistral.key` in the serv
 
 ## Detection
 
-OpenMausBot checks common installation directories and the login shell in the background. Restart the app after installing or authenticating a CLI.
+MausBot checks common installation directories and the login shell in the background. Restart the app after installing or authenticating a CLI.
 
 If detection fails, use **Settings → Engines** to set an explicit executable path. This is supported for every engine and is the most reliable solution for version managers, wrappers, custom builds, and Windows installations outside the normal path.
 
@@ -57,31 +57,31 @@ If detection fails, use **Settings → Engines** to set an explicit executable p
 
 The model picker groups models by provider and marks defaults. Supported engines can refresh their model catalog from the installed CLI. Changing the model affects future turns; it does not rewrite earlier transcript history.
 
-<ProductScreenshot name="docs-model-picker" alt="The OpenMausBot model picker with several cloud and local engines" caption="Every bot can use a different engine and model." />
+<ProductScreenshot name="docs-model-picker" alt="The MausBot model picker with several cloud and local engines" caption="Every bot can use a different engine and model." />
 
 ## Codex browser tools
 
-Codex bots use the browser and computer selected in OpenMausBot. Desktop-only Codex
+Codex bots use the browser and computer selected in MausBot. Desktop-only Codex
 browser/computer features and their bundled plugins are disabled for those bot
 processes, so bots do not select a native desktop connection that is unavailable
 inside the CLI. This does not uninstall plugins or change the standalone Codex app.
 Native web search keeps its configured mode.
 
-After built-in browser navigation, OpenMausBot collects a snapshot in the same
+After built-in browser navigation, MausBot collects a snapshot in the same
 browser session. A sign-in page or redirect is evidence of where navigation landed,
 not confirmation that the requested task finished. Connection failures retain the
 selected computer/account and do not automatically replay uncertain actions.
 
 ## Multiple Claude accounts
 
-Open **Settings → Engines → Add Claude account** and give the account a name, such as **Work** or **Personal**. OpenMausBot creates a separate configuration-directory setting for it; it does not copy your existing login. Under **Manage account and sign-in**, copy the sign-in command and run it on the computer hosting OpenMausBot, then choose **Check account**. On Windows, use PowerShell. Claude handles the browser sign-in and stores its own credentials.
+Open **Settings → Engines → Add Claude account** and give the account a name, such as **Work** or **Personal**. MausBot creates a separate configuration-directory setting for it; it does not copy your existing login. Under **Manage account and sign-in**, copy the sign-in command and run it on the computer hosting MausBot, then choose **Check account**. On Windows, use PowerShell. Claude handles the browser sign-in and stores its own credentials.
 
 In a bot's model picker, choose **Claude**, select **Work** or **Personal** in the **Account** dropdown, then choose a model to save the selection. Claude appears only once in the provider list. Each bot keeps its own selection, and the chat header shows the account name. Account changes apply to future turns and are blocked while that bot is responding; other bots are unaffected. Conversation history is not erased when you change the selection.
 
-The original **Default** entry keeps using your existing CLI login. Advanced users can supply an existing, separate Claude configuration directory. Once an account has been used by bots or conversation history, add a new account instead of repointing its directory. Removing an account from OpenMausBot does not delete its files or sign it out; first move any bots using it to another account.
+The original **Default** entry keeps using your existing CLI login. Advanced users can supply an existing, separate Claude configuration directory. Once an account has been used by bots or conversation history, add a new account instead of repointing its directory. Removing an account from MausBot does not delete its files or sign it out; first move any bots using it to another account.
 
 This does not require a CLI proxy, and there is no automatic account rotation or fallback. Named account management currently supports Claude only.
 
 <Callout type="info" title="Subscriptions stay with the provider">
-  Your existing CLI login or provider API key determines access and billing. OpenMausBot does not turn one subscription into access to another provider.
+  Your existing CLI login or provider API key determines access and billing. MausBot does not turn one subscription into access to another provider.
 </Callout>

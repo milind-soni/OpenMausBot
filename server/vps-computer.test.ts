@@ -55,6 +55,8 @@ import {
   vpsUnavailableHint,
   inspectVpsForAuto,
   reuseVps,
+  dockerCliInstallCommand,
+  listManagedVpsComputers,
   type VpsCommandRunner,
 } from "./vps-computer.ts";
 
@@ -1339,5 +1341,30 @@ describe("remote desktop tunnel ownership", () => {
       await vi.advanceTimersByTimeAsync(30_001);
       expect(child.kill).toHaveBeenCalledTimes(1);
     } finally { closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+});
+
+describe("a missing Docker CLI", () => {
+  it("gives every platform it ships one install line", () => {
+    expect(dockerCliInstallCommand("darwin")).toBe("brew install docker");
+    expect(dockerCliInstallCommand("win32")).toBe("winget install -e --id Docker.DockerCLI");
+    expect(dockerCliInstallCommand("linux")).toBe("sudo apt install docker-ce-cli");
+    expect(dockerCliInstallCommand("freebsd")).toBeNull();
+  });
+
+  it("names that install line instead of the spawn error, for the inventory and the status", async () => {
+    const missing = Object.assign(new Error("Docker-over-SSH could not start: spawn docker ENOENT"), { code: "ENOENT" });
+    const runner: VpsCommandRunner = async () => {
+      throw missing;
+    };
+    const command = dockerCliInstallCommand(process.platform)!;
+    const inventory = await listManagedVpsComputers(CONFIG, [], runner);
+    expect(inventory.available).toBe(false);
+    expect(inventory.problem).toContain(command);
+    expect(inventory.problem).not.toMatch(/ENOENT/);
+
+    const status = await vpsComputerStatus(CONFIG, BOT_ID, runner);
+    expect(status.problem).toContain(command);
+    expect(status.problem).not.toMatch(/ENOENT/);
   });
 });

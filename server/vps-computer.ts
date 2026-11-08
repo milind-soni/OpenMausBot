@@ -29,6 +29,7 @@ export { defaultRunner, type VpsCommandOptions, type VpsCommandRunner } from "./
 import { prepareVpsSsh } from "./vps-ssh.ts";
 import { loadEnvironmentId } from "./environment.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import { dockerCliMissing, dockerCliMissingProblem } from "./vps-hints.ts";
 
 export const VPS_IMAGE = CUA_IMAGE;
 export const VPS_MANAGED_LABEL = "com.openmausbot.vps";
@@ -36,6 +37,7 @@ export const VPS_CONTAINER_LABEL = "com.openmausbot.container";
 export const VPS_ENVIRONMENT_LABEL = "com.openmausbot.environment";
 export const VPS_VIEWER_LABEL = "com.openmausbot.vps-viewer";
 export const VPS_CONTAINER_PREFIX = "openmausbot-vps";
+export { dockerCliInstallCommand, vpsStartsForTurn, vpsUnavailableHint } from "./vps-hints.ts";
 // Lazy: index must finish data migration and take the writer lease before this may create the data directory.
 let vpsEnvironmentIdCache: string | null = null;
 function vpsEnvironmentId(): string {
@@ -95,18 +97,6 @@ function invalidateVpsStatus(key: string): void {
 }
 
 export type VpsLifecycleAction = "provision" | "start" | "stop" | "remove";
-
-export function vpsStartsForTurn(input: { wants: "cloud" | "vm" | "local" | "off" | undefined; autoStartVps?: boolean; automationSource?: string }): boolean {
-  if (input.wants === "cloud") return true;
-  if (input.wants !== undefined) return false;
-  return input.autoStartVps === true || Boolean(input.automationSource);
-}
-
-export function vpsUnavailableHint(input: { automationSource?: string; autoStartVps?: boolean; reachable?: boolean }): string {
-  if (input.automationSource) return "This scheduled run tried to start the VPS computer and could not reach it. Check the VPS connection in Settings → API keys.";
-  if (input.autoStartVps || input.reachable === false) return "Check the VPS connection in Settings → API keys.";
-  return input.reachable ? "Open Computer and enable Start VPS automatically, or choose Cloud computer to start it manually." : "";
-}
 
 export interface VpsComputerStatus {
   configured: boolean;
@@ -321,6 +311,7 @@ function isMissingObjectMessage(message: string): boolean {
 }
 
 function transportFailure(message: string): string {
+  if (dockerCliMissing(message)) return dockerCliMissingProblem();
   if (/timed out/i.test(message)) {
     return "Docker over SSH failed while checking the VPS: the connection timed out. Check that the VPS is online, SSH is reachable from this computer, and Docker is running on the VPS, then retry. No computer was reset.";
   }
@@ -592,6 +583,7 @@ const VPS_INVENTORY_STATES = new Set<ManagedVpsInventoryInstance["state"]>([
 type ManagedVpsAliasScan = Pick<ManagedVpsInventory, "available" | "problem" | "instances"> & { containerIds: Map<string, string> };
 
 function inventoryFailure(alias: string, error: unknown): ManagedVpsAliasScan {
+  if (dockerCliMissing(error)) return { available: false, problem: `${dockerCliMissingProblem()} (VPS host: ${alias})`, instances: [], containerIds: new Map() };
   const detail = (error instanceof Error ? error.message : String(error))
     .replace(/[\r\n\t]+/g, " ")
     .trim()

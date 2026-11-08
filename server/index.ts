@@ -6450,7 +6450,7 @@ bus.subscribe((event: RuntimeEvent) => {
           const saved = saveImage(decoded.bytes, decoded.mime);
           const key = turnAttachmentKey(event.threadId, event.turnId);
           const current = turnAttachmentsByTurn.get(key) ?? [];
-          current.push({ kind: "image", path: saved.path, mime: saved.mime });
+          current.push({ kind: "image", path: saved.path, mime: saved.mime, ...(event.fromTool ? { fromTool: true as const } : {}) });
           turnAttachmentsByTurn.set(key, current);
         } catch (error) {
           pushMessage({
@@ -11551,7 +11551,7 @@ function claimPhoneSecretBotDeletion(botId: string): (() => void) | null {
   };
 }
 
-const secretCards = createSecretCards({ store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, followCard: (threadId, from, to) => coordinator.followCard(threadId, from, to), threadLanguage, email: { connect: (request, reading) => emailService.connect(request, reading), refusal: () => emailService.status().reason, connected: (address) => { const one = emailService.store.get(address); return Boolean(one && !one.problem); }, sendingProblem: (address) => emailService.sendingProblem(address), profileAddress: () => cfg.profile?.email?.trim() || undefined }, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
+const secretCards = createSecretCards({ store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, followCard: (threadId, from, to) => coordinator.followCard(threadId, from, to), threadLanguage, email: { connect: (request, reading) => emailService.connect(request, reading), refusal: () => emailService.status().reason, connected: (address) => { const one = emailService.store.get(address); return Boolean(one && !one.problem); }, sendingProblem: (address) => emailService.sendingProblem(address), account: (address) => emailService.status().accounts.find((one) => one.address.toLowerCase() === address.toLowerCase()), checkOutgoing: (address, fields) => emailService.checkOutgoing(address, fields), profileAddress: () => cfg.profile?.email?.trim() || undefined }, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
 ROUTES.push(createSecretCardRoutes({ cards: secretCards, phoneSecretSubmissions, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), answerContext: (auth, botId, threadId) => ({ personalCloud: Boolean(CLOUD_PERSONAL), shared: sharedMembership(), owner: (CLOUD_TEAM ? teamOwners.routing.askedPerson(botId, threadId) : null) ?? threadStarters.get(threadId) ?? null, person: auth.kind === "session" ? personKey(auth.session) : null }) }));
 
 // By design OpenMausBot never receives a website password: the person signs in where the bot works, and the bot uses that session.
@@ -13752,7 +13752,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const targets = botIds.map(botId => roomHandoffTarget({ groupId: destination?.id, threadId: roomThreadId ?? store.bot(botId)?.threadId ?? "", botId }, address));
         const direct = targets.some(target => !target.groupId), fresh = direct && call.thread === "new";
         const folder = inMyFolderCwd(call.inMyFolder, direct, store.taskByThread(internalSender.id, address.threadId)?.cwd, DATA_DIR);
-        if (folder.error) return refuse(400, folder.error);
         if (fresh && !EXTERNAL && internalCapability.openedThreads >= MAX_THREADS_OPENED_PER_TURN) {
           return refuse(429, `You have already opened ${MAX_THREADS_OPENED_PER_TURN} threads this turn, which is the limit. Do not retry — finish your turn and tell the person which threads you still wanted to open, so they can open them or ask you again.`);
         }
