@@ -26,8 +26,9 @@ describe("a card the server built", () => {
 
 describe("the app's own add-a-key suggestion", () => {
   it("replays as a card the bot did not write, never as the bot's own words, and so does a reply or reaction to it", () => {
-    const card = message({ text: "Want me to sort your email for free? Add a key.", setupSuggestion: { kind: "helperKey" } });
-    const records = cardRecords(card.text, SETUP_RECORDS_SOURCE);
+    const text = "Want me to sort your email for free? Add a key.";
+    const card = message({ text, setupSuggestion: { kind: "helperKey" } });
+    const records = cardRecords(text, SETUP_RECORDS_SOURCE);
     expect(records).not.toContain("mail, calendar");
     expect(transcriptText(card, new Map())).toBe(records);
     const reply = message({ id: "m2", role: "user", text: "what is this?", replyToId: "m1" });
