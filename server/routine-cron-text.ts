@@ -14,11 +14,17 @@ const NTH_WEEKEND: Record<Nth, ServerLineKey> = {
   4: "server.routines.cron.nthWeekend.fourth", 5: "server.routines.cron.nthWeekend.fifth", last: "server.routines.cron.nthWeekend.last",
 };
 
+/** The calendar words of a line: the language's own locale, so a Chinese sentence says 星期一 where English says Monday. */
+const lineLocale = (language: string | undefined) =>
+  byLanguage({ en: "en-US", de: "de-DE", "pt-br": "pt-BR", "zh-tw": "zh-TW", zh: "zh-CN" }, language);
+
 function presetText(preset: CronPreset, language: string | undefined): string {
-  const locale = byLanguage({ en: "en-US", de: "de-DE", "pt-br": "pt-BR" }, language);
+  const locale = lineLocale(language);
   const time = locale === "en-US" ? preset.time.replace(/^0(?=\d:)/, "") : preset.time;
   const weekdayName = (day: number) => new Intl.DateTimeFormat(locale, { weekday: "long", timeZone: "UTC" }).format(Date.UTC(2023, 0, 1 + day));
-  const monthName = (month: number) => new Intl.DateTimeFormat(locale, { month: "long", timeZone: "UTC" }).format(Date.UTC(2023, month, 1));
+  // Chinese writes the month with its marker ("3月"); the long form is the word for it ("三月"), which does not fit the
+  // "每年 {month} {day} 日" line as well, and reads to a Chinese reader the way "March" would in English.
+  const monthName = (month: number) => new Intl.DateTimeFormat(locale, { month: locale.startsWith("zh") ? "short" : "long", timeZone: "UTC" }).format(Date.UTC(2023, month, 1));
   switch (preset.kind) {
     case "everyDay": return serverLine(language, "server.routines.cron.everyDay", { time });
     case "monthlyLastDay": return serverLine(language, "server.routines.cron.monthlyLastDay", { time });
@@ -33,7 +39,7 @@ function presetText(preset: CronPreset, language: string | undefined): string {
 export function routineCronText(schedule: RoutineCronSchedule, language?: string): string {
   const preset = cronPreset(schedule.expression);
   const text = preset ? presetText(preset, language) : serverLine(language, "server.routines.cron.raw", { expression: schedule.expression });
-  return `${text} ${plainTimeZone(schedule.timeZone)}`;
+  return `${text} ${plainTimeZone(schedule.timeZone, lineLocale(language))}`;
 }
 
 export function formatInstant(at: number, timeZone: string): string {
