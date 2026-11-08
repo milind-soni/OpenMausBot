@@ -5,7 +5,7 @@ OpenMausBot uses one Composio project API key and one reusable Composio Session.
 ## Packaged desktop app
 
 1. Open your project's [API Keys page](https://dashboard.composio.dev/~/project/settings/api-keys) in the Composio Dashboard (sign in or create a project first if asked).
-2. Copy a project key beginning with `ak_`. The `ck_` key on the personal **Sessions & API Key** page is a different key and won't work.
+2. Create a project key there if the project has none, then copy it (it begins with `ak_`). The `ck_` key on the personal **Sessions & API Key** page is a different key and won't work.
 3. In OpenMausBot, open **Settings → API keys** and save it under **Self-host connected apps → Composio project key**.
 4. Open **Connected apps** and choose Gmail, GitHub, Slack, or another service. Enter a unique label such as `work` or `personal`, then finish the authorization in your normal browser.
 5. To connect another account for the same app, choose **Add account**, give it a unique label, and finish the second authorization in your browser.
