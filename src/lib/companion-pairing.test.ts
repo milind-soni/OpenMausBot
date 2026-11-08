@@ -200,6 +200,150 @@ describe("companionPairingRoute", () => {
     }, "tailscale")).toBeNull();
   });
 
+  it("uses the enabled Tailscale route name when the sidecar reports no tailnet endpoint or legacy name", () => {
+    const source = {
+      port: 8810,
+      routes: { tailscale: { on: true, name: "mac.tail1234.ts.net" } },
+      lan: "192.168.1.42",
+      endpoints: [
+        { url: "http://192.168.1.42:8810", kind: "lan" as const, priority: 200 },
+      ],
+    };
+    const route = companionPairingRoute(source, "tailscale");
+    expect(route?.address).toBe("mac.tail1234.ts.net");
+    expect(route?.port).toBe(8810);
+    expect(route?.hosts).toEqual(["mac.tail1234.ts.net"]);
+    const pin = companionPairingRoutePin(source, "tailscale");
+    expect(pin?.protectedEndpoint).toEqual({
+      url: "http://mac.tail1234.ts.net:8810",
+      kind: "tailnet",
+      priority: 0,
+    });
+    expect(companionPairingRoutePinAvailable(source, pin!)).toBe(true);
+  });
+
+  it("prefers the saved Tailscale route name over a stale advertised endpoint", () => {
+    const source = {
+      port: 8810,
+      tailnetName: "old.tail1234.ts.net",
+      routes: { tailscale: { on: true, name: "new.tail1234.ts.net" } },
+      endpoints: [
+        { url: "http://old.tail1234.ts.net:8810", kind: "tailnet" as const, priority: 100 },
+      ],
+    };
+    const route = companionPairingRoute(source, "tailscale");
+    expect(route?.address).toBe("new.tail1234.ts.net");
+    const pin = companionPairingRoutePin(source, "tailscale");
+    expect(pin?.protectedEndpoint).toEqual({
+      url: "http://new.tail1234.ts.net:8810",
+      kind: "tailnet",
+      priority: 0,
+    });
+    expect(companionPairingRoutePinAvailable(source, pin!)).toBe(true);
+  });
+
+  it("falls back to an advertised Tailscale endpoint when the saved name is not a MagicDNS name", () => {
+    const source = {
+      port: 8810,
+      routes: { tailscale: { on: true, name: "attacker.example" } },
+      endpoints: [
+        { url: "http://mac.tail1234.ts.net:8810", kind: "tailnet" as const, priority: 100 },
+      ],
+    };
+    expect(companionPairingRoute(source, "tailscale")?.address).toBe("mac.tail1234.ts.net");
+  });
+
+  it("ignores a Tailscale route name that is switched off", () => {
+    expect(companionPairingRoute({
+      port: 8810,
+      routes: { tailscale: { on: false, name: "mac.tail1234.ts.net" } },
+      endpoints: [],
+    }, "tailscale")).toBeNull();
+  });
+
+  it("refuses an advertised Tailscale endpoint when the switch is off", () => {
+    expect(companionPairingRoute({
+      port: 8810,
+      routes: { tailscale: { on: false, name: "mac.tail1234.ts.net" } },
+      endpoints: [
+        { url: "http://mac.tail1234.ts.net:8810", kind: "tailnet" as const, priority: 100 },
+      ],
+    }, "tailscale")).toBeNull();
+  });
+
+  it("refuses a legacy Tailscale name when the switch is off", () => {
+    expect(companionPairingRoute({
+      port: 8810,
+      tailnetName: "mac.tail1234.ts.net",
+      routes: { tailscale: { on: false, name: "mac.tail1234.ts.net" } },
+      endpoints: [],
+    }, "tailscale")).toBeNull();
+  });
+
+  it("ignores a non-MagicDNS name from the enabled Tailscale route", () => {
+    expect(companionPairingRoute({
+      port: 8810,
+      routes: { tailscale: { on: true, name: "attacker.example" } },
+      endpoints: [],
+    }, "tailscale")).toBeNull();
+  });
+
+  it("does not keep a Tailscale pin when the enabled route name changes", () => {
+    const source = {
+      port: 8810,
+      routes: { tailscale: { on: true, name: "mac.tail1234.ts.net" } },
+      endpoints: [],
+    };
+    const pin = companionPairingRoutePin(source, "tailscale");
+    expect(pin).not.toBeNull();
+    expect(companionPairingRoutePinAvailable({
+      ...source,
+      routes: { tailscale: { on: true, name: "other.tail9999.ts.net" } },
+    }, pin!)).toBe(false);
+    expect(companionPairingRoutePinAvailable({
+      ...source,
+      routes: { tailscale: { on: false, name: "mac.tail1234.ts.net" } },
+    }, pin!)).toBe(false);
+    const staleEndpoint = {
+      url: "http://mac.tail1234.ts.net:8810",
+      kind: "tailnet" as const,
+      priority: 100,
+    };
+    expect(companionPairingRoutePinAvailable({
+      ...source,
+      routes: { tailscale: { on: true, name: "other.tail9999.ts.net" } },
+      endpoints: [staleEndpoint],
+    }, pin!)).toBe(false);
+    expect(companionPairingRoutePinAvailable({
+      ...source,
+      routes: { tailscale: { on: false, name: "mac.tail1234.ts.net" } },
+      endpoints: [staleEndpoint],
+    }, pin!)).toBe(false);
+  });
+
+  it("does not keep an advertised Tailscale pin when its endpoint is withdrawn", () => {
+    const source = {
+      port: 8810,
+      routes: { tailscale: { on: true, name: "mac.tail1234.ts.net" } },
+      endpoints: [
+        { url: "http://mac.tail1234.ts.net:8810", kind: "tailnet" as const, priority: 100 },
+      ],
+    };
+    const pin = companionPairingRoutePin(source, "tailscale");
+    expect(pin?.protectedEndpointAdvertised).toBe(true);
+    expect(companionPairingRoutePinAvailable(source, pin!)).toBe(true);
+    expect(companionPairingRoutePinAvailable({ ...source, endpoints: [] }, pin!)).toBe(false);
+  });
+
+  it("keeps a Tailscale pin built from a legacy tailnetName when routes and endpoints are absent", () => {
+    const source = { port: 8810, tailnetName: "mac.tail1234.ts.net" };
+    const pin = companionPairingRoutePin(source, "tailscale");
+    expect(pin).not.toBeNull();
+    expect(pin?.protectedEndpointAdvertised).toBe(false);
+    expect(companionPairingRoutePinAvailable(source, pin!)).toBe(true);
+    expect(companionPairingRoutePinAvailable({ ...source, tailnetName: "other.tail9999.ts.net" }, pin!)).toBe(false);
+  });
+
   it("refuses explicit local pairing when no LAN or Bonjour route exists", () => {
     expect(companionPairingRoute({
       port: 8810,
@@ -268,3 +412,4 @@ describe("companionPairingAddressText", () => {
     expect(companionPairingAddressText({ address: "192.168.1.42", port: 8810 })).toBe("192.168.1.42:8810");
   });
 });
+

@@ -457,3 +457,43 @@ describe("the secret, under More", () => {
     expect(container.innerHTML).not.toContain(secret);
   });
 });
+
+describe("a run that waits on the person", () => {
+  const routine = { id: "routine-1", name: "Morning summary", prompt: "Send me a summary of my inbox.", target: "bot", botId: "bot-a", runOn: "maus", enabled: true,
+    schedule: { type: "daily", time: "09:00", weekdays: [0, 1, 2, 3, 4, 5, 6] }, durationMinutes: 30, nextRunAt: now + 3_600_000, createdAt: now, updatedAt: now };
+  const run = (status: string) => ({ id: "run-1", routineId: "routine-1", botId: "bot-a", status, scheduledFor: now - 60_000, startedAt: now - 60_000, createdAt: now - 60_000, threadId: "exec-1" });
+  const panel = (status: string) => {
+    const [automation] = automationsFrom({ routines: [routine] as never, webhooks: [], runs: [run(status)] as never });
+    return mount(createElement(AutomationPanel, { automation: automation!, sentence: "s", onClose: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() }));
+  };
+  const cancel = (container: HTMLElement) => container.querySelector<HTMLButtonElement>("[data-automation-cancel-run]");
+
+  it("can be cancelled beside Answer, when its question was settled somewhere else", async () => {
+    const cancelled = { ...run("cancelled"), finishedAt: now };
+    fixture.api.mockResolvedValue({ run: cancelled });
+    const container = panel("waiting");
+    expect(button(container, "Answer")).toBeTruthy();
+    expect(cancel(container)!.textContent).toBe("Cancel run");
+    flushSync(() => cancel(container)!.click());
+    await vi.waitFor(() => expect(fixture.api).toHaveBeenCalledWith("/api/routine-runs/run-1/cancel", { method: "POST" }));
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "routineRunPatched", run: cancelled }));
+  });
+
+  it("opens and cancels the same waiting run when a newer run was cancelled", async () => {
+    const newer = { ...run("cancelled"), id: "run-2", threadId: "exec-2", scheduledFor: now - 30_000, startedAt: now - 30_000, createdAt: now - 30_000, finishedAt: now };
+    const [automation] = automationsFrom({ routines: [routine] as never, webhooks: [], runs: [newer, run("waiting")] as never });
+    const container = mount(createElement(AutomationPanel, { automation: automation!, sentence: "s", onClose: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() }));
+    flushSync(() => button(container, "Answer")!.click());
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "bot-a", threadId: "exec-1" });
+    expect(fixture.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ threadId: "exec-2" }));
+    fixture.api.mockResolvedValue({ run: { ...run("cancelled"), finishedAt: now } });
+    flushSync(() => cancel(container)!.click());
+    await vi.waitFor(() => expect(fixture.api).toHaveBeenCalledWith("/api/routine-runs/run-1/cancel", { method: "POST" }));
+  });
+
+  it("offers no Cancel run when nothing waits", () => {
+    expect(cancel(panel("failed"))).toBeNull();
+    root?.unmount(); root = null; document.body.innerHTML = "";
+    expect(cancel(panel("completed"))).toBeNull();
+  });
+});

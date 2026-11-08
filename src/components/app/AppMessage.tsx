@@ -10,7 +10,7 @@ import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
 import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE } from "./AppChrome";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
 import { closePage, onPageOpened, openPage, openPageFor } from "@/lib/open-page";
-import { PAGE_HEIGHT, PAGE_PREVIEW_HEIGHT, PageFullScreen, PageNotes, PagePaneContext, PageToolbar, usePagePoint, usePageShare, usePageVersion } from "./PageTools";
+import { PAGE_HEIGHT, PAGE_PREVIEW_HEIGHT, PageFullScreen, PageNotes, PagePaneContext, PageToolbar, usePagePoint, usePageSave, usePageShare, usePageVersion } from "./PageTools";
 
 const WIDTH = "max-w-[760px]";
 const DOC_REUSE_MS = 60_000;
@@ -166,7 +166,8 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
     return () => { off(); closePage(threadId, message.id); };
   }, [paneOpen, threadId, message.id, rev]);
   const share = usePageShare(threadId, message.id, message.publishedPage);
-  const tools = { version, point, share, room, ready: Boolean(current), fullScreen: { open: fullScreen, pane: Boolean(pane), toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
+  const save = usePageSave(threadId, message.id, payload.title);
+  const tools = { version, point, share, save, room, ready: Boolean(current), fullScreen: { open: fullScreen, pane: Boolean(pane), toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
 
   const reloadNow = () => {
     setProblem(null);
@@ -273,7 +274,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
           bordered={bordered}
         />
         {page && <PageToolbar {...tools} className={bordered ? "px-4 pb-3" : "pb-2"} />}
-        {page && <PageNotes version={version} point={point} share={share} room={room} className={bordered ? "px-4 pb-3" : "pb-2"} />}
+        {page && <PageNotes version={version} point={point} share={share} save={save} room={room} className={bordered ? "px-4 pb-3" : "pb-2"} />}
         {infoOpen && <AppInfo id={infoId} network={payload.network ?? { connect: [], resources: [] }} bytes={payload.bytes ?? 0} bordered={bordered} />}
         {collapsed && (
           <div className={cn("flex", bordered ? "px-4 pb-3.5" : "pb-2")}>
