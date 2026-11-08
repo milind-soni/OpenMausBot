@@ -1857,6 +1857,8 @@
   "simpleModePrompt.switch": "簡易模式",
   "simpleModePrompt.switchHint": "切換一下，立刻就能看到差別。",
   "simpleModePrompt.where": "隨時可在「設定 → 一般」中切換。",
+  "newLook.title": "{app} 的外觀變得更簡潔了",
+  "newLook.body": "你需要的功能都還在；較少用到的設定位於「設定 → 更多設定」。",
   "settings.openAtLogin.title": "登入時開啟",
   "settings.openAtLogin.subtitle": "登入這台電腦時開啟 {app}，讓你的機器人和例行工作不必手動開啟就能準備就緒。",
   "settings.openAtLogin.failed": "無法變更。請再試一次，或檢查系統設定中的登入項目。",

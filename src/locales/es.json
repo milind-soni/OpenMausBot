@@ -1401,6 +1401,8 @@
   "settings.analytics.subtitle": "Eventos anónimos del producto y un recuento diario de lo que está configurado: qué proveedores tienen una clave (nunca la clave) y cuántos bots, grupos, rutinas y equipos hay. Nunca conversaciones, prompts, contenido de archivos, nombres ni direcciones. Tu correo solo se adjunta si lo compartiste durante la configuración, o si eliges mejorar, gestionar o comparar planes en la ventana de Cloud Pro con la sesión iniciada en MausBot Cloud (el correo de tu cuenta de Cloud).",
   "settings.analytics.link": "Ver todo lo que envía",
   "settings.analytics.aria": "Enviar analíticas de uso",
+  "newLook.title": "{app} ahora tiene un aspecto más sencillo",
+  "newLook.body": "Todo lo que necesitas sigue aquí; los ajustes que se usan menos están en Ajustes → Más ajustes.",
   "settings.updates.startingDownload": "Iniciando la descarga…",
   "settings.updates.preparing": "Descarga completa. macOS está preparando la actualización.",
   "settings.updates.readyInstall": "{app} {version} está lista: instálala en una terminal",

@@ -1532,6 +1532,8 @@
   "updatesConsent.emailHint": "Facoltativa. Se la lasci vuota, useremo la tua email di MausBot Cloud appena accedi.",
   "updatesConsent.badEmail": "Inserisci un indirizzo email valido.",
   "updatesConsent.failed": "Non è stato salvato. Riprova.",
+  "newLook.title": "{app} ora ha un aspetto più semplice",
+  "newLook.body": "Tutto ciò che ti serve è ancora qui; le impostazioni meno usate sono in Impostazioni → Altre impostazioni.",
   "settings.updatesConsent.title": "Novità del prodotto via email",
   "settings.updatesConsent.subtitle": "Novità e consigli, circa due volte al mese. Puoi disiscriverti quando vuoi.",
   "settings.updatesConsent.to": "Inviata a {email}.",

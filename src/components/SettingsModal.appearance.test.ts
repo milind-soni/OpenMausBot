@@ -115,25 +115,22 @@ afterEach(() => {
 const render = () => renderToStaticMarkup(createElement(SettingsModal));
 
 describe("Settings → Appearance", () => {
-  it.each([true, false])("flips Advanced mode from General, first in Advanced and last in Simple, when the switch is %s", (enabled) => {
+  it.each([true, false])("has no Advanced mode switch in General, Simple being the only mode (Advanced %s)", (enabled) => {
     fixture.section = "general";
     fixture.advancedMode = enabled;
     const html = render();
-    if (enabled) expect(html.indexOf('aria-label="Advanced mode"')).toBeLessThan(html.indexOf("Language"));
-    else expect(html.indexOf('aria-label="Advanced mode"')).toBeGreaterThan(html.indexOf("Language"));
-    expect(html).toContain('aria-label="Advanced mode"');
-    expect(html).toContain("Nothing is deleted either way");
-    const toggle = fixture.switches.find((props) => props["aria-label"] === "Advanced mode")!;
-    expect(toggle.checked).toBe(enabled);
-    toggle.onClick!({} as never);
-    expect(fixture.setAdvancedMode).toHaveBeenCalledWith(!enabled);
-    expect(fixture.api).not.toHaveBeenCalled();
-    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(html).toContain("Language");
+    expect(html).not.toContain('aria-label="Advanced mode"');
+    expect(html).not.toContain("Nothing is deleted either way");
+    expect(fixture.switches.some((props) => props["aria-label"] === "Advanced mode")).toBe(false);
   });
 
-  it("keeps the Advanced mode switch reachable from a paired remote client", () => {
+  it.each([true, false])("has none for a paired remote client either (Advanced %s)", (enabled) => {
+    fixture.advancedMode = enabled;
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
-    expect(render()).toContain('aria-label="Advanced mode"');
+    const html = render();
+    expect(html).toContain('aria-label="App language"');
+    expect(html).not.toContain('aria-label="Advanced mode"');
   });
 
   it("does not repeat the Advanced mode switch in Appearance on this computer", () => {

@@ -1105,6 +1105,8 @@
   "settings.diagnostics.elsewhere": "Günlükler {app}'un çalıştığı yerde tutulur. Bu bilgisayarınkileri açmak veya dışa aktarmak için oradaki masaüstü uygulamasında Ayarlar'ı kullanın. Cloud'unkileri MausBot Cloud desteği okuyabilir.",
   "settings.analytics.title": "Kullanım analitiği",
   "settings.analytics.aria": "Kullanım analitiği gönder",
+  "newLook.title": "{app} artık daha sade görünüyor",
+  "newLook.body": "İhtiyacınız olan her şey hâlâ burada; daha az kullanılan ayarlar Ayarlar → Diğer ayarlar bölümünde.",
   "settings.updates.startingDownload": "İndirme başlatılıyor…",
   "settings.updates.preparing": "İndirme tamamlandı. macOS güncellemeyi hazırlıyor.",
   "settings.updates.readyInstall": "{app} {version} hazır — bir terminalde yükleyin",

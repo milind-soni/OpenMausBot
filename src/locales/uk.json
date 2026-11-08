@@ -703,6 +703,8 @@
   "settings.diagnostics.elsewhere": "Логи зберігаються там, де працює {app}. Щоб відкрити або експортувати логи цього комп’ютера, скористайтеся Налаштуваннями настільного застосунку на ньому. Підтримка MausBot Cloud може читати логи Cloud.",
   "settings.analytics.title": "Аналітика використання",
   "settings.analytics.aria": "Надсилати аналітику використання",
+  "newLook.title": "{app} тепер виглядає простіше",
+  "newLook.body": "Усе потрібне досі тут; рідше використовувані налаштування — у розділі Налаштування → Інші налаштування.",
   "settings.updates.startingDownload": "Починаємо завантаження…",
   "settings.updates.preparing": "Завантаження завершено. macOS готує оновлення.",
   "settings.updates.readyInstall": "{app} {version} готова — встановіть у терміналі",

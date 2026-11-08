@@ -1557,6 +1557,8 @@
   "updatesConsent.emailHint": "Opcjonalne. Pozostaw puste, a po zalogowaniu użyjemy adresu e-mail z MausBot Cloud.",
   "updatesConsent.badEmail": "Wpisz prawidłowy adres e-mail.",
   "updatesConsent.failed": "Nie udało się zapisać. Spróbuj ponownie.",
+  "newLook.title": "{app} wygląda teraz prościej",
+  "newLook.body": "Wszystko, czego potrzebujesz, nadal tu jest; rzadziej używane ustawienia znajdziesz w Ustawienia → Więcej ustawień.",
   "settings.updatesConsent.title": "Aktualizacje produktu e-mailem",
   "settings.updatesConsent.subtitle": "Nowe funkcje i wskazówki, mniej więcej dwa razy w miesiącu. Możesz zrezygnować w każdej chwili.",
   "settings.updatesConsent.to": "Wysyłane na adres {email}.",

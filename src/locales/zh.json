@@ -1764,6 +1764,8 @@
   "simpleModePrompt.switch": "简洁模式",
   "simpleModePrompt.switchHint": "切换一下，立刻看到差别。",
   "simpleModePrompt.where": "随时可以在「设置 → 通用」中切换。",
+  "newLook.title": "{app} 的界面变得更简洁了",
+  "newLook.body": "你需要的功能都还在；不常用的设置在「设置 → 更多设置」中。",
   "settings.openAtLogin.title": "登录时打开",
   "settings.openAtLogin.subtitle": "你登录这台电脑时自动打开 {app}，让你的机器人和例行任务随时就绪，无需手动打开。",
   "settings.openAtLogin.failed": "无法更改此项。请重试，或检查系统设置中的「登录项」。",
