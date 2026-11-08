@@ -359,13 +359,13 @@ describe("the floating menu and the pointer", () => {
     vi.spyOn(chip(), "getBoundingClientRect").mockImplementation(() =>
       ({ left: right - 80, right, top: 40, bottom: 72, width: 80, height: 32, x: right - 80, y: 40, toJSON: () => ({}) }) as DOMRect);
     await openWith("click");
-    expect(menu()!.style.left).toBe(`${980 - 300}px`);
+    expect(menu()!.style.left).toBe(`${980 - 324}px`);
     right = 952;
     flushSync(() => chip().parentElement!.dispatchEvent(new Event("animationend", { bubbles: true })));
-    expect(menu()!.style.left).toBe(`${952 - 300}px`);
+    expect(menu()!.style.left).toBe(`${952 - 324}px`);
     right = 900;
     flushSync(() => menu()!.dispatchEvent(new Event("animationend", { bubbles: true })));
-    expect(menu()!.style.left).toBe(`${952 - 300}px`);
+    expect(menu()!.style.left).toBe(`${952 - 324}px`);
   });
 
   it("moves the keyboard highlight to the row under the mouse once the keyboard is in the list", async () => {

@@ -112,8 +112,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
 function LooksRow({ onLooks }: { onLooks: () => void }) {
   const current = SKINS.find((skin) => skin.id === resolveSkin(useSkinChoice()))?.name;
   return (
-    <SettingRow title={t("settings.theme.title")} subtitle={t("settings.simple.themes.hint")}>
-      {current && <span data-looks-current className="me-3 text-[13px] text-ink-tertiary">{current}</span>}
+    <SettingRow title={current ? `${t("settings.theme.title")} · ${current}` : t("settings.theme.title")} subtitle={t("settings.simple.themes.hint")}>
       <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.themes.browse")}</button>
     </SettingRow>
   );

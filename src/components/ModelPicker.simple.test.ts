@@ -186,15 +186,15 @@ describe("the model picker in Simple mode", () => {
     expect(html).not.toContain("new chats too");
   });
 
-  it("is a 300px menu on the shared menu surface, and the full picker keeps its own 420px", () => {
-    expect(SIMPLE_POPOVER_WIDTH).toBe(300);
+  it("is a 324px menu on the shared menu surface, and the full picker keeps its own 420px", () => {
+    expect(SIMPLE_POPOVER_WIDTH).toBe(324);
     fixture.instances = [claude(false)];
     const forBot = bot();
     const opened = open(forBot);
     const content = opened.nodes.find((node) => node.props["data-model-picker-content"] !== undefined)!;
     expect(String(content.props.className)).toContain("menu-surface");
     expect(String(content.props.className)).not.toMatch(/\bborder\b|shadow-2xl|rounded-2xl/);
-    expect(menu(opened.html)).toContain("width:300px");
+    expect(menu(opened.html)).toContain("width:324px");
     pane(opened)!.props.onSetUp(instance("claude"), false);
     expect(menu(render(forBot).html)).toContain("width:420px");
   });
@@ -360,7 +360,7 @@ describe("the model picker in Simple mode", () => {
     const atDefault = region(menu(open(bot()).html), "data-simple-effort-band");
     expect(atDefault.match(/aria-pressed="true"/g)).toHaveLength(1);
     expect(atDefault).toMatch(/data-effort-auto="true" aria-pressed="true"[^>]*>Auto<\/button>/);
-    expect(atDefault).toContain('data-simple-effort-auto="true" class="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">Auto lets the model choose. Higher levels are slower but more careful.</p>');
+    expect(atDefault).toContain('data-simple-effort-auto="true" class="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">Recommended. The model picks how hard to think; higher levels are slower but more careful.</p>');
   });
 
   it("names the model on the Simple chip, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {

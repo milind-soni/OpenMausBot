@@ -197,7 +197,7 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
 
 const POPOVER_WIDTH = 420;
 const POPOVER_HEIGHT = 600;
-export const SIMPLE_POPOVER_WIDTH = 300;
+export const SIMPLE_POPOVER_WIDTH = 324;
 const MENU_ITSELF = ":scope";
 
 export function ModelPicker({
@@ -675,8 +675,7 @@ export function ModelPicker({
     instances,
     listed: pickerInstances,
     selection,
-    bot: { name: profile.name, selection: profile.modelSelection, follows },
-    updatesBotDefault: !threadId || simpleUpdatesBotDefault,
+    bot: { name: profile.name, selection: profile.modelSelection, follows }, updatesBotDefault: !threadId || simpleUpdatesBotDefault,
     query,
     expanded,
     probing,
