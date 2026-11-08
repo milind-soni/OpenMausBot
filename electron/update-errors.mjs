@@ -17,7 +17,8 @@ export function updateErrorNeedsPerson(error) {
 }
 
 export function updateErrorCode(error) {
-  const message = String(error?.message ?? error ?? "Update failed");
+  // electron-updater appends the whole releases feed (release notes included) to ERR_UPDATER_INVALID_RELEASE_FEED; only the error before it says what failed.
+  const message = String(error?.message ?? error ?? "Update failed").split("\nXML:\n")[0];
   const detail = `${error?.code ?? ""} ${message}`;
   // Installer errors may mention SignerCertificate details; that must not read as network advice.
   const integrity = /ERR_UPDATER_(?:INVALID_SIGNATURE|CHECKSUM_MISMATCH)/i.test(detail);
@@ -29,6 +30,8 @@ export function updateErrorCode(error) {
   if (/\b(?:EACCES|EPERM)\b|read.only (?:volume|file system)|permission denied|access is denied/i.test(detail)) return "permission";
   if (/\bEBUSY\b|being used by another process/i.test(detail)) return "busy";
   if (/certificate/i.test(detail)) return "tls";
+  // The same error wraps a failed GitHub request, such as a 504 while looking up the latest release.
+  if (/ERR_UPDATER_INVALID_RELEASE_FEED/.test(detail) && /HttpError: 5\d\d\b/.test(message)) return "network";
   if (/\b404\b|cannot find .*\.yml|cannot parse update info|no files provided|ERR_UPDATER_INVALID_RELEASE_FEED/i.test(detail)) return "feed";
   if (/\b(?:ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN)\b|net::ERR_|\bHTTP[^\n]*\b5\d\d\b|status(?: code)?[: ]+5\d\d\b/i.test(detail)) return "network";
   if (message === UPDATE_TEXT.prepareTimeout) return "prepareTimeout";
