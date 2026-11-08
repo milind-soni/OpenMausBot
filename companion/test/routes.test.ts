@@ -90,6 +90,7 @@ describe("what the app may do", () => {
     ["GET", "/api/threads/th_1/messages/msg_2/image"],
     ["GET", "/api/threads/th_1/messages/msg_2/tool"],
     ["GET", "/api/threads/th_1/messages/msg_2/app"],
+    ["GET", "/api/threads/th_1/messages/msg_2/app/download"],
     ["POST", "/api/bots/bot_123/apps/msg_2/rpc"],
     ["POST", "/api/bots/bot_123/apps/msg_2/context"],
     ["POST", "/api/threads/th_1/messages/msg_2/file"],
