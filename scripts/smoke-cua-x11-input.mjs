@@ -200,18 +200,26 @@ async function stop(child) {
 }
 
 try {
+  let remapped = false;
   const windowId = await until(async () => {
     if (xev.exitCode !== null || xev.signalCode !== null) {
       throw new Error(`xev exited before its test window appeared:\n${xevOutput}`);
     }
-    const { stdout } = await execFileAsync("xdotool", [
-      "search",
-      "--onlyvisible",
-      "--name",
-      `^${title}$`,
-    ]);
-    return stdout.trim().split(/\s+/)[0] || null;
-  }, "the unrelated X11 test window");
+    if (windowManager.exitCode !== null || windowManager.signalCode !== null) {
+      throw new Error(`openbox exited before the test window appeared: ${windowManager.exitCode ?? windowManager.signalCode}`);
+    }
+    const { stdout } = await execFileAsync("xdotool", ["search", "--name", `^${title}$`]);
+    const id = stdout.trim().split(/\s+/)[0];
+    if (!id) return null;
+    const { stdout: info } = await execFileAsync("xwininfo", ["-id", id]);
+    if (/Map State:\s+IsViewable/.test(info)) return id;
+    // openbox 3.6 on a loaded runner can drop the map request of a window opened while it finishes starting; ask again once.
+    if (!remapped) {
+      remapped = true;
+      await execFileAsync("xdotool", ["windowmap", id]);
+    }
+    return null;
+  }, "the unrelated X11 test window", 20_000);
   if (!windowId) throw new Error("xev test window did not appear");
 
   const metadata = await until(
