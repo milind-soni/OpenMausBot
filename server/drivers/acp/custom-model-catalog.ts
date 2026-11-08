@@ -7,6 +7,7 @@ import type { ModelCatalog } from "../../contracts.ts";
 import type { AcpConfig } from "./core.ts";
 import { killCliTree, spawnCli } from "../../procs.ts";
 import { acpModelOption, acpVariantOption } from "./config-options.ts";
+import { deleteAcpSessions, deletesAcpSessions } from "./session-delete.ts";
 
 const REQUEST_TIMEOUT_MS = 8_000;
 const DISCOVERY_TIMEOUT_MS = 60_000;
@@ -32,7 +33,7 @@ export interface AcpDiscoveryOptions {
   /** Close stdin and give the agent this many milliseconds to exit on its own, so it can release what it holds,
    * before it is killed. Without it the agent is killed at once. */
   exitGraceMs?: number;
-  /** Remove what the agent kept of the discovery session, once its process has stopped. */
+  /** Remove what the agent kept of the discovery session, once its process has stopped, when session/delete did not. */
   forgetSession?(session: { sessionId: string; cwd: string; env: Record<string, string | undefined> }): Promise<void>;
 }
 
@@ -111,6 +112,7 @@ export async function discoverAcpModels(
   let sequence = 0;
   let updateSequence = 0;
   let sessionId: string | undefined;
+  let initialized: unknown;
   let latestUpdate: unknown;
   let outputBytes = 0;
   let buffer = "";
@@ -189,7 +191,7 @@ export async function discoverAcpModels(
     });
     child.stderr.on("data", (chunk: Buffer) => { count(chunk); });
     globalTimer = setTimeout(() => fail("ACP model discovery timed out."), DISCOVERY_TIMEOUT_MS);
-    await request("initialize", {
+    initialized = await request("initialize", {
       protocolVersion: 1,
       clientInfo: { name: DISCOVERY_CLIENT_NAME, version: "1" },
       clientCapabilities: {
@@ -252,11 +254,12 @@ export async function discoverAcpModels(
     thrown = error;
   } finally {
     if (globalTimer) clearTimeout(globalTimer);
+    const deleted = sessionId && deletesAcpSessions(initialized) ? (await deleteAcpSessions(request, [sessionId])).length > 0 : false;
     fail("ACP model discovery finished.");
     let stopped = false;
     try {
       stopped = await stopDiscovery(child, discovery.exitGraceMs);
-      if (stopped && sessionId) await discovery.forgetSession?.({ sessionId, cwd, env }).catch(() => undefined);
+      if (stopped && sessionId && !deleted) await discovery.forgetSession?.({ sessionId, cwd, env }).catch(() => undefined);
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }

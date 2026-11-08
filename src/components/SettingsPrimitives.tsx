@@ -25,13 +25,14 @@ export function Switch({
       className={cn(
         "relative cursor-pointer h-6 w-11 shrink-0 rounded-full transition-colors enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
         "in-data-[settings-look=simple]:h-5 in-data-[settings-look=simple]:w-8",
-        checked ? "bg-accent" : "bg-control in-data-[settings-look=simple]:bg-ink/[0.12] in-data-[settings-look=simple]:ring-1 in-data-[settings-look=simple]:ring-inset in-data-[settings-look=simple]:ring-ink/45",
+        checked ? "bg-accent in-data-[settings-look=simple]:bg-ink" : "bg-control in-data-[settings-look=simple]:bg-ink/[0.12] in-data-[settings-look=simple]:ring-1 in-data-[settings-look=simple]:ring-inset in-data-[settings-look=simple]:ring-ink/45",
         className,
       )}
     >
       <span
         className={cn(
           "absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-[left] motion-reduce:transition-none",
+          checked && "in-data-[settings-look=simple]:bg-app",
           "in-data-[settings-look=simple]:top-0.5 in-data-[settings-look=simple]:size-4",
           checked ? "start-[21px] in-data-[settings-look=simple]:start-[14px]" : "start-[3px] in-data-[settings-look=simple]:start-0.5",
         )}
@@ -79,7 +80,7 @@ export function SettingRow({
           <div id={titleId} className="text-[14px] font-medium text-ink in-data-[settings-look=simple]:font-normal in-data-[settings-look=simple]:leading-5">{title}</div>
           {subtitle && <div className="mt-1 text-[12px] leading-relaxed text-pretty text-ink-secondary in-data-[settings-look=simple]:mt-0 in-data-[settings-look=simple]:text-[13px] in-data-[settings-look=simple]:leading-[18px]">{subtitle}</div>}
         </div>
-        <div className="min-w-0 sm:max-w-[240px] in-data-[settings-look=simple]:ms-auto in-data-[settings-look=simple]:shrink-0 in-data-[settings-look=simple]:sm:max-w-none">{children}</div>
+        <div className="min-w-0 sm:max-w-[240px] in-data-[settings-look=simple]:ms-auto in-data-[settings-look=simple]:flex in-data-[settings-look=simple]:shrink-0 in-data-[settings-look=simple]:items-center in-data-[settings-look=simple]:sm:max-w-none">{children}</div>
       </div>
       {message && <div className="mt-2 text-[12px]">{message}</div>}
     </div>
@@ -102,7 +103,7 @@ export function SettingsGroup({ label, block, actions, footnote, children }: {
     >
       {(label || actions) && (
         <div className="flex min-h-4 items-center justify-between gap-3 ps-4 pe-1">
-          {label && <h3 id={labelId} className="text-[12px] leading-4 font-normal text-ink-secondary">{label}</h3>}
+          {label && <h3 id={labelId} className="text-[13px] leading-4 font-semibold text-ink-secondary">{label}</h3>}
           {actions}
         </div>
       )}

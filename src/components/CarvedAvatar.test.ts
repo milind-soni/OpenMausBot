@@ -4,17 +4,17 @@ import { describe, expect, it } from "vitest";
 
 import { CarvedAvatar, REST_POSE, carvedFills, carvedGeometry } from "./CarvedAvatar";
 import { MausAvatar } from "./Avatar";
-import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../shared/halloween-bodies";
+import { CARVED_BODIES, CARVED_BODY_IDS } from "../../shared/carved-bodies";
 import { MAUS_COLORS } from "@/lib/mascot";
 
-const render = (body: (typeof HALLOWEEN_BODY_IDS)[number], color: "orange" | "purple" = "orange") =>
+const render = (body: (typeof CARVED_BODY_IDS)[number], color: "orange" | "purple" = "orange") =>
   renderToStaticMarkup(createElement(CarvedAvatar, { body, color, animated: false, label: body }));
 
 describe("CarvedAvatar", () => {
   it("draws every part, two eyes, and a smile unless the drawing has its own mouth", () => {
-    for (const id of HALLOWEEN_BODY_IDS) {
+    for (const id of CARVED_BODY_IDS) {
       const markup = render(id);
-      const body = HALLOWEEN_BODIES[id];
+      const body = CARVED_BODIES[id];
       expect(markup).toContain(`data-carved-body="${id}"`);
       expect(markup.match(/<rect /g)?.length, id).toBe(2);
       expect(markup.match(/<path /g)?.length, id).toBe(body.parts.length + 1 + (body.eyes.mouth ? 1 : 0));
@@ -22,21 +22,27 @@ describe("CarvedAvatar", () => {
     }
   });
 
-  it("is what MausAvatar wears for a Halloween body", () => {
-    const markup = renderToStaticMarkup(createElement(MausAvatar, { color: "orange", bodyId: "pumpkin", animated: false }));
-    expect(markup).toContain('data-carved-body="pumpkin"');
+  it.each(["pumpkin", "laddu"] as const)("is what MausAvatar wears for the %s body", (bodyId) => {
+    const markup = renderToStaticMarkup(createElement(MausAvatar, { color: "orange", bodyId, animated: false }));
+    expect(markup).toContain(`data-carved-body="${bodyId}"`);
     expect(markup).not.toContain("linearGradient");
   });
 
   it("fills flat with the bot's colour, pale for the ghost, bone for the skull", () => {
     expect(render("pumpkin")).not.toContain("linearGradient");
-    expect(carvedFills(HALLOWEEN_BODIES.pumpkin, "orange").body).not.toBe(MAUS_COLORS.orange);
-    expect(carvedFills(HALLOWEEN_BODIES.ghost, "purple").body).toMatch(/^#[e-f]/);
-    expect(carvedFills(HALLOWEEN_BODIES.skull, "purple").body).toBe(HALLOWEEN_BODIES.skull.bone);
+    expect(carvedFills(CARVED_BODIES.pumpkin, "orange").body).not.toBe(MAUS_COLORS.orange);
+    expect(carvedFills(CARVED_BODIES.ghost, "purple").body).toMatch(/^#[e-f]/);
+    expect(carvedFills(CARVED_BODIES.skull, "purple").body).toBe(CARVED_BODIES.skull.bone);
+  });
+
+  it("paints firecrackers in the bot's colour and sweets in their own", () => {
+    expect(carvedFills(CARVED_BODIES.rocket, "blue").body).toBe(carvedFills(CARVED_BODIES.pumpkin, "blue").body);
+    expect(carvedFills(CARVED_BODIES.laddu, "blue").body).toBe(CARVED_BODIES.laddu.bone);
+    expect(carvedFills(CARVED_BODIES.jalebi, "purple").body).toBe(carvedFills(CARVED_BODIES.jalebi, "green").body);
   });
 
   it("opens round eyes and an open mouth when startled", () => {
-    const body = HALLOWEEN_BODIES.pumpkin;
+    const body = CARVED_BODIES.pumpkin;
     const rest = carvedGeometry(body, REST_POSE);
     const wide = carvedGeometry(body, { ...REST_POSE, wide: 1 });
     expect(rest.eyes[0].height).toBeGreaterThan(rest.eyes[0].width * 1.5);
@@ -47,7 +53,7 @@ describe("CarvedAvatar", () => {
   });
 
   it("closes the eyes and follows the gaze", () => {
-    const body = HALLOWEEN_BODIES.cat;
+    const body = CARVED_BODIES.cat;
     const shut = carvedGeometry(body, { ...REST_POSE, shut: 1 });
     expect(shut.eyes[0].height).toBeLessThan(body.eyes.h * 0.15);
     const left = carvedGeometry(body, { ...REST_POSE, gx: -1 });

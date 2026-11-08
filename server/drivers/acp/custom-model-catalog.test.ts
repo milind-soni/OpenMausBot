@@ -37,7 +37,8 @@ appendFileSync(process.env.CATALOG_DUMP,JSON.stringify({cwd:process.cwd(),pid:pr
 for await(const line of createInterface({input:process.stdin})){
  const msg=JSON.parse(line); appendFileSync(process.env.CATALOG_DUMP,JSON.stringify({cwd:process.cwd(),...msg})+'\\n');
  if(!msg.method)continue;
- if(msg.method==='initialize'){emit({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1}});continue;}
+ if(msg.method==='initialize'){emit({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1,...(mode==='deletes'?{agentCapabilities:{sessionCapabilities:{delete:{}}}}:{})}});continue;}
+ if(msg.method==='session/delete'){emit({jsonrpc:'2.0',id:msg.id,result:{}});continue;}
  if(msg.method==='session/new'){
   if(mode==='exit'){process.exit(3);}
   if(mode==='legacy'){emit({jsonrpc:'2.0',id:msg.id,result:legacyResult()});continue;}
@@ -139,6 +140,19 @@ describe("custom ACP catalog discovery (isolated fake CLI)", () => {
     const stuck = vi.fn(async () => {});
     await expect(discoverAcpModels(fixture.env, fixture.config.cli, [], { forgetSession: stuck })).rejects.toThrow("could not be stopped");
     expect(stuck).not.toHaveBeenCalled();
+  });
+
+  it("deletes its session over ACP when the agent offers session/delete, and then skips forgetSession", async () => {
+    const fixture = await fake("deletes");
+    const forgetSession = vi.fn(async () => {});
+    await discoverAcpModels(fixture.env, fixture.config.cli, [], { forgetSession });
+    const deletes = (await fixture.requests()).filter((request) => request.method === "session/delete");
+    expect(deletes.map((request) => request.params.sessionId)).toEqual(["fake-session"]);
+    expect(forgetSession).not.toHaveBeenCalled();
+
+    const plain = await fake();
+    await discoverAcpModels(plain.env, plain.config.cli, []);
+    expect((await plain.requests()).some((request) => request.method === "session/delete")).toBe(false);
   });
 
   it("stops a custom agent at once, and lets an agent asked to exit gracefully read EOF first", async () => {

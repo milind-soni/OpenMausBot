@@ -257,7 +257,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
   </>;
   if (simple) {
     return (
-      <div ref={frame} dir="ltr" className="group/code relative my-2.5 overflow-hidden rounded-lg bg-ink/[0.04]">
+      <div ref={frame} dir="ltr" className="group/code relative my-2.5 overflow-hidden rounded-xl bg-ink/[0.04]">
         <CodePlate copied={copied} onCopy={copy} copyLabel={t("code.copySource")} items={[
           { key: "source", label: t(showSource ? "code.hideSource" : "code.showSource"), icon: <WrapText size={14} aria-hidden="true" />, active: showSource, onSelect: () => setShowSource((shown) => !shown) },
           { key: "about", label: t("code.mermaid"), disabled: true, separatorBefore: true, onSelect: () => {} },
@@ -698,10 +698,10 @@ const MARKDOWN_COMPONENTS: Components = {
     return <ol dir={blockDirection(node)} className="list-decimal space-y-1 ps-5">{children}</ol>;
   },
   h1({ node, children }: BlockProps) {
-    return <div dir={blockDirection(node)} className="mt-3 text-[18px] font-semibold">{children}</div>;
+    return <div dir={blockDirection(node)} className="md-heading mt-3 text-[20px] font-semibold leading-[26px] tracking-[-0.01em]">{children}</div>;
   },
   h2({ node, children }: BlockProps) {
-    return <div dir={blockDirection(node)} className="mt-2 text-[16px] font-semibold">{children}</div>;
+    return <div dir={blockDirection(node)} className="md-heading mt-2 text-[17px] font-semibold leading-6 tracking-[-0.005em]">{children}</div>;
   },
   h3({ node, children }: BlockProps) {
     return <div dir={blockDirection(node)} className="mt-1.5 font-semibold">{children}</div>;

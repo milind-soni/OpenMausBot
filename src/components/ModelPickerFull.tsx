@@ -52,7 +52,7 @@ export function ModelRow({ option, current, defaultId, botModel = false, onPick 
           {t("model.loadedNow")}
         </span>
       )}
-      {current && <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />}
+      {current && <Check size={14} className="shrink-0 text-ink" aria-hidden="true" />}
     </button>
   );
 }
@@ -71,7 +71,7 @@ export function FollowBotModelRow({ name, model, follows, onPick }: { name: stri
         <span className="shrink-0 font-medium">{t("model.useBotModel", { name })}</span>
         <span className="truncate text-[12px] leading-4 text-ink-tertiary">{model}</span>
       </span>
-      {follows && <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />}
+      {follows && <Check size={14} className="shrink-0 text-ink" aria-hidden="true" />}
     </button>
   );
 }

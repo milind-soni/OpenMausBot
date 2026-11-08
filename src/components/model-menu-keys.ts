@@ -20,7 +20,7 @@ export function modelMenuKey(event: ReactKeyboardEvent<HTMLElement>, { query, ty
     event.stopPropagation();
   };
   if (event.key === "Tab") {
-    const stops = [...menu.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((element) => element !== target && element.tabIndex >= 0);
+    const stops = [...menu.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((element) => element !== target && element.tabIndex >= 0 && !element.closest("[hidden]"));
     const follows = (first: Node, second: Node) => Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
     if (!stops.some((stop) => (event.shiftKey ? follows(stop, target) : follows(target, stop)))) {
       handled();

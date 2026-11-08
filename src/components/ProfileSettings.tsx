@@ -230,7 +230,10 @@ export function ProfileSummaryRow() {
           {name || email ? <>
             <div className="truncate text-[14px] leading-5 text-ink">{name || email}</div>
             {name && email && <div className="truncate text-[13px] leading-[18px] text-ink-secondary">{email}</div>}
-          </> : <div className="truncate text-[14px] leading-5 text-ink-secondary">{t("settings.simple.account.noName")}</div>}
+          </> : <>
+            <div className="truncate text-[14px] leading-5 text-ink">{t("settings.simple.account.yourName")}</div>
+            <div className="truncate text-[13px] leading-[18px] text-ink-secondary">{t("settings.simple.account.noNameHint")}</div>
+          </>}
         </div>
         <button type="button" aria-expanded={editing} aria-controls={fieldsId} className="ui-button shrink-0" onClick={() => setEditing(!editing)}>
           {editing ? t("common.done") : t(name || email ? "settings.simple.account.edit" : "settings.simple.account.add")}

@@ -525,8 +525,10 @@ export function profileMenuItems({
   const groups = [
     move,
     present(raised),
-    [...present(usageItem), ...phone, { ...support, submenu: raised ? help : [...help, ...present(update)] }, settings],
+    // Places you go first, then the app's own settings, then getting the phone app and help.
     simple.tools,
+    [...present(usageItem), settings],
+    [...phone, { ...support, submenu: raised ? help : [...help, ...present(update)] }],
     [...simple.places, ...present(accountItem)],
     accounts,
   ].filter((group) => group.length > 0);

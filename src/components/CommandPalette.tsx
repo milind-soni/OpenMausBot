@@ -1,6 +1,7 @@
 import { t } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
-import { Bot as BotIcon, MessageSquare, Search, Users } from "lucide-react";
+import { MessageSquare, Search, Users } from "lucide-react";
+import { BotAvatar } from "./Avatar";
 import { api, openBot, useStore, type Bot, type Group } from "@/state/store";
 import { rankByName } from "@/lib/palette-rank";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -139,9 +140,9 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
       // mousemove, not mouseenter: rows shifting under a resting pointer must not steal the keyboard selection.
       onMouseMove={() => setCursor(index)}
       className={cn(
-        "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-start",
+        "flex min-h-10 w-full items-center gap-3 rounded-lg px-3 py-2 text-start",
         twoLine && "flex-col items-stretch gap-0.5",
-        index === selected ? "bg-raised" : "hover:bg-raised/50",
+        index === selected ? "bg-menu-active" : "hover:bg-menu-hover",
       )}
     >
       {children}
@@ -150,7 +151,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-6 pt-[14vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-6 pt-[14vh] [:root[data-skin=daylight]_&]:bg-black/[0.18]"
       onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}
       onKeyDown={onKeyDown}
     >
@@ -158,7 +159,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
         role="dialog"
         aria-modal="true"
         aria-label={t("palette.label")}
-        className="popover-surface flex max-h-[min(480px,70vh)] w-full max-w-[560px] flex-col overflow-hidden rounded-xl border border-hairline/50 bg-card shadow-2xl shadow-black/60"
+        className="popover-surface flex max-h-[min(480px,70vh)] w-full max-w-[560px] flex-col overflow-hidden rounded-[var(--radius-menu)] border border-hairline/50 bg-menu shadow-2xl shadow-black/60"
       >
         <div className="flex items-center gap-3 border-b border-hairline/40 px-4 py-3">
           <Search size={16} className="shrink-0 text-ink-secondary" />
@@ -181,7 +182,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
             </div>
           )}
           {bots.length > 0 && (
-            <div className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+            <div className="px-3 pb-1 pt-1.5 text-[12px] font-medium text-ink-tertiary">
               {t("palette.bots")}
             </div>
           )}
@@ -191,7 +192,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
               i,
               () => void activate({ kind: "bot", bot }),
               <>
-                <BotIcon size={16} className="shrink-0 text-ink-secondary" />
+                <BotAvatar bot={bot} state="happy" size={22} animated={false} />
                 <span className="truncate text-[14px] text-ink">{bot.name}</span>
                 {bot.title && (
                   <span className="min-w-0 truncate text-[13px] text-ink-secondary">{bot.title}</span>
@@ -200,7 +201,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
             ),
           )}
           {rooms.length > 0 && (
-            <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+            <div className="px-3 pb-1 pt-2 text-[12px] font-medium text-ink-tertiary">
               {t("palette.groups")}
             </div>
           )}
@@ -210,13 +211,13 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
               roomOffset + i,
               () => void activate({ kind: "room", group }),
               <>
-                <Users size={16} className="shrink-0 text-ink-secondary" />
+                <Users size={16} strokeWidth={1.75} className="mx-[3px] shrink-0 text-ink-secondary" />
                 <span className="truncate text-[14px] text-ink">{group.name}</span>
               </>,
             ),
           )}
           {q && messageHits.length > 0 && (
-            <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+            <div className="px-3 pb-1 pt-2 text-[12px] font-medium text-ink-tertiary">
               {t("palette.messages")}
             </div>
           )}
