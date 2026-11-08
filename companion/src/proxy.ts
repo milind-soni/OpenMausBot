@@ -49,6 +49,8 @@ export interface ProxyOptions {
    * it synchronously on revoke; the returned disposer is called exactly once. */
   connected?: (deviceId: string, disconnect: () => void) => () => void;
   headersTimeoutMs?: number;
+  /** Tests only: a lower whole-body ceiling, so a reply past it need not be tens of MiB. */
+  wholeJsonBodyBytes?: number;
   /** The `e2e` descriptor for one device (null: the phone pairing now); null when end-to-end is off. */
   e2eDescriptor?: (deviceId: string | null) => E2EDescriptor | null;
   /** A phone paired through an encrypted session keyed by the pairing token: the session is now that device's. */
@@ -664,7 +666,7 @@ export function createProxyHandler(options: ProxyOptions) {
         const hold = (chunk: Buffer) => {
           size += chunk.length;
           chunks.push(chunk);
-          if (size <= WHOLE_JSON_BODY_BYTES) return;
+          if (size <= (options.wholeJsonBodyBytes ?? WHOLE_JSON_BODY_BYTES)) return;
           harness.off("data", hold);
           harness.off("end", finish);
           // These two are rewritten or withdrawn whole, so neither can start before its end.

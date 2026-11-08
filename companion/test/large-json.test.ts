@@ -1,33 +1,43 @@
-// A bot list past the whole-body ceiling (a long history: 25 bots of 200 recent messages, about 52 MiB) reaches a
-// paired device scrubbed, instead of a 502.
-import { createServer, request, type IncomingHttpHeaders, type Server, type ServerResponse } from "node:http";
+// A bot list past the whole-body ceiling (a long history: about 52 MiB in the field) reaches a paired device
+// scrubbed, instead of a 502. One test crosses the real 32 MiB ceiling; the rest lower it, so each body stays small.
+import { createServer, request, type IncomingHttpHeaders, type RequestListener, type Server, type ServerResponse } from "node:http";
 import { gunzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { createProxyHandler } from "../src/proxy.ts";
+import { createProxyHandler, type ProxyOptions } from "../src/proxy.ts";
 import { gzipTunnelReplies } from "../src/tunnel-gzip.ts";
 import { scrub } from "../src/wire.ts";
 
 const TOKEN = "omb_test_token";
 const MiB = 1024 * 1024;
+const LOW_CEILING = 256 * 1024;
 
 /** Multi-byte characters, quotes and escapes, so chunk edges land inside all of them. */
 const LINE = 'A long reply with "quotes", a back\\slash, é, 😀 and a\nnew line. ';
-const bots = Array.from({ length: 25 }, (_, b) => ({
-  id: `b${b}`,
-  name: `Bot ${b}`,
-  sshAlias: "my-server",
-  tasks: [{ id: `t${b}`, title: "Main", resumeCursors: { claude: `cursor-value-${b}` } }],
-  messages: Array.from({ length: 200 }, (_, m) => ({ id: `m${b}-${m}`, role: m % 2 ? "bot" : "user", text: LINE.repeat(150) })),
-  hasMore: true,
-}));
-const BODY = Buffer.from(JSON.stringify({ bots, groups: [], sections: [], resumeCursors: { agent: "cursor-value" } }));
-const SCRUBBED = JSON.stringify(scrub(JSON.parse(BODY.toString("utf8"))));
+function snapshot(bots: number, messages: number, lines: number) {
+  const text = LINE.repeat(lines);
+  return {
+    bots: Array.from({ length: bots }, (_, b) => ({
+      id: `b${b}`,
+      name: `Bot ${b}`,
+      sshAlias: "my-server",
+      tasks: [{ id: `t${b}`, title: "Main", resumeCursors: { claude: `cursor-value-${b}` } }],
+      messages: Array.from({ length: messages }, (_, m) => ({ id: `m${b}-${m}`, role: m % 2 ? "bot" : "user", text })),
+      hasMore: true,
+    })),
+    groups: [],
+    sections: [],
+    resumeCursors: { agent: "cursor-value" },
+  };
+}
+/** About 1.3 MiB: five times the lowered ceiling. */
+const SMALL = snapshot(25, 20, 40);
+const BODY = Buffer.from(JSON.stringify(SMALL));
+const SCRUBBED = JSON.stringify(scrub(SMALL));
 
 let harness: Server;
-let lan: Server;
-let origin: Server;
-const ports = { lan: 0, origin: 0 };
+const servers: Server[] = [];
+const ports = { real: 0, lan: 0, origin: 0 };
 let respond: (res: ServerResponse) => void = (res) => res.end();
 
 /** Written in odd-sized slices, as a socket would deliver them. */
@@ -40,9 +50,10 @@ const send = (res: ServerResponse, body: Buffer): void => {
 const listen = (server: Server): Promise<number> =>
   new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve((server.address() as { port: number }).port)));
 
-/** Whatever bytes arrived, and whether the response ended cleanly or was cut. */
+/** Whatever bytes arrived, and whether the response ended cleanly or was cut. A connection the proxy neither
+ * finishes nor closes fails here by name, rather than as a test timeout. */
 function device(port: number, path = "/api/bots", method = "GET"): Promise<{ status: number; headers: IncomingHttpHeaders; raw: Buffer; complete: boolean }> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const req = request({ host: "127.0.0.1", port, path, method, headers: { authorization: `Bearer ${TOKEN}`, "accept-encoding": "gzip" } }, (res) => {
       const chunks: Buffer[] = [];
       let complete = false;
@@ -51,47 +62,76 @@ function device(port: number, path = "/api/bots", method = "GET"): Promise<{ sta
         complete = true;
       });
       res.on("error", () => {});
-      res.on("close", () => resolve({ status: res.statusCode ?? 0, headers: res.headers, raw: Buffer.concat(chunks), complete }));
+      res.on("close", () => {
+        clearTimeout(deadline);
+        resolve({ status: res.statusCode ?? 0, headers: res.headers, raw: Buffer.concat(chunks), complete });
+      });
     });
-    req.on("error", () => resolve({ status: 0, headers: {}, raw: Buffer.alloc(0), complete: false }));
+    const deadline = setTimeout(() => {
+      req.destroy();
+      reject(new Error("the proxy neither finished nor closed the connection"));
+    }, 15_000);
+    req.on("error", () => {
+      clearTimeout(deadline);
+      resolve({ status: 0, headers: {}, raw: Buffer.alloc(0), complete: false });
+    });
     req.end();
   });
 }
 
 beforeAll(async () => {
   harness = createServer((_req, res) => respond(res));
-  const proxy = createProxyHandler({
-    harnessPort: await listen(harness),
+  const options = (extra: Partial<ProxyOptions> = {}): ProxyOptions => ({
+    harnessPort: 0,
     authenticate: (t) => (t === TOKEN ? { id: "phone-1", cloudDesktopAccess: true, browserControlAccess: true } : null),
     redeem: () => ({ error: "not used here" }),
     serverName: () => "Test computer",
+    ...extra,
   });
-  lan = createServer(proxy);
-  origin = createServer(gzipTunnelReplies(proxy));
-  ports.lan = await listen(lan);
-  ports.origin = await listen(origin);
+  const harnessPort = await listen(harness);
+  const real = createProxyHandler(options({ harnessPort }));
+  const lowered = createProxyHandler(options({ harnessPort, wholeJsonBodyBytes: LOW_CEILING }));
+  const make = (handler: RequestListener) => {
+    const server = createServer(handler);
+    servers.push(server);
+    return listen(server);
+  };
+  ports.real = await make(real);
+  ports.lan = await make(lowered);
+  ports.origin = await make(gzipTunnelReplies(lowered));
 });
 
 afterAll(async () => {
-  for (const server of [lan, origin, harness]) {
+  for (const server of [...servers, harness]) {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   }
 });
 
 describe("a JSON reply past the whole-body ceiling", () => {
-  it("is the size of a long history", () => {
-    expect(BODY.length).toBeGreaterThan(48 * MiB);
+  it("crosses the real 32 MiB ceiling and still arrives, scrubbed", async () => {
+    // One shared message text keeps the heap small; only the serialised body is this large.
+    const big = snapshot(25, 140, 150);
+    const body = Buffer.from(JSON.stringify(big));
+    expect(body.length).toBeGreaterThan(34 * MiB);
+    respond = (res) => send(res, body);
+    const { status, raw, complete } = await device(ports.real);
+    expect(status).toBe(200);
+    expect(complete).toBe(true);
+    const text = raw.toString("utf8");
+    expect(text === JSON.stringify(scrub(big))).toBe(true);
+    expect(text).not.toContain("cursor-value");
   });
 
   it("reaches a paired device whole, with the withheld fields gone", async () => {
+    expect(BODY.length).toBeGreaterThan(4 * LOW_CEILING);
     respond = (res) => send(res, BODY);
     const { status, headers, raw, complete } = await device(ports.lan);
     expect(status).toBe(200);
     expect(complete).toBe(true);
     expect(headers["cache-control"]).toBe("private, no-store");
+    expect(headers["content-length"]).toBeUndefined();
     const text = raw.toString("utf8");
-    expect(text.length).toBe(SCRUBBED.length);
     expect(text === SCRUBBED).toBe(true);
     expect(text).not.toContain("cursor-value");
     expect(text).not.toContain("my-server");
@@ -110,7 +150,7 @@ describe("a JSON reply past the whole-body ceiling", () => {
   });
 
   it("passes through verbatim when it was never JSON, as a small body does", async () => {
-    const notJson = Buffer.from(`not JSON ${"x".repeat(40 * MiB)}`);
+    const notJson = Buffer.from(`not JSON ${"x".repeat(2 * LOW_CEILING)}`);
     respond = (res) => send(res, notJson);
     const { status, raw, complete } = await device(ports.lan);
     expect(status).toBe(200);
