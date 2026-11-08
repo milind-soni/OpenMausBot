@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Component, lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Code2, Download, ExternalLink, Eye, LoaderCircle, RotateCcw } from "lucide-react";
 import { requestMessageFile, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { TableDialog } from "./RichTable";
@@ -20,6 +20,20 @@ export function isMarkdownFile(name: string): boolean {
 
 // Lazy, so the chat's Markdown renderer (which uses this file's chips) is not imported back into it.
 const MarkdownFileContent = lazy(() => import("./MarkdownFilePreview"));
+
+// A failed import stays failed until the page reloads, and without a boundary it would replace the whole message.
+class MarkdownPreviewBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{t("markdown.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => location.reload()}>{t("page.broken.reload")}</button></div>;
+  }
+}
 
 /** Security: `<base target="_blank">` turns every link into a popup, which the empty sandbox blocks, so the frame never navigates. */
 export function htmlPreviewDocument(source: string): string {
@@ -52,7 +66,7 @@ export function useHtmlPreview(path: string, name: string, message?: MessageAtta
       ? <TableDialog title={name} returnFocus={opener.current} onClose={() => setOpen(false)}>
         {kind === "html"
           ? <HtmlFileContent key={key} path={path} name={name} message={message} />
-          : <Suspense fallback={<div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</div>}><MarkdownFileContent key={key} path={path} name={name} message={message} /></Suspense>}
+          : <MarkdownPreviewBoundary><Suspense fallback={<div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</div>}><MarkdownFileContent key={key} path={path} name={name} message={message} /></Suspense></MarkdownPreviewBoundary>}
       </TableDialog>
       : null,
   };
