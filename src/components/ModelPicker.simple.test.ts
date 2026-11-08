@@ -374,7 +374,7 @@ describe("the model picker in Simple mode", () => {
     expect(String(chip.props.className)).toContain("rounded-full");
     expect(String(chip.props.className)).not.toMatch(/\bborder\b|bg-control/);
     expect(markup).not.toContain("@max-4xl/chathead");
-    expect(markup).toContain('<span class="min-w-0 max-w-[160px] truncate">Opus 5.5</span>');
+    expect(markup).toContain('<span class="min-w-0 truncate max-w-[160px]">Opus 5.5</span>');
     expect(markup).toContain("opacity-60");
     fixture.advanced = true;
     const advanced = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
@@ -403,11 +403,11 @@ describe("the model picker in Simple mode", () => {
 
   it("lets the contained trigger shrink inside the bot panel's Model row, and the loose one keep its size", () => {
     const contained = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
-    expect(String(contained.props.className)).toContain("min-w-0 max-w-[58%]");
+    expect(String(contained.props.className)).toContain("min-w-0 max-w-[72%]");
     expect(String(contained.props.className)).not.toMatch(/\bshrink-0\b/);
     const loose = render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!;
     expect(String(loose.props.className)).toContain("shrink-0");
-    expect(String(loose.props.className)).not.toContain("max-w-[58%]");
+    expect(String(loose.props.className)).not.toContain("max-w-[72%]");
   });
 
   it("puts the provider before a model the catalog names in one bare word, on the chip and the current row", () => {

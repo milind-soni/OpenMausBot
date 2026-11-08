@@ -653,7 +653,7 @@ export function ModelPicker({
       className={cn(
         "group flex items-center rounded-full text-[13px] leading-[18px] text-ink-secondary disabled:cursor-not-allowed disabled:text-ink-tertiary",
         contained
-          ? "min-w-0 max-w-[58%] transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:hover:bg-transparent"
+          ? "min-w-0 max-w-[72%] transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:hover:bg-transparent"
           : cn("shrink-0", ELEVATED_FLOAT, ELEVATED_HOVER, "hover:text-ink aria-expanded:text-ink disabled:hover:bg-composer"),
         size === "sm" ? "h-7 pl-2 pr-1.5" : "h-8 pl-2.5 pr-2",
       )}
@@ -664,7 +664,7 @@ export function ModelPicker({
           : <span className="size-3.5 rounded-full bg-ink/[0.08]" aria-hidden="true" />}
         {attention && <span data-model-attention className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-warning ring-[1.5px] ring-app" />}
       </span>
-      <span className="min-w-0 max-w-[160px] truncate">{modelName(active, selection.model)}</span>
+      <span className={cn("min-w-0 truncate", !contained && "max-w-[160px]")}>{modelName(active, selection.model)}</span>
       {selection.variant !== undefined && <span className="shrink-0 whitespace-pre">{variantSuffix(active, selection.model, selection.variant)}</span>}
       <UsageBars engine={selection.instanceId} className="ml-1.5" />
       <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="ml-1 shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />

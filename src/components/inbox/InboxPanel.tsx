@@ -59,25 +59,23 @@ export function InboxPanel() {
   const count = waitingCount(view);
   const body = (
     <>
-      <div className="flex items-center gap-1 px-2 pb-1 pt-2">
-        <div data-inbox-tab-chip className="flex h-8 min-w-0 max-w-[15rem] flex-1 items-center gap-2 rounded-lg bg-raised ps-2.5 pe-1 text-[13px]">
-          <Inbox size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+      <div className="flex items-center gap-1 px-3 pb-1 pt-2">
+        <div data-inbox-tab-chip className="flex h-8 min-w-0 flex-1 items-center gap-2 ps-1 text-[14px]">
+          <Inbox size={16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
           <span className="min-w-0 truncate font-medium text-ink">{t("inbox.panel.title")}</span>
           {count > 0 && <span data-inbox-tab-count className="shrink-0 tabular-nums text-ink-tertiary">{count}</span>}
-          <span className="flex-1" />
-          <button type="button" onClick={closeInbox} aria-label={t("inbox.action.closePanel")} title={t("inbox.action.closePanel")} className={cn(BAR_BUTTON, "size-6")}>
-            <X size={14} aria-hidden="true" />
-          </button>
         </div>
-        <span className="flex-1" />
         {!phone && (
           <button type="button" onClick={() => widenInbox(!panel.wide)} aria-pressed={Boolean(panel.wide)} aria-label={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")}
             title={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")} className={BAR_BUTTON}>
             {panel.wide ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
           </button>
         )}
+        <button type="button" onClick={closeInbox} aria-label={t("inbox.action.closePanel")} title={t("inbox.action.closePanel")} className={BAR_BUTTON}>
+          <X size={15} aria-hidden="true" />
+        </button>
       </div>
-      <div className="mx-1.5 mb-1.5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-hairline/40 bg-app/40">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {reading && view ? (
           <InboxReading view={view} row={reading} now={now} position={at >= 0 ? { index: at, count: rows.length } : null} onStep={step} />
         ) : (

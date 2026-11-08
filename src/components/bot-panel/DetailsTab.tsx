@@ -1,4 +1,4 @@
-import { Calendar, CalendarPlus, Sparkles } from "lucide-react";
+import { Calendar, CalendarPlus, ChevronRight, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -33,7 +33,9 @@ export function ItemRow({ item }: { item: SidebarMenuItem }) {
         {item.icon}
       </span>
       <span className={cn("min-w-0 truncate text-[14px] font-medium", !wrapsValue && "flex-1", item.active ? "text-accent-text" : "text-ink")}>{item.label}</span>
-      {item.trailing && <span className={cn("flex items-center", wrapsValue ? "min-w-0 flex-1 justify-end text-right" : "shrink-0")}>{item.trailing}</span>}
+      {item.trailing
+        ? <span className={cn("flex items-center", wrapsValue ? "min-w-0 flex-1 justify-end text-right" : "shrink-0")}>{item.trailing}</span>
+        : <ChevronRight size={15} aria-hidden="true" className="shrink-0 text-ink-tertiary rtl:-scale-x-100" />}
     </button>
   );
 }
@@ -65,7 +67,7 @@ export function DetailsTab({ bot, derived, onOpen }: {
       {derived.botRoutines.length === 0 ? (
         <section data-panel-empty="routines">
           <CardLabel>{t("botSettings.simple.routines")}</CardLabel>
-          <p className="mx-1 text-[13px] leading-[18px] text-ink-tertiary">{t("botPanel.routines.empty")}</p>
+          <p className="mx-1 text-[13px] leading-[18px] text-ink-tertiary">{t("botPanel.routines.emptyHint")}</p>
           <button
             type="button"
             data-panel-page="routines"

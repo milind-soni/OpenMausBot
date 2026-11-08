@@ -169,7 +169,7 @@ function Thinking({ thinking, labelId }: { thinking: SimpleThinking; labelId: st
         <span id={labelId} className="text-[12px] font-medium leading-4 text-ink-tertiary">{t("botSettings.simple.thinking")}</span>
       </div>
       <div data-simple-effort role="group" aria-labelledby={labelId} className="m-1 grid rounded-full bg-ink/[0.05] p-[3px]"
-        style={{ gridTemplateColumns: `repeat(${levels.levels.length + 1}, minmax(0, 1fr))` }}>
+        style={{ gridTemplateColumns: `repeat(${levels.levels.length + 1}, auto)` }}>
         <button type="button" data-effort-pill data-effort-auto aria-pressed={auto} tabIndex={auto ? 0 : -1}
           title={t("model.simple.thinkingDefault")} onClick={levels.onReset} className={pill(auto)}>
           {t("model.simple.auto")}
