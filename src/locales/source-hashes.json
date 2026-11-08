@@ -3418,7 +3418,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -9486,7 +9489,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -12771,7 +12777,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -15908,7 +15917,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -23653,7 +23665,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -33466,7 +33481,18 @@
       "native.lend.own.title": "e0c0ec1959aef8a27ef00e5524990219d7e3d1f3d4ae97103b78e1e0469b9201",
       "native.lend.own.detail": "6dbcd74c9c925e16d72b6e641fedcdfb27f2554697a843ff647050a5115cd293",
       "native.lend.own.allow": "e213c161d5cefa520c8dd4155c9569076d9a40406111465136a6f1b207045761",
-      "native.lend.notOwnServer": "6ec1c2fc26d171727a4509b66ee7a9f4848733a2b4572c01b629a31c5a255cf0"
+      "native.lend.notOwnServer": "6ec1c2fc26d171727a4509b66ee7a9f4848733a2b4572c01b629a31c5a255cf0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b",
+      "apiInstances.editModels": "6289535b3751b28360962c140a14f124af1368871e0ebaa7968d2676a99948d6",
+      "apiInstances.modelsFor": "928aa8803b92765b315905a8bec2d9c8d1712c506ab62e1a39e9fa2d12f2c8a1",
+      "apiInstances.editModelsHint": "417c86a79ae13950d99588cb9c63e6981978aa80263e24458e1fde3097ea9e49",
+      "apiInstances.modelsLimit": "872a834885967b40ebcc35d2ff89adbc1ae4e8585bf0673f4a3ed1d718ba23fc",
+      "shortcuts.new-thread": "3fb707417e2f33bda62583185a5f38f34990d0327583a776f29666f092624735",
+      "chat.notice.kiroAccountRefused": "ef063546ea8868ab805bd60eac7048ab9e49143868131c8316fb9c31beb336a9",
+      "serverError.instance.modelsUnsupported": "d54242a01f65b60793c5a1fe58379c95e039c35ecaf8f368c398129b5b856e41",
+      "serverError.instance.defaultModelRemoved": "56ceaae5dfc24c88162a02fc1546381e517ec3e6d390024f4e4be5eca8619a77"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -41097,7 +41123,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -50898,7 +50927,10 @@
       "native.lend.own.title": "e0c0ec1959aef8a27ef00e5524990219d7e3d1f3d4ae97103b78e1e0469b9201",
       "native.lend.own.detail": "6dbcd74c9c925e16d72b6e641fedcdfb27f2554697a843ff647050a5115cd293",
       "native.lend.own.allow": "e213c161d5cefa520c8dd4155c9569076d9a40406111465136a6f1b207045761",
-      "native.lend.notOwnServer": "6ec1c2fc26d171727a4509b66ee7a9f4848733a2b4572c01b629a31c5a255cf0"
+      "native.lend.notOwnServer": "6ec1c2fc26d171727a4509b66ee7a9f4848733a2b4572c01b629a31c5a255cf0",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -54476,7 +54508,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -60044,7 +60079,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -65612,7 +65650,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72442,7 +72483,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -79334,7 +79378,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -86026,7 +86073,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -93440,7 +93490,10 @@
       "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
       "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
       "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
-      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "chat.error.pastUsageLimit": "7c63a440471f4d20b5ce89b6e9c83547db02d840c79cbe7a4913b06e5a57c381",
+      "computer.watchFullScreenTitle": "9f3f625c39cd1e74ba76474fda7f8cd15b2fabe6e6ee337201a72551f47986d2",
+      "computer.watchingBotWorks": "b441025e38fe828e8ec4d56a2c9c685f88d9b41d993242c2af8eeaeb8ae3878b"
     }
   }
 }

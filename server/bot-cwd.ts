@@ -53,11 +53,10 @@ export function sharedProjectFolder(cwd: string | null | undefined, dataDir: str
   return lstatSync(checked.cwd).isSymbolicLink() ? real : checked.cwd;
 }
 
-/** coordinate_bots' in_my_folder: the sender's project folder for the teammate threads it opens outside a room, or why an explicit true cannot be honoured. Omitted means on whenever there is a folder to share. */
-export function inMyFolderCwd(wanted: boolean | undefined, outsideRoom: boolean, senderCwd: string | null | undefined, dataDir: string): { cwd?: string; error?: string } {
-  if (wanted === false) return {};
-  if (!outsideRoom) return wanted ? { error: "in_my_folder does not apply in a room: the room's folder governs there. Leave it out." } : {};
+/** coordinate_bots' in_my_folder: the sender's project folder for the teammate threads it opens outside a room. On unless
+ * false; with no folder to share, or in a room (whose folder governs there), the hand-off goes ahead without one. */
+export function inMyFolderCwd(wanted: boolean | undefined, outsideRoom: boolean, senderCwd: string | null | undefined, dataDir: string): { cwd?: string } {
+  if (wanted === false || !outsideRoom) return {};
   const cwd = sharedProjectFolder(senderCwd, dataDir);
-  if (cwd) return { cwd };
-  return wanted ? { error: "This conversation has no project folder to share (it works in its own private folder), so in_my_folder cannot be used. Leave it out; do not retry it." } : {};
+  return cwd ? { cwd } : {};
 }

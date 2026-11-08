@@ -44,7 +44,24 @@ export interface DeviceSignIn {
   status?: { args: readonly string[]; read(code: number | null, output: string): DeviceSignInState };
   /** Without a status command: whether the sign-in a turn uses is now there. */
   signedIn?(env: Env): boolean;
+  /** The sign-out probe when a plain boolean is not enough: a credential folder that cannot be read is `unknown`,
+   * and sign-out refuses instead of reporting a removal that never happened. */
+  signInState?(env: Env): DeviceSignInState;
   logoutArgs?: readonly string[];
+  /** Sign-out without a CLI command: remove the stored credential files the CLI reads. */
+  removeCredentials?(env: Env): void | Promise<void>;
+}
+
+/** The instance surface an ACP driver exposes for its device sign-in: start/get/cancel, plus `signOut` when the spec
+ * can actually perform one (a CLI logout command or a credential removal). Lives beside the controller so the
+ * instance wiring stays one line in each driver. */
+export function deviceAuthInstanceSurface(deviceSignIn: DeviceAuthController, spec: DeviceSignIn) {
+  return {
+    startAuthentication: () => deviceSignIn.start(),
+    getAuthentication: (flowId: string) => deviceSignIn.get(flowId),
+    cancelAuthentication: () => deviceSignIn.cancel(),
+    ...((spec.logoutArgs || spec.removeCredentials) ? { signOut: () => deviceSignIn.signOut() } : {}),
+  };
 }
 
 type Flow = {
@@ -180,8 +197,9 @@ export class DeviceAuthController {
   }
 
   private async signOutNow(): Promise<void> {
-    const { product, account, status, logoutArgs } = this.spec;
-    if (!status || !logoutArgs) throw new Error(`Signing out of ${account} is not available from here.`);
+    const { product, account, status, signedIn, signInState, logoutArgs, removeCredentials } = this.spec;
+    if (!logoutArgs && !removeCredentials) throw new Error(`Signing out of ${account} is not available from here.`);
+    if (!status && !signedIn && !signInState) throw new Error(`Signing out of ${account} is not available from here.`);
     if (this.disposed) throw new Error("This provider was removed. Refresh Settings before signing out.");
     if (this.flow?.status.phase === "waiting") throw new Error(`Finish or cancel the ${account} sign-in in progress before signing out.`);
     await this.flow?.stopping;
@@ -193,16 +211,28 @@ export class DeviceAuthController {
     }
     authenticatingHomes.add(homeKey);
     try {
-      const before = await this.exec([...status.args], env, home);
-      const state = status.read(before.code, before.output);
+      const held = async (): Promise<DeviceSignInState> => {
+        if (signInState) return signInState(env);
+        if (!status) return signedIn!(env) ? "signed-in" : "signed-out";
+        const probe = await this.exec([...status.args], env, home);
+        return status.read(probe.code, probe.output);
+      };
+      const state = await held();
       if (state === "signed-out") return;
       if (state !== "signed-in") {
         throw new Error(`${product} did not confirm a ${account} sign-in. Other authentication methods will not be removed; ask the server administrator to check the account.`);
       }
-      const logout = await this.exec([...logoutArgs], env, home);
-      if (logout.code !== 0) throw new Error(`${product} could not remove the sign-in on this server. Check the server's ${product} installation and try again.`);
-      const after = await this.exec([...status.args], env, home);
-      if (status.read(after.code, after.output) !== "signed-out") {
+      if (logoutArgs) {
+        const logout = await this.exec([...logoutArgs], env, home);
+        if (logout.code !== 0) throw new Error(`${product} could not remove the sign-in on this server. Check the server's ${product} installation and try again.`);
+      } else {
+        try {
+          await removeCredentials!(env);
+        } catch {
+          throw new Error(`${product} could not remove the sign-in on this server. Check the server's ${product} installation and try again.`);
+        }
+      }
+      if (await held() !== "signed-out") {
         throw new Error(`${product} still reports a sign-in on this server. Update ${product} and check its login status before trying again.`);
       }
     } finally {

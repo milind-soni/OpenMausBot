@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { QRCodeSVG } from "qrcode.react";
 
 import { ANDROID_APK_URL, IOS_APP_STORE_URL, openExternalLink } from "@/lib/app-links";
@@ -34,7 +35,7 @@ export function PhoneAppDialog({ open, onClose, connect = [] }: { open: boolean;
 
   if (!open) return null;
 
-  return (
+  const overlay = (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
@@ -95,4 +96,6 @@ export function PhoneAppDialog({ open, onClose, connect = [] }: { open: boolean;
       </div>
     </div>
   );
+
+  return typeof document === "undefined" ? overlay : createPortal(overlay, document.body);
 }

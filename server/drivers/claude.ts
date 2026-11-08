@@ -1573,7 +1573,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               if (b.type === "tool_result") {
                 emit({ ...base(threadId, currentTurnId()), type: "item.completed", itemType: "tool", itemId: b.tool_use_id, ok: !b.is_error, output: toolDetailPreview(b.content) });
                 for (const img of extractMcpImages(b.content)) {
-                  emit({ ...base(threadId, currentTurnId()), type: "item.completed", itemType: "assistant_image", data: img.data });
+                  emit({ ...base(threadId, currentTurnId()), type: "item.completed", itemType: "assistant_image", data: img.data, fromTool: true });
                 }
               }
             }

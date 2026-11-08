@@ -385,6 +385,7 @@ describe("ACP turns (fake CLI)", () => {
     const failedEnd = recorder.events.findIndex((e) => e.type === "item.completed" && e.itemType === "tool" && e.itemId === started[4]);
     const image = recorder.events.findIndex((e) => e.type === "item.completed" && e.itemType === "assistant_image");
     expect(image).toBe(failedEnd + 1);
+    expect(recorder.events[image]).toMatchObject({ fromTool: true });
     // The stall watchdog sees no tool left running, so the turn's own silence limit applies.
     let now = 0;
     const limits: number[] = [];
@@ -1014,6 +1015,7 @@ describe("ACP turns (fake CLI)", () => {
       itemType: "assistant_image",
       alt: "Generated image",
     });
+    expect(image).not.toHaveProperty("fromTool");
     expect(image && "data" in image ? image.data : "").toMatch(/^iVBOR/);
     expect(
       recorder.events.some(

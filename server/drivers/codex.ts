@@ -41,8 +41,7 @@ import type {
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { codexSelectedProviderArgs, decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
-import { codexLocalProviderArgs } from "./local-inject.ts";
-import { codexBackgroundRoute, runCodexBackgroundRoute, runCodexOneShot } from "./codex-background-text.ts";
+import { codexBackgroundProviderArgs, codexBackgroundRoute, runCodexBackgroundRoute, runCodexOneShot } from "./codex-background-text.ts";
 import { augmentedPath } from "../env-path.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { appendNative } from "./native.ts";
@@ -1164,7 +1163,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               });
               if (item.type === "mcpToolCall") {
                 for (const img of extractMcpImages(item.result)) {
-                  emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_image", data: img.data });
+                  emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_image", data: img.data, fromTool: true });
                 }
               }
             } else if (item.type === "reasoning") {
@@ -1581,6 +1580,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     };
   };
 
+  let openaiUnreachable = false; // set once OpenAI turned a background call away: later ones go straight to the bot's model
   /** The background one-shot: `codex exec` with no tools or session, in an empty folder. Never
    * generateText, or titles and compaction would each start a Codex process. */
   const generateMemoryText = async (prompt: string, options: TextGenerationOptions = {}): Promise<string> => {
@@ -1606,7 +1606,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       }
       providerArgs = managedCodexArgs(config.managed);
     }
-    const route = codexBackgroundRoute(models, smallModelsUsable(), options.fallback);
+    const route = codexBackgroundRoute(models, smallModelsUsable(), options.fallback, openaiUnreachable);
     if (!route) throw new Error("Codex lists no model for background calls. Refresh models in Settings → Model providers → Codex.");
     return runCodexBackgroundRoute(route, (id) => {
       const selection = planAuth || routed ? { model: id, modelProvider: null } : decodeCodexSelection(id);
@@ -1614,14 +1614,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         spawn: spawnCli, kill: killCliTree, cli: config.cli, env, prompt, options,
         model: selection.model ?? id,
         modelProvider: selection.modelProvider,
-        providerArgs: planAuth || routed ? providerArgs : codexLocalProviderArgs(env, id),
+        providerArgs: planAuth || routed ? providerArgs : codexBackgroundProviderArgs(env, id),
         describeError: (message) => {
           const route: CodexRoute = planAuth ? "plan" : selection.modelProvider === OFFICIAL_CODEX_PROVIDER ? "own" : "other";
           hidePlanRefusedModel(selection.model ?? id, message, route);
           return codexUserError(message, route);
         },
       });
-    }, options);
+    }, options, planAuth || config.managed ? undefined : () => { openaiUnreachable = true; });
   };
 
   return {
