@@ -70,6 +70,8 @@ The host companion remains the authorization boundary. Its route list defaults t
 
 The desktop client matches the reviewed companion feature surface: chats, rooms, streamed responses, approvals, inline Connected Apps authorization, search, routines, attachments, and a narrowly scoped cloud/VPS viewer the host explicitly grants to that paired device. Expanding the desktop client must be done by explicitly reviewing and adding companion routes; it must not bypass the companion API or proxy the full harness.
 
+When creating a bot from the client's New menu, choose the host's default AI or one of the available models configured on the host. To change an existing bot's AI, open its remote agent settings and choose a model. Provider accounts and credentials are managed on the host; changing AI follows the same approval and busy-thread checks as on the host.
+
 ## Runtime shape
 
 ```text
