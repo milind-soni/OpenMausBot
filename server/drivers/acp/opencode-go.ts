@@ -22,6 +22,7 @@ import {
   type OpenCodeModelSources,
   type OpenCodeRefreshSchedule,
 } from "./opencode-model-refresh.ts";
+import { openCodePromptUnreachedModel } from "./opencode-unreached.ts";
 import { parseOpenCodeLogLine } from "./quiet-status.ts";
 import type { ModelCatalog, ModelVariantOption, ProviderDriver, ProviderErrorCode } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
@@ -37,6 +38,7 @@ import {
 } from "./opencode-probe.ts";
 
 export { catalogFromOpenCodeSession, surveyOpenCodeEfforts } from "./opencode-probe.ts";
+export { openCodePromptUnreachedModel } from "./opencode-unreached.ts";
 
 const NO_MODELS: ModelCatalog = { default: "", options: [] };
 
@@ -715,6 +717,7 @@ const support = (
       || await canRunOpenCode(env, config.cli, loadCatalog);
   },
   classifyError: classifyOpenCodeError,
+  promptUnreachedModel: openCodePromptUnreachedModel,
   describeAccountError: describeOpenCodeAccountError,
   resolveModels: async (environment, config, instanceId, fresh) => {
     if (fresh) markOpenCodeCatalogRefreshed(instanceId, (sources.now ?? Date.now)());
