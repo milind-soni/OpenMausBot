@@ -135,7 +135,7 @@ export function parseSendState(value) {
         arrived: countsOf(entry.arrived),
         chats: record(entry.chats) ? Object.fromEntries(Object.entries(entry.chats).filter(([threadId, cursor]) => /^[\w-]{1,200}$/u.test(threadId)
           && (cursor === "removed" || (record(cursor) && Number.isSafeInteger(cursor.after) && typeof cursor.id === "string")))) : {},
-        created: record(entry.created) ? Object.fromEntries(Object.entries(entry.created).filter(([key, on]) => key.startsWith("bot:") && on === true)) : {},
+        created: record(entry.created) ? Object.fromEntries(Object.entries(entry.created).filter(([key, on]) => (key.startsWith("bot:") || key === itemKey.onePassword()) && on === true)) : {},
         creating: record(entry.creating) ? Object.fromEntries(Object.entries(entry.creating).filter(([key, on]) => key.startsWith("bot:") && on === true)) : {},
         release: Array.isArray(entry.release) ? entry.release.filter((held) => record(held) && typeof held.id === "string" && typeof held.digest === "string").slice(0, 200) : [],
         files: record(entry.files) ? Object.fromEntries(Object.entries(entry.files).filter(([path, sha]) => typeof sha === "string" && /^[a-f0-9]{64}$/u.test(sha) && path.length <= 4096)) : {},
@@ -654,6 +654,14 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     persist();
   }
 
+  /** A row whose send may stop part way on My Cloud goes again until a send of it is recorded. */
+  function resendUntilRecorded(ctx, key) {
+    const kept = entry(ctx.origin);
+    kept.sent[key] = {};
+    kept.created[key] = true;
+    persist();
+  }
+
   const done = (ctx, key, parts = null) => { ctx.sentKeys.add(key); if (parts) ctx.sentParts[key] = parts; };
   /** A bot this send made on My Cloud: its fields go whatever My Cloud's defaults are, until they are recorded, and it
    * counts as sent before, so one removed there before then stays removed. */
@@ -879,6 +887,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       if (!granted.ok && granted.status !== 404) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its vaults to the same bots.");
     }
     const itemGrants = record(onePassword.itemGrants) ? onePassword.itemGrants : {};
+    resendUntilRecorded(ctx, row.key);
     const there = await ctx.session.call("GET", "/api/logins");
     if (!there.ok) throw refusedError("refused", there, "My Cloud connected 1Password but could not list its logins to keep them to the same bots.");
     const ownThere = (Array.isArray(there.body?.logins) ? there.body.logins : []).flatMap((login) => login?.onePassword?.ownBots ? [login.onePassword.itemId] : []);

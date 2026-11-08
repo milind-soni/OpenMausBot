@@ -389,6 +389,31 @@ test("1Password is not reported sent when My Cloud's logins cannot be read, or M
   assert.equal((await createCloudSend(old.deps).send()).result.failed[0]?.error, "My Cloud is too old to keep a 1Password login to its own bots. Update My Cloud, then send again.");
 });
 
+test("a 1Password send that stopped part way goes again even after this computer is back to what was sent before", async () => {
+  const onePassword = (vaults) => ({ key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t", vaults } });
+  let saved = { clouds: { [CLOUD]: { sent: { "1password": { token: ["t", "t"], vaults: ["v0", "v0"] } } } } };
+  const store = { read: () => saved, write: (value) => { saved = structuredClone(value); } };
+  const partial = fakeSides({ localItems: [onePassword("v2")], cloudItems: [onePassword("v0")],
+    refuse: { "/api/logins/1password/items/i2": { status: 500, error: "busy" } } });
+  partial.deps.store = store;
+  partial.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {}, itemGrants: { i1: [], i2: [] } } });
+  assert.equal((await createCloudSend(partial.deps).send()).result.failed[0]?.key, "1password");
+  assert.ok(partial.calls.includes("PATCH /api/logins/1password/items/i1"));
+
+  const cleared = fakeSides({ localItems: [onePassword("v0")], cloudItems: [onePassword("v1")] });
+  cleared.deps.store = store;
+  cleared.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {}, itemGrants: {} } });
+  const session = await cleared.deps.cloud.open();
+  const call = session.call;
+  session.call = async (method, route, body) => method === "GET" && route === "/api/logins"
+    ? (await call(method, route), { status: 200, ok: true, body: { logins: [{ onePassword: { itemId: "i1", ownBots: true } }] } })
+    : call(method, route, body);
+  cleared.deps.cloud.open = async () => session;
+  const outcome = await createCloudSend(cleared.deps).send();
+  assert.deepEqual(outcome.result.failed, []);
+  assert.ok(cleared.calls.includes("PATCH /api/logins/1password/items/i1"), "My Cloud's half-sent login is handed back");
+});
+
 test("chats by row: the cursor moves only past what My Cloud took; one removed there is never sent again; one being answered waits", async () => {
   const rows = { "t-a": [{ id: "a1", at: 1 }, { id: "a2", at: 2 }], "t-b": [{ id: "b1", at: 1 }], "t-c": [{ id: "c1", at: 1 }] };
   const heads = () => Object.entries(rows).map(([threadId, list]) => ({ bot: "ember", threadId, last: list.length, lastId: list.at(-1).id, busy: threadId === "t-c" }));
