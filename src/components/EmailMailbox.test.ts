@@ -7,7 +7,8 @@ vi.mock("@/state/store", async (original) => ({ ...await original<typeof import(
 import { setLocale } from "@/lib/i18n";
 import type { EmailAccountView } from "../../shared/email";
 import { EmailConnectForm } from "./EmailCard";
-import { EmailCheckLines, EmailMailbox, EmailSignInNote, outgoingOf } from "./EmailMailbox";
+import { EmailCheckLines, EmailMailbox, EmailSignInNote } from "./EmailMailbox";
+import { outgoingFieldsOf } from "../../shared/email";
 import { EmailRequestSettled } from "./EmailRequestCard";
 
 const WORKS: EmailAccountView = { address: "office@small-shop.at", imapHost: "imap.world4you.com", smtpHost: "smtp.world4you.com", smtpPort: 587, smtpSecurity: "starttls", connectedAt: "2026-11-06T00:00:00.000Z" };
@@ -52,7 +53,7 @@ describe("the email card", () => {
     expect(card).toContain(">Try again<");
     expect(card).not.toContain("Send a test to myself");
     expect(card).not.toContain("Connected.");
-    expect(outgoingOf(FAILS)).toEqual({ smtpHost: "smtp.world4you.com", smtpPort: 465, smtpSecurity: "tls" });
+    expect(outgoingFieldsOf(FAILS)).toEqual({ smtpHost: "smtp.world4you.com", smtpPort: 465, smtpSecurity: "tls" });
   });
 
   it("connected: Connected., both lines ticked with their servers, and a test to myself", () => {
