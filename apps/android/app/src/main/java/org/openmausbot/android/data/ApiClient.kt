@@ -2,6 +2,7 @@ package org.openmausbot.android.data
 
 import org.json.JSONArray
 import org.json.JSONObject
+import org.openmausbot.android.e2e.E2EDescriptor
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -16,6 +17,8 @@ class ApiException(val status: Int, message: String, val body: String? = null) :
 class ApiClient(
     baseUrl: String,
     private val token: String?,
+    private val loopbackHeaderName: String? = null,
+    private val loopbackHeaderValue: String? = null,
 ) {
     val baseUrl: String = baseUrl.trimEnd('/')
     private val deviceName = android.os.Build.MODEL ?: "Android"
@@ -87,7 +90,11 @@ class ApiClient(
         val device = answer.optJSONObject("device")
         val endpoints = answer.optJSONArray("endpoints")?.let { array ->
             (0 until array.length()).mapNotNull { index ->
-                array.optJSONObject(index)?.optString("url")?.takeIf { it.isNotBlank() }
+                when (val item = array.opt(index)) {
+                    is String -> item.takeIf { it.isNotBlank() }
+                    is JSONObject -> item.optString("url").takeIf { it.isNotBlank() }
+                    else -> null
+                }
             }
         } ?: emptyList()
         return PairResult(
@@ -96,10 +103,25 @@ class ApiClient(
             serverName = answer.optString("serverName").takeIf { it.isNotBlank() }
                 ?: serverNameHint ?: PairingInvite.hostOf(baseUrl),
             endpoints = endpoints,
+            e2e = E2EDescriptor.from(answer.opt("e2e")),
         )
     }
 
     fun health(): JSONObject = JSONObject(request("GET", "/api/health", null) ?: "{}")
+
+    /** Shared by ordinary requests and the SSE stream. The loopback header is
+     *  the proxy's only admission check; Connection: close keeps one HTTP head
+     *  per yamux stream. */
+    internal fun applyHeaders(connection: HttpURLConnection) {
+        connection.setRequestProperty("User-Agent", "OpenMausBot-Android/1.0")
+        token?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
+        val name = loopbackHeaderName
+        val value = loopbackHeaderValue
+        if (name != null && value != null) {
+            connection.setRequestProperty(name, value)
+            connection.setRequestProperty("Connection", "close")
+        }
+    }
 
     private fun open(method: String, path: String): HttpURLConnection {
         val url = URL(baseUrl + path)
@@ -108,8 +130,7 @@ class ApiClient(
         connection.connectTimeout = TimeUnit.SECONDS.toMillis(12).toInt()
         connection.readTimeout = TimeUnit.SECONDS.toMillis(30).toInt()
         connection.setRequestProperty("Accept", "application/json")
-        connection.setRequestProperty("User-Agent", "OpenMausBot-Android/1.0")
-        token?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
+        applyHeaders(connection)
         return connection
     }
 
@@ -145,6 +166,7 @@ class ApiClient(
         val deviceId: String,
         val serverName: String,
         val endpoints: List<String>,
+        val e2e: E2EDescriptor? = null,
     )
 
     /** Server-sent events. `onFrame` receives each JSON payload; `onCursor`
@@ -210,8 +232,7 @@ class ApiClient(
             conn.readTimeout = 0
             conn.setRequestProperty("Accept", "text/event-stream")
             conn.setRequestProperty("Cache-Control", "no-cache")
-            conn.setRequestProperty("User-Agent", "OpenMausBot-Android/1.0")
-            client.token?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
+            client.applyHeaders(conn)
             lastEventId?.let { conn.setRequestProperty("Last-Event-ID", it) }
             val status = conn.responseCode
             if (status !in 200..299) {

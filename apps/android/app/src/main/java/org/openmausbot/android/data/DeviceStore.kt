@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
+import org.openmausbot.android.e2e.E2EDescriptor
 
 /** Saved pairing trust. The device token is a revocable bearer credential and
  *  lives in app-private storage, never in the transcript or in a backup. */
@@ -76,6 +77,9 @@ class DeviceStore(context: Context) {
                         } ?: emptyList(),
                         lastCursor = json.optString("lastCursor").takeIf { it.isNotBlank() },
                         lastUsedAt = json.optLong("lastUsedAt"),
+                        e2e = json.optJSONObject("e2e")?.let { E2EDescriptor.parse(it) }
+                            ?: json.optString("e2e").takeIf { it.isNotBlank() }
+                                ?.let { E2EDescriptor.parse(it) },
                     )
                 }
             }
@@ -94,6 +98,7 @@ class DeviceStore(context: Context) {
                     put("endpoints", JSONArray(computer.endpoints))
                     put("lastCursor", computer.lastCursor ?: "")
                     put("lastUsedAt", computer.lastUsedAt)
+                    computer.e2e?.let { put("e2e", it.toJson()) }
                 }
             )
         }

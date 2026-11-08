@@ -316,4 +316,5 @@ data class PairedComputer(
     val endpoints: List<String> = emptyList(),
     val lastCursor: String? = null,
     val lastUsedAt: Long = 0,
+    val e2e: org.openmausbot.android.e2e.E2EDescriptor? = null,
 )

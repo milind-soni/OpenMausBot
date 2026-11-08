@@ -1,6 +1,7 @@
 package org.openmausbot.android.data
 
 import android.net.Uri
+import org.openmausbot.android.e2e.E2EDescriptor
 import java.net.URI
 import java.net.URLDecoder
 
@@ -14,6 +15,7 @@ data class PairingInvite(
     val serverName: String,
     val endpoints: List<String>,
     val secretKey: String?,
+    val e2e: E2EDescriptor? = null,
 ) {
     companion object {
         private val TOKEN = Regex("^omb_pair_[A-Za-z0-9_-]{43}$")
@@ -50,6 +52,8 @@ data class PairingInvite(
                 }
                 query["endpoints"]?.let { addAll(decodeEndpoints(it)) }
             }.mapNotNull { clampOrigin(it) }.distinct()
+            val e2eText = query["e2e"]?.takeIf { it.isNotBlank() }
+            val e2e = if (e2eText != null) E2EDescriptor.parse(e2eText) ?: return null else null
             return PairingInvite(
                 baseUrl = base,
                 token = token,
@@ -57,6 +61,7 @@ data class PairingInvite(
                 serverName = query["name"]?.takeIf { it.isNotBlank() } ?: hostOf(base),
                 endpoints = endpoints,
                 secretKey = query["secretKey"],
+                e2e = e2e,
             )
         }
 

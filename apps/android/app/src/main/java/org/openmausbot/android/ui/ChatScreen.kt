@@ -83,6 +83,7 @@ fun ChatScreen(
     val subtitle = bot?.subtitle ?: group?.subtitle ?: ""
     val liveBot = bot?.let { Repo.bots.firstOrNull { b -> b.id == it.id } } ?: bot
     val messages = Repo.messages(threadId)
+    val visibleMessages = messages.filterNot { it.isChatNoise() }
     val hasMore = Repo.hasMore(threadId)
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -116,9 +117,9 @@ fun ChatScreen(
     LaunchedEffect(threadId, Repo.openThreadId) {
         Repo.openThreadId = threadId
     }
-    LaunchedEffect(threadId, messages.size) {
-        if (messages.isEmpty()) return@LaunchedEffect
-        val lastItem = messages.lastIndex + if (hasMore) 1 else 0
+    LaunchedEffect(threadId, visibleMessages.size) {
+        if (visibleMessages.isEmpty()) return@LaunchedEffect
+        val lastItem = visibleMessages.lastIndex + if (hasMore) 1 else 0
         if (!didInitialScroll) {
             runCatching { listState.scrollToItem(lastItem) }
             didInitialScroll = true
@@ -179,7 +180,7 @@ fun ChatScreen(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 10.dp),
             ) {
-                if (hasMore && messages.isNotEmpty()) {
+                if (hasMore && visibleMessages.isNotEmpty()) {
                     item {
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                             if (Repo.isLoading(threadId)) {
@@ -190,7 +191,7 @@ fun ChatScreen(
                         }
                     }
                 }
-                items(messages, key = { it.id }) { message ->
+                items(visibleMessages, key = { it.id }) { message ->
                     MessageRow(
                         message = message,
                         botId = bot?.id,
@@ -241,6 +242,10 @@ fun ChatScreen(
         BotSheet(bot = liveBot ?: bot, onDismiss = { sheet = false })
     }
 }
+
+private fun Message.isChatNoise(): Boolean =
+    kind == "digest" || kind == "activity" || kind == "notice" ||
+        tool != null || (isBot && (text.startsWith("[digest]") || text.startsWith("notice:")))
 
 @Composable
 private fun MessageRow(

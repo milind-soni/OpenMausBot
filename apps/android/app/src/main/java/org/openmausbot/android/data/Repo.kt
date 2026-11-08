@@ -9,10 +9,14 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import org.openmausbot.android.e2e.E2EClient
+import org.openmausbot.android.e2e.E2EConnection
+import org.openmausbot.android.e2e.E2EDescriptor
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** One process-wide state holder. The React app folds a single SSE stream into
@@ -44,6 +48,7 @@ object Repo {
     private val loadingThreads = mutableStateMapOf<String, Boolean>()
     private var client: ApiClient? = null
     private var stream: ApiClient.Stream? = null
+    @Volatile private var activeE2E: E2EConnection? = null
     private val connecting = AtomicBoolean(false)
     private val notifiedIds = mutableSetOf<String>()
 
@@ -67,13 +72,18 @@ object Repo {
     // ---------------------------------------------------------------- pairing
 
     suspend fun pairWith(invite: PairingInvite): Result<PairedComputer> = withContext(Dispatchers.IO) {
+        val credential = invite.token ?: invite.code
+            ?: return@withContext Result.failure(ApiException(400, "这个邀请没有配对码"))
+        val descriptor = invite.e2e
+        val pairingToken = invite.token
+        if (descriptor != null && pairingToken != null) {
+            return@withContext pairE2E(invite, pairingToken, descriptor)
+        }
         val candidates = (listOf(invite.baseUrl) + invite.endpoints).distinct()
         var lastError: Exception? = null
         for (base in candidates) {
             try {
                 val api = ApiClient(base, null)
-                val credential = invite.token ?: invite.code
-                    ?: return@withContext Result.failure(ApiException(400, "这个邀请没有配对码"))
                 val result = api.pair(credential, invite.serverName)
                 val computer = PairedComputer(
                     id = result.deviceId,
@@ -82,6 +92,7 @@ object Repo {
                     token = result.token,
                     endpoints = (invite.endpoints + result.endpoints).filter { it != base }.distinct(),
                     lastUsedAt = System.currentTimeMillis(),
+                    e2e = result.e2e ?: descriptor,
                 )
                 store.upsert(computer)
                 store.selectedId = computer.id
@@ -92,6 +103,47 @@ object Repo {
             }
         }
         Result.failure(lastError ?: ApiException(500, "无法连接这台电脑"))
+    }
+
+    /** A pairing token is also a valid PSK, so the QR's redemption can happen
+     *  inside the encrypted session; the device token is used afterwards. */
+    private suspend fun pairE2E(
+        invite: PairingInvite,
+        pairingToken: String,
+        descriptor: E2EDescriptor,
+    ): Result<PairedComputer> {
+        return try {
+            val candidates = (listOf(invite.baseUrl) + invite.endpoints).distinct()
+            val connection = E2EClient(descriptor, pairingToken, candidates).connect()
+            try {
+                val api = ApiClient(
+                    connection.baseUrl,
+                    null,
+                    connection.headerName,
+                    connection.headerValue,
+                )
+                val result = api.pair(pairingToken, invite.serverName)
+                val computer = PairedComputer(
+                    id = result.deviceId,
+                    serverName = result.serverName,
+                    baseUrl = invite.baseUrl,
+                    token = result.token,
+                    endpoints = (invite.endpoints + result.endpoints)
+                        .filter { it != invite.baseUrl }
+                        .distinct(),
+                    lastUsedAt = System.currentTimeMillis(),
+                    e2e = result.e2e ?: descriptor,
+                )
+                store.upsert(computer)
+                store.selectedId = computer.id
+                computers = store.computers
+                Result.success(computer)
+            } finally {
+                connection.close()
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun pairWithCode(baseUrl: String, code: String, name: String?): Result<PairedComputer> =
@@ -124,10 +176,26 @@ object Repo {
         computer = target
         connection = ConnectionState(ConnectionState.Phase.CONNECTING, "正在连接 ${target.serverName}…", target.serverName)
         lastError = null
-        val api = ApiClient(target.baseUrl, target.token)
-        client = api
+        val descriptor = target.e2e
         scope.launch {
+            var established: E2EConnection? = null
             try {
+                val api = if (descriptor != null) {
+                    connection = connection.copy(detail = "正在建立端到端加密…")
+                    val live = withContext(Dispatchers.IO) {
+                        E2EClient(
+                            descriptor = descriptor,
+                            credential = target.token,
+                            origins = (listOf(target.baseUrl) + target.endpoints).distinct(),
+                        ).connect()
+                    }
+                    established = live
+                    activeE2E = live
+                    ApiClient(live.baseUrl, target.token, live.headerName, live.headerValue)
+                } else {
+                    ApiClient(target.baseUrl, target.token)
+                }
+                client = api
                 val health = withContext(Dispatchers.IO) { api.health() }
                 connection = connection.copy(
                     phase = ConnectionState.Phase.CONNECTING,
@@ -135,7 +203,24 @@ object Repo {
                 )
                 refreshAll()
                 startStream(api, target.lastCursor)
+                val live = established
+                if (live != null) {
+                    scope.launch {
+                        val ended = runCatching {
+                            withContext(Dispatchers.IO) { live.session.closed.get() }
+                        }.isSuccess
+                        if (!ended) return@launch
+                        if (activeE2E !== live || computer?.id != target.id) return@launch
+                        delay(1_500)
+                        if (activeE2E !== live || computer?.id != target.id) return@launch
+                        disconnect()
+                        connect(target)
+                    }
+                }
             } catch (e: Exception) {
+                established?.close()
+                activeE2E = null
+                client = null
                 connection = ConnectionState(ConnectionState.Phase.ERROR, e.message ?: "Could not reach the computer")
                 lastError = e.message
             } finally {
@@ -166,6 +251,8 @@ object Repo {
     fun disconnect() {
         stream?.close()
         stream = null
+        activeE2E?.close()
+        activeE2E = null
         client = null
         computer = null
         bots.clear()
