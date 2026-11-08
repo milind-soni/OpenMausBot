@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AttachedFileChip } from "./AttachmentPreview";
 import { isMarkdownFile } from "./HtmlFilePreview";
-import { MARKDOWN_PREVIEW_MAX_BYTES, MarkdownFileView } from "./MarkdownFilePreview";
+import MarkdownFileContent, { MARKDOWN_PREVIEW_MAX_BYTES, MarkdownFileView } from "./MarkdownFilePreview";
 import { readTableResponse } from "./TableFilePreview";
 
 const message = { threadId: "t", messageId: "m" };
@@ -57,5 +57,15 @@ describe("MarkdownFileView (#4765)", () => {
   it("stops a file at its cap", async () => {
     const signal = new AbortController().signal;
     await expect(readTableResponse(new Response(new Uint8Array(MARKDOWN_PREVIEW_MAX_BYTES + 1)), signal, MARKDOWN_PREVIEW_MAX_BYTES)).rejects.toThrow("size");
+  });
+
+  it("keeps Save and Retry on screen while the file is still loading, wrapping for long names", () => {
+    const name = `${"a".repeat(120)}.md`;
+    const html = renderToStaticMarkup(createElement(MarkdownFileContent, { path: `/workspace/${name}`, name, message }));
+    expect(html).toContain('role="status"');
+    expect(html).toContain(`Save a copy of ${name}`);
+    expect(html).toContain(">Retry</button>");
+    expect(html).toMatch(/class="mt-3 flex flex-wrap justify-center gap-2"/);
+    expect(html).not.toMatch(/role="status"[^>]*>(?:(?!<\/span>)[^])*<button/);
   });
 });
