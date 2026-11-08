@@ -44,7 +44,7 @@ const omittedPath = (path: string) => {
 
 export function preparePackageSkill(skillMd: string, files: PortableSkillFile[]) {
   if (!portableFolderFilesSchema.safeParse(files).success) return { error: "invalid skill files" };
-  const folder = prepareSkillFolder([{ path: "SKILL.md", content: skillMd }, ...portableFilesForDisk(files)]);
+  const folder = prepareSkillFolder([{ path: "SKILL.md", content: skillMd }, ...portableFilesForDisk(files)], undefined, { recordExecutableIntent: true });
   if ("error" in folder) return folder;
   if (folder.skipped.length) return { error: "invalid skill files" };
   return { files: [{ path: "SKILL.md", content: skillMd }], parsed: folder.parsed, warnings: folder.warnings, skippedFiles: [], folder: folder.files };
@@ -66,7 +66,7 @@ export function portableSkillFilesFromMemory(input: ReadonlyArray<{ path: string
   return { files, skipped };
 }
 
-export function snapshotPortableSkill(root: string, verifiedText: () => string | null, reviewedPaths?: readonly string[], verifyFiles?: (files: readonly PortableSkillFile[]) => boolean): (PortableSkillFiles & { instructions: string }) | null {
+export function snapshotPortableSkill(root: string, verifiedText: () => string | null, reviewedPaths?: readonly string[], verifyFiles?: (files: readonly PortableSkillFile[]) => boolean, executablePaths?: readonly string[] | null): (PortableSkillFiles & { instructions: string }) | null {
   let fd: number | null = null;
   try {
     if (!lstatSync(root).isDirectory()) return null;
@@ -78,16 +78,18 @@ export function snapshotPortableSkill(root: string, verifiedText: () => string |
     const bytes = readBoundedSkillDescriptor(fd, before.size), after = fstatSync(fd);
     if (!bytes || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) return null;
     const instructions = decoder.decode(bytes);
-    const contents = readPortableSkillFiles(root, reviewedPaths);
+    const contents = readPortableSkillFiles(root, reviewedPaths, executablePaths);
     if (!contents || (verifyFiles && !verifyFiles(contents.files)) || verifiedText() !== instructions || verifiedText() !== instructions) return null;
     return { instructions, ...contents };
   } catch { return null; } finally { if (fd !== null) closeSync(fd); }
 }
 
 /** Reads bounded files without following links; changed directories or files refuse the snapshot. */
-export function readPortableSkillFiles(root: string, reviewedPaths?: readonly string[]): PortableSkillFiles | null {
+export function readPortableSkillFiles(root: string, reviewedPaths?: readonly string[], executablePaths?: readonly string[] | null): PortableSkillFiles | null {
   const files: PortableSkillFile[] = [], skipped: PortableSkillSkip[] = [];
   const reviewed = reviewedPaths && new Set(reviewedPaths);
+  const executable = executablePaths && new Set(executablePaths);
+  if (executable && (executable.size !== executablePaths!.length || (reviewed && [...executable].some((path) => !reviewed.has(path))))) return null;
   let visited = 0, bytes = 0, sourceBytes = 0, failed = false;
   const skip = (path: string, reason: PortableSkillSkip["reason"]) => skipped.push({ path: omittedPath(path), reason });
   const walk = (directory: string, prefix: string): void => {
@@ -134,7 +136,8 @@ export function readPortableSkillFiles(root: string, reviewedPaths?: readonly st
           const data = readBoundedSkillDescriptor(fd, info.size);
           const after = fstatSync(fd);
           if (!data || after.size !== info.size || after.mtimeMs !== info.mtimeMs || after.ctimeMs !== info.ctimeMs) { failed = true; continue; }
-          const candidate = portableFile(path, data, Boolean(info.mode & 0o100));
+          if (process.platform === "win32" && executablePaths === null) { failed = true; continue; }
+          const candidate = portableFile(path, data, process.platform === "win32" && executable ? executable.has(path) : Boolean(info.mode & 0o100));
           if (!candidate) { skip(path, "skill_file_type"); continue; }
           if (!portableFolderFilesSchema.safeParse([...files, candidate]).success) { skip(path, "skill_file_limit"); continue; }
           files.push(candidate); bytes += data.length;

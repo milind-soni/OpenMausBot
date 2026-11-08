@@ -22,7 +22,7 @@ import {
 import { pair, partHash, sha256Hex, skillReleaseValue, type PartPair, type TeamPart } from "./package-parts.ts";
 import { storedPresetObject, type StoredPreset } from "./presets.ts";
 import { applyUpdates, handleWithdrawn, type ReleaseContext } from "./org-library-releases.ts";
-import { createOrgSkillRetry } from "./org-skill-retry.ts";
+import { createOrgSkillRetry, onPendingOrgSkillRemoval } from "./org-skill-retry.ts";
 import type { RoutineManager } from "./routines.ts";
 import type { SkillListing, SkillPackageStamp } from "./skills.ts";
 import { sectionKey, type InstalledPackageMetadata, type Store, type StoreChange } from "./store.ts";
@@ -318,6 +318,7 @@ export class OrgLibrary {
   private lastPosted: OrgLibraryStateMessage | null = null;
   private importing: string | null = null;
   private readonly unsubscribe: () => void;
+  private readonly unsubscribeRemoval: () => void;
 
   constructor(deps: OrgLibraryDeps) {
     this.deps = deps;
@@ -331,11 +332,12 @@ export class OrgLibrary {
         catch (error) { console.error(`[org-library] could not retry skill synchronization: ${error instanceof Error ? error.message : String(error)}`); this.skillRetry.schedule(); }
       });
     } });
+    this.unsubscribeRemoval = onPendingOrgSkillRemoval((botId) => { if (deps.store.bots.some((bot) => bot.id === botId)) this.skillRetry.schedule(); });
     if (!this.skillRetry.recover()) this.skillRetry.schedule();
   }
 
   dispose(): void {
-    this.unsubscribe();
+    this.unsubscribe(); this.unsubscribeRemoval();
     if (this.recheck) clearTimeout(this.recheck);
     this.skillRetry.dispose();
   }

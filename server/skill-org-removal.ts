@@ -1,5 +1,9 @@
 import { join } from "node:path";
 import type { SkillManifestEntry } from "./skills.ts";
+import { canonicalJson } from "../shared/package-format.ts";
+import { partHash, skillReleaseValue } from "./package-parts.ts";
+import { readInstalledSkillBundle } from "./portable-skill-private.ts";
+import { notifyPendingOrgSkillRemoval } from "./org-skill-retry.ts";
 import { retireUnchangedSkillRoot, skillRootHasExpectedContent, skillRootIdentity } from "./skill-retirement.ts";
 import { nativeSkillLinksMayReferTo } from "./skill-native-reference.ts";
 import { taskSkillsMayReferTo } from "./skill-task-references.ts";
@@ -32,16 +36,23 @@ export function removeOrganizationSkill(botId: string, name: string, storage: St
   }
   let pending = entry.pendingRemoval;
   if (!pending) {
+    if (process.platform === "win32" && entry.filesSha256 && !entry.executableFiles) {
+      return { error: "the existing Windows skill has no recorded executable intent; its folder needs manual recovery before removal" };
+    }
     const directory = storage.skillDirectory(botId, name, entry), identity = directory && skillRootIdentity(directory);
-    if (!directory || !identity || !entry.package || !skillRootHasExpectedContent(directory, entry.package.w)) {
+    const unstamped = entry.package ? null : readInstalledSkillBundle(botId, name);
+    const hash = entry.package?.w ?? (unstamped && partHash(skillReleaseValue(unstamped)));
+    if (!directory || !identity || !hash || !skillRootHasExpectedContent(directory, hash, entry.executableFiles)) {
       return { error: "the skill folder changed; move it before removing this skill" };
     }
-    pending = { identity, hash: entry.package.w, ...(entry.storageRevision ? { revision: entry.storageRevision } : {}) };
+    pending = { identity, hash, ...(entry.storageRevision ? { revision: entry.storageRevision } : {}),
+      ...(entry.executableFiles ? { executableFiles: [...entry.executableFiles] } : {}) };
     entry.enabled = false;
     entry.pendingRemoval = pending;
     try { storage.writeManifest(botId, manifest); }
     catch { return { error: "the skill removal could not be recorded safely" }; }
   }
+  notifyPendingOrgSkillRemoval(botId);
   const directory = pending.revision ? join(root, ".revisions", pending.revision) : join(root, name);
   try { if (!storage.syncSkillLinks(botId, { onlyName: name }) || nativeSkillLinksMayReferTo(botId, name, directory)) return { error: "the skill removal is waiting for native links to synchronize" }; }
   catch { return { error: "the skill removal is waiting for native links to synchronize" }; }
@@ -51,7 +62,7 @@ export function removeOrganizationSkill(botId: string, name: string, storage: St
   const retired = (options.retire ?? retireUnchangedSkillRoot)(directory, pending, storage.skillStateDir(botId));
   if ("error" in retired) return retired;
   const latest = storage.readManifest(botId), now = latest[name];
-  if (!now?.pendingRemoval || JSON.stringify(now.pendingRemoval) !== JSON.stringify(pending)) return { error: "the skill changed during removal" };
+  if (!now?.pendingRemoval || canonicalJson(now.pendingRemoval) !== canonicalJson(pending)) return { error: "the skill changed during removal" };
   delete latest[name];
   try { storage.writeManifest(botId, latest); }
   catch { return { error: "the completed skill removal needs to be recorded" }; }

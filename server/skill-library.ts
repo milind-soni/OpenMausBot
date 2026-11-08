@@ -159,6 +159,7 @@ export interface SkillLibraryEntry {
   /** The files beside SKILL.md and skillFolderDigest over them; absent for a skill that is SKILL.md alone. */
   files?: string[];
   filesSha256?: string;
+  executableFiles?: string[];
   github?: GitHubSkillOrigin;
   /** Replaced descriptions, oldest first, with when each was replaced, so a running conversation keeps its prompt. */
   descriptionHistory?: Array<{ description: string; until: number }>;
@@ -277,7 +278,7 @@ function libraryContentMatches(root: string, entry: SkillLibraryEntry): boolean 
     const file = join(librarySkillDirectory(root, entry.name), "SKILL.md");
     const bytes = readBoundedSkillFile(file, SKILL_FILE_MAX_BYTES);
     if (!bytes || sha256Hex(bytes.toString("utf8")) !== entry.sha256) return false;
-    return !entry.filesSha256 || skillFolderDigest(librarySkillDirectory(root, entry.name), entry.files ?? []) === entry.filesSha256;
+    return !entry.filesSha256 || skillFolderDigest(librarySkillDirectory(root, entry.name), entry.files ?? [], { executablePaths: entry.executableFiles }) === entry.filesSha256;
   } catch {
     return false;
   }
@@ -385,6 +386,7 @@ export function installLibrarySkill(input: {
     if ("error" in stored) return stored;
     entry.files = input.files.map((file) => file.path);
     entry.filesSha256 = stored.filesSha256;
+    entry.executableFiles = input.files.filter((file) => file.executable).map((file) => file.path);
   } else {
     mkdirSync(librarySkillDirectory(root, input.name), { recursive: true, mode: 0o700 });
     writeFileAtomic(join(librarySkillDirectory(root, input.name), "SKILL.md"), input.instructions, { mode: 0o600 });
@@ -406,8 +408,9 @@ function storeLibraryFolder(
   const staged = join(root, "skills", `.install-${name}-${randomUUID()}`);
   try {
     mkdirSync(join(root, "skills"), { recursive: true, mode: 0o700 });
-    writeSkillFolder(staged, skillMd, files);
-    const filesSha256 = skillFolderDigest(staged, files.map((file) => file.path), { remember: false });
+    const executablePaths = files.filter((file) => file.executable).map((file) => file.path);
+    writeSkillFolder(staged, skillMd, files, { recordExecutableIntent: true });
+    const filesSha256 = skillFolderDigest(staged, files.map((file) => file.path), { remember: false, executablePaths });
     if (!filesSha256) throw new Error("the stored skill folder could not be read back");
     if (entryExistsWithoutFollowing(directory)) {
       mkdirSync(join(root, "archive", "unreferenced"), { recursive: true, mode: 0o700 });
@@ -441,7 +444,8 @@ export function exportLibrarySkill(name: string, root: string = skillsLibraryRoo
   if (!entry) return null;
   const directory = librarySkillDirectory(root, name), paths = entry.files ?? [];
   return snapshotPortableSkill(directory, () => libraryContentMatches(root, entry) ? readLibrarySkillFile(name, root) : null, paths,
-    (files) => entry.filesSha256 ? skillFolderDigest(directory, paths, { captured: portableFilesForDisk(files), remember: false }) === entry.filesSha256 : paths.length === 0);
+    (files) => entry.filesSha256 ? skillFolderDigest(directory, paths, { captured: portableFilesForDisk(files), remember: false, executablePaths: entry.executableFiles }) === entry.filesSha256 : paths.length === 0,
+    entry.filesSha256 ? entry.executableFiles ?? null : []);
 }
 
 export function setLibrarySkillReviewState(

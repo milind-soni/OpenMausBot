@@ -65,13 +65,12 @@ export function ensureTaskWorkspaceWithSkills(botId: string, threadId: string, i
   };
   // Before the bot's own, so a name it now holds itself is free; after, so a name it gave up is linked this turn.
   linkImported();
-  let synchronized = false;
   try {
-    synchronized = syncTaskSkillLinks(botId, threadId);
+    syncTaskSkillLinks(botId, threadId);
   } catch (error) {
     console.warn(`[skills] linking skills into the task folder failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (!synchronized && taskHasStaleOrganizationLink(botId, threadId)) {
+  if (taskHasStaleOrganizationLink(botId, threadId)) {
     throw new Error("Skill links could not be synchronized safely; retry after the task's previous skill links are cleared.");
   }
   linkImported();

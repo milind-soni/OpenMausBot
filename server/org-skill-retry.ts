@@ -1,3 +1,16 @@
+const removalListeners = new Set<(botId: string) => void>();
+
+export function onPendingOrgSkillRemoval(listener: (botId: string) => void): () => void {
+  removalListeners.add(listener);
+  return () => { removalListeners.delete(listener); };
+}
+
+export function notifyPendingOrgSkillRemoval(botId: string): void {
+  for (const listener of removalListeners) {
+    try { listener(botId); } catch (error) { console.warn(`[org-library] could not schedule skill removal recovery: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+}
+
 type Recovery = (botId: string) => { ok: true; pending?: true } | { error: string; retryable: true };
 
 export function createOrgSkillRetry(options: {

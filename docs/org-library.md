@@ -93,13 +93,17 @@ removing or moving that skill waits until its old links are cleared. This
 staging currently requires the workspace and protected skill state
 to be on the same filesystem; an update across filesystems is refused. A change
 to a file's path, bytes or executable bit is an update; an edited, missing or extra local
-file blocks replacement of that skill. Cleanup deletes an old folder only
-while its contents are unchanged; a changed folder is kept for you to move.
+file blocks replacement of that skill. On Windows, protected metadata carries
+reviewed executable intent through updates and cleanup; an older copy without
+that metadata needs manual recovery rather than guessing. Cleanup deletes an old
+folder only while its contents are unchanged; a changed folder is kept for you to move.
 If deletion stops partway, the remaining folder and its recovery record stay
 in protected skill state and cleanup reports that they need attention.
 If an organization's active skill folder has changed, removal is refused and
-the folder is kept for recovery, including before its first update. A partial
-removal remains disabled and records the recovery folder until cleanup finishes.
+the folder is kept for recovery, including before its first update and for an
+organization-sourced skill without a release stamp. A partial removal remains
+disabled and records the recovery folder until cleanup finishes; a removal
+waiting for a task link is retried after that link clears, without a new catalog.
 A task or legacy workspace whose old link cannot be synchronized cannot start
 its next turn until that link is cleared. An edited retained revision is kept
 for recovery without blocking updates to other skills.

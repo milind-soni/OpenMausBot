@@ -384,7 +384,7 @@ export function exportImportedSkill(name: string) {
   const entry = readImportedSkills()[name], directory = join(IMPORTED_SKILLS_DIR, name);
   if (!entry) return null;
   return snapshotPortableSkill(directory, () => readImportedSkillFile(name), undefined,
-    (files) => folderDigest(directory, files)?.sha256 === entry.filesSha256);
+    (files) => folderDigest(directory, files)?.sha256 === entry.filesSha256, null);
 }
 
 /** One bot's switch. Off stays off whatever is brought in later, and out of its search; on puts it in the bot's list and,

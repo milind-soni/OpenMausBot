@@ -36,6 +36,8 @@ import { workspaceDir } from "./workspace.ts";
 import { preparePackageSkill } from "./portable-skill-files.ts";
 import { readBoundedSkillFile } from "./bounded-skill-read.ts";
 import type { PackageSkill } from "../shared/package-format.ts";
+import type { SkillPackageStamp } from "./package-parts.ts";
+export type { SkillPackageStamp } from "./package-parts.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 
 export {
@@ -67,6 +69,7 @@ export interface SkillManifestEntry {
   /** An import's files beside SKILL.md, and skillFolderDigest over them. */
   files?: string[];
   filesSha256?: string;
+  executableFiles?: string[];
   github?: GitHubSkillOrigin;
   /** Replay guard for a crash between promotion and card settlement. Never exposed to agents. */
   appliedStageId?: string;
@@ -76,15 +79,6 @@ export interface SkillManifestEntry {
   pendingRetirements?: Array<RetiredSkillRoot & { revision?: string }>;
   pendingRemoval?: RetiredSkillRoot & { revision?: string };
   package?: SkillPackageStamp;
-}
-
-export interface SkillPackageStamp {
-  installId: string;
-  key: string;
-  release: string;
-  r: string;
-  w: string;
-  via?: "preset";
 }
 
 interface SkillManifest {
@@ -106,9 +100,9 @@ const skillManifestEntrySchema = z.object({
   github: githubSkillOriginSchema.optional(),
   appliedStageId: z.string().optional(),
   storageRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-  retiredRoot: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
-  pendingRetirements: z.array(z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), revision: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict()).max(32).optional(),
-  pendingRemoval: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), revision: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict().optional(),
+  retiredRoot: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), executableFiles: skillFolderRecordSchema.executableFiles }).strict().optional(),
+  pendingRetirements: z.array(z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), executableFiles: skillFolderRecordSchema.executableFiles, revision: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict()).max(32).optional(),
+  pendingRemoval: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), executableFiles: skillFolderRecordSchema.executableFiles, revision: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict().optional(),
   package: z.object({
     installId: z.string().regex(/^[a-f0-9]{32}$/),
     key: z.string().min(1).max(64),
@@ -230,7 +224,7 @@ function readManifest(botId: string): SkillManifest {
   for (const [name, entry] of Object.entries(legacy)) {
     // No workspace-authored bit may carry enablement into secure state.
     const {
-      appliedStageId: _appliedStageId,
+      appliedStageId: _appliedStageId, executableFiles: _executableFiles,
       storageRevision: _storageRevision, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements, pendingRemoval: _pendingRemoval,
       ...visible
     } = entry;
@@ -483,7 +477,7 @@ function skillContentMatches(botId: string, name: string, entry: SkillManifestEn
     const file = join(directory, "SKILL.md");
     const bytes = readBoundedSkillFile(file, SKILL_FILE_MAX_BYTES);
     if (!bytes || createHash("sha256").update(bytes).digest("hex") !== entry.sha256) return false;
-    if (entry.filesSha256 && skillFolderDigest(directory, entry.files ?? []) !== entry.filesSha256) return false;
+    if (entry.filesSha256 && skillFolderDigest(directory, entry.files ?? [], { executablePaths: entry.executableFiles }) !== entry.filesSha256) return false;
     if (!entry.referencesSha256) return true;
     const references = readReferenceFiles(directory);
     return references !== null && skillReferencesSha256(references) === entry.referencesSha256;
@@ -492,7 +486,7 @@ function skillContentMatches(botId: string, name: string, entry: SkillManifestEn
   }
 }
 function skillListing(botId: string, name: string, entry: SkillManifestEntry): SkillListing {
-  const { appliedStageId, storageRevision: _storageRevision, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements, pendingRemoval: _pendingRemoval, package: _package, ...visible } = entry;
+  const { appliedStageId, storageRevision: _storageRevision, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements, pendingRemoval: _pendingRemoval, executableFiles: _executableFiles, package: _package, ...visible } = entry;
   const intact = skillContentMatches(botId, name, entry);
   return {
     name,
@@ -533,7 +527,7 @@ export function readSkillFile(botId: string, name: string): string | null {
 
 /** The whole folder comes in, within the limits; what is left out is reported in `skippedFiles`. */
 export function installSkill(botId: string, source: string, files: readonly SkillFolderFile[], github?: GitHubSkillOrigin): SkillListing | { error: string } {
-  const folder = prepareSkillFolder(files);
+  const folder = prepareSkillFolder(files, undefined, { recordExecutableIntent: true });
   if ("error" in folder) return folder;
   const { skillMd: content, parsed, warnings, skipped } = folder;
   const prepared = { files: [{ path: "SKILL.md", content }], parsed, warnings, skippedFiles: skipped.map((file) => file.path), folder: folder.files };
@@ -807,8 +801,9 @@ function commitNewSkillFiles(
   if (entryExistsWithoutFollowing(target)) throw new Error(`skill path already exists: ${name}`);
   let published = false;
   try {
-    writeSkillFolder(staged, files[0]!.content, files.slice(1));
-    const filesSha256 = skillFolderDigest(staged, files.slice(1).map((file) => file.path), { remember: false });
+    const executablePaths = files.slice(1).filter((file) => file.executable).map((file) => file.path);
+    writeSkillFolder(staged, files[0]!.content, files.slice(1), { recordExecutableIntent: true });
+    const filesSha256 = skillFolderDigest(staged, files.slice(1).map((file) => file.path), { remember: false, executablePaths });
     if (directoryEntryState(root) !== "directory" || entryExistsWithoutFollowing(target)) {
       throw new Error("the workspace skills path changed during installation");
     }
@@ -886,7 +881,7 @@ function installPreparedSkill(
   try {
     commitNewSkillFiles(botId, name, prepared.folder ? [...prepared.files, ...prepared.folder] : prepared.files, (filesSha256) => {
       if (!filesSha256) throw new Error("the stored skill could not be read back");
-      if (prepared.folder?.length) Object.assign(entry, { files: prepared.folder.map((file) => file.path), filesSha256 });
+      if (prepared.folder?.length) Object.assign(entry, { files: prepared.folder.map((file) => file.path), filesSha256, executableFiles: prepared.folder.filter((file) => file.executable).map((file) => file.path) });
       manifest[name] = entry;
       writeManifest(botId, manifest);
     });
@@ -1336,6 +1331,7 @@ export interface MigratableSkillCopy {
   package?: SkillPackageStamp;
   files?: string[];
   filesSha256?: string;
+  executableFiles?: string[];
   referencesSha256?: string;
   retiredRoot?: RetiredSkillRoot;
   pendingRetirement?: boolean;
@@ -1355,7 +1351,7 @@ export function listMigratableSkills(botId: string, onlyName?: string, checkInte
       ...(entry.license ? { license: entry.license } : {}),
       ...(entry.compatibility ? { compatibility: entry.compatibility } : {}),
       ...(entry.package ? { package: { ...entry.package } } : {}),
-      ...(entry.filesSha256 ? { files: [...entry.files ?? []], filesSha256: entry.filesSha256 } : {}),
+      ...(entry.filesSha256 ? { files: [...entry.files ?? []], filesSha256: entry.filesSha256, ...(entry.executableFiles ? { executableFiles: [...entry.executableFiles] } : {}) } : {}),
       ...(entry.referencesSha256 ? { referencesSha256: entry.referencesSha256 } : {}),
       ...(entry.retiredRoot ? { retiredRoot: { ...entry.retiredRoot } } : {}),
       ...(entry.pendingRetirements?.length || entry.pendingRemoval ? { pendingRetirement: true } : {}),

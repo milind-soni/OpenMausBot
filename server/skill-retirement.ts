@@ -7,7 +7,7 @@ import { partHash, skillReleaseValue } from "./package-parts.ts";
 import { snapshotPortableSkill } from "./portable-skill-files.ts";
 import { readBoundedSkillFile } from "./bounded-skill-read.ts";
 
-export interface RetiredSkillRoot { identity: string; hash: string }
+export interface RetiredSkillRoot { identity: string; hash: string; executableFiles?: string[] }
 
 function directoryState(directory: string): "directory" | "missing" | "unsafe" {
   try { const stat = lstatSync(directory); return stat.isDirectory() && !stat.isSymbolicLink() ? "directory" : "unsafe"; }
@@ -30,8 +30,8 @@ function readSkillText(directory: string): string | null {
   } catch { return null; }
 }
 
-export function skillRootHasExpectedContent(directory: string, expected: string): boolean {
-  const snapshot = snapshotPortableSkill(directory, () => readSkillText(directory));
+export function skillRootHasExpectedContent(directory: string, expected: string, executableFiles?: readonly string[]): boolean {
+  const snapshot = snapshotPortableSkill(directory, () => readSkillText(directory), undefined, undefined, executableFiles ?? null);
   return Boolean(snapshot && !snapshot.skipped.length && partHash(skillReleaseValue(snapshot)) === expected);
 }
 
@@ -85,7 +85,7 @@ export function retireUnchangedSkillRoot(
   const parentId = parentState === "directory" ? skillRootIdentity(parent) : null;
   let justMoved = false;
   if (movedState === "missing") {
-    if (!parentId || skillRootIdentity(directory) !== retired.identity || !skillRootHasExpectedContent(directory, retired.hash)) return changed;
+    if (!parentId || skillRootIdentity(directory) !== retired.identity || !skillRootHasExpectedContent(directory, retired.hash, retired.executableFiles)) return changed;
     if (directoryState(marker) !== "missing" && readReceipt() !== record) return recoveryError;
     try {
       // Persist the original identity before the move so a crash leaves an attributable recovery path.
@@ -105,7 +105,7 @@ export function retireUnchangedSkillRoot(
   if (stableIdentity(skillRootIdentity(moved)) !== stableIdentity(retired.identity) ||
     stableIdentity(skillRootIdentity(stateDir)) !== stableIdentity(stateId) ||
     stableIdentity(skillRootIdentity(quarantine)) !== stableIdentity(quarantineId) ||
-    readReceipt() !== record || !skillRootHasExpectedContent(moved, retired.hash)) {
+    readReceipt() !== record || !skillRootHasExpectedContent(moved, retired.hash, retired.executableFiles)) {
     // A partial deletion cannot be re-verified; retain it for explicit recovery, never delete blindly.
     if (justMoved) restore();
     return recoveryError;

@@ -1032,6 +1032,31 @@ describe("a newer release of an added team", () => {
     expect(app.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]!.enabled).toBe(true);
   });
 
+  it.each(["unchanged", "edited", "added"])("safely removes an unstamped organization-source skill when %s", async (change) => {
+    const { app, botOf } = await addedTeam(), lead = botOf("lead"), name = "unstamped-skill";
+    const text = `---\nname: ${name}\ndescription: A saved default.\n---\n\nFollow the guide.\n`;
+    expect(app.skills.installSkill(lead.id, "org:fixture@1.0.0", [{ path: "SKILL.md", content: text },
+      { path: "references/guide.md", content: "Reviewed guide.\n" }])).not.toHaveProperty("error");
+    expect(app.skills.setSkillEnabled(lead.id, name, true)).toMatchObject({ enabled: true });
+    const directory = app.skills.listMigratableSkills(lead.id, name)[0]!.directory!;
+    const file = change === "edited" ? join(directory, "references", "guide.md") : join(directory, "notes.md");
+    if (change !== "unchanged") writeFileSync(file, "local work\n");
+    const result = app.skills.removeSkill(lead.id, name);
+    if (change === "unchanged") { expect(result).toEqual({ removed: true }); expect(existsSync(directory)).toBe(false); }
+    else { expect(result).toHaveProperty("error", expect.stringContaining("folder changed")); expect(readFileSync(file, "utf8")).toBe("local work\n"); }
+  });
+
+  it("retries a pending removal after a task link clears without another catalog", async () => {
+    const { app, botOf } = await addedTeam(), lead = botOf("lead");
+    const { ensureTaskWorkspaceWithSkills } = await import("./skill-task-links.ts");
+    const folder = ensureTaskWorkspaceWithSkills(lead.id, "removal-task"), link = join(folder, ".claude", "skills", "pricing-policy");
+    expect(app.skills.removeSkill(lead.id, "pricing-policy")).toHaveProperty("error", expect.stringContaining("waiting for task links"));
+    expect(app.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]).toMatchObject({ enabled: false, pendingRemoval: expect.any(Object) });
+    ensureTaskWorkspaceWithSkills(lead.id, "removal-task");
+    expect(existsSync(link)).toBe(false);
+    await vi.waitFor(() => expect(app.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]).toBeUndefined());
+  });
+
   it("retains removal state and the quarantine after a partial cleanup and restart", async () => {
     const bundle = release("full-team.v2.json", (doc) => {
       doc.package.skills.version = 2;
@@ -1188,6 +1213,25 @@ describe("a newer release of an added team", () => {
     for (const family of [".claude", ".agents", ".grok"]) rmSync(join(folder, family, "skills", "pricing-policy"));
     expect(ensureTaskWorkspaceWithSkills(lead.id, thread)).toBe(folder);
     expect(readFileSync(join(folder, ".claude", "skills", "pricing-policy", "SKILL.md"), "utf8")).toContain("New reviewed revision.");
+  });
+
+  it("refuses a stale disabled task link even when synchronization reports success", async () => {
+    const { app, botOf, update } = await addedTeam();
+    const lead = botOf("lead"), { ensureTaskWorkspaceWithSkills } = await import("./skill-task-links.ts");
+    await update();
+    const thread = "disabled-lost-record", folder = ensureTaskWorkspaceWithSkills(lead.id, thread);
+    const link = join(folder, ".claude", "skills", "pricing-policy"), oldText = readFileSync(join(link, "SKILL.md"), "utf8");
+    await update(release("full-team.v2.json", (doc) => {
+      NEXT(doc); doc.package.release = "1.5.0";
+      doc.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").instructions += "\nNew reviewed revision.";
+    }));
+    expect(app.skills.setSkillEnabled(lead.id, "pricing-policy", false)).toMatchObject({ enabled: false });
+    writeFileSync(join(app.DATA_DIR, "skill-state", lead.id, "task-links", `${thread}.json`), "[]");
+    expect(() => ensureTaskWorkspaceWithSkills(lead.id, thread)).toThrow("could not be synchronized safely");
+    expect(readFileSync(join(link, "SKILL.md"), "utf8")).toBe(oldText);
+    for (const family of [".claude", ".agents", ".grok"]) rmSync(join(folder, family, "skills", "pricing-policy"));
+    expect(ensureTaskWorkspaceWithSkills(lead.id, thread)).toBe(folder);
+    expect(existsSync(link)).toBe(false);
   });
 
   it("blocks a legacy workspace turn while its native link targets the previous revision", async () => {

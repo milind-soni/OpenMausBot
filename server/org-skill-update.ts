@@ -97,7 +97,11 @@ export function replaceOrganizationSkill(
   if (skillMayBeInUse(botId)) return { error: "the bot is still using its skills; the update will be retried", retryable: true };
   const recovery = recoverOrganizationSkillLinks(botId, stamp.key);
   if ("error" in recovery) return recovery;
-  const folder = prepareSkillFolder([{ path: "SKILL.md", content: skill.instructions }, ...portableFilesForDisk(skill.files ?? [])]);
+  const stored = orgSkillStorage.readManifest(botId)[stamp.key];
+  if (process.platform === "win32" && stored?.filesSha256 && !stored.executableFiles) {
+    return { error: "the existing Windows skill has no recorded executable intent; its folder needs manual recovery before updating" };
+  }
+  const folder = prepareSkillFolder([{ path: "SKILL.md", content: skill.instructions }, ...portableFilesForDisk(skill.files ?? [])], undefined, { recordExecutableIntent: true });
   if ("error" in folder) return folder;
   if (folder.skipped.length || folder.parsed.name !== stamp.key || stamp.key !== expected.key) return { error: "invalid organization skill files" };
   const root = orgSkillStorage.ensureSkillsRoot(botId);
@@ -116,11 +120,12 @@ export function replaceOrganizationSkill(
   const stagingId = identity(staging);
   if (!stagingId) return { error: "the protected staging path is not a real directory" };
   const revision = createHash("sha256").update(randomUUID()).digest("hex"), target = join(revisions, revision), prepared = join(staging, revision);
+  const executableFiles = folder.files.filter((file) => file.executable).map((file) => file.path);
   let published = false, moved = false, preparedId: string | null = null;
   try {
-    (options.writeFolder ?? writeSkillFolder)(prepared, skill.instructions, folder.files);
-    const filesSha256 = skillFolderDigest(prepared, folder.files.map((file) => file.path), { remember: false });
-    const staged = snapshotPortableSkill(prepared, () => skill.instructions);
+    (options.writeFolder ?? writeSkillFolder)(prepared, skill.instructions, folder.files, { recordExecutableIntent: true });
+    const filesSha256 = skillFolderDigest(prepared, folder.files.map((file) => file.path), { remember: false, executablePaths: executableFiles });
+    const staged = snapshotPortableSkill(prepared, () => skill.instructions, undefined, undefined, executableFiles);
     preparedId = identity(prepared);
     if (!filesSha256 || !staged || staged.skipped.length ||
       partHash(skillReleaseValue(staged)) !== partHash(skillReleaseValue(skill)) ||
@@ -128,7 +133,7 @@ export function replaceOrganizationSkill(
       identity(root) !== rootId || identity(revisions) !== revisionsId || directoryEntryState(target) !== "missing") throw new Error("the staged skill could not be verified safely");
     (options.moveRevision ?? renameSync)(prepared, target);
     moved = true;
-    const transferred = snapshotPortableSkill(target, () => skill.instructions);
+    const transferred = snapshotPortableSkill(target, () => skill.instructions, undefined, undefined, executableFiles);
     if (identity(target) !== preparedId || identity(root) !== rootId || identity(revisions) !== revisionsId ||
       !transferred || transferred.skipped.length || partHash(skillReleaseValue(transferred)) !== partHash(skillReleaseValue(skill))) throw new Error("the staged skill moved through an unsafe path");
     const manifest = orgSkillStorage.readManifest(botId), previous = manifest[stamp.key];
@@ -138,15 +143,17 @@ export function replaceOrganizationSkill(
     const oldDirectory = orgSkillStorage.skillDirectory(botId, stamp.key, previous);
     const oldIdentity = oldDirectory && skillRootIdentity(oldDirectory);
     if (!oldDirectory || !oldIdentity) return { stale: true };
-    const retiredRoot = previous.storageRevision ? previous.retiredRoot : { identity: oldIdentity, hash: expected.w };
-    const { referencesSha256: _references, files: _files, filesSha256: _digest, storageRevision: _revision,
+    const retiredRoot = previous.storageRevision ? previous.retiredRoot : { identity: oldIdentity, hash: expected.w,
+      ...(previous.executableFiles ? { executableFiles: [...previous.executableFiles] } : {}) };
+    const { referencesSha256: _references, files: _files, filesSha256: _digest, executableFiles: _executable, storageRevision: _revision,
       appliedStageId: _stage, github: _github, retiredRoot: _retiredRoot, pendingRetirements: _pending, ...rest } = previous;
     manifest[stamp.key] = { ...rest, source, description: folder.parsed.description, sha256: createHash("sha256").update(skill.instructions).digest("hex"),
       importedAt: new Date().toISOString(), license: folder.parsed.license, compatibility: folder.parsed.compatibility,
       warnings: folder.warnings, skippedFiles: [], storageRevision: revision, package: { ...stamp },
-      pendingRetirements: [...(previous.pendingRetirements ?? []), { identity: oldIdentity, hash: expected.w, ...(previous.storageRevision ? { revision: previous.storageRevision } : {}) }],
+      pendingRetirements: [...(previous.pendingRetirements ?? []), { identity: oldIdentity, hash: expected.w, ...(previous.storageRevision ? { revision: previous.storageRevision } : {}),
+        ...(previous.executableFiles ? { executableFiles: [...previous.executableFiles] } : {}) }],
       ...(retiredRoot ? { retiredRoot } : {}),
-      ...(folder.files.length ? { files: folder.files.map((file) => file.path), filesSha256 } : {}) };
+      ...(folder.files.length ? { files: folder.files.map((file) => file.path), filesSha256, executableFiles } : {}) };
     (options.writeManifest ?? orgSkillStorage.writeManifest)(botId, manifest);
     published = true;
     const switched = recoverOrganizationSkillLinks(botId, stamp.key);
@@ -159,7 +166,7 @@ export function replaceOrganizationSkill(
     if (!published && identity(state) === stateId && identity(staging) === stagingId) {
       try { rmSync(prepared, { recursive: true, force: true }); } catch {}
       const targetIdentity = moved && identity(target) === preparedId ? skillRootIdentity(target) : null;
-      if (targetIdentity) retireUnchangedSkillRoot(target, { identity: targetIdentity, hash: partHash(skillReleaseValue(skill)) }, state);
+      if (targetIdentity) retireUnchangedSkillRoot(target, { identity: targetIdentity, hash: partHash(skillReleaseValue(skill)), executableFiles }, state);
     }
   }
 }

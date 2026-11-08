@@ -139,12 +139,12 @@ export function executableSkillModeUnsupported(files: ReadonlyArray<{ executable
   return platform === "win32" && files.some((file) => file.executable);
 }
 
-export function prepareSkillFolder(files: readonly SkillFolderFile[], platform: NodeJS.Platform = process.platform): PreparedSkillFolder | { error: string } {
+export function prepareSkillFolder(files: readonly SkillFolderFile[], platform: NodeJS.Platform = process.platform, options: { recordExecutableIntent?: boolean } = {}): PreparedSkillFolder | { error: string } {
   const entries = files.map((file) => ({ ...file, kind: "file" as const, size: Buffer.byteLength(file.content) }));
   const { take, skipped } = planSkillFolder(entries);
   const skillMdFile = take.find((file) => file.path === "SKILL.md");
   if (!skillMdFile) return { error: "no SKILL.md found at that location" };
-  if (executableSkillModeUnsupported(take.filter((file) => file !== skillMdFile), platform)) return { error: EXECUTABLE_MODE_UNSUPPORTED };
+  if (!options.recordExecutableIntent && executableSkillModeUnsupported(take.filter((file) => file !== skillMdFile), platform)) return { error: EXECUTABLE_MODE_UNSUPPORTED };
   if (skillMdFile.size > SKILL_FILE_MAX_BYTES) return { error: `SKILL.md is larger than ${SKILL_FILE_MAX_BYTES / 1024}KB` };
   const skillMd = skillFileText(skillMdFile.content);
   if (skillMd === null) return { error: "SKILL.md is not UTF-8 text" };
@@ -178,8 +178,9 @@ export function writeSkillFolder(
   folder: string,
   skillMd: string | Uint8Array,
   files: ReadonlyArray<{ path: string; content: string | Uint8Array; executable?: boolean }>,
+  options: { recordExecutableIntent?: boolean } = {},
 ): void {
-  if (executableSkillModeUnsupported(files)) throw new Error(EXECUTABLE_MODE_UNSUPPORTED);
+  if (!options.recordExecutableIntent && executableSkillModeUnsupported(files)) throw new Error(EXECUTABLE_MODE_UNSUPPORTED);
   mkdirSync(folder, { mode: 0o700 });
   writeFileSync(join(folder, "SKILL.md"), skillMd, { mode: 0o600, flag: "wx" });
   for (const file of files) {
@@ -195,7 +196,7 @@ export function writeSkillFolder(
       if (directoryEntryState(at) === "missing") mkdirSync(at, { mode: 0o700 });
       if (directoryEntryState(at) !== "directory") throw new Error(`${file.path} has no real folder to go in`);
     }
-    writeFileSync(target, file.content, { mode: file.executable ? 0o700 : 0o600, flag: "wx" });
+    writeFileSync(target, file.content, { mode: process.platform === "win32" ? 0o600 : file.executable ? 0o700 : 0o600, flag: "wx" });
   }
 }
 
@@ -209,13 +210,15 @@ const digests = new Map<string, { key: string; sha256: string }>();
  * when one is missing, is not a plain file, or is reached through a link at any level. SKILL.md keeps a hash of its own.
  * Security: only the files that came in are checked, so what a run adds beside them (a cache, a lockfile) leaves the
  * skill usable; a bot can add a file there, which a script may then load, but cannot change one that came in. */
-export function skillFolderDigest(dir: string, paths: readonly string[], options: { remember?: boolean; captured?: readonly SkillFolderFile[] } = {}): string | null {
+export function skillFolderDigest(dir: string, paths: readonly string[], options: { remember?: boolean; captured?: readonly SkillFolderFile[]; executablePaths?: readonly string[] } = {}): string | null {
   if (directoryEntryState(dir) !== "directory") return null;
+  const executable = options.executablePaths && new Set(options.executablePaths);
+  if (executable && (executable.size !== options.executablePaths!.length || [...executable].some((path) => !paths.includes(path)))) return null;
   const captured = options.captured && new Map(options.captured.map((file) => [file.path, file]));
   if (captured && (captured.size !== options.captured!.length || [...captured.keys()].some((path) => !paths.includes(path)))) return null;
   const folders = new Set<string>();
   const files: Array<{ path: string; full: string; executable: boolean }> = [];
-  const stats: string[] = [];
+  const stats: string[] = process.platform === "win32" && executable ? [JSON.stringify([...executable].sort())] : [];
   for (const path of [...paths].sort()) {
     if (skillFilePathProblem(path)) return null;
     const parts = path.split("/");
@@ -233,8 +236,10 @@ export function skillFolderDigest(dir: string, paths: readonly string[], options
       return null;
     }
     if (!info.isFile()) return null;
+    const fileExecutable = (info.mode & 0o100) !== 0;
+    if (process.platform !== "win32" && executable && executable.has(path) !== fileExecutable) return null;
     stats.push(`${path}\0${info.ino}\0${info.size}\0${info.mtimeMs}\0${info.ctimeMs}\0${info.mode}`);
-    files.push({ path, full, executable: (info.mode & 0o100) !== 0 });
+    files.push({ path, full, executable: process.platform === "win32" && executable ? executable.has(path) : fileExecutable });
   }
   const key = createHash("sha256").update(stats.join("\n")).digest("hex");
   const known = digests.get(dir);
@@ -263,4 +268,5 @@ export const githubSkillOriginSchema = z.object({
 export const skillFolderRecordSchema = {
   files: z.array(z.string()).max(SKILL_FOLDER_LIMITS.files).optional(),
   filesSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  executableFiles: z.array(z.string().max(2048)).max(SKILL_FOLDER_LIMITS.files).optional(),
 };

@@ -9,15 +9,16 @@ export function exportPrivateSkill(botId: string, name: string) {
   if (!source?.directory) return null;
   const references = source.files ?? readSkillReferences(botId, name)?.map((file) => file.path);
   if (!references) return null;
+  const executablePaths = source.filesSha256 ? source.executableFiles ?? null : [];
   return snapshotPortableSkill(source.directory, () => {
     const current = listMigratableSkills(botId, name)[0];
     return current?.intact && current.directory === source.directory ? readSkillFile(botId, name) : null;
   }, references, (files) => {
     const captured = portableFilesForDisk(files);
-    if (source.filesSha256) return skillFolderDigest(source.directory!, references, { captured, remember: false }) === source.filesSha256;
+    if (source.filesSha256) return skillFolderDigest(source.directory!, references, { captured, remember: false, executablePaths: source.executableFiles }) === source.filesSha256;
     if (source.referencesSha256) return captured.every((file) => !file.executable) && skillReferencesSha256(captured) === source.referencesSha256;
     return references.length === 0;
-  });
+  }, executablePaths);
 }
 
 export function readInstalledSkillBundle(botId: string, name: string): Pick<PackageSkill, "instructions" | "files"> | null {

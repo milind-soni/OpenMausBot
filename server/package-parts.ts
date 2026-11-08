@@ -12,6 +12,12 @@ import type {
 } from "../shared/package-format.ts";
 
 export interface PartPair { r: string; w: string }
+export interface SkillPackageStamp extends PartPair {
+  installId: string;
+  key: string;
+  release: string;
+  via?: "preset";
+}
 
 export const AGENT_PARTS = ["name", "title", "description", "soul", "look", "playbooks", "skills", "connections", "approval"] as const;
 export type AgentPart = typeof AGENT_PARTS[number];

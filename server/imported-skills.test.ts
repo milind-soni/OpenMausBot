@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -34,7 +34,7 @@ function input(name: string, options: { source?: "claudeCode" | "codex"; root?: 
   return {
     name,
     skillMd: skillMd(name),
-    files: options.files ?? [{ path: "scripts/run.sh", content: "echo run\n", executable: true }],
+    files: options.files ?? [{ path: "scripts/run.sh", content: "echo run\n", executable: process.platform !== "win32" }],
     entry: {
       description: options.description ?? `Works with ${name}.`, source, root, origin: join(root, name), label: `~/${source}/${name}`,
       sha256: "0".repeat(64), warnings: options.warnings ?? [],
@@ -61,17 +61,20 @@ describe("skills brought in from this computer", () => {
     }));
     expect(store([input("deep-import", { files })])).toEqual([expect.objectContaining({ stored: true, leftOut: 0 })]);
     expect(readImportedSkillFile("deep-import")).toBe(skillMd("deep-import"));
+    for (const file of files) expect(readFileSync(join(IMPORTED_SKILLS_DIR, "deep-import", file.path), "utf8")).toBe(file.content);
   });
 
   it("exports the intact imported folder, and never falls through a changed private collision", () => {
-    store([input("bundle", { files: [{ path: "references/guide.md", content: "imported guide", executable: false }, { path: "script.sh", content: "echo hi", executable: true }] })]);
+    store([input("bundle", { files: [{ path: "references/guide.md", content: "imported guide", executable: false }, { path: "script.sh", content: "echo hi", executable: process.platform !== "win32" }] })]);
     const bot = newBot();
     const host = createSkillsLibraryHost({
       store: { bot: () => undefined, messagesFor: () => [], taskByThread: () => undefined } as unknown as Store,
       cfg: {} as AppConfig, appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
     });
     const record = { id: bot } as BotRecord;
-    expect(host.exportBotSkill(record, "bundle")).toMatchObject({ files: [
+    const imported = host.exportBotSkill(record, "bundle");
+    if (process.platform === "win32") expect(imported).toBeNull();
+    else expect(imported).toMatchObject({ files: [
       { path: "references/guide.md", content: "imported guide" }, { path: "script.sh", content: "echo hi", executable: true },
     ], skipped: [] });
     installSkill(bot, "private", [{ path: "SKILL.md", content: skillMd("bundle") }, { path: "README.md", content: "private guide" }]);

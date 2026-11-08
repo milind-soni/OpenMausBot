@@ -15,10 +15,12 @@ the department name), or from **Templates → Share**.
   The goal is a portable skill directory containing every asset needed to run
   the skill. UTF-8 text files, including HTML, nested references and scripts,
   travel with `SKILL.md`; executable bits on text files are retained on supported
-  filesystems. On Windows, imports that declare an executable bit are refused
-  because it cannot be preserved. Export cannot infer the original mode of a
-  Windows copy; an older copy may need to be reimported on a system that
-  supports it. Binary
+  filesystems. On Windows, bot-owned, library and organization imports retain
+  reviewed executable intent in protected state for hashing and later export;
+  this does not run the file or grant it execution privileges. Older Windows
+  copies and welcome imports may lack trustworthy mode information; their
+  companions cannot be exported until the folder is recovered from a trusted
+  source. Binary
   companions are left out unless you explicitly choose **Include binary skill
   files**. Binary files cannot be scanned or redacted for secrets or metadata;
   inspect them before sharing. The preview lists included and omitted files and

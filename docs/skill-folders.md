@@ -4,10 +4,14 @@ A per-bot GitHub skill import keeps the admitted folder, including nested
 references, scripts and binary assets. It starts disabled and its recorded files
 are checked before use. Links, unsafe paths, generated content and files over
 the import limits are reported as omitted. Importing a single text template or
-using the library's text import supplies only the text provided. Windows cannot
-preserve executable permission bits: imports declaring one fail rather than
-silently changing it. Existing Windows copies may have already lost that intent
-and need to be reimported on a filesystem that supports it.
+using the library's text import supplies only the text provided. On Windows,
+new bot-owned, library and organization imports record reviewed executable
+intent in protected state because the filesystem mode cannot preserve it.
+This metadata does not execute files or grant new permissions. Existing Windows
+copies without trusted mode metadata cannot be exported with companions; an
+organization copy needs manual recovery before update or removal. Welcome
+imports from this computer cannot reliably infer executable intent and still
+refuse a skill that declares executable files.
 
 The bot's own `skill_manage` authoring flow has a narrower reviewed format:
 `SKILL.md` and up to eight `references/<topic>.md` files. Sharing a learned
