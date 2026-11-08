@@ -39,13 +39,13 @@ export function AwakeBotsPicker({ limit, onSaved }: { limit: number; onSaved: ()
   return (
     <div className="mt-4 w-full text-start" data-awake-bots="">
       <p className="mb-1.5 text-[12px] text-ink-tertiary">{t("botLimit.paused.chosen", { chosen: chosen.size, count: wanted })}</p>
-      <ul className="max-h-[220px] overflow-y-auto rounded-md border border-line">
+      <ul className="max-h-[220px] overflow-y-auto rounded-md border border-hairline">
         {bots.map((bot) => {
           const on = chosen.has(bot.id);
           return (
             <li key={bot.id}>
               <button type="button" role="checkbox" aria-checked={on} disabled={!on && chosen.size >= wanted} onClick={() => toggle(bot.id)}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-[14px] hover:bg-surface-hover disabled:opacity-50">
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-[14px] hover:bg-raised disabled:opacity-50">
                 <BotAvatar bot={bot} size={22} animated={false} />
                 <span className="min-w-0 flex-1 truncate">{bot.name}</span>
                 {!on && <span className="text-[12px] text-ink-tertiary">{t("botLimit.paused.badge")}</span>}
