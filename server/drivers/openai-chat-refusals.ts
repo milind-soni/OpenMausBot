@@ -60,6 +60,21 @@ export function rejectsReasoningReplay(status: number, body: string): boolean {
     /\b(?:unsupported|not supported|unknown|unrecognized|unexpected|not permitted|not allowed)\b/i.test(message);
 }
 
+export class UnsupportedReasoningEffortError extends Error {}
+
+/** Many OpenAI-compatible servers take `reasoning_content` but not `reasoning_effort`, and refuse the
+ *  whole request rather than ignoring the field. */
+export function refusesReasoningEffort(status: number, body: string): boolean {
+  if (status !== 400 && status !== 422) return false;
+  let envelope: Record<string, unknown> | undefined;
+  try { envelope = object(JSON.parse(body)); } catch { return false; }
+  const error = object(envelope?.error);
+  if (error?.param === "reasoning_effort") return true;
+  const message = error?.message ?? envelope?.error;
+  return typeof message === "string" && /\breasoning[._]effort\b/i.test(message) &&
+    /\b(?:unsupported|not supported|unknown|unrecognized|unexpected|not permitted|not allowed|invalid)\b/i.test(message);
+}
+
 /** Groq fails a completion with `tool_use_failed` when a generated tool call is invalid: usually a
  *  tool it was not offered (gpt-oss inventing a "json" tool), sometimes arguments missing the schema. */
 export class RejectedToolCallError extends ChatProtocolError {
