@@ -246,6 +246,10 @@ deb:
   afterInstall: build/linux-after-install.sh
   afterRemove: build/linux-after-remove.sh
 
+pacman:
+  packageCategory: utils
+  fpm: ["--depends", "fuse3", "--depends", "gtk3", "--depends", "nss", "--depends", "alsa-lib", "--depends", "libcups", "--depends", "mesa"]
+
 # Static AppImage runtime: Ubuntu 24.04 can launch it without legacy FUSE 2.
 toolsets:
   appimage: "1.0.3"
