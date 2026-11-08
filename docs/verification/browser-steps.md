@@ -3,7 +3,7 @@
 What a bot's page reports (console errors, uncaught errors, failed requests)
 reaches the bot in its browser tool results, and a bot set to **Record browser
 steps** leaves a screenshot and a short note of each browser action with the
-conversation. Design: [the browser engine plan](../plans/browser-engine.md#7-page-health-and-recorded-browser-steps--implemented).
+conversation. Design: [the browser engine plan](../plans/browser-engine.md#7-page-health-and-recorded-browser-steps-implemented).
 
 ## The automated check
 
