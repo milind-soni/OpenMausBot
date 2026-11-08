@@ -676,6 +676,7 @@ export function ModelPicker({
     listed: pickerInstances,
     selection,
     bot: { name: profile.name, selection: profile.modelSelection, follows },
+    updatesBotDefault: !threadId || simpleUpdatesBotDefault,
     query,
     expanded,
     probing,

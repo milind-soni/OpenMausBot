@@ -179,7 +179,7 @@ describe("Settings in Simple mode", () => {
     fixture.rail = { available: true, hidden: false };
     const html = render();
     const appearance = html.slice(html.indexOf('data-settings-block="appearance"'), html.indexOf(">Notifications<"));
-    const order = ['role="radiogroup" aria-label="Theme"', ">Sidebar picture<", 'aria-label="Show your computers"', 'aria-label="Color my messages with the bot&#x27;s color"', ">More looks<"]
+    const order = ['role="radiogroup" aria-label="Theme"', ">Sidebar picture<", 'aria-label="Show your computers"', 'aria-label="Color my messages with the bot&#x27;s color"', ">Color themes<"]
       .map((needle) => appearance.indexOf(needle));
     expect(order.every((at) => at > -1), String(order)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));

@@ -307,7 +307,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
     return () => { observer?.disconnect(); window.removeEventListener("resize", keepOnScreen); };
   }, [menu]);
   const heading = <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-    <span dir="auto" className={cn("min-w-0 flex-1 max-w-max truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{displayTitle}</span>
+    <span dir="auto" className={cn("min-w-0 flex-1 max-w-max", panel ? "line-clamp-2 break-words" : "truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{displayTitle}</span>
     {byline && (
       <span className="min-w-0 max-w-[45%] shrink truncate font-normal text-ink-tertiary">{byline}</span>
     )}

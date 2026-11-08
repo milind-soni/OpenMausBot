@@ -54,7 +54,7 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
       data-chathead-pill
       data-tour="bot-pill"
       onClick={onToggle}
-      title={t("chat.openProfile")}
+      title={t("chat.openBotPanel")}
       aria-label={conversation ? `${label}, ${conversation}` : label}
       aria-expanded={open}
       aria-controls={open ? BOT_PANEL_ID : undefined}

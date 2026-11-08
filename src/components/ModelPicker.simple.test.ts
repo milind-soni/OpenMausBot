@@ -360,7 +360,7 @@ describe("the model picker in Simple mode", () => {
     const atDefault = region(menu(open(bot()).html), "data-simple-effort-band");
     expect(atDefault.match(/aria-pressed="true"/g)).toHaveLength(1);
     expect(atDefault).toMatch(/data-effort-auto="true" aria-pressed="true"[^>]*>Auto<\/button>/);
-    expect(atDefault).toContain('data-simple-effort-auto="true" class="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">The model decides how hard to think.</p>');
+    expect(atDefault).toContain('data-simple-effort-auto="true" class="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">Auto lets the model choose. Higher levels are slower but more careful.</p>');
   });
 
   it("names the model on the Simple chip, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
@@ -886,7 +886,7 @@ describe("a thread's picker and its bot's model", () => {
   it("says on the current model that a thread follows its bot, with no follow row to click", () => {
     const opened = open(scout(null));
     expect(list(opened).follow).toBe(false);
-    expect(list(opened).current!.meta).toBe("Scout's model");
+    expect(list(opened).current!.meta).toBe("Scout's model, used in all its chats");
     expect(menu(opened.html)).not.toContain("data-follow-bot-model");
     expect(render(scout(null)).nodes.find((node) => node.props["data-tour"] === "model")!.props.title).toContain("Uses Scout's model");
   });

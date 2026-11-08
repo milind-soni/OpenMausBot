@@ -112,9 +112,9 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
 function LooksRow({ onLooks }: { onLooks: () => void }) {
   const current = SKINS.find((skin) => skin.id === resolveSkin(useSkinChoice()))?.name;
   return (
-    <SettingRow title={t("settings.simple.looks.title")}>
+    <SettingRow title={t("settings.simple.themes.title")}>
       {current && <span data-looks-current className="me-3 text-[13px] text-ink-tertiary">{current}</span>}
-      <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.looks.change")}</button>
+      <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.themes.browse")}</button>
     </SettingRow>
   );
 }

@@ -190,7 +190,7 @@ function Thinking({ thinking, labelId }: { thinking: SimpleThinking; labelId: st
         ))}
       </div>
       <p data-simple-effort-auto={auto || undefined} className="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">
-        {auto ? t("model.simple.thinkingDefault") : t("model.simple.thinkingLevel", { level: effortLabel(levels.current!) })}
+        {auto ? t("model.simple.thinkingAuto") : t("model.simple.thinkingLevel", { level: effortLabel(levels.current!) })}
       </p>
     </div>
   );
