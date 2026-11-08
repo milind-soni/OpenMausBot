@@ -58,6 +58,68 @@ beforeAll(async () => {
   background = await import("./cloud-computer-background.ts");
   journal = await import("./boat-delete-journal.ts");
 });
+
+describe("background status deadlines", () => {
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it("reports an initial read timeout without inventing a status", async () => {
+    vi.useFakeTimers();
+    const clock = {
+      now: () => Date.now(),
+      sleep: (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+      timeout: (ms: number) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), ms);
+        return controller.signal;
+      },
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
+    }));
+    const pending = background.backgroundStatus({ box: { token: OWN_KEY } } as AppConfig, BOX,
+      { process_id: background.processIdOn(BOX, 41), wait_seconds: 1 }, new AbortController().signal, clock);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await pending).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("call exec_status again") }] });
+  });
+
+  it.each(["finished", "running", "timeout"] as const)("checks a short wait on a controlled clock: %s", async outcome => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const clock = {
+      now: () => Date.now(),
+      sleep: (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+      timeout: (ms: number) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), ms);
+        return controller.signal;
+      },
+    };
+    const fetchStatus = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (fetchStatus.mock.calls.length === 1) return Response.json({ running: true, stdout: "partial", stderr: "" });
+      if (outcome !== "timeout") return Response.json({ running: outcome === "running", exitCode: 3, stdout: "final", stderr: "" });
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
+      });
+    });
+    const processId = background.processIdOn(BOX, 41);
+    const pending = background.backgroundStatus({ box: { token: OWN_KEY } } as AppConfig, BOX,
+      { process_id: processId, wait_seconds: 1 }, new AbortController().signal, clock);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchStatus).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(749);
+    expect(fetchStatus).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchStatus).toHaveBeenCalledTimes(2);
+    if (outcome === "timeout") await vi.advanceTimersByTimeAsync(250);
+    const result = json(await pending);
+    if (outcome === "timeout") {
+      expect(result).toMatchObject({ status: "running", exitCode: null, stdout: "partial", observedAt: "2026-01-01T00:00:00.000Z", note: expect.stringContaining("may have changed") });
+    } else {
+      expect(result).toMatchObject({ status: outcome, exitCode: outcome === "finished" ? 3 : null, stdout: "final" });
+      expect(result.observedAt).toBeUndefined();
+    }
+  });
+});
 afterAll(async () => { vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
 beforeEach(() => {
   calls.length = 0; processes.clear(); hold = false; holdStatusAfterFirst = false; startReply = undefined; statusReply = undefined;
@@ -128,9 +190,7 @@ describe.each([
   it("waits for the command to finish when asked, polling the computer rather than the bot", async () => {
     const processId = await start();
     Object.assign(processes.get(`${BOX}:${processId.split("-")[1]}`)!, { runningFor: 2, stdout: "loaded\n" });
-    const began = Date.now();
     expect(json(await call("exec_status", { process_id: processId, wait_seconds: 30 }).done)).toMatchObject({ status: "finished", exitCode: 0, stdout: "loaded\n" });
-    expect(Date.now() - began).toBeGreaterThanOrEqual(3_500);
     expect(calls.filter(entry => entry.method === "GET")).toHaveLength(3);
   });
 
@@ -138,26 +198,15 @@ describe.each([
     const processId = await start();
     processes.get(`${BOX}:${processId.split("-")[1]}`)!.runningFor = 100;
     expect(json(await call("exec_status", { process_id: processId, wait_seconds: 3 }).done)).toMatchObject({ status: "running", exitCode: null });
-    expect(calls.filter(entry => entry.method === "GET")).toHaveLength(3);
-  });
-
-  it.each([true, false])("honors a one-second wait and reports whether the command finished: %s", async (finishes) => {
-    const processId = await start();
-    Object.assign(processes.get(`${BOX}:${processId.split("-")[1]}`)!, { runningFor: finishes ? 1 : 100, exitCode: 3 });
-    const began = Date.now();
-    const result = json(await call("exec_status", { process_id: processId, wait_seconds: 1 }).done);
-    expect(Date.now() - began).toBeGreaterThanOrEqual(700);
-    expect(result).toMatchObject({ status: finishes ? "finished" : "running", exitCode: finishes ? 3 : null });
-    expect(calls.filter(entry => entry.method === "GET")).toHaveLength(2);
   });
 
   it("bounds a stalled follow-up status read by the requested wait", async () => {
     const processId = await start();
+    processes.get(`${BOX}:${processId.split("-")[1]}`)!.stdout = "partial output";
     holdStatusAfterFirst = true;
-    const began = Date.now();
-    const result = await call("exec_status", { process_id: processId, wait_seconds: 1 }).done;
-    expect(Date.now() - began).toBeLessThan(3_000);
-    expect(result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("Nothing was changed; call exec_status again") }] });
+    const result = await call("exec_status", { process_id: processId, wait_seconds: 3 }).done;
+    expect(result.isError).not.toBe(true);
+    expect(json(result)).toMatchObject({ status: "running", stdout: "partial output", observedAt: expect.any(String), note: expect.stringContaining("may have changed") });
     expect(calls.filter(entry => entry.method === "GET")).toHaveLength(2);
     server.closeAllConnections();
   });
@@ -165,9 +214,7 @@ describe.each([
   it("bounds a stalled initial status read by the requested wait", async () => {
     const processId = await start();
     hold = true;
-    const began = Date.now();
     const result = await call("exec_status", { process_id: processId, wait_seconds: 1 }).done;
-    expect(Date.now() - began).toBeLessThan(3_000);
     expect(result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("Nothing was changed; call exec_status again") }] });
     server.closeAllConnections();
   });

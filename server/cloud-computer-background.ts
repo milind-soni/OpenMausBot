@@ -32,6 +32,18 @@ const UNKNOWN_PROCESS = "This cloud computer has no background command with that
   + "Look at the files the command writes to see how far it got.";
 const LOST = "The cloud computer restarted or lost track of this command, so its exit code may be unknown. Look at the files it writes to see how far it got.";
 const CUT = "Only the end of the output is shown. Write long output to a file and read the part you need with exec.";
+const STALE = "The follow-up status read timed out. This is the last observed status; it may have changed. Call exec_status again.";
+
+type StatusClock = {
+  now: () => number;
+  sleep: (ms: number, signal: AbortSignal) => Promise<void>;
+  timeout: (ms: number) => AbortSignal;
+};
+const statusClock: StatusClock = {
+  now: Date.now,
+  sleep: (ms, signal) => delay(ms, undefined, { signal }),
+  timeout: ms => AbortSignal.timeout(ms),
+};
 
 const text = (value: string, isError = false): CloudComputerResult => ({ ...(isError ? { isError } : {}), content: [{ type: "text", text: value }] });
 const included = (cfg: AppConfig) => boatAccount(cfg)?.included === true;
@@ -117,7 +129,7 @@ export async function startInBackground(cfg: AppConfig, boxId: string, command: 
   return text(JSON.stringify({ processId: processIdOn(boxId, processId), status: "running", next: "It keeps running after this call, but its completion will not automatically resume this turn or notify a delegator. If its result is needed for this task, use exec_status with wait_seconds in this turn until it finishes, then check its exit code and output. If you cannot finish checking in this turn, report it as unfinished with the process_id; do not start another copy blindly." }));
 }
 
-function describeStatus(processId: string, body: any): CloudComputerResult {
+function describeStatus(processId: string, body: any, observedAt?: number): CloudComputerResult {
   const stdout = tail(body.stdout, STDOUT_TAIL_CHARS), stderr = tail(body.stderr, STDERR_TAIL_CHARS);
   const status = body.running ? "running" : body.status === "lost" ? "lost" : "finished";
   return text(JSON.stringify({
@@ -127,6 +139,7 @@ function describeStatus(processId: string, body: any): CloudComputerResult {
     stdout: stdout.text, stderr: stderr.text,
     ...(stdout.cut || stderr.cut || body.stdoutTruncated === true || body.stderrTruncated === true ? { outputCut: CUT } : {}),
     ...(status === "lost" ? { note: LOST } : {}),
+    ...(observedAt === undefined ? {} : { observedAt: new Date(observedAt).toISOString(), note: STALE }),
   }));
 }
 
@@ -135,14 +148,16 @@ export async function backgroundStatus(
   boxId: string,
   args: { process_id: string; wait_seconds?: number },
   signal: AbortSignal,
+  clock: StatusClock = statusClock,
 ): Promise<CloudComputerResult> {
   const processId = processIdFrom(boxId, args.process_id);
   if (processId === null) return text(OTHER_COMPUTER, true);
   const waitMs = Math.min(args.wait_seconds ?? 0, STATUS_WAIT_MAX_SECONDS) * 1_000;
-  const until = Date.now() + waitMs;
+  const until = clock.now() + waitMs;
+  let last: { body: any; observedAt: number } | undefined;
   for (;;) {
     assertBoatNotDeleting(boxId);
-    const deadline = waitMs ? AbortSignal.timeout(Math.max(1, until - Date.now())) : null;
+    const deadline = waitMs ? clock.timeout(Math.max(1, until - clock.now())) : null;
     const readSignal = deadline ? AbortSignal.any([signal, deadline]) : signal;
     let response: Response, body: any;
     try {
@@ -151,16 +166,18 @@ export async function backgroundStatus(
       readSignal.throwIfAborted();
     } catch (error) {
       signal.throwIfAborted();
-      if (deadline?.aborted) return text(STATUS_LATE, true);
+      if (deadline?.aborted) return last ? describeStatus(args.process_id, last.body, last.observedAt) : text(STATUS_LATE, true);
       throw error;
     }
     if (response.status === 404) return text(UNKNOWN_PROCESS, true);
     if (!response.ok) return text(boatErrorMessage(response.status, "Reading the command's status", body, included(cfg)), true);
     if (typeof body?.running !== "boolean") return text("The cloud computer gave an unreadable answer about this command. Call exec_status again.", true);
     if (!body.running) untrack(boxId, processId);
-    const remaining = until - Date.now();
+    const observedAt = clock.now();
+    last = { body, observedAt };
+    const remaining = until - observedAt;
     if (!body.running || remaining <= LAST_READ_WINDOW_MS) return describeStatus(args.process_id, body);
-    await delay(Math.min(POLL_MS, remaining - LAST_READ_WINDOW_MS), undefined, { signal });
+    await clock.sleep(Math.min(POLL_MS, remaining - LAST_READ_WINDOW_MS), signal);
   }
 }
 
