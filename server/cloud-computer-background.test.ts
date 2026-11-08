@@ -82,7 +82,54 @@ describe("background status deadlines", () => {
     expect(await pending).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("call exec_status again") }] });
   });
 
-  it.each(["finished", "running", "late", "slow", "timeout", "not_found", "server_error", "malformed"] as const)("checks a short wait on a controlled clock: %s", async outcome => {
+  it("does not start another read when a delayed sleep passes the deadline", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const clock = {
+      now: () => Date.now(),
+      sleep: (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms + 1_000)),
+      timeout: (ms: number) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), ms);
+        return controller.signal;
+      },
+    };
+    const fetchStatus = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ running: true, stdout: "partial", stderr: "" }));
+    const pending = background.backgroundStatus({ box: { token: OWN_KEY } } as AppConfig, BOX,
+      { process_id: background.processIdOn(BOX, 41), wait_seconds: 1 }, new AbortController().signal, clock);
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(fetchStatus).toHaveBeenCalledTimes(1);
+    expect(json(await pending)).toMatchObject({ status: "running", observedAt: "2026-01-01T00:00:00.000Z", note: expect.stringContaining("may have changed") });
+  });
+
+  it("propagates cancellation during the final wait", async () => {
+    vi.useFakeTimers();
+    const clock = {
+      now: () => Date.now(),
+      sleep: (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, ms);
+        signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+      }),
+      timeout: (ms: number) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), ms);
+        return controller.signal;
+      },
+    };
+    const fetchStatus = vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({ running: true, stdout: "", stderr: "" }));
+    const controller = new AbortController();
+    const pending = background.backgroundStatus({ box: { token: OWN_KEY } } as AppConfig, BOX,
+      { process_id: background.processIdOn(BOX, 41), wait_seconds: 1 }, controller.signal, clock);
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersToNextTimerAsync();
+    expect(fetchStatus).toHaveBeenCalledTimes(2);
+    controller.abort();
+    await rejected;
+    expect(fetchStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["finished", "running", "late", "slow", "timeout", "last_timeout", "not_found", "server_error", "malformed"] as const)("checks a short wait on a controlled clock: %s", async outcome => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
     const clock = {
@@ -99,7 +146,7 @@ describe("background status deadlines", () => {
       if (outcome === "slow") return new Promise<Response>(resolve => setTimeout(() => resolve(Response.json({ running: false, exitCode: 3, stdout: "final", stderr: "" })), 400));
       if (outcome === "not_found" || outcome === "server_error") return Response.json({ message: "unavailable" }, { status: outcome === "not_found" ? 404 : 503 });
       if (outcome === "malformed") return Response.json({});
-      if (outcome !== "timeout") return Response.json({ running: outcome === "running" || (outcome === "late" && Date.now() < Date.parse("2026-01-01T00:00:00.700Z")), exitCode: 3, stdout: "final", stderr: "" });
+      if (outcome !== "timeout" && !(outcome === "last_timeout" && fetchStatus.mock.calls.length === 3)) return Response.json({ running: outcome === "running" || outcome === "last_timeout" || (outcome === "late" && Date.now() < Date.parse("2026-01-01T00:00:00.700Z")), exitCode: 3, stdout: "final", stderr: "" });
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
       });
@@ -108,11 +155,13 @@ describe("background status deadlines", () => {
     const pending = background.backgroundStatus({ box: { token: OWN_KEY } } as AppConfig, BOX,
       { process_id: processId, wait_seconds: 1 }, new AbortController().signal, clock);
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(fetchStatus).toHaveBeenCalledTimes(2);
+    expect(fetchStatus).toHaveBeenCalledTimes(outcome === "running" || outcome === "late" || outcome === "last_timeout" ? 3 : 2);
     const raw = await pending;
     const result = json(raw);
     if (outcome === "timeout") {
       expect(result).toMatchObject({ status: "running", exitCode: null, stdout: "partial", observedAt: "2026-01-01T00:00:00.000Z", note: expect.stringContaining("may have changed") });
+    } else if (outcome === "last_timeout") {
+      expect(result).toMatchObject({ status: "running", exitCode: null, stdout: "final", observedAt: "2026-01-01T00:00:00.500Z", note: expect.stringContaining("may have changed") });
     } else if (outcome === "not_found" || outcome === "server_error" || outcome === "malformed") {
       expect(raw.isError).toBe(true);
       expect(result).toMatchObject({ error: expect.any(String), lastObserved: { processId, status: "running", observedAt: "2026-01-01T00:00:00.000Z", stdout: outcome === "server_error" ? "x".repeat(4_000) : "partial", stderr: "", note: expect.stringContaining("may have changed") } });
@@ -120,7 +169,7 @@ describe("background status deadlines", () => {
       if (outcome === "not_found") expect(result.error).toContain("no background command");
       if (outcome === "malformed") expect(result.error).toContain("unreadable answer");
     } else {
-      expect(result).toMatchObject({ status: outcome === "running" || outcome === "late" ? "running" : "finished", exitCode: outcome === "running" || outcome === "late" ? null : 3, stdout: "final" });
+      expect(result).toMatchObject({ status: outcome === "running" ? "running" : "finished", exitCode: outcome === "running" ? null : 3, stdout: "final" });
       expect(result.observedAt).toBeUndefined();
     }
   });

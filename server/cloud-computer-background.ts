@@ -32,7 +32,7 @@ const UNKNOWN_PROCESS = "This cloud computer has no background command with that
   + "Look at the files the command writes to see how far it got.";
 const LOST = "The cloud computer restarted or lost track of this command, so its exit code may be unknown. Look at the files it writes to see how far it got.";
 const CUT = "Only the end of the output is shown. Write long output to a file and read the part you need with exec.";
-const STALE = "The follow-up status read timed out. This is the last observed status; it may have changed. Call exec_status again.";
+const STALE = "No newer status was confirmed before the wait ended. This is the last observed status; it may have changed. Call exec_status again.";
 
 type StatusClock = {
   now: () => number;
@@ -169,8 +169,11 @@ export async function backgroundStatus(
   const until = clock.now() + waitMs;
   const lastReadWindow = Math.min(MAX_LAST_READ_WINDOW_MS, waitMs / 2);
   let last: { body: any; observedAt: number } | undefined;
+  let finalRead = false;
   for (;;) {
+    signal.throwIfAborted();
     assertBoatNotDeleting(boxId);
+    if (last && clock.now() >= until) return describeStatus(args.process_id, last.body, last.observedAt);
     const deadline = waitMs ? clock.timeout(Math.max(1, until - clock.now())) : null;
     const readSignal = deadline ? AbortSignal.any([signal, deadline]) : signal;
     let response: Response, body: any;
@@ -190,8 +193,12 @@ export async function backgroundStatus(
     const observedAt = clock.now();
     last = { body, observedAt };
     const remaining = until - observedAt;
-    if (!body.running || remaining <= lastReadWindow) return describeStatus(args.process_id, body);
-    await clock.sleep(Math.min(POLL_MS, remaining - lastReadWindow), signal);
+    if (!body.running || remaining <= 0 || finalRead) return describeStatus(args.process_id, body);
+    const inLastWindow = remaining <= lastReadWindow;
+    finalRead = inLastWindow;
+    await clock.sleep(inLastWindow ? Math.max(1, Math.floor(remaining / 2)) : Math.min(POLL_MS, remaining - lastReadWindow), signal);
+    signal.throwIfAborted();
+    if (clock.now() >= until) return describeStatus(args.process_id, body, observedAt);
   }
 }
 
