@@ -934,6 +934,28 @@ describe("OpenCode after a login added since its process started", () => {
 describe("OpenCode catalog probes", () => {
   afterEach(() => resetOpenCodeModelCache());
 
+  const rpcLines = (file: string) => readFileSync(file, "utf8").trim().split("\n")
+    .map((line) => JSON.parse(line) as { method: string; sessionId?: string });
+
+  it("deletes the sessions it opens and those an earlier probe left behind, but not one still in use", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-delete-"));
+    try {
+      const rpc = join(scratch, "rpc.jsonl");
+      const listed = [
+        { sessionId: "ses_left_behind", updatedAt: new Date(Date.now() - 10 * 60_000).toISOString() },
+        { sessionId: "ses_other_probe", updatedAt: new Date().toISOString() },
+      ];
+      await discoverOpenCodeModels({
+        ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle",
+        FAKE_ACP_LISTED_SESSIONS: JSON.stringify(listed), FAKE_ACP_RPC_APPEND_FILE: rpc,
+      }, FAKE_CLI);
+      const deleted = rpcLines(rpc).filter((entry) => entry.method === "session/delete").map((entry) => entry.sessionId);
+      expect(deleted.sort()).toEqual(["fake-acp-session", "ses_left_behind"]);
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
   it("runs in a folder that is its own git project", async () => {
     try {
       execFileSync("git", ["--version"], { stdio: "ignore" });

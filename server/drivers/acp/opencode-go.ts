@@ -309,16 +309,32 @@ export function surveyOpenCodeEfforts(
   return surveyModelVariants(request, session, budgetMs);
 }
 
+/** OpenCode 2.2.6) keeps every ACP session, even one closed with session/close or whose process was killed, and lists
+ * it in the user's history; only session/delete removes it. A probe cut off by its timeout cannot delete its own. */
+async function deleteDiscoverySessions(
+  request: (method: string, params: unknown) => Promise<unknown>,
+  cwd: string,
+  opened: string[],
+  timeoutMs: number,
+): Promise<void> {
+  const listed = await request("session/list", { cwd }).catch(() => null) as { sessions?: unknown } | null;
+  const staleBefore = Date.now() - 2 * timeoutMs;
+  const stale = (Array.isArray(listed?.sessions) ? listed.sessions : [])
+    .filter((session): session is { sessionId: string; updatedAt?: unknown } => typeof session?.sessionId === "string")
+    .filter((session) => Date.parse(String(session.updatedAt)) < staleBefore)
+    .map((session) => session.sessionId);
+  await Promise.allSettled([...new Set([...opened, ...stale])].map((sessionId) => request("session/delete", { sessionId })));
+}
+
 /** `settleMs` keeps the process open that long after it starts, then lists again: OpenCode 2's own catalog refresh
  * reaches a running process's later sessions only. */
 export async function probeOpenCodeSession(
   cli: string,
   environment: Record<string, string | undefined>,
-  folder?: string,
   timeoutMs = DISCOVERY_TIMEOUT_MS,
   settleMs = 0,
 ): Promise<OpenCodeSessionProbe> {
-  const cwd = folder ?? await discoveryDirectory();
+  const cwd = await discoveryDirectory();
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawnCli>;
@@ -397,22 +413,36 @@ export async function probeOpenCodeSession(
       pending.set(id, { resolve: resolveRequest, reject: rejectRequest });
       write({ jsonrpc: "2.0", id, method, params });
     });
+    const opened: string[] = [];
+    const openSession = async () => {
+      const session = await request("session/new", { cwd, mcpServers: [] });
+      const sessionId = (session as { sessionId?: unknown } | null)?.sessionId;
+      if (typeof sessionId === "string") opened.push(sessionId);
+      return session;
+    };
+    const cleanUp = () => deleteDiscoverySessions(request, cwd, opened, timeoutMs);
     void (async () => {
       await request("initialize", {
         protocolVersion: 1,
         clientInfo: { name: "openmausbot", version: "0.0.0" },
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
       });
-      const session = await request("session/new", { cwd, mcpServers: [] });
+      const session = await openSession();
       listed = { session, efforts: new Map() };
       const budget = Math.min(EFFORT_SURVEY_MS, deadline - Date.now() - 1_000);
       const efforts = await surveyOpenCodeEfforts(request, session, budget);
       if (!settleMs) return { session, efforts };
       const wait = Math.min(settleMs, timeoutMs - 2_000) - (Date.now() - (deadline - timeoutMs));
       if (wait > 0) await new Promise((resolveWait) => setTimeout(resolveWait, wait));
-      const later = await request("session/new", { cwd, mcpServers: [] });
+      const later = await openSession();
       return { session: catalogFromOpenCodeSession(later) ? later : session, efforts };
-    })().then((result) => finish(null, result), (error: Error) => finish(error));
+    })().then(
+      (result) => {
+        listed = result;
+        return cleanUp().then(() => finish(null, result));
+      },
+      (error: Error) => cleanUp().then(() => finish(error)),
+    );
   });
 }
 
@@ -438,7 +468,7 @@ export async function discoverOpenCodeModels(
     : 0;
   // A listing ends long before a catalog refetch would: it reads the cache, unless it waits for OpenCode 2's own refetch.
   const listing = settleMs ? environment : { ...environment, OPENCODE_DISABLE_MODELS_FETCH: "1" };
-  const probeSession = () => probeOpenCodeSession(cli, listing, undefined, DISCOVERY_TIMEOUT_MS, settleMs);
+  const probeSession = () => probeOpenCodeSession(cli, listing, DISCOVERY_TIMEOUT_MS, settleMs);
   const readMetadata = () => runOpenCodeModelsVerbose(cli, listing).then(parseOpenCodeModels);
   let [session, verbose] = await Promise.allSettled([probeSession(), readMetadata()]);
   // Two OpenCode processes starting together in a fresh home race to create its database and one fails
