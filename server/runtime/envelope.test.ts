@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CONSENT_RULE } from "../peer-provenance.ts";
-import { composeAddition, composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, ENVELOPE_MARK, escapeEnvelope } from "./envelope.ts";
+import { composeAddition, composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, ENVELOPE_MARK, envelopeNote, escapeEnvelope } from "./envelope.ts";
 import type { Assignment, EnvelopeNames } from "./types.ts";
 
 const base: Assignment = {
@@ -470,6 +470,18 @@ describe("composeEnvelope at Full access: nothing a bot can settle waits on the 
       .endsWith('\n\nNobody was asked, at this level: go on with your default, "CSV", and say in one plain line what you chose.')).toBe(true);
     expect(composeEnvelope(assignment({ answer: "", answeredBy: { kind: "default" } }), names)
       .endsWith("\n\nNobody was asked, at this level: pick the sensible default yourself, and say in one plain line what you chose.")).toBe(true);
+  });
+
+  it("carries a long answer whole, also in the note the thread shows and on resume", () => {
+    const answer = `Use the fork. ${"You work best with a clear brief. ".repeat(120)}End of answer.`;
+    const long = assignment({ question: "Which repo?", answer, answeredBy: { kind: "bot", botId: "chief" } });
+    const chief = { ...names, answerer: "Chief" };
+    const line = `@Chief answered: "${answer.trim()}".`;
+    expect(answer.length).toBeGreaterThan(3_900);
+    const envelope = composeEnvelope(long, chief);
+    expect(envelope.endsWith(`\n\nYour question was: "Which repo?". ${line}`)).toBe(true);
+    expect(envelopeNote(envelope)).toContain(line);
+    expect(composeResume(long, chief, [])).toContain(line);
   });
 });
 
