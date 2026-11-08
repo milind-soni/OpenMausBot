@@ -14,7 +14,7 @@ describe("Details tab item row", () => {
     const [, label, trailing] = spans(markup);
     expect(label).toContain("truncate");
     expect(label).not.toContain("flex-1");
-    expect(trailing).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "justify-end", "text-right"]));
+    expect(trailing).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "justify-end", "text-end"]));
     expect(trailing).not.toContain("shrink-0");
   });
 
