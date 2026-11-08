@@ -458,8 +458,9 @@ export class EngineMemory {
 
   private order(): Waiter[] {
     const at = this.now();
-    const ahead = (waiter: Waiter) => this.personsOwn(waiter.threadId) || at - waiter.since >= BOT_TURN_GIVES_WAY_MS;
-    return [...this.queue.filter(ahead), ...this.queue.filter((waiter) => !ahead(waiter))];
+    const first: Waiter[] = [], rest: Waiter[] = [];
+    for (const waiter of this.queue) (this.personsOwn(waiter.threadId) || at - waiter.since >= BOT_TURN_GIVES_WAY_MS ? first : rest).push(waiter);
+    return [...first, ...rest];
   }
 
   private wake(): void { for (const waiter of this.queue) waiter.wake(); }
