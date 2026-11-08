@@ -16,6 +16,7 @@ import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { DefaultBotHideRow } from "../DefaultBotControls";
 import { SoulField } from "../SoulField";
 import { BotApiCard } from "../bot-settings/BotApiCard";
+import { TelegramCard } from "../bot-settings/TelegramCard";
 import { useBotApps } from "../bot-settings/useBotApps";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { useThreadApproval } from "../thread-approval";
@@ -199,6 +200,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
       </Card>
 
       <BotApiCard bot={bot} webhooksLink className="mt-3.5" />
+      <TelegramCard bot={bot} className="mt-3.5" />
 
       <DefaultBotHideRow bot={bot} />
       {approval.dialogs}

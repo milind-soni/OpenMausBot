@@ -142,6 +142,11 @@ The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
 consent, discovery failures, reconnect and disconnect using that same registry
 and a synthetic provider, without accessing a real Whop account.
 
+The [Telegram fixture](telegram.md) checks the per-bot Telegram card: a
+BotFather token refused and accepted, the `t.me` link that links the person's
+own chat, a message answered on Telegram and Disconnect, against a loopback
+stand-in for Telegram's Bot API.
+
 The [Postiz fixture](postiz.md) checks the Apps page's Postiz card in the Social
 category: Postiz Cloud's sign-in and an API key for a person's own Postiz, the
 bot's turn getting the `postiz` tools with the token kept out of every answer,
