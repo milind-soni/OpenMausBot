@@ -10,8 +10,6 @@ import { lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promi
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
-import { kiroConsentMeta, kiroFilterDelta, kiroShouldDropUpdate } from "./kiro-content-filter.ts";
-
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
 import { openStartupModelCatalog } from "../../startup-model-catalog.ts";
 import { acpModelCatalog } from "./model-catalog.ts";
@@ -107,8 +105,6 @@ export interface AcpSupport {
   effortLevels?: readonly EffortLevel[];
   /** Discover and select opaque model variants through ACP config options. */
   modelVariants?: boolean;
-  /** Config option ids owned by the model (e.g. model, effort) — filtered from generic option handling. */
-  ownedModelOptionIds?: ReadonlySet<string> | readonly string[];
   /** Default CLI binary name if the instance config doesn't override it. */
   defaultCli: string;
   /** Optional live model catalog; a failed lookup keeps the last usable one. `config` lets a support ask the binary
@@ -189,8 +185,8 @@ export interface AcpSupport {
   clientFileSystem?: boolean;
   /** Sent as `clientCapabilities._meta` on initialize, where agents read vendor capabilities. */
   clientCapabilitiesMeta?: Record<string, unknown>;
-  /** Sent as `_meta` on session/new and session/load (Kiro policyPreset). */
-  sessionMeta?: (config: AcpConfig, turn: SendTurnInput) => Record<string, unknown> | null;
+  /** Made once per process: rewrites a session/update before the turn reads it, or drops it by returning null. */
+  updateFilter?(): (update: Record<string, any>) => Record<string, any> | null;
   /** The agent reaches MCP servers by URL: OpenMausBot's own servers are this server's endpoints, no process each. */
   ownMcpOverHttp?: boolean;
   /** How many tools the agent lists of its own beside the MCP servers', counted against a provider's tool limit. */
@@ -763,16 +759,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           if (current.turnConfig.fullAuto && current.turn.approvalMode === undefined && !isQuestion && answersAlone(toolCall.rawInput?.command)) {
             const allow = optionFor("allow");
             if (!allow) missing("allow");
-            return send({
-              jsonrpc: "2.0",
-              id: msg.id,
-              result: allow ? { outcome: { outcome: "selected", optionId: allow } } : cancelled,
-            });
+            return send({ jsonrpc: "2.0", id: msg.id, result: allow ? { outcome: { outcome: "selected", optionId: allow } } : cancelled });
           }
           const kind = String(toolCall.kind ?? "");
           const operationKey = isQuestion || current.controlsHost ? null : acpSessionOperationKey(toolCall);
-          const canRemember = answersAlone(toolCall.rawInput?.command);
-          if (operationKey && canRemember && sessionAllows.get(threadId)?.has(operationKey)) {
+          if (operationKey && answersAlone(toolCall.rawInput?.command) && sessionAllows.get(threadId)?.has(operationKey)) {
             const allow = optionFor("allow");
             if (allow) {
               return send({ jsonrpc: "2.0", id: msg.id, result: { outcome: { outcome: "selected", optionId: allow } } });
@@ -813,13 +804,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 : forSession
                   ? optionAlways ?? optionFor("allow")
                   : optionFor(want);
-            const shouldRemember = forSession && !optionAlways && optionId && operationKey;
-            if (shouldRemember) {
+            if (forSession && !optionAlways && optionId && operationKey) {
               const remembered = sessionAllows.get(threadId) ?? new Set<string>();
               remembered.add(operationKey);
               sessionAllows.set(threadId, remembered);
             }
-            const consentMeta = kiroConsentMeta(params as any, cwd, forSession, optionAlways, optionId);
             if (behavior !== "cancel" && !optionId) {
               if (!isQuestion) missing(want);
               else if (behavior === "answer") {
@@ -829,9 +818,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             send({
               jsonrpc: "2.0",
               id: msg.id,
-              result: optionId
-                ? { outcome: { outcome: "selected", optionId }, ...(consentMeta ? { _meta: consentMeta } : {}) }
-                : cancelled,
+              result: optionId ? { outcome: { outcome: "selected", optionId } } : cancelled,
             });
             // ACP means "cancelled" only while cancelling the prompt turn, so an agent may then wait for
             // session/cancel (Antigravity does): end the turn.
@@ -870,6 +857,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           });
         };
 
+        const filterUpdate = support.updateFilter?.();
         const handleNotification = (msg: any) => {
           // Vendor side-channels (grok's `_x.ai/*`) are only teed to the native log.
           if (msg.method !== "session/update") return;
@@ -884,13 +872,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             current.state.startupActivity = true;
           }
           if (!current || !current.state.promptSent) return;
-          const u = p.update ?? {};
+          const u = filterUpdate ? filterUpdate(p.update ?? {}) : p.update ?? {};
+          if (!u) return;
           const finished = u.status === "completed" || u.status === "failed";
           const toolEnded = (itemId: string | undefined) => {
             current.state.producedItem = true;
             for (const event of acpToolEndEvents(u, itemId, current.endedToolIds)) emit({ ...base(threadId, current.turnId), ...event });
           };
-          if (support.driverKind === "kiroAgent" && kiroShouldDropUpdate(u as Record<string, unknown>, p as { sessionId?: unknown }, handleNotification)) return;
           switch (u.sessionUpdate) {
             case "agent_message_chunk": {
               const content = u.content;
@@ -906,18 +894,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   alt: "Generated image",
                 });
               } else if (typeof delta === "string" && delta) {
-                const filteredDelta = support.driverKind === "kiroAgent" ? kiroFilterDelta(delta) : delta;
-                if (!filteredDelta) break;
                 const messageId = typeof u.messageId === "string" ? u.messageId : null;
                 if (support.resendsReasoningReply && messageId && messageId === current.state.textMessageId
-                    && isHermesReasoningReplay(filteredDelta, current.state.text)) break;
+                    && isHermesReasoningReplay(delta, current.state.text)) break;
                 current.state.textMessageId = messageId;
-                current.state.text += filteredDelta;
+                current.state.text += delta;
                 const trimmed = current.state.text.trimStart();
                 if (!trimmed.startsWith("<SYSTEM_MESSAGE") &&
                     !trimmed.startsWith("The following is a <SYSTEM_MESSAGE") &&
                     !trimmed.startsWith("<SYSTEM_NOTIFICATION")) {
-                  emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "assistant_text", delta: filteredDelta });
+                  emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "assistant_text", delta });
                 }
               }
               break;
@@ -1097,11 +1083,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const envFingerprint = createHash("sha256").update(JSON.stringify(spawnEnv)).digest("hex").slice(0, 16);
         const inheritedScopeFingerprint = narrowsNativeTools(turn.toolScope) && support.toolScopeCacheKey
           ? createHash("sha256").update(support.toolScopeCacheKey({ config: turnConfig, env, cwd })).digest("hex") : null;
-        const sessionMetaForContract = support.sessionMeta?.(turnConfig, cliTurn) ?? null;
         const processContract = [launch.command, launch.args ?? [], spawnArgs,
           support.sessionScopedApproval ? null : turnConfig.fullAuto === true, envFingerprint,
-          support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null,
-          sessionMetaForContract ? JSON.stringify(sessionMetaForContract) : null];
+          support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null];
         const contractKey = JSON.stringify([...processContract, cwd, turn.toolScope ?? null, inheritedScopeFingerprint]);
         const launchModel = support.sessionModelEnv && cliTurn.model && /^[\w.:/-]{1,200}$/u.test(cliTurn.model)
           && catalog.accountModels?.has(cliTurn.model) ? cliTurn.model : undefined;
@@ -1292,10 +1276,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               let loaded = false;
               if (cursor) {
                 try {
-                  const loadSessionMeta = support.sessionMeta?.(turnConfig, cliTurn) ?? null;
                   await request(
                     support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                    { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams, ...(loadSessionMeta ? { _meta: loadSessionMeta } : {}) },
+                    { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams },
                     LOAD_SESSION_TIMEOUT,
                     (result) => {
                       if (result) {
@@ -1328,9 +1311,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 init = session.initResult;
                 continue;
               }
-              if (support.driverKind !== "kiroAgent") sessionAllows.delete(threadId);
-              else if (pooled && pooled.contractKey !== contractKey) sessionAllows.delete(threadId);
-              // For Kiro, persistent consent outlives a single session for the same thread and cwd.
+              sessionAllows.delete(threadId);
               if (cursor) {
                 const recovery = recoveryPromptFor({
                   recoveryText: turn.recoveryText,
@@ -1340,8 +1321,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              const newSessionMeta = support.sessionMeta?.(turnConfig, cliTurn) ?? null;
-              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams, ...(newSessionMeta ? { _meta: newSessionMeta } : {}) }, NEW_SESSION_TIMEOUT, (result) => {
+              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result, true);

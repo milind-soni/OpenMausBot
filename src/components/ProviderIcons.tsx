@@ -136,6 +136,16 @@ export function CommandCodeMark({ size = 16, className }: IconProps) {
   </svg>;
 }
 
+export function KiroMark({ size = 16, className }: IconProps) {
+  // Kiro's ghost, drawn plainly in white on a rounded square in Kiro's purple.
+  return <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
+    <rect width="24" height="24" rx="6" fill="#7B3FE4" />
+    <path fill="#FFFFFF" d="M12 4.5a5.5 5.5 0 0 0-5.5 5.5v9.5l1.83-1.3 1.84 1.3L12 18.2l1.83 1.3 1.84-1.3 1.83 1.3V10A5.5 5.5 0 0 0 12 4.5Z" />
+    <circle cx="10" cy="10.5" r="1.1" fill="#7B3FE4" />
+    <circle cx="14" cy="10.5" r="1.1" fill="#7B3FE4" />
+  </svg>;
+}
+
 export function GreenferenceMark({ size = 16, className }: IconProps) {
   // Greenference's site icon (greenference.com/assets/favicon.svg) without its tile, in a teal from its logo that reads on light and dark.
   return <svg width={size} height={size} viewBox="4 2 24 24" className={className} aria-hidden="true">
@@ -180,6 +190,8 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
       return <CopilotMark size={size} className={className} />;
     case "commandCodeAgent":
       return <CommandCodeMark size={size} className={className} />;
+    case "kiroAgent":
+      return <KiroMark size={size} className={className} />;
     case "greenference":
       return <GreenferenceMark size={size} className={className} />;
     default:
