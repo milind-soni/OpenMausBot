@@ -140,9 +140,10 @@ const streamCompactionTurn = () => {
   send({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false, willRetry: false, errorMessage: "Compaction failed" });
   send({ type: "compaction_start", reason: "threshold" });
   send({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false, willRetry: false });
-  // An extension can also hand back a result with an empty summary: nothing usable was made, so no marker either.
+  // An extension can also hand back a result with an empty or non-text summary: nothing usable was made, so no marker either.
   send({ type: "compaction_start", reason: "threshold" });
   send({ type: "compaction_end", reason: "threshold", result: { summary: " ", firstKeptEntryId: "e1", tokensBefore: 100 }, aborted: false, willRetry: false });
+  send({ type: "compaction_end", reason: "threshold", result: { summary: {}, firstKeptEntryId: "e1", tokensBefore: 100 }, aborted: false, willRetry: false });
   if (process.env.FAKE_PI_COMPACTION_FAILS_ONLY !== "1") {
     send({ type: "compaction_start", reason: "threshold" });
     send({ type: "compaction_end", reason: "threshold", result: { summary: "fake summary", firstKeptEntryId: "e1", tokensBefore: 100 }, aborted: false, willRetry: false });
