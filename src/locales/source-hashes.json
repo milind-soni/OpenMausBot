@@ -9505,7 +9505,11 @@
       "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
       "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
       "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
-      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df",
+      "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
+      "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
+      "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -23699,7 +23703,11 @@
       "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
       "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
       "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
-      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df",
+      "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
+      "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
+      "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -33576,7 +33584,11 @@
       "skins.tagline.diwali": "92af77174824ccd4267be3745deb99c28cd2ddd21e761e2afcd438bded98405c",
       "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
       "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
-      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df",
+      "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
+      "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
+      "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -41219,7 +41231,11 @@
       "task.untitledChat": "4d4e126c2185da5e86b7478f0f12fc30009339941ef0d8627959aeb4641b6f69",
       "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
       "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
-      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df",
+      "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
+      "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
+      "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -51034,7 +51050,11 @@
       "task.untitledChat": "4d4e126c2185da5e86b7478f0f12fc30009339941ef0d8627959aeb4641b6f69",
       "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
       "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
-      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df",
+      "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
+      "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
+      "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -60199,7 +60219,11 @@
       "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
       "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
       "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
-      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df",
+      "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
+      "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
+      "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -65778,7 +65802,11 @@
       "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
       "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
       "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
-      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df",
+      "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
+      "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
+      "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72619,7 +72647,11 @@
       "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
       "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
       "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
-      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df",
+      "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
+      "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
+      "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -79522,7 +79554,11 @@
       "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
       "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
       "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
-      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df",
+      "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
+      "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
+      "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -86225,7 +86261,11 @@
       "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
       "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
       "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
-      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df",
+      "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
+      "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
+      "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -93650,7 +93690,11 @@
       "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
       "settings.logins.findBot": "4db9d1538b8007065eb4530c207a2b03f9a5749f066f63c352ba5d50956713d4",
       "settings.logins.botsChosen": "048c18380c0092d180ad39f7eaad790cc0069c2df45335a07f42af2f74276390",
-      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df"
+      "settings.logins.noBotMatch": "1e04c4b98080c09b6b34624801818ca28fcbc333423ffdfe99beba2a014b48df",
+      "settings.logins.onePassword.changeItem": "67a695ea8e01ddf27c3ad3c692a15dd8b5e4e7465e03d326bfecd320522e0177",
+      "settings.logins.onePassword.useVault": "a14647f6e4b5a8dbbb97d8fbd70814f8d93c2debf7c85fade4e8988fb4bf31ee",
+      "settings.logins.onePassword.skippedWebsite": "5a399af71f11dc4ed351ebd89dd4cae358aeed039b9e0963ed96d9ed5f96e226",
+      "settings.logins.onePassword.skippedPassword": "bebcb96c2272988e44441a944fc5281734559d248aed23e41542b295c4420c4d"
     }
   }
 }
