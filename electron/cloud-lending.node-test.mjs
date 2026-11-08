@@ -360,7 +360,7 @@ test("Pause is instant: the Cloud is told, running work is cancelled, nothing mo
   home.push({ action: "computer_call", tool_name: "click", arguments: {} });
   await delay(300);
   assert.equal((await readFile(driver.calls, "utf8")).trim(), "drag");
-  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], waiting: [], using: [], paused: true, terminal: false, busy: null, screen: null });
+  assert.deepEqual(summaries.at(-1), { lending: [], clouds: ["My Cloud"], waiting: [], using: [], paused: true, terminal: false, terminalSwitch: true, busy: null, screen: null });
   assert.equal(sharing.cloudState(env).problem, "paused");
 });
 

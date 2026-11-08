@@ -109,6 +109,9 @@ export class LentComputers {
     this.save();
   }
 
+  /** Anyone's computer is still lent (online or away). */
+  any(): boolean { return this.computers.some((computer) => computer.stoppedAt === null); }
+
   list(person: string | null): LentComputer[] {
     if (!person) return [];
     return this.computers.filter((computer) => computer.person === person).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
