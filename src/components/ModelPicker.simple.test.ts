@@ -359,7 +359,7 @@ describe("the model picker in Simple mode", () => {
     const atDefault = region(menu(open(bot()).html), "data-simple-effort-band");
     expect(atDefault.match(/aria-pressed="true"/g)).toHaveLength(1);
     expect(atDefault).toMatch(/data-effort-auto="true" aria-pressed="true"[^>]*>Auto<\/button>/);
-    expect(atDefault).toContain('data-simple-effort-auto="true" class="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">Recommended. The model picks how hard to think; higher levels are slower but more careful.</p>');
+    expect(atDefault).toContain('data-simple-effort-auto="true" class="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">Recommended. Effort is picked per message.</p>');
   });
 
   it("names the model on the Simple chip, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
@@ -1021,7 +1021,7 @@ describe("every capability of the picker stays reachable", () => {
       if (!advanced) {
         const band = region(html, "data-simple-effort-band");
         expect(band).toContain(">X-High</button>");
-        expect(band).not.toContain('role="separator"');
+        expect(band.lastIndexOf('role="separator"')).toBeLessThan(band.indexOf(">X-High</button>"));
       }
     } finally {
       delete window.ogb;

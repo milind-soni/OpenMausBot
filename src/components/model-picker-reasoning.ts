@@ -46,7 +46,7 @@ export function useRefocusAfterPick(menuRef: RefObject<HTMLElement | null>, open
     pending.current = false;
     const menu = menuRef.current;
     if (!open || !menu || menu.contains(document.activeElement)) return;
-    (menu.querySelector<HTMLElement>('[data-simple-effort] [tabindex="0"]') ?? menu).focus({ preventScroll: true });
+    (menu.querySelector<HTMLElement>(':not([hidden]) > [data-simple-effort] [tabindex="0"]') ?? menu).focus({ preventScroll: true });
   }, [selection, query, open, menuRef]);
   return () => { pending.current = true; };
 }

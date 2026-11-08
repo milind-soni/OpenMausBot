@@ -33530,7 +33530,7 @@
       "chat.openBotPanel": "1f9ede9056d58ca37a4f7f79dd7da5226a8f30d0f1b616ac7eaaca6dcebaccbf",
       "model.simple.botsModelScope": "c82c64a1fc353ed97f01626c16baf213f73cc6c0859519653ec5eaea9608bbee",
       "model.simple.auto": "0286249762f7c94349cdc0ba3bb2255baf9a80036e2193ead1d77696f888582f",
-      "model.simple.thinkingAuto": "06130b18bfad8c684041ec5c924ff0f27083fc192dbf275be321c8dcabc978b9",
+      "model.simple.thinkingAuto": "1d0caa99d3ed5904336835bfcf2966ed4d0b76486100da2f725dea4b580fbcc7",
       "model.simple.effortHint.none": "55a20fa5220bf26aa8762241df3dfb36f421390668b629feb585e07bef8a35fa",
       "model.simple.effortHint.low": "5922c465b05d4d086ba46fee455e609c44f43f0f888e8c9743586d7ed51c5c30",
       "model.simple.effortHint.medium": "b74fb799966ff8749e0b5448e4327c74895473651216e174081f9628fc82a5de",
@@ -33548,9 +33548,11 @@
       "settings.simple.themes.hint": "b4a933bbef7eebd1ba5305d6bbc14395b9c23eb149178c14c1b1436510c88a9b",
       "settings.simple.themes.followHint": "d42ba551158199061ebfda7029c05ad07f84ebad29cfc8c24ffe4a7323ed5629",
       "settings.simple.themes.fixedHint": "9debc6ac74d17e0dee92665cd9c4c39963b0a25c3de4830d59175e94e2ad5625",
-      "chat.setupCard.hint": "c6ddd65e5fdd0145d1711ce1a16c81129537e39f2b81f1ee165aa231d6e208d8",
+      "chat.setupCard.hint": "d7bbe8e1ab022e478f36b7338b2b278b9ad5b2d421eced2fd24b157b5df8db74",
       "chat.setupCard.heading": "c55d59f402bbe025ee81dbf0efa20086040334938ed8617f340ab81db478b196",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "settings.simple.account.noNameHint": "488c9a6a017d6ea2f145c838bee156e762ffcebdaddc173135f4d0590f0b6271",
+      "settings.simple.account.yourName": "2c6b2e253c01fb2ed7209c15766745ccee92a35ac8209f544789bdf9500e0944"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

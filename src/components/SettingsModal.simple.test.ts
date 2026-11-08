@@ -171,7 +171,8 @@ describe("Settings in Simple mode", () => {
     expect([...html.matchAll(/<button[^>]*role="switch"[^>]*>/g)].at(-1)?.[0]).toContain('aria-label="Advanced mode"');
     expect(html).toContain("Show every control, including tools for builders. Nothing is deleted either way.");
     expect(html).not.toContain("border-accent-border/40");
-    expect(html).toContain("Add your name");
+    expect(html).toContain(">Your name</div>");
+    expect(html).toContain(">Not set yet</div>");
     expect(html).toMatch(/aria-expanded="false" aria-controls="[^"]+"[^>]*>Add<\/button>/);
   });
 
@@ -298,7 +299,7 @@ describe("Settings in Simple mode", () => {
     fixture.section = "appearance";
     const general = render();
     expect(currentPage(general)).toBe("general");
-    expect(general).not.toContain("Add your name");
+    expect(general).not.toContain(">Your name</div>");
     expect(general).toContain('aria-label="App language"');
     expect(general).toContain('aria-label="Advanced mode"');
   });

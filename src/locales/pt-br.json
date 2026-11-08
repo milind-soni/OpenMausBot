@@ -2916,7 +2916,7 @@
   "model.simple.clearSearch": "Limpar busca",
   "model.simple.thinkingLevel": "Raciocínio: {level}. Níveis mais altos deixam o raciocínio mais lento, mas mais cuidadoso.",
   "model.simple.thinkingDefault": "O modelo decide quanto precisa pensar.",
-  "model.simple.thinkingAuto": "Recomendado. O modelo escolhe quanto pensar; níveis mais altos são mais lentos, porém mais cuidadosos.",
+  "model.simple.thinkingAuto": "Recomendado. O esforço é escolhido a cada mensagem.",
   "model.simple.effortHint.none": "Sem raciocínio extra. As respostas mais rápidas.",
   "model.simple.effortHint.low": "Um pouco de raciocínio. Respostas rápidas para pedidos simples.",
   "model.simple.effortHint.medium": "Algum raciocínio. Um bom equilíbrio para a maioria das tarefas.",
@@ -7471,7 +7471,7 @@
   "voice.libraryHint": "A voz que você escolher entra na sua lista de vozes.",
   "voice.adding": "Adicionando…",
   "chat.setupCard.title": "Com o que devo ajudar primeiro?",
-  "chat.setupCard.hint": "Escolha um foco para este bot ou digite o seu abaixo. Você pode mudar depois.",
+  "chat.setupCard.hint": "{name} se configura para a opção que você escolher, ou escreva a sua abaixo.",
   "chat.setupCard.heading": "Escolha um ponto de partida",
   "chat.setupCard.other": "Outra coisa",
   "chat.setupCard.answer": "Sua resposta",
@@ -9853,5 +9853,7 @@
   "remote.client.endsDec7": "Este tipo de conexão termina em 7 de dezembro. Depois disso, pareie este computador de novo em Celular e dispositivos no outro computador.",
   "phone.code.pairingCode": "Código de pareamento",
   "phone.code.typeIntro": "Abra o app do {app} e digite este código de pareamento.",
-  "phone.signIn.emailCode": "Código de login do seu e-mail"
+  "phone.signIn.emailCode": "Código de login do seu e-mail",
+  "settings.simple.account.noNameHint": "Ainda não definido",
+  "settings.simple.account.yourName": "Seu nome"
 }
