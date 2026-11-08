@@ -68,6 +68,13 @@ describe("UpdateBanner", () => {
     expect(render({ status: "downloaded", version: "0.2.0", installMode: "handoff", installsByItself: true })).not.toContain("by itself");
   });
 
+  it("offers a release the person asked to hear about first, downloading nothing until they choose", () => {
+    const html = render({ status: "available", version: "0.2.0" });
+    expect(html).toContain("MausBot 0.2.0 is available");
+    expect(html).toContain("Download and restart");
+    expect(render({ status: "available", version: "0.2.0" }, undefined, true)).toBe("");
+  });
+
   it("offers restart only after native preparation is complete", () => {
     const html = render({ status: "downloaded", version: "0.2.0" });
     expect(html).toContain("0.2.0 is ready");

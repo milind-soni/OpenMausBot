@@ -421,6 +421,8 @@ const bridge = {
     install: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("update:install") : Promise.reject(new Error("Choose Restart to update.")),
     seen: () => ipcRenderer.invoke("update:seen"),
+    setAutoInstall: on => on !== true || isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("update:set-auto-install", on === true) : Promise.reject(new Error("Turn on the switch to install updates by themselves.")),
     onState: (cb) => {
       ipcRenderer
         .invoke("update:get-state")

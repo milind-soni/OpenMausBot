@@ -30,7 +30,9 @@ export function UpdatesRow({ title = t("settings.updates.title") }: { title?: st
   const label =
     s.status === "checking"
       ? t("settings.updates.checking")
-      : s.status === "downloading"
+      : s.status === "available"
+        ? t("settings.updates.available", { app: productName(), version: s.version ?? "" })
+        : s.status === "downloading"
         ? s.percent == null
           ? t("settings.updates.startingDownload")
           : t("settings.updates.downloading", { percent: Math.round(s.percent) })
@@ -54,7 +56,7 @@ export function UpdatesRow({ title = t("settings.updates.title") }: { title?: st
     <SettingRow title={title} subtitle={label}>
       <button
         onClick={() => {
-          if (s.status === "downloaded") return void updater.install();
+          if (s.status === "downloaded" || s.status === "available") return void updater.install();
           void updater.check();
         }}
         disabled={
@@ -65,7 +67,9 @@ export function UpdatesRow({ title = t("settings.updates.title") }: { title?: st
       >
         {s.retryable === false
           ? t("settings.updates.quitReopen")
-          : s.status === "downloaded"
+          : s.status === "available"
+            ? t("update.card.downloadRestart")
+            : s.status === "downloaded"
             ? s.installMode === "handoff"
               ? t("settings.updates.install")
               : t("settings.updates.restart")
@@ -77,6 +81,23 @@ export function UpdatesRow({ title = t("settings.updates.title") }: { title?: st
                   : t("settings.updates.restartingShort")
                 : t("settings.updates.check")}
       </button>
+    </SettingRow>
+  );
+}
+
+export function AutoInstallRow() {
+  const s = useUpdaterState();
+  const updater = window.ogb?.updater;
+  const [busy, setBusy] = useState(false);
+  if (typeof s?.autoInstall !== "boolean" || !updater?.setAutoInstall) return null;
+  const on = s.autoInstall;
+  const set = () => {
+    setBusy(true);
+    void updater.setAutoInstall?.(!on).catch(() => {}).finally(() => setBusy(false));
+  };
+  return (
+    <SettingRow title={t("settings.updates.autoInstall.title")} subtitle={t("settings.updates.autoInstall.subtitle", { app: productName() })}>
+      <Switch checked={on} disabled={busy} aria-label={t("settings.updates.autoInstall.title")} onClick={set} />
     </SettingRow>
   );
 }

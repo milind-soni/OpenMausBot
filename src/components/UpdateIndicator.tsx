@@ -11,7 +11,7 @@ import { t } from "@/lib/i18n";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 
 export function updateIndicatorShown(state: UpdaterState | null): boolean {
-  return Boolean(state && ["downloading", "preparing", "downloaded", "installing"].includes(state.status));
+  return Boolean(state && ["available", "downloading", "preparing", "downloaded", "installing"].includes(state.status));
 }
 
 export function updateIndicatorLabel(state: UpdaterState): string {
@@ -20,6 +20,7 @@ export function updateIndicatorLabel(state: UpdaterState): string {
   if (state.status === "downloaded" || state.status === "installing") {
     return t("update.button.ready", { app, version }).replace("  ", " ").trim();
   }
+  if (state.status === "available") return t("update.button.available", { app, version }).replace("  ", " ").trim();
   if (state.status === "preparing") return t("update.button.preparing");
   return state.percent == null
     ? t("update.button.downloadingStart")
@@ -42,7 +43,7 @@ export function UpdateIndicator({ className, bar }: { className?: string; bar?: 
     return open && !settled ? <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} /> : null;
   }
   const label = updateIndicatorLabel(state);
-  const ready = state.status === "downloaded";
+  const ready = state.status === "downloaded" || state.status === "available";
   if (bar !== undefined) return (
     <>
       <button
@@ -145,7 +146,7 @@ export function UpdateCard({
 
   const action = () => {
     if (!updater) return;
-    if (status === "downloaded") {
+    if (status === "downloaded" || status === "available") {
       setPending(true);
       void updater.install();
     } else if (failed && state.retryable !== false) {
@@ -162,7 +163,9 @@ export function UpdateCard({
         ? percent == null ? t("update.card.downloadingStart") : t("update.card.downloading", { percent })
         : failed
           ? t("update.card.tryAgain")
-          : handoff ? t("settings.updates.install") : t("update.card.restart");
+          : status === "available"
+            ? t("update.card.downloadRestart")
+            : handoff ? t("settings.updates.install") : t("update.card.restart");
   const primaryIcon = installing || (downloading && percent == null) || status === "preparing"
     ? <Loader2 size={14} className="animate-spin" aria-hidden />
     : downloading
@@ -173,7 +176,9 @@ export function UpdateCard({
     ? updaterMessage(state)?.split("\n")[0]?.slice(0, 160) || t("update.card.failed")
     : downloading
       ? t("update.card.downloadingNote")
-      : handoff
+      : status === "available"
+        ? t("update.card.availableNote", { app: productName() })
+        : handoff
         ? t("update.card.handoffNote")
         : status === "downloaded" && state.installsByItself
           ? t("update.card.idleNote", { app: productName() })

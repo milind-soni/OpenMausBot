@@ -223,6 +223,7 @@
   "updater.install",
   "updater.onState",
   "updater.seen",
+  "updater.setAutoInstall",
   "updatesConsent",
   "updatesConsent.choose",
   "updatesConsent.state",

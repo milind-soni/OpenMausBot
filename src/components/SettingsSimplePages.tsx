@@ -31,7 +31,7 @@ import { ProfileSummaryRow } from "./ProfileSettings";
 import { ImportSettings } from "./ImportSettings";
 import { NotificationRows } from "./NotificationSettingsRows";
 import { useServerUpdateItem } from "./SidebarProfileMenu";
-import { AdvancedModeRow, BrowserProfilesRow, ColorUserBubblesRow, FollowUpRow, LanguageRow, ReplayTourRow, SendKeyRow, UpdatesRow } from "./AppSettingsRows";
+import { AdvancedModeRow, AutoInstallRow, BrowserProfilesRow, ColorUserBubblesRow, FollowUpRow, LanguageRow, ReplayTourRow, SendKeyRow, UpdatesRow } from "./AppSettingsRows";
 import { ThemeRow } from "./ThemeRow";
 import { AdminOnly } from "./AdminOnly";
 
@@ -201,6 +201,7 @@ export function SimpleUpdatesPage({ remoteActive }: { remoteActive: boolean }) {
     <SettingsGroup block="updates">
       <SettingsRows>
         {window.ogb?.updater ? <UpdatesRow title={versionTitle()} /> : <ServerUpdatesRow />}
+        <AutoInstallRow />
         <UpdatesConsentRow />
         {!remoteActive && <ReplayTourRow />}
         <DiagnosticsRow simple />

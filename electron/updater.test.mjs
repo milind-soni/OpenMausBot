@@ -16,10 +16,10 @@ const CLOUD = "https://home-7f3k2.fly.dev";
 const OTHER = "https://bots.example.test";
 const OWN = "https://omb-c-a.fly.dev";
 
-const fixture = vi.hoisted(() => ({ autoUpdater: null, handlers: new Map() }));
+const fixture = vi.hoisted(() => ({ autoUpdater: null, handlers: new Map(), userData: "" }));
 
 vi.mock("electron", () => ({
-  app: { isPackaged: true, getPath: () => "/unused-updater-test-log", getVersion: () => "1.0.0", hide: vi.fn() },
+  app: { isPackaged: true, getPath: () => fixture.userData, getVersion: () => "1.0.0", hide: vi.fn() },
   clipboard: { writeText: vi.fn() },
   ipcMain: { handle: (name, handler) => fixture.handlers.set(name, handler) },
 }));
@@ -120,10 +120,12 @@ const settle = async () => {
 };
 
 beforeEach(() => {
+  fixture.userData = mkdtempSync(join(tmpdir(), "omb-updater-data-"));
   localOriginModule.setLocalOrigin(LOCAL);
   vi.useFakeTimers();
 });
 afterEach(() => {
+  rmSync(fixture.userData, { recursive: true, force: true });
   vi.clearAllTimers();
   vi.useRealTimers();
 });
@@ -153,7 +155,7 @@ function bridgeFor(origin, { clicked = false, rule = null } = {}) {
 
 it("My Cloud's page gets the update bridge, and it restarts the app only on the person's click", async () => {
   const local = bridgeFor(LOCAL);
-  expect(Object.keys(local.bridge.updater).sort()).toEqual(["check", "install", "onState", "seen"]);
+  expect(Object.keys(local.bridge.updater).sort()).toEqual(["check", "install", "onState", "seen", "setAutoInstall"]);
   expect(local.asked, "this computer's page has the whole bridge without asking").toEqual([]);
   await local.bridge.updater.install();
   expect(local.invoked).toEqual([["update:install"]]);
@@ -161,7 +163,7 @@ it("My Cloud's page gets the update bridge, and it restarts the app only on the 
   const rule = mainRule();
   rule.show(page(CLOUD), "cloud");
   const cloud = bridgeFor(CLOUD, { rule });
-  expect(Object.keys(cloud.bridge.updater).sort()).toEqual(["check", "install", "onState", "seen"]);
+  expect(Object.keys(cloud.bridge.updater).sort()).toEqual(["check", "install", "onState", "seen", "setAutoInstall"]);
   await expect(cloud.bridge.updater.install()).rejects.toThrow(/Restart to update/);
   await cloud.bridge.updater.check();
   cloud.bridge.updater.onState(() => {});
@@ -287,6 +289,68 @@ it("a downloaded update installs by itself at a quiet moment on macOS and Window
   }
 });
 
+it("asked first, a release is only offered on macOS, Windows and AppImage, and Update downloads and installs it", async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const appImage = process.env.APPIMAGE;
+  const quiet = { locked: () => true, idleMs: () => 0, typedAt: () => 0, shown: () => true, busy: () => null, work: async () => null, watch: () => {} };
+  try {
+    for (const [os, image] of [["darwin", null], ["win32", null], ["linux", "/home/a/OpenMausBot.AppImage"]]) {
+      Object.defineProperty(process, "platform", { ...platform, value: os });
+      if (image) process.env.APPIMAGE = image;
+      else delete process.env.APPIMAGE;
+      rmSync(join(fixture.userData, "update-install.json"), { force: true });
+      const { updater, autoUpdater, handlers } = await load(() => true);
+      updater.startUpdater(quiet);
+      expect((await handlers.get("update:get-state")({})).autoInstall, os).toBe(true);
+      expect((await handlers.get("update:set-auto-install")({}, false)).autoInstall, os).toBe(false);
+      expect(autoUpdater.autoInstallOnAppQuit, os).toBe(os === "darwin");
+      await vi.advanceTimersByTimeAsync(15_000 + 60_000);
+      await settle();
+      expect(await handlers.get("update:get-state")({}), os).toMatchObject({ status: "available", version: "2.0.0" });
+      expect(autoUpdater.downloadUpdate, os).not.toHaveBeenCalled();
+      expect(autoUpdater.quitAndInstall, os).not.toHaveBeenCalled();
+      await handlers.get("update:install")({});
+      await settle();
+      expect(autoUpdater.downloadUpdate, os).toHaveBeenCalledTimes(1);
+      if (os !== "darwin") expect(autoUpdater.quitAndInstall.mock.calls, os).toEqual([[true, true]]);
+    }
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    if (appImage === undefined) delete process.env.APPIMAGE;
+    else process.env.APPIMAGE = appImage;
+  }
+});
+
+it("turned back on, the offered release downloads at once", async () => {
+  const { updater, autoUpdater, handlers } = await load(() => true);
+  updater.startUpdater();
+  await handlers.get("update:set-auto-install")({}, false);
+  await vi.advanceTimersByTimeAsync(15_000);
+  await settle();
+  expect(autoUpdater.downloadUpdate).not.toHaveBeenCalled();
+  await handlers.get("update:set-auto-install")({}, true);
+  await settle();
+  expect(autoUpdater.downloadUpdate).toHaveBeenCalledTimes(1);
+});
+
+it("a system package offers no choice: its install already asks", async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const resourcesPath = process.resourcesPath;
+  const resources = mkdtempSync(join(tmpdir(), "omb-updater-deb-"));
+  try {
+    Object.defineProperty(process, "platform", { ...platform, value: "linux" });
+    process.resourcesPath = resources;
+    writeFileSync(join(resources, "package-type"), "rpm");
+    const { updater, handlers } = await load(() => true);
+    updater.startUpdater();
+    expect((await handlers.get("update:get-state")({})).autoInstall).toBeUndefined();
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    process.resourcesPath = resourcesPath;
+    rmSync(resources, { recursive: true, force: true });
+  }
+});
+
 it("My Cloud's page hears \"Restart to update\" once the sign-in it loaded before is restored", async () => {
   const rule = mainRule();
   rule.launching();
@@ -339,7 +403,7 @@ it("downloads an update by itself: the first check after launch starts it, and n
 it("My Cloud's page reads and drives the update channels, and another server's page is refused", async () => {
   const rule = mainRule();
   const { handlers } = await load(rule.pageAllowed);
-  expect([...handlers.keys()].sort()).toEqual(["update:check", "update:get-state", "update:install", "update:seen"]);
+  expect([...handlers.keys()].sort()).toEqual(["update:check", "update:get-state", "update:install", "update:seen", "update:set-auto-install"]);
 
   const cloud = page(CLOUD);
   rule.show(cloud, "cloud");

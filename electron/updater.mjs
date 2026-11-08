@@ -28,11 +28,13 @@ let updaterCoordinator = null;
 let pageAllowed = () => false;
 let quiet = null;
 let launch = null;
+/** The person's choice to be asked before an update downloads; null where installing already asks (a system package). */
+let askFirst = null;
 /** Where these updaters install without asking anything: Squirrel.Mac, and the per-user NSIS installer run silently. */
 const QUIET_PLATFORMS = new Set(["darwin", "win32"]);
 
-function quietRecord() {
-  const file = join(app.getPath("userData"), "update-when-quiet.json");
+function jsonRecord(name) {
+  const file = join(app.getPath("userData"), name);
   return {
     read: () => { try { return JSON.parse(readFileSync(file, "utf8")); } catch { return null; } },
     write: (value) => {
@@ -47,7 +49,7 @@ function quietRecord() {
 
 function launched() {
   launch ??= app.isPackaged && QUIET_PLATFORMS.has(process.platform)
-    ? launchAfter(quietRecord(), { version: app.getVersion() })
+    ? launchAfter(jsonRecord("update-when-quiet.json"), { version: app.getVersion() })
     : { hidden: false, updated: null };
   return launch;
 }
@@ -63,7 +65,8 @@ export function reopenedOutOfSight() {
 function view() {
   return {
     ...state,
-    ...(quiet && state.status === "downloaded" ? { installsByItself: quiet.promises(state.version) } : {}),
+    ...(quiet && state.status === "downloaded" ? { installsByItself: askFirst !== true && quiet.promises(state.version) } : {}),
+    ...(askFirst !== null ? { autoInstall: !askFirst } : {}),
     ...(launch?.updated ? { updated: launch.updated } : {}),
   };
 }
@@ -112,7 +115,7 @@ function relaunchAfterInstall() {
 function setState(patch) {
   const { messageCode: _stale, messageKey: _key, messageParams: _params, ...kept } = state;
   state = { ...(Object.hasOwn(patch, "message") ? kept : state), ...patch };
-  if (quiet && patch.status === "error") installFailed(quietRecord());
+  if (quiet && patch.status === "error") installFailed(jsonRecord("update-when-quiet.json"));
   try {
     const contents = win?.webContents;
     if (contents && pageAllowed({ sender: contents, senderFrame: contents.mainFrame })) contents.send("update:state", view());
@@ -126,16 +129,25 @@ export function sendUpdaterState() {
 
 export function registerUpdaterIpc({ pageAllowed: allowed }) {
   pageAllowed = allowed;
-  const guarded = (channel, handler) => (event) => {
+  const guarded = (channel, handler) => (event, ...args) => {
     if (!pageAllowed(event)) throw new Error(`${channel} is only available in this app's window`);
-    return handler();
+    return handler(...args);
   };
   ipcMain.handle("update:get-state", guarded("update:get-state", view));
   ipcMain.handle("update:check", guarded("update:check", () => updaterCoordinator?.check(true)));
   ipcMain.handle("update:install", guarded("update:install", () => updaterCoordinator?.install()));
+  ipcMain.handle("update:set-auto-install", guarded("update:set-auto-install", (on) => {
+    if (askFirst === null) return view();
+    askFirst = on !== true;
+    jsonRecord("update-install.json").write({ askFirst });
+    if (autoUpdater && process.platform !== "darwin") autoUpdater.autoInstallOnAppQuit = !askFirst;
+    setState({});
+    if (!askFirst) void updaterCoordinator?.check();
+    return view();
+  }));
   ipcMain.handle("update:seen", guarded("update:seen", () => {
     if (!launch?.updated) return;
-    updateSeen(quietRecord());
+    updateSeen(jsonRecord("update-when-quiet.json"));
     launch = { ...launch, updated: null };
     setState({});
   }));
@@ -168,7 +180,9 @@ export function startUpdater(signals = null) {
   const packageType = linuxPackageType({ readMarker: (file) => (existsSync(file) ? readFileSync(file, "utf8") : null) });
   const handOff = HAND_OFF_TYPES.has(packageType);
   // On macOS this also starts Squirrel.Mac's native staging at once; a system package is never installed on quit.
-  autoUpdater.autoInstallOnAppQuit = !handOff;
+  if (!handOff) askFirst = jsonRecord("update-install.json").read()?.askFirst === true;
+  // Squirrel.Mac stages a download for its next launch whatever this says; asking first there means not downloading.
+  autoUpdater.autoInstallOnAppQuit = !handOff && !(askFirst && process.platform !== "darwin");
   const elevated = packageType === "deb" && canInstallElevated();
   setState({ installMode: handOff && !elevated ? "handoff" : "restart" });
   updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState, {
@@ -176,10 +190,13 @@ export function startUpdater(signals = null) {
     elevatedInstall: elevated ? installDownloadedPackage : null,
     relaunch: elevated ? relaunchAfterInstall : null,
     nativeStaging: process.platform === "darwin",
+    askFirst: () => askFirst === true,
   });
   if (signals && QUIET_PLATFORMS.has(process.platform)) {
     launched();
-    quiet = createQuietInstall({ updater: updaterCoordinator, signals, record: quietRecord(), version: app.getVersion(),
+    const coordinator = updaterCoordinator;
+    const updater = { installable: () => (askFirst ? null : coordinator.installable()), install: () => coordinator.install() };
+    quiet = createQuietInstall({ updater, signals, record: jsonRecord("update-when-quiet.json"), version: app.getVersion(),
       log: (line) => autoUpdater.logger?.info?.(line) });
     setInterval(() => void quiet?.look(), LOOK_EVERY_MS).unref?.();
     signals.watch(() => quiet?.look());

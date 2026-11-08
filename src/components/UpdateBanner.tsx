@@ -52,7 +52,7 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
     return <UpdatedLine version={s.updated} onSeen={() => void window.ogb?.updater?.seen?.().catch(() => {})} />;
   }
   if (!s || s.status === "idle" || s.status === "checking" || s.status === "downloading" || s.status === "preparing") return null;
-  if (sidebarIndicator && (s.status === "downloaded" || s.status === "installing")) return null;
+  if (sidebarIndicator && (s.status === "available" || s.status === "downloaded" || s.status === "installing")) return null;
   const key = `${s.status}:${s.version ?? ""}`;
   if (dismissed === key) return null;
   const updater = window.ogb!.updater!;
@@ -62,7 +62,9 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
   const handoff = s.installMode === "handoff";
 
   const title =
-    s.status === "downloaded"
+    s.status === "available"
+      ? t("update.banner.available", { app: productName(), version: s.version ?? "" })
+      : s.status === "downloaded"
       ? t("update.banner.ready", { app: productName(), version: s.version ?? "" })
       : installing
         ? handoff
@@ -72,7 +74,9 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
           ? t("update.banner.finishInTerminal")
           : t("update.banner.failed");
   const subtitle =
-    s.status === "downloaded"
+    s.status === "available"
+      ? t("update.card.availableNote", { app: productName() })
+      : s.status === "downloaded"
       ? handoff
         ? t("update.banner.copyCommand")
         : s.installsByItself
@@ -130,6 +134,18 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
 
       {!installing && (
         <div className="mt-2.5 flex gap-2">
+          {s.status === "available" && (
+            <button
+              onClick={() => {
+                setPending("install");
+                void updater.install();
+              }}
+              disabled={pending !== null}
+              className={primaryAction}
+            >
+              {pending === "install" ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {t("update.card.downloadRestart")}
+            </button>
+          )}
           {s.status === "downloaded" && (
             <button
               onClick={() => {

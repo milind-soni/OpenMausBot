@@ -39,12 +39,13 @@ export function isNewerVersion(candidate, base) {
 /** Three consecutive hourly failures: the app has gone about three hours without seeing the release feed. */
 export const QUIET_FAILURES_BEFORE_NOTICE = 3;
 
+// `askFirst()`: a found release is only offered (status "available"); `install` then downloads it and installs at once.
 // `elevatedInstall` (Ubuntu .deb, electron/elevated-install.mjs) resolves { ok } or { ok: false, reason, detail }; `relaunch` reopens the app after it.
 // Anything but a closed prompt or a checksum failure falls back to `handOffInstall`.
 export function createUpdaterCoordinator(
   updater,
   setState,
-  { handOffInstall = null, elevatedInstall = null, relaunch = null, nativeStaging = false } = {},
+  { handOffInstall = null, elevatedInstall = null, relaunch = null, nativeStaging = false, askFirst = () => false } = {},
 ) {
   let checkOperation = null;
   let downloadedFiles = null;
@@ -58,6 +59,8 @@ export function createUpdaterCoordinator(
   let actionOwnsState = false;
   // The downloaded or handed-off update the person has not acted on: { version, patch } (patch restores its card). Hourly checks look for a newer one.
   let staged = null;
+  // The release offered while askFirst holds, not downloaded: { version, releaseNotes }.
+  let offered = null;
   const routedErrors = new WeakSet();
   // Hourly checks fail quietly one at a time (offline laptop, a feed still uploading), but a feed that stays
   // unreachable must not leave the app on an old version with no sign of it.
@@ -101,7 +104,7 @@ export function createUpdaterCoordinator(
         setState({ status: "error", ...updateWords("native.update.checkFailed", { error: updateErrorMessage(error) }), ...said(error) });
         return;
       }
-      setState({ status: "idle" });
+      setState(offered ? { status: "available", ...offered } : { status: "idle" });
       return;
     }
     setState({ status: "error", message: updateErrorMessage(error), ...said(error) });
@@ -118,7 +121,7 @@ export function createUpdaterCoordinator(
 
   updater.on("checking-for-update", () => {
     // The banner shows nothing while checking, so a quiet check must not replace the notice; a manual retry still shows it.
-    if (checkOwnsState() && (checkOperation?.manual || quietFailures < QUIET_FAILURES_BEFORE_NOTICE)) setState({ status: "checking" });
+    if (checkOwnsState() && (checkOperation?.manual || (!offered && quietFailures < QUIET_FAILURES_BEFORE_NOTICE))) setState({ status: "checking" });
   });
   updater.on("update-available", (info) => {
     quietFailures = 0;
@@ -129,6 +132,11 @@ export function createUpdaterCoordinator(
         percent: undefined,
         message: undefined,
       }, true);
+      return;
+    }
+    if (checkOwnsState() && askFirst()) {
+      offered = { version: info?.version, releaseNotes: releaseNotesText(info?.releaseNotes) };
+      setState({ status: "available", ...offered, percent: undefined, message: undefined });
       return;
     }
     if (checkOwnsState()) {
@@ -142,6 +150,7 @@ export function createUpdaterCoordinator(
   });
   updater.on("update-not-available", () => {
     quietFailures = 0;
+    offered = null;
     if (checkOwnsState()) setState({ status: "idle" });
   });
   // macOS native staging (quitAndInstall) reports failure only through this event; quitAndInstall returns void.
@@ -205,11 +214,12 @@ export function createUpdaterCoordinator(
     return operation.promise;
   }
 
-  function download(manual, starting, replacing = false) {
+  function download(manual, starting, replacing = false, installWhenReady = false) {
     if (recoveryRequired || installOperation || nativeStagingStarted) return;
     if (checkOperation) checkOperation.supersededByDownload = true;
+    offered = null;
 
-    const operation = { downloadedInfo: null, failed: false, manual, replacing, timer: null };
+    const operation = { downloadedInfo: null, failed: false, manual, replacing, timer: null, installWhenReady };
     downloadOperation = operation;
       // Own the state before the request: the first progress event can be seconds away, and no percent reads as "starting".
     setState({ status: "downloading", ...starting });
@@ -231,6 +241,7 @@ export function createUpdaterCoordinator(
         .finally(() => {
           clearTimeout(operation.timer);
           if (downloadOperation === operation) downloadOperation = null;
+          if (operation.installWhenReady && !operation.failed && operation.downloadedInfo) install();
         });
     } catch (error) {
       handleRejectedOperation(operation.manual, error);
@@ -239,6 +250,10 @@ export function createUpdaterCoordinator(
   }
 
   function install() {
+    if (offered && !recoveryRequired && !installOperation && !downloadOperation) {
+      download(true, { ...offered, percent: undefined, message: undefined }, false, true);
+      return;
+    }
     if (recoveryRequired || installOperation || downloadOperation || (nativeStaging && !nativeReady)) return;
     actionOwnsState = true;
     if (elevatedInstall) {
