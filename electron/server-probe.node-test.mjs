@@ -100,3 +100,15 @@ test("a 401 body with no or a wrong Content-Length is read only up to the refusa
     assert.ok(pulled <= 8, `pulled ${pulled} chunks`);
   }
 });
+
+test("a 401 whose Content-Length is over the refusal limit is cancelled unread", async () => {
+  let pulled = 0;
+  let cancelled = false;
+  const big = () => new Response(new ReadableStream({
+    pull(controller) { pulled += 1; controller.enqueue(new Uint8Array(1_024).fill(120)); },
+    cancel() { cancelled = true; },
+  }, { highWaterMark: 0 }), { status: 401, headers: { "content-length": "1000000" } });
+  assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": big }).fetch })).problem, "notMausBot");
+  assert.equal(cancelled, true);
+  assert.equal(pulled, 0);
+});

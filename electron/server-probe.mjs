@@ -59,7 +59,10 @@ async function readSmallBody(response) {
 
 /** A desktop app's companion refusal is a small JSON body; anything larger or not shaped like it isn't one. */
 async function isDesktopAppRefusal(response) {
-  if (Number(response.headers?.get?.("content-length")) > REFUSAL_MAX_BYTES) return false;
+  if (Number(response.headers?.get?.("content-length")) > REFUSAL_MAX_BYTES) {
+    await response.body?.cancel().catch(() => {});
+    return false;
+  }
   const text = await readSmallBody(response).catch(() => null);
   if (text === null) return false;
   let error;
