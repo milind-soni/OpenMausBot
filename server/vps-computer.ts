@@ -189,9 +189,7 @@ export function vpsDockerArgs(alias: string, args: string[]): string[] {
 /** Never published by Docker: SSH forwards one loopback port to noVNC, and every caller-controlled part is validated before argv. */
 export function vpsSshTunnelArgs(alias: string, localPort: number, privateIp: string, configPath: string | null = null): string[] {
   if (!isValidSshAlias(alias)) throw new Error("invalid VPS SSH config alias");
-  if (!Number.isInteger(localPort) || localPort < 1024 || localPort > 65535) {
-    throw new Error("invalid VPS viewer port");
-  }
+  if (!Number.isInteger(localPort) || localPort < 1024 || localPort > 65535) throw new Error("invalid VPS viewer port");
   if (!privateDockerIpv4(privateIp)) throw new Error("invalid VPS private container address");
   return [
     ...(configPath ? ["-F", configPath] : []),
@@ -202,6 +200,8 @@ export function vpsSshTunnelArgs(alias: string, localPort: number, privateIp: st
     "ExitOnForwardFailure=yes",
     "-o",
     "PermitLocalCommand=no",
+    "-o",
+    "ControlPath=none",
     "-o",
     "ServerAliveInterval=30",
     "-o",
