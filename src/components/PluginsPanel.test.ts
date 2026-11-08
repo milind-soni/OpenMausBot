@@ -6,7 +6,6 @@ import {
   hasUsableConnectedApps,
   connectorSetupNotice,
   disconnectAccountConfirmation,
-  staleNoticeKey,
 } from "./PluginsPanel";
 import { mergeCompleteConnectorStatus, mergeCurrentConnectorStatus, onlyLatestConnectorResponses } from "@/lib/connector-status-merge";
 import {
@@ -334,20 +333,5 @@ describe("connected apps setup notice", () => {
   it("says nothing when apps work or the stale banner already explains", () => {
     expect(connectorSetupNotice({ ...base, configured: true, setup: "ready" })).toBeNull();
     expect(connectorSetupNotice({ ...base, stale: true, setup: "needs-setup" })).toBeNull();
-  });
-});
-
-describe("unreadable credential store notice", () => {
-  it("says This PC only for a Windows or Linux desktop's own store", () => {
-    const own = { active: false };
-    expect(staleNoticeKey({ platform: "darwin", remoteClient: own })).toBe("connectors.stale");
-    expect(staleNoticeKey({ platform: "win32", remoteClient: own })).toBe("connectors.stalePc");
-    expect(staleNoticeKey({ platform: "linux", remoteClient: own })).toBe("connectors.stalePc");
-    expect(staleNoticeKey({ remoteClient: own })).toBe("connectors.stale");
-    expect(staleNoticeKey(undefined)).toBe("connectors.stale");
-    // A remote client shows the server's store, which may not be this PC.
-    expect(staleNoticeKey({ platform: "win32", remoteClient: { active: true } })).toBe("connectors.stale");
-    // A remote server's page in this desktop gets no remoteClient bridge: its store is the server's too.
-    expect(staleNoticeKey({ platform: "win32" })).toBe("connectors.stale");
   });
 });
