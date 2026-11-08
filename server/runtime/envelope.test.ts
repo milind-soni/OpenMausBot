@@ -485,6 +485,14 @@ describe("composeEnvelope at Full access: nothing a bot can settle waits on the 
     expect(composeResume(long, chief, [])).toContain(line);
   });
 
+  it("still bounds a long default pick to the short quote", () => {
+    const answer = `Pick A. ${"x".repeat(1_000)}TAIL`;
+    const envelope = composeEnvelope(assignment({ answer, answeredBy: { kind: "default" } }), names);
+    expect(envelope).toContain("go on with your default, \"Pick A. ");
+    expect(envelope).not.toContain("TAIL");
+    expect(envelope.length).toBeLessThan(envelope.indexOf("go on with your default") + 600);
+  });
+
   it("keeps the end of an answer that redaction made more than twice as long", () => {
     const answer = `${"--token=x ".repeat(1000)}END`;
     const envelope = composeEnvelope(assignment({ question: "Done?", answer, answeredBy: { kind: "bot", botId: "chief" } }), { ...names, answerer: "Chief" });

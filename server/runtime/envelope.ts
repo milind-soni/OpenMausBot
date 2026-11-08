@@ -111,7 +111,8 @@ function replyLine(a: Assignment, requester: string, parent?: Assignment): strin
 function answerLine(a: Assignment, names: EnvelopeNames): string {
   const question = quote(a.question, QUOTE_MAX);
   const asked = question ? `Your question was: "${question}". ` : "";
-  const answer = quote(a.answer, Number.POSITIVE_INFINITY);
+  // Only a bot's or the person's answer travels whole; a default pick keeps the short quote it always had.
+  const answer = quote(a.answer, a.answeredBy?.kind === "default" ? QUOTE_MAX : Number.POSITIVE_INFINITY);
   if (a.answeredBy?.kind === "default") {
     return `${asked}Nobody was asked, at this level: ${answer ? `go on with your default, "${answer}"` : "pick the sensible default yourself"}, and say in one plain line what you chose.`;
   }
