@@ -9,7 +9,7 @@ import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop, MascotFaceColor } from "./bot-avatar.ts";
 import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
-import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts";
+import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts"; import type { EmailOutgoingFields } from "./email.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
 import type { SetupCardFields } from "./setup-card.ts"; import type { BugReportField } from "./devs-report-status.ts"; import type { AccessRequestCardField, BotAccessFields } from "./bot-access.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts"; import type { SavedStepsMark } from "./saved-steps.ts";
@@ -740,6 +740,7 @@ export interface SecretRequestCardData {
   /** An email card: the mailbox it is for, when known; off a phone the person can change it on the card. */ address?: string;
   /** An email card: the incoming server that took the password, once it did, while sending is still being checked. */
   emailReading?: string;
+  /** An email card for a connected mailbox that can't send: only its outgoing server, from what is known, never a password. */ emailOutgoing?: EmailOutgoingFields;
   /** A custom secret: the bot's own words on why; `description` adds what the bot may do with it, and helpUrl is empty. */
   reason?: string;
   /** A file secret's Local VM target key, when the asking turn ran in one. */

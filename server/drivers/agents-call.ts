@@ -940,6 +940,7 @@ async function requestEmailCard(args: Json, context: ToolCallContext): Promise<T
   });
   if (!r.ok) return { text: String(r.body.error ?? `request_credential failed (HTTP ${r.status}).`), isError: true };
   if (r.body.alreadyConfigured === true) return { text: typeof r.body.text === "string" ? r.body.text : `${String(r.body.label)} is already connected. Use the email tools.` };
+  if (r.body.outgoing === true) return { text: "A secure card for the mailbox's outgoing server is ready in OpenMausBot, on the computer and on a freshly QR-paired phone. End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person saves it or declines, and says whether sending works." };
   return { text: "A secure card for the mailbox is ready in OpenMausBot, on the computer and on a freshly QR-paired phone. End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person connects it or declines." };
 }
 

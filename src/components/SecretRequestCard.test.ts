@@ -241,6 +241,18 @@ describe("SecretRequestCard mailbox", () => {
     expect(html).toContain('data-email-check="waiting"');
   });
 
+  it("for a mailbox that reads but can't send, asks only for its outgoing server, filled with what is known", () => {
+    const html = view({ ...email, label: "Outgoing server for me@shop.example", placeholder: "Password for sending", address: "me@shop.example", emailOutgoing: { smtpHost: "smtp.shop.example", smtpPort: 587 } });
+    expect(html).toContain("data-email-outgoing-request");
+    expect(html).toContain("Outgoing server for me@shop.example");
+    expect(html).toContain('value="smtp.shop.example"');
+    expect(html).toContain('value="587"');
+    expect(html).toContain('type="password"');
+    expect(html).toContain("Save securely");
+    expect(html).not.toContain('type="email"');
+    expect(html).not.toContain(">Connect<");
+  });
+
   it("says the bot goes on once connected, without the address field", () => {
     const html = view({ ...email, provided: true, resumed: true, address: "me@shop.example" });
     expect(html).toContain('data-ask-card="settled"');
