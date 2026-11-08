@@ -24,8 +24,8 @@ export function updateErrorCode(error) {
   const integrity = /ERR_UPDATER_(?:INVALID_SIGNATURE|CHECKSUM_MISMATCH)/i.test(detail);
   const tls = /CERT_|ERR_TLS_|UNABLE_TO_VERIFY_LEAF_SIGNATURE|SSL_ERROR|SELF_SIGNED_CERT_IN_CHAIN/i.test(detail);
   if (!integrity && tls) return "tls";
-  // The same error wraps a failed GitHub request, such as a 504 while looking up the latest release;
-  // checked before the text scan below, since the server's error page may say anything.
+  // The same error wraps a failed GitHub request, such as a 504 while looking up the latest release.
+  // The server's error page may contain text that matches another error category.
   if (!integrity && /ERR_UPDATER_INVALID_RELEASE_FEED/.test(detail) && /HttpError: 5\d\d\b/.test(message)) return "network";
   // Integrity failures must never be explained away as a network/disk issue.
   if (integrity || /checksum|signature|codesign/i.test(detail)) return "integrity";
