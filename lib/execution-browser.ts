@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { sealIntegration } from "./githubConnection";
+import { openIntegration, sealIntegration } from "./githubConnection";
 import { cloudAccountUsage } from "./execution-cloud";
+import { boxdOrganization } from "./execution-cloud/boxd";
+import { nativeBoxdUsage } from "./execution-cloud/billing";
 import { effectiveExecutionPolicy, executionBillingAllowed, parseExecutionPolicyOverride } from "./execution-policy";
 import {
   activeExecutionStatuses, enrolledHost, ExecutionError, executionId, executionPolicies, observedExecutionHost,
@@ -27,7 +29,9 @@ export function executionSnapshot(principal: ExecutionPrincipal): ExecutionSnaps
     && (!principal.project || environment.projectId === principal.project.id)).map(({ sealed: _sealed, teamId: _team, ...metadata }) => metadata);
   const cloudProviders: ExecutionCloudProviderStatus[] = ["boxd", "boat"].map(provider => {
     const stored = executionSetting<StoredCloudProvider>(principal.teamId, "cloud", provider);
-    return stored ? { provider: stored.provider, enabled: stored.enabled, keyConfigured: stored.keyConfigured, updatedAt: stored.updatedAt, usage: stored.usage }
+    return stored ? { provider: stored.provider, enabled: stored.enabled, keyConfigured: stored.keyConfigured, updatedAt: stored.updatedAt,
+      usage: stored.provider === "boxd" ? nativeBoxdUsage(stored) : stored.usage,
+      ...(stored.boxdBinding ? { boxdBilling: { orgId: stored.boxdBinding.orgId, revision: stored.boxdBinding.revision, autoTopUpOffConfirmedAt: stored.boxdBinding.autoTopUpOffConfirmedAt } } : {}) }
       : { provider: provider as "boxd" | "boat", enabled: false, keyConfigured: false, updatedAt: 0, usage: { status: "unknown" } };
   });
   const updates = executionSettings<ExecutionUpdate[]>(principal.teamId, "updates").flat().filter(update => !update.hostId || hosts.some(host => host.id === update.hostId));
@@ -169,17 +173,32 @@ export async function executionAction(principal: ExecutionPrincipal, body: Recor
     }
     case "saveCloudProvider": {
       requireExecutionAdmin(principal);
-      const input = z.object({ provider: z.enum(["boxd", "boat"]), apiKey: z.string().trim().min(10).max(16000).optional(), enabled: z.boolean() }).parse(body);
+      const input = z.object({ provider: z.enum(["boxd", "boat"]), apiKey: z.string().trim().min(10).max(16000).optional(), enabled: z.boolean(),
+        boxdAutoTopUpOff: z.boolean().optional(), boxdBillingRevision: z.string().uuid().optional() }).parse(body);
       const old = executionSetting<StoredCloudProvider>(principal.teamId, "cloud", input.provider);
       if (input.enabled && !input.apiKey && !old?.sealedKey) throw new ExecutionError("Enter the provider API key first");
+      let boxdBinding = old?.boxdBinding;
+      if (input.provider === "boxd" && (input.apiKey || !boxdBinding && old?.sealedKey)) {
+        const orgId = await boxdOrganization(input.apiKey ?? openIntegration(old!.sealedKey!, `execution-cloud:${principal.teamId}:boxd`));
+        boxdBinding = { orgId, revision: randomUUID() };
+      }
+      if (input.provider === "boxd" && input.boxdAutoTopUpOff !== undefined) {
+        if (!boxdBinding || input.apiKey || input.boxdBillingRevision !== boxdBinding.revision) throw new ExecutionError("Save the Boxd credential first, then confirm top-up is off for the displayed organization");
+        boxdBinding = { ...boxdBinding, autoTopUpOffConfirmedAt: input.boxdAutoTopUpOff ? Date.now() : undefined, confirmedBy: input.boxdAutoTopUpOff ? principal.userId : undefined };
+      }
       let usage: StoredCloudProvider["usage"] = old?.usage || { status: "unknown" };
-      if (input.apiKey) {
+      if (input.apiKey && input.provider !== "boxd") {
         try { usage = { ...await cloudAccountUsage({ provider: input.provider, apiKey: input.apiKey }), observedAt: Date.now() }; }
         catch { usage = { status: "unknown", error: "The provider did not return a verified balance", observedAt: Date.now() }; }
       }
       const stored: StoredCloudProvider = { provider: input.provider, enabled: input.enabled, keyConfigured: Boolean(input.apiKey || old?.sealedKey), updatedAt: Date.now(), usage,
-        sealedKey: input.apiKey ? sealIntegration(input.apiKey, `execution-cloud:${principal.teamId}:${input.provider}`) : old?.sealedKey };
-      setExecutionSetting(principal.teamId, "cloud", input.provider, stored); executionAudit(principal, "save_cloud_provider", input.provider);
+        sealedKey: input.apiKey ? sealIntegration(input.apiKey, `execution-cloud:${principal.teamId}:${input.provider}`) : old?.sealedKey,
+        ...(input.provider === "boxd" ? { boxdBinding, nativeBilling: boxdBinding?.revision === old?.boxdBinding?.revision ? old?.nativeBilling : undefined } : {}) };
+      if (input.provider === "boxd") stored.usage = nativeBoxdUsage(stored);
+      atomicExecution(() => {
+        if (JSON.stringify(executionSetting(principal.teamId, "cloud", input.provider)) !== JSON.stringify(old)) throw new ExecutionError("Provider configuration changed; reload before saving");
+        setExecutionSetting(principal.teamId, "cloud", input.provider, stored); executionAudit(principal, "save_cloud_provider", input.provider);
+      });
       return { ok: true };
     }
     case "saveEnvironment": {

@@ -10,6 +10,8 @@ export default defineConfig([
     "@next/next/no-html-link-for-pages": "warn", "react/no-unescaped-entities": "warn",
   } },
   { files: ["scripts/**"], rules: { "@typescript-eslint/no-explicit-any": "warn" } },
+  // Standalone Node runtimes use SDK functions named use*, not React hooks.
+  { files: ["deploy/**/*.mjs", "runner/**/*.mjs"], rules: { "react-hooks/rules-of-hooks": "off" } },
   // Never lint vendored or generated bundles.
   globalIgnores([".next/**", "convex/_generated/**", "public/**", "node_modules/**", "artifacts/**", "**/playwright-report/**", "**/test-results/**"]),
 ]);

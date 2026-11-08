@@ -7,9 +7,12 @@ import { executionAction, executionRunDetail, executionSnapshot } from "./execut
 import { accountIdentity, atomicExecution, executionAccounts, executionDb, executionSetting, readExecutionRun, replaceExecutionAccounts, saveExecutionHost, saveExecutionRun, type ExecutionPrincipal } from "./execution-store";
 import { cloudAccountUsage } from "./execution-cloud";
 import { enrolledHost } from "./execution-common";
+import { boxdOrganization } from "./execution-cloud/boxd";
+import type { StoredCloudProvider } from "./execution-common";
 import type { ExecutionAccountReport, ExecutionHost, ExecutionPolicyOverride, ExecutionRun } from "./execution-types";
 
 vi.mock("./execution-cloud", () => ({ cloudAccountUsage: vi.fn() }));
+vi.mock("./execution-cloud/boxd", () => ({ boxdOrganization: vi.fn() }));
 const now = Date.UTC(2026, 10, 8, 12);
 let directory: string;
 beforeAll(() => { directory = mkdtempSync(path.join(tmpdir(), "origin-execution-browser-")); vi.stubEnv("ORIGIN_LOCAL_DATA_DIR", directory); });
@@ -19,6 +22,7 @@ beforeEach(() => {
   const db = executionDb();
   for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'execution_%'").all() as { name: string }[]) db.exec(`DELETE FROM "${name}"`);
   vi.mocked(cloudAccountUsage).mockReset().mockResolvedValue({ status: "unknown" });
+  vi.mocked(boxdOrganization).mockReset().mockResolvedValue("org-fixture");
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 afterAll(() => { executionDb().close(); rmSync(directory, { recursive: true, force: true }); vi.unstubAllEnvs(); });
@@ -159,6 +163,31 @@ test("cloud keys and automation values are write-only; snapshots expose only nam
   expect(executionSnapshot(actor).cloudProviders.find(provider => provider.provider === "boxd")).toMatchObject({ keyConfigured: true, enabled: false });
   await executionAction(actor, { action: "deleteEnvironment", environmentId: "project:development" });
   expect(executionSnapshot(actor).environments).toEqual([]);
+});
+
+test("Boxd consent binds the resolved organization and is cleared on credential replacement", async () => {
+  const actor = principal();
+  await executionAction(actor, { action: "saveCloudProvider", provider: "boxd", apiKey: "first-fixture-key", enabled: false });
+  const first = executionSetting<StoredCloudProvider>(actor.teamId, "cloud", "boxd")!;
+  expect(first.boxdBinding).toMatchObject({ orgId: "org-fixture" });
+  expect(first.boxdBinding?.autoTopUpOffConfirmedAt).toBeUndefined();
+  await executionAction(actor, { action: "saveCloudProvider", provider: "boxd", enabled: false, boxdAutoTopUpOff: true, boxdBillingRevision: first.boxdBinding!.revision });
+  expect(executionSetting<StoredCloudProvider>(actor.teamId, "cloud", "boxd")!.boxdBinding).toMatchObject({ confirmedBy: actor.userId, autoTopUpOffConfirmedAt: now });
+  vi.mocked(boxdOrganization).mockResolvedValueOnce("another-org");
+  await executionAction(actor, { action: "saveCloudProvider", provider: "boxd", apiKey: "replacement-key", enabled: false });
+  const replaced = executionSetting<StoredCloudProvider>(actor.teamId, "cloud", "boxd")!;
+  expect(replaced.boxdBinding?.orgId).toBe("another-org");
+  expect(replaced.boxdBinding?.revision).not.toBe(first.boxdBinding!.revision);
+  expect(replaced.boxdBinding?.autoTopUpOffConfirmedAt).toBeUndefined();
+  expect(replaced.nativeBilling).toBeUndefined();
+  await expect(executionAction(actor, { action: "saveCloudProvider", provider: "boxd", enabled: true, boxdAutoTopUpOff: true, boxdBillingRevision: first.boxdBinding!.revision })).rejects.toThrow(/Save the Boxd credential first/);
+});
+
+test("Boxd unresolved key identity cannot overwrite the existing provider", async () => {
+  const actor = principal();
+  vi.mocked(boxdOrganization).mockRejectedValueOnce(new Error("Identity unavailable"));
+  await expect(executionAction(actor, { action: "saveCloudProvider", provider: "boxd", apiKey: "unknown-key-fixture", enabled: false })).rejects.toThrow("Identity unavailable");
+  expect(executionSetting(actor.teamId, "cloud", "boxd")).toBeUndefined();
 });
 
 test.each(["unscoped", "different project", "different workspace", "revoked"])("environment grants reject %s hosts without retaining the secret", async variant => {

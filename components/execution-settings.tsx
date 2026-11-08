@@ -111,11 +111,18 @@ function CloudProviderForm({ provider, status, disabled, act }: { provider: "box
   const [key, setKey] = useState("");
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [saved, setSaved] = useState(false);
+  const [topUpOff, setTopUpOff] = useState<{ revision: string; confirmed: boolean } | null>(null);
   return <form className="settings-form execution-card" onSubmit={async event => {
     event.preventDefault(); setSaved(false);
-    try { await act("saveCloudProvider", { provider, enabled: enabled ?? status?.enabled ?? false, ...(key ? { apiKey: key } : {}) }); setKey(""); setEnabled(null); setSaved(true); } catch { /* Parent displays errors. */ }
+    try { await act("saveCloudProvider", { provider, enabled: enabled ?? status?.enabled ?? false, ...(key ? { apiKey: key } : {}),
+      ...(provider === "boxd" && !key && topUpOff ? { boxdAutoTopUpOff: topUpOff.confirmed, boxdBillingRevision: topUpOff.revision } : {}) }); setKey(""); setEnabled(null); setTopUpOff(null); setSaved(true); } catch { /* Parent displays errors. */ }
   }}><h4>{provider === "boxd" ? "Boxd" : "Boat"}</h4><p className="execution-help">Credential: {status?.keyConfigured ? "Configured (write-only)" : "Not configured"}</p>
-    <fieldset disabled={disabled}><label>{status?.keyConfigured ? "Replace API key (leave blank to keep)" : "API key"}<input type="password" autoComplete="new-password" spellCheck={false} value={key} onChange={event => setKey(event.target.value)} /></label><SettingSwitch label="Enable provider" checked={enabled ?? status?.enabled ?? false} onChange={setEnabled} /><button className="ghost-button compact">Save provider</button></fieldset>
+    <fieldset disabled={disabled}><label>{status?.keyConfigured ? "Replace API key (leave blank to keep)" : "API key"}<input type="password" autoComplete="new-password" spellCheck={false} value={key} onChange={event => { setKey(event.target.value); setTopUpOff(null); }} /></label>
+      {provider === "boxd" && <><p className="execution-help">Boxd organization: {status?.boxdBilling?.orgId ?? "Save the credential to verify its organization"}. Replacing the key clears billing evidence and this confirmation.</p>
+        <label><input type="checkbox" disabled={Boolean(key) || !status?.boxdBilling} checked={!key && (topUpOff && topUpOff.revision === status?.boxdBilling?.revision ? topUpOff.confirmed : Boolean(status?.boxdBilling?.autoTopUpOffConfirmedAt))}
+          onChange={event => { if (status?.boxdBilling) setTopUpOff({ revision: status.boxdBilling.revision, confirmed: event.target.checked }); }} />I personally verified automatic top-up is OFF for this organization in Boxd Billing.</label>
+        <p className="execution-help">This is your attestation, not an API check or billing change. <a href="https://app.boxd.sh/" target="_blank" rel="noreferrer">Open Boxd Billing</a>. Fresh controller-native credit evidence is also required before cloud work can start.</p></>}
+      <SettingSwitch label="Enable provider" checked={enabled ?? status?.enabled ?? false} onChange={setEnabled} /><button className="ghost-button compact">Save provider</button></fieldset>
     {status && <p className="execution-help">Provider balance: {status.usage.status === "available" && status.usage.balance !== undefined ? `${status.usage.balance} ${status.usage.unit ?? ""}` : "Unknown / not provided"}{status.usage.observedAt ? ` · Observed ${executionTime(status.usage.observedAt)}` : ""}{status.usage.error ? ` · ${status.usage.error}` : ""}</p>}
     {saved && <p className="notice success" role="status">Provider saved. Secret cleared from the form.</p>}
   </form>;

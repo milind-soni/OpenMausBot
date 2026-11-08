@@ -4,6 +4,7 @@ import { openIntegration, sealIntegration } from "./githubConnection";
 import { integrationBridge, originUrl } from "./integration-bridge";
 import { executionRunnerPublicKey } from "./execution-bundle";
 import { cloudHerdrConnectionPlan, cloudRexConnectionPlan, type CloudHerdrConnectionPlan, type CloudRexConnectionPlan } from "./execution-cloud-runtime";
+import { boxdAdmissionFailure } from "./execution-cloud/billing";
 import { prepareRunRepository } from "./github-execution";
 import { executionSelectionKey, routeExecution, verificationMatchesPolicy } from "./execution-policy";
 import {
@@ -154,6 +155,10 @@ async function claim(host: ExecutionHost) {
   await hostPrincipal(host);
   if (host.paused || activeHostRuns(host.id).length >= host.capacity) return { run: null, reason: "Machine paused or busy" };
   if ((host.kind === "boxd" || host.kind === "boat") && executionSetting<StoredCloudProvider>(host.teamId, "cloud", host.kind)?.enabled !== true) return { run: null, reason: "Cloud provider is disabled" };
+  if (host.kind === "boxd") {
+    const reason = boxdAdmissionFailure(executionSetting<StoredCloudProvider>(host.teamId, "cloud", "boxd"));
+    if (reason) return { run: null, reason };
+  }
   for (const candidate of executionRuns(host.teamId, true).filter(record => record.run.status === "queued" && record.run.requestedBy === host.ownerId && host.projectIds.includes(record.run.projectId)).sort((a, b) => a.run.createdAt - b.run.createdAt)) {
     const route = routeExecution({ policy: candidate.policy, projectId: candidate.run.projectId, ownerId: candidate.run.requestedBy, hosts: executionHosts(host.teamId).map(host => observedExecutionHost(host)), accounts: candidate.run.verificationOnly ? [] : executionAccounts(host.teamId, host.ownerId), attempted: candidate.attempted, verificationOnly: candidate.run.verificationOnly });
     if (route.host?.id !== host.id || !candidate.run.verificationOnly && !route.selection) continue;
@@ -168,6 +173,7 @@ async function claim(host: ExecutionHost) {
       const cloud = currentHost.kind === "boxd" || currentHost.kind === "boat";
       const allocation = cloud ? cloudAllocations(host.teamId).find(allocation => allocation.hostId === host.id) : undefined;
       if (cloud && (executionSetting<StoredCloudProvider>(host.teamId, "cloud", currentHost.kind)?.enabled !== true || allocation?.status !== "ready")) return null;
+      if (currentHost.kind === "boxd" && boxdAdmissionFailure(executionSetting<StoredCloudProvider>(host.teamId, "cloud", "boxd"))) return null;
       if (executionSetting(host.teamId, "maintenance", host.id)) return null;
       const currentRoute = routeExecution({ policy: record.policy, projectId: record.run.projectId, ownerId: host.ownerId, hosts: executionHosts(host.teamId).map(host => observedExecutionHost(host)), accounts: record.run.verificationOnly ? [] : executionAccounts(host.teamId, host.ownerId), attempted: record.attempted, verificationOnly: record.run.verificationOnly });
       if (currentRoute.host?.id !== host.id) return null;

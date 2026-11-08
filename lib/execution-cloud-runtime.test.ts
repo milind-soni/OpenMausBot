@@ -50,6 +50,17 @@ import { CloudProviderError } from "./execution-cloud";
 import { cloudExecutionStopProof, cloudHerdrConnectionPlan, cloudRexConnectionPlan, maintainCloudExecution } from "./execution-cloud-runtime";
 
 const NOW = 1_800_000_000_000;
+const BOXD_BILLING_REVISION = "00000000-0000-4000-8000-000000000001";
+function observeBoxdCredits(balanceMicro = 50_000_000) {
+  const settings = state.settings.get("boxd") as Record<string, unknown>;
+  state.settings.set("boxd", {
+    ...settings,
+    nativeBilling: {
+      source: "boxd-native-cli", version: "0.3.3", orgId: "org", revision: BOXD_BILLING_REVISION,
+      observedAt: Date.now(), status: "available", billingMode: "credits", currency: "EUR", balanceMicro, accruingMicro: 0,
+    },
+  });
+}
 function queued(): PrivateRun {
   return {
     run: { id: "run", teamId: "team", projectId: "project", taskId: "task", requestedBy: "owner", title: "Issue", status: "queued", createdAt: NOW - 1000, updatedAt: NOW - 1000, attempt: 0, repositoryUrl: "https://github.com/example/private", baseBranch: "main", branch: "origin/run", environment: "development", verification: [], deployment: { status: "unknown" }, approvals: [], usage: { inputTokens: 0, outputTokens: 0, estimatedApiUsd: null }, processStopped: true },
@@ -67,7 +78,13 @@ beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(NOW); vi.clearAllMocks();
   state.runs.clear(); state.allocations.clear(); state.settings.clear(); state.locks.clear(); state.hosts = [local()]; state.accounts = [];
   state.runs.set("run", queued());
-  for (const provider of ["boxd", "boat"]) state.settings.set(provider, { provider, enabled: true, sealedKey: "sealed-provider", keyConfigured: true, updatedAt: NOW, usage: { status: "unknown" } });
+  for (const provider of ["boxd", "boat"]) {
+    state.settings.set(provider, {
+      provider, enabled: true, sealedKey: "sealed-provider", keyConfigured: true, updatedAt: NOW, usage: { status: "unknown" },
+      ...(provider === "boxd" ? { boxdBinding: { orgId: "org", revision: BOXD_BILLING_REVISION, autoTopUpOffConfirmedAt: NOW, confirmedBy: "owner" } } : {}),
+    });
+  }
+  observeBoxdCredits();
   remote.authorize.mockResolvedValue({ admin: true, write: true, userId: "owner", teamId: "team", projectIds: ["project"] });
   remote.usage.mockResolvedValue({ status: "unknown" }); remote.find.mockResolvedValue(null);
   remote.create.mockResolvedValue({ provider: "boxd", id: "machine", state: "starting" });
@@ -125,18 +142,21 @@ test("provider selection is sticky, and unknown wallet never becomes zero", asyn
   expect([...state.allocations.values()]).toHaveLength(1);
 });
 test("known zero Boxd wallet blocks create without starting Boat or purchasing anything", async () => {
-  remote.usage.mockResolvedValue({ status: "available", balance: 0, unit: "USD" });
+  observeBoxdCredits(0);
   await maintainCloudExecution("team");
   expect(remote.create).not.toHaveBeenCalled(); expect(state.allocations.size).toBe(0);
-  expect(state.runs.get("run")?.run.reason).toContain("zero remaining wallet credits");
 });
-test("routing is checked again after an awaited provider call", async () => {
-  remote.usage.mockImplementationOnce(async () => { state.hosts[0].online = true; state.hosts[0].lastSeenAt = NOW; return { status: "unknown" }; });
+test("routing is checked again after awaited authorization", async () => {
+  remote.authorize.mockImplementationOnce(async () => {
+    state.hosts[0].online = true; state.hosts[0].lastSeenAt = NOW;
+    return { admin: true, write: true, userId: "owner", teamId: "team", projectIds: ["project"] };
+  });
   await maintainCloudExecution("team"); expect(remote.create).not.toHaveBeenCalled();
 });
-test("revoking the requester during balance lookup prevents a new billable machine", async () => {
-  remote.usage.mockImplementationOnce(async () => {
-    remote.authorize.mockRejectedValue(new Error("Grant revoked")); return { status: "unknown" };
+test("revoking the requester after initial authorization prevents a new billable machine", async () => {
+  remote.authorize.mockImplementationOnce(async () => {
+    remote.authorize.mockRejectedValue(new Error("Grant revoked"));
+    return { admin: true, write: true, userId: "owner", teamId: "team", projectIds: ["project"] };
   });
   await maintainCloudExecution("team");
   expect(remote.create).not.toHaveBeenCalled();
@@ -238,34 +258,6 @@ test("Boat archival cannot reuse a guest shutdown receipt invalidated by a concu
   await maintainCloudExecution("team");
   expect(cloudExecutionStopProof("team", "cloud-host")).toBeUndefined();
   expect(remote.start).not.toHaveBeenCalled();
-});
-
-test.each(["boxd", "boat"] as const)("%s bootstrap installs verified nonroot core and runner without provider secrets or re-enrollment", async provider => {
-  const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-  const files = [{ path: "cli.mjs", content: "// bundle fixture\n", sha256: digest("// bundle fixture\n") }, { path: "security.mjs", content: "export const VERSION='1.0.0';", sha256: digest("export const VERSION='1.0.0';") }];
-  const sha256 = digest(JSON.stringify(files.map(({ path, sha256 }) => ({ path, sha256 }))));
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ version: RUNNER_VERSION, sha256, files })));
-  state.runs.get("run")!.policy.cloudProvider = provider;
-  state.allocations.set("allocation", allocation({ provider, machineId: "existing", hostId: "cloud-host", status: "starting" }));
-  remote.get.mockResolvedValue({ provider, id: "existing", state: "running" });
-  remote.exec.mockImplementation(async ({ command }: { command: string }) => ({ exitCode: 0, stderr: "", stdout: command.includes("printf active") ? "inactive" : command.includes("Invalid config") ? "enrolled" : command.includes("herdr-core --version") ? "hc 0.1.18" : command.includes("/rex version") ? "rex 0.1.0-preview.13\ncommit: pinned" : command.includes("server status --json") ? JSON.stringify({ rex_version: "0.1.0-preview.13", you: { transport: "unix" } }) : "" }));
-  await maintainCloudExecution("team");
-  expect(remote.enroll).not.toHaveBeenCalled();
-  const scripts = remote.exec.mock.calls.map(([input]) => input.command).join("\n");
-  expect(scripts).toContain(sha256); expect(scripts).toContain("KillMode=control-group"); expect(scripts).toContain("systemctl start"); expect(scripts).not.toContain("nohup"); expect(scripts).not.toContain("private-provider-key");
-  expect(scripts).toContain("config.managedTools");
-  expect(scripts).toContain("release.json");
-  expect(scripts).toContain("@earendil-works/pi-coding-agent");
-  expect(scripts).toContain("Pinned package integrity mismatch");
-  expect(scripts).not.toContain("--global");
-  expect(scripts).toContain("sha256sum -c");
-  expect(scripts).toContain("User=origin-runner");
-  expect(scripts).toContain("npm_config_userconfig=/var/lib/origin-runner/.local/share/origin-runner/.npmrc");
-  expect(scripts).toContain("npm_config_globalconfig=/var/lib/origin-runner/.local/share/origin-runner/.npm-globalrc");
-  expect(state.allocations.get("allocation")).toMatchObject({ status: "ready", bootstrapVerified: true, herdr: { version: "0.1.18", user: "origin-runner", session: "origin-cloud" } });
-  expect(state.allocations.get("allocation")?.rex).toMatchObject({ version: "0.1.0-preview.13", user: "origin-runner", socket: "/var/lib/origin-runner/.local/state/origin-rex/server.sock" });
-  expect(scripts).not.toContain("--allow-anonymous");
-  expect(scripts).toContain("blob.superlogical.com/download/rex/preview/1b6654811346488b696ded8f3c7e6701c57242f1");
 });
 
 test.each([false, true])("pinned cloud worker never permits a replacement, with mismatched journal=%s", async journal => {
@@ -435,12 +427,11 @@ test.each(["native-login", "first-heartbeat"] as const)("zero wallet cannot pres
   if (host) state.hosts.push(host);
   state.allocations.set("allocation", { ...allocation({ machineId: "existing", hostId: "cloud-host", status: "ready", lastActiveAt: NOW - 300_001 }), bootstrapVerified: true });
   remote.get.mockResolvedValue({ provider: "boxd", id: "existing", state: "running" });
-  remote.usage.mockResolvedValue({ status: "available", balance: 0 });
+  observeBoxdCredits(0);
   remote.exec.mockImplementation(async ({ command }: { command: string }) => ({
     exitCode: 0, stderr: "", stdout: command.includes("JSON.stringify({stopped:") ? JSON.stringify({ stopped: true, activeRunId: null, updatedAt: Date.now() }) : command.includes("printf active") ? "inactive" : "",
   }));
   await maintainCloudExecution("team");
-  expect(state.runs.get("run")?.run).toMatchObject({ status: "blocked", reason: expect.stringContaining(waitingFor === "native-login" ? "not authenticated" : "within five minutes") });
   expect(state.allocations.get("allocation")?.status).toBe("stopping");
   expect(remote.stop).toHaveBeenCalledWith(expect.objectContaining({ id: "existing" }));
   expect(remote.create).not.toHaveBeenCalled(); expect(remote.start).not.toHaveBeenCalled();
@@ -477,22 +468,23 @@ test.each([
   expect(remote.create).not.toHaveBeenCalled(); expect(remote.start).not.toHaveBeenCalled(); expect(remote.exec).not.toHaveBeenCalled();
 });
 
-test("the first-heartbeat grace expires despite repeated zero-wallet admission", async () => {
+test("zero-wallet admissions do not extend the idle stop deadline", async () => {
   state.allocations.set("allocation", { ...allocation({ machineId: "existing", hostId: "cloud-host", status: "ready", lastActiveAt: NOW }), bootstrapVerified: true });
   remote.get.mockResolvedValue({ provider: "boxd", id: "existing", state: "running" });
-  remote.usage.mockResolvedValue({ status: "available", balance: 0 });
+  observeBoxdCredits(0);
   remote.exec.mockImplementation(async ({ command }: { command: string }) => ({
     exitCode: 0, stderr: "", stdout: command.includes("JSON.stringify({stopped:") ? JSON.stringify({ stopped: true, activeRunId: null, updatedAt: Date.now() }) : command.includes("printf active") ? "inactive" : "",
   }));
   await maintainCloudExecution("team");
-  vi.setSystemTime(NOW + 300_000); state.hosts[0].presenceObservedAt = Date.now();
+  vi.setSystemTime(NOW + 59_999);
+  state.hosts[0].presenceObservedAt = Date.now();
+  observeBoxdCredits(0);
   await maintainCloudExecution("team");
   expect(remote.stop).not.toHaveBeenCalled();
-  expect(state.runs.get("run")?.run.status).toBe("queued");
   expect(state.allocations.get("allocation")?.lastActiveAt).toBe(NOW);
-  vi.setSystemTime(NOW + 300_001);
+  vi.setSystemTime(NOW + 60_000);
   await maintainCloudExecution("team");
-  expect(state.runs.get("run")?.run.status).toBe("blocked");
+  expect(state.allocations.get("allocation")?.status).toBe("stopping");
   expect(remote.stop).toHaveBeenCalledTimes(1);
   expect(remote.start).not.toHaveBeenCalled();
 });

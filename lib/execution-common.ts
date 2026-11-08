@@ -8,6 +8,7 @@ import { openIntegration, sealIntegration } from "./githubConnection";
 import { effectiveExecutionPolicy } from "./execution-policy";
 import { executionDb, executionSetting, executionTokenHash, readExecutionRun, saveExecutionHost, type ExecutionPrincipal, type PrivateRun } from "./execution-store";
 import type { ExecutionCloudProviderStatus, ExecutionEnvironment, ExecutionHost, ExecutionPolicyOverride } from "./execution-types";
+import type { BoxdBillingBinding, BoxdBillingReport } from "./execution-cloud/billing";
 
 export class ExecutionError extends Error {
   constructor(message: string, public status = 400) { super(message); this.name = "ExecutionError"; }
@@ -15,7 +16,7 @@ export class ExecutionError extends Error {
 export const executionId = z.string().min(1).max(200);
 export const executionHarness = z.enum(["omp", "claude-code", "codex", "pi", "t3"]);
 export type StoredEnvironment = ExecutionEnvironment & { sealed: string; teamId: string };
-export type StoredCloudProvider = ExecutionCloudProviderStatus & { sealedKey?: string };
+export type StoredCloudProvider = ExecutionCloudProviderStatus & { sealedKey?: string; boxdBinding?: BoxdBillingBinding; nativeBilling?: BoxdBillingReport };
 export const LEASE_SECONDS = 60;
 export const HEARTBEAT_SECONDS = 15;
 export const activeExecutionStatuses: Record<string, true> = { queued: true, preparing: true, running: true, verifying: true, blocked: true, awaiting_checks: true };

@@ -24,7 +24,7 @@ if test -e ${CLOUD_HERDR_BIN}; then
 else
   install -m 755 "$tmp/herdr-core" ${CLOUD_HERDR_BIN}
 fi
-install -d -m 700 -o origin-runner -g origin-runner ${CLOUD_HERDR_HOME}/.local/bin ${CLOUD_HERDR_HOME}/.cache
+install -d -m 700 -o origin-runner -g origin-runner ${CLOUD_HERDR_HOME}/.local ${CLOUD_HERDR_HOME}/.local/share ${CLOUD_HERDR_HOME}/.local/bin ${CLOUD_HERDR_HOME}/.cache
 ln -sfn ${CLOUD_HERDR_BIN} ${CLOUD_HERDR_HOME}/.local/bin/hc
 ln -sfn ${CLOUD_HERDR_BIN} ${CLOUD_HERDR_HOME}/.local/bin/herdr-core
 `;

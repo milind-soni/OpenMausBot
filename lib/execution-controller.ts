@@ -3,23 +3,39 @@ import { z } from "zod";
 import { integrationBridge } from "./integration-bridge";
 import { finalizeRunPullRequest, readRunDeployment, reconcileMergedRunPullRequest } from "./github-execution";
 import { cloudExecutionStopProof, maintainCloudExecution } from "./execution-cloud-runtime";
-import { ExecutionError, executionId, observedExecutionHost, revalidateExecutionPrincipal } from "./execution-common";
+import { ExecutionError, executionId, observedExecutionHost, revalidateExecutionPrincipal, type StoredCloudProvider } from "./execution-common";
 import { routeExecution, verificationMatchesPolicy } from "./execution-policy";
 import type { ExecutionMerge } from "./execution-types";
+import { boxdBillingReport, matchingBoxdBilling, nativeBoxdUsage } from "./execution-cloud/billing";
 import {
   acquireExecutionLock, appendExecutionEvent, atomicExecution, executionAccounts, executionDeploymentRuns, executionHosts, executionRuns,
-  executionTokenHash, readExecutionHost, readExecutionRun, releaseExecutionLock, saveExecutionHost, saveExecutionRun,
+  executionTokenHash, executionSetting, setExecutionSetting, readExecutionHost, readExecutionRun, releaseExecutionLock, saveExecutionHost, saveExecutionRun,
   type ExecutionPrincipal, type PrivateRun,
 } from "./execution-store";
 
-export function acceptExecutionControllerTick(token: string, body: unknown) {
+function authenticateController(token: string) {
   const expected = process.env.ORIGIN_EXECUTION_CONTROLLER_TOKEN_HASH;
   const teamId = process.env.ORIGIN_EXECUTION_TEAM_ID;
   if (!expected || !/^[a-f0-9]{64}$/.test(expected) || !teamId) throw new ExecutionError("Execution controller is not configured", 503);
   if (token.length < 32 || token.length > 200 || !timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(executionTokenHash(token), "hex"))) throw new ExecutionError("Controller authentication failed", 401);
-  const input = z.object({ op: z.literal("tick"), localPresence: z.array(z.object({ hostId: executionId, tailnetName: z.string().max(253).regex(/^[a-zA-Z0-9.-]+$/), online: z.boolean(), observedAt: z.number().finite().nonnegative() })).max(500) }).strict().parse(body);
+  return teamId;
+}
+export function executionControllerBillingContext(token: string) {
+  const teamId = authenticateController(token);
+  const provider = executionSetting<StoredCloudProvider>(teamId, "cloud", "boxd");
+  return provider?.sealedKey && provider.boxdBinding ? { orgId: provider.boxdBinding.orgId, revision: provider.boxdBinding.revision } : null;
+}
+export function acceptExecutionControllerTick(token: string, body: unknown) {
+  const teamId = authenticateController(token);
+  const input = z.object({ op: z.literal("tick"), localPresence: z.array(z.object({ hostId: executionId, tailnetName: z.string().max(253).regex(/^[a-zA-Z0-9.-]+$/), online: z.boolean(), observedAt: z.number().finite().nonnegative() })).max(500), boxdBilling: boxdBillingReport.optional() }).strict().parse(body);
   const now = Date.now();
   atomicExecution(() => {
+    const provider = executionSetting<StoredCloudProvider>(teamId, "cloud", "boxd");
+    if (provider?.sealedKey && input.boxdBilling && matchingBoxdBilling(provider.boxdBinding, input.boxdBilling, now)
+      && (!provider.nativeBilling || provider.nativeBilling.observedAt <= input.boxdBilling.observedAt)) {
+      const updated = { ...provider, nativeBilling: input.boxdBilling };
+      setExecutionSetting(teamId, "cloud", "boxd", { ...updated, usage: nativeBoxdUsage(updated, now) });
+    }
     for (const report of input.localPresence) {
       if (report.observedAt > now + 10000 || now - report.observedAt > 60000) continue;
       const host = readExecutionHost(report.hostId);

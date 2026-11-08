@@ -191,12 +191,20 @@ export function parseBoxdUsage(value: unknown): CloudUsage {
   if (typeof data.balanceMicro !== "number" || !Number.isSafeInteger(data.balanceMicro) || typeof data.currency !== "string" || !/^(eur|usd)$/i.test(data.currency)) return { status: "unknown", error: "Boxd did not expose a usable credit-wallet balance" };
   return { status: "available", balance: data.balanceMicro / 1000000, unit: data.currency.toUpperCase(), balanceScope: "credit_wallet", label: "Boxd credit wallet (not a subscription allowance)" };
 }
+export function boxdOrganization(apiKey: string): Promise<string> {
+  return withBoxd(apiKey, "usage", undefined, async client => {
+    const { orgId } = await client.orgs.getMachineLimit();
+    if (typeof orgId !== "string" || !orgId || orgId.length > 200) protocol("boxd", "usage");
+    return orgId;
+  });
+}
 export function usageBoxd(apiKey: string) {
   return withBoxd(apiKey, "usage", undefined, async client => {
-    // Legacy subscription accounts have no meaningful credit balance. Do not
-    // present their protobuf default zero as exhausted subscription credits.
+    // Account status can remain "active" for credit-billed orgs too. The SDK
+    // does not expose org billing mode, and GetOrgBilling requires native login.
+    // Keep an ambiguous wallet unknown instead of treating a default zero as exhaustion.
     const account = await client.account.get();
-    if (account.billing.subscriptionStatus) return { status: "unknown" as const, error: "Boxd reports a subscription; no remaining subscription balance is exposed" };
+    if (account.billing.subscriptionStatus) return { status: "unknown" as const, error: "Boxd account status does not establish organization billing mode; verify credits with native boxd manage billing" };
     return parseBoxdUsage(await client.orgs.billingActivityPage({ pageSize: 1 }));
   });
 }

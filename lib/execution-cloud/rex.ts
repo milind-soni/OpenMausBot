@@ -11,7 +11,7 @@ case "$(uname -m)" in
   *) exit 72;;
 esac
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 180 "https://blob.superlogical.com/download/rex/preview/1b6654811346488b696ded8f3c7e6701c57242f1/rex-linux-$arch.tar.gz" -o "$tmp/rex.tar.gz"
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time 180 "https://blob.superlogical.com/download/rex/preview/1b6654811346488b696ded8f3c7e6701c57242f1/rex-linux-$arch.tar.gz" -o "$tmp/rex.tar.gz"
 printf '%s  %s\\n' "$sha" "$tmp/rex.tar.gz" | sha256sum -c - >/dev/null
 tar -xzf "$tmp/rex.tar.gz" -C "$tmp" rex
 install -d -m 755 /opt/origin-rex/${REX_VERSION}
@@ -19,5 +19,5 @@ if test -e ${CLOUD_REX_BIN}; then cmp "$tmp/rex" ${CLOUD_REX_BIN}; else install 
 install -d -m 700 -o origin-runner -g origin-runner /var/lib/origin-runner/.local/state /var/lib/origin-runner/.local/state/origin-rex
 `;
 export function cloudRexService(path: string) {
-  return `[Unit]\nDescription=Origin private Rex server\nAfter=network-online.target\n[Service]\nType=simple\nUser=origin-runner\nGroup=origin-runner\nEnvironment=HOME=/var/lib/origin-runner\nEnvironment=PATH=${path}\nWorkingDirectory=/var/lib/origin-runner\nExecStart=${CLOUD_REX_BIN} server run --listen unix://${REX_SOCKET} --state-dir /var/lib/origin-runner/.local/state/origin-rex --socket-mode 0600\nKillMode=control-group\nTimeoutStopSec=30\nUMask=0077\nNoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nReadWritePaths=/var/lib/origin-runner\nPrivateTmp=yes\n`;
+  return `[Unit]\nDescription=Origin private Rex server\nAfter=network-online.target\n[Service]\nType=simple\nUser=origin-runner\nGroup=origin-runner\nEnvironment=HOME=/var/lib/origin-runner\nEnvironment=PATH=${path}\nWorkingDirectory=/var/lib/origin-runner\nExecStart=${CLOUD_REX_BIN} server run --listen unix://${REX_SOCKET} --state-dir /var/lib/origin-runner/.local/state/origin-rex --socket-mode 0600\nExecStartPost=/bin/sh -c 'i=0; until ${CLOUD_REX_BIN} --autostart=false --server unix://${REX_SOCKET} server status --json >/dev/null 2>&1; do i=$$((i+1)); [ "$$i" -lt 30 ] || exit 1; sleep 1; done'\nTimeoutStartSec=45\nKillMode=control-group\nTimeoutStopSec=30\nUMask=0077\nNoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nReadWritePaths=/var/lib/origin-runner\nPrivateTmp=yes\n`;
 }

@@ -5,10 +5,15 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-DynamicUser=yes
+User=origin-controller-native
+Group=origin-controller-native
+StateDirectory=origin-controller
+StateDirectoryMode=0700
+Environment=HOME=/var/lib/origin-controller
+Environment=XDG_CONFIG_HOME=/var/lib/origin-controller/.config
 LoadCredential=service-token:/etc/origin-controller/service-token
 ExecStart=/usr/bin/python3 /opt/origin-controller/controller.py tick
-TimeoutStartSec=50
+TimeoutStartSec=65
 UMask=0077
 NoNewPrivileges=yes
 ProtectSystem=strict

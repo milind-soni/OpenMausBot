@@ -7,6 +7,7 @@ import { openIntegration, sealIntegration } from "./githubConnection";
 import { originUrl } from "./integration-bridge";
 import { CLOUD_HERDR_BIN, CLOUD_HERDR_ENV, CLOUD_HERDR_SESSION, CLOUD_HERDR_UNIT, CLOUD_HERDR_VERSION, cloudHerdrService, installCloudHerdr } from "./execution-cloud/herdr";
 import { CLOUD_REX_BIN, CLOUD_REX_SOCKET, CLOUD_REX_UNIT, CLOUD_REX_VERSION, cloudRexService, installCloudRex } from "./execution-cloud/rex";
+import { boxdAdmissionFailure } from "./execution-cloud/billing";
 import { setBoxdHerdrSsh } from "./execution-cloud/boxd";
 import { VERSION as RUNNER_VERSION } from "../runner/security.mjs";
 
@@ -75,6 +76,8 @@ async function authorizeProvision(record: PrivateRun, sealedKey: string, allocat
   if (!principal.admin) throw new CloudProvisionDeferred("A workspace administrator must authorize private cloud enrollment");
   const provider = executionSetting<StoredCloudProvider>(record.run.teamId, "cloud", record.policy.cloudProvider);
   if (!provider?.enabled || provider.sealedKey !== sealedKey) throw new CloudProvisionDeferred("Cloud provider consent or credentials changed; no new provisioning action was sent");
+  const billingFailure = record.policy.cloudProvider === "boxd" ? boxdAdmissionFailure(provider) : undefined;
+  if (billingFailure) throw new CloudProvisionDeferred(billingFailure);
   if (!pending(record, allocation)) throw new CloudProvisionDeferred("Run policy or local availability changed; no new provisioning action was sent");
   if (allocation?.hostId) {
     const host = readExecutionHost(allocation.hostId);
@@ -345,13 +348,16 @@ async function provision(record: PrivateRun) {
     const keys = credentials({ teamId: record.run.teamId, provider: record.policy.cloudProvider }, true);
     if (!keys) { reason(record, `${record.policy.cloudProvider} is disabled or its server-side API key is missing`); return; }
     const authorize = () => authorizeProvision(record, keys.stored.sealedKey!, allocation);
-    let usage: StoredCloudProvider["usage"];
-    try { usage = { ...await cloudAccountUsage({ provider: record.policy.cloudProvider, apiKey: keys.apiKey }), observedAt: Date.now() }; }
-    catch { usage = { status: "unknown", observedAt: Date.now(), error: "Provider balance is unavailable; this is not confirmed exhaustion" }; }
+    let usage: StoredCloudProvider["usage"] | undefined;
+    if (record.policy.cloudProvider !== "boxd") {
+      try { usage = { ...await cloudAccountUsage({ provider: record.policy.cloudProvider, apiKey: keys.apiKey }), observedAt: Date.now() }; }
+      catch { usage = { status: "unknown", observedAt: Date.now(), error: "Provider balance is unavailable; this is not confirmed exhaustion" }; }
+    }
     const latestProvider = executionSetting<StoredCloudProvider>(record.run.teamId, "cloud", record.policy.cloudProvider);
     if (!latestProvider || latestProvider.sealedKey !== keys.stored.sealedKey || !latestProvider.enabled) return;
-    setExecutionSetting(record.run.teamId, "cloud", record.policy.cloudProvider, { ...latestProvider, usage });
-    if (record.policy.cloudProvider === "boxd" && usage.status === "available" && typeof usage.balance === "number" && usage.balance <= 0) { reason(record, "Boxd reports zero remaining wallet credits; no account, subscription or Boat fallback was created"); return; }
+    if (usage) setExecutionSetting(record.run.teamId, "cloud", record.policy.cloudProvider, { ...latestProvider, usage });
+    const billingFailure = record.policy.cloudProvider === "boxd" ? boxdAdmissionFailure(latestProvider) : undefined;
+    if (billingFailure) { reason(record, billingFailure); return; }
     await authorize();
     if (!allocation) {
       const now = Date.now(), id = randomUUID();
@@ -493,7 +499,8 @@ async function maintainAllocation(allocation: Allocation) {
       try { if (!(await revalidateExecutionPrincipal(record)).admin) continue; } catch { continue; }
       const currentHost = allocation.hostId ? readExecutionHost(allocation.hostId) : undefined;
       const current = pending(record, allocation);
-      if (current && !currentHost?.revoked && !currentHost?.paused && executionSetting<StoredCloudProvider>(allocation.teamId, "cloud", allocation.provider)?.enabled && !blockIdleSetup(current, allocation)) { demand = true; break; }
+      const currentProvider = executionSetting<StoredCloudProvider>(allocation.teamId, "cloud", allocation.provider);
+      if (current && !currentHost?.revoked && !currentHost?.paused && currentProvider?.enabled && (allocation.provider !== "boxd" || !boxdAdmissionFailure(currentProvider)) && !blockIdleSetup(current, allocation)) { demand = true; break; }
     }
     if (maintenance !== "expired" && demand && allocation.status !== "stopping" && allocation.status !== "failed") return;
     if (maintenance !== "expired" && allocation.status !== "stopping" && Date.now() - allocation.lastActiveAt < IDLE_MS) return;
