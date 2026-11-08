@@ -9,11 +9,13 @@ import {
   apiBase,
   canonicalToolkitSlug,
   forgetProjectAuthConfigs,
+  listConnectedAccounts,
   projectAuthConfigs,
   projectHeaders,
   responseError,
   turnOnToolRouter,
   type AuthConfigChoice,
+  type ConnectedAccountResponse,
   type AuthConfigMap,
 } from "./composio-project.ts";
 
@@ -155,6 +157,25 @@ async function createProjectSession(apiKey: string, userId: string, authConfigs:
   return session.session_id;
 }
 
+/** The one OpenMausBot Composio user in this project, when it still has a live connection, so a fresh installation (a
+ * reinstall, another computer) gets that installation's apps back; null when there is none, more than one (even with
+ * only expired connections, since it can't tell whose is whose), or Composio can't say. */
+async function earlierInstallationUser(apiKey: string): Promise<string | null> {
+  const users = new Set<string>();
+  const sawSeveralUsers = (page: ConnectedAccountResponse[]) => {
+    for (const { user_id } of page) if (user_id?.startsWith("openmausbot_")) users.add(user_id);
+    return users.size > 1;
+  };
+  try {
+    const accounts = await listConnectedAccounts(apiKey, null, [], sawSeveralUsers);
+    if (users.size !== 1) return null;
+    return accounts.find((account) => account.status === "ACTIVE" && users.has(account.user_id ?? ""))?.user_id ?? null;
+  } catch (error) {
+    console.warn(`[composio] Could not read the project's earlier connections: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 export async function prepareProjectSession(
   apiKey: string,
   current?: { apiKey?: string; userId?: string; sessionId?: string },
@@ -180,7 +201,8 @@ export async function prepareProjectSession(
     priorUserId = existing?.config?.user_id ?? priorUserId;
   }
 
-  const userId = priorUserId ?? `openmausbot_${randomUUID()}`;
+  // A fresh installation keeps the Composio user an earlier one connected apps with in this project.
+  const userId = priorUserId ?? (await earlierInstallationUser(trimmed)) ?? `openmausbot_${randomUUID()}`;
   const sessionId = await createProjectSession(trimmed, userId, authConfigs);
   return { apiKey: trimmed, userId, sessionId };
 }
