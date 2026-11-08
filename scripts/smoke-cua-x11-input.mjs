@@ -116,7 +116,11 @@ async function until(probe, description, timeout = 10_000) {
     await delay(25);
   }
   const x11 = async (command, args) => (await execFileAsync(command, args).catch((error) => ({ stdout: String(error) }))).stdout;
-  throw new Error(`timed out waiting for ${description}\n${driverError}\n${xevOutput}\nopenbox:\n${windowManagerOutput}\n` +
+  const pid = windowManager.pid;
+  const proc = async (file) => (await import("node:fs/promises")).readFile(`/proc/${pid}/${file}`, "utf8").catch((error) => String(error));
+  const state = `${await x11("ps", ["-o", "pid,stat,wchan:32,pcpu,etime,args", "-p", String(pid)])}\nwchan ${await proc("wchan")}\n` +
+    `syscall ${await proc("syscall")}\n${(await proc("status")).split("\n").filter((line) => /^(State|Threads|SigBlk|SigPnd)/.test(line)).join("\n")}`;
+  throw new Error(`timed out waiting for ${description}\n${driverError}\n${xevOutput}\nopenbox:\n${windowManagerOutput}\n${state}\n` +
     `${await x11("xprop", ["-root"])}\n${await x11("xwininfo", ["-root", "-tree"])}`);
 }
 
