@@ -1120,7 +1120,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   for (const group of sectionedRooms) {
     if (!sectionNames.includes(group.section!)) sectionNames.push(group.section!);
   }
-  const drops = botDrag.arrange({ enabled: sections.interactive && !phone, main: saved.unsectionedBots, sectioned: saved.sectionedBots, departments: sectionNames, bots: state.bots, taken: departmentNames(state) });
+  const drops = botDrag.arrange({ enabled: (sections.interactive || density === "icons") && !phone, withinList: density === "icons", main: saved.unsectionedBots, sectioned: saved.sectionedBots, departments: sectionNames, bots: state.bots, taken: departmentNames(state) });
   const naturalSectionIds = [
     ...(pinnedBots.length > 0 && !universalPins && !simpleDesk ? [PINNED_SECTION_ID] : []),
     ...(unsectionedRooms.length > 0 ? [CHANNELS_SECTION_ID] : []),

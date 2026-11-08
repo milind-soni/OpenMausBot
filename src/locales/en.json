@@ -5071,6 +5071,8 @@
   "automations.wake": "Keep this computer awake for scheduled automations",
   "automations.wakeBattery": "Plug in to hold it awake.",
   "automations.allBots": "All bots",
+  "automations.allDepartments": "All departments",
+  "automations.generalDepartment": "General",
   "automations.status.working": "On",
   "automations.status.paused": "Paused",
   "automations.status.needsYou": "Needs you",

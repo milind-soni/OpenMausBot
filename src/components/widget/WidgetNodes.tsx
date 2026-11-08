@@ -1,6 +1,7 @@
 import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 import { Check, LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { imeComposing } from "@/lib/send-key";
 import { widgetNumber, widgetString, type WidgetNode } from "../../../shared/widget";
 import { ChatMarkdown } from "../ChatMarkdown";
 import { WidgetChart } from "./WidgetChart";
@@ -130,7 +131,7 @@ function Layout({ node, where }: { node: WidgetNode; where: WidgetWhere }) {
   if (!isForm || where.form) return <div className={className} style={style}>{children}</div>;
   const onKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
     const target = event.target;
-    if (event.key !== "Enter" || event.nativeEvent.isComposing || !(target instanceof HTMLInputElement) || target.type === "checkbox" || target.type === "radio") return;
+    if (event.key !== "Enter" || imeComposing(event.nativeEvent) || !(target instanceof HTMLInputElement) || target.type === "checkbox" || target.type === "radio") return;
     event.preventDefault();
     const ref = submitRef(node, form);
     if (ref) form.press(ref);
