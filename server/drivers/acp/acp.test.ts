@@ -1451,6 +1451,8 @@ describe("ACP turns (fake CLI)", () => {
   });
 
   it("tells the person where to turn tool selection off when Grok has its own MCP server", async () => {
+    const rpcFile = join(scratch, "grok-native-mcp-rpc.json");
+    process.env.FAKE_ACP_RPC_DUMP = rpcFile;
     process.env.FAKE_ACP_GROK_NATIVE_MCP = "github";
     try {
       await create(GrokAgentDriver);
@@ -1460,6 +1462,7 @@ describe("ACP turns (fake CLI)", () => {
         message: "Grok has an MCP connection outside the bot's selection. Remove the MCP servers from Grok's own settings, "
           + "or set Tool selection back to all tools in this bot's settings (Access). No prompt was sent.",
       });
+      expect(JSON.parse(readFileSync(rpcFile, "utf8"))).not.toContain("session/prompt");
     } finally {
       delete process.env.FAKE_ACP_GROK_NATIVE_MCP;
     }
