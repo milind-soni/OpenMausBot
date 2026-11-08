@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { ADAPTERS, attribute, chunkStream, noteQuestion, runSession, teamsSafeName, type CallPage, type MeetbotConfig, type SessionParts } from "./meetbot.ts";
+import { ADAPTERS, attribute, chunkStream, noteQuestion, runSession, teamsSafeName, whisperStream, type CallPage, type MeetbotConfig, type SessionParts } from "./meetbot.ts";
 
 const config: MeetbotConfig = {
   url: "https://meet.systemli.org/room", platform: "jitsi", name: "Ada (notes)", consent: "Hi, I'm Ada (notes). Ask me with @notes.",
@@ -149,6 +152,32 @@ describe("the meeting bot on Google Meet", () => {
     await runSession(run.session);
     expect(run.events.find((e) => e.type === "signed_in")?.data).toEqual({ as: "Milind" });
     expect(sent[0]).toBe(config.consent);
+  });
+});
+
+describe("local transcription install", () => {
+  it("leaves while the first install is still running", async () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-whisper-"));
+    const killed: string[] = [];
+    const events: Array<{ type: string; data?: Record<string, unknown> }> = [];
+    const stream = whisperStream((type, data) => { events.push({ type, data }); }, () => {}, () => {}, {
+      home,
+      stopWaitMs: 50,
+      spawn: (() => ({
+        kill(signal?: string) { killed.push(signal ?? "SIGTERM"); },
+        on() { return this; },
+        stdout: null,
+        stdin: null,
+      })) as unknown as typeof import("node:child_process").spawn,
+    });
+    const result = await Promise.race([
+      stream.stop().then(() => "stopped"),
+      new Promise((resolve) => setTimeout(() => resolve("hung"), 1_000)),
+    ]);
+    rmSync(home, { recursive: true, force: true });
+    expect(result).toBe("stopped");
+    expect(killed).toContain("SIGKILL");
+    expect(events.some((event) => event.type === "stt" && event.data?.status === "installing")).toBe(true);
   });
 });
 

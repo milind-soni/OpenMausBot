@@ -43,6 +43,30 @@ export type EndReason = "left" | "stop_requested" | "meeting_ended" | "removed" 
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** A pip install on a dead network, or ffmpeg on a stuck pipe, never exits. Leave must not wait for that. */
+const WHISPER_INSTALL_MS = 10 * 60_000;
+const STOP_INSTALL_WAIT_MS = 1_000;
+const FFMPEG_ENCODE_MS = 20_000;
+
+function boundChild(child: ChildProcess, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(new Error(`timed out after ${timeoutMs} ms`));
+    }, timeoutMs);
+    child.on("error", (error) => finish(error));
+    child.on("exit", (code) => finish(code === 0 ? undefined : new Error(`exited ${code}`)));
+  });
+}
+
 export function eventLog(dir: string) {
   const file = join(dir, "events.jsonl");
   let seq = existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).length : 0;
@@ -789,23 +813,30 @@ for chunk in iter(lambda: sys.stdin.buffer.read(FRAME * 4), b""):
 `;
 
 /** Speech-to-text on the computer itself, for a person with no speech key: faster-whisper, installed on first use. */
-function whisperStream(emit: SessionParts["emit"], onWords: (words: Word[]) => void, log: (line: string) => void) {
-  const home = join(process.env.HOME ?? "/tmp", ".mausbot-meet");
+export function whisperStream(emit: SessionParts["emit"], onWords: (words: Word[]) => void, log: (line: string) => void,
+  options: { home?: string; spawn?: typeof spawn; installMs?: number; stopWaitMs?: number } = {}) {
+  const home = options.home ?? join(process.env.HOME ?? "/tmp", ".mausbot-meet");
+  const run = options.spawn ?? spawn;
   const python = join(home, "venv", "bin", "python");
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, "whisper_worker.py"), WHISPER_WORKER);
   let worker: ChildProcess | null = null;
+  let install: ChildProcess | null = null;
+  let stopped = false;
   let startedAt = 0;
   const queue: Buffer[] = [];
   const ready = (async () => {
     if (!existsSync(python)) {
       emit("stt", { status: "installing" });
-      await new Promise<void>((resolve, reject) => {
-        const install = spawn("bash", ["-c", `python3 -m venv ${JSON.stringify(join(home, "venv"))} && ${JSON.stringify(join(home, "venv", "bin", "pip"))} install -q faster-whisper numpy`], { stdio: "ignore" });
-        install.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`installing local speech-to-text failed (${code})`))));
-      });
+      install = run("bash", ["-c", `python3 -m venv ${JSON.stringify(join(home, "venv"))} && ${JSON.stringify(join(home, "venv", "bin", "pip"))} install -q faster-whisper numpy`], { stdio: "ignore" });
+      try {
+        await boundChild(install, options.installMs ?? WHISPER_INSTALL_MS);
+      } finally {
+        install = null;
+      }
     }
-    worker = spawn(python, [join(home, "whisper_worker.py")], { stdio: ["pipe", "pipe", "ignore"] });
+    if (stopped) return;
+    worker = run(python, [join(home, "whisper_worker.py")], { stdio: ["pipe", "pipe", "ignore"] });
     let pending = "";
     worker.stdout!.on("data", (data) => {
       pending += data;
@@ -829,10 +860,18 @@ function whisperStream(emit: SessionParts["emit"], onWords: (words: Word[]) => v
       else if (queue.length < 4_000) queue.push(chunk);
     },
     async stop() {
-      await ready;
-      worker?.stdin?.end();
+      stopped = true;
+      install?.kill("SIGKILL");
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const finish = () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); };
+        const timer = setTimeout(finish, options.stopWaitMs ?? STOP_INSTALL_WAIT_MS);
+        ready.catch(() => {}).then(finish);
+      });
+      if (!worker) return;
+      worker.stdin?.end();
       await sleep(4_000);
-      worker?.kill();
+      worker.kill();
     },
   };
 }
@@ -907,9 +946,22 @@ function encodeOpus(pcm: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", ["-loglevel", "error", "-f", "s16le", "-ar", "16000", "-ac", "1", "-i", "-", "-c:a", "libopus", "-b:a", "32k", "-f", "ogg", "-"], { stdio: ["pipe", "pipe", "ignore"] });
     const out: Buffer[] = [];
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const finish = (error: Error | null, audio?: Buffer) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(audio ?? Buffer.concat(out));
+    };
+    timer = setTimeout(() => {
+      ffmpeg.kill("SIGKILL");
+      finish(new Error("ffmpeg timed out"));
+    }, FFMPEG_ENCODE_MS);
     ffmpeg.stdout!.on("data", (data: Buffer) => out.push(data));
-    ffmpeg.on("error", reject);
-    ffmpeg.on("close", (code) => (code === 0 ? resolve(Buffer.concat(out)) : reject(new Error(`ffmpeg exited ${code}`))));
+    ffmpeg.on("error", (error) => finish(error));
+    ffmpeg.on("close", (code) => finish(code === 0 ? null : new Error(`ffmpeg exited ${code}`)));
     ffmpeg.stdin!.end(pcm);
   });
 }
