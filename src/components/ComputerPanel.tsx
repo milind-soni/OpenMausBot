@@ -19,6 +19,7 @@ import { listenLiveFrames } from "@/lib/live-events";
 import { CloudScreenPreview } from "./CloudScreenPreview";
 import { isActiveTurnRefusal, isRemoteScreenshotContention } from "@/lib/remote-desktop";
 import { CloudBackendPicker } from "./CloudBackendPicker";
+import { SimpleVpsChoices } from "./SimpleVpsChoices";
 import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnSelected } from "./WorksOnGrid";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutinesSection } from "./bot-settings/RoutinesSection";
@@ -1042,6 +1043,9 @@ export function ComputerPanel({
   };
 
   const openConnectionSettings = () => dispatch(openKeySettings("vps"));
+  const vpsPhase = computerStatusCurrent && (phase === "vps-unconfigured" || phase === "vps-stopped" || phase === "vps-incompatible");
+  const canProvisionVps = computerStatusCurrent && canManageCloud && (phase === "vps-stopped" || (phase === "vps-unconfigured" && Boolean(vpsStatus?.configured)));
+  const canReplaceVps = computerStatusCurrent && canManageCloud && phase === "vps-incompatible" && Boolean(vpsStatus?.managed);
 
   const browserCanTurnOn = browserAvailableHere || state.config?.browserEngine?.installable === true;
   const [browserTurningOn, setBrowserTurningOn] = useState(false);
@@ -1460,16 +1464,16 @@ export function ComputerPanel({
                   </button>
                 )
               )}
-              {!advanced && computerStatusCurrent && (phase === "vps-unconfigured" || phase === "vps-stopped" || phase === "vps-incompatible") && (
+              {!advanced && vpsPhase && (
                 <>
                   <p className="text-[12px]">{t("computer.simple.needsSetup", { name: bot.name })}</p>
-                  <button
+                  {!canProvisionVps && !canReplaceVps && <button
                     type="button"
                     onClick={() => setAdvancedMode(true)}
                     className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
                   >
                     {t("computer.simple.showAdvanced")}
-                  </button>
+                  </button>}
                 </>
               )}
               {advanced && computerStatusCurrent && (phase === "vps-unconfigured" || phase === "vps-stopped") && (
@@ -1480,8 +1484,7 @@ export function ComputerPanel({
                   {t("computer.openVpsSettings")}
                 </button>
               )}
-              {advanced && computerStatusCurrent && (phase === "vps-stopped" || (phase === "vps-unconfigured" && vpsStatus?.configured)) &&
-                canManageCloud && (
+              {canProvisionVps && (
                 <button
                   onClick={() => run("provision")}
                   disabled={pending === "provision"}
@@ -1491,8 +1494,7 @@ export function ComputerPanel({
                   {phase === "vps-stopped" ? t("computer.startVps") : t("computer.prepareVps")}
                 </button>
               )}
-              {advanced && computerStatusCurrent && phase === "vps-incompatible" && vpsStatus?.managed &&
-                canManageCloud && (
+              {canReplaceVps && (
                 <button
                   onClick={() => void replaceVpsComputer()}
                   disabled={pending === "vps-replace"}
@@ -1749,6 +1751,8 @@ export function ComputerPanel({
                 </button>
               </div>
             )}
+            {vpsPhase && <SimpleVpsChoices bot={bot} backend={cloudBackend} onBackend={(backend) => updateComputerSelection({ cloudBackend: backend })}
+              onAutoStart={() => dispatch({ type: "updateBot", botId: bot.id, patch: { autoStartVps: !bot.autoStartVps } })} />}
           </div>
         )}
       </div>
