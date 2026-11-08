@@ -400,7 +400,7 @@ function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
 }
 
 function openedUnreadDivider(state: AppState, threadId: string, unread: boolean, messages: readonly Message[], lastReadMessageId?: string, hasMore?: boolean): AppState["unreadDivider"] {
-  return unread ? unreadDividerFor(threadId, messages, lastReadMessageId, hasMore) : state.unreadDivider?.threadId === threadId ? state.unreadDivider : null;
+  return unread ? unreadDividerFor(threadId, messages, lastReadMessageId, hasMore) : placeUnreadDivider(state.unreadDivider?.threadId === threadId ? state.unreadDivider : null, threadId, messages, Boolean(hasMore));
 }
 
 import type { BrowserEngineSummary, BrowserProfile, ConfigStatus, ManagedPolicySummary } from "./config-status";
@@ -931,6 +931,8 @@ export function reducer(state: AppState, action: Action): AppState {
         transcriptGeneration: {},
         modelVariantSessions: {},
       };
+      const held = [...hydrated.bots, ...hydrated.groups].find((owner) => owner.threadId === state.unreadDivider?.threadId);
+      if (held) hydrated.unreadDivider = placeUnreadDivider(state.unreadDivider, held.threadId, visibleMessages(held), Boolean(held.hasMore));
       return reconcileSnapshotQueues(
         action.botQueuedMessages ? replaceBotQueues(hydrated, action.botQueuedMessages) : hydrated,
         [...action.bots, ...action.groups],

@@ -135,6 +135,17 @@ describe("the divider in the store", () => {
     }
   });
 
+  it("places a waiting divider when a reload or reselect brings the boundary in", () => {
+    const full = ["b1", "b2", "b3", "b4", "b5"].map((id) => line(id, "bot"));
+    const tasks = [{ threadId: "pepper-a", title: "A", createdAt: 1, lastReadMessageId: "b1" }];
+    const short = { ...base, bots: [bot("other"), bot("pepper", { unread: true, hasMore: true, messages: full.slice(3), tasks: [{ ...tasks[0]!, unread: true }] })] };
+    const opened = reducer(short, { type: "select", id: "pepper" });
+    expect(opened.unreadDivider?.messageId ?? null).toBeNull();
+    const read = bot("pepper", { messages: full, tasks });
+    expect(reducer(opened, { type: "hydrate", bots: [bot("other"), read], groups: [], computerControl: {} }).unreadDivider).toEqual({ threadId: "pepper-a", messageId: "b2" });
+    expect(reducer({ ...opened, bots: [bot("other"), read] }, { type: "select", id: "pepper" }).unreadDivider).toEqual({ threadId: "pepper-a", messageId: "b2" });
+  });
+
   it("is dropped once done, only for its own conversation", () => {
     const opened = reducer(base, { type: "select", id: "pepper" });
     expect(reducer(opened, { type: "unreadDividerDone", threadId: "elsewhere" })).toBe(opened);
