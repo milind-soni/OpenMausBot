@@ -10,7 +10,7 @@ import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerive
 import { BotConversations } from "./Conversations";
 import type { SimplePageId } from "./page-registry";
 import { TryAsking } from "./TryAsking";
-import { Card, CardLabel, panelActionCls, NavRow, RowIcon, rowCls, RowText } from "./rows";
+import { Card, CardLabel, LabelAction, panelActionCls, NavRow, RowIcon, rowCls, RowText } from "./rows";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
@@ -27,7 +27,7 @@ export function ItemRow({ item }: { item: SidebarMenuItem }) {
       disabled={item.disabled}
       aria-pressed={item.active || undefined}
       onClick={item.onSelect}
-      className={cn(rowCls, "w-full text-left enabled:hover:bg-ink/[0.03] disabled:cursor-default disabled:opacity-45")}
+      className={cn(rowCls, "w-full rounded-[8px] text-left enabled:hover:bg-ink/[0.04] disabled:cursor-default disabled:opacity-45")}
     >
       <span className="flex size-4 shrink-0 items-center justify-center text-ink-secondary [&_svg]:size-4" aria-hidden="true">
         {item.icon}
@@ -51,8 +51,9 @@ export function DetailsTab({ bot, derived, onOpen }: {
 
   return (
     <div data-panel-tabpanel="details">
-      <Card anchor="model">
-        <div data-panel-row="model" className={rowCls}>
+      {/* One row style down the whole tab: flat rows under quiet labels, no cards. */}
+      <section data-panel-card="model" className="pt-2">
+        <div data-panel-row="model" className={cn(rowCls, "rounded-[8px]")}>
           <ModelPicker
             bot={bot}
             contained
@@ -60,23 +61,30 @@ export function DetailsTab({ bot, derived, onOpen }: {
             label={<span className="flex shrink-0 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.model")} /></span>}
           />
         </div>
-      </Card>
+      </section>
 
       <BotConversations bot={bot} />
 
+      <TryAsking bot={bot} />
+
+      {conversationItems.length > 0 && (
+        <section data-panel-card="conversation">
+          <CardLabel>{t("botPanel.section.conversation")}</CardLabel>
+          {conversationItems.map((item) => <ItemRow key={item.key} item={item} />)}
+        </section>
+      )}
+
       {derived.botRoutines.length === 0 ? (
         <section data-panel-empty="routines">
-          <CardLabel>{t("botSettings.simple.routines")}</CardLabel>
-          <p className="mx-3.5 text-[13px] leading-[18px] text-ink-tertiary">{t("botPanel.routines.emptyHint")}</p>
-          <button type="button" data-panel-automations onClick={() => dispatch({ type: "showRoutines", view: "list" })}
-            className="mx-3.5 mt-0.5 inline-flex min-h-7 items-center gap-0.5 rounded-[4px] text-[13px] font-medium text-ink underline decoration-ink/30 underline-offset-2 hover:decoration-ink">
-            {t("botPanel.routines.seeAll")}<ChevronRight size={14} aria-hidden="true" className="rtl:-scale-x-100" />
-          </button>
+          <CardLabel action={<LabelAction data-panel-automations="" onClick={() => dispatch({ type: "showRoutines", view: "list" })}>{t("sidebar.nav.automations")}</LabelAction>}>
+            {t("botSettings.simple.routines")}
+          </CardLabel>
           <button
             type="button"
             data-panel-page="routines"
+            title={t("botPanel.routines.emptyHint")}
             onClick={() => onOpen("routines")}
-            className={cn(panelActionCls, "mt-2.5 w-full")}
+            className={cn(panelActionCls, "w-full")}
           >
             <CalendarPlus size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
             <span className="truncate">{t("botPanel.routines.add")}</span>
@@ -91,14 +99,6 @@ export function DetailsTab({ bot, derived, onOpen }: {
             value={routinesOn > 0 ? t("botPanel.routinesOn", { count: routinesOn }) : t("botPanel.none")}
             onClick={() => onOpen("routines")}
           />
-        </Card>
-      )}
-
-      <TryAsking bot={bot} />
-
-      {conversationItems.length > 0 && (
-        <Card label={t("botPanel.section.conversation")} anchor="conversation">
-          {conversationItems.map((item) => <ItemRow key={item.key} item={item} />)}
         </Card>
       )}
     </div>

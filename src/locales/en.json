@@ -3041,7 +3041,7 @@
   "model.simple.clearSearch": "Clear search",
   "model.simple.thinkingLevel": "{level} thinking. Higher is slower but more careful.",
   "model.simple.thinkingDefault": "The model decides how hard to think.",
-  "model.simple.thinkingAuto": "Recommended. The model picks how hard to think; higher levels are slower but more careful.",
+  "model.simple.thinkingAuto": "Recommended. Effort is picked per message.",
   "model.simple.effortHint.none": "No extra thinking. The fastest replies.",
   "model.simple.effortHint.low": "A little thinking. Quick replies for simple asks.",
   "model.simple.effortHint.medium": "Some thinking. A good balance for most work.",
@@ -7531,7 +7531,7 @@
   "chat.savedSteps.forgotten": "Forgotten",
   "chat.savedSteps.forgetFailed": "Couldn't forget these steps. Try again.",
   "chat.setupCard.title": "What should I help you with first?",
-  "chat.setupCard.hint": "Choose a focus for this bot, or type your own below. You can change it later.",
+  "chat.setupCard.hint": "{name} sets itself up for whichever you choose, or type your own below.",
   "chat.setupCard.heading": "Pick a starting point",
   "chat.setupCard.other": "Something else",
   "chat.setupCard.answer": "Your answer",
@@ -9830,5 +9830,7 @@
   "remote.client.endsDec7": "This connection type ends Dec 7. After that, pair this computer again from the other computer's Phone & devices.",
   "phone.code.pairingCode": "Pairing code",
   "phone.code.typeIntro": "Open the {app} app and type this pairing code.",
-  "phone.signIn.emailCode": "Sign-in code from your email"
+  "phone.signIn.emailCode": "Sign-in code from your email",
+  "settings.simple.account.noNameHint": "Not set yet",
+  "settings.simple.account.yourName": "Your name"
 }

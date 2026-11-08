@@ -33399,7 +33399,7 @@
       "phone.code.pairingCode": "1c5ea2f7ed52a91c82993d40cf16581ac6ccff5283e1840cad1a1857311d1121",
       "phone.code.typeIntro": "eefcfc11ed512a8866f3764a972fa5a7c7bdd01bcbe4cb1681c37ae697f69fe1",
       "phone.signIn.emailCode": "81c2e322abeb89f738de06ccdbefa7893c976a129b89c194299c75bd490fe128",
-      "chat.setupCard.hint": "c6ddd65e5fdd0145d1711ce1a16c81129537e39f2b81f1ee165aa231d6e208d8",
+      "chat.setupCard.hint": "d7bbe8e1ab022e478f36b7338b2b278b9ad5b2d421eced2fd24b157b5df8db74",
       "inbox.emptyHint": "0105954275918cda7ea87a1d942173015f96aaf820ba74a4bd07386d6426b4d8",
       "settings.simple.group.typing": "0b96af8bce90a78a3ab5958209736b8738fe952deefc38fc958a14fbbeb75ef6",
       "model.simple.auto": "0286249762f7c94349cdc0ba3bb2255baf9a80036e2193ead1d77696f888582f",
@@ -33407,7 +33407,7 @@
       "botPanel.routines.seeAll": "d527f42e92589c7cdf4206957f30f7f0236358f47139f591023c83a68e8ce3b2",
       "settings.userBubbles.simpleTitle": "376821eb1ffb476bbbe293fe9c8f43d79e8f64417292afade8a351e443941aaa",
       "chat.openBotPanel": "1f9ede9056d58ca37a4f7f79dd7da5226a8f30d0f1b616ac7eaaca6dcebaccbf",
-      "model.simple.thinkingAuto": "06130b18bfad8c684041ec5c924ff0f27083fc192dbf275be321c8dcabc978b9",
+      "model.simple.thinkingAuto": "1d0caa99d3ed5904336835bfcf2966ed4d0b76486100da2f725dea4b580fbcc7",
       "model.simple.botsModelScope": "c82c64a1fc353ed97f01626c16baf213f73cc6c0859519653ec5eaea9608bbee",
       "settings.simple.themes.title": "eceab8df6ddf48352bc730a2784437d15472a4e9d81ee29834587d7f1a532e08",
       "settings.simple.themes.browse": "5d7a5476ede9e8cb334ca24996a48200bea59e871006443754457753f797bf53",
@@ -33444,7 +33444,9 @@
       "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
       "chat.setupCard.heading": "c55d59f402bbe025ee81dbf0efa20086040334938ed8617f340ab81db478b196",
       "settings.simple.themes.followHint": "d42ba551158199061ebfda7029c05ad07f84ebad29cfc8c24ffe4a7323ed5629",
-      "settings.simple.themes.fixedHint": "9debc6ac74d17e0dee92665cd9c4c39963b0a25c3de4830d59175e94e2ad5625"
+      "settings.simple.themes.fixedHint": "9debc6ac74d17e0dee92665cd9c4c39963b0a25c3de4830d59175e94e2ad5625",
+      "settings.simple.account.noNameHint": "488c9a6a017d6ea2f145c838bee156e762ffcebdaddc173135f4d0590f0b6271",
+      "settings.simple.account.yourName": "2c6b2e253c01fb2ed7209c15766745ccee92a35ac8209f544789bdf9500e0944"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

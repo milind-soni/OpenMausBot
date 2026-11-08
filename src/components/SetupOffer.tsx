@@ -111,7 +111,7 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
       <div className="flex items-start justify-between gap-2 ps-3 pe-1">
         <div className="min-w-0">
           <h3 dir="auto" className="py-px text-[16px] font-semibold leading-[22px] text-ink">{title}</h3>
-          {!settled && <p dir="auto" className="text-[13px] leading-[18px] text-ink-tertiary">{t("chat.setupCard.hint")}</p>}
+          {!settled && <p dir="auto" className="text-[13px] leading-[18px] text-ink-tertiary">{t("chat.setupCard.hint", { name: bot.name })}</p>}
         </div>
         {!settled && <button type="button" onClick={close} aria-label={t("common.close")} title={t("common.close")}
           className="-mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/[0.07] hover:text-ink-secondary">
@@ -125,16 +125,14 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
           </div>
         ))}
       </div> : <div key={choices.join("\n")} data-setup-updating={updating ? "" : undefined}
-        className={cn("mt-2 flex flex-col gap-1", updating ? "motion-safe:animate-pulse" : waitedOnce.current && "motion-safe:animate-msg-in")}>
+        className={cn("mt-2 flex flex-col", updating ? "motion-safe:animate-pulse" : waitedOnce.current && "motion-safe:animate-msg-in")}>
         {options.map((option, index) => (
           <button key={option.label} type="button" data-ask-choice="" disabled={quiet || busy} onClick={option.pick}
             className={cn("group flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-start",
-              quiet ? "cursor-default" : "bg-ink/[0.05] hover:bg-ink/[0.09] disabled:cursor-default")}>
-            <kbd className={cn("flex size-6 shrink-0 items-center justify-center rounded-md font-sans text-[12px] font-medium",
-              quiet ? "bg-ink/[0.04] text-ink-tertiary" : "bg-ink/[0.07] text-ink-secondary group-hover:bg-ink/[0.1]")}>
-              {LETTERS[index]}
-            </kbd>
-            <span dir="auto" className={cn("min-w-0 break-words text-[14px] leading-5", quiet ? "text-ink-tertiary" : "text-ink")}>{option.label}</span>
+              quiet ? "cursor-default" : "hover:bg-ink/[0.05] disabled:cursor-default")}>
+            <span dir="auto" className={cn("min-w-0 flex-1 break-words text-[14px] leading-5", quiet ? "text-ink-tertiary" : "text-ink")}>{option.label}</span>
+            {/* The letter picks the row from the keyboard; it trails the words so they line up with the heading. */}
+            <kbd className="shrink-0 font-mono text-[12px] text-ink-tertiary">{LETTERS[index]}</kbd>
           </button>
         ))}
       </div>}
