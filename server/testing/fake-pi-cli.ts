@@ -133,11 +133,17 @@ const streamErrorTurn = () => {
 const streamCompactionTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
-  // A failed attempt first (pi reports it with errorMessage, not aborted), then the one that succeeds.
+  send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "before" } });
+  // A failed attempt (pi reports it with errorMessage, not aborted) and a skipped one (no result, no error, e.g. an
+  // expired credential); FAKE_PI_COMPACTION_FAILS_ONLY=1 stops there, otherwise one attempt succeeds with a summary.
   send({ type: "compaction_start", reason: "threshold" });
   send({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false, willRetry: false, errorMessage: "Compaction failed" });
   send({ type: "compaction_start", reason: "threshold" });
   send({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false, willRetry: false });
+  if (process.env.FAKE_PI_COMPACTION_FAILS_ONLY !== "1") {
+    send({ type: "compaction_start", reason: "threshold" });
+    send({ type: "compaction_end", reason: "threshold", result: { summary: "fake summary", firstKeptEntryId: "e1", tokensBefore: 100 }, aborted: false, willRetry: false });
+  }
   send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "compacted" } });
   send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage: { input: 12, output: 3 } });
   send({ type: "agent_end" });
