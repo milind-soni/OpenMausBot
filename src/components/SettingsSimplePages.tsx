@@ -66,11 +66,11 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
         <SettingsGroup label={t("settings.section.appearance")} block="appearance">
           <SettingsRows>
             <ThemeRow simple />
+            <LooksRow onLooks={onLooks} />
             <PlaceLookRows />
             <ChromeRailRow />
             <WindowFrameRow />
             <ColorUserBubblesRow simple />
-            <LooksRow onLooks={onLooks} />
           </SettingsRows>
         </SettingsGroup>
       )}
@@ -112,7 +112,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
 function LooksRow({ onLooks }: { onLooks: () => void }) {
   const current = SKINS.find((skin) => skin.id === resolveSkin(useSkinChoice()))?.name;
   return (
-    <SettingRow title={t("settings.simple.themes.title")}>
+    <SettingRow title={t("settings.theme.title")}>
       {current && <span data-looks-current className="me-3 text-[13px] text-ink-tertiary">{current}</span>}
       <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.themes.browse")}</button>
     </SettingRow>

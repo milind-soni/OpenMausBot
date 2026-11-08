@@ -46,7 +46,7 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   const title = bot.tasks?.find((task) => task.threadId === bot.threadId)?.title;
   // Simple mode calls an untitled conversation what it is, never a "thread".
   const conversation = !awayFromMainThread(bot, false) ? (privacy?.kind === "shared" ? t("task.sharedChat") : null)
-    : !title || title === UNTITLED ? t("task.untitledConversation") : localizedTaskTitle(title);
+    : !title || title === UNTITLED ? t("task.untitledChat") : localizedTaskTitle(title);
   const label = t("chat.openProfileAria", { name: bot.name });
   return (
     <button

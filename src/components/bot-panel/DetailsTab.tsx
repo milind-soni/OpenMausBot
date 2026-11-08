@@ -70,8 +70,8 @@ export function DetailsTab({ bot, derived, onOpen }: {
           <p className="mx-3.5 text-[13px] leading-[18px] text-ink-tertiary">
             {t("botPanel.routines.emptyHint")}{" "}
             <button type="button" data-panel-automations onClick={() => dispatch({ type: "showRoutines", view: "list" })}
-              className="rounded-[4px] font-medium text-ink-secondary underline decoration-ink/25 underline-offset-2 hover:text-ink hover:decoration-ink/60">
-              {t("botPanel.routines.seeAll")}
+              className="inline-flex items-center gap-0.5 rounded-[4px] font-medium text-ink-secondary hover:text-ink">
+              {t("botPanel.routines.seeAll")}<ChevronRight size={13} aria-hidden="true" className="rtl:-scale-x-100" />
             </button>
           </p>
           <button

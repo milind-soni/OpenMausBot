@@ -275,7 +275,7 @@ describe("the chat header's pill", () => {
     }
     const untitled = pill({ bot: { ...withTasks, mainThreadId: "other", tasks: [{ ...withTasks.tasks![0]!, title: "New thread" }, withTasks.tasks![1]!] } });
     try {
-      expect(untitled.header.querySelector("[data-chathead-conversation]")!.textContent).toBe("New conversation");
+      expect(untitled.header.querySelector("[data-chathead-conversation]")!.textContent).toBe("Untitled chat");
     } finally {
       untitled.done();
     }
