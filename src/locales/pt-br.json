@@ -7285,6 +7285,8 @@
   "chat.preview.openTabNeedsLink": "Compartilhe a página para abrir em uma nova aba",
   "chat.preview.fullScreen": "Tela cheia",
   "chat.preview.exitFullScreen": "Sair da tela cheia",
+  "chat.preview.openPage": "Abrir página",
+  "chat.preview.closePage": "Fechar página",
   "chat.preview.pointedPart": "uma parte da página",
   "chat.preview.removePoint": "Remover {label}",
   "chat.preview.pointedAt": "Você apontou para {parts}",

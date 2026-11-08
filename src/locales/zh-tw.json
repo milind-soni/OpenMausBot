@@ -7407,6 +7407,8 @@
   "chat.preview.openTabNeedsLink": "分享頁面後即可在新分頁中開啟",
   "chat.preview.fullScreen": "全螢幕",
   "chat.preview.exitFullScreen": "結束全螢幕",
+  "chat.preview.openPage": "開啟頁面",
+  "chat.preview.closePage": "關閉頁面",
   "chat.preview.pointedPart": "頁面的一部分",
   "chat.preview.removePoint": "移除 {label}",
   "chat.preview.pointedAt": "指出了 {parts}",

@@ -6242,6 +6242,8 @@
   "chat.preview.openTabNeedsLink": "Condividi la pagina per aprirla in una nuova scheda",
   "chat.preview.fullScreen": "Schermo intero",
   "chat.preview.exitFullScreen": "Chiudi lo schermo intero",
+  "chat.preview.openPage": "Apri pagina",
+  "chat.preview.closePage": "Chiudi pagina",
   "chat.preview.pointedPart": "una parte della pagina",
   "chat.preview.removePoint": "Rimuovi {label}",
   "chat.preview.pointedAt": "Indicato su {parts}",

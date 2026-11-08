@@ -7199,6 +7199,8 @@
   "chat.preview.openTabNeedsLink": "新しいタブで開くには、ページを共有してください",
   "chat.preview.fullScreen": "全画面",
   "chat.preview.exitFullScreen": "全画面を閉じる",
+  "chat.preview.openPage": "ページを開く",
+  "chat.preview.closePage": "ページを閉じる",
   "chat.preview.pointedPart": "ページの一部",
   "chat.preview.removePoint": "{label} を外す",
   "chat.preview.pointedAt": "指し示した部分：{parts}",

@@ -4942,6 +4942,8 @@
   "chat.preview.openTabNeedsLink": "Chia sẻ trang để mở nó trong thẻ mới",
   "chat.preview.fullScreen": "Toàn màn hình",
   "chat.preview.exitFullScreen": "Thoát toàn màn hình",
+  "chat.preview.openPage": "Mở trang",
+  "chat.preview.closePage": "Đóng trang",
   "chat.preview.pointedPart": "một phần của trang",
   "chat.preview.removePoint": "Bỏ {label}",
   "chat.preview.pointedAt": "Đã chỉ vào {parts}",

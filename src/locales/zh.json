@@ -7156,6 +7156,8 @@
   "chat.preview.openTabNeedsLink": "分享页面后即可在新标签页中打开",
   "chat.preview.fullScreen": "全屏",
   "chat.preview.exitFullScreen": "退出全屏",
+  "chat.preview.openPage": "打开页面",
+  "chat.preview.closePage": "关闭页面",
   "chat.preview.pointedPart": "页面的一部分",
   "chat.preview.removePoint": "移除 {label}",
   "chat.preview.pointedAt": "指出了 {parts}",

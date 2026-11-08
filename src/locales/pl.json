@@ -6374,6 +6374,8 @@
   "chat.preview.openTabNeedsLink": "Udostępnij stronę, aby otworzyć ją w nowej karcie",
   "chat.preview.fullScreen": "Pełny ekran",
   "chat.preview.exitFullScreen": "Zamknij pełny ekran",
+  "chat.preview.openPage": "Otwórz stronę",
+  "chat.preview.closePage": "Zamknij stronę",
   "chat.preview.pointedPart": "część strony",
   "chat.preview.removePoint": "Usuń {label}",
   "chat.preview.pointedAt": "Wskazano: {parts}",

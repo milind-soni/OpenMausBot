@@ -4,8 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { json, readBody } from "../harness/http.ts";
 import type { NotificationLogEntry } from "../../shared/notification.ts";
+import { insertNotificationLog, recentNotificationLog } from "../message-db.ts";
 import type { RequestAuth } from "../request-auth.ts";
-import { createNotificationRoutes } from "./notifications.ts";
+import { createNotificationRoutes, notificationListedFor, readThreadNotifications } from "./notifications.ts";
 import { dispatchRoutes } from "./table.ts";
 
 const servers: Server[] = [];
@@ -21,7 +22,7 @@ async function serve(
   reaches?: (auth: RequestAuth, entry: NotificationLogEntry) => boolean,
 ) {
   const deps = { recent: vi.fn(() => entries), markRead: vi.fn() };
-  const routes = [createNotificationRoutes(deps, shown, reaches)];
+  const routes = [createNotificationRoutes(deps, notificationListedFor(shown, reaches))];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const handled = await dispatchRoutes(routes, {
@@ -68,6 +69,25 @@ describe("notification routes", () => {
       expect((await fetch(`${base}/api/notifications/${id}/read`, { method: "POST" })).status, id).toBe(404);
     }
     expect(deps.markRead).toHaveBeenCalledTimes(1);
+  });
+
+  it("opening a conversation reads only what the opener's own list shows", () => {
+    const ask = { ...sample, id: "n2", kind: "question" as const };
+    const elsewhere = { ...sample, id: "n3", threadId: "t2" };
+    for (const entry of [sample, ask, elsewhere]) insertNotificationLog(entry);
+    const broadcast = vi.fn();
+    const auth: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
+    readThreadNotifications("t1", broadcast, notificationListedFor(undefined, (_auth, entry) => entry.kind !== "question")(auth));
+    expect(broadcast).toHaveBeenCalledExactlyOnceWith({ kind: "notifications.read", threadId: "t1", ids: ["n1"] });
+    expect(recentNotificationLog().filter((entry) => entry.read).map((entry) => entry.id)).toEqual(["n1"]);
+
+    readThreadNotifications("t1", broadcast, notificationListedFor(() => (threadId) => threadId !== "t1")(auth));
+    expect(broadcast).toHaveBeenCalledTimes(1);
+    expect(recentNotificationLog().filter((entry) => entry.read).map((entry) => entry.id)).toEqual(["n1"]);
+
+    readThreadNotifications("t1", broadcast, notificationListedFor()(auth));
+    expect(broadcast).toHaveBeenLastCalledWith({ kind: "notifications.read", threadId: "t1", ids: ["n2"] });
+    expect(recentNotificationLog().filter((entry) => !entry.read).map((entry) => entry.id)).toEqual(["n3"]);
   });
 
   it("leaves other paths and methods to the next handler", async () => {
