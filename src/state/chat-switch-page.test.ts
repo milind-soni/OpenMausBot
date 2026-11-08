@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-// Opening a chat fetches a short tail so big chats switch quickly; older messages load on scroll.
 import { createElement, type Dispatch } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";

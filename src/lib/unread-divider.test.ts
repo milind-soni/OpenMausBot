@@ -120,6 +120,21 @@ describe("the divider in the store", () => {
     expect(reducer(read, { type: "select", id: "room" }).unreadDivider).toEqual({ threadId: "room-t", messageId: "b3" });
   });
 
+  it("waits above a short switch page until scrollback reaches the boundary", () => {
+    const tail = [line("b4", "bot"), line("b5", "bot")];
+    const short = { ...base, bots: [bot("other"), bot("pepper", { unread: true, hasMore: true, messages: tail,
+      tasks: [{ threadId: "pepper-a", title: "A", createdAt: 1, unread: true, lastReadMessageId: "b1" }] })],
+    groups: [{ ...room, hasMore: true, messages: tail, lastReadMessageId: "b1" }] };
+    for (const [id, threadId] of [["pepper", "pepper-a"], ["room", "room-t"]] as const) {
+      const opened = reducer(short, { type: "select", id });
+      expect(opened.unreadDivider?.messageId ?? null).toBeNull();
+      const partial = reducer(opened, { type: "olderMessages", threadId, generation: 0, messages: [line("b3", "bot")], hasMore: true });
+      expect(partial.unreadDivider?.messageId ?? null).toBeNull();
+      const reached = reducer(partial, { type: "olderMessages", threadId, generation: 0, messages: [line("b1", "bot"), line("b2", "bot")], hasMore: false });
+      expect(reached.unreadDivider).toEqual({ threadId, messageId: "b2" });
+    }
+  });
+
   it("is dropped once done, only for its own conversation", () => {
     const opened = reducer(base, { type: "select", id: "pepper" });
     expect(reducer(opened, { type: "unreadDividerDone", threadId: "elsewhere" })).toBe(opened);
