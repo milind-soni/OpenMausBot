@@ -221,6 +221,7 @@ export async function transcribe(audio: Uint8Array, mime: string, key: string): 
       method: "POST",
       headers: { authorization: `Bearer ${key}`, model: "transcribe-1-pro" },
       body: form,
+      redirect: "error",
       signal: AbortSignal.timeout(60_000),
     });
   } catch {
