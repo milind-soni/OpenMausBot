@@ -157,6 +157,10 @@ export function serverInstall(env: NodeJS.ProcessEnv = process.env, script = pro
   return prefix === "npx openmausbot" ? "npx" : "global";
 }
 
+/** What a server only its one owner signs in to takes from that owner's own desktop by default: told in the owner's own
+ * /api/auth/session answer, never in the description anyone may read before pairing. */
+export const OWNER_LENDING = Object.freeze({ sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, lentMcp: true } as const);
+
 export function environmentDescriptor(input: { environmentId: string; desktopManaged: boolean; emailSignIn?: boolean; sharedComputers?: boolean; cloudHome?: boolean; cloudTeam?: boolean; ownHome?: boolean; label?: string }): EnvironmentDescriptor {
   return {
     environmentId: input.environmentId,

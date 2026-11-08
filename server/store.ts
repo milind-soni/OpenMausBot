@@ -41,6 +41,8 @@ import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
 import { appsFromCreator } from "./inherited-apps.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
+import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
+export { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 export type {
   BotActivity, GroupDefaultResponder, OptionCardData,
   SecretRequestCardData, Surface, TaskClosedBy, TaskOpenedBy, TaskUsage,
@@ -136,18 +138,12 @@ export type StoreChange =
   | { type: "group"; groupId: string }
   | { type: "group.deleted"; groupId: string };
 
-export const UNTITLED_TASK = "New task";
 export const UNTITLED_THREAD = "New thread";
 
 /** Every title (a bot's or a person's) passes through here, so equality tells a machine-made title from a rename. */
 const TASK_TITLE_MAX = 80;
 export function threadTitleFrom(title?: string): string {
   return title?.trim().slice(0, TASK_TITLE_MAX) || UNTITLED_THREAD;
-}
-
-export function titleFromMessage(text: string): string {
-  const line = text.trim().split("\n")[0]!.trim();
-  return line.length > 48 ? `${line.slice(0, 47)}…` : line || UNTITLED_TASK;
 }
 
 export function titleFromLlm(raw: string): string | null {

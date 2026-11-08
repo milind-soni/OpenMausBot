@@ -197,12 +197,28 @@ describe("taking control of a Local VM", () => {
     expect(button("Take control")).toBeDefined();
   });
 
-  it("Full screen takes control straight into the whole window", async () => {
+  it("Full screen only watches: the bot keeps working until the person takes control from there", async () => {
     await open(makeBot({ computer: "vm" }));
     await press("Full screen");
+    const watch = () => document.querySelector<HTMLElement>("[data-watch-full-screen]");
+    expect(watch(), "Full screen must fill the window with the bot's screen").not.toBeNull();
+    expect(watch()!.querySelector("img")!.getAttribute("src")).toBe("data:image/png;base64,FRAME");
+    expect(fixture.controls, "watching must not pause the bot").toEqual([]);
+    expect(liveDesktop()).toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await settle();
+    expect(watch(), "Escape leaves full screen").toBeNull();
+    expect(fixture.controls).toEqual([]);
+
+    await press("Full screen");
+    const take = [...watch()!.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === "Take control")!;
+    flushSync(() => take.click());
+    await settle();
     expect(fixture.controls.map((control) => control.action)).toEqual(["take"]);
     await shownLive();
-    expect(liveDesktop()!.dataset.expanded).toBe("true");
+    expect(liveDesktop()!.dataset.expanded, "taking control from full screen stays full screen").toBe("true");
+    expect(watch()).toBeNull();
   });
 
   it("closing the panel, leaving its Screen view or closing the page gives back the hold it took", async () => {

@@ -186,6 +186,23 @@ it("a Cloud of the person's own has no lending control here, since this computer
   expect(render().html).not.toContain("data-cloud-lending-link");
 });
 
+it("a server of the person's own has Share this computer with the maintainer flag off: the switch asks main, and its computer access opens", async () => {
+  const sharing = { state: vi.fn(), revoke: vi.fn(), servers: vi.fn().mockResolvedValue([{ id: "vps", enabled: false, connected: false, paused: false }]), allow: vi.fn().mockResolvedValue({ enabled: true }) };
+  stub({ computerSharing: sharing });
+  await mount();
+  render(); for (const effect of f.effects) effect(); await flush();
+  const { html, nodes: tree } = render();
+  expect(html).toContain('data-server-share="vps"');
+  expect(html).toContain("Share this computer");
+  expect(html, "the switch stands in for the maintainer's button").not.toContain('aria-label="Computer access for VPS"');
+  const list = tree.find(node => (node.props as { onShare?: unknown }).onShare) as unknown as { props: { onShare: (id: string, on: boolean) => void } };
+  list.props.onShare("vps", true); await flush();
+  expect(sharing.allow).toHaveBeenCalledWith("vps");
+  expect(render().html).toContain("Computer access · VPS");
+  list.props.onShare("vps", false); await flush();
+  expect(sharing.revoke).toHaveBeenCalledWith("vps");
+});
+
 it("shows local environment controls in Simplified Chinese", async () => {
   stubEnvironments(); setLocale("zh"); await mount();
   const { html } = render();
