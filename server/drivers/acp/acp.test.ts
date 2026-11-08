@@ -385,6 +385,7 @@ describe("ACP turns (fake CLI)", () => {
     const failedEnd = recorder.events.findIndex((e) => e.type === "item.completed" && e.itemType === "tool" && e.itemId === started[4]);
     const image = recorder.events.findIndex((e) => e.type === "item.completed" && e.itemType === "assistant_image");
     expect(image).toBe(failedEnd + 1);
+    expect(recorder.events[image]).toMatchObject({ fromTool: true });
     // The stall watchdog sees no tool left running, so the turn's own silence limit applies.
     let now = 0;
     const limits: number[] = [];
@@ -1014,6 +1015,7 @@ describe("ACP turns (fake CLI)", () => {
       itemType: "assistant_image",
       alt: "Generated image",
     });
+    expect(image).not.toHaveProperty("fromTool");
     expect(image && "data" in image ? image.data : "").toMatch(/^iVBOR/);
     expect(
       recorder.events.some(
@@ -1448,6 +1450,24 @@ describe("ACP turns (fake CLI)", () => {
       message: "Kimi refused this turn as an invalid request because the input schema of one of this bot's tools is too large, so nothing ran. "
         + "Turn off the MCP server or app that tool comes from for this bot, or switch the bot to another AI.",
     });
+  });
+
+  it("tells the person where to turn tool selection off when Grok has its own MCP server", async () => {
+    const rpcFile = join(scratch, "grok-native-mcp-rpc.json");
+    process.env.FAKE_ACP_RPC_DUMP = rpcFile;
+    process.env.FAKE_ACP_GROK_NATIVE_MCP = "github";
+    try {
+      await create(GrokAgentDriver);
+      await instance.adapter.sendTurn({ threadId: "t-grok-native-mcp", text: "go", toolScope: { allow: ["native:*"] } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: false });
+      expect(recorder.events.find((event) => event.type === "runtime.error")).toMatchObject({
+        message: "Grok has an MCP connection outside the bot's selection. Remove the MCP servers from Grok's own settings, "
+          + "or set Tool selection back to all tools in this bot's settings (Access). No prompt was sent.",
+      });
+      expect(JSON.parse(readFileSync(rpcFile, "utf8"))).not.toContain("session/prompt");
+    } finally {
+      delete process.env.FAKE_ACP_GROK_NATIVE_MCP;
+    }
   });
 
   it("keeps a tool selection's gate in front of the connector", async () => {

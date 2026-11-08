@@ -91,14 +91,21 @@ describe("skins", () => {
   });
 
   it.each([["halloween", "Halloween"], ["diwali", "Diwali"]] as const)(
-    "adds the %s festival skin at the end, with its atmosphere kept off the picker miniature",
+    "adds the %s festival skin after Pop, with its atmosphere kept off the picker miniature",
     (id, name) => {
-      expect(SKIN_IDS.slice(-2)).toEqual(["halloween", "diwali"]);
+      expect(SKIN_IDS.slice(10, 12)).toEqual(["halloween", "diwali"]);
       expect(SKINS.find((s) => s.id === id)?.name).toBe(name);
       expect(css).toMatch(new RegExp(`@scope \\(\\[data-skin="${id}"\\]:not\\(\\[data-skin-preview\\]\\)\\) to \\(\\[data-skin\\]\\)\\s*\\{\\s*main\\.bg-app\\s*\\{`));
       expect(css).toMatch(new RegExp(`@media \\(prefers-reduced-motion: reduce\\)\\s*\\{\\s*\\[data-skin="${id}"\\] main\\.bg-app::before`));
     },
   );
+
+  it("adds Aurora last, dark, with its light field kept off the picker miniature", () => {
+    expect(SKIN_IDS.at(-1)).toBe("aurora");
+    expect(SKINS.find((s) => s.id === "aurora")?.name).toBe("Aurora");
+    expect(css).toMatch(/\[data-skin="aurora"\] \{[^}]*--code-color-scheme: dark;/);
+    expect(css).toMatch(/@scope \(\[data-skin="aurora"\]:not\(\[data-skin-preview\]\)\) to \(\[data-skin\]\)\s*\{\s*main\.bg-app\s*\{/);
+  });
 
   it("describes each skin exactly once", () => {
     expect(SKINS.map((s) => s.id).sort()).toEqual([...SKIN_IDS].sort());

@@ -9,7 +9,7 @@ import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 
 export function EmailIcon() {
   return (
-    <span className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-[#2f6f6d] text-white" aria-hidden="true"><Mail size={20} /></span>
+    <span className="grid size-10 shrink-0 place-items-center rounded-[8px] bg-[#2f6f6d] text-white" aria-hidden="true"><Mail size={20} /></span>
   );
 }
 

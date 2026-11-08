@@ -19,15 +19,15 @@ export const EMAIL_TO_CONNECT_PROMPT =
 export const EMAIL_NOT_CONNECTED_TEXT =
   "OpenMausBot note: no mailbox is connected, so this call did not run. Call request_credential with credential_id email, then end this turn.";
 
-/** The failed-call text for a mailbox that can't send until the person fixes its outgoing server: what is wrong, who
- * fixes it and where, and no way round it, so a bot neither retries nor builds one. */
+/** The failed-call text for a mailbox that can't send until the person fixes its outgoing server: what is wrong, the card
+ * that lets them fix it here, and no way round it, so a bot neither retries nor builds one. */
 export const EMAIL_CANT_SEND_TEXT = (address: string, problem: string) =>
-  `OpenMausBot note: nothing was sent. Sending from ${address} doesn't work: ${problem} Only the person can fix this, under Outgoing server for ${address} in Connected apps › Email; reading mail still works. ` +
-  "Don't retry, don't send another way (no script, other mail tool or mail client of your own) and don't ask for the password: tell the person this in one line and carry on without sending.";
+  `OpenMausBot note: nothing was sent. Sending from ${address} doesn't work: ${problem} Only the person can fix this, and they can do it here: call request_credential with credential_id email and address ${address}, which opens a secure card in this chat for its outgoing server (or they use Outgoing server for ${address} in Connected apps › Email), then end this turn. Reading mail still works. ` +
+  "Don't retry, don't send another way (no script, other mail tool or mail client of your own) and never ask for the password in chat.";
 
 /** The system prompt line for a mailbox that can't send yet. */
 export const EMAIL_CANT_SEND_PROMPT = (address: string, problem: string) =>
-  ` Sending from ${address} doesn't work until the person fixes its outgoing server in Connected apps › Email (${problem}); don't try to send from it, and say so if a task needs it.`;
+  ` Sending from ${address} doesn't work until the person fixes its outgoing server (${problem}); when a task needs it, request_credential with credential_id email and address ${address} opens a card for them to fix it in the chat. Don't try to send from it before then.`;
 
 /** The failed-call text when a send didn't go but may later: nothing to retry now. */
 export const EMAIL_NOT_SENT_TEXT = (problem: string) =>

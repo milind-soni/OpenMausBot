@@ -14,7 +14,7 @@ import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV
 import { openStartupModelCatalog } from "../../startup-model-catalog.ts";
 import { acpModelCatalog } from "./model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
-import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
+import { DeviceAuthController, deviceAuthInstanceSurface, type DeviceSignIn } from "../device-auth.ts";
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts";
@@ -185,6 +185,8 @@ export interface AcpSupport {
   clientFileSystem?: boolean;
   /** Sent as `clientCapabilities._meta` on initialize, where agents read vendor capabilities. */
   clientCapabilitiesMeta?: Record<string, unknown>;
+  /** Made once per process: rewrites a session/update before the turn reads it, or drops it by returning null. */
+  updateFilter?(): (update: Record<string, any>) => Record<string, any> | null;
   /** The agent reaches MCP servers by URL: OpenMausBot's own servers are this server's endpoints, no process each. */
   ownMcpOverHttp?: boolean;
   /** How many tools the agent lists of its own beside the MCP servers', counted against a provider's tool limit. */
@@ -221,6 +223,7 @@ export interface AcpSupport {
   requireAuthenticationBeforeSpawn?: boolean;
   /** Classify provider-native failures without coupling the core to messages. */
   classifyError?(error: unknown): ProviderErrorCode | undefined;
+  /** How far a usage limit the engine reports reaches: its whole account, or one allowance its models share (OpenCode's free models), with the models that allowance holds. */ limitFacts?(text: string, model?: string): { limit: "engine" | "model"; limitModels?: string[] };
   /** Plain words for an account failure (bad key, no credit, a used-up
    * quota, no subscription) in place of the provider's raw RPC text. */
   describeAccountError?(code: AccountErrorCode, model?: string): string;
@@ -757,11 +760,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           if (current.turnConfig.fullAuto && current.turn.approvalMode === undefined && !isQuestion && answersAlone(toolCall.rawInput?.command)) {
             const allow = optionFor("allow");
             if (!allow) missing("allow");
-            return send({
-              jsonrpc: "2.0",
-              id: msg.id,
-              result: allow ? { outcome: { outcome: "selected", optionId: allow } } : cancelled,
-            });
+            return send({ jsonrpc: "2.0", id: msg.id, result: allow ? { outcome: { outcome: "selected", optionId: allow } } : cancelled });
           }
           const kind = String(toolCall.kind ?? "");
           const operationKey = isQuestion || current.controlsHost ? null : acpSessionOperationKey(toolCall);
@@ -859,6 +858,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           });
         };
 
+        const filterUpdate = support.updateFilter?.();
         const handleNotification = (msg: any) => {
           // Vendor side-channels (grok's `_x.ai/*`) are only teed to the native log.
           if (msg.method !== "session/update") return;
@@ -873,7 +873,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             current.state.startupActivity = true;
           }
           if (!current || !current.state.promptSent) return;
-          const u = p.update ?? {};
+          const u = filterUpdate ? filterUpdate(p.update ?? {}) : p.update ?? {};
+          if (!u) return;
           const finished = u.status === "completed" || u.status === "failed";
           const toolEnded = (itemId: string | undefined) => {
             current.state.producedItem = true;
@@ -1485,8 +1486,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             // opencode 1.18.18 reports usage at the result root; grok and gemini under _meta.
             const usage = result?.usage ?? result?._meta ?? {};
             if (typeof usage.inputTokens === "number" || typeof usage.outputTokens === "number") {
-              // opencode 1.18.25 keeps only the uncached share in inputTokens and reports cache reads
-              // beside it (omitted when 0); other agents count them inside. Absent is not zero.
+              // opencode 1.18.25 keeps only the uncached share in inputTokens and reports cache reads beside it (omitted when 0); other agents count them inside. Absent is not zero.
               const input = usage.inputTokens ?? 0;
               const output = usage.outputTokens ?? 0;
               const cachedRead = typeof usage.cachedReadTokens === "number" && usage.cachedReadTokens > 0
@@ -1563,7 +1563,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 ...base(threadId, turnId), type: "runtime.error",
                 ...acpRuntimeFailure(e, support.displayName, accountError ? { message: support.describeAccountError?.(code, cliTurn.model), text: support.accountErrorText?.(code) } : undefined),
                 ...(needsAuth ? { setup: true } : {}), ...((e as any)?.acpPromptStall === true ? { stalled: true } : {}),
-                ...((e as any)?.acpUsageLimit === true || (code === "quota_or_region_restriction" && LIMIT_WORDS.test(message)) ? { limit: "engine" as const } : {}), // waited out, or the engine gave up: another AI can carry on
+                ...((e as any)?.acpUsageLimit === true || (code === "quota_or_region_restriction" && LIMIT_WORDS.test(message)) ? support.limitFacts?.(message, cliTurn.model) ?? { limit: "engine" as const } : {}), // waited out, or the engine gave up: another AI can carry on
               });
               // Never replay an accepted prompt (it may have run tools); evict before listeners start the next turn.
               if (!needsAuth && !accountError && ((e as any)?.acpPromptStall === true || (e as any)?.acpUsageLimit === true || (e as any)?.acpSessionFailure === true
@@ -1672,11 +1672,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         },
         refreshModels: support.resolveModels ? () => refreshModels(true) : undefined,
         ...(startupModelRefresh ? { startupModelRefresh } : {}),
-        ...(deviceSignIn ? {
-          startAuthentication: () => deviceSignIn.start(),
-          getAuthentication: (flowId: string) => deviceSignIn.get(flowId),
-          cancelAuthentication: () => deviceSignIn.cancel(),
-        } : {}),
+        ...(support.deviceSignIn && deviceSignIn ? deviceAuthInstanceSurface(deviceSignIn, support.deviceSignIn) : {}),
         snapshot,
         adapter: {
           provider: DRIVER_KIND,

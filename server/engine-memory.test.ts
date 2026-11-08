@@ -316,6 +316,7 @@ describe("who goes first when memory holds several", () => {
     for (const threadId of ["handoff-1", "handoff-2", "person"]) void waiting(h, threadId, []);
     await settle();
     asked.length = 0;
+    h.advance(1);
     const order = (h.memory as unknown as { order(): { threadId: string }[] }).order();
     expect(order.map((waiter) => waiter.threadId)).toEqual(["person", "handoff-1", "handoff-2"]);
     expect(asked).toEqual(["handoff-1", "handoff-2", "person"]);
@@ -652,6 +653,32 @@ describe("a plan's limit on turns at once", () => {
     for (const threadId of ["b", "c"]) void h.memory.admit(threadId, signal(), () => {}, "turn").then(() => admitted.push(threadId));
     await settle();
     expect(admitted).toEqual(["b"]);
+  });
+
+  it("asks who goes first and who holds a place a number of times that grows with the queue, not with its square", async () => {
+    const perWake = async (waiters: number) => {
+      const h = host({ tickMs: 60_000 });
+      let asked = 0;
+      h.memory.useCap({ most: () => 2, waitsOnOthers: () => { asked++; return false; } });
+      h.memory.useTurnOrder(() => { asked++; return false; });
+      await h.memory.admit("a", signal(), () => {}, "turn");
+      await h.memory.admit("b", signal(), () => {}, "turn");
+      const stop = new AbortController();
+      for (let at = 0; at < waiters; at++) void h.memory.admit(`w${at}`, stop.signal, () => {}, "turn");
+      await settle();
+      asked = 0;
+      for (let round = 0; round < 5; round++) {
+        (h.memory as unknown as { wake(): void }).wake();
+        await settle();
+      }
+      const each = asked / 5;
+      stop.abort();
+      await settle();
+      return each;
+    };
+    const [ten, forty] = [await perWake(10), await perWake(40)];
+    expect(forty, "one wake of 40 waiters").toBeLessThanOrEqual(2 * 40 + 10);
+    expect(forty / ten, "four times the waiters, about four times the asking").toBeLessThan(6);
   });
 
   it("holds no place for a turn waiting on work it handed out, so that work runs", async () => {

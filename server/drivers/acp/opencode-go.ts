@@ -912,6 +912,7 @@ const support = (
       || await canRunOpenCode(env, config.cli, loadCatalog);
   },
   classifyError: classifyOpenCodeError,
+  limitFacts: openCodeLimitFacts,
   describeAccountError: describeOpenCodeAccountError,
   resolveModels: async (environment, config, instanceId, fresh) => {
     if (fresh) markOpenCodeCatalogRefreshed(instanceId, (sources.now ?? Date.now)());
@@ -927,11 +928,25 @@ const support = (
 const ACCOUNT_ERROR_TEXT: ReadonlyArray<readonly [RegExp, AccountErrorCode]> = [
   [/insufficient (?:account )?(?:funds|balance|credits?)|out of credits?|no credits? (?:left|remaining)|payment required|\b402\b/iu, "insufficient_funds"],
   // Not plain "rate limit exceeded": a transient 429 that OpenCode retries itself.
-  [/\bquota\b|usage limit|(?:hourly|daily|weekly|monthly|5-hour) limit/iu, "quota_or_region_restriction"],
+  [/\bquota\b|usage limit|\b(?:Free|Go)UsageLimitError\b|(?:hourly|daily|weekly|monthly|5-hour) limit/iu, "quota_or_region_restriction"],
   [/\bsubscription\b/iu, "inactive_subscription"],
   // "User not found." is OpenRouter's refusal of an unknown key (opencode 1.18.27).
   [/invalid api key|api key (?:is )?(?:invalid|missing|revoked|expired)|incorrect api key|unauthori[sz]ed|\b401\b|authentication (?:failed|required)|(?:^|internal error: )user not found\b/iu, "invalid_credentials"],
 ];
+
+/** A usage limit that only OpenCode's free models met: the paid Go and Zen models on the same login still work, so the
+ * refusal holds that login's free models and leaves the account available. */
+const FREE_MODEL_LIMIT = /\bfree(?:UsageLimitError|\s+usage\s+limit)\b/iu;
+
+/** How far a usage limit OpenCode reported reaches: one provider's shared free allowance (with the free models that
+ * allowance holds), or the whole account. */
+export function openCodeLimitFacts(text: string, model?: string): { limit: "engine" | "model"; limitModels?: string[] } {
+  if (!FREE_MODEL_LIMIT.test(text)) return { limit: "engine" };
+  const provider = model?.includes("/") ? model.slice(0, model.indexOf("/")) : "";
+  const shared = provider ? [...freeModels].filter((id) => id.startsWith(`${provider}/`)) : [];
+  const models = [...new Set(model ? [model, ...shared] : shared)];
+  return models.length > 1 ? { limit: "model", limitModels: models } : { limit: "model" };
+}
 
 export function classifyOpenCodeError(error: unknown): ProviderErrorCode | undefined {
   const value = error && typeof error === "object" ? error as Record<string, unknown> : {};

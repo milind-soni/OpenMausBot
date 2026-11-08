@@ -896,7 +896,8 @@ const playTurn = (prompt: JsonValue, late = false) => {
     process.exit(3);
   }
   // FAKE_CLAUDE_TRANSIENTS launches fail transiently (exit 5), counted in the FAKE_CLAUDE_STATE file;
-  // FAKE_CLAUDE_PARTIAL_FAILS makes the first one emit a text delta before failing.
+  // FAKE_CLAUDE_PARTIAL_FAILS makes the first one emit a text delta before failing; FAKE_CLAUDE_ANSWERED_FAILS makes it
+  // finish one model call (a tool use) before failing.
   if (process.env.FAKE_CLAUDE_TRANSIENTS && process.env.FAKE_CLAUDE_STATE) {
     let launched = 0;
     try {
@@ -908,6 +909,9 @@ const playTurn = (prompt: JsonValue, late = false) => {
     if (launched < quota) {
       if (process.env.FAKE_CLAUDE_PARTIAL_FAILS) {
         out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "half an answer" } } });
+      }
+      if (process.env.FAKE_CLAUDE_ANSWERED_FAILS) {
+        out({ type: "assistant", session_id: sessionId, message: { content: [{ type: "tool_use", id: "toolu_spent", name: "Read", input: { file_path: "notes.md" } }] } });
       }
       // an MCP server's question still open when the launch fails
       if (process.env.FAKE_CLAUDE_ELICIT) out({ type: "control_request", request_id: "elicit-1", request: { subtype: "elicitation", ...JSON.parse(process.env.FAKE_CLAUDE_ELICIT) } });

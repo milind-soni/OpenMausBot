@@ -224,7 +224,7 @@ if (params.has("railpage")) {
     // Windows' own title bar is drawn outside the page; this stands in for it, above the page.
     const bar = document.createElement("div");
     bar.setAttribute("aria-hidden", "true");
-    const dark = ["midnight", "foundry", "graphite", "dusk", "halloween", "diwali"].includes(params.get("skin") ?? "midnight");
+    const dark = ["midnight", "foundry", "graphite", "dusk", "halloween", "diwali", "aurora"].includes(params.get("skin") ?? "midnight");
     bar.style.cssText = `position:fixed;inset:0 0 auto 0;height:31px;display:flex;align-items:center;z-index:100;font:12px "Segoe UI",sans-serif;padding-left:12px;${dark ? "background:#202020;color:#fff" : "background:#f3f3f3;color:#000"}`;
     bar.innerHTML = `<span style="flex:1">MausBot</span>${["\u2013", "\u2610", "\u2715"].map((glyph) => `<span style="width:46px;text-align:center">${glyph}</span>`).join("")}`;
     document.body.append(bar);

@@ -80,6 +80,8 @@ export interface SimpleMenuInput {
   probing: ReadonlySet<string>;
   loading: boolean;
   refreshing?: string | null;
+  /** Picking a model also changes the bot's own model, not just this conversation's. */
+  updatesBotDefault?: boolean;
 }
 
 export function providerName(instance: InstanceInfo): string {
@@ -144,7 +146,7 @@ function currentRow(input: SimpleMenuInput): MenuCurrent {
   if (active.policy) return { ...row, meta: t("policy.managedBy", { organization: active.policy.organizationName }), warning: true };
   if (needsCli(active)) return { ...row, meta: t("model.setupRequired"), warning: true };
   if (needsSignIn(active) && !isCustomOnly(active) && !option?.custom) return { ...row, meta: t("model.signInRequired"), warning: true };
-  if (bot.follows === true) return { ...row, meta: t("model.simple.botsModel", { name: bot.name }) };
+  if (bot.follows === true) return { ...row, meta: t(input.updatesBotDefault ? "model.simple.botsModelScope" : "model.simple.botsModel", { name: bot.name }) };
   const family = signInFamily(active);
   const accounts = family ? instances.filter((instance) => signInFamily(instance) === family).length : 0;
   if (accounts > 1 || active.snapshot.chatgptPlan) return { ...row, meta: engineDisplayName(active) };

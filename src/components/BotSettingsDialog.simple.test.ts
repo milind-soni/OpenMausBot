@@ -215,7 +215,7 @@ const click = (node: Node) => (node.props.onClick as () => void)();
 const change = (node: Node, value: string) => (node.props.onChange as (event: unknown) => void)({ target: { value } });
 const submit = (node: Node) => (node.props.onSubmit as (event: unknown) => void)({ preventDefault: () => {} });
 const key = (node: Node, name: string) => {
-  const event = { key: name, defaultPrevented: false, target: null, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+  const event = { key: name, nativeEvent: { isComposing: false, keyCode: 0 }, defaultPrevented: false, target: null, preventDefault: vi.fn(), stopPropagation: vi.fn() };
   (node.props.onKeyDown as (event: unknown) => void)(event);
   return event;
 };
@@ -608,11 +608,11 @@ describe("the avatar editor", () => {
 
 
 describe("the Details tab", () => {
-  it("holds the model, the conversations, routines and this conversation's rows, in that order, with no switch or Thinking row", () => {
+  it("holds the model, the conversations, this conversation's rows and routines, in that order, with no switch or Thinking row", () => {
     const rendered = botTab(makeBot());
     expect(ofType(rendered, ModelPicker)!.props).toMatchObject({ bot: expect.objectContaining({ id: "scout" }), threadId: "thread-scout", contained: true });
     expect(ofType(rendered, BotConversations)!.props.bot).toMatchObject({ id: "scout" });
-    const order = ['data-panel-row="model"', 'data-panel-card="conversations"', 'data-panel-empty="routines"', 'data-panel-item="find"', 'data-panel-item="activity"']
+    const order = ['data-panel-row="model"', 'data-panel-card="conversations"', 'data-panel-item="find"', 'data-panel-item="activity"', 'data-panel-empty="routines"']
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -624,13 +624,14 @@ describe("the Details tab", () => {
     expect(switches(rendered.html)).toBe(0);
   });
 
-  it("says what routines are while the bot has none, with Add a routine, and lists them once it has some", () => {
+  it("offers Add a routine, which says what routines are, and Automations while the bot has none, and lists them once it has some", () => {
     const empty = botTab(makeBot());
     expect(empty.html).toContain('data-panel-empty="routines"');
-    expect(empty.html).toContain(">Routines are recurring tasks this bot runs on a schedule. Ask it in chat to set one up.<");
+    expect(empty.html).toContain('title="Jobs this bot runs on a schedule, like a news roundup every morning."');
+    expect(empty.html).toMatch(/data-panel-automations=""[^>]*>Automations<svg/);
     expect(empty.html.match(/data-panel-page="routines"/g)).toHaveLength(1);
     const add = find(empty, "data-panel-page", "routines");
-    expect(add.props.children).toBe("Add a routine");
+    expect(empty.html).toMatch(/data-panel-page="routines"[^>]*>.*<span class="truncate">Add a routine<\/span><\/button>/);
     click(add);
     expect(onOpen).toHaveBeenLastCalledWith("routines");
     fixture.derived.botRoutines = [routine()];
@@ -660,6 +661,15 @@ describe("the Details tab", () => {
 });
 
 describe("the Bot settings page", () => {
+  it.each(["整理文件。", "整理檔案。"])("migrates the full SOUL while retaining only %s as the description", (first) => {
+    const description = `${first}${"遵守安全要求。".repeat(80)}`;
+    const rendered = capture(() => SoulField({ bot: makeBot({ description, soul: "" }), onPatch: patch }));
+    const migrate = rendered.nodes.find((node) => node.type === "button" && node.props.children === "Move instructions into SOUL.md");
+    expect(migrate).toBeDefined();
+    click(migrate!);
+    expect(patch).toHaveBeenCalledExactlyOnceWith({ soul: description, description: first });
+  });
+
   it("holds Instructions, Before it acts, Backup AIs, Call mode, Apps, Job and Hide, with every title on one edge", () => {
     const rendered = settingsPage(makeBot({ defaultBot: {} }));
     const order = ['data-panel-edit="soul"', 'data-panel-row="approval"', 'data-panel-row="backups"', 'data-panel-row="call-mode"', 'data-panel-page="apps"', 'data-panel-row="job"', 'data-panel-row="default-bot-hide"']
@@ -1303,4 +1313,34 @@ describe("the panel's switches", () => {
     expect(html).toContain("background-color:#377FE6");
     expect(Switch).toBeDefined();
   });
+});
+
+describe("the hero while an input method is composing", () => {
+  const hero = (bot: Bot) => capture(() => PanelHero({ bot, activeState: "idle", patch, editorOpen: false, onToggleEditor: vi.fn() }));
+  const composingKey = (node: Node, name: string, nativeEvent: { isComposing: boolean; keyCode: number }) => {
+    const event = { key: name, nativeEvent, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    (node.props.onKeyDown as (event: unknown) => void)(event);
+    return event;
+  };
+
+  for (const [field, open, input] of [
+    ["name", "data-panel-rename", "data-panel-rename-input"],
+    ["label", "data-panel-label", "data-panel-label-input"],
+  ] as const) {
+    it(`keeps the ${field} field open, and the panel where it is, when Enter or Escape belongs to the input method`, () => {
+      const bot = makeBot();
+      click(find(hero(bot), open));
+      change(find(hero(bot), input), "Ni");
+      for (const nativeEvent of [{ isComposing: true, keyCode: 13 }, { isComposing: false, keyCode: 229 }]) {
+        for (const name of ["Enter", "Escape"]) {
+          const event = composingKey(find(hero(bot), input), name, nativeEvent);
+          expect(event.preventDefault).not.toHaveBeenCalled();
+          // The panel goes back a page on an Escape that reaches it.
+          expect(event.stopPropagation).toHaveBeenCalled();
+        }
+      }
+      expect(patch).not.toHaveBeenCalled();
+      expect(find(hero(bot), input).props.value).toBe("Ni");
+    });
+  }
 });

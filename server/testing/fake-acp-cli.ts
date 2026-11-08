@@ -25,6 +25,7 @@
 //       grok 1.0.25's initialize, or FAKE_ACP_MCP_HANDSHAKE; FAKE_ACP_MCP_SCHEMA_BYTES=1 adds each schema's length)
 //     | lend-question (list_shared_computers around a question)
 //     | list-peers (list_bots through the agents MCP; keeps the first agents server it is offered, like Hermes)
+//   FAKE_ACP_GROK_NATIVE_MCP  _x.ai/mcp/list reports these comma-separated native servers after the session's accepted ones
 //   FAKE_ACP_MCP_TRANSPORTS  remote MCP transports advertised in initialize, e.g. "http,sse"
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
 //   FAKE_ACP_DUMP  path for {argv, env}; with FAKE_ACP_MODES or FAKE_ACP_MODELS also <dump>.prompts.jsonl
@@ -58,6 +59,7 @@
 //   FAKE_ACP_USAGE_ROOT  usage at the prompt result's root, as opencode 1.18.18 sends it
 //   FAKE_ACP_USAGE_UPDATES_FILE  JSON numbers re-read per prompt, each sent as usage_update {used, size: 200000}
 //   FAKE_ACP_UPDATES_FILE  JSON array of session/update params ({update, _meta?}) re-read per prompt, sent as-is
+//   FAKE_ACP_AUTOPILOT=1  set_config_option takes Kiro 3.1.0's `autopilot` ("on" or "off")
 //   FAKE_ACP_MODE_ACK_FILE  while it exists a mode switch answers "empty" (no configOptions) or "error"
 //   FAKE_ACP_HANG_ON  a prompt whose text holds this hangs as in mode hang; others answer
 //   FAKE_ACP_CURSOR_FAST=1  a `fast` select ("true") once initialize declares _meta.parameterizedModelPicker, as Cursor CLI 2026.10.19; =stuck acknowledges set_config_option but keeps "true"
@@ -268,6 +270,7 @@ const dumpEnv = Object.fromEntries(
     "GH_TOKEN",
     "GITHUB_TOKEN",
     "COMMAND_CODE_API_KEY",
+    "KIRO_API_KEY",
   ].flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]] as const)),
 );
 const dumpState: Record<string, unknown> = { argv, env: dumpEnv, pid: process.pid };
@@ -729,7 +732,9 @@ function handle(msg: any) {
       result(msg.id, {});
       break;
     case "_x.ai/mcp/list":
-      result(msg.id, { result: { servers: [], sessionMcpResolved: true } });
+      // Like Grok: the servers this session accepted, then any native ones from its own config.
+      result(msg.id, { result: { servers: [...sessionMcp.map((entry) => entry.name), ...(process.env.FAKE_ACP_GROK_NATIVE_MCP ?? "").split(",").filter(Boolean)]
+        .map((name) => ({ name, session: { enabled: true, status: "ready" } })), sessionMcpResolved: true } });
       break;
     case "session/new": {
       if (failRpc(msg)) break;
@@ -886,6 +891,14 @@ function handle(msg: any) {
           writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
         }
         result(msg.id, process.env.FAKE_ACP_EMPTY_MODE_ACK ? {} : { configOptions: configOptions() });
+        break;
+      }
+      if (configId === "autopilot" && process.env.FAKE_ACP_AUTOPILOT === "1" && (value === "on" || value === "off")) {
+        configCalls.push({ method: msg.method, params: msg.params });
+        if (process.env.FAKE_ACP_DUMP) {
+          writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
+        }
+        result(msg.id, { configOptions: configOptions() });
         break;
       }
       if (configId === "model" && value === process.env.FAKE_ACP_EXIT_ON_MODEL) process.exit(4);
