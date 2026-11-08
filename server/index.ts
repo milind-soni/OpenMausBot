@@ -640,7 +640,7 @@ import { personKey, relayedPersonKey } from "./person-key.ts";
 import { createOutsideLineage, OUTSIDE_STAYS_HERE } from "./host/outside-lineage.ts"; import { OUTSIDE_REFUSAL, outsideRouteRefused } from "./host/outside-fence.ts"; import { createOutsideWrites } from "./host/outside-writes.ts";
 import { teamAiOwner } from "./host/team-ai-owner.ts"; import { createTeamOwners, type AskViewer } from "./host/team-owners.ts"; import { createTeamMessages } from "./host/team-messages.ts"; import { createPlaceInbox, guestNameIn, placeInboxViewer } from "./host/place-inbox.ts"; import { relayedTurn } from "./host/relayed-turn.ts"; import { createPersonCalendar } from "./host/person-calendar.ts";
 import { createDevsReports } from "./host/devs-reports.ts"; import { bugReportEndpoint, devsReportSender, devsStatusAsker } from "./devs-report-send.ts"; import { captureRecentLog } from "./recent-log.ts"; import { createShareAnswer } from "./host/share-answer.ts";
-import { createCardRequester, linePersonKey } from "./host/thread-person.ts"; import { selfThreadRefusal } from "./host/self-threads.ts"; import { lookedAfterBy } from "./host/looked-after.ts"; import { createActingPeople, HANDED_PEOPLE_FILE, HandedPeople, type HandedRun, keptPrivate, privateHandBack, withPerson } from "./host/acting-person.ts";
+import { createCardRequester, linePersonKey } from "./host/thread-person.ts"; import { selfThreadRefusal } from "./host/self-threads.ts"; import { lookedAfterBy } from "./host/looked-after.ts"; import { createActingPeople, HANDED_PEOPLE_FILE, HandedPeople, type HandedRun, keptPrivate, privateHandBack, withPerson } from "./host/acting-person.ts"; import { createTurnCallSignals } from "./host/turn-call-signals.ts";
 import { createThreadRoutes } from "./routes/threads.ts";
 import { createWebhookRoutes } from "./routes/webhooks.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
@@ -1635,6 +1635,7 @@ const MAX_CREATED_BOT_INSTRUCTIONS = 4_000;
 const INTERNAL_CAPABILITY_ORPHAN_MS = 30 * 24 * 60 * 60_000;
 const internalCapabilities = new Map<string, InternalCapability>();
 const activeInternalGenerationByThread = new Map<string, string>();
+const turnCallSignals = createTurnCallSignals(internalCapabilityIsActive);
 const internalGenerationByProviderTurn = new ProviderTurnGenerationRegistry();
 const computerSelectionTurns = new Map<string, {
   generation: string;
@@ -1735,14 +1736,11 @@ function revokeInternalCapabilityGeneration(threadId: string, generation: string
   endForeignTurns(threadId, generation);
   if (guestDrivenTurns.get(threadId) === generation) guestDrivenTurns.delete(threadId);
   for (const [token, capability] of internalCapabilities) {
-    if (capability.threadId === threadId && capability.generation === generation) {
-      internalCapabilities.delete(token);
-    }
+    if (capability.threadId === threadId && capability.generation === generation) internalCapabilities.delete(token);
   }
-  if (activeInternalGenerationByThread.get(threadId) === generation) {
-    activeInternalGenerationByThread.delete(threadId);
-  }
+  if (activeInternalGenerationByThread.get(threadId) === generation) activeInternalGenerationByThread.delete(threadId);
   internalGenerationByProviderTurn.deleteGeneration(threadId, generation);
+  turnCallSignals.sweep();
 }
 
 /** Revokes earlier turns' records but keeps the thread's bearers, so its engine stays warm. */
@@ -1768,6 +1766,7 @@ function revokeAllInternalCapabilities(): void {
   // foreignTurns stays: a foreign turn can still write while its engine is torn down, and only its own end judges it.
   activeInternalGenerationByThread.clear();
   internalGenerationByProviderTurn.clear();
+  turnCallSignals.sweep();
 }
 
 function bindInternalCapabilityToProviderTurn(threadId: string, generation: string, turnId?: string): void {
@@ -13009,7 +13008,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error(TURN_ENDED_REFUSAL), { status: 401 });
         }
       };
-      const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await lentMcp.route({ method, path, req, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS || await internalToolRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders }) !== PASS || await waitRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, ...waitTurnChecks(internalCapability, internalSender) }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await devsReports.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || (computerAsks && await computerAsks.internal({ method, path, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS) || await meetingsHost.internal({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, active: () => internalCapabilityIsActive(internalCapability) }) !== PASS || await imageTools.internal({ method, path, res, json, readBody: readInternalBody, threadId: internalCapability.threadId, requireActive: requireActiveInternalCapability, personTurn: turnOrigin(internalCapability).kind === "user" || (Boolean(roomRun(internalCapability.generation)?.requestMessageId) && guestDrivenTurns.get(internalCapability.threadId) !== internalCapability.generation) }) !== PASS) return; const pagesCall = new AbortController(); res.once("close", () => { if (!res.writableEnded) pagesCall.abort(); }); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: pagesCall.signal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle, bot: internalSender })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
+      const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await lentMcp.route({ method, path, req, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS || await internalToolRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders }) !== PASS || await waitRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, ...waitTurnChecks(internalCapability, internalSender) }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await devsReports.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || (computerAsks && await computerAsks.internal({ method, path, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS) || await meetingsHost.internal({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, active: () => internalCapabilityIsActive(internalCapability) }) !== PASS || await imageTools.internal({ method, path, res, json, readBody: readInternalBody, threadId: internalCapability.threadId, requireActive: requireActiveInternalCapability, personTurn: turnOrigin(internalCapability).kind === "user" || (Boolean(roomRun(internalCapability.generation)?.requestMessageId) && guestDrivenTurns.get(internalCapability.threadId) !== internalCapability.generation) }) !== PASS) return; const callSignal = turnCallSignals.signal(internalCapability, res); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: callSignal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle, bot: internalSender })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);
       };
@@ -14410,7 +14409,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "voice notes are turned off for this bot" });
         }
         try {
-          const audio = await tts.speak(cfg, text, voiceBot.voice, undefined, pagesCall.signal);
+          const audio = await tts.speak(cfg, text, voiceBot.voice, undefined, callSignal);
           // Synthesis can outlive its turn: re-check before saving, so the clip never parks onto a later turn.
           requireActiveInternalCapability();
           const turnId = liveTurnByThread.get(internalCapability.threadId);
