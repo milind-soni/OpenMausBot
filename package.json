@@ -138,7 +138,7 @@
     "tailwind-merge": "^3.3.1",
     "tar": "7.5.22",
     "tldts": "7.4.18",
-    "undici": "8.11.2",
+    "undici": "8.12.4",
     "vega": "6.4.0",
     "vega-embed": "7.3.0",
     "vega-interpreter": "2.3.2",
