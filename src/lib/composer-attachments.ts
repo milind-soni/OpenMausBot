@@ -1,5 +1,6 @@
 import { isCitationAttachment, serializeCitation, type CitationAttachment } from "./citations.ts";
 import { randomUuid } from "./random-uuid.ts";
+import { FILE_MAX_BYTES } from "../../shared/upload-limits.ts";
 export { dataContextFor, type DataContext, type DataViewContext } from "../../shared/data-context.ts";
 
 export type PasteAttachment = {
@@ -91,7 +92,8 @@ export function fileAttachment(name: string, path: string, size: number): FileAt
 
 /** Must match the server's IMAGE_MAX_BYTES. */
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
-export const FILE_MAX_BYTES = 25 * 1024 * 1024;
+/** One limit for a sent file on every surface; previews read whole stay at PREVIEW_MAX_BYTES. */
+export { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../../shared/upload-limits.ts";
 /** Must match the server's TURN_IMAGE_MAX_COUNT: a message carrying more images is refused at send. */
 export const TURN_IMAGE_MAX_COUNT = 10;
 

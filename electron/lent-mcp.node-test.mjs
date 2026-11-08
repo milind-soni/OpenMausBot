@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { createLentMcp, inheritedEnvironment, isLoopbackAddress, lentMcpRefusal, ownEnvironmentIds, validLentMcpServer, windowsLaunch } from "./lent-mcp.mjs";
+import { createLentMcp, inheritedEnvironment, isLoopbackAddress, lentMcpRefusal, ownEnvironmentIds, ownPorts, validLentMcpServer, windowsLaunch } from "./lent-mcp.mjs";
 import { executeSharedOperation } from "./shared-computer-access.mjs";
 import { validSharedOperation } from "./computer-sharing.mjs";
 
@@ -68,6 +68,36 @@ test("security: only the person's own Cloud, a command only with the terminal le
     assert.match(lentMcpRefusal(cloud, http(url)), /this computer's own address/);
   }
   assert.match(lentMcpRefusal(cloud, { ...http("http://127.0.0.1:1/sse"), type: "sse" }), /older SSE transport/);
+});
+
+const OWN_PORT = /^Only an MCP server on its own port \(1024 or higher\) at this computer's address can be reached, never this computer's own OpenMausBot or Chrome ports$/;
+
+test("security: an address only on its own port, 1024 or higher, never one left to its default", () => {
+  const cloud = { cloud: { accountId: "a", origin: "https://x" }, terminal: false };
+  for (const url of ["http://127.0.0.1/mcp", "http://127.0.0.1:80/mcp", "https://localhost/mcp", "http://localhost:443/mcp", "http://[::1]:1023/mcp", "http://[::1]/mcp", "http://127.0.0.1:0/mcp"]) {
+    assert.match(lentMcpRefusal(cloud, http(url)) ?? "", OWN_PORT, url);
+  }
+  for (const url of ["http://127.0.0.1:19501/mcp", "http://localhost:19501/mcp", "http://[::1]:19501/mcp", "https://127.0.0.1:1024/mcp"]) assert.equal(lentMcpRefusal(cloud, http(url)), null, url);
+});
+
+test("security: never this computer's own OpenMausBot ports or Chrome's DevTools port, and nothing is fetched", async t => {
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-lent-mcp-ports-")));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const chrome = path.join(dir, "Google", "Chrome");
+  await mkdir(chrome, { recursive: true });
+  await writeFile(path.join(chrome, "DevToolsActivePort"), "9333\n/devtools/browser/0b1c2d3e-aaaa-4bbb-8ccc-0123456789ab");
+  const ports = await ownPorts({ serverPorts: [41234], dirs: [chrome, path.join(dir, "Brave")] });
+  assert.deepEqual([...ports].sort((a, b) => a - b), [8799, 9333, 18799, 28799, 41234]);
+  let fetched = 0;
+  const fetch = async () => { fetched++; throw new Error("never fetched"); };
+  const lent = createLentMcp({ ports: () => ownPorts({ serverPorts: [41234], dirs: [chrome] }), fetch });
+  for (const url of ["http://127.0.0.1:8799/mcp", "http://localhost:18799/mcp", "http://[::1]:41234/mcp", "http://127.0.0.1:9333/json/new"]) {
+    await assert.rejects(lent.call({ action: "mcp_tools", server: http(url) }, signal()), error => OWN_PORT.test(error.message), url);
+  }
+  await assert.rejects(createLentMcp({ fetch }).call({ action: "mcp_call", server: http("http://127.0.0.1:8799/api/config"), tool_name: "x" }, signal()), error => OWN_PORT.test(error.message), "the desktop's ports by default");
+  assert.equal(fetched, 0);
+  await assert.rejects(lent.call({ action: "mcp_tools", server: http("http://127.0.0.1:19501/mcp") }, signal()), /local is not answering/);
+  assert.equal(fetched, 1, "a port of its own is reached");
 });
 
 test("the executor refuses before anything starts when the grant doesn't allow it", async () => {

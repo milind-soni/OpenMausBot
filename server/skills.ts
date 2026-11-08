@@ -25,7 +25,8 @@ import {
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
 import { libraryDescriptionsAt, librarySkillFilePath, listLibrarySkills, type LibrarySkillListing } from "./skill-library.ts";
 import { readManagedLinks, writeManagedLinks } from "./skill-link-registry.ts";
-import { retireUnchangedSkillRoot, type RetiredSkillRoot } from "./skill-retirement.ts";
+import { retireUnchangedSkillRoot, SKILL_RECOVERY_ATTENTION_WARNING, SKILL_RECOVERY_CAPACITY_WARNING, type RetiredSkillRoot } from "./skill-retirement.ts";
+import { skillUpdateNeedsRecovery } from "./skill-recovery-capacity.ts";
 import { skillMayBeInUse } from "./skill-use-guard.ts";
 import { removeOrganizationSkill } from "./skill-org-removal.ts";
 import {
@@ -74,6 +75,7 @@ export interface SkillManifestEntry {
   /** Replay guard for a crash between promotion and card settlement. Never exposed to agents. */
   appliedStageId?: string;
   storageRevision?: string;
+  recovery?: "capacity" | "attention";
   retiredRoot?: RetiredSkillRoot;
   /** A prior organization revision is retained until links have been switched safely. */
   pendingRetirements?: Array<RetiredSkillRoot & { revision?: string }>;
@@ -99,10 +101,10 @@ const skillManifestEntrySchema = z.object({
   ...skillFolderRecordSchema,
   github: githubSkillOriginSchema.optional(),
   appliedStageId: z.string().optional(),
-  storageRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-  retiredRoot: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), executableFiles: skillFolderRecordSchema.executableFiles }).strict().optional(),
-  pendingRetirements: z.array(z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), executableFiles: skillFolderRecordSchema.executableFiles, revision: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict()).max(32).optional(),
-  pendingRemoval: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), executableFiles: skillFolderRecordSchema.executableFiles, revision: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict().optional(),
+  storageRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(), recovery: z.enum(["capacity", "attention"]).optional(),
+  retiredRoot: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), executableFiles: skillFolderRecordSchema.executableFiles, recovery: z.enum(["capacity", "attention"]).optional() }).strict().optional(),
+  pendingRetirements: z.array(z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), executableFiles: skillFolderRecordSchema.executableFiles, revision: z.string().regex(/^[a-f0-9]{64}$/).optional(), recovery: z.enum(["capacity", "attention"]).optional() }).strict()).max(32).optional(),
+  pendingRemoval: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), executableFiles: skillFolderRecordSchema.executableFiles, revision: z.string().regex(/^[a-f0-9]{64}$/).optional(), recovery: z.enum(["capacity", "attention"]).optional() }).strict().optional(),
   package: z.object({
     installId: z.string().regex(/^[a-f0-9]{32}$/),
     key: z.string().min(1).max(64),
@@ -213,7 +215,6 @@ function readProtectedManifest(botId: string): SkillManifest | null {
   try { lstatSync(manifestPath(botId)); } catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT" ? {} : null; }
   return manifestFromFile(manifestPath(botId));
 }
-
 function readManifest(botId: string): SkillManifest {
   const securePath = manifestPath(botId);
   // Corrupt protected state fails closed; never fall back to the agent-writable legacy manifest.
@@ -229,7 +230,7 @@ function readManifest(botId: string): SkillManifest {
     // No workspace-authored bit may carry enablement into secure state.
     const {
       appliedStageId: _appliedStageId, executableFiles: _executableFiles,
-      storageRevision: _storageRevision, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements, pendingRemoval: _pendingRemoval,
+      storageRevision: _storageRevision, recovery: _recovery, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements, pendingRemoval: _pendingRemoval,
       ...visible
     } = entry;
     migrated[name] = { ...visible, enabled: false };
@@ -241,7 +242,6 @@ function readManifest(botId: string): SkillManifest {
   }
   return migrated;
 }
-
 function comparablePath(path: string): string {
   const normalized = resolve(path).replace(/^\\\\\?\\/, "");
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
@@ -490,7 +490,7 @@ function skillContentMatches(botId: string, name: string, entry: SkillManifestEn
   }
 }
 function skillListing(botId: string, name: string, entry: SkillManifestEntry): SkillListing {
-  const { appliedStageId, storageRevision: _storageRevision, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements, pendingRemoval: _pendingRemoval, executableFiles: _executableFiles, package: _package, ...visible } = entry;
+  const { appliedStageId, storageRevision: _storageRevision, recovery: _recovery, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements, pendingRemoval: _pendingRemoval, executableFiles: _executableFiles, package: _package, ...visible } = entry;
   const intact = skillContentMatches(botId, name, entry);
   return {
     name,
@@ -502,10 +502,10 @@ function skillListing(botId: string, name: string, entry: SkillManifestEntry): S
       ...(intact ? [] : ["stored skill files changed after review — enablement is blocked"]),
       ...(entry.pendingRetirements?.length ? ["a previous skill revision is waiting for safe link synchronization or cleanup"] : []),
       ...(entry.pendingRemoval ? ["skill removal is waiting for safe cleanup"] : []),
+      ...(["capacity", "attention"] as const).flatMap((reason) => entry.recovery === reason || entry.pendingRetirements?.some((item) => item.recovery === reason) || entry.pendingRemoval?.recovery === reason || (reason === "attention" && entry.source.startsWith("org:") && skillUpdateNeedsRecovery(skillStateDir(botId), name)) ? [reason === "capacity" ? SKILL_RECOVERY_CAPACITY_WARNING : SKILL_RECOVERY_ATTENTION_WARNING] : []),
     ],
   };
 }
-
 export function listSkills(botId: string): SkillListing[] {
   const manifest = readManifest(botId);
   return Object.entries(manifest)

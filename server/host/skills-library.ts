@@ -28,6 +28,7 @@ import {
 } from "../skill-share.ts";
 import { enabledSkillFiles, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
 import { exportPrivateSkill } from "../portable-skill-private.ts";
+import { SKILL_RECOVERY_ATTENTION_WARNING, SKILL_RECOVERY_CAPACITY_WARNING } from "../skill-recovery-capacity.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { claudeUserSkillsEnabled } from "../turn-settings.ts";
 import { typedWords } from "../typed-sends.ts";
@@ -349,8 +350,9 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     },
 
     harnessListing(botId: string, skills: SkillListing[]): Array<SkillListing & { revision?: string }> {
-      if (mode() === "off") return skills;
-      return skills.map((skill) => !skill.editable && editable(botId, skill.name)
+      const visible = skills.map((skill) => ({ ...skill, warnings: skill.warnings.filter((warning) => warning !== SKILL_RECOVERY_CAPACITY_WARNING && warning !== SKILL_RECOVERY_ATTENTION_WARNING) }));
+      if (mode() === "off") return visible;
+      return visible.map((skill) => !skill.editable && editable(botId, skill.name)
         ? { ...skill, editable: true, revision: skill.sha256.slice(0, SHARED_REVISION_CHARS) }
         : skill);
     },

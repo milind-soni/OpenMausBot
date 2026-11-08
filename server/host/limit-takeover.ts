@@ -261,7 +261,9 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
       const said = event.type === "turn.completed" || event.type === "session.exited" ? setupSaid.get(event.threadId) : undefined;
       if (said !== undefined) setupSaid.delete(event.threadId);
       if (!selection) return;
-      if (event.type === "runtime.error" && (event.limit === "model" || event.limit === "credits")) holdModel(selection, event.limit, event.limitResetsAt);
+      if (event.type === "runtime.error" && (event.limit === "model" || event.limit === "credits")) {
+        for (const model of event.limitModels?.length ? event.limitModels : [selection.model]) holdModel({ ...selection, model }, event.limit, event.limitResetsAt);
+      }
       else if (event.type === "turn.completed" && event.ok) worked(botId, selection);
       else if (event.type === "turn.completed" && signedOutStop(event.stopReason, said)) noteSignedOut(selection.instanceId);
     },

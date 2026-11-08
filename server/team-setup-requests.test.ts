@@ -1,10 +1,12 @@
 import { createBotLimit } from "./host/starter-bot-limit.ts";
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
+import { botFolder } from "./bot-folder.ts";
+import { flushProfileHistory, readHistory } from "./profile-versions.ts";
 import { hasTeamAuthority } from "./peer-roster.ts";
 import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
@@ -303,6 +305,15 @@ describe("reviewed Chief team setup", () => {
     expect(await h.resolve(card.requestId)).toMatchObject({ result: { state: "cancelled" }, duplicate: true });
     expect(h.apply).not.toHaveBeenCalled();
   });
+  it("puts a setup's change to a bot's instructions in that bot's history, where its Changes list can undo it", async () => {
+    const h = harness();
+    mkdirSync(botFolder(h.peer.id), { recursive: true });
+    const request = h.propose([{ action: "update", botId: h.peer.id, fields: { soul: "Verify sources." } }]);
+    expect((await h.resolve(request.requestId))?.result.state).toBe("applied");
+    await flushProfileHistory(h.peer.id);
+    expect(readHistory(h.peer.id).find((row) => row.field === "soul")).toMatchObject({ actor: "bot", via: "team-setup", before: "", after: "Verify sources.", canRestore: true });
+  });
+
   it("renders a soul-only update as a SOUL.md line diff, not a JSON blob", () => {
     const h = harness(); h.peer.soul = "Verify sources.\nCheck citations.";
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: { soul: "Verify sources.\nCheck citations and dates." } }]);

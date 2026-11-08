@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { prepareVpsSsh as prepare, vpsSshConfigText } from "./vps-ssh.ts";
+import { ensureVpsSshMaster, prepareVpsSsh as prepare, vpsSshConfigText } from "./vps-ssh.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -19,9 +19,10 @@ function prepareVpsSsh(...args: Parameters<typeof prepare>) {
 }
 
 describe("VPS SSH connection sharing supplied by the app", () => {
-  it("does nothing on Windows, where OpenSSH has no connection sharing", () => {
+  it("does nothing on Windows, where OpenSSH has no connection sharing", async () => {
     const data = scratch();
     expect(prepareVpsSsh(data, "C:\\Windows\\System32", "win32")).toEqual({ configPath: null, path: "C:\\Windows\\System32" });
+    await expect(ensureVpsSshMaster({ configPath: null, path: "missing-ssh" }, "fixture-vps")).resolves.toBeUndefined();
     expect(existsSync(join(data, "ssh"))).toBe(false);
   });
 });
@@ -70,7 +71,7 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
   it.skipIf(!existsSync("/usr/bin/ssh"))("quotes spaces in user config and socket paths for OpenSSH", () => {
     const home = scratch();
     const userConfig = join(home, "my config");
-    writeFileSync(userConfig, "Host fixture-vps\n  HostName 192.0.2.1\n");
+    writeFileSync(userConfig, "Host fixture-vps\n  HostName 192.0.2.1\n  StrictHostKeyChecking yes\n  BatchMode yes\n  PasswordAuthentication no\n");
     const config = vpsSshConfigText("/isolated/space path/100%", userConfig, join(home, "absent"));
     // A real file, not /dev/stdin: spawnSync feeds stdin through a socketpair, which Linux refuses to reopen (ENXIO).
     const generatedConfig = join(home, "generated config");
@@ -78,6 +79,9 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
     const parsed = spawnSync("/usr/bin/ssh", ["-G", "-F", generatedConfig, "fixture-vps"], { encoding: "utf8" });
     expect(parsed.status, parsed.stderr).toBe(0);
     expect(parsed.stdout).toContain("hostname 192.0.2.1\n");
+    expect(parsed.stdout).toContain("stricthostkeychecking true\n");
+    expect(parsed.stdout).toContain("batchmode yes\n");
+    expect(parsed.stdout).toContain("passwordauthentication no\n");
     expect(parsed.stdout).toContain("controlpath /isolated/space path/100%/cm-");
   });
 

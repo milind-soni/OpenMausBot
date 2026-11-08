@@ -41,7 +41,7 @@ const api = async (
 
 /** A gate written before the turn starts lets it finish at once. Depth-1 turns (no thread id in their MCP config) share the "peer" gate. */
 const release = (threadId: string) => writeFileSync(join(gates, `${threadId}.gate`), "finish");
-const dumpOf = (threadId: string): { systemPrompt?: string; mcpConfig?: any } | undefined => {
+const dumpOf = (threadId: string): { argv?: string[]; systemPrompt?: string; mcpConfig?: any } | undefined => {
   try {
     return JSON.parse(readFileSync(join(gates, `${threadId}.json`), "utf8"));
   } catch {
@@ -193,6 +193,13 @@ beforeAll(async () => {
         driver: "claudeAgent",
         displayName: "Gated fixture",
         config: { cli: gated },
+      },
+      plain: {
+        driver: "cursorAgent",
+        displayName: "Plain fixture",
+        // Answered the way cursor-agent answers: any other --version is another program behind the path, so the engine is unavailable.
+        environment: { FAKE_ACP_VERSION: "2026.10.22-27dcf5f" },
+        config: { cli: FAKE_ACP, fullAuto: true },
       },
       curious: {
         driver: "grokAgent",
@@ -388,6 +395,146 @@ describe("start_thread on yourself", () => {
       expect(await botState(pm.id)).toMatchObject({ modelSelection: sonnet, approvalMode: "edits" });
     } finally {
       await cleanup([pm.id, qa.id]);
+    }
+  }, 60_000);
+});
+
+describe("start_thread on another model, reporting back", () => {
+  it("runs the thread on the chosen model and resumes the opener with its result", async () => {
+    const pm = await createBot("Pam", "gated");
+    const opus = { instanceId: "gated", model: "claude-opus-5" };
+    try {
+      const token = await heldTurn(pm, "Get a second opinion on the diff.");
+      const models = await api("GET", "/api/internal/models", undefined, token);
+      expect(models.status).toBe(200);
+      expect(models.body.current).toMatchObject({ instanceId: "gated", model: "claude-sonnet-5" });
+      expect(models.body.engines.find((row: any) => row.instanceId === "gated").models.map((model: any) => model.id ?? model)).toEqual(expect.arrayContaining(["claude-sonnet-5", "claude-opus-5"]));
+      const unknown = await api("POST", "/api/internal/threads",
+        { title: "Review", message: "go", modelSelection: { instanceId: "gated", model: "no-such-model" }, reportBack: true }, token);
+      expect([unknown.status, unknown.body.error]).toEqual([400, 'model "no-such-model" is not offered by instance "gated"']);
+      expect((await botState(pm.id)).tasks).toHaveLength(1);
+
+      const opened = await api("POST", "/api/internal/threads",
+        { title: "Review: Opus", message: "Review the diff. [[gate:own-review]]", modelSelection: opus, reportBack: true }, token);
+      expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+      expect(opened.body).toMatchObject({ self: true, reportBack: true, title: "Review: Opus" });
+      const { threadId, requestId } = opened.body;
+      expect(await taskOf(pm.id, threadId)).toMatchObject({ title: "Review: Opus", modelSelection: opus, openedBy: { botId: pm.id, threadId: pm.threadId } });
+      expect((await messages(pm.threadId)).find((message) => message.threadRef?.threadId === threadId))
+        .toMatchObject({ tool: { name: "Opened thread #Review: Opus", ok: true } });
+
+      release(pm.threadId);
+      await expect.poll(() => dumpOf("own-review")?.argv?.join(" "), { timeout: 15_000 }).toContain("claude-opus-5");
+      expect(handoffs().find((node) => node.id === requestId)).toMatchObject({ botId: pm.id, threadId, status: "running" });
+      release("own-review");
+      await expect.poll(() => handoffs().find((node) => node.id === requestId)?.status, { timeout: 15_000 }).toBe("completed");
+      await expect.poll(async () => (await messages(pm.threadId)).find((message) => message.roomRequest?.id === requestId && message.roomRequest.phase === "result")
+        ?.tool?.name, { timeout: 15_000 }).toBe("#Review: Opus replied");
+      expect(promptsOf("own-review")[0].message.content).toContain("Brief from @Pam (you, in #Get a second opinion on the diff.):\nReview the diff.");
+      await expect.poll(() => promptsOf("own-review").at(-1)?.message.content ?? "", { timeout: 15_000 })
+        .toContain(`[From @Pam (your thread #Review: Opus, on claude-opus-5) (bot) · report on assignment ${requestId}: done`);
+      expect((await messages(pm.threadId)).some((message) => message.tool?.name === "Resumed with #Review: Opus results, reviewing")).toBe(true);
+      await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
+      expect((await botState(pm.id)).modelSelection).toMatchObject({ model: "claude-sonnet-5" });
+    } finally {
+      await cleanup([pm.id]);
+    }
+  }, 60_000);
+
+  it("runs it on another engine, and refuses report_back from a room", async () => {
+    const pm = await createBot("Pam", "gated");
+    try {
+      const token = await heldTurn(pm, "Ask a different engine.");
+      const listed = (await api("GET", "/api/internal/models", undefined, token)).body;
+      const row = (instanceId: string) => listed.engines.find((engine: any) => engine.instanceId === instanceId);
+      expect(row("curious")).toEqual({ instanceId: "curious", name: "Curious fixture", unusable: expect.stringContaining("can't run now: it is signed out") });
+      const { instances } = (await api("GET", "/api/instances")).body;
+      const pick = (instanceId: string) => {
+        const engine = instances.find((instance: any) => instance.instanceId === instanceId);
+        return { instanceId, model: engine.models.default || engine.models.options[0].id };
+      };
+      const signedOut = await api("POST", "/api/internal/threads", { title: "Review: Grok", message: "Review the diff.", modelSelection: pick("curious"), reportBack: true }, token);
+      // One check behind both: the list's reason is the refusal, word for word.
+      expect([signedOut.status, signedOut.body.error]).toEqual([400, row("curious").unusable]);
+      expect((await botState(pm.id)).tasks).toHaveLength(1);
+      const first = row("plain").models[0], selection = { instanceId: "plain", model: first.id ?? first };
+      const opened = await api("POST", "/api/internal/threads", { title: "Review: Cursor", message: "Review the diff.", modelSelection: selection, reportBack: true }, token);
+      expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+      expect(await taskOf(pm.id, opened.body.threadId)).toMatchObject({ modelSelection: selection });
+      release(pm.threadId);
+      await expect.poll(() => handoffs().find((node) => node.id === opened.body.requestId)?.status, { timeout: 15_000 }).toBe("completed");
+      await expect.poll(async () => (await messages(pm.threadId)).some((message) => message.tool?.name === "#Review: Cursor replied"), { timeout: 15_000 }).toBe(true);
+      expect((await messages(opened.body.threadId)).filter((message) => message.tool?.name?.startsWith("notice: This thread's model"))).toEqual([]);
+      expect(await taskOf(pm.id, opened.body.threadId)).toMatchObject({ modelSelection: selection });
+      await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
+
+      const { group } = (await api("POST", "/api/groups", { name: "Review room", memberIds: [pm.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: pm.id } } })).body;
+      const inRoom = await api("POST", "/api/internal/threads", { title: "Review", message: "go", reportBack: true }, await mintedToken(pm.id, group.threadId));
+      expect([inRoom.status, inRoom.body.error]).toEqual([400, "report_back works only from your own conversation, not a room. Leave it out; the thread's result then stays in that thread."]);
+      expect((await botState(pm.id)).tasks.some((task: any) => task.title === "Review")).toBe(false);
+    } finally {
+      await cleanup([pm.id]);
+    }
+  }, 60_000);
+  it("lets the opener answer its own thread's question, and that thread carries on with the answer", async () => {
+    const pm = await createBot("Pam", "gated");
+    try {
+      // With no teammates the brief is the end of the prompt, so the echoing engine's reply ends on its question.
+      expect((await api("PATCH", `/api/bots/${pm.id}`, { peers: [] })).status).toBe(200);
+      const token = await heldTurn(pm, "Get a second opinion on the wording.");
+      const opened = await api("POST", "/api/internal/threads",
+        { title: "Review: wording", message: "Check the wording. [[gate:own-ask]]\nNEEDS INPUT: Formal or casual?", reportBack: true }, token);
+      expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+      const { requestId } = opened.body;
+      release("own-ask");
+      await expect.poll(() => handoffs().find((node) => node.id === requestId)?.status, { timeout: 15_000 }).toBe("waiting");
+
+      const answered = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Casual.", answers: requestId }, token);
+      expect(answered.status, JSON.stringify(answered.body)).toBe(200);
+      expect(answered.body.receipts).toMatchObject([{ outcome: "injected", requestId }]);
+      await expect.poll(() => promptsOf("own-ask").at(-1)?.message.content ?? "", { timeout: 15_000 }).toContain("Casual.");
+      await expect.poll(() => handoffs().find((node) => node.id === requestId)?.status, { timeout: 15_000 }).toBe("completed");
+      expect((await botState(pm.id)).tasks.filter((task: any) => task.title === "Review: wording")).toHaveLength(1);
+
+      const notMine = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Do it again." }, token);
+      expect([notMine.status, notMine.body.error]).toEqual([403, "Choose a teammate, not yourself"]);
+      release(pm.threadId);
+      await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
+    } finally {
+      await cleanup([pm.id]);
+    }
+  }, 60_000);
+
+  it("fails a report-back thread whose model can no longer run when its turn comes, instead of running it on the bot's own model", async () => {
+    const pm = await createBot("Pam", "gated");
+    try {
+      const token = await heldTurn(pm, "Ask a different engine, later.");
+      const { task: busy } = (await api("POST", `/api/bots/${pm.id}/tasks`, { title: "Busy" })).body;
+      expect((await api("POST", `/api/bots/${pm.id}/messages`, { text: "Keep busy.", threadId: busy.threadId })).status).toBe(202);
+      await liveToken(busy.threadId);
+      const plain = (await api("GET", "/api/internal/models", undefined, token)).body.engines.find((engine: any) => engine.instanceId === "plain");
+      const selection = { instanceId: "plain", model: plain.models[0].id ?? plain.models[0] };
+      const opened = await api("POST", "/api/internal/threads", { title: "Review: later", message: "Review the diff.", modelSelection: selection, reportBack: true }, token);
+      expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+      const { threadId, requestId } = opened.body;
+      expect(handoffs().find((node) => node.id === requestId)?.status).toBe("queued");
+
+      const { instances } = (await api("GET", "/api/instances")).body;
+      const curious = instances.find((instance: any) => instance.instanceId === "curious");
+      const signedOut = { instanceId: "curious", model: curious.models.default || curious.models.options[0].id };
+      const moved = await api("PATCH", `/api/bots/${pm.id}/tasks/${threadId}`, { modelSelection: signedOut });
+      expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+      release(busy.threadId);
+
+      await expect.poll(() => handoffs().find((node) => node.id === requestId)?.status, { timeout: 15_000 }).toBe("failed");
+      expect(handoffs().find((node) => node.id === requestId)?.result).toMatch(/can't run now: it is signed out\. Nothing ran on another model in its place/);
+      expect(await taskOf(pm.id, threadId)).toMatchObject({ modelSelection: signedOut });
+      expect((await messages(threadId)).filter((message) => message.tool?.name?.startsWith("notice: This thread's model"))).toEqual([]);
+      release(pm.threadId);
+      await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
+    } finally {
+      await cleanup([pm.id]);
     }
   }, 60_000);
 });

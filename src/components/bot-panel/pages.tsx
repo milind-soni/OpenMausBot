@@ -27,6 +27,7 @@ import { SettingsPage } from "./SettingsPage";
 import { panelMemoryNotes, withMemoryNote, withoutMemoryNote, type PanelMemoryNote } from "./memory-notes";
 import type { SimplePageId } from "./page-registry";
 import { BotSwitch, buttonCls, Card, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, SwitchRow, TextRow, TrashButton } from "./rows";
+import { MemoryUpkeepCards } from "./MemoryUpkeepCards";
 import { useMemoryDoc } from "./use-memory-doc";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
@@ -129,7 +130,8 @@ export function AppsPage({ bot, derived }: PageContext) {
 
 export function RoutinesPage({ bot, derived }: PageContext) {
   const { state, dispatch } = useStore();
-  const [editing, setEditing] = useState<Routine | "new" | null>(null);
+  // Arriving with no routines means the person asked to add one, so the editor opens straight away.
+  const [editing, setEditing] = useState<Routine | "new" | null>(() => derived.botRoutines.length === 0 ? "new" : null);
   return (
     <>
       <RoutineList
@@ -240,6 +242,7 @@ export function MemoryPage({ bot }: PageContext) {
           />
         </Card>
       )}
+      {memoryOn && !memory.mine && <MemoryUpkeepCards bot={bot} onChanged={memory.reload} />}
     </>
   );
 }

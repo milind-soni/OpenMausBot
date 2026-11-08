@@ -177,17 +177,17 @@ describe("reviewed executable intent on Windows", () => {
     expect(existsSync(old)).toBe(false);
   }));
 
-  it("retains a partially deleted executable bundle and its mode metadata for recovery", () => simulateWindows(() => {
+  it("retains an interrupted executable bundle and its mode metadata for recovery", () => simulateWindows(() => {
     setSkillUseGuard(() => false);
     const skill = { instructions, files: [{ path: "scripts/run.sh", content: "echo keep\n", executable: true as const }] };
     const stamp = { installId: "a".repeat(32), key: name, release: "1.0.0", ...pair(skillReleaseValue(skill), skillReleaseValue(skill)) };
     expect(installOrgSkill(bot, "org:fixture", instructions, stamp, skill.files)).toMatchObject({ enabled: true });
     const result = removeOrganizationSkill(bot, name, orgSkillStorage, { retire: (directory, expected, state) =>
-      retireUnchangedSkillRoot(directory, expected, state, { remove: (moved) => { rmSync(join(String(moved), "SKILL.md")); throw new Error("partial deletion"); } }) });
-    expect(result).toHaveProperty("error", expect.stringContaining("still needs cleanup"));
+      retireUnchangedSkillRoot(directory, expected, state, { afterVerify: (moved) => { writeFileSync(join(moved, "scripts", "run.sh"), "late local edit"); throw new Error("interrupted"); } }) });
+    expect(result).toHaveProperty("error", expect.stringContaining("still needs recovery"));
     const pending = orgSkillStorage.readManifest(bot)[name]!;
     expect(pending).toMatchObject({ enabled: false, pendingRemoval: { executableFiles: ["scripts/run.sh"] } });
-    expect(recoverOrganizationSkillLinks(bot, name)).toHaveProperty("error", expect.stringContaining("still needs cleanup"));
+    expect(recoverOrganizationSkillLinks(bot, name)).toHaveProperty("error", expect.stringContaining("still needs recovery"));
     expect(orgSkillStorage.readManifest(bot)[name]!.pendingRemoval).toEqual(pending.pendingRemoval);
   }));
 

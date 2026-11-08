@@ -131,7 +131,7 @@ export type ToolName = keyof typeof TOOL_INPUTS;
 export type ToolInput<N extends ToolName> = z.output<(typeof TOOL_INPUTS)[N]>;
 
 const DESCRIPTIONS: Record<ToolName, string> = {
-  agent_browser_status: "Your browser's state: its tabs, the tab in front with its address, title and loading state, who controls it, any open dialog or file picker, and finished downloads with their file paths.",
+  agent_browser_status: "Your browser's state: its tabs, the tab in front with its address, title and loading state, who controls it, any open dialog or file picker, and finished downloads with their file paths. Download files and IDs expire when the browser closes, sleeps or restarts; copy files you need to keep.",
   agent_browser_open: "Open a page in your browser and answer with its snapshot: the page's accessibility tree with element refs (e12) that the other tools act on. Waits for the page to load, at most 15 s.",
   agent_browser_navigate: "Go to an address in the current tab, or go back, forward or reload. Refs from earlier snapshots stop applying to the new page.",
   agent_browser_snapshot: "The page's accessibility tree with element refs, across frames and shadow roots, plus what the page reported. Take one before acting when you have no current refs; refs expire when the page navigates or a person takes control. Capped near 20 KB; it lists what it left out.",

@@ -358,7 +358,7 @@ export function htmlVisibleText(html: string): string {
       const lower = name.toLowerCase();
       if (ENTITIES[lower] !== undefined) return ENTITIES[lower]!;
       const code = lower.startsWith("#x") ? Number.parseInt(lower.slice(2), 16) : lower.startsWith("#") ? Number.parseInt(lower.slice(1), 10) : NaN;
-      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? String.fromCodePoint(code) : whole;
     })
     .replace(/\s+/g, " ")
     .trim();

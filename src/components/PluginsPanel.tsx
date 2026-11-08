@@ -779,7 +779,7 @@ export function PluginsPanel() {
         className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40"
       >
         <div className="flex items-center gap-3">
-          <ServiceIcon card={card} className="size-10 shrink-0 rounded-[10px]" />
+          <ServiceIcon card={card} className="size-10 shrink-0 rounded-[8px]" />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-1.5">
               <span className="truncate text-[14px] font-semibold leading-5 text-ink">{card.label}</span>

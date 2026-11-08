@@ -8,6 +8,7 @@ import { retireUnchangedSkillRoot, skillRootHasExpectedContent, skillRootIdentit
 import { nativeSkillLinksMayReferTo } from "./skill-native-reference.ts";
 import { taskSkillsMayReferTo } from "./skill-task-references.ts";
 import { skillMayBeInUse } from "./skill-use-guard.ts";
+import { skillUpdateGuardPath, skillUpdateNeedsRecovery } from "./skill-recovery-capacity.ts";
 
 type Manifest = Record<string, SkillManifestEntry>;
 type Storage = {
@@ -23,6 +24,7 @@ export function removeOrganizationSkill(botId: string, name: string, storage: St
   if (skillMayBeInUse(botId)) return { error: "wait until the bot finishes using its skills" };
   const manifest = storage.readManifest(botId), entry = manifest[name];
   if (!entry) return { removed: true };
+  if (skillUpdateNeedsRecovery(storage.skillStateDir(botId), name)) return { error: `a previous skill update needs recovery; inspect ${skillUpdateGuardPath(storage.skillStateDir(botId), name)} before removing this skill` };
   if (entry.pendingRetirements?.length) return { error: "wait until the previous skill revision is synchronized" };
   const root = storage.ensureSkillsRoot(botId);
   if (!root) return { error: "the workspace skills path is not a real directory" };
@@ -60,7 +62,18 @@ export function removeOrganizationSkill(botId: string, name: string, storage: St
     return { error: "the skill removal is waiting for task links to clear" };
   }
   const retired = (options.retire ?? retireUnchangedSkillRoot)(directory, pending, storage.skillStateDir(botId));
-  if ("error" in retired) return retired;
+  if ("error" in retired) {
+    const recovery = retired.reason === "capacity" ? "capacity" : "attention";
+    if (pending.recovery !== recovery) {
+      const latest = storage.readManifest(botId), now = latest[name];
+      if (now?.pendingRemoval && canonicalJson(now.pendingRemoval) === canonicalJson(pending)) {
+        const { recovery: _previous, ...rest } = pending;
+        now.pendingRemoval = { ...rest, recovery };
+        try { storage.writeManifest(botId, latest); } catch {}
+      }
+    }
+    return { error: retired.error };
+  }
   const latest = storage.readManifest(botId), now = latest[name];
   if (!now?.pendingRemoval || canonicalJson(now.pendingRemoval) !== canonicalJson(pending)) return { error: "the skill changed during removal" };
   delete latest[name];

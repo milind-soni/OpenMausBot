@@ -1,10 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { canonicalJson, parsePackageDocument } from "../shared/package-format.ts";
+import { SKILL_RECOVERY_CAPACITY_WARNING, SKILL_RECOVERY_MAX_ROOTS } from "./skill-recovery-capacity.ts";
 
 const FIXTURES = join(import.meta.dirname, "..", "shared", "package-fixtures");
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -251,4 +252,47 @@ it("waits for another bot using an organization's workspace before replacing its
     expect(readFileSync(skill, "utf8")).toContain("Reviewed 1.5.0.");
   } finally { await fixture.close(); }
 }, 180_000);
+
+it("shows the recovery limit and retains a removed skill after the person moves a backup", async () => {
+  const key = randomBytes(32).toString("hex");
+  const fixture = await launchVerificationServer({ OMB_TEST_ORG_LIBRARY_KEY: key });
+  const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const response = await fetch(`${fixture.info.url}${path}`, { method, headers: { "content-type": "application/json", ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: response.status, body: await response.json() as any };
+  };
+  let fd: number | null = null;
+  try {
+    const team = release("full-team.v2.json"), blobs = join(fixture.info.dataDir, "org-library", "blobs");
+    mkdirSync(blobs, { recursive: true }); writeFileSync(join(blobs, `${team.sha256}.json`), team.bytes, { mode: 0o600 });
+    const catalog = JSON.stringify({ format: "openmaus.org-library", version: 1, libraryVersion: 1,
+      organization: { id: ORG, name: "Customer Co" }, packages: [entry(TEAM_ID, team)] });
+    expect((await call("POST", "/api/testing/org-library", { library: { adminOrigin: "https://admin.example.com", organizationId: ORG,
+      organizationName: "Customer Co", digest: sha(catalog), catalog } }, { "x-openmausbot-test-org-library": key })).status).toBe(200);
+    expect((await call("POST", "/api/org-library/add", { packageId: TEAM_ID })).status).toBe(201);
+    const lead = (await call("GET", "/api/bots?messages=0")).body.bots.find((bot: any) => bot.installedPackage?.agentKey === "lead");
+    const root = join(fixture.info.dataDir, "workspaces", lead.id, "skills", "pricing-policy");
+    const recovery = join(fixture.info.dataDir, "skill-state", lead.id, "retired-roots");
+    mkdirSync(recovery, { recursive: true });
+    for (let i = 0; i < SKILL_RECOVERY_MAX_ROOTS; i++) { const old = join(recovery, `old-${i}`); mkdirSync(old); writeFileSync(join(old, "work"), `kept ${i}`); }
+    if (process.platform !== "win32") fd = openSync(join(root, "SKILL.md"), "a");
+    const refused = await call("DELETE", `/api/bots/${lead.id}/skills/pricing-policy`);
+    expect(refused.status).toBe(404);
+    expect(refused.body.error).toContain(recovery);
+    const skills = async () => (await call("GET", `/api/bots/${lead.id}/skills`)).body.skills as any[];
+    expect((await skills()).find((skill) => skill.name === "pricing-policy")).toMatchObject({ enabled: false, warnings: expect.arrayContaining([SKILL_RECOVERY_CAPACITY_WARNING]) });
+    expect(existsSync(join(root, "SKILL.md"))).toBe(true);
+    const backup = join(fixture.info.dataDir, "private-backup"); renameSync(join(recovery, "old-0"), backup);
+    await expect.poll(async () => !(await skills()).some((skill) => skill.name === "pricing-policy"), { timeout: 30_000 }).toBe(true);
+    if (fd !== null) writeSync(fd, "\nlate retained edit\n");
+    const retained = readdirSync(recovery).find((name) => /^[a-f0-9]{64}$/.test(name))!;
+    const text = readFileSync(join(recovery, retained, "SKILL.md"), "utf8");
+    expect(text).toContain("Quote only list prices.");
+    if (fd !== null) expect(text).toContain("late retained edit");
+    expect(readFileSync(join(backup, "work"), "utf8")).toBe("kept 0");
+  } finally {
+    if (fd !== null) closeSync(fd);
+    await fixture.close();
+  }
+}, 120_000);
 

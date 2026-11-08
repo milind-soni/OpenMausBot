@@ -253,7 +253,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
 
   if (simple) {
     return (
-      <div ref={frame} dir="ltr" className="chat-code-block group/code relative my-2.5 overflow-hidden rounded-lg bg-ink/[0.04]">
+      <div ref={frame} dir="ltr" className="chat-code-block group/code relative my-2.5 overflow-hidden rounded-xl bg-ink/[0.04]">
         <CodePlate copied={copied} onCopy={copy} copyLabel={t("code.copyTitle")} items={[
           { key: "wrap", label: t("code.wrapLines"), icon: <WrapText size={14} aria-hidden="true" />, active: wrapLines, onSelect: () => setWrapLines((wrap) => !wrap) },
           { key: "save", label: t("code.saveAsFile"), icon: <Download size={14} aria-hidden="true" />, onSelect: download },

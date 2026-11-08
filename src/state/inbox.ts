@@ -41,6 +41,16 @@ export const setInboxSupport = support.set;
 /** Tests and previews show a list of their own. */
 export const setInboxView = (view: InboxView | null): void => { list.set(view); support.set(view ? "yes" : "unknown"); };
 
+// Every read and every change here takes the next number; a list from the server lands only if nothing later was shown,
+// so an older answer never moves a row back.
+let sent = 0, shown = 0;
+const show = (seq: number, view: InboxView) => {
+  if (seq < shown) return;
+  shown = seq;
+  list.set(view);
+  support.set("yes");
+};
+
 let reading: Promise<void> | null = null;
 let readAgain = false;
 /** Reads the list now, or once more after the read on its way, so the newest answer always lands last. */
@@ -50,11 +60,12 @@ export function refreshInbox(): Promise<void> {
     try {
       do {
         readAgain = false;
+        const seq = ++sent;
         const view = await api<InboxView>("/api/inbox", { background: true }).catch((error: unknown) => {
           if ((error as { status?: number }).status === 404) { list.set(null); support.set("no"); }
           return null;
         });
-        if (view && Array.isArray(view.rows)) { list.set(view); support.set("yes"); }
+        if (view && Array.isArray(view.rows)) show(seq, view);
       } while (readAgain);
     } finally {
       reading = null;
@@ -77,21 +88,25 @@ export function useInboxLoader(version: string): void {
 }
 
 const patchRow = (id: string, patch: Partial<InboxRow>) => {
+  shown = ++sent;
   const view = list.get();
   if (view) list.set({ ...view, rows: view.rows.map((row) => (row.id === id ? { ...row, ...patch } : row)) });
 };
 
-async function mark(id: string, what: "read" | "done"): Promise<void> {
+/** Tells the server; if it can't be told, the row goes back to how it was (`undo`) and the list is read again. */
+async function mark(id: string, what: "read" | "done", undo: Partial<InboxRow>): Promise<void> {
+  const seq = ++sent;
   const view = await api<InboxView>(`/api/inbox/${id}/${what}`, { method: "POST", background: true }).catch(() => null);
-  if (view && Array.isArray(view.rows)) list.set(view);
-  else void refreshInbox();
+  if (view && Array.isArray(view.rows)) return show(seq, view);
+  patchRow(id, undo);
+  void refreshInbox();
 }
 
 /** The person read a line: it is no longer bold. */
 export function readInboxRow(row: Pick<InboxRow, "id" | "unread">): void {
   if (!row.unread) return;
   patchRow(row.id, { unread: false });
-  void mark(row.id, "read");
+  void mark(row.id, "read", { unread: true });
 }
 
 /** An ask the person just answered here: it leaves the list at once, before the server's next read says so. */
@@ -99,8 +114,9 @@ export const settleInboxRow = (row: Pick<InboxRow, "id">): void => patchRow(row.
 
 /** The person is done with a line of news: it moves to Done. */
 export function doneInboxRow(row: Pick<InboxRow, "id">): void {
+  const before = list.get()?.rows.find((one) => one.id === row.id);
   patchRow(row.id, { tab: "done", unread: false });
-  void mark(row.id, "done");
+  void mark(row.id, "done", before ? { tab: before.tab, unread: before.unread } : {});
 }
 
 /** A reply to a line of news that waits on one: it goes back where the line came from, as a Reply in the chat does. */

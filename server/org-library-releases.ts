@@ -11,6 +11,8 @@ import {
   agentReleaseValues, pair, partHash, playbookValues, roomReleaseValues, routineReleaseValues, scheduleValue, skillReleaseValue,
   type AgentPart, type PartPair, type RoomPart, type RoutinePart,
 } from "./package-parts.ts";
+import { profileSnapshot } from "./profile-revision.ts";
+import { recordProfileChange } from "./profile-versions.ts";
 import type { BotRecord, GroupRecord } from "./store.ts";
 
 export interface ReleaseContext {
@@ -158,7 +160,11 @@ class InstallUpdate {
         continue;
       }
       if (skillUpdate.changed) base.skills = pair(released.skills, released.skills);
-      if (Object.keys(profile).length) this.deps.store.patchBotProfile(bot.id, profile);
+      if (Object.keys(profile).length) {
+        const before = profileSnapshot(bot);
+        const updated = this.deps.store.patchBotProfile(bot.id, profile);
+        if (updated) recordProfileChange(bot.id, "import", "library", before, profileSnapshot(updated));
+      }
       const installed = bot.installedPackage && { ...bot.installedPackage, release: this.pkg.release, sha256: this.sha256 };
       // The stamps go last: a part written before a crash and not yet stamped is kept, never written twice.
       this.deps.store.patchBot(bot.id, { ...(playbooks ? { playbooks } : {}), packageBase: base, ...(installed ? { installedPackage: installed } : {}) });

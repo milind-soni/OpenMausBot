@@ -1,13 +1,15 @@
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, opendirSync, renameSync, rmSync } from "node:fs";
+import { lstatSync, mkdirSync, opendirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { partHash, skillReleaseValue } from "./package-parts.ts";
 import { snapshotPortableSkill } from "./portable-skill-files.ts";
 import { readBoundedSkillFile } from "./bounded-skill-read.ts";
+import { SKILL_RECOVERY_CAPACITY_WARNING, skillRecoveryHasCapacity } from "./skill-recovery-capacity.ts";
+export { SKILL_RECOVERY_ATTENTION_WARNING, SKILL_RECOVERY_CAPACITY_WARNING } from "./skill-recovery-capacity.ts";
 
-export interface RetiredSkillRoot { identity: string; hash: string; executableFiles?: string[] }
+export interface RetiredSkillRoot { identity: string; hash: string; executableFiles?: string[]; recovery?: "capacity" | "attention" }
 
 function directoryState(directory: string): "directory" | "missing" | "unsafe" {
   try { const stat = lstatSync(directory); return stat.isDirectory() && !stat.isSymbolicLink() ? "directory" : "unsafe"; }
@@ -50,11 +52,26 @@ function findEarlierQuarantine(quarantine: string, identity: string): "found" | 
   } catch { return "unsafe"; }
 }
 
-/** Move into protected state before deleting, and recheck what actually moved; never delete a swapped path. */
+export function skillRetirementCapacity(stateDir: string, incoming: string): { ok: true } | { error: string; reason: "capacity" } {
+  const quarantine = join(stateDir, "retired-roots");
+  const refusal = { error: `${SKILL_RECOVERY_CAPACITY_WARNING} Recovery folder: ${quarantine}`, reason: "capacity" as const };
+  const stateId = skillRootIdentity(stateDir);
+  if (!stateId) return refusal;
+  if (directoryState(quarantine) === "missing") {
+    try { mkdirSync(quarantine, { mode: 0o700 }); } catch { return refusal; }
+  }
+  const quarantineId = skillRootIdentity(quarantine);
+  if (!quarantineId || !skillRecoveryHasCapacity(quarantine, incoming) ||
+      stableIdentity(skillRootIdentity(stateDir)) !== stableIdentity(stateId) ||
+      stableIdentity(skillRootIdentity(quarantine)) !== stableIdentity(quarantineId)) return refusal;
+  return { ok: true };
+}
+
+/** Keep the original inode: an already-open writer can still change it after any content check. */
 export function retireUnchangedSkillRoot(
   directory: string, retired: RetiredSkillRoot, stateDir: string,
-  options: { beforeMove?: () => void; remove?: typeof rmSync } = {},
-): { retired: true } | { error: string } {
+  options: { beforeMove?: () => void; afterVerify?: (moved: string) => void } = {},
+): { retired: true } | { error: string; reason?: "capacity" } {
   const changed = { error: "the previous skill folder changed; move it before removing this skill" };
   const parent = dirname(directory), parentState = directoryState(parent);
   if (parentState === "unsafe") return { error: "the previous skill folder could not be checked safely" };
@@ -69,32 +86,34 @@ export function retireUnchangedSkillRoot(
   if (!stateId || !quarantineId) return { error: "the protected recovery folder could not be checked safely" };
   const key = createHash("sha256").update(JSON.stringify([resolve(directory), retired.identity, retired.hash])).digest("hex");
   const moved = join(quarantine, key), marker = `${moved}.json`;
-  const record = JSON.stringify({ directory: resolve(directory), identity: retired.identity, hash: retired.hash });
-  const recoveryError = { error: `the previous skill folder still needs cleanup in ${quarantine}` };
+  const record = { directory: resolve(directory), identity: retired.identity, hash: retired.hash };
+  const legacy = JSON.stringify(record), pending = JSON.stringify({ ...record, state: "pending" }), retained = JSON.stringify({ ...record, state: "retained" });
+  const recoveryError = { error: `the previous skill folder still needs recovery in ${quarantine}; this attempt deleted no files` };
   const movedState = directoryState(moved);
   if (movedState === "unsafe") return recoveryError;
   const readReceipt = () => readBoundedSkillFile(marker, 16_384)?.toString("utf8");
   if (movedState === "missing" && originalState === "missing") {
     const old = findEarlierQuarantine(quarantine, retired.identity);
     if (old !== "absent") return recoveryError;
-    // A crash after deleting the folder but before deleting its receipt is harmless.
-    if (directoryState(marker) !== "missing" && readReceipt() !== record) return recoveryError;
-    try { rmSync(marker, { force: true }); } catch { return recoveryError; }
+    // Old receipts may be left by the prior cleanup after it deleted the folder.
+    if (directoryState(marker) !== "missing" && ![legacy, retained].includes(readReceipt() ?? "")) return recoveryError;
     return { retired: true };
   }
   const parentId = parentState === "directory" ? skillRootIdentity(parent) : null;
   let justMoved = false;
   if (movedState === "missing") {
     if (!parentId || skillRootIdentity(directory) !== retired.identity || !skillRootHasExpectedContent(directory, retired.hash, retired.executableFiles)) return changed;
-    if (directoryState(marker) !== "missing" && readReceipt() !== record) return recoveryError;
+    if (directoryState(marker) !== "missing" && ![legacy, pending].includes(readReceipt() ?? "")) return recoveryError;
+    const capacity = skillRetirementCapacity(stateDir, directory);
+    if ("error" in capacity) return capacity;
     try {
       // Persist the original identity before the move so a crash leaves an attributable recovery path.
-      writeFileAtomic(marker, record, { mode: 0o600 });
+      writeFileAtomic(marker, pending, { mode: 0o600 });
       options.beforeMove?.(); renameSync(directory, moved); justMoved = true;
     }
     catch { return { error: "the previous skill folder could not be moved safely" }; }
   } else if (originalState !== "missing") {
-    // Do not delete a quarantine while a replacement occupies its original name.
+    // A replacement at the original name makes the interrupted move ambiguous.
     return recoveryError;
   }
   const restore = () => {
@@ -102,17 +121,23 @@ export function retireUnchangedSkillRoot(
       if (stableIdentity(skillRootIdentity(parent)) === stableIdentity(parentId) && directoryState(directory) === "missing") renameSync(moved, directory);
     } catch {}
   };
+  const receipt = readReceipt();
   if (stableIdentity(skillRootIdentity(moved)) !== stableIdentity(retired.identity) ||
     stableIdentity(skillRootIdentity(stateDir)) !== stableIdentity(stateId) ||
     stableIdentity(skillRootIdentity(quarantine)) !== stableIdentity(quarantineId) ||
-    readReceipt() !== record || !skillRootHasExpectedContent(moved, retired.hash, retired.executableFiles)) {
-    // A partial deletion cannot be re-verified; retain it for explicit recovery, never delete blindly.
+    ![legacy, pending, retained].includes(receipt ?? "")) {
+    if (justMoved) restore();
+    return recoveryError;
+  }
+  if (receipt === retained) return { retired: true };
+  if (!skillRootHasExpectedContent(moved, retired.hash, retired.executableFiles)) {
     if (justMoved) restore();
     return recoveryError;
   }
   try {
-    (options.remove ?? rmSync)(moved, { recursive: true, force: true });
-    rmSync(marker, { force: true });
+    options.afterVerify?.(moved);
+    writeFileAtomic(marker, retained, { mode: 0o600 });
+    if (readReceipt() !== retained) return recoveryError;
     return { retired: true };
   } catch { return recoveryError; }
 }

@@ -76,9 +76,9 @@ describe("filterTasks", () => {
   afterEach(() => { setLocale(previousLocale); });
 
   it.each([
-    ["zh", "New thread", "新建对话"],
+    ["zh", "New thread", "未命名对话"],
     ["zh", "Shared chat", "共享聊天"],
-    ["zh-tw", "New thread", "新增對話"],
+    ["zh-tw", "New thread", "未命名對話"],
     ["zh-tw", "Shared chat", "共享聊天"],
   ])("matches %s display title for %s while preserving raw search and prefix ranking", async (locale, raw, displayed) => {
     expect(await loadLocale(locale)).toBe(locale);

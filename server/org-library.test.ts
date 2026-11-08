@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -1018,6 +1018,14 @@ describe("a newer release of an added team", () => {
     return { app, library, first, installId: added.value.result.installId as string, botOf, routineOf, update };
   }
 
+  it("records organization profile changes alongside a successful skill update", async () => {
+    const { botOf, update } = await addedTeam(), lead = botOf("lead");
+    await update();
+    const { flushProfileHistory, readHistory } = await import("./profile-versions.ts");
+    await flushProfileHistory(lead.id);
+    expect(readHistory(lead.id)).toEqual(expect.arrayContaining([expect.objectContaining({ actor: "import", via: "library", field: "soul", after: "You run the desk. Quote the 2027 price list." })]));
+  });
+
   it.each(["edited", "added"])("preserves locally %s files when removing an initial organization skill", async (change) => {
     const bundle = release("full-team.v2.json", (doc) => {
       doc.package.skills.version = 2;
@@ -1061,7 +1069,7 @@ describe("a newer release of an added team", () => {
     await vi.waitFor(() => expect(app.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]).toBeUndefined());
   });
 
-  it("retains removal state and the quarantine after a partial cleanup and restart", async () => {
+  it("retains removal state and a changed quarantine after an interruption and restart", async () => {
     const bundle = release("full-team.v2.json", (doc) => {
       doc.package.skills.version = 2;
       doc.package.skills.entries.find((entry: any) => entry.name === "pricing-policy").files = [{ path: "references/guide.md", content: "reviewed" }];
@@ -1070,18 +1078,126 @@ describe("a newer release of an added team", () => {
     const lead = botOf("lead"), { removeOrganizationSkill } = await import("./skill-org-removal.ts");
     const { retireUnchangedSkillRoot } = await import("./skill-retirement.ts");
     const result = removeOrganizationSkill(lead.id, "pricing-policy", app.skills.orgSkillStorage, { retire: (directory, expected, state) =>
-      retireUnchangedSkillRoot(directory, expected, state, { remove: (moved) => { rmSync(join(String(moved), "SKILL.md")); throw new Error("partial deletion"); } }) });
-    expect(result).toHaveProperty("error", expect.stringContaining("still needs cleanup"));
+      retireUnchangedSkillRoot(directory, expected, state, { afterVerify: (moved) => { writeFileSync(join(moved, "references", "guide.md"), "late local edit"); throw new Error("interrupted"); } }) });
+    expect(result).toHaveProperty("error", expect.stringContaining("still needs recovery"));
     expect(app.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]).toMatchObject({ enabled: false, pendingRemoval: expect.any(Object) });
+    const { SKILL_RECOVERY_ATTENTION_WARNING } = await import("./skill-recovery-capacity.ts");
+    expect(app.skills.listSkills(lead.id).find((item) => item.name === "pricing-policy")!.warnings).toContain(SKILL_RECOVERY_ATTENTION_WARNING);
     expect(app.skills.setSkillEnabled(lead.id, "pricing-policy", true)).toHaveProperty("error", expect.stringContaining("waiting for safe cleanup"));
     const recovery = join(app.DATA_DIR, "skill-state", lead.id, "retired-roots");
     const held = readdirSync(recovery).find((name) => !name.endsWith(".json"))!;
-    expect(readFileSync(join(recovery, held, "references", "guide.md"), "utf8")).toBe("reviewed");
+    expect(readFileSync(join(recovery, held, "references", "guide.md"), "utf8")).toBe("late local edit");
     library.dispose();
     const restarted = await installation(home);
     restarted.open();
     expect(restarted.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]).toHaveProperty("pendingRemoval");
-    expect(readFileSync(join(recovery, held, "references", "guide.md"), "utf8")).toBe("reviewed");
+    expect(restarted.skills.listSkills(lead.id).find((item) => item.name === "pricing-policy")!.warnings).toContain(SKILL_RECOVERY_ATTENTION_WARNING);
+    expect(readFileSync(join(recovery, held, "references", "guide.md"), "utf8")).toBe("late local edit");
+  });
+
+  it("shows recovery capacity on a deferred update and retries after a retained folder moves to backup", async () => {
+    const { app, botOf, update, installId } = await addedTeam(), lead = botOf("lead");
+    const { SKILL_RECOVERY_MAX_ROOTS, SKILL_RECOVERY_CAPACITY_WARNING } = await import("./skill-recovery-capacity.ts");
+    const recovery = join(app.DATA_DIR, "skill-state", lead.id, "retired-roots");
+    mkdirSync(recovery, { recursive: true });
+    for (let i = 0; i < SKILL_RECOVERY_MAX_ROOTS; i++) { const dir = join(recovery, `old-${i}`); mkdirSync(dir); writeFileSync(join(dir, "work"), `kept ${i}`); }
+    const old = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    const oldText = readFileSync(join(old, "SKILL.md"), "utf8");
+    await update();
+    expect(app.readState().installs[installId].release).toBe("1.3.0");
+    expect(readFileSync(join(old, "SKILL.md"), "utf8")).toBe(oldText);
+    expect(app.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]).toMatchObject({ recovery: "capacity", enabled: true, package: { release: "1.3.0" } });
+    expect(app.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]!.pendingRetirements).toBeUndefined();
+    expect(app.skills.listSkills(lead.id).find((item) => item.name === "pricing-policy")!.warnings).toContain(SKILL_RECOVERY_CAPACITY_WARNING);
+    const { createSkillsLibraryHost } = await import("./host/skills-library.ts");
+    const host = createSkillsLibraryHost({ store: app.store, cfg: {} as any, appendSkillRequestCard: () => ({ requestId: "", summary: "" }) });
+    const engineWarnings = host.harnessListing(lead.id, app.skills.listSkills(lead.id)).find((item) => item.name === "pricing-policy")!.warnings;
+    expect(engineWarnings).not.toContain(SKILL_RECOVERY_CAPACITY_WARNING);
+    const backup = join(home, "retention-backup");
+    renameSync(join(recovery, "old-0"), backup);
+    await vi.waitFor(() => expect(app.readState().installs[installId].release).toBe("1.4.0"), { timeout: 3_000 });
+    expect(readFileSync(join(backup, "work"), "utf8")).toBe("kept 0");
+    expect(app.skills.listSkills(lead.id).find((item) => item.name === "pricing-policy")!.warnings).not.toContain(SKILL_RECOVERY_CAPACITY_WARNING);
+    const retained = readdirSync(recovery).find((name) => /^[a-f0-9]{64}$/.test(name))!;
+    expect(readFileSync(join(recovery, retained, "SKILL.md"), "utf8")).toBe(oldText);
+  });
+
+  it("shows recovery capacity for a pending removal without dropping the skill or its data", async () => {
+    const { app, library, botOf } = await addedTeam(), lead = botOf("lead");
+    const { SKILL_RECOVERY_MAX_ROOTS, SKILL_RECOVERY_CAPACITY_WARNING } = await import("./skill-recovery-capacity.ts");
+    const recovery = join(app.DATA_DIR, "skill-state", lead.id, "retired-roots");
+    mkdirSync(recovery, { recursive: true });
+    for (let i = 0; i < SKILL_RECOVERY_MAX_ROOTS; i++) mkdirSync(join(recovery, `old-${i}`));
+    const old = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    expect(app.skills.removeSkill(lead.id, "pricing-policy")).toHaveProperty("error", expect.stringContaining(recovery));
+    expect(app.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]).toMatchObject({ enabled: false, pendingRemoval: { recovery: "capacity" } });
+    expect(app.skills.listSkills(lead.id).find((item) => item.name === "pricing-policy")!.warnings).toContain(SKILL_RECOVERY_CAPACITY_WARNING);
+    expect(existsSync(join(old, "SKILL.md"))).toBe(true);
+    library.dispose();
+    const restarted = await installation(home); restarted.open();
+    expect(restarted.skills.listSkills(lead.id).find((item) => item.name === "pricing-policy")!.warnings).toContain(SKILL_RECOVERY_CAPACITY_WARNING);
+    renameSync(join(recovery, "old-0"), join(home, "removal-backup"));
+    await vi.waitFor(() => expect(restarted.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]).toBeUndefined(), { timeout: 3_000 });
+    expect(readdirSync(recovery).some((name) => /^[a-f0-9]{64}$/.test(name))).toBe(true);
+  });
+
+  it("refuses repeated updates before publishing untracked revisions when recovery is full", async () => {
+    const { app, botOf } = await addedTeam(), lead = botOf("lead"), name = "pricing-policy";
+    const { SKILL_RECOVERY_MAX_ROOTS } = await import("./skill-recovery-capacity.ts");
+    const recovery = join(app.DATA_DIR, "skill-state", lead.id, "retired-roots"); mkdirSync(recovery, { recursive: true });
+    for (let i = 0; i < SKILL_RECOVERY_MAX_ROOTS; i++) mkdirSync(join(recovery, `old-${i}`));
+    const before = app.skills.skillPackageStamps(lead.id).find((item) => item.name === name)!.stamp;
+    const instructions = app.skills.readSkillFile(lead.id, name)! + "\nNext release.\n";
+    const value = app.parts.skillReleaseValue({ instructions }), stamp = { ...before, release: "1.4.0", ...app.parts.pair(value, value) };
+    const revisions = join(app.DATA_DIR, "workspaces", lead.id, "skills", ".revisions");
+    for (let i = 0; i < 3; i++) {
+      expect(app.replaceOrganizationSkill(lead.id, "org:fixture", { instructions }, stamp, before,
+        { writeManifest: () => { throw new Error("disk failure"); } })).toHaveProperty("error", expect.stringContaining("recovery storage"));
+      expect(readdirSync(revisions)).toEqual([]);
+      expect(app.skills.skillPackageStamps(lead.id).find((item) => item.name === name)!.stamp).toEqual(before);
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("fences a failed staged revision across retries and restart when recovery fills during the switch", async () => {
+    const { app, library, botOf } = await addedTeam(), lead = botOf("lead"), name = "pricing-policy";
+    const { SKILL_RECOVERY_MAX_ROOTS, SKILL_RECOVERY_ATTENTION_WARNING, skillUpdateGuardPath } = await import("./skill-recovery-capacity.ts");
+    const state = join(app.DATA_DIR, "skill-state", lead.id), recovery = join(state, "retired-roots");
+    const revisions = join(app.DATA_DIR, "workspaces", lead.id, "skills", ".revisions");
+    const before = app.skills.skillPackageStamps(lead.id).find((item) => item.name === name)!.stamp;
+    const instructions = app.skills.readSkillFile(lead.id, name)! + "\nNext release.\n";
+    const value = app.parts.skillReleaseValue({ instructions }), stamp = { ...before, release: "1.4.0", ...app.parts.pair(value, value) };
+    let fd = -1;
+    try {
+      const failed = app.replaceOrganizationSkill(lead.id, "org:fixture", { instructions }, stamp, before, { writeManifest: () => {
+        const target = readdirSync(revisions).find((item) => hex.test(item))!;
+        fd = openSync(join(revisions, target, "SKILL.md"), "a");
+        for (let i = 0; i < SKILL_RECOVERY_MAX_ROOTS; i++) mkdirSync(join(recovery, `race-${i}`));
+        throw new Error("fixture manifest failure");
+      } });
+      const guard = skillUpdateGuardPath(state, name), target = JSON.parse(readFileSync(guard, "utf8")).target as string;
+      expect(failed).toHaveProperty("error", expect.stringContaining(guard));
+      expect(failed).toHaveProperty("error", expect.stringContaining(target));
+      writeSync(fd, "Late local edit.\n");
+      expect(readFileSync(join(target, "SKILL.md"), "utf8")).toContain("Late local edit.");
+      expect(app.skills.listSkills(lead.id).find((item) => item.name === name)!.warnings).toContain(SKILL_RECOVERY_ATTENTION_WARNING);
+      expect(app.skills.removeSkill(lead.id, name)).toHaveProperty("error", expect.stringContaining(guard));
+      for (let i = 0; i < 3; i++) {
+        expect(app.replaceOrganizationSkill(lead.id, "org:fixture", { instructions }, stamp, before)).toHaveProperty("error", expect.stringContaining(guard));
+        expect(readdirSync(revisions)).toHaveLength(1);
+      }
+      library.dispose();
+      const restarted = await installation(home);
+      expect(restarted.replaceOrganizationSkill(lead.id, "org:fixture", { instructions }, stamp, before)).toHaveProperty("error", expect.stringContaining(guard));
+      expect(restarted.skills.listSkills(lead.id).find((item) => item.name === name)!.warnings).toContain(SKILL_RECOVERY_ATTENTION_WARNING);
+      const backup = join(home, "interrupted-update-backup");
+      renameSync(target, backup);
+      renameSync(guard, join(home, "interrupted-update-marker.json"));
+      renameSync(join(recovery, "race-0"), join(home, "retained-backup"));
+      writeSync(fd, "After moving to backup.\n");
+      expect(readFileSync(join(backup, "SKILL.md"), "utf8")).toContain("After moving to backup.");
+      expect(restarted.replaceOrganizationSkill(lead.id, "org:fixture", { instructions }, stamp, before)).toEqual({ updated: true });
+      expect(readFileSync(join(backup, "SKILL.md"), "utf8")).toContain("Late local edit.");
+    } finally { if (fd >= 0) closeSync(fd); }
   });
 
   it("waits for an active task before updating and retries without another catalog", async () => {
@@ -1579,7 +1695,7 @@ describe("a newer release of an added team", () => {
     await update();
     interrupted.mockRestore();
     writeFileSync(join(oldDirectory, "local.md"), "Keep my notes\n");
-    expect(app.recoverOrganizationSkillLinks(lead.id)).toEqual({ ok: true, pending: true });
+    expect(app.recoverOrganizationSkillLinks(lead.id)).toHaveProperty("error", expect.stringContaining("folder changed"));
     expect(app.skills.removeSkill(lead.id, "pricing-policy")).toHaveProperty("error", expect.stringContaining("previous skill revision"));
     expect(readFileSync(join(oldDirectory, "local.md"), "utf8")).toBe("Keep my notes\n");
     expect(app.skills.listSkills(lead.id).some((skill) => skill.name === "pricing-policy")).toBe(true);

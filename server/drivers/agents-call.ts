@@ -208,8 +208,30 @@ function recallWhen(at: unknown, dateOnly: boolean): string {
   return dateOnly ? day : `${day} ${pad(said.getHours())}:${pad(said.getMinutes())}`;
 }
 
+/** The top-level arguments a model may fill with `""` (or spaces) when it means to leave them out, per tool. Only these:
+ * elsewhere a blank can be the value itself, such as a cleared room bulletin or a bot's private folder. */
+const BLANK_MEANS_LEFT_OUT: Readonly<Record<string, readonly string[]>> = {
+  coordinate_bots: ["group_id", "reason", "thread", "title", "reply", "done_when", "answers"],
+  session_search: ["thread_id", "message_id", "query", "since", "until", "scope"],
+  show_html: ["html", "jsx", "path"],
+  // A blank text or old_text is a mistake the schema names, not "not given".
+  memory_update: ["until"],
+};
+
+function dropBlankArguments(name: string, input: Json): Json {
+  const keys = Object.hasOwn(BLANK_MEANS_LEFT_OUT, name) ? BLANK_MEANS_LEFT_OUT[name] : undefined;
+  if (!keys || !input || typeof input !== "object" || Array.isArray(input)) return input;
+  const out: Json = { ...input };
+  for (const key of keys) {
+    const value = out[key];
+    if (typeof value === "string" && !value.trim()) delete out[key];
+  }
+  return out;
+}
+
 export async function callTool(called: string, input: Json, context: ToolCallContext): Promise<ToolCallResult> {
-  const { name, arguments: args } = resolveAgentsCall(called, input);
+  const { name, arguments: given } = resolveAgentsCall(called, input);
+  const args = dropBlankArguments(name, given);
   const refused = outOfBounds(name, fullInputSchema(name), args);
   if (refused) return { text: refused, isError: true };
   const member = agentsCallMember(name, args);
@@ -442,13 +464,18 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (folder) body.folder = folder;
     if (args.model_selection !== undefined) {
       const fields = jsonRecord(args.model_selection) ? args.model_selection : null;
-      if (!fields || typeof fields.instanceId !== "string" || !fields.instanceId.trim() || typeof fields.model !== "string" || !fields.model.trim()) {
-        return { text: "start_thread model_selection needs instanceId and model.", isError: true };
+      if (!fields || typeof fields.instanceId !== "string" || !fields.instanceId.trim() || typeof fields.model !== "string" || !fields.model.trim()
+        || (fields.effort !== undefined && (typeof fields.effort !== "string" || !fields.effort.trim()))) {
+        return { text: "start_thread model_selection needs instanceId and model, as list_models gives them, and effort only from that engine's efforts.", isError: true };
       }
-      body.modelSelection = { instanceId: fields.instanceId.trim(), model: fields.model.trim() };
+      body.modelSelection = { instanceId: fields.instanceId.trim(), model: fields.model.trim(), ...(typeof fields.effort === "string" ? { effort: fields.effort.trim() } : {}) };
     }
+    if (args.report_back === true) body.reportBack = true;
     const r = await api("/api/internal/threads", { method: "POST", body: JSON.stringify(body) });
     if (r.error && r.state !== "failed") return { text: `Couldn't open that thread: ${String(r.error)}`, isError: true };
+    if (r.reportBack === true) {
+      return { text: `Opened thread #${String(r.title ?? title)} on yourself [thread id: ${String(r.threadId ?? "")}]. It starts when this turn ends, and its result comes back to this conversation and resumes you automatically (assignment id: ${String(r.requestId ?? "unknown")}). Mention it to the person as #${String(r.title ?? title)} and finish your turn; do not check or wait for it in this turn.` };
+    }
     const receipt = r.self !== true && Array.isArray(r.receipts) && jsonRecord(r.receipts[0]) ? r.receipts[0] : undefined;
     const threadTitle = String(r.title ?? receipt?.title ?? title);
     const threadId = String(r.threadId ?? receipt?.threadId ?? "");
@@ -475,6 +502,12 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return {
       text: `${opened}${timing}${approval} Its result will be delivered to this conversation automatically (assignment id: ${assignmentId || "unknown"}). Acknowledge it, mention it to the person as #${threadTitle}, and finish your turn; do not check or wait for it in this turn.`,
     };
+  }
+  if (name === "list_models") {
+    const search = typeof args.search === "string" ? args.search.trim() : "";
+    const r = await api(`/api/internal/models${search ? `?search=${encodeURIComponent(search)}` : ""}`);
+    if (r.error) return { text: `Couldn't list models: ${String(r.error)}`, isError: true };
+    return { text: JSON.stringify(r) };
   }
   if (name === "list_team_setup") {
     return { text: JSON.stringify(await api("/api/internal/team-setup-catalog")) };

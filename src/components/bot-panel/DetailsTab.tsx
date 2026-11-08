@@ -1,8 +1,8 @@
-import { Calendar, Sparkles } from "lucide-react";
+import { Calendar, CalendarPlus, ChevronRight, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { Bot } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
 import { useChatMoreItems } from "../ChatMoreMenu";
 import { ModelPicker } from "../ModelPicker";
 import type { SidebarMenuItem } from "../SidebarPopoverMenu";
@@ -10,7 +10,7 @@ import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerive
 import { BotConversations } from "./Conversations";
 import type { SimplePageId } from "./page-registry";
 import { TryAsking } from "./TryAsking";
-import { Card, NavRow, RowIcon, rowCls, RowText } from "./rows";
+import { Card, CardLabel, LabelAction, panelActionCls, NavRow, RowIcon, rowCls, RowText } from "./rows";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
@@ -27,13 +27,14 @@ export function ItemRow({ item }: { item: SidebarMenuItem }) {
       disabled={item.disabled}
       aria-pressed={item.active || undefined}
       onClick={item.onSelect}
-      className={cn(rowCls, "w-full text-left enabled:hover:bg-ink/[0.03] disabled:cursor-default disabled:opacity-45")}
+      className={cn(rowCls, "w-full rounded-[8px] text-left enabled:hover:bg-ink/[0.04] disabled:cursor-default disabled:opacity-45")}
     >
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-ink/[0.05] text-ink-secondary [&_svg]:size-[15px]" aria-hidden="true">
+      <span className="flex size-4 shrink-0 items-center justify-center text-ink-secondary [&_svg]:size-4" aria-hidden="true">
         {item.icon}
       </span>
       <span className={cn("min-w-0 truncate text-[14px] font-medium", !wrapsValue && "flex-1", item.active ? "text-accent-text" : "text-ink")}>{item.label}</span>
       {item.trailing && <span className={cn("flex items-center", wrapsValue ? "min-w-0 flex-1 justify-end text-right" : "shrink-0")}>{item.trailing}</span>}
+      {item.key !== "find" && <ChevronRight size={15} aria-hidden="true" className="shrink-0 text-ink-tertiary rtl:-scale-x-100" />}
     </button>
   );
 }
@@ -44,36 +45,51 @@ export function DetailsTab({ bot, derived, onOpen }: {
   onOpen: (page: SimplePageId) => void;
 }) {
   const { items } = useChatMoreItems(bot);
+  const { dispatch } = useStore();
   const routinesOn = derived.botRoutines.filter((routine) => routine.enabled).length;
   const conversationItems = CONVERSATION_ITEMS.flatMap((key) => items.filter((item) => item.key === key));
 
   return (
     <div data-panel-tabpanel="details">
-      <Card anchor="model">
-        <div data-panel-row="model" className={rowCls}>
+      {/* One row style down the whole tab: flat rows under quiet labels, no cards. */}
+      <section data-panel-card="model" className="pt-2">
+        <div data-panel-row="model" className={cn(rowCls, "rounded-[8px]")}>
           <ModelPicker
             bot={bot}
             contained
             threadId={bot.threadId}
-            label={<span className="flex min-w-0 flex-1 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.model")} /></span>}
+            label={<span className="flex shrink-0 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.model")} /></span>}
           />
         </div>
-      </Card>
+      </section>
 
       <BotConversations bot={bot} />
 
+      <TryAsking bot={bot} />
+
+      {conversationItems.length > 0 && (
+        <section data-panel-card="conversation">
+          <CardLabel>{t("botPanel.section.conversation")}</CardLabel>
+          {conversationItems.map((item) => <ItemRow key={item.key} item={item} />)}
+        </section>
+      )}
+
       {derived.botRoutines.length === 0 ? (
-        <div data-panel-empty="routines" className="px-3 py-7 text-center text-[13px] leading-[18px] text-ink-tertiary">
-          <p>{t("botPanel.routines.empty")}</p>
+        <section data-panel-empty="routines">
+          <CardLabel action={<LabelAction data-panel-automations="" onClick={() => dispatch({ type: "showRoutines", view: "list" })}>{t("sidebar.nav.automations")}</LabelAction>}>
+            {t("botSettings.simple.routines")}
+          </CardLabel>
           <button
             type="button"
             data-panel-page="routines"
+            title={t("botPanel.routines.emptyHint")}
             onClick={() => onOpen("routines")}
-            className="mt-1.5 rounded-md px-1.5 py-0.5 text-[13px] font-medium text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
+            className={cn(panelActionCls, "w-full")}
           >
-            {t("botPanel.routines.add")}
+            <CalendarPlus size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+            <span className="truncate">{t("botPanel.routines.add")}</span>
           </button>
-        </div>
+        </section>
       ) : (
         <Card label={t("botSettings.simple.routines")} anchor="routines">
           <NavRow
@@ -83,14 +99,6 @@ export function DetailsTab({ bot, derived, onOpen }: {
             value={routinesOn > 0 ? t("botPanel.routinesOn", { count: routinesOn }) : t("botPanel.none")}
             onClick={() => onOpen("routines")}
           />
-        </Card>
-      )}
-
-      <TryAsking bot={bot} />
-
-      {conversationItems.length > 0 && (
-        <Card label={t("botPanel.section.conversation")} anchor="conversation">
-          {conversationItems.map((item) => <ItemRow key={item.key} item={item} />)}
         </Card>
       )}
     </div>
