@@ -20,6 +20,7 @@ describe("pairing devices from a hosted server's settings", () => {
     expect(lastSeen(1_000, 30_000)).toBe("just now");
     expect(lastSeen(0, 3 * 60_000)).toBe("3 min ago");
     expect(lastSeen(0, 5 * 3_600_000)).toBe("5 h ago");
+    expect(lastSeen(0, 1_410 * 60_000)).toBe("1 d ago");
     expect(lastSeen(0, 3 * 86_400_000)).toBe("3 d ago");
   });
 
