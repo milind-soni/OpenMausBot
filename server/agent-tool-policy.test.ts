@@ -6,6 +6,7 @@ describe("built-in agent tool read policy", () => {
     expect([...READ_ONLY_AGENT_TOOL_NAMES]).toEqual([
       "list_bots",
       "list_team_setup",
+      "list_models",
       "list_shared_computers",
       "list_rooms",
       "list_threads",
