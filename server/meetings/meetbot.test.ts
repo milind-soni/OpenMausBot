@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -156,19 +156,46 @@ describe("the meeting bot on Google Meet", () => {
 });
 
 describe("local transcription install", () => {
+  function scriptedSpawn(plan: Array<number | "hang">) {
+    const calls: Array<{ file: string; args: string[]; detached?: boolean }> = [];
+    const killed: string[] = [];
+    const groups: number[] = [];
+    let n = 0;
+    const spawn = ((file: string, args: readonly string[] = [], options?: { detached?: boolean }) => {
+      const behavior = plan[n++] ?? "hang";
+      calls.push({ file, args: [...args], detached: options?.detached });
+      const listeners: Array<(code: number | null) => void> = [];
+      const child = {
+        pid: 424242,
+        kill(signal?: string) {
+          killed.push(signal ?? "SIGTERM");
+          for (const listener of listeners) listener(null);
+        },
+        on(event: string, cb: (code: number | null) => void) {
+          if (event === "exit") {
+            listeners.push(cb);
+            if (typeof behavior === "number") queueMicrotask(() => cb(behavior));
+          }
+          return child;
+        },
+        stdout: null,
+        stdin: null,
+      };
+      return child;
+    }) as unknown as typeof import("node:child_process").spawn;
+    return { spawn, calls, killed, groups };
+  }
+
   it("leaves while the first install is still running", async () => {
     const home = mkdtempSync(join(tmpdir(), "omb-whisper-"));
-    const killed: string[] = [];
     const events: Array<{ type: string; data?: Record<string, unknown> }> = [];
+    const scripted = scriptedSpawn(["hang"]);
     const stream = whisperStream((type, data) => { events.push({ type, data }); }, () => {}, () => {}, {
       home,
       stopWaitMs: 50,
-      spawn: (() => ({
-        kill(signal?: string) { killed.push(signal ?? "SIGTERM"); },
-        on() { return this; },
-        stdout: null,
-        stdin: null,
-      })) as unknown as typeof import("node:child_process").spawn,
+      groupProcesses: true,
+      killGroup(pid: number) { scripted.groups.push(pid); },
+      spawn: scripted.spawn,
     });
     const result = await Promise.race([
       stream.stop().then(() => "stopped"),
@@ -176,8 +203,31 @@ describe("local transcription install", () => {
     ]);
     rmSync(home, { recursive: true, force: true });
     expect(result).toBe("stopped");
-    expect(killed).toContain("SIGKILL");
+    expect(scripted.killed).toContain("SIGKILL");
+    expect(scripted.groups).toEqual([424242]);
+    expect(scripted.calls[0]?.detached).toBe(true);
     expect(events.some((event) => event.type === "stt" && event.data?.status === "installing")).toBe(true);
+    expect(events.some((event) => event.type === "stt" && event.data?.status === "failed")).toBe(false);
+  });
+
+  it("installs again when the virtual environment cannot import", async () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-whisper-"));
+    mkdirSync(join(home, "venv", "bin"), { recursive: true });
+    writeFileSync(join(home, "venv", "bin", "python"), "");
+    const events: Array<{ type: string; data?: Record<string, unknown> }> = [];
+    const scripted = scriptedSpawn([1, "hang"]);
+    const stream = whisperStream((type, data) => { events.push({ type, data }); }, () => {}, () => {}, {
+      home,
+      stopWaitMs: 50,
+      spawn: scripted.spawn,
+    });
+    for (let i = 0; i < 50 && scripted.calls.length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    await stream.stop();
+    rmSync(home, { recursive: true, force: true });
+    expect(scripted.calls[0]?.args).toEqual(["-c", "import faster_whisper, numpy"]);
+    expect(scripted.calls[1]?.file).toBe("bash");
+    expect(events.some((event) => event.type === "stt" && event.data?.status === "installing")).toBe(true);
+    expect(events.some((event) => event.type === "stt" && event.data?.status === "failed")).toBe(false);
   });
 });
 

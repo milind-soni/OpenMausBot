@@ -45,10 +45,11 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 /** A pip install on a dead network, or ffmpeg on a stuck pipe, never exits. Leave must not wait for that. */
 const WHISPER_INSTALL_MS = 10 * 60_000;
+const WHISPER_PROBE_MS = 15_000;
 const STOP_INSTALL_WAIT_MS = 1_000;
 const FFMPEG_ENCODE_MS = 20_000;
 
-function boundChild(child: ChildProcess, timeoutMs: number): Promise<void> {
+function boundChild(child: ChildProcess, timeoutMs: number, end: () => void): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
     const finish = (error?: Error) => {
@@ -59,7 +60,7 @@ function boundChild(child: ChildProcess, timeoutMs: number): Promise<void> {
       else resolve();
     };
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
+      end();
       finish(new Error(`timed out after ${timeoutMs} ms`));
     }, timeoutMs);
     child.on("error", (error) => finish(error));
@@ -814,25 +815,59 @@ for chunk in iter(lambda: sys.stdin.buffer.read(FRAME * 4), b""):
 
 /** Speech-to-text on the computer itself, for a person with no speech key: faster-whisper, installed on first use. */
 export function whisperStream(emit: SessionParts["emit"], onWords: (words: Word[]) => void, log: (line: string) => void,
-  options: { home?: string; spawn?: typeof spawn; installMs?: number; stopWaitMs?: number } = {}) {
+  options: { home?: string; spawn?: typeof spawn; installMs?: number; stopWaitMs?: number; groupProcesses?: boolean; killGroup?: (pid: number) => void } = {}) {
   const home = options.home ?? join(process.env.HOME ?? "/tmp", ".mausbot-meet");
   const run = options.spawn ?? spawn;
   const python = join(home, "venv", "bin", "python");
+  // `python3 -m venv` stays a child of Bash. A Linux process group lets leave kill both.
+  const groupProcesses = options.groupProcesses ?? process.platform !== "win32";
+  const killGroup = options.killGroup ?? ((pid: number) => { process.kill(-pid, "SIGKILL"); });
+  const endChild = (child: ChildProcess, group: boolean) => {
+    if (group && typeof child.pid === "number" && child.pid > 0) {
+      try { killGroup(child.pid); } catch { /* already gone */ }
+    }
+    try { child.kill("SIGKILL"); } catch { /* already gone */ }
+  };
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, "whisper_worker.py"), WHISPER_WORKER);
   let worker: ChildProcess | null = null;
   let install: ChildProcess | null = null;
+  let endInstall: (() => void) | null = null;
   let stopped = false;
   let startedAt = 0;
   const queue: Buffer[] = [];
-  const ready = (async () => {
-    if (!existsSync(python)) {
-      emit("stt", { status: "installing" });
-      install = run("bash", ["-c", `python3 -m venv ${JSON.stringify(join(home, "venv"))} && ${JSON.stringify(join(home, "venv", "bin", "pip"))} install -q faster-whisper numpy`], { stdio: "ignore" });
-      try {
-        await boundChild(install, options.installMs ?? WHISPER_INSTALL_MS);
-      } finally {
+  const watchInstall = async (child: ChildProcess, timeoutMs: number, group: boolean) => {
+    const end = () => endChild(child, group);
+    install = child;
+    endInstall = end;
+    try {
+      await boundChild(child, timeoutMs, end);
+    } finally {
+      if (install === child) {
         install = null;
+        endInstall = null;
+      }
+    }
+  };
+  const ready = (async () => {
+    let depsReady = false;
+    if (existsSync(python)) {
+      try {
+        await watchInstall(run(python, ["-c", "import faster_whisper, numpy"], { stdio: "ignore" }), WHISPER_PROBE_MS, false);
+        depsReady = !stopped;
+      } catch {
+        depsReady = false;
+      }
+    }
+    if (stopped) return;
+    if (!depsReady) {
+      emit("stt", { status: "installing" });
+      const script = `python3 -m venv ${JSON.stringify(join(home, "venv"))} && ${JSON.stringify(join(home, "venv", "bin", "pip"))} install -q faster-whisper numpy`;
+      try {
+        await watchInstall(run("bash", ["-c", script], { stdio: "ignore", detached: groupProcesses }), options.installMs ?? WHISPER_INSTALL_MS, groupProcesses);
+      } catch (error) {
+        if (stopped) return;
+        throw error;
       }
     }
     if (stopped) return;
@@ -852,7 +887,10 @@ export function whisperStream(emit: SessionParts["emit"], onWords: (words: Word[
     });
     emit("stt", { status: "connected" });
     for (const chunk of queue.splice(0)) worker.stdin!.write(chunk);
-  })().catch((error: Error) => emit("stt", { status: "failed", detail: error.message }));
+  })().catch((error: Error) => {
+    if (stopped) return;
+    emit("stt", { status: "failed", detail: error.message });
+  });
   return {
     write(chunk: Buffer) {
       if (!startedAt) startedAt = Date.now() - chunk.length / 32;
@@ -861,7 +899,7 @@ export function whisperStream(emit: SessionParts["emit"], onWords: (words: Word[
     },
     async stop() {
       stopped = true;
-      install?.kill("SIGKILL");
+      endInstall?.();
       await new Promise<void>((resolve) => {
         let settled = false;
         const finish = () => { if (settled) return; settled = true; clearTimeout(timer); resolve(); };
