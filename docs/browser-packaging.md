@@ -134,7 +134,9 @@ A self-hosted server opens more with `config.json`:
 ```
 
 Each entry is an address or CIDR range with an optional `:port` (IPv6 in
-brackets for a port: `[fd12::1]:443`). OpenMausBot's own ports, metadata and
+brackets for a port: `[fd12::1]:443`). `localhost` resolves to both loopback
+addresses, so `127.0.0.1:9000` also allows `[::1]:9000` and the other way
+round, on that port only. OpenMausBot's own ports, metadata and
 link-local addresses stay closed whatever it lists, and MausBot Cloud and shared
 company workspaces ignore it.
 

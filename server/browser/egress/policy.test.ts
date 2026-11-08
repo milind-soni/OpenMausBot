@@ -193,6 +193,21 @@ describe("browserEngine.egress.allow", () => {
     expect(allowList(undefined)("10.0.0.5", 80)).toBe(false);
   });
 
+  it("lets an entry for one loopback address cover the other on the same port only", async () => {
+    const v4 = allowList(["127.0.0.1:4321"]);
+    expect(v4("127.0.0.1", 4321)).toBe(true);
+    expect(v4("::1", 4321)).toBe(true);
+    expect(v4("::1", 4322)).toBe(false);
+    expect(v4("127.0.0.2", 4321)).toBe(false);
+    expect(allowList(["[::1]:4321"])("127.0.0.1", 4321)).toBe(true);
+    expect(allowList(["[::1]:4321"])("127.0.0.1", 4322)).toBe(false);
+    expect(allowList(["127.0.0.0/8"])("::1", 80)).toBe(false);
+    expect(allowList(["10.0.0.5:4321"])("::1", 4321)).toBe(false);
+    // `localhost` resolves to both, so the page opens with only the IPv4 entry configured.
+    expect(await decide("server", "localhost:4321", ["127.0.0.1", "::1"], { allowed: v4 })).toBeNull();
+    expect(await decide("server", "localhost:4322", ["127.0.0.1", "::1"], { allowed: v4 })).toBe("this-computer");
+  });
+
   it("refuses a config entry it cannot read", () => {
     expect(browserEgressConfigSchema.safeParse({ allow: ["10.0.0.0/8"], localNetwork: false }).success).toBe(true);
     expect(browserEgressConfigSchema.safeParse({ allow: ["nas.local"] }).success).toBe(false);
