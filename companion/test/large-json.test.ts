@@ -52,12 +52,19 @@ const listen = (server: Server): Promise<number> =>
 
 /** Whatever bytes arrived, and whether the response ended cleanly or was cut. A connection the proxy neither
  * finishes nor closes fails here by name, rather than as a test timeout. */
-function device(port: number, path = "/api/bots", method = "GET"): Promise<{ status: number; headers: IncomingHttpHeaders; raw: Buffer; complete: boolean }> {
+function device(port: number, path = "/api/bots", method = "GET", slow = false): Promise<{ status: number; headers: IncomingHttpHeaders; raw: Buffer; complete: boolean }> {
   return new Promise((resolve, reject) => {
     const req = request({ host: "127.0.0.1", port, path, method, headers: { authorization: `Bearer ${TOKEN}`, "accept-encoding": "gzip" } }, (res) => {
       const chunks: Buffer[] = [];
       let complete = false;
-      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("data", (chunk: Buffer) => {
+        chunks.push(chunk);
+        // A reader slower than the proxy, so the device's socket backs up and the proxy has to wait for it.
+        if (slow) {
+          res.pause();
+          setTimeout(() => res.resume(), 1);
+        }
+      });
       res.on("end", () => {
         complete = true;
       });
@@ -115,7 +122,7 @@ describe("a JSON reply past the whole-body ceiling", () => {
     const body = Buffer.from(JSON.stringify(big));
     expect(body.length).toBeGreaterThan(34 * MiB);
     respond = (res) => send(res, body);
-    const { status, raw, complete } = await device(ports.real);
+    const { status, raw, complete } = await device(ports.real, "/api/bots", "GET", true);
     expect(status).toBe(200);
     expect(complete).toBe(true);
     const text = raw.toString("utf8");
@@ -136,6 +143,19 @@ describe("a JSON reply past the whole-body ceiling", () => {
     expect(text).not.toContain("cursor-value");
     expect(text).not.toContain("my-server");
     expect((JSON.parse(text) as { bots: unknown[] }).bots).toHaveLength(25);
+  });
+
+  it("keeps going to a reader slower than the proxy, long after the socket buffers fill", async () => {
+    // Several MiB past the ceiling: on Linux the device's socket backs up many times over. Waiting on the
+    // response's 'drain' there stalled for good; this reply must still finish.
+    const long = snapshot(25, 40, 150);
+    const body = Buffer.from(JSON.stringify(long));
+    expect(body.length).toBeGreaterThan(8 * MiB);
+    respond = (res) => send(res, body);
+    const { status, raw, complete } = await device(ports.lan, "/api/bots", "GET", true);
+    expect(status).toBe(200);
+    expect(complete).toBe(true);
+    expect(raw.toString("utf8") === JSON.stringify(scrub(long))).toBe(true);
   });
 
   it("is gzipped as it streams on the phone tunnel", async () => {

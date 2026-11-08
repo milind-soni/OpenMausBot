@@ -2,9 +2,9 @@
 // (a DNS-rebinding defence), so a device's request is replayed to 127.0.0.1
 // as this process, never with the device's Host or Origin.
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
-import type { Duplex, Writable } from "node:stream";
+import type { Duplex, Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
-import { createGzip } from "node:zlib";
+import { createGzip, type Gzip } from "node:zlib";
 
 import { bearerToken } from "./devices.ts";
 import type { E2EDescriptor } from "./e2e/descriptor.ts";
@@ -153,6 +153,17 @@ const sendJson = (res: ServerResponse, status: number, body: unknown): void => {
   res.end(text);
 };
 
+/** Writes to a device and holds `source` back until that write has reached the socket. Paced by the write's own
+ * callback, not the response's 'drain': on Node 24 on Linux a chunked response that wrote a large piece can finish
+ * flushing with `writableNeedDrain` still set and never emit 'drain', which left the reply stalled for good. */
+function toDevice(res: ServerResponse, data: string | Buffer, source: Readable): void {
+  let held = false;
+  held = !res.write(data, () => {
+    if (held) source.resume();
+  });
+  if (held) source.pause();
+}
+
 /** A JSON reply past the whole-body ceiling, scrubbed as it streams. Bytes that were never JSON go on verbatim, as a
  * small body's do; a body that stops being JSON after its start is out can only be cut off. */
 function streamScrubbedJson(harness: IncomingMessage, res: ServerResponse, held: Buffer[]): void {
@@ -165,8 +176,9 @@ function streamScrubbedJson(harness: IncomingMessage, res: ServerResponse, held:
     first = scrubber.write(decoder.write(head));
   } catch {
     res.writeHead(status, privateHeaders(harness.headers));
-    res.write(head);
-    harness.pipe(res);
+    toDevice(res, head, harness);
+    harness.on("data", (chunk: Buffer) => toDevice(res, chunk, harness));
+    harness.on("end", () => res.end());
     return;
   }
   const headers = { ...harness.headers };
@@ -174,30 +186,39 @@ function streamScrubbedJson(harness: IncomingMessage, res: ServerResponse, held:
   delete headers["content-encoding"];
   delete headers["transfer-encoding"];
   const reply = privateHeaders(headers);
-  let sink: Writable = res;
+  let zip: Gzip | null = null;
   // A phone tunnel gzips a whole JSON reply; this one is gzipped as it goes.
   if (gzipCandidate(res, status, reply, first)) {
     const vary = varyOnEncoding(reply.vary ?? res.getHeader("vary"));
     if (acceptsGzip(res.req.headers["accept-encoding"])) {
       res.writeHead(status, { ...reply, vary, "content-encoding": "gzip" });
-      const zip = createGzip();
-      zip.on("error", () => res.destroy());
-      zip.pipe(res);
-      sink = zip;
+      zip = createGzip();
+      const gzipped = zip;
+      gzipped.on("data", (chunk: Buffer) => toDevice(res, chunk, gzipped));
+      gzipped.on("end", () => res.end());
+      gzipped.on("error", () => res.destroy());
+      // zlib's own 'drain' is an ordinary stream's, and it holds the harness back while it compresses.
+      gzipped.on("drain", () => harness.resume());
     } else {
       res.writeHead(status, { ...reply, vary });
     }
   } else {
     res.writeHead(status, reply);
   }
+  const send = (text: string): void => {
+    if (!zip) toDevice(res, text, harness);
+    else if (!zip.write(text)) harness.pause();
+  };
+  const finish = (text: string): void => {
+    if (zip) zip.end(text);
+    else res.end(text);
+  };
   const cut = (): void => {
     harness.destroy();
-    sink.destroy();
+    zip?.destroy();
     res.destroy();
   };
-  // Backpressure, or a slow device buffers the whole body in this process after all.
-  if (!sink.write(first)) harness.pause();
-  sink.on("drain", () => harness.resume());
+  send(first);
   harness.on("data", (chunk: Buffer) => {
     let text: string;
     try {
@@ -205,7 +226,7 @@ function streamScrubbedJson(harness: IncomingMessage, res: ServerResponse, held:
     } catch {
       return cut();
     }
-    if (text && !sink.write(text)) harness.pause();
+    if (text) send(text);
   });
   harness.on("end", () => {
     let rest: string;
@@ -214,7 +235,7 @@ function streamScrubbedJson(harness: IncomingMessage, res: ServerResponse, held:
     } catch {
       return cut();
     }
-    sink.end(rest);
+    finish(rest);
   });
 }
 
