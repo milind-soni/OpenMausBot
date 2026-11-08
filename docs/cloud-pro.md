@@ -657,6 +657,10 @@ to resume, a menu-bar item (the notification area on Windows) shows it
   **Resume**, which lends every Cloud again. Files keeps copying lent folders
   while paused, but bots' changes made on My Cloud wait there until Resume, as
   they do while this computer is away.
+- If saving Pause fails, sharing stops at once and the item says the pause is
+  not saved. **Retry saving pause** saves it without resuming. A Resume that
+  can't be saved keeps sharing paused, and an ask's Turn on answers that it
+  failed.
 - **See activity** opens this computer's own record of what its Clouds did here
   (`electron/lending-activity-window.mjs`): every request, refused ones
   included, and each website opened through its internet connection (**Opened a
