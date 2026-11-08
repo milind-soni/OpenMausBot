@@ -146,6 +146,17 @@ export function describePageChange(before: PageState, after: PageState): string 
   ].filter(Boolean).join(" ") + title;
 }
 
+/** agent-browser prints a failed Chrome launch's stderr after this line. */
+const CHROME_STDERR = "Chrome stderr:";
+const MAX_LIBRARY_NAME = 120;
+
+/** The library a failed Chrome launch's own stderr names, not one a page's text merely quotes. */
+function launchMissingLibrary(text: string): string | undefined {
+  const stderr = text.indexOf(CHROME_STDERR);
+  const library = stderr < 0 ? undefined : loaderMissingLibrary(text.slice(stderr));
+  return library && library.length > MAX_LIBRARY_NAME ? `${library.slice(0, MAX_LIBRARY_NAME)}…` : library;
+}
+
 export function shapeBrowserToolResult(result: unknown, options: { toolName?: string; budget?: number } = {}): unknown {
   if (!isRecord(result) || !Array.isArray(result.content)) return result;
   const budget = options.budget ?? DEFAULT_BROWSER_RESULT_BUDGET;
@@ -154,14 +165,14 @@ export function shapeBrowserToolResult(result: unknown, options: { toolName?: st
   const content = (result.content as unknown[]).map((part) => {
     if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") return part;
     textParts++;
-    if (result.isError === true && process.platform === "linux") library ??= loaderMissingLibrary(part.text);
+    if (result.isError === true && process.platform === "linux") library ??= launchMissingLibrary(part.text);
     const outcome = trimResultText({ text: withoutLifecycle(part.text), budget, toolName: options.toolName });
     return { ...part, text: outcome.trimmed ? outcome.text + BROWSER_NARROWING_HINT : outcome.text };
   });
   if (!textParts) return { ...result, content };
   // agent-browser launches Chrome itself, so a host missing system libraries
   // only shows the loader's words; say how to install them, as our own launch does.
-  // The advice joins the first text part: older Claude Code shows a bot only that one.
+  // The advice joins the first text part: some MCP clients show only that one.
   if (library) {
     const first = content.find((part): part is { text: string } => isRecord(part) && part.type === "text" && typeof part.text === "string");
     if (first) first.text += `\n\n${new BrowserHostError("libraries", [library]).message}`;

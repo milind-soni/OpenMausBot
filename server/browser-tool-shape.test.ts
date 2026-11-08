@@ -87,9 +87,14 @@ describe("browser tool shaping", () => {
       expect(shaped.content[0].text).toContain("missing libraries the browser needs (libatk-1.0.so.0)");
       expect(shaped.content[0].text).toContain("`sudo openmausbot browser install --with-deps`");
       // a page that merely mentions the loader's words, or another failure, gets no install advice
-      for (const result of [{ content: [{ type: "text", text: launch }] }, { content: [{ type: "text", text: "Chrome exited early (exit code: 1)" }], isError: true }]) {
+      const echoed = "Error: page script failed: /usr/bin/app: error while loading shared libraries: libfoo.so.1: cannot open shared object file";
+      for (const result of [{ content: [{ type: "text", text: launch }] }, { content: [{ type: "text", text: "Chrome exited early (exit code: 1)" }], isError: true }, { content: [{ type: "text", text: echoed }], isError: true }]) {
         expect(shape(result).content).toEqual(result.content);
       }
+      // an absurdly long library name is cut short
+      const long = shape({ content: [{ type: "text", text: launch.replace("libatk-1.0.so.0", "x".repeat(5000)) }], isError: true }).content[0].text;
+      expect(long).toContain(`(${"x".repeat(120)}…)`);
+      expect(long).not.toContain(`${"x".repeat(121)})`);
       // the install command is for Linux hosts only
       Object.defineProperty(process, "platform", { value: "darwin" });
       expect(shape({ content: [{ type: "text", text: launch }], isError: true }).content[0].text).toBe(launch);
