@@ -25,13 +25,14 @@ export function Switch({
       className={cn(
         "relative cursor-pointer h-6 w-11 shrink-0 rounded-full transition-colors enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
         "in-data-[settings-look=simple]:h-5 in-data-[settings-look=simple]:w-8",
-        checked ? "bg-accent" : "bg-control in-data-[settings-look=simple]:bg-ink/[0.12] in-data-[settings-look=simple]:ring-1 in-data-[settings-look=simple]:ring-inset in-data-[settings-look=simple]:ring-ink/45",
+        checked ? "bg-accent in-data-[settings-look=simple]:bg-ink" : "bg-control in-data-[settings-look=simple]:bg-ink/[0.12] in-data-[settings-look=simple]:ring-1 in-data-[settings-look=simple]:ring-inset in-data-[settings-look=simple]:ring-ink/45",
         className,
       )}
     >
       <span
         className={cn(
           "absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-[left] motion-reduce:transition-none",
+          checked && "in-data-[settings-look=simple]:bg-app",
           "in-data-[settings-look=simple]:top-0.5 in-data-[settings-look=simple]:size-4",
           checked ? "left-[21px] in-data-[settings-look=simple]:left-[14px]" : "left-[3px] in-data-[settings-look=simple]:left-0.5",
         )}

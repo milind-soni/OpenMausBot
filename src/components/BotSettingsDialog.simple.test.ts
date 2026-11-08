@@ -622,7 +622,7 @@ describe("the Details tab", () => {
     const empty = botTab(makeBot());
     expect(empty.html).toContain('data-panel-empty="routines"');
     expect(empty.html).toContain(">Jobs this bot runs on a schedule, like a news roundup every morning.</p>");
-    expect(empty.html).toContain(">Every bot&#x27;s routines are in Automations.<svg");
+    expect(empty.html).toContain(">See every bot&#x27;s routines in Automations<svg");
     expect(empty.html.match(/data-panel-page="routines"/g)).toHaveLength(1);
     const add = find(empty, "data-panel-page", "routines");
     expect(empty.html).toMatch(/data-panel-page="routines"[^>]*>.*<span class="truncate">Add a routine<\/span><\/button>/);

@@ -7320,7 +7320,7 @@
   "botPanel.tab.library": "Biblioteca",
   "botPanel.routines.empty": "Rotinas são tarefas recorrentes que este bot executa em horários definidos. Peça no chat para ele criar uma.",
   "botPanel.routines.emptyHint": "Tarefas que este bot executa em um horário, como um resumo de notícias toda manhã.",
-  "botPanel.routines.seeAll": "As rotinas de todos os bots ficam em Automações.",
+  "botPanel.routines.seeAll": "Ver as rotinas de todos os bots em Automações",
   "botPanel.routines.add": "Adicionar uma rotina",
   "botPanel.library.empty": "As páginas, os arquivos e os apps que este bot cria aparecem aqui",
   "botPanel.library.pages": "Páginas",

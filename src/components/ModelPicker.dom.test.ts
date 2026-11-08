@@ -109,9 +109,9 @@ describe("choosing a model with the keyboard", () => {
     expect(chip().getAttribute("aria-expanded")).toBe("true");
 
     press("ArrowDown");
-    expect(focused()?.querySelector("[data-simple-model-text] > :first-child")?.textContent ?? focused()?.textContent).toBe("Sonnet 5.5");
+    expect(focused()?.textContent).toBe("Sonnet 5.5");
     press("ArrowDown");
-    expect(focused()?.querySelector("[data-simple-model-text] > :first-child")?.textContent ?? focused()?.textContent).toBe("Haiku 5.5");
+    expect(focused()?.textContent).toBe("Haiku 5.5");
     press("ArrowUp");
     press("Enter");
     await settle();
@@ -139,10 +139,10 @@ describe("choosing a model with the keyboard", () => {
     render(scout("claude-sonnet-5-5"));
     await openWith("click");
     press("o");
-    expect(focused()?.querySelector("[data-simple-model-text] > :first-child")?.textContent ?? focused()?.textContent).toBe("Opus 5.5");
+    expect(focused()?.textContent).toBe("Opus 5.5");
     press("p");
     expect(press(" ").defaultPrevented).toBe(true);
-    expect(focused()?.querySelector("[data-simple-model-text] > :first-child")?.textContent ?? focused()?.textContent).toBe("Opus 5.5");
+    expect(focused()?.textContent).toBe("Opus 5.5");
     expect(fixture.dispatch).not.toHaveBeenCalled();
     expect(menu()).not.toBeNull();
   });
@@ -154,7 +154,7 @@ describe("choosing a model with the keyboard", () => {
     press("ArrowDown");
     expect(focused()?.hasAttribute("data-current-model")).toBe(true);
     press("h");
-    expect(focused()?.querySelector("[data-simple-model-text] > :first-child")?.textContent ?? focused()?.textContent).toBe("Haiku 5.5");
+    expect(focused()?.textContent).toBe("Haiku 5.5");
     press("End");
     expect(focused()?.hasAttribute("data-simple-manage")).toBe(true);
     press("Home");
