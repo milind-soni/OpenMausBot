@@ -8,7 +8,7 @@ import { localApi, localAppOrigin, navigateLocalApp } from "@/lib/client-api";
 import { errorText } from "@/lib/error-text";
 import { ConfirmButton, SettingSwitch } from "./settings-controls";
 
-type Config = { configured: boolean; canSetup: boolean; login: string | null; installationUrl: string | null; prPermissionNotice?: string; permissionApprovalUrl?: string };
+type Config = { configured: boolean; canSetup: boolean; login: string | null; installationUrl: string | null; configurationNotice?: string | null; prPermissionNotice?: string; permissionApprovalUrl?: string };
 export function IntegrationSettings({ sessionToken }: { sessionToken: string }) {
   const workspace = useWorkspace();
   const [config, setConfig] = useState<Config | null>(null), [notice, setNotice] = useState(""), [busy, setBusy] = useState(false);
@@ -33,6 +33,7 @@ export function IntegrationSettings({ sessionToken }: { sessionToken: string }) 
       {config.installationUrl && <a className="ghost-button compact" href={config.installationUrl} target="_blank" rel="noreferrer">Repository access<ExternalLink size={13} /></a>}</div>}
       {github?.login && <SettingSwitch label="Create a private repository for new projects" disabled={!admin || busy} checked={Boolean(github?.autoCreate)} onChange={checked => attempt(async () => { await configure({ sessionToken, teamId: workspace._id, autoCreate: checked }); })} />}
       {admin && config?.prPermissionNotice && <div className="notice" role="status"><p>{config.prPermissionNotice}</p><a className="ghost-button compact" href={config.permissionApprovalUrl} target="_blank" rel="noreferrer">Re-approve permissions<ExternalLink size={13} /></a></div>}
+      {config?.configurationNotice && <p className="notice" role="status">{config.configurationNotice}</p>}
     </section>
     {notice && <p className="notice danger" role="alert">{notice}</p>}
   </div>;

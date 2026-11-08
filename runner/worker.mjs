@@ -10,8 +10,9 @@ import { startHarness } from './harnesses.mjs';
 import { runnerUpdatePlan, automaticUpdatePolicy, automaticUpdateDue } from './maintenance.mjs';
 import { maintainTools, recoverManagedToolUpdates } from './tool-updates.mjs';
 import { assertIdleState, withMaintenanceLock, applyRunnerRelease, beginRunnerUpdate, confirmRunnerUpdate, recoverRunnerUpdate, boundedUpdateReports } from './service.mjs';
-import { HerdrConsole, validateConsoleInput } from './herdr-console.mjs';
+import { RunConsole, validateConsoleInput } from './run-console.mjs';
 import { HerdrConnections } from './herdr-connections.mjs';
+import { RexConnections } from './rex-connections.mjs';
 
 export class Runner {
   constructor(config, dependencies = {}) {
@@ -20,8 +21,9 @@ export class Runner {
     this.discover = dependencies.discover ?? discoverAccounts;
     this.startHarness = dependencies.startHarness ?? startHarness;
     this.Workspace = dependencies.Workspace ?? Workspace;
-    this.startConsole = dependencies.startConsole ?? (options => HerdrConsole.start(options));
+    this.startConsole = dependencies.startConsole ?? (options => RunConsole.start(options));
     this.herdr = config.herdr?.enabled === true ? (dependencies.herdrConnections ?? new HerdrConnections(config)) : null;
+    this.rex = config.rex?.enabled === true ? (dependencies.rexConnections ?? new RexConnections(config)) : null;
     this.ledger = new RunLedger(this.root); this.accounts = []; this.active = null; this.paused = false; this.stopping = false;
     this.localPaused = false; this.serverPaused = false;
     this.abort = new AbortController(); this.heartbeatSeconds = config.heartbeatSeconds ?? 15;
@@ -30,7 +32,7 @@ export class Runner {
   }
   async status(extra = {}) {
     this.updateReports = boundedUpdateReports(this.updateReports, [this.config.hostToken]);
-    await atomicJson(join(this.root, 'status.json'), { version: VERSION, pid: process.pid, hostId: this.config.hostId, name: this.config.name ?? hostname(), paused: this.paused, locallyPaused: this.localPaused, serverPaused: this.serverPaused, activeRunId: this.active?.run.id ?? null, updatedAt: Date.now(), accounts: this.accounts.map(value => freshReport(value.report)), updates: this.updateReports, ...extra });
+    await atomicJson(join(this.root, 'status.json'), { version: VERSION, pid: process.pid, hostId: this.config.hostId, name: this.config.name ?? hostname(), paused: this.paused, locallyPaused: this.localPaused, serverPaused: this.serverPaused, activeRunId: this.active?.run.id ?? null, updatedAt: Date.now(), accounts: this.accounts.map(value => freshReport(value.report)), updates: this.updateReports, herdr: this.herdr?.report() ?? { enabled: false, cloudConnections: false }, rex: this.rex?.report() ?? { enabled: false, cloudConnections: false }, ...extra });
   }
   async localControls() {
     const controls = await readJson(join(this.root, 'control.json'), {});
@@ -43,9 +45,10 @@ export class Runner {
     this.updateReports = boundedUpdateReports(this.updateReports, [this.config.hostToken]);
     let response;
     try {
-      response = await this.client.request('heartbeat', { version: VERSION, platform: process.platform, capabilities: [...new Set(this.accounts.map(value => value.binding.harness))], activeRunIds: this.active ? [this.active.run.id] : [], accounts: this.accounts.map(value => freshReport(value.report)), capacity: 1, paused: this.localPaused, herdr: this.herdr?.report() ?? { enabled: false, cloudConnections: false }, ...(this.updateReports.length ? { updateReports: this.updateReports } : {}) });
-    } catch (error) { this.herdr?.schedule([]); throw error; }
+      response = await this.client.request('heartbeat', { version: VERSION, platform: process.platform, capabilities: [...new Set(this.accounts.map(value => value.binding.harness))], activeRunIds: this.active ? [this.active.run.id] : [], accounts: this.accounts.map(value => freshReport(value.report)), capacity: 1, paused: this.localPaused, herdr: this.herdr?.report() ?? { enabled: false, cloudConnections: false }, rex: this.rex?.report() ?? { enabled: false, cloudConnections: false }, ...(this.updateReports.length ? { updateReports: this.updateReports } : {}) });
+    } catch (error) { this.herdr?.schedule([]); this.rex?.schedule([]); throw error; }
     this.herdr?.schedule(response.herdrPlans ?? []);
+    this.rex?.schedule(response.rexPlans ?? []);
     if (response.cancelRunIds?.includes(this.active?.run.id)) this.active.abort.abort(new RunError('cancelled', 'Cancelled by Origin'));
     if (response.refreshUsage) this.refreshUsage = true;
     if (response.paused !== undefined) this.serverPaused = response.paused;
@@ -112,6 +115,7 @@ export class Runner {
     } finally {
       this.stopping = true; this.abort.abort(); await heartbeatLoop;
       await this.herdr?.stop();
+      await this.rex?.stop();
       process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop);
       try { await this.status({ stopped: true }); }
       finally { await lock.close(); await rm(lockPath, { force: true }); }
@@ -219,13 +223,13 @@ export class Runner {
     try {
       lease.assert();
       if (abort.signal.aborted) throw abort.signal.reason;
-      if (this.config.herdr?.enabled === true) {
+      if (this.config.herdr?.enabled === true || this.config.rex?.enabled === true) {
         try {
           active.console = await this.startConsole({ config: this.config, run, redactor, signal: abort.signal, input: request => this.consoleInput(active, request) });
-          if (active.console) await journal.event(active.console.metadata);
+          if (active.console) for (const event of active.console.metadata) await journal.event(event);
         } catch (error) {
           if (error.processStopUnproven || abort.signal.aborted) throw error;
-          await journal.event({ type: 'log', stream: 'system', text: 'Herdr run console unavailable. Native execution and Origin owner controls remain authoritative.' });
+          await journal.event({ type: 'log', stream: 'system', text: 'Run console unavailable. Native execution and Origin owner controls remain authoritative.' });
         }
       }
       if (run.verificationOnly && !run.resume?.checkpointSha) throw new RunError('failed', 'Verification-only work requires an exact preserved checkpoint');

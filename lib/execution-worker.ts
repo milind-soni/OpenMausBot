@@ -3,7 +3,7 @@ import { z } from "zod";
 import { openIntegration, sealIntegration } from "./githubConnection";
 import { integrationBridge, originUrl } from "./integration-bridge";
 import { executionRunnerPublicKey } from "./execution-bundle";
-import { cloudHerdrConnectionPlan, type CloudHerdrConnectionPlan } from "./execution-cloud-runtime";
+import { cloudHerdrConnectionPlan, cloudRexConnectionPlan, type CloudHerdrConnectionPlan, type CloudRexConnectionPlan } from "./execution-cloud-runtime";
 import { prepareRunRepository } from "./github-execution";
 import { executionSelectionKey, routeExecution, verificationMatchesPolicy } from "./execution-policy";
 import {
@@ -30,12 +30,13 @@ const hostDescription = z.object({ name: z.string().trim().min(1).max(100), plat
 const verificationSchema = z.array(z.object({ command: z.string().max(2000), exitCode: z.number().int(), kind: z.enum(["test", "smoke"]), summary: z.string().max(3000).optional() })).max(20);
 const shaSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i);
 const updateReportsSchema = z.array(z.object({ component: z.string().min(1).max(100), currentVersion: z.string().max(120).optional(), availableVersion: z.string().max(120).optional(), status: z.enum(["unknown", "current", "available", "pending", "updating", "failed"]), message: z.string().max(1000).optional(), checkedAt: z.number().finite().nonnegative().optional() })).max(20);
-const herdrReportSchema = z.object({
+const consoleReportSchema = z.object({
   enabled: z.boolean(), cloudConnections: z.boolean(), version: z.string().max(120).optional(),
   status: z.enum(["ready", "unavailable", "needs_auth"]).optional(), message: z.string().max(500).optional(),
 }).strict();
 const terminalText = z.string().min(1).max(128).regex(/^[^\x00-\x1f\x7f-\x9f]+$/);
 const terminalSchema = z.object({ type: z.literal("terminal"), backend: z.literal("herdr"), coreId: terminalText, terminalId: terminalText, name: terminalText, session: terminalText }).strict();
+const rexTerminalSchema = z.object({ type: z.literal("terminal"), backend: z.literal("rex"), sessionId: z.string().regex(/^session:[0-9a-f-]{36}$/), windowId: z.string().regex(/^window:[0-9a-f-]{36}$/), blockId: z.string().regex(/^block:[0-9a-f-]{36}$/), name: z.string().regex(/^origin-[0-9a-f]{20}$/) }).strict();
 
 function storeUpdateReports(host: ExecutionHost, reports: ExecutionUpdate[]) {
   const updates = new Map((executionSetting<ExecutionUpdate[]>(host.teamId, "updates", host.id) ?? []).map(update => [update.component, update]));
@@ -87,16 +88,16 @@ async function enroll(token: string, body: Record<string, unknown>) {
   });
   return { hostId: enrollment.host.id, hostToken, protocolVersion: 1, heartbeatSeconds: HEARTBEAT_SECONDS, leaseDurationSeconds: LEASE_SECONDS, runnerUpdates };
 }
-async function desktopHerdrPlans(host: ExecutionHost): Promise<CloudHerdrConnectionPlan[]> {
+async function desktopConsolePlans(host: ExecutionHost, backend: "herdr" | "rex"): Promise<(CloudHerdrConnectionPlan | CloudRexConnectionPlan)[]> {
   const version = /^(\d+)\.(\d+)\.(\d+)$/.exec(host.version);
-  if (!version || !(Number(version[1]) > 1 || Number(version[1]) === 1 && Number(version[2]) >= 1) || !host.herdr?.enabled || !host.herdr.cloudConnections || !["nixos", "mac"].includes(host.kind)) return [];
-  const plans: CloudHerdrConnectionPlan[] = [];
+  if (!version || !(Number(version[1]) > 1 || Number(version[1]) === 1 && Number(version[2]) >= (backend === "rex" ? 2 : 1)) || !host[backend]?.enabled || !host[backend]?.cloudConnections || !["nixos", "mac"].includes(host.kind)) return [];
+  const plans: (CloudHerdrConnectionPlan | CloudRexConnectionPlan)[] = [];
   for (const allocation of cloudAllocations(host.teamId)) {
     if (plans.length >= 32) break;
     if (allocation.teamId !== host.teamId || allocation.ownerId !== host.ownerId || !host.projectIds.includes(allocation.projectId) || allocation.status !== "ready" || !allocation.hostId) continue;
     const assertCurrent = () => {
       const current = readExecutionHost(host.id);
-      if (!current || current.revoked || current.ownerId !== host.ownerId || current.teamId !== host.teamId || current.kind !== host.kind || !current.herdr?.enabled || !current.herdr.cloudConnections || !current.projectIds.includes(allocation.projectId) || current.lastSeenAt > Date.now() || Date.now() - current.lastSeenAt > 45_000) throw new ExecutionError("Desktop connection authorization expired", 403);
+      if (!current || current.revoked || current.ownerId !== host.ownerId || current.teamId !== host.teamId || current.kind !== host.kind || !current[backend]?.enabled || !current[backend]?.cloudConnections || !current.projectIds.includes(allocation.projectId) || current.lastSeenAt > Date.now() || Date.now() - current.lastSeenAt > 45_000) throw new ExecutionError("Desktop connection authorization expired", 403);
       const cloudHost = readExecutionHost(allocation.hostId!);
       if (!cloudHost || cloudHost.revoked || cloudHost.paused || cloudHost.teamId !== host.teamId || cloudHost.ownerId !== host.ownerId || cloudHost.kind !== allocation.provider || !cloudHost.projectIds.includes(allocation.projectId) || cloudHost.lastSeenAt > Date.now() || Date.now() - cloudHost.lastSeenAt > 45_000) throw new ExecutionError("Cloud worker authorization expired", 403);
       const active = executionUnstoppedHostRuns(allocation.hostId!).some(record => record.run.teamId === host.teamId && record.run.requestedBy === host.ownerId && record.run.projectId === allocation.projectId && !record.run.processStopped && !record.cancelRequested && record.leaseExpiresAt > Date.now());
@@ -109,14 +110,14 @@ async function desktopHerdrPlans(host: ExecutionHost): Promise<CloudHerdrConnect
       assertCurrent();
       return principal;
     };
-    try { plans.push(await cloudHerdrConnectionPlan(allocation.id, allocation.provider, host.kind === "mac" ? "macos" : "nixos", authorize)); }
+    try { plans.push(await (backend === "rex" ? cloudRexConnectionPlan : cloudHerdrConnectionPlan)(allocation.id, allocation.provider, host.kind === "mac" ? "macos" : "nixos", authorize)); }
     catch { /* No private allocation details or provider failures cross the host boundary. */ }
   }
   return plans;
 }
 async function heartbeat(host: ExecutionHost, body: Record<string, unknown>) {
   const principal = await hostPrincipal(host);
-  const input = z.object({ version: z.string().max(120), platform: z.enum(["linux", "darwin"]), capabilities: z.array(executionHarness).max(5), activeRunIds: z.array(executionId).max(10), accounts: z.array(accountSchema).max(30), capacity: z.literal(1), paused: z.boolean(), updateReports: updateReportsSchema.optional(), herdr: herdrReportSchema.optional() }).parse(body);
+  const input = z.object({ version: z.string().max(120), platform: z.enum(["linux", "darwin"]), capabilities: z.array(executionHarness).max(5), activeRunIds: z.array(executionId).max(10), accounts: z.array(accountSchema).max(30), capacity: z.literal(1), paused: z.boolean(), updateReports: updateReportsSchema.optional(), herdr: consoleReportSchema.optional(), rex: consoleReportSchema.optional() }).parse(body);
   if (input.platform !== host.platform) throw new ExecutionError("Machine platform changed; enroll it again");
   const accounts: ExecutionAccountReport[] = input.accounts.map(account => ({ ...account, quota: { ...account.quota, observedAt: Math.min(account.quota.observedAt, Date.now()), ...(account.quota.error ? { error: redactExecutionText(account.quota.error) } : {}) } }));
   let refreshUsage = false;
@@ -126,7 +127,10 @@ async function heartbeat(host: ExecutionHost, body: Record<string, unknown>) {
     current.lastSeenAt = Date.now(); current.version = input.version; current.capabilities = input.capabilities; current.capacity = 1;
     current.online = true; current.status = "online"; current.projectIds = current.projectIds.filter(id => principal.projectIds.includes(id));
     current.locallyPaused = input.paused; current.paused = Boolean(current.pauseRequested || current.locallyPaused);
-    current.herdr = input.herdr ? { ...input.herdr, ...(input.herdr.version ? { version: redactExecutionText(input.herdr.version).slice(0, 120) } : {}), ...(input.herdr.message ? { message: redactExecutionText(input.herdr.message).slice(0, 500) } : {}), updatedAt: Date.now() } : undefined;
+    for (const backend of ["herdr", "rex"] as const) {
+      const report = input[backend];
+      current[backend] = report ? { ...report, ...(report.version ? { version: redactExecutionText(report.version).slice(0, 120) } : {}), ...(report.message ? { message: redactExecutionText(report.message).slice(0, 500) } : {}), updatedAt: Date.now() } : undefined;
+    }
     current.accountIds = [...new Set(accounts.map(account => accountIdentity(current.ownerId, account)))];
     replaceExecutionAccounts(current, accounts); saveExecutionHost(current); updateHostActivity(current);
     if (input.updateReports) storeUpdateReports(current, input.updateReports);
@@ -142,8 +146,9 @@ async function heartbeat(host: ExecutionHost, body: Record<string, unknown>) {
   const current = readExecutionHost(host.id)!;
   const known = new Set(activeHostRuns(host.id));
   const cancelRunIds = input.activeRunIds.filter(id => !known.has(id) || readExecutionRun(id)?.cancelRequested);
-  const herdrPlans = await desktopHerdrPlans(current);
-  return { cancelRunIds, refreshUsage, maintenance, herdrPlans, paused: Boolean(current.pauseRequested), serverTime: Date.now(), leaseDurationSeconds: LEASE_SECONDS };
+  const herdrPlans = await desktopConsolePlans(current, "herdr");
+  const rexPlans = await desktopConsolePlans(current, "rex");
+  return { cancelRunIds, refreshUsage, maintenance, herdrPlans, rexPlans, paused: Boolean(current.pauseRequested), serverTime: Date.now(), leaseDurationSeconds: LEASE_SECONDS };
 }
 async function claim(host: ExecutionHost) {
   await hostPrincipal(host);
@@ -182,6 +187,7 @@ async function claim(host: ExecutionHost) {
       record.run.updatedAt = Date.now(); record.run.reason = undefined; record.run.processStopped = false; record.run.verification = [];
       record.run.verifiedBaseSha = undefined;
       record.run.herdr = undefined;
+      record.run.rex = undefined;
       record.leaseHash = executionTokenHash(leaseToken); record.leaseExpiresAt = Date.now() + LEASE_SECONDS * 1000; record.sequence = 0;
       record.sealedEnvironment = sealRunEnvironment(record.run.id, variables);
       if (repository.gitCredential) { record.sealedGitCredential = sealIntegration(JSON.stringify(repository.gitCredential), `execution-git:${record.run.id}`); record.gitCredentialExpiresAt = repository.gitCredential.expiresAt; }
@@ -278,8 +284,13 @@ function acceptEvent(host: ExecutionHost, body: Record<string, unknown>) {
     }
     switch (event.type) {
       case "terminal": {
-        const terminal = terminalSchema.parse(event);
-        record.run.herdr = { backend: terminal.backend, coreId: redactExecutionText(terminal.coreId, record).slice(0, 128), terminalId: redactExecutionText(terminal.terminalId, record).slice(0, 128), name: redactExecutionText(terminal.name, record).slice(0, 128), session: redactExecutionText(terminal.session, record).slice(0, 128), updatedAt: Date.now() };
+        if (event.backend === "rex") {
+          const terminal = rexTerminalSchema.parse(event);
+          record.run.rex = { backend: "rex", name: redactExecutionText(terminal.name, record), sessionId: redactExecutionText(terminal.sessionId, record), windowId: redactExecutionText(terminal.windowId, record), blockId: redactExecutionText(terminal.blockId, record), updatedAt: Date.now() };
+        } else {
+          const terminal = terminalSchema.parse(event);
+          record.run.herdr = { backend: terminal.backend, coreId: redactExecutionText(terminal.coreId, record).slice(0, 128), terminalId: redactExecutionText(terminal.terminalId, record).slice(0, 128), name: redactExecutionText(terminal.name, record).slice(0, 128), session: redactExecutionText(terminal.session, record).slice(0, 128), updatedAt: Date.now() };
+        }
         break;
       }
       case "log": {

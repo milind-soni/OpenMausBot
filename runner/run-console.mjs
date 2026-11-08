@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
 import { command } from './process.mjs';
 import { baseEnvironment } from './security.mjs';
+import { rexCommand, rexStatus } from './rex.mjs';
 
 const self = fileURLToPath(import.meta.url);
 const LINE_LIMIT = 32768, BUFFER_LIMIT = 256 * 1024;
@@ -61,10 +62,27 @@ async function ownerOnly(path, kind) {
   if (info.isSymbolicLink() || info.uid !== process.getuid() || (info.mode & 0o077) || !info[kind]()) throw Error('Console IPC must belong exclusively to the local owner');
 }
 
-export class HerdrConsole {
+async function startRexViewer({ config, name, path, launch, options }) {
+  const { executable, args } = rexCommand(config);
+  await rexStatus(config, (executable, args, statusOptions) => launch(executable, args, { ...statusOptions, ...options }));
+  const created = JSON.parse((await launch(executable, [...args, 'api', 'call', 'session.create', JSON.stringify({ label: name })], options)).stdout);
+  if (!/^session:[0-9a-f-]{36}$/.test(created.session_id ?? '')) throw Error('Rex did not return a stable session identity');
+  const cleanup = async () => {
+    try { await launch(executable, [...args, 'kill', created.session_id], { ...options, signal: undefined }); } catch { /* Socket closure already detached the fixed viewer. */ }
+  };
+  try {
+    // Empty session creation never attaches/focuses a client. Run directly, with
+    // no login shell, keep-open recovery shell, TUI/model command or focus.
+    const terminal = JSON.parse((await launch(executable, [...args, 'run', '--session', created.session_id, '--shell=none', '--focus=false', '--json', '--', process.execPath, self, path], options)).stdout);
+    if (!/^window:[0-9a-f-]{36}$/.test(terminal.window_id ?? '') || !Array.isArray(terminal.block_ids) || terminal.block_ids.length !== 1 || !/^block:[0-9a-f-]{36}$/.test(terminal.block_ids[0])) throw Error('Rex did not return the new console identity');
+    return { metadata: { type: 'terminal', backend: 'rex', name, sessionId: created.session_id, windowId: terminal.window_id, blockId: terminal.block_ids[0] }, cleanup };
+  } catch (error) { await cleanup(); throw error; }
+}
+
+export class RunConsole {
   static async start({ config, run, redactor, input, signal, launch = command }) {
-    if (config.herdr?.enabled !== true) return null;
-    const view = new HerdrConsole(redactor, input);
+    if (config.herdr?.enabled !== true && config.rex?.enabled !== true) return null;
+    const view = new RunConsole(redactor, input);
     try {
       const root = resolve(config.dataDirectory, 'consoles');
       await mkdir(root, { recursive: true, mode: 0o700 });
@@ -79,19 +97,33 @@ export class HerdrConsole {
       await new Promise((done, reject) => { view.server.once('error', reject); view.server.listen(view.path, done); });
       view.server.on('error', () => { void view.close('Console IPC unavailable; native run remains managed by Origin.'); });
       await chmod(view.path, 0o600);
-      const session = process.env.HC_SESSION || 'default';
-      if (!identifier(session)) throw Error('Invalid Herdr session');
-      const name = `origin-${randomBytes(10).toString('hex')}`;
       const env = baseEnvironment();
       for (const key of ['HC_SESSION', 'XDG_RUNTIME_DIR', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME']) if (process.env[key]) env[key] = process.env[key];
       const options = { env, cwd: view.directory, timeoutMs: 10000, maxOutput: 65536, signal };
-      // No shell string, template, keep/recovery shell, personal terminal read, or core lifecycle action.
-      const status = JSON.parse((await launch('hc', ['server', 'status', '--json'], options)).stdout);
-      if (!identifier(status.core?.id)) throw Error('Herdr core metadata unavailable');
+      view.metadata = [];
       view.publish({ type: 'log', text: `Origin run console — not the native harness UI.\nRun: ${run.id}; attempt: ${run.attempt ?? 1}\n${run.verificationOnly ? 'Verification-only: no model will start.\n' : ''}Task text sends a follow-up; /cancel requests cancellation; /quit closes this view only.\nTool approvals remain in the Origin owner UI.\n\n` });
-      const terminal = JSON.parse((await launch('hc', ['run', '--bg', '--json', '--no-parent', '--no-notify', '--name', name, '--', process.execPath, self, view.path], options)).stdout);
-      if (!identifier(terminal.address) || terminal.name !== name || terminal.state !== 'live') throw Error('Herdr did not return the new run console');
-      view.metadata = { type: 'terminal', backend: 'herdr', coreId: status.core.id, terminalId: terminal.address, name, session };
+      // Each optional viewer shares this exact socket, authorization and input ledger.
+      for (const backend of ['herdr', 'rex']) {
+        if (config[backend]?.enabled !== true) continue;
+        try {
+          const name = `origin-${randomBytes(10).toString('hex')}`;
+          if (backend === 'herdr') {
+            const session = process.env.HC_SESSION || 'default';
+            if (!identifier(session)) throw Error('Invalid Herdr session');
+            const status = JSON.parse((await launch('hc', ['server', 'status', '--json'], options)).stdout);
+            if (!identifier(status.core?.id)) throw Error('Herdr core metadata unavailable');
+            const terminal = JSON.parse((await launch('hc', ['run', '--bg', '--json', '--no-parent', '--no-notify', '--name', name, '--', process.execPath, self, view.path], options)).stdout);
+            if (!identifier(terminal.address) || terminal.name !== name || terminal.state !== 'live') throw Error('Herdr did not return the new run console');
+            view.metadata.push({ type: 'terminal', backend, coreId: status.core.id, terminalId: terminal.address, name, session });
+          } else {
+            const rex = await startRexViewer({ config, name, path: view.path, launch, options });
+            view.metadata.push(rex.metadata); view.cleanupRex = rex.cleanup;
+          }
+        } catch (error) {
+          if (error.processStopUnproven || signal?.aborted) throw error;
+          view.metadata.push({ type: 'log', stream: 'system', text: `${backend === 'rex' ? 'Rex' : 'Herdr'} run console unavailable. Native execution and Origin owner controls remain authoritative.` });
+        }
+      }
       return view;
     } catch (error) { await view.close('Console unavailable; use Origin run controls.'); throw error; }
   }
@@ -140,6 +172,7 @@ export class HerdrConsole {
       }
       if (this.server?.listening) await new Promise(done => this.server.close(done));
       if (this.directory) await rm(this.directory, { recursive: true, force: true });
+      await this.cleanupRex?.();
     })();
     return this.closing;
   }
@@ -182,6 +215,6 @@ export async function runConsoleViewer(path) {
   print('\nView disconnected. This does not cancel native execution. Check Origin for the audited outcome.\n');
 }
 if (process.argv[1] && resolve(process.argv[1]) === self) {
-  if (process.argv.length !== 3) { console.error('Usage: herdr-console.mjs PRIVATE_RUN_SOCKET'); process.exitCode = 1; }
+  if (process.argv.length !== 3) { console.error('Usage: run-console.mjs PRIVATE_RUN_SOCKET'); process.exitCode = 1; }
   else runConsoleViewer(process.argv[2]).catch(() => { console.error('Origin run console unavailable. No native execution was cancelled.'); process.exitCode = 1; });
 }

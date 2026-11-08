@@ -31,6 +31,11 @@ export type CloudAllocation = {
   stopProof?: { kind: "provider-cold-stop" | "guest-supervisor-stop"; observedAt: number; machineId: string; environmentClean: boolean };
   runDeadline?: { runId: string; attempt: number; deadline: number };
   herdr?: { version: string; session: string; user: "origin-runner"; verifiedAt: number };
+  herdrSetupAttempted?: boolean;
+  herdrPrerequisite?: string;
+  rex?: { version: string; socket: string; user: "origin-runner"; verifiedAt: number };
+  rexSetupAttempted?: boolean;
+  rexPrerequisite?: string;
   herdrConnectionUntil?: number;
   herdrSshEnabled?: boolean;
 };

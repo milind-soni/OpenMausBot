@@ -13,13 +13,15 @@ import { createSession } from "../convex/lib/auth";
 import type { ConvexHttpClient } from "convex/browser";
 import { NextRequest } from "next/server";
 import { integrationBridge } from "./integration-bridge";
-import { githubRequest, saveGitHubApp, saveGitHubJob, saveWorkspaceGitHub, workspaceGitHubInfo, workspaceGitHubToken } from "./github-workspace";
+import { githubRequest, saveGitHubApp, saveGitHubJob, saveWorkspaceGitHub } from "./github-workspace";
+import type * as GitHubWorkspace from "./github-workspace";
 import { createGitHubTask, createProjectRepository, processGitHubWork, reconcileGitHubLifecycle, syncGitHubPage } from "./github-sync";
 import { saveGitHubConnection, githubConnectionToken, deleteGitHubConnection, integrationDb } from "./githubConnection";
 import { POST } from "../app/api/github/webhook/route";
+import { createFakeGitHub } from "../testing/fake-github";
 
 vi.mock("./integration-bridge", () => ({ integrationBridge: vi.fn(), originUrl: () => "http://127.0.0.1:1" }));
-vi.mock("./github-workspace", async importOriginal => ({ ...await importOriginal<typeof import("./github-workspace")>(), githubRequest: vi.fn() }));
+vi.mock("./github-workspace", async importOriginal => ({ ...await importOriginal<typeof GitHubWorkspace>(), githubRequest: vi.fn() }));
 const backend = vi.hoisted(() => ({ client: null as unknown as ConvexHttpClient }));
 vi.mock("next/server", async importOriginal => ({ ...await importOriginal<typeof import("next/server")>(), after: vi.fn() }));
 vi.mock("./localRealtime", async importOriginal => ({
@@ -44,7 +46,7 @@ process.env.ORIGIN_LOCAL_DATA_DIR = directory;
 const modules = import.meta.glob(["../convex/**/*.ts", "!../convex/**/*.test.ts"]);
 const secret = "pg3-synthetic-signing-secret";
 afterAll(() => { integrationDb().close(); rmSync(directory, { recursive: true, force: true }); delete process.env.ORIGIN_LOCAL_DATA_DIR; });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 async function fixture() {
   const db = integrationDb();
@@ -311,14 +313,19 @@ test("PG3 O-121: snapshot import preserves issue/PR fields and legacy create use
   expect(await f.t.action(api.github.syncRepo, args)).toMatchObject({ ok: false, error: expect.stringContaining("Repo not found") });
 });
 
-test("PG3 R2 O-111 HTTP OAuth state/cookie/PKCE, installation retry, refresh, reconnect and disconnect retain repositories", async () => {
+test("HTTP OAuth connects new workspaces to shared GitHub with isolated reconnect and disconnect", async () => {
   const f = await fixture();
+  const fake = await createFakeGitHub(), userToken = fake.user("z4mbo", 1);
   const oauth = await import("../app/api/github/oauth/[step]/route");
   const workspace = await import("../app/api/github/workspace/route");
-  saveGitHubApp({ clientId: "fixture-id", clientSecret: "fixture-secret", slug: "fixture-app" });
+  const actual = await vi.importActual<typeof GitHubWorkspace>("./github-workspace");
+  vi.mocked(githubRequest).mockImplementation(actual.githubRequest);
+  vi.stubEnv("ORIGIN_SEALING_KEY", Buffer.alloc(32, 17).toString("base64"));
+  saveGitHubApp({ clientId: "fixture-id", clientSecret: "fixture-secret", slug: fake.slug, appId: fake.appId, privateKey: fake.privateKeyPem });
   const context = (step: string) => ({ params: Promise.resolve({ step }) });
-  const start = async () => {
-    const response = await oauth.POST(new NextRequest(`http://127.0.0.1:1/api/github/oauth/start?teamId=${f.teamId}&projectId=${f.projectId}`, { method: "POST", headers: { authorization: `Bearer ${f.owner.sessionToken}` } }), context("start"));
+  const start = async (teamId = f.teamId) => {
+    const project = teamId === f.teamId ? `&projectId=${f.projectId}` : "";
+    const response = await oauth.POST(new NextRequest(`http://127.0.0.1:1/api/github/oauth/start?teamId=${teamId}${project}`, { method: "POST", headers: { authorization: `Bearer ${f.owner.sessionToken}` } }), context("start"));
     expect(response.status).toBe(200);
     const url = new URL((await response.json()).url);
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
@@ -326,19 +333,15 @@ test("PG3 R2 O-111 HTTP OAuth state/cookie/PKCE, installation retry, refresh, re
     return { state: url.searchParams.get("state")!, cookie, challenge: url.searchParams.get("code_challenge") };
   };
   const callback = (state: string, cookie: string) => oauth.GET(new NextRequest(`http://127.0.0.1:1/api/github/oauth/callback?state=${state}&code=fixture-code`, { headers: { cookie } }), context("callback"));
-  let installed = false, refreshes = 0;
   const exchanges: Record<string, string>[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    expect(String(url)).toBe("https://github.com/login/oauth/access_token");
-    const body = JSON.parse(init!.body as string); exchanges.push(body);
-    if (body.grant_type === "refresh_token") { refreshes++; return Response.json({ access_token: "fixture-refreshed", refresh_token: "fixture-refresh-2", expires_in: 7200 }); }
-    return Response.json({ access_token: "fixture-oauth", refresh_token: "fixture-refresh", expires_in: 1 });
+    const request = new Request(url, init);
+    if (request.url === "https://github.com/login/oauth/access_token") {
+      exchanges.push(await request.json());
+      return Response.json({ access_token: userToken, expires_in: 7200 });
+    }
+    return fake.handle(request);
   }));
-  vi.mocked(githubRequest).mockImplementation(async endpoint => {
-    if (endpoint === "/user") return { id: 1, login: "z4mbo" };
-    if (endpoint.startsWith("/user/installations")) return { installations: installed ? [{ account: { id: 1 }, app_slug: "fixture-app", suspended_at: null, permissions: { administration: "write" } }] : [] };
-    throw new Error(`Unexpected GitHub ${endpoint}`);
-  });
   const first = await start();
   expect((await callback("wrong-state", first.cookie)).headers.get("location")).toContain("connection-failed");
   expect((await callback(first.state, "origin.github=wrong-browser")).headers.get("location")).toContain("connection-failed");
@@ -347,33 +350,40 @@ test("PG3 R2 O-111 HTTP OAuth state/cookie/PKCE, installation retry, refresh, re
   expect(installation.headers.get("location")).toContain("/installations/new?state=");
   const state = new URL(installation.headers.get("location")!).searchParams.get("state")!;
   const cookie = installation.headers.get("set-cookie")!.split(";")[0];
-  installed = true;
+  fake.install("z4mbo", 1);
   const installReturn = await oauth.GET(new NextRequest(`http://127.0.0.1:1/api/github/oauth/install?state=${state}`, { headers: { cookie } }), context("install"));
   expect(installReturn.headers.get("location")).toContain("code_challenge_method=S256");
   expect((await callback(state, cookie)).headers.get("location")).toContain("github=connected");
-  expect(exchanges[0].code_verifier).toHaveLength(43);
   const { createHash } = await import("node:crypto");
   expect(createHash("sha256").update(exchanges[0].code_verifier).digest("base64url")).toBe(first.challenge);
-  expect(workspaceGitHubInfo(f.teamId)).toMatchObject({ login: "z4mbo", connected_by: f.owner.id });
-  expect(await workspaceGitHubToken(f.teamId, f.owner.id)).toBe("fixture-refreshed");
-  expect(refreshes).toBe(1);
+  const status = (teamId: Id<"teams">) => f.t.query(api.teamGitHub.status, { sessionToken: f.owner.sessionToken, teamId });
+  expect((await status(f.teamId)).shared).toMatchObject({ accountLogin: "z4mbo" });
   expect((await callback(state, cookie)).headers.get("location")).toContain("connection-failed");
-  const reconnect = await start();
+
+  const second = await f.t.mutation(api.workspaces.create, { sessionToken: f.owner.sessionToken, name: "Second workspace" });
+  expect((await status(second.teamId)).shared).toBeNull();
+  const secondConnect = await start(second.teamId);
+  expect((await callback(secondConnect.state, secondConnect.cookie)).headers.get("location")).toContain("github=connected");
+  const projectId = await f.t.mutation(api.projects.create, { sessionToken: f.owner.sessionToken, teamId: second.teamId, name: "Second workspace app", githubRepo: "later" });
+  expect(await f.t.action(api.teamGitHub.createRepository, { sessionToken: f.owner.sessionToken, projectId })).toEqual({ state: "ready", repoUrl: "https://github.com/z4mbo/Second-workspace-app" });
+  const reconnect = await start(second.teamId);
   expect((await callback(reconnect.state, reconnect.cookie)).headers.get("location")).toContain("github=connected");
-  const disconnected = await workspace.DELETE(new Request(`http://127.0.0.1:1/api/github/workspace?teamId=${f.teamId}`, { method: "DELETE", headers: { authorization: `Bearer ${f.owner.sessionToken}` } }));
+  const disconnected = await workspace.DELETE(new Request(`http://127.0.0.1:1/api/github/workspace?teamId=${second.teamId}`, { method: "DELETE", headers: { authorization: `Bearer ${f.owner.sessionToken}` } }));
   expect(disconnected.status).toBe(200);
-  expect(workspaceGitHubInfo(f.teamId)).toBeNull();
-  expect(await f.t.query(api.projects.get, { sessionToken: f.owner.sessionToken, projectId: f.projectId })).toMatchObject({ repoUrl: "https://github.com/z4mbo/origin-pr-sandbox" });
+  expect((await status(second.teamId)).shared).toBeNull();
+  expect((await status(f.teamId)).shared).toMatchObject({ accountLogin: "z4mbo" });
+  expect(await f.t.query(api.projects.get, { sessionToken: f.owner.sessionToken, projectId })).toMatchObject({ repoUrl: "https://github.com/z4mbo/Second-workspace-app" });
+
   const stale = await start();
   vi.stubGlobal("fetch", vi.fn(async () => {
     await f.t.run(async ctx => {
-      const member = await ctx.db.query("teamMembers").withIndex("by_user", q => q.eq("userId", f.owner.id)).first();
+      const member = await ctx.db.query("teamMembers").withIndex("by_team_email", q => q.eq("teamId", f.teamId).eq("email", "owner@pg3.test")).unique();
       await ctx.db.patch(member!._id, { role: "viewer" });
     });
     return Response.json({ access_token: "must-not-store-revoked-token" });
   }));
   expect((await callback(stale.state, stale.cookie)).headers.get("location")).toContain("connection-failed");
-  expect(workspaceGitHubInfo(f.teamId)).toBeNull();
+  expect((await status(f.teamId)).shared).toBeNull();
 });
 
 test("PG3 R2 O-112 HTTP token connection validates account/repo, admin, encryption and disconnect", async () => {

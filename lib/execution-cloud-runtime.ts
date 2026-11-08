@@ -6,6 +6,7 @@ import { acquireExecutionLock, atomicExecution, cloudAllocations, executionAccou
 import { openIntegration, sealIntegration } from "./githubConnection";
 import { originUrl } from "./integration-bridge";
 import { CLOUD_HERDR_BIN, CLOUD_HERDR_ENV, CLOUD_HERDR_SESSION, CLOUD_HERDR_UNIT, CLOUD_HERDR_VERSION, cloudHerdrService, installCloudHerdr } from "./execution-cloud/herdr";
+import { CLOUD_REX_BIN, CLOUD_REX_SOCKET, CLOUD_REX_UNIT, CLOUD_REX_VERSION, cloudRexService, installCloudRex } from "./execution-cloud/rex";
 import { setBoxdHerdrSsh } from "./execution-cloud/boxd";
 import { VERSION as RUNNER_VERSION } from "../runner/security.mjs";
 
@@ -248,14 +249,30 @@ async function bootstrap(allocation: Allocation, apiKey: string, authorize: () =
   await authorize();
   persist(allocation, { status: "bootstrapping" });
   await execute(prepareMachine, undefined, 240);
-  if (allocation.herdr?.version !== CLOUD_HERDR_VERSION) {
-    await execute(asRoot(installCloudHerdr), undefined, 240);
-    await execute(asRoot(`set -eu; printf '%s' ${q(cloudHerdrService(WORKER_PATH))} > /etc/systemd/system/${CLOUD_HERDR_UNIT}; chmod 644 /etc/systemd/system/${CLOUD_HERDR_UNIT}; systemctl daemon-reload; systemctl start ${CLOUD_HERDR_UNIT}; systemctl is-active --quiet ${CLOUD_HERDR_UNIT}`));
-    const version = await execute(asWorker(`${CLOUD_HERDR_BIN} --version`));
-    if (version !== `hc ${CLOUD_HERDR_VERSION}`) throw new CloudRuntimePrerequisiteError("The private Herdr core version could not be verified.");
-    persist(allocation, { herdr: { version: CLOUD_HERDR_VERSION, session: CLOUD_HERDR_SESSION, user: "origin-runner", verifiedAt: Date.now() } });
-  } else {
-    await execute(asRoot(`systemctl start ${CLOUD_HERDR_UNIT}; systemctl is-active --quiet ${CLOUD_HERDR_UNIT}`));
+  try {
+    if (allocation.herdr?.version !== CLOUD_HERDR_VERSION) {
+      await execute(asRoot(installCloudHerdr), undefined, 240);
+      await execute(asRoot(`set -eu; printf '%s' ${q(cloudHerdrService(WORKER_PATH))} > /etc/systemd/system/${CLOUD_HERDR_UNIT}; chmod 644 /etc/systemd/system/${CLOUD_HERDR_UNIT}; systemctl daemon-reload; systemctl start ${CLOUD_HERDR_UNIT}; systemctl is-active --quiet ${CLOUD_HERDR_UNIT}`));
+      const version = await execute(asWorker(`${CLOUD_HERDR_BIN} --version`));
+      if (version !== `hc ${CLOUD_HERDR_VERSION}`) throw new CloudRuntimePrerequisiteError("The private Herdr core version could not be verified.");
+      persist(allocation, { herdr: { version: CLOUD_HERDR_VERSION, session: CLOUD_HERDR_SESSION, user: "origin-runner", verifiedAt: Date.now() }, herdrSetupAttempted: true, herdrPrerequisite: undefined });
+    } else await execute(asRoot(`systemctl start ${CLOUD_HERDR_UNIT}; systemctl is-active --quiet ${CLOUD_HERDR_UNIT}`));
+  } catch {
+    persist(allocation, { herdr: undefined, herdrSetupAttempted: true, herdrPrerequisite: "Private Herdr unavailable: requires systemd, root/passwordless sudo, curl, sha256sum, tar, HTTPS access to releases.herdr.dev and the pinned Linux x64/arm64 core. Inspect origin-cloud-herdr.service; native execution remains independent." });
+  }
+  // Optional viewer failure cannot prevent the worker or the other console backend.
+  try {
+    if (allocation.rex?.version !== CLOUD_REX_VERSION) {
+      await execute(asRoot(installCloudRex), undefined, 240);
+      await execute(asRoot(`set -eu; printf '%s' ${q(cloudRexService(WORKER_PATH))} > /etc/systemd/system/${CLOUD_REX_UNIT}; chmod 644 /etc/systemd/system/${CLOUD_REX_UNIT}; systemctl daemon-reload; systemctl start ${CLOUD_REX_UNIT}; systemctl is-active --quiet ${CLOUD_REX_UNIT}`));
+      const version = await execute(asWorker(`${CLOUD_REX_BIN} version`));
+      if (!version.startsWith(`rex ${CLOUD_REX_VERSION}\n`)) throw new CloudRuntimePrerequisiteError("Pinned Rex preview version was not verified.");
+      const status = JSON.parse(await execute(asWorker(`${CLOUD_REX_BIN} --autostart=false --server unix://${CLOUD_REX_SOCKET} server status --json`)));
+      if (status.rex_version !== CLOUD_REX_VERSION || status.you?.transport !== "unix") throw new CloudRuntimePrerequisiteError("Private Rex server was not verified.");
+      persist(allocation, { rex: { version: CLOUD_REX_VERSION, socket: CLOUD_REX_SOCKET, user: "origin-runner", verifiedAt: Date.now() }, rexSetupAttempted: true, rexPrerequisite: undefined });
+    } else await execute(asRoot(`systemctl start ${CLOUD_REX_UNIT}; systemctl is-active --quiet ${CLOUD_REX_UNIT}`));
+  } catch {
+    persist(allocation, { rex: undefined, rexSetupAttempted: true, rexPrerequisite: "Private Rex unavailable: requires systemd, root/passwordless sudo, curl, sha256sum, tar, HTTPS access to blob.superlogical.com and the pinned Linux amd64/arm64 preview. Inspect origin-cloud-rex.service; no personal server or model authentication was changed." });
   }
   // A previously enrolled service must not be overwritten while it could still be running.
   const running = await execute(asRoot(`if systemctl is-active --quiet ${UNIT}; then printf active; else printf inactive; fi`));
@@ -288,7 +305,7 @@ async function bootstrap(allocation: Allocation, apiKey: string, authorize: () =
     const token = openIntegration(allocation.enrollment!.sealedToken, `cloud-enrollment:${allocation.id}`);
     await execute(`printf '%s' "$ORIGIN_ENROLLMENT_TOKEN" | ${asWorker(`${NODE} ${CLI} enroll --url ${q(release.origin)} --name ${q(allocation.name)} --kind ${allocation.provider} --config ${CONFIG}`)}`, { ORIGIN_ENROLLMENT_TOKEN: token });
   }
-  await execute(asWorker(`${NODE} --input-type=module -e ${q(`import {readFile,writeFile,rename} from 'node:fs/promises';import {randomUUID} from 'node:crypto';const path=${JSON.stringify(CONFIG)};const config=JSON.parse(await readFile(path,'utf8'));config.herdr={...config.herdr,enabled:true,cloudConnections:false};const stage=path+'.'+randomUUID();await writeFile(stage,JSON.stringify(config),{mode:384,flag:'wx'});await rename(stage,path);`)}`));
+  await execute(asWorker(`${NODE} --input-type=module -e ${q(`import {readFile,writeFile,rename} from 'node:fs/promises';import {randomUUID} from 'node:crypto';const path=${JSON.stringify(CONFIG)};const config=JSON.parse(await readFile(path,'utf8'));config.herdr={...config.herdr,enabled:true,cloudConnections:false};config.rex={...config.rex,enabled:true,cloudConnections:false,executable:${JSON.stringify(CLOUD_REX_BIN)},server:${JSON.stringify(`unix://${CLOUD_REX_SOCKET}`)}};const stage=path+'.'+randomUUID();await writeFile(stage,JSON.stringify(config),{mode:384,flag:'wx'});await rename(stage,path);`)}`));
   await execute(asWorker(`if ! test -L ${DATA}/installation/current; then ${NODE} ${CLI} install --files-only --config ${CONFIG}; fi`));
   await execute(asWorker(`${NODE} ${CLI} resume --config ${CONFIG}`));
   await execute(asRoot(`set -eu; printf '%s' ${q(service)} > /etc/systemd/system/${UNIT}; chmod 644 /etc/systemd/system/${UNIT}; systemctl daemon-reload; systemctl start ${UNIT}; systemctl is-active --quiet ${UNIT}`));
@@ -363,13 +380,13 @@ async function provision(record: PrivateRun) {
       reason(record, `Starting the existing private ${allocation.provider} worker; native CLI login is preserved on its disk`); return;
     }
     if (machine.state === "starting") { reason(record, `${allocation.provider} private machine is starting`); return; }
-    if (allocation.status !== "ready" || allocation.herdr?.version !== CLOUD_HERDR_VERSION) {
-      reason(record, `Bootstrapping the existing private ${allocation.provider} worker: verified runner and nonroot Herdr core, Node 24, pinned coding CLIs and scoped enrollment. This does not authenticate a model account.`);
+    if (allocation.status !== "ready" || !allocation.herdr && !allocation.herdrSetupAttempted || !allocation.rexSetupAttempted) {
+      reason(record, `Bootstrapping the existing private ${allocation.provider} worker: verified runner and nonroot Herdr/Rex consoles, Node 24, pinned coding CLIs and scoped enrollment. This does not authenticate a model account.`);
       await bootstrap(allocation, keys.apiKey, authorize);
     }
     if (blockIdleSetup(record, allocation)) return;
     const currentHost = allocation.hostId ? readExecutionHost(allocation.hostId) : undefined;
-    reason(record, allocation.error || (currentHost?.lastSeenAt ? `Private ${allocation.provider} worker is available; the exact selected account, harness and model must be installed and logged in on this worker. No local OAuth tokens were copied.` : `Private ${allocation.provider} worker is awaiting its first heartbeat. Install the selected coding CLI and sign in on this private worker; enrollment is not model authentication.`));
+    reason(record, [allocation.error || (currentHost?.lastSeenAt ? `Private ${allocation.provider} worker is available; the exact selected account, harness and model must be installed and logged in on this worker. No local OAuth tokens were copied.` : `Private ${allocation.provider} worker is awaiting its first heartbeat. Install the selected coding CLI and sign in on this private worker; enrollment is not model authentication.`), allocation.herdrPrerequisite, allocation.rexPrerequisite].filter(Boolean).join(" "));
   } catch (error) {
     if (error instanceof CloudProvisionDeferred) { reason(record, error.message); return; }
     const message = safeFailure(error);
@@ -503,7 +520,10 @@ async function maintainAllocation(allocation: Allocation) {
     const inactive = await command(allocation, keys.apiKey, asRoot(`if systemctl is-active --quiet ${UNIT}; then printf active; else printf inactive; fi`));
     if (!status.stopped || status.activeRunId || typeof status.updatedAt !== "number" || status.updatedAt < allocation.lastActiveAt || inactive !== "inactive") return;
     persist(allocation, { runnerStoppedAt: Math.min(requestedAt, status.updatedAt) });
-    if (allocation.herdr) await command(allocation, keys.apiKey, asRoot(`systemctl stop ${CLOUD_HERDR_UNIT}`));
+    // An optional console stop failure cannot keep billable capacity running.
+    for (const unit of [allocation.herdr && CLOUD_HERDR_UNIT, allocation.rex && CLOUD_REX_UNIT]) {
+      if (unit) try { await command(allocation, keys.apiKey, asRoot(`systemctl stop ${unit}`)); } catch {}
+    }
     await stopCloudMachine(input);
     // A subsequent provider observation records the separate Boxd or verified guest receipt.
   } catch (error) { persist(allocation, { error: safeFailure(error) }); }
@@ -539,9 +559,9 @@ export type CloudHerdrConnectionPlan = {
 
 // Explicit user action, never discovery. authorize must revalidate Origin
 // authorization, not return a cached or browser-supplied principal.
-export async function cloudHerdrConnectionPlan(
-  allocationId: string, provider: "boxd" | "boat", desktop: "nixos" | "macos", authorize: () => Promise<ExecutionPrincipal>,
-): Promise<CloudHerdrConnectionPlan> {
+async function cloudConsoleConnectionPlan(
+  allocationId: string, provider: "boxd" | "boat", desktop: "nixos" | "macos", authorize: () => Promise<ExecutionPrincipal>, backend: "herdr" | "rex",
+): Promise<CloudHerdrConnectionPlan | CloudRexConnectionPlan> {
   const principal = await authorize();
   const permitted = (value: ExecutionPrincipal, row: Allocation) => value.admin && value.write && value.teamId === row.teamId && value.userId === row.ownerId && value.projectIds.includes(row.projectId);
   const row = (cloudAllocations(principal.teamId) as Allocation[]).find(value => value.id === allocationId);
@@ -552,7 +572,7 @@ export async function cloudHerdrConnectionPlan(
     const current = () => {
       const allocation = (cloudAllocations(row.teamId) as Allocation[]).find(value => value.id === row.id);
       const host = allocation?.hostId ? readExecutionHost(allocation.hostId) : undefined;
-      if (!allocation || allocation.provider !== provider || allocation.machineId !== row.machineId || allocation.status !== "ready" || allocation.recoveryRequired || allocation.stopRequestedAt || allocation.stopProof || allocation.herdr?.version !== CLOUD_HERDR_VERSION || !executionSetting<StoredCloudProvider>(row.teamId, "cloud", provider)?.enabled || !host || host.revoked || host.paused || host.teamId !== row.teamId || host.ownerId !== row.ownerId || !host.projectIds.includes(row.projectId) || Date.now() < host.lastSeenAt || Date.now() - host.lastSeenAt > 45_000) throw new CloudRuntimePrerequisiteError("Herdr access requires a verified, running, unpaused private allocation. Discovery never starts or wakes it.");
+      if (!allocation || allocation.provider !== provider || allocation.machineId !== row.machineId || allocation.status !== "ready" || allocation.recoveryRequired || allocation.stopRequestedAt || allocation.stopProof || (backend === "herdr" ? allocation.herdr?.version !== CLOUD_HERDR_VERSION : allocation.rex?.version !== CLOUD_REX_VERSION) || !executionSetting<StoredCloudProvider>(row.teamId, "cloud", provider)?.enabled || !host || host.revoked || host.paused || host.teamId !== row.teamId || host.ownerId !== row.ownerId || !host.projectIds.includes(row.projectId) || Date.now() < host.lastSeenAt || Date.now() - host.lastSeenAt > 45_000) throw new CloudRuntimePrerequisiteError(`${backend} access requires a verified, running, unpaused private allocation. Discovery never starts or wakes it.`);
       return allocation;
     };
     let allocation = current();
@@ -569,6 +589,11 @@ export async function cloudHerdrConnectionPlan(
     if (provider === "boxd") await setBoxdHerdrSsh({ provider, apiKey: keys.apiKey, id: allocation.machineId! }, true);
     if (!permitted(await authorize(), allocation)) throw new CloudRuntimePrerequisiteError("Private allocation access was revoked.");
     current();
+    if (backend === "rex") return {
+      schemaVersion: 1, allocationId, hostId: allocation.hostId!, provider, desktop, machineId: machine.id, machineName: machine.name,
+      name: `origin-rex-${provider}-${hash(JSON.stringify([allocationId, desktop])).slice(0, 20)}`, issuedAt, expiresAt,
+      core: { version: CLOUD_REX_VERSION, socket: CLOUD_REX_SOCKET, user: "origin-runner" },
+    };
     return {
       schemaVersion: 1, allocationId, hostId: allocation.hostId!, provider, desktop, machineId: machine.id, machineName: machine.name,
       name: `origin-${provider}-${hash(JSON.stringify([allocationId, desktop])).slice(0, 20)}`, issuedAt, expiresAt,
@@ -576,4 +601,14 @@ export async function cloudHerdrConnectionPlan(
       remotePrefix: `sudo -n -u origin-runner env -i ${CLOUD_HERDR_ENV} PATH=${WORKER_PATH} bash -c`,
     };
   } finally { releaseExecutionLock(lockName, owner); }
+}
+
+export type CloudRexConnectionPlan = Omit<CloudHerdrConnectionPlan, "remotePrefix" | "core"> & {
+  core: { version: string; socket: string; user: "origin-runner" };
+};
+export async function cloudHerdrConnectionPlan(allocationId: string, provider: "boxd" | "boat", desktop: "nixos" | "macos", authorize: () => Promise<ExecutionPrincipal>): Promise<CloudHerdrConnectionPlan> {
+  return await cloudConsoleConnectionPlan(allocationId, provider, desktop, authorize, "herdr") as CloudHerdrConnectionPlan;
+}
+export async function cloudRexConnectionPlan(allocationId: string, provider: "boxd" | "boat", desktop: "nixos" | "macos", authorize: () => Promise<ExecutionPrincipal>): Promise<CloudRexConnectionPlan> {
+  return await cloudConsoleConnectionPlan(allocationId, provider, desktop, authorize, "rex") as CloudRexConnectionPlan;
 }

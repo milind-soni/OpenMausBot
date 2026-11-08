@@ -64,6 +64,23 @@ describe("workspace GitHub held by the backend", () => {
     expect(row?.sealed).not.toContain("BEGIN RSA PRIVATE KEY");
   });
 
+  test("revocation during GitHub authorization cannot persist a workspace connection", async () => {
+    const f = await fixture();
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const request = new Request(input, init);
+      const response = await fake.handle(request);
+      if (new URL(request.url).pathname === "/users/octo/installation") {
+        await f.t.run(async ctx => {
+          const member = await ctx.db.query("teamMembers").withIndex("by_team_email", q => q.eq("teamId", f.teamId).eq("email", "owner@test.dev")).unique();
+          await ctx.db.patch(member!._id, { role: "member" });
+        });
+      }
+      return response;
+    });
+    await expect(f.share()).rejects.toThrow("administrator access changed");
+    expect((await f.t.query(api.teamGitHub.status, { sessionToken: f.owner.token, teamId: f.teamId })).shared).toBeNull();
+  });
+
   test("a member creates the project's repository with the visibility chosen at creation", async () => {
     const f = await fixture();
     await f.share();

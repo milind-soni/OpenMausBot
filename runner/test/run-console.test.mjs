@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createConnection } from 'node:net';
 import { once } from 'node:events';
-import { HerdrConsole, consoleEventText, validateConsoleInput } from '../herdr-console.mjs';
+import { RunConsole, consoleEventText, validateConsoleInput } from '../run-console.mjs';
 import { Runner } from '../worker.mjs';
 import { EventJournal, Lease } from '../protocol.mjs';
 import { Redactor, readJson } from '../security.mjs';
@@ -25,7 +25,7 @@ function launcher(calls = []) {
 }
 async function viewFixture(t, input = async () => ({ state: 'delivered' })) {
   const root = await directory(t), calls = [];
-  const view = await HerdrConsole.start({ config: { dataDirectory: root, herdr: { enabled: true } }, run: { id: 'run-one' }, redactor: new Redactor(['private-secret']), input, launch: launcher(calls) });
+  const view = await RunConsole.start({ config: { dataDirectory: root, herdr: { enabled: true } }, run: { id: 'run-one' }, redactor: new Redactor(['private-secret']), input, launch: launcher(calls) });
   t.after(() => view.close());
   return { view, root, calls };
 }
@@ -64,7 +64,7 @@ async function activeFixture(t, control = async () => ({ leaseValid: true })) {
 
 test('disabled console makes no filesystem or hc call, and disabled worker never schedules personal-core helpers', async t => {
   let calls = 0;
-  assert.equal(await HerdrConsole.start({ config: {}, launch: () => { calls++; } }), null);
+  assert.equal(await RunConsole.start({ config: {}, launch: () => { calls++; } }), null);
   const root = await directory(t);
   const runner = new Runner({ dataDirectory: root }, { client: { request: async (_op, payload) => { assert.deepEqual(payload.herdr, { enabled: false, cloudConnections: false }); return { herdrPlans: [{}] }; } }, herdrConnections: { report: () => { calls++; }, schedule: () => { calls++; } } });
   await runner.heartbeat(); assert.equal(calls, 0);
@@ -79,14 +79,14 @@ test('console launches only its fixed viewer and authenticates through an owner-
   const args = calls[1].args;
   assert.ok(args.includes('--no-parent')); assert.ok(args.includes('--no-notify'));
   assert.ok(!args.includes('--keep')); assert.ok(!args.includes('--on'));
-  assert.deepEqual(args.slice(args.indexOf('--') + 1), [process.execPath, new URL('../herdr-console.mjs', import.meta.url).pathname, view.path]);
+  assert.deepEqual(args.slice(args.indexOf('--') + 1), [process.execPath, new URL('../run-console.mjs', import.meta.url).pathname, view.path]);
   const token = await readFile(`${view.path}.auth`, 'utf8');
   assert.ok(!args.includes(token));
   const bad = await connect(t, view, '0'.repeat(64));
   await once(bad.socket, 'close');
   const good = await connect(t, view); await good.next(frame => frame.type === 'ready');
   assert.match((await good.next(frame => frame.type === 'output')).text, /not the native harness UI/);
-  assert.deepEqual(view.metadata, { type: 'terminal', backend: 'herdr', coreId: 'fixture-core', terminalId: 't1', name: args[args.indexOf('--name') + 1], session: process.env.HC_SESSION || 'default' });
+  assert.deepEqual(view.metadata, [{ type: 'terminal', backend: 'herdr', coreId: 'fixture-core', terminalId: 't1', name: args[args.indexOf('--name') + 1], session: process.env.HC_SESSION || 'default' }]);
 });
 
 test('untrusted output cannot issue clipboard, terminal title, OSC7501 status or cursor commands', async t => {
@@ -131,7 +131,7 @@ test('output replay and request lines are bounded and closing a viewer does not 
 
 test('native viewer renders output and /quit detaches without issuing a run control', { timeout: 10000 }, async t => {
   const received = [], { view } = await viewFixture(t, async request => { received.push(request); return { state: 'delivered' }; });
-  const child = new ManagedProcess(process.execPath, [new URL('../herdr-console.mjs', import.meta.url).pathname, view.path]);
+  const child = new ManagedProcess(process.execPath, [new URL('../run-console.mjs', import.meta.url).pathname, view.path]);
   t.after(() => child.stop());
   let output = '', ready;
   const shown = new Promise(resolve => { ready = resolve; });
@@ -147,7 +147,7 @@ test('private console directory permissions are enforced before hc is invoked', 
   const { view, root } = await viewFixture(t);
   await view.close(); await chmod(join(root, 'consoles'), 0o755);
   let calls = 0;
-  await assert.rejects(HerdrConsole.start({ config: { dataDirectory: root, herdr: { enabled: true } }, run: {}, redactor: new Redactor([]), input: () => {}, launch: async () => { calls++; } }), /exclusively/);
+  await assert.rejects(RunConsole.start({ config: { dataDirectory: root, herdr: { enabled: true } }, run: {}, redactor: new Redactor([]), input: () => {}, launch: async () => { calls++; } }), /exclusively/);
   assert.equal(calls, 0);
 });
 
@@ -213,4 +213,61 @@ test('heartbeat reports opt-in, schedules received grants and revokes plans on c
   });
   await runner.heartbeat(); fail = true; await assert.rejects(runner.heartbeat(), /Offline/);
   assert.deepEqual(schedules, [[{ name: 'authorized' }], []]);
+});
+
+test('Rex and Herdr share one authenticated socket; either viewer can detach without cancelling the run', { timeout: 5000 }, async t => {
+  const root = await directory(t), calls = [], inputs = [];
+  const id = '00000000-0000-0000-0000-000000000001';
+  const view = await RunConsole.start({
+    config: { dataDirectory: root, herdr: { enabled: true }, rex: { enabled: true, server: 'unix:///private/rex.sock' } },
+    run: { id: 'same-run' }, redactor: new Redactor(['private-secret']), input: async value => { inputs.push(value); return { state: 'delivered' }; },
+    launch: async (executable, args, options) => {
+      calls.push({ executable, args, options });
+      if (executable === 'hc') return launcher()(executable, args, options);
+      if (args[0] === 'version') return { stdout: 'rex 0.1.0-preview.13\ncommit: pinned\n' };
+      if (args.includes('status')) return { stdout: JSON.stringify({ rex_version: '0.1.0-preview.13', instance_id: 'instance', you: { transport: 'unix' } }) };
+      assert.ok(args.includes('--autostart=false'));
+      assert.equal(options.env.REX_SESSION, undefined); assert.equal(options.env.REX_BLOCK, undefined);
+      if (args.includes('session.create')) return { stdout: JSON.stringify({ session_id: `session:${id}` }) };
+      if (args.includes('run')) return { stdout: JSON.stringify({ window_id: `window:${id}`, block_ids: [`block:${id}`] }) };
+      assert.ok(args.includes('kill')); return { stdout: '' };
+    },
+  });
+  t.after(() => view.close());
+  assert.deepEqual(view.metadata.map(value => value.backend), ['herdr', 'rex']);
+  const commands = calls.filter(value => value.args.includes('run'));
+  assert.equal(commands.length, 2);
+  for (const { args } of commands) assert.deepEqual(args.slice(args.indexOf('--') + 1), [process.execPath, new URL('../run-console.mjs', import.meta.url).pathname, view.path]);
+  const rex = commands.find(value => value.executable === 'rex').args;
+  assert.ok(rex.includes('--shell=none')); assert.ok(rex.includes('--focus=false'));
+  assert.ok(!rex.includes('--keep-open')); assert.ok(!rex.includes('--interactive'));
+  const first = await connect(t, view), second = await connect(t, view);
+  await first.next(frame => frame.type === 'ready'); await second.next(frame => frame.type === 'ready');
+  view.publish({ type: 'log', text: 'private-secret shared progress\n' });
+  for (const client of [first, second]) assert.equal((await client.next(frame => frame.type === 'output' && frame.text.includes('shared progress'))).text, '[REDACTED] shared progress\n');
+  first.socket.destroy(); assert.equal(view.closed, false); assert.deepEqual(inputs, []);
+  second.send({ id: 'same-task', action: 'followup', text: 'Continue the task' });
+  assert.equal((await second.next(frame => frame.type === 'reply')).state, 'delivered');
+  assert.deepEqual(inputs, [{ id: 'same-task', action: 'followup', text: 'Continue the task' }]);
+});
+
+for (const failed of ['hc', 'rex']) test(`${failed} failure leaves the other console and shared IPC alive`, async t => {
+  const root = await directory(t), id = '00000000-0000-0000-0000-000000000002';
+  const view = await RunConsole.start({
+    config: { dataDirectory: root, herdr: { enabled: true }, rex: { enabled: true } }, run: { id: 'run' }, redactor: new Redactor([]), input: async () => ({ state: 'delivered' }),
+    launch: async (executable, args, options) => {
+      if (executable === failed) throw Error('private native diagnostic');
+      if (executable === 'hc') return launcher()(executable, args, options);
+      if (args[0] === 'version') return { stdout: 'rex 0.1.0-preview.13\ncommit: pinned\n' };
+      if (args.includes('status')) return { stdout: JSON.stringify({ rex_version: '0.1.0-preview.13', instance_id: 'instance', you: { transport: 'unix' } }) };
+      return { stdout: JSON.stringify(args.includes('session.create') ? { session_id: `session:${id}` } : { window_id: `window:${id}`, block_ids: [`block:${id}`] }) };
+    },
+  });
+  t.after(() => view.close());
+  assert.equal(view.closed, false);
+  assert.deepEqual(view.metadata.filter(event => event.type === 'terminal').map(event => event.backend), [failed === 'hc' ? 'rex' : 'herdr']);
+  assert.equal(JSON.stringify(view.metadata).includes('private native diagnostic'), false);
+  const client = await connect(t, view); await client.next(frame => frame.type === 'ready');
+  client.send({ id: 'remaining', action: 'followup', text: 'Same run continues' });
+  assert.equal((await client.next(frame => frame.type === 'reply')).state, 'delivered');
 });

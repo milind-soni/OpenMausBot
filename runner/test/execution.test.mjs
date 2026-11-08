@@ -364,10 +364,10 @@ test('unproven auxiliary-process stop fences the daemon without another claim or
   }
 });
 
-test('opted-in run console follows real native output and cancellation still waits for native stop proof', { timeout: 15000 }, async t => {
+test('both opted-in views retain one native process and cancellation waits for its stop proof', { timeout: 15000 }, async t => {
   const root = await fixture(t, 'console-native'), displayed = [], events = [];
-  let input, child, closed = false;
-  const runner = new Runner({ dataDirectory: root, hostToken: 'private', hostId: 'host', herdr: { enabled: true } }, {
+  let input, child, closed = false, harnessStarts = 0;
+  const runner = new Runner({ dataDirectory: root, hostToken: 'private', hostId: 'host', herdr: { enabled: true }, rex: { enabled: true } }, {
     client: { request: async (op, value) => {
       if (op === 'control') return { leaseValid: true };
       if (op === 'event') {
@@ -379,9 +379,10 @@ test('opted-in run console follows real native output and cancellation still wai
     discover: async () => [account], Workspace: fakeWorkspace,
     startConsole: async options => {
       input = options.input;
-      return { metadata: { type: 'terminal', backend: 'herdr', coreId: 'fixture', terminalId: 't1', name: 'origin-test', session: 'fixture' }, publish: event => displayed.push(event), close: async () => { closed = true; } };
+      return { metadata: [{ type: 'terminal', backend: 'herdr', coreId: 'fixture', terminalId: 't1', name: 'origin-test', session: 'fixture' }, { type: 'terminal', backend: 'rex', name: 'origin-test', sessionId: 'session:fixture', windowId: 'window:fixture', blockId: 'block:fixture' }], publish: event => displayed.push(event), close: async () => { closed = true; } };
     },
     startHarness: async context => {
+      harnessStarts++;
       child = new ManagedProcess(process.execPath, ['-e', 'process.stdin.setEncoding("utf8"); process.stdin.on("data", text => console.log("native follow-up: " + text.trim())); setInterval(()=>{},1000)'], { signal: context.signal });
       child.child.stdout.on('data', text => context.output('stdout', text.toString()));
       return { stop: () => child.stop(20), message: text => child.send(`${text}\n`), done: child.exit.then(() => { throw context.signal.reason ?? new Error('unexpected exit'); }) };
@@ -397,7 +398,8 @@ test('opted-in run console follows real native output and cancellation still wai
   assert.equal(closed, true);
   assert.equal(events.find(event => event.type === 'finished').result, 'cancelled');
   assert.equal(events.find(event => event.type === 'finished').processStopped, true);
-  assert.equal(displayed.filter(event => event.type === 'terminal').length, 1);
+  assert.equal(harnessStarts, 1);
+  assert.deepEqual(displayed.filter(event => event.type === 'terminal').map(event => event.backend), ['herdr', 'rex']);
   assert.equal((await readJson(runner.ledger.path('run'))).consoleInputs.length, 2);
 });
 
@@ -420,7 +422,7 @@ test('verification-only console displays check progress without model discovery 
     startHarness: async () => { throw Error('Verification must not start a model'); },
     startConsole: async options => {
       assert.equal(options.run.verificationOnly, true); input = options.input;
-      return { metadata: { type: 'terminal', backend: 'herdr', coreId: 'fixture', terminalId: 't1', name: 'origin-verify', session: 'fixture' }, publish: event => displayed.push(event), close: async () => { closed = true; } };
+      return { metadata: [{ type: 'terminal', backend: 'herdr', coreId: 'fixture', terminalId: 't1', name: 'origin-verify', session: 'fixture' }], publish: event => displayed.push(event), close: async () => { closed = true; } };
     },
   });
   await runner.execute(testRun({ verificationOnly: true, resume: { checkpointSha: 'a'.repeat(40) } }));

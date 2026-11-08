@@ -47,7 +47,7 @@ vi.mock("./execution-cloud/boxd", () => ({ setBoxdHerdrSsh: remote.ssh }));
 vi.mock("./githubConnection", () => ({ openIntegration: (sealed: string) => sealed === "sealed-provider" ? "private-provider-key" : "single-use-token", sealIntegration: () => "sealed-enrollment" }));
 vi.mock("./integration-bridge", () => ({ originUrl: () => "https://origin.example" }));
 import { CloudProviderError } from "./execution-cloud";
-import { cloudExecutionStopProof, cloudHerdrConnectionPlan, maintainCloudExecution } from "./execution-cloud-runtime";
+import { cloudExecutionStopProof, cloudHerdrConnectionPlan, cloudRexConnectionPlan, maintainCloudExecution } from "./execution-cloud-runtime";
 
 const NOW = 1_800_000_000_000;
 function queued(): PrivateRun {
@@ -248,7 +248,7 @@ test.each(["boxd", "boat"] as const)("%s bootstrap installs verified nonroot cor
   state.runs.get("run")!.policy.cloudProvider = provider;
   state.allocations.set("allocation", allocation({ provider, machineId: "existing", hostId: "cloud-host", status: "starting" }));
   remote.get.mockResolvedValue({ provider, id: "existing", state: "running" });
-  remote.exec.mockImplementation(async ({ command }: { command: string }) => ({ exitCode: 0, stderr: "", stdout: command.includes("printf active") ? "inactive" : command.includes("Invalid config") ? "enrolled" : command.includes("herdr-core --version") ? "hc 0.1.18" : "" }));
+  remote.exec.mockImplementation(async ({ command }: { command: string }) => ({ exitCode: 0, stderr: "", stdout: command.includes("printf active") ? "inactive" : command.includes("Invalid config") ? "enrolled" : command.includes("herdr-core --version") ? "hc 0.1.18" : command.includes("/rex version") ? "rex 0.1.0-preview.13\ncommit: pinned" : command.includes("server status --json") ? JSON.stringify({ rex_version: "0.1.0-preview.13", you: { transport: "unix" } }) : "" }));
   await maintainCloudExecution("team");
   expect(remote.enroll).not.toHaveBeenCalled();
   const scripts = remote.exec.mock.calls.map(([input]) => input.command).join("\n");
@@ -263,6 +263,9 @@ test.each(["boxd", "boat"] as const)("%s bootstrap installs verified nonroot cor
   expect(scripts).toContain("npm_config_userconfig=/var/lib/origin-runner/.local/share/origin-runner/.npmrc");
   expect(scripts).toContain("npm_config_globalconfig=/var/lib/origin-runner/.local/share/origin-runner/.npm-globalrc");
   expect(state.allocations.get("allocation")).toMatchObject({ status: "ready", bootstrapVerified: true, herdr: { version: "0.1.18", user: "origin-runner", session: "origin-cloud" } });
+  expect(state.allocations.get("allocation")?.rex).toMatchObject({ version: "0.1.0-preview.13", user: "origin-runner", socket: "/var/lib/origin-runner/.local/state/origin-rex/server.sock" });
+  expect(scripts).not.toContain("--allow-anonymous");
+  expect(scripts).toContain("blob.superlogical.com/download/rex/preview/1b6654811346488b696ded8f3c7e6701c57242f1");
 });
 
 test.each([false, true])("pinned cloud worker never permits a replacement, with mismatched journal=%s", async journal => {
@@ -340,7 +343,7 @@ test.each(["starting", "bootstrapping", "unknown"] as const)("a route-selectable
   await maintainCloudExecution("team");
   expect(state.allocations.get("allocation")).toMatchObject({ status: "ready", machineId: "existing", hostId: host.id });
   expect(state.runs.get("run")?.run.status).toBe("queued");
-  expect(remote.exec).toHaveBeenCalledTimes(5);
+  expect(remote.exec.mock.calls.some(([input]) => input.command.includes(" resume --config") || input.command.includes("systemctl start origin-cloud-runner.service"))).toBe(false);
   expect(remote.create).not.toHaveBeenCalled(); expect(remote.start).not.toHaveBeenCalled(); expect(remote.enroll).not.toHaveBeenCalled();
 });
 
@@ -374,9 +377,7 @@ test("lost service-start response recovers authenticated enrollment without re-i
   });
   await maintainCloudExecution("team");
   expect(state.allocations.get("allocation")).toMatchObject({ status: "unknown", hostId: "cloud-host", bootstrapVerified: true });
-  const beforeRecovery = remote.exec.mock.calls.length;
   await maintainCloudExecution("team");
-  expect(remote.exec.mock.calls.slice(beforeRecovery)).toHaveLength(3);
   expect(state.allocations.get("allocation")).toMatchObject({ status: "ready", enrollment: undefined, stopProof: undefined });
   expect(state.runs.get("run")?.run.status).toBe("queued");
   expect(remote.enroll).toHaveBeenCalledTimes(1); expect(remote.create).not.toHaveBeenCalled(); expect(remote.start).not.toHaveBeenCalled();
@@ -401,7 +402,7 @@ test.each(["local-online", "provider-disabled", "host-revoked", "host-paused", "
   });
   await maintainCloudExecution("team");
   expect(state.allocations.get("allocation")?.status).toBe("bootstrapping");
-  expect(remote.exec).toHaveBeenCalledTimes(5);
+  expect(remote.exec.mock.calls.some(([input]) => input.command.includes(" resume --config") || input.command.includes("systemctl start origin-cloud-runner.service"))).toBe(false);
   expect(remote.create).not.toHaveBeenCalled(); expect(remote.start).not.toHaveBeenCalled(); expect(remote.enroll).not.toHaveBeenCalled();
   if (change !== "uncertain-run") {
     remote.exec.mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
@@ -673,14 +674,22 @@ test("idle stop fences grants, expires owned SSH and never leaves a reconnect ke
   expect(remote.stop).toHaveBeenCalledTimes(1);
 });
 
-test("a mismatched core cannot publish readiness or enroll a worker", async () => {
+test.each(["herdr", "rex"] as const)("a mismatched optional %s core cannot block the worker or the other backend", async failed => {
   bootstrapFixture();
   state.allocations.set("allocation", allocation({ machineId: "existing", status: "starting" }));
-  remote.exec.mockResolvedValue({ exitCode: 0, stdout: "hc 0.0.0", stderr: "" });
+  const ordinary = remote.exec.getMockImplementation()!;
+  remote.exec.mockImplementation(async (input: { command: string }) => {
+    if (input.command.includes("herdr-core --version")) return { exitCode: 0, stdout: failed === "herdr" ? "hc 0.0.0" : "hc 0.1.18", stderr: "" };
+    if (input.command.includes("/rex version")) return { exitCode: 0, stdout: failed === "rex" ? "rex unreviewed" : "rex 0.1.0-preview.13\ncommit: pinned", stderr: "" };
+    if (input.command.includes("server status --json")) return { exitCode: 0, stdout: JSON.stringify({ rex_version: "0.1.0-preview.13", you: { transport: "unix" } }), stderr: "" };
+    return ordinary(input);
+  });
   await maintainCloudExecution("team");
-  expect(state.allocations.get("allocation")).toMatchObject({ status: "failed", recoveryRequired: true });
-  expect(state.allocations.get("allocation")?.herdr).toBeUndefined();
-  expect(remote.enroll).not.toHaveBeenCalled();
+  const row = state.allocations.get("allocation")!;
+  expect(row.status).toBe("ready"); expect(row[failed]).toBeUndefined();
+  expect(row[failed === "herdr" ? "rex" : "herdr"]).toBeDefined();
+  expect(row[failed === "herdr" ? "herdrPrerequisite" : "rexPrerequisite"]).toContain("Private");
+  expect(remote.enroll).toHaveBeenCalledTimes(1); expect(remote.create).not.toHaveBeenCalled();
 });
 
 test("desktop revocation failure cannot postpone the immutable hard deadline", async () => {
@@ -691,4 +700,18 @@ test("desktop revocation failure cannot postpone the immutable hard deadline", a
   await maintainCloudExecution("team");
   expect(remote.stop).toHaveBeenCalledTimes(1);
   expect(state.allocations.get(row.id)?.status).toBe("stopping");
+});
+
+test.each(["boxd", "boat"] as const)("%s Rex grants bind the same worker without wake, shell authority or extended billing", async provider => {
+  const row = herdrAllocation(provider);
+  state.allocations.set(row.id, { ...row, rex: { version: "0.1.0-preview.13", socket: "/var/lib/origin-runner/.local/state/origin-rex/server.sock", user: "origin-runner", verifiedAt: NOW } });
+  const herdr = await cloudHerdrConnectionPlan(row.id, provider, "nixos", remote.authorize);
+  const rex = await cloudRexConnectionPlan(row.id, provider, "nixos", remote.authorize);
+  expect(rex.machineId).toBe(herdr.machineId); expect(rex.hostId).toBe(herdr.hostId);
+  expect(rex.name).not.toBe(herdr.name); expect(rex.expiresAt).toBe(NOW + 60000);
+  expect(rex).not.toHaveProperty("remotePrefix"); expect(rex.core.user).toBe("origin-runner");
+  expect(state.allocations.get(row.id)?.lastActiveAt).toBe(NOW);
+  state.allocations.get(row.id)!.status = "stopping";
+  await expect(cloudRexConnectionPlan(row.id, provider, "nixos", remote.authorize)).rejects.toThrow("verified, running");
+  expect(remote.create).not.toHaveBeenCalled(); expect(remote.start).not.toHaveBeenCalled(); expect(remote.extend).not.toHaveBeenCalled(); expect(remote.exec).not.toHaveBeenCalled();
 });

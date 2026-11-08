@@ -13,14 +13,14 @@ import { executionWorkerRequest } from "./execution-worker";
 import { atomicExecution, cloudAllocations, executionAccounts, executionDb, executionDeploymentRuns, executionEvents, executionSetting, readExecutionHost, readExecutionRun, saveExecutionHost, saveExecutionRun, saveCloudAllocation, setExecutionSetting, type ExecutionPrincipal } from "./execution-store";
 import { integrationBridge } from "./integration-bridge";
 import { prepareRunRepository } from "./github-execution";
-import { cloudHerdrConnectionPlan, type CloudHerdrConnectionPlan } from "./execution-cloud-runtime";
+import { cloudHerdrConnectionPlan, cloudRexConnectionPlan, type CloudHerdrConnectionPlan, type CloudRexConnectionPlan } from "./execution-cloud-runtime";
 import type { ExecutionAccountReport, ExecutionRun, ExecutionUpdate, ExecutionVerification, ExecutionWorkerRun } from "./execution-types";
 
 // Only cross-service seams are replaced; authorization runs against the real Convex functions.
 vi.mock("./integration-bridge", () => ({ integrationBridge: vi.fn(), originUrl: () => "http://127.0.0.1:1" }));
 vi.mock("./github-execution", () => ({ prepareRunRepository: vi.fn() }));
 vi.mock("./execution-cloud", () => ({ cloudAccountUsage: vi.fn(() => { throw new Error("Unexpected cloud request"); }) }));
-vi.mock("./execution-cloud-runtime", () => ({ cloudHerdrConnectionPlan: vi.fn() }));
+vi.mock("./execution-cloud-runtime", () => ({ cloudHerdrConnectionPlan: vi.fn(), cloudRexConnectionPlan: vi.fn() }));
 const modules = import.meta.glob(["../convex/**/*.ts", "!../convex/**/*.test.ts"]);
 const now = Date.UTC(2026, 10, 8, 12);
 const sha = "a".repeat(40);
@@ -38,6 +38,7 @@ beforeEach(() => {
   vi.mocked(integrationBridge).mockReset();
   vi.mocked(prepareRunRepository).mockReset();
   vi.mocked(cloudHerdrConnectionPlan).mockReset();
+  vi.mocked(cloudRexConnectionPlan).mockReset();
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 afterAll(() => { executionDb().close(); rmSync(directory, { recursive: true, force: true }); vi.unstubAllEnvs(); });
@@ -131,7 +132,7 @@ async function desktopFixture() {
   const desktop = await f.enroll("Opted-in desktop");
   const plan: CloudHerdrConnectionPlan = { schemaVersion: 1, allocationId: "allocation", hostId: f.host.hostId, provider: "boxd", desktop: "nixos", machineId: "private-machine", machineName: "private-machine", name: "origin-boxd-fixture", issuedAt: now, expiresAt: now + 60000, core: { version: "0.1.18", session: "origin-cloud", user: "origin-runner" }, remotePrefix: "fixture" };
   vi.mocked(cloudHerdrConnectionPlan).mockImplementation(async (_id, _provider, _desktop, authorize) => { await authorize(); await authorize(); return plan; });
-  const beat = (patch: Record<string, unknown> = {}) => worker<{ herdrPlans: CloudHerdrConnectionPlan[] }>(desktop, { op: "heartbeat", version: "1.1.0", platform: "linux", capabilities: ["codex"], capacity: 1, paused: false, accounts: [], activeRunIds: [], herdr: { enabled: true, cloudConnections: true, status: "ready", version: "0.1.18" }, ...patch });
+  const beat = (patch: Record<string, unknown> = {}) => worker<{ herdrPlans: CloudHerdrConnectionPlan[]; rexPlans: CloudRexConnectionPlan[] }>(desktop, { op: "heartbeat", version: "1.1.0", platform: "linux", capabilities: ["codex"], capacity: 1, paused: false, accounts: [], activeRunIds: [], herdr: { enabled: true, cloudConnections: true, status: "ready", version: "0.1.18" }, ...patch });
   return { ...f, run, desktop, plan, beat };
 }
 
@@ -206,6 +207,37 @@ test("terminal metadata is exact, bounded, display-only and bound to the current
   const record = readExecutionRun(run.id)!; record.leaseExpiresAt = now; saveExecutionRun(record);
   await expect(send(terminal)).rejects.toThrow(/lease expired/i);
   expect(readExecutionRun(run.id)?.run.herdr?.coreId).toBe("core");
+});
+
+test("Rex identities coexist with Herdr but cannot grant commands or escape an attempt lease", async () => {
+  const f = await fixture(); await f.start(); const run = (await f.claim())!, send = f.events(run);
+  const id = "00000000-0000-0000-0000-000000000001";
+  const terminal = { type: "terminal", backend: "rex", name: `origin-${"a".repeat(20)}`, sessionId: `session:${id}`, windowId: `window:${id}`, blockId: `block:${id}` };
+  await send({ type: "terminal", backend: "herdr", coreId: "core", terminalId: "terminal", name: "Origin", session: "origin-cloud" });
+  await send(terminal);
+  expect(readExecutionRun(run.id)?.run.rex).toEqual({ backend: "rex", name: terminal.name, sessionId: terminal.sessionId, windowId: terminal.windowId, blockId: terminal.blockId, updatedAt: now });
+  expect(readExecutionRun(run.id)?.run.herdr?.terminalId).toBe("terminal");
+  for (const patch of [{ command: "sh" }, { server: "https://arbitrary" }, { blockId: "block:short" }, { windowId: `${terminal.windowId}\n` }, { name: "personal-session" }]) await expect(send({ ...terminal, ...patch })).rejects.toThrow();
+  const record = readExecutionRun(run.id)!; record.leaseExpiresAt = now; saveExecutionRun(record);
+  await expect(send(terminal)).rejects.toThrow(/lease expired/i);
+  expect(readExecutionRun(run.id)?.run.rex?.blockId).toBe(terminal.blockId);
+});
+
+test("Rex cloud grants require independent opt-in and revalidate the same task owner, scope and lease", async () => {
+  const f = await desktopFixture();
+  const plan: CloudRexConnectionPlan = { schemaVersion: 1, allocationId: "allocation", hostId: f.host.hostId, provider: "boxd", desktop: "nixos", machineId: "private-machine", machineName: "private-machine", name: "origin-rex-boxd-fixture", issuedAt: now, expiresAt: now + 60000, core: { version: "0.1.0-preview.13", socket: "/var/lib/origin-runner/.local/state/origin-rex/server.sock", user: "origin-runner" } };
+  vi.mocked(cloudRexConnectionPlan).mockImplementation(async (_id, _provider, _desktop, authorize) => { await authorize(); await authorize(); return plan; });
+  const rex = { enabled: true, cloudConnections: true, status: "ready", version: "0.1.0-preview.13" };
+  expect((await f.beat({ version: "1.2.0" })).rexPlans).toEqual([]);
+  expect((await f.beat({ version: "1.1.0", rex })).rexPlans).toEqual([]);
+  expect(await f.beat({ version: "1.2.0", rex, herdr: undefined })).toMatchObject({ rexPlans: [plan], herdrPlans: [] });
+  expect(readExecutionHost(f.desktop.hostId)?.rex).toEqual({ ...rex, updatedAt: now });
+  const record = readExecutionRun(f.run.id)!; record.leaseExpiresAt = now; saveExecutionRun(record);
+  expect((await f.beat({ version: "1.2.0", rex })).rexPlans).toEqual([]);
+  record.leaseExpiresAt = now + 60000; saveExecutionRun(record);
+  saveExecutionHost({ ...readExecutionHost(f.desktop.hostId)!, projectIds: [] });
+  expect((await f.beat({ version: "1.2.0", rex })).rexPlans).toEqual([]);
+  expect(JSON.stringify(readExecutionHost(f.desktop.hostId)?.rex)).not.toContain("private-machine");
 });
 
 test("claim selects the authorized subscription profile rather than an earlier paid sibling", async () => {

@@ -67,6 +67,7 @@ export type ExecutionHost = {
   presenceObservedAt?: number;
   tailnetOnline?: boolean | null;
   herdr?: { enabled: boolean; cloudConnections: boolean; version?: string; status?: "ready" | "unavailable" | "needs_auth"; message?: string; updatedAt: number };
+  rex?: { enabled: boolean; cloudConnections: boolean; version?: string; status?: "ready" | "unavailable" | "needs_auth"; message?: string; updatedAt: number };
 };
 export type ExecutionVerification = { command: string; exitCode: number; kind: "test" | "smoke"; summary?: string };
 export type ExecutionApproval = { id: string; tool: string; input: unknown; createdAt: number; decision?: "allow" | "deny"; decidedAt?: number };
@@ -102,6 +103,7 @@ export type ExecutionRun = {
   usage: { inputTokens: number; outputTokens: number; estimatedApiUsd: number | null };
   processStopped: boolean;
   herdr?: { backend: "herdr"; coreId: string; terminalId: string; name: string; session: string; updatedAt: number };
+  rex?: { backend: "rex"; sessionId: string; windowId: string; blockId: string; name: string; updatedAt: number };
 };
 export type ExecutionEvent = { id: number; runId: string; createdAt: number; type: string; stream?: "stdout" | "stderr" | "system"; text?: string; data?: Record<string, unknown> };
 export type ExecutionEnvironment = { id: string; projectId: string; name: string; keys: string[]; hostIds: string[]; automationEnabled: boolean; updatedAt: number };

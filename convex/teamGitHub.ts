@@ -109,6 +109,9 @@ export const store = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, a) => {
+    const user = await ctx.db.get(a.sharedBy);
+    const member = user?.status === "active" ? await getActiveTeamMember(ctx, a.teamId, user.email) : null;
+    if (!member || !ADMIN_ROLES.has(member.role) || member.userId && member.userId !== a.sharedBy) throw new ConvexError("Workspace administrator access changed while connecting GitHub");
     const existing = await ctx.db.query("teamGitHub").withIndex("by_teamId", q => q.eq("teamId", a.teamId)).unique();
     const fields = { ...a, version: (existing?.version ?? 0) + 1, updatedAt: Date.now() };
     if (existing) await ctx.db.replace(existing._id, fields);
