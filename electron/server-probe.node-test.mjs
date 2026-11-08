@@ -112,3 +112,13 @@ test("a 401 whose Content-Length is over the refusal limit is cancelled unread",
   assert.equal(cancelled, true);
   assert.equal(pulled, 0);
 });
+
+test("a 401 body whose cancellation never settles does not hold up the probe", async () => {
+  for (const headers of [{ "content-length": "1000000" }, {}]) {
+    const stuck = () => new Response(new ReadableStream({
+      pull(controller) { controller.enqueue(new Uint8Array(1_024).fill(120)); },
+      cancel() { return new Promise(() => {}); },
+    }, { highWaterMark: 0 }), { status: 401, headers });
+    assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": stuck }).fetch })).problem, "notMausBot");
+  }
+});
