@@ -464,13 +464,18 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (folder) body.folder = folder;
     if (args.model_selection !== undefined) {
       const fields = jsonRecord(args.model_selection) ? args.model_selection : null;
-      if (!fields || typeof fields.instanceId !== "string" || !fields.instanceId.trim() || typeof fields.model !== "string" || !fields.model.trim()) {
-        return { text: "start_thread model_selection needs instanceId and model.", isError: true };
+      if (!fields || typeof fields.instanceId !== "string" || !fields.instanceId.trim() || typeof fields.model !== "string" || !fields.model.trim()
+        || (fields.effort !== undefined && (typeof fields.effort !== "string" || !fields.effort.trim()))) {
+        return { text: "start_thread model_selection needs instanceId and model, as list_models gives them, and effort only from that engine's efforts.", isError: true };
       }
-      body.modelSelection = { instanceId: fields.instanceId.trim(), model: fields.model.trim() };
+      body.modelSelection = { instanceId: fields.instanceId.trim(), model: fields.model.trim(), ...(typeof fields.effort === "string" ? { effort: fields.effort.trim() } : {}) };
     }
+    if (args.report_back === true) body.reportBack = true;
     const r = await api("/api/internal/threads", { method: "POST", body: JSON.stringify(body) });
     if (r.error && r.state !== "failed") return { text: `Couldn't open that thread: ${String(r.error)}`, isError: true };
+    if (r.reportBack === true) {
+      return { text: `Opened thread #${String(r.title ?? title)} on yourself [thread id: ${String(r.threadId ?? "")}]. It starts when this turn ends, and its result comes back to this conversation and resumes you automatically (assignment id: ${String(r.requestId ?? "unknown")}). Mention it to the person as #${String(r.title ?? title)} and finish your turn; do not check or wait for it in this turn.` };
+    }
     const receipt = r.self !== true && Array.isArray(r.receipts) && jsonRecord(r.receipts[0]) ? r.receipts[0] : undefined;
     const threadTitle = String(r.title ?? receipt?.title ?? title);
     const threadId = String(r.threadId ?? receipt?.threadId ?? "");
@@ -497,6 +502,12 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return {
       text: `${opened}${timing}${approval} Its result will be delivered to this conversation automatically (assignment id: ${assignmentId || "unknown"}). Acknowledge it, mention it to the person as #${threadTitle}, and finish your turn; do not check or wait for it in this turn.`,
     };
+  }
+  if (name === "list_models") {
+    const search = typeof args.search === "string" ? args.search.trim() : "";
+    const r = await api(`/api/internal/models${search ? `?search=${encodeURIComponent(search)}` : ""}`);
+    if (r.error) return { text: `Couldn't list models: ${String(r.error)}`, isError: true };
+    return { text: JSON.stringify(r) };
   }
   if (name === "list_team_setup") {
     return { text: JSON.stringify(await api("/api/internal/team-setup-catalog")) };
