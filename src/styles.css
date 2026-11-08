@@ -1048,6 +1048,20 @@
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
   --radius-2xl: 16px; --radius-3xl: 24px; --radius-4xl: 32px;
   --color-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  --identity-green: #009957;
+  --identity-blue: #377FE6;
+  --identity-red: #D94B52;
+  --identity-orange: #E78531;
+  --identity-purple: #8c68cd;
+  --identity-cyan: #0EA5C6;
+  --identity-pink: #D84F8B;
+  --identity-yellow: #D8A729;
+  --identity-teal: #01A492;
+  --identity-coral: #E5634E;
+  --identity-silver: #A8ADB4;
+  --identity-chrome: #B3BAC4;
+}
+
 [data-skin="aurora"] {
   --code-color-scheme: dark;
   --color-app: #0b0c0b;
@@ -1101,7 +1115,6 @@
   --identity-blue: #377FE6;
   --identity-red: #D94B52;
   --identity-orange: #E78531;
-  --identity-purple: #8c68cd;
   --identity-purple: #8a65cd;
   --identity-cyan: #0EA5C6;
   --identity-pink: #D84F8B;
@@ -3050,6 +3063,9 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   [data-skin="diwali"] main.bg-app::before,
   [data-skin="diwali"] main.bg-app::after {
     display: none;
+  }
+}
+
 /* Fixed to the window, so the band runs on unbroken from one pane to the next. Its dots are drawn at one CSS pixel
    each, so the field scales up pixelated; the pane's contents scale as usual. */
 @scope ([data-skin="aurora"]:not([data-skin-preview])) to ([data-skin]) {
@@ -3247,8 +3263,7 @@ button:disabled.bg-danger {
   outline-offset: -1.5px;
 }
 :root,
-:is([data-skin="midnight"], [data-skin="foundry"], [data-skin="graphite"], [data-skin="dusk"], [data-skin="halloween"], [data-skin="diwali"]) {
-:is([data-skin="midnight"], [data-skin="foundry"], [data-skin="graphite"], [data-skin="dusk"], [data-skin="halloween"], [data-skin="aurora"]) {
+:is([data-skin="midnight"], [data-skin="foundry"], [data-skin="graphite"], [data-skin="dusk"], [data-skin="halloween"], [data-skin="diwali"], [data-skin="aurora"]) {
   --radius-menu: 12px;
   --menu-shadow: 0 14px 32px -10px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.35);
 }
