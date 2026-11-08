@@ -282,8 +282,9 @@ export function ShowThreadsRow() {
 
 export function HoverThreadsRow() {
   const enabled = useSidebarHoverThreads();
-  return <SettingRow title={t("settings.hoverThreads.title")} subtitle={t("settings.hoverThreads.subtitle")}>
-    <Switch checked={enabled} aria-label={t("settings.hoverThreads.title")} onClick={() => setSidebarHoverThreads(!enabled)} />
+  const [saved, setSaved] = useState(true);
+  return <SettingRow title={t("settings.hoverThreads.title")} subtitle={t("settings.hoverThreads.subtitle")} message={!saved ? <p role="status">{t("settings.hoverThreads.sessionOnly")}</p> : undefined}>
+    <Switch checked={enabled} aria-label={t("settings.hoverThreads.title")} onClick={() => setSaved(setSidebarHoverThreads(!enabled))} />
   </SettingRow>;
 }
 

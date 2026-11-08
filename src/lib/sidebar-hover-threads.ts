@@ -21,7 +21,9 @@ const subscribe = (listener: () => void) => {
 };
 export function setSidebarHoverThreads(enabled: boolean) {
   choice = enabled;
-  try { localStorage.setItem(KEY, enabled ? "1" : "0"); } catch { }
+  let saved = true;
+  try { localStorage.setItem(KEY, enabled ? "1" : "0"); } catch { saved = false; }
   notify();
+  return saved;
 }
 export function useSidebarHoverThreads() { return useSyncExternalStore(subscribe, read, () => false); }

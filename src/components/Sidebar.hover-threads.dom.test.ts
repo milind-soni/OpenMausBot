@@ -32,3 +32,19 @@ it("keeps selected chats in the popup and closes it when a chat is opened", asyn
   expect(popup()).toBeNull();
   await act(async () => { root.unmount(); });
 });
+
+it("moves keyboard focus into recent chats and closes when focus leaves", async () => {
+  const bot: Bot = { id: "atlas", threadId: "one", name: "Atlas", title: "", description: "", notifications: true, color: "green", unread: false,
+    modelSelection: { instanceId: "claude", model: "test" }, messages: [], tasks: [{ threadId: "one", title: "First", createdAt: 1 }, { threadId: "two", title: "Second", createdAt: 2 }] };
+  const host = document.body.appendChild(document.createElement("div"));
+  const outside = document.body.appendChild(document.createElement("button"));
+  const root = createRoot(host);
+  await act(async () => { root.render(createElement(BotListItem, botRowProps(initialState, vi.fn(), bot, { density: "comfortable", query: "", onMenu: vi.fn() }))); });
+  const trigger = document.querySelector<HTMLButtonElement>('[aria-label="Expand Atlas threads"]')!;
+  await act(async () => { trigger.focus(); trigger.click(); });
+  const popup = document.querySelector<HTMLElement>('[data-recent-chats-popup="atlas"]')!;
+  expect(popup.contains(document.activeElement)).toBe(true);
+  await act(async () => { outside.focus(); });
+  expect(document.querySelector('[data-recent-chats-popup="atlas"]')).toBeNull();
+  await act(async () => { root.unmount(); });
+});

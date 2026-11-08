@@ -689,7 +689,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const { bot, selected, deleting, mascotMotion, reveal, pendingQueued, instances, liveCall, density, query, dispatch, onMenu, renameRequest, botDrag: drag, botDrop: drop, botDragging: dragging } = props;
   const showThreads = useShowThreads();
   const hoverThreads = useSidebarHoverThreads();
-  const { popover, setPopover, rowRef, cancelClose, closeLater, openPopover } = useRecentChatsPopup();
+  const { popover, setPopover, rowRef, popupRef, cancelClose, closeLater, openPopover } = useRecentChatsPopup();
   const liveMedia = useLiveMedia();
   const remoteClient = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
   const [renaming, setRenaming] = useState(false);
@@ -699,6 +699,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0 || Boolean(query);
   const iconOnly = density === "icons";
   const popupMode = showThreads && hoverThreads && !iconOnly && ((bot.tasks?.filter((task) => !task.routineRunId).length ?? 0) > 0 || (bot.projects?.length ?? 0) > 0);
+  useEffect(() => { if (!popupMode) { cancelClose(); setPopover(null); } }, [popupMode]);
   const expanded = showThreads && !popupMode && !iconOnly && threadsOpen && hasThreadList;
   useEffect(() => { if (iconOnly) setRenaming(false); }, [iconOnly]);
   const simpleRow = !advanced && !showThreads && density === "comfortable";
@@ -887,7 +888,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         className="absolute left-0.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-ink-secondary outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent/60"
       ><ChevronRight aria-hidden="true" size={13} className={cn("transition-transform", threadsOpen && "rotate-90")} /></button>}
       {popupMode && <button type="button" aria-label={t("task.expandNamed", { name: bot.name })} aria-expanded={Boolean(popover)}
-        onClick={(event) => { event.stopPropagation(); if (popover) setPopover(null); else openPopover(); }}
+        onClick={(event) => { event.stopPropagation(); if (popover) setPopover(null); else openPopover(event.detail === 0); }}
         className="absolute left-0.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 focus-visible:opacity-100 touch:opacity-100 max-md:opacity-100"><span aria-hidden="true">⋯</span></button>}
       {!renaming && iconOnly && unread && (
         <span className={cn("pointer-events-none absolute size-2 rounded-full border border-panel bg-accent", railTile ? "right-1 top-1" : "bottom-1.5 right-1.5")} />
@@ -907,7 +908,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         </span>
       )}
     </div>
-    {popupMode && popover && <RecentChatsPopup botId={bot.id} position={popover} onEnter={cancelClose} onLeave={closeLater}>
+    {popupMode && popover && <RecentChatsPopup popupRef={popupRef} botId={bot.id} position={popover} onEnter={cancelClose} onLeave={closeLater}>
       <BotThreadList {...props} onThreadOpened={() => setPopover(null)} activityLabel={liveActivityLabel(sidebarMessage(last))} query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />
     </RecentChatsPopup>}
     {advanced && !popupMode && !iconOnly && threadsOpen && hasThreadList && <BotThreadList {...props} hidden={!showThreads}
