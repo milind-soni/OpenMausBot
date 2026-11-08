@@ -9,9 +9,10 @@ Use the `phone` tools for every requested Android action. Never replace them
 with Bash, raw `adb`, `subprocess`, an emulator, network ADB, or Tailscale.
 
 1. Call `status` before the first action. If the device is missing or
-   unauthorized, stop and relay the physical setup instruction. If the screen
-   is off, press `wakeup`; on a swipe lock screen, swipe up. If it asks for a
-   PIN, pattern, or password, stop and ask the user to unlock the phone.
+   unauthorized, stop and relay the physical setup instruction. Press `wakeup`
+   before the first action; it leaves a screen that is already on as it is. If
+   the phone asks for a PIN, pattern, or password, stop and ask the user to
+   unlock it.
 2. Call `open_app` with the human app name. Do not scan the launcher first.
    Use `list_apps` only when the name is ambiguous or not found, then pass the
    package name.
@@ -19,7 +20,6 @@ with Bash, raw `adb`, `subprocess`, an emulator, network ADB, or Tailscale.
    `tap_text`; use `screenshot` and pixel `tap` only when accessibility text
    cannot identify the target.
 4. Use `swipe`, `type_text`, and `press` for interaction, verifying each step.
-   If you woke the screen, press `sleep` when the task is done.
 
 The tools operate the user's real phone. Navigate and read only what the task
 needs. Stop before sending, posting, purchasing, booking, deleting, changing
