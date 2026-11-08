@@ -9,7 +9,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { githubSkillOriginSchema, skillFolderDigest, skillFolderRecordSchema, writeSkillFolder } from "./skill-folder.ts";
 import { entryExistsWithoutFollowing } from "./skill-storage.ts";
-import { snapshotPortableSkill } from "./portable-skill-files.ts";
+import { portableFilesForDisk, snapshotPortableSkill } from "./portable-skill-files.ts";
 import { readBoundedSkillFile } from "./bounded-skill-read.ts";
 import type { GitHubSkillOrigin } from "../shared/skill-import.ts";
 import { isSkillName, parseSkillMd, SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
@@ -439,7 +439,9 @@ export function exportLibrarySkill(name: string, root: string = skillsLibraryRoo
   if (!isSkillName(name)) return null;
   const entry = readSkillLibraryIndex(root)[name];
   if (!entry) return null;
-  return snapshotPortableSkill(librarySkillDirectory(root, name), () => libraryContentMatches(root, entry) ? readLibrarySkillFile(name, root) : null, entry.files ?? []);
+  const directory = librarySkillDirectory(root, name), paths = entry.files ?? [];
+  return snapshotPortableSkill(directory, () => libraryContentMatches(root, entry) ? readLibrarySkillFile(name, root) : null, paths,
+    (files) => entry.filesSha256 ? skillFolderDigest(directory, paths, { captured: portableFilesForDisk(files), remember: false }) === entry.filesSha256 : paths.length === 0);
 }
 
 export function setLibrarySkillReviewState(

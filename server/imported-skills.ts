@@ -21,8 +21,9 @@ import { rankSkills } from "../shared/skill-fit.ts";
 import { isSkillName } from "../shared/skill-md.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
+import { executableSkillModeUnsupported } from "./skill-folder.ts";
 import { directoryEntryState, entryExistsWithoutFollowing } from "./skill-storage.ts";
-import { snapshotPortableSkill } from "./portable-skill-files.ts";
+import { portableFilesForDisk, snapshotPortableSkill, type PortableSkillFile } from "./portable-skill-files.ts";
 import { readBoundedSkillFile } from "./bounded-skill-read.ts";
 import { INDEX_MAX_BYTES, INDEX_MAX_SKILLS, type SkillListing } from "./skills.ts";
 
@@ -108,12 +109,14 @@ interface Digest {
 }
 
 const MAX_DIGEST_DEPTH = 16;
-const MAX_DIGEST_ENTRIES = 2048, MAX_DIGEST_BYTES = 16 * 1024 * 1024, MAX_DIGEST_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_DIGEST_ENTRIES = 1 + 200 * (MAX_DIGEST_DEPTH + 1), MAX_DIGEST_BYTES = 16 * 1024 * 1024, MAX_DIGEST_FILE_BYTES = 2 * 1024 * 1024;
 const digests = new Map<string, Digest>();
 
 /** One hash over every entry below `dir`, each file with its executable bit and content; null when anything there is
  * not a plain file or folder. */
-function folderDigest(dir: string): Digest | null {
+function folderDigest(dir: string, capturedFiles?: readonly PortableSkillFile[]): Digest | null {
+  const captured = capturedFiles && new Map(portableFilesForDisk(capturedFiles).map((file) => [file.path, file]));
+  if (captured && captured.size !== capturedFiles!.length) return null;
   const stats: string[] = [];
   const entries: Array<{ path: string; full: string; executable: boolean } | { path: string; folder: true }> = [];
   let visited = 0, bytes = 0;
@@ -167,21 +170,23 @@ function folderDigest(dir: string): Digest | null {
     return null;
   }
   if (!walk(dir, "", 0)) return null;
+  if (captured && [...captured.keys()].some((path) => !entries.some((entry) => entry.path === path && !("folder" in entry)))) return null;
   const key = createHash("sha256").update(stats.join("\n")).digest("hex");
   const known = digests.get(dir);
-  if (known?.key === key) return known;
+  if (!captured && known?.key === key) return known;
   const hash = createHash("sha256");
   for (const entry of entries) {
     if ("folder" in entry) {
       hash.update(`d ${entry.path}\n`);
       continue;
     }
-    const bytes = readFileNoFollow(entry.full);
+    const snapshot = captured?.get(entry.path);
+    const bytes = snapshot ? Buffer.from(snapshot.content) : readFileNoFollow(entry.full);
     if (bytes === null) return null;
-    hash.update(`f ${entry.executable ? "x" : "-"} ${entry.path} ${createHash("sha256").update(bytes).digest("hex")}\n`);
+    hash.update(`f ${(snapshot ? Boolean(snapshot.executable) : entry.executable) ? "x" : "-"} ${entry.path} ${createHash("sha256").update(bytes).digest("hex")}\n`);
   }
   const digest = { key, sha256: hash.digest("hex") };
-  digests.set(dir, digest);
+  if (!captured) digests.set(dir, digest);
   return digest;
 }
 
@@ -267,6 +272,7 @@ export function storeImportedSkills(inputs: readonly ImportedSkillInput[]): Stor
       const staged = join(staging, randomUUID());
       try {
         if (!isSkillName(input.name)) throw new Error("invalid skill name");
+        if (executableSkillModeUnsupported(input.files)) throw new Error("executable skill file permissions cannot be preserved");
         const leftOut = writeStaged(staged, input);
         const digest = folderDigest(staged);
         if (!digest) throw new Error("the staged copy could not be read back");
@@ -375,7 +381,10 @@ export function readImportedSkillFile(name: string): string | null {
 
 export function exportImportedSkill(name: string) {
   if (!isSkillName(name)) return null;
-  return snapshotPortableSkill(join(IMPORTED_SKILLS_DIR, name), () => readImportedSkillFile(name));
+  const entry = readImportedSkills()[name], directory = join(IMPORTED_SKILLS_DIR, name);
+  if (!entry) return null;
+  return snapshotPortableSkill(directory, () => readImportedSkillFile(name), undefined,
+    (files) => folderDigest(directory, files)?.sha256 === entry.filesSha256);
 }
 
 /** One bot's switch. Off stays off whatever is brought in later, and out of its search; on puts it in the bot's list and,

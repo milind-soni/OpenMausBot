@@ -54,6 +54,15 @@ const names = (skills: Array<{ name: string }>) => skills.map((skill) => skill.n
 const target = (link: string) => resolve(readlinkSync(link).replace(/^\\\\\?\\/, ""));
 
 describe("skills brought in from this computer", () => {
+  it("keeps a valid cloud import with 200 distinct deeply nested files", () => {
+    const files = Array.from({ length: 200 }, (_, index) => ({
+      path: [`folder-${index}`, ...Array.from({ length: 15 }, () => "d"), "guide.md"].join("/"),
+      content: `guide ${index}`, executable: false,
+    }));
+    expect(store([input("deep-import", { files })])).toEqual([expect.objectContaining({ stored: true, leftOut: 0 })]);
+    expect(readImportedSkillFile("deep-import")).toBe(skillMd("deep-import"));
+  });
+
   it("exports the intact imported folder, and never falls through a changed private collision", () => {
     store([input("bundle", { files: [{ path: "references/guide.md", content: "imported guide", executable: false }, { path: "script.sh", content: "echo hi", executable: true }] })]);
     const bot = newBot();

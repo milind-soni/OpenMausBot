@@ -1018,6 +1018,43 @@ describe("a newer release of an added team", () => {
     return { app, library, first, installId: added.value.result.installId as string, botOf, routineOf, update };
   }
 
+  it.each(["edited", "added"])("preserves locally %s files when removing an initial organization skill", async (change) => {
+    const bundle = release("full-team.v2.json", (doc) => {
+      doc.package.skills.version = 2;
+      doc.package.skills.entries.find((entry: any) => entry.name === "pricing-policy").files = [{ path: "references/guide.md", content: "reviewed" }];
+    });
+    const { app, botOf } = await addedTeam({}, bundle);
+    const lead = botOf("lead"), directory = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    const path = change === "edited" ? join(directory, "references", "guide.md") : join(directory, "local.md");
+    writeFileSync(path, "local changes");
+    expect(app.skills.removeSkill(lead.id, "pricing-policy")).toHaveProperty("error", expect.stringContaining("folder changed"));
+    expect(readFileSync(path, "utf8")).toBe("local changes");
+    expect(app.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]!.enabled).toBe(true);
+  });
+
+  it("retains removal state and the quarantine after a partial cleanup and restart", async () => {
+    const bundle = release("full-team.v2.json", (doc) => {
+      doc.package.skills.version = 2;
+      doc.package.skills.entries.find((entry: any) => entry.name === "pricing-policy").files = [{ path: "references/guide.md", content: "reviewed" }];
+    });
+    const { app, library, botOf } = await addedTeam({}, bundle);
+    const lead = botOf("lead"), { removeOrganizationSkill } = await import("./skill-org-removal.ts");
+    const { retireUnchangedSkillRoot } = await import("./skill-retirement.ts");
+    const result = removeOrganizationSkill(lead.id, "pricing-policy", app.skills.orgSkillStorage, { retire: (directory, expected, state) =>
+      retireUnchangedSkillRoot(directory, expected, state, { remove: (moved) => { rmSync(join(String(moved), "SKILL.md")); throw new Error("partial deletion"); } }) });
+    expect(result).toHaveProperty("error", expect.stringContaining("still needs cleanup"));
+    expect(app.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]).toMatchObject({ enabled: false, pendingRemoval: expect.any(Object) });
+    expect(app.skills.setSkillEnabled(lead.id, "pricing-policy", true)).toHaveProperty("error", expect.stringContaining("waiting for safe cleanup"));
+    const recovery = join(app.DATA_DIR, "skill-state", lead.id, "retired-roots");
+    const held = readdirSync(recovery).find((name) => !name.endsWith(".json"))!;
+    expect(readFileSync(join(recovery, held, "references", "guide.md"), "utf8")).toBe("reviewed");
+    library.dispose();
+    const restarted = await installation(home);
+    restarted.open();
+    expect(restarted.skills.orgSkillStorage.readManifest(lead.id)["pricing-policy"]).toHaveProperty("pendingRemoval");
+    expect(readFileSync(join(recovery, held, "references", "guide.md"), "utf8")).toBe("reviewed");
+  });
+
   it("waits for an active task before updating and retries without another catalog", async () => {
     const { app, library, botOf, update, installId } = await addedTeam();
     const lead = botOf("lead");
@@ -1097,12 +1134,60 @@ describe("a newer release of an added team", () => {
     expect(existsSync(oldDirectory)).toBe(true);
     expect(readFileSync(join(link, "keep.txt"), "utf8")).toBe("user data");
     expect(app.skills.removeSkill(lead.id, "pricing-policy")).toHaveProperty("error");
+    await update();
+    expect(app.readState().installs[installId].release).toBe("1.3.0");
+    expect(readFileSync(join(link, "keep.txt"), "utf8")).toBe("user data");
     // The owner removes the obstacle; no catalog or new release is relayed.
     rmSync(link, { recursive: true });
     await vi.waitFor(() => expect(app.readState().installs[installId].release).toBe("1.4.0"));
     await library.settled();
     expect(existsSync(oldDirectory)).toBe(false);
     expect(readFileSync(join(link, "SKILL.md"), "utf8")).toContain("Seats are 59 from January.");
+  });
+
+  it("continues other skill updates when one bot's link recovery is blocked", async () => {
+    const { app, botOf, update, installId } = await addedTeam();
+    const scout = botOf("scout");
+    const original = app.skills.orgSkillStorage.syncSkillLinks;
+    let blockResearch = true;
+    const blocked = vi.spyOn(app.skills.orgSkillStorage, "syncSkillLinks").mockImplementation((botId, options) =>
+      botId === scout.id && (options?.onlyName === "pricing-policy" || (blockResearch && options?.onlyName === "research-brief"))
+        ? false : original(botId, options));
+    const next = release("full-team.v2.json", (doc) => {
+      NEXT(doc);
+      doc.package.skills.entries.find((skill: any) => skill.name === "research-brief").instructions += "\nCheck new sources.";
+    });
+    await update(next);
+    expect(app.readState().installs[installId].release).toBe("1.3.0");
+    expect(app.skills.skillPackageStamps(scout.id).find((skill) => skill.name === "research-brief")!.stamp.release).toBe("1.4.0");
+    expect(app.skills.readSkillFile(scout.id, "research-brief")).toContain("Check new sources.");
+    expect(app.skills.orgSkillStorage.readManifest(scout.id)["research-brief"]!.pendingRetirements).toHaveLength(1);
+    blockResearch = false;
+    expect(app.recoverOrganizationSkillLinks(scout.id)).toHaveProperty("error");
+    expect(app.skills.orgSkillStorage.readManifest(scout.id)["research-brief"]!.pendingRetirements).toBeUndefined();
+    expect(app.skills.orgSkillStorage.readManifest(scout.id)["pricing-policy"]!.pendingRetirements).toHaveLength(1);
+    blocked.mockRestore();
+  });
+
+  it("refuses a turn with an unsynchronized old task link without inspecting other tasks", async () => {
+    const { app, botOf, update } = await addedTeam();
+    const lead = botOf("lead"), { ensureTaskWorkspaceWithSkills } = await import("./skill-task-links.ts");
+    await update();
+    const thread = "guest-old-task", folder = ensureTaskWorkspaceWithSkills(lead.id, thread);
+    const old = readFileSync(join(folder, ".claude", "skills", "pricing-policy", "SKILL.md"), "utf8");
+    await update(release("full-team.v2.json", (doc) => {
+      NEXT(doc); doc.package.release = "1.5.0";
+      doc.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").instructions += "\nNew reviewed revision.";
+    }));
+    // A lost record leaves the previous revision link outside the app's removal authority.
+    writeFileSync(join(app.DATA_DIR, "skill-state", lead.id, "task-links", `${thread}.json`), "[]");
+    expect(() => ensureTaskWorkspaceWithSkills(lead.id, thread)).toThrow("could not be synchronized safely");
+    expect(readFileSync(join(folder, ".claude", "skills", "pricing-policy", "SKILL.md"), "utf8")).toBe(old);
+    const other = ensureTaskWorkspaceWithSkills(lead.id, "guest-other-task");
+    expect(readFileSync(join(other, ".claude", "skills", "pricing-policy", "SKILL.md"), "utf8")).toContain("New reviewed revision.");
+    for (const family of [".claude", ".agents", ".grok"]) rmSync(join(folder, family, "skills", "pricing-policy"));
+    expect(ensureTaskWorkspaceWithSkills(lead.id, thread)).toBe(folder);
+    expect(readFileSync(join(folder, ".claude", "skills", "pricing-policy", "SKILL.md"), "utf8")).toContain("New reviewed revision.");
   });
 
   it("recovers an interrupted link switch after restart without a new catalog", async () => {
@@ -1173,16 +1258,16 @@ describe("a newer release of an added team", () => {
       doc.package.skills.version = 2;
       doc.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").files = [{ path: "references/pricing.md", content }];
     });
-    let fail: "folder" | "manifest" | "tamper" | null = null;
+    let fail: "folder" | "manifest" | "tamper" | "tamper-skill-md" | null = null;
     const first = bundle("1.3.0", "Old reference\n");
     const { app, botOf, update, installId } = await addedTeam({ replaceOrg: (botId, source, skill, stamp, expected) => {
       const options = fail === "folder" ? { writeFolder: (...parts: Parameters<typeof writeSkillFolder>) => {
         mkdirSync(parts[0]); writeFileSync(join(parts[0], "SKILL.md"), parts[1]); throw new Error("disk full");
       } }
         : fail === "manifest" ? { writeManifest: () => { throw new Error("disk full"); } }
-          : fail === "tamper" ? { writeFolder: (...parts: Parameters<typeof writeSkillFolder>) => {
+          : fail === "tamper" || fail === "tamper-skill-md" ? { writeFolder: (...parts: Parameters<typeof writeSkillFolder>) => {
             writeSkillFolder(...parts);
-            writeFileSync(join(parts[0], "references", "pricing.md"), "Unexpected content\n");
+            writeFileSync(join(parts[0], fail === "tamper" ? "references/pricing.md" : "SKILL.md"), "Unexpected content\n");
           } } : {};
       return app.replaceOrganizationSkill(botId, source, skill, stamp, expected, options);
     } }, first);
@@ -1193,7 +1278,7 @@ describe("a newer release of an added team", () => {
     expect(stamp.w).toBe(app.parts.partHash(app.parts.skillReleaseValue(first.document.package.skills.entries.find((s: any) => s.name === "pricing-policy"))));
     app.skills.setSkillEnabled(lead.id, "pricing-policy", false);
     const next = bundle("1.4.0", "New reference\n");
-    for (const stage of ["folder", "manifest", "tamper"] as const) {
+    for (const stage of ["folder", "manifest", "tamper", "tamper-skill-md"] as const) {
       fail = stage;
       await update(next);
       expect(readFileSync(path, "utf8")).toBe("Old reference\n");
@@ -1384,7 +1469,7 @@ describe("a newer release of an added team", () => {
     await update();
     interrupted.mockRestore();
     writeFileSync(join(oldDirectory, "local.md"), "Keep my notes\n");
-    expect(app.recoverOrganizationSkillLinks(lead.id)).toHaveProperty("error", expect.stringContaining("previous skill folder changed"));
+    expect(app.recoverOrganizationSkillLinks(lead.id)).toEqual({ ok: true, pending: true });
     expect(app.skills.removeSkill(lead.id, "pricing-policy")).toHaveProperty("error", expect.stringContaining("previous skill revision"));
     expect(readFileSync(join(oldDirectory, "local.md"), "utf8")).toBe("Keep my notes\n");
     expect(app.skills.listSkills(lead.id).some((skill) => skill.name === "pricing-policy")).toBe(true);

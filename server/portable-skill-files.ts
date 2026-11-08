@@ -11,11 +11,11 @@ import { readBoundedSkillDescriptor } from "./bounded-skill-read.ts";
 export type PortableSkillFile = PortableFolderFile;
 export type PortableSkillSkip = { path: string; reason: "skill_file_type" | "skill_file_unsafe" | "skill_file_limit" | "skill_file_binary" | "skill_file_unreviewed" };
 export type PortableSkillFiles = { files: PortableSkillFile[]; skipped: PortableSkillSkip[] };
-const MAX_VISITED = 512;
+const MAX_VISITED = 1 + SKILL_FOLDER_MAX_FILES * 8;
 const MAX_SOURCE_BYTES = 16 * 1024 * 1024, MAX_SOURCE_FILE_BYTES = 2 * 1024 * 1024;
 const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
-export function portableFilesForDisk(files: readonly PortableSkillFile[]) {
+export function portableFilesForDisk(files: readonly PortableSkillFile[]): Array<{ path: string; content: string | Buffer; executable?: boolean }> {
   return files.map((file) => "content" in file ? file : { path: file.path, content: Buffer.from(file.binary.base64, "base64") });
 }
 
@@ -66,7 +66,7 @@ export function portableSkillFilesFromMemory(input: ReadonlyArray<{ path: string
   return { files, skipped };
 }
 
-export function snapshotPortableSkill(root: string, verifiedText: () => string | null, reviewedPaths?: readonly string[]): (PortableSkillFiles & { instructions: string }) | null {
+export function snapshotPortableSkill(root: string, verifiedText: () => string | null, reviewedPaths?: readonly string[], verifyFiles?: (files: readonly PortableSkillFile[]) => boolean): (PortableSkillFiles & { instructions: string }) | null {
   let fd: number | null = null;
   try {
     if (!lstatSync(root).isDirectory()) return null;
@@ -79,7 +79,7 @@ export function snapshotPortableSkill(root: string, verifiedText: () => string |
     if (!bytes || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) return null;
     const instructions = decoder.decode(bytes);
     const contents = readPortableSkillFiles(root, reviewedPaths);
-    if (!contents || verifiedText() !== instructions || verifiedText() !== instructions) return null;
+    if (!contents || (verifyFiles && !verifyFiles(contents.files)) || verifiedText() !== instructions || verifiedText() !== instructions) return null;
     return { instructions, ...contents };
   } catch { return null; } finally { if (fd !== null) closeSync(fd); }
 }

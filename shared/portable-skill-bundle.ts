@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { secretName } from "./skill-secret-names.ts";
 
 export const SKILL_BUNDLE_MAX_FILES = 32, SKILL_BUNDLE_FILE_MAX_BYTES = 64 * 1024, SKILL_BUNDLE_MAX_BYTES = 512 * 1024;
 export const SKILL_FOLDER_MAX_FILES = 128, SKILL_FOLDER_FILE_MAX_BYTES = 512 * 1024, SKILL_FOLDER_MAX_BYTES = 2 * 1024 * 1024;
@@ -17,7 +18,7 @@ export const isUtf8Text = (text: string) => {
 export function isPortableFolderPath(path: string): boolean {
   const parts = path.split("/");
   return isUtf8Text(path) && utf8Bytes(path) <= 512 && parts.length <= 8 &&
-    parts.every((part) => !!part && !part.startsWith(".") && !/[. ]$/.test(part) &&
+    parts.every((part) => !!part && !secretName(part) && !part.startsWith(".") && !/[. ]$/.test(part) &&
       ![...part].some((char) => char < " " || char === "\u007f" || '<>:"|?*\\'.includes(char)) && utf8Bytes(part) <= 255 &&
       !/^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\..*)?$/i.test(part) &&
       !["node_modules", "__pycache__", "venv"].includes(part.toLowerCase())) &&

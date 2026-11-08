@@ -253,7 +253,7 @@ export interface OrgLibraryDeps {
     installOrg(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp, files?: PackageSkill["files"]): SkillListing | { error: string };
     replaceOrg?(botId: string, source: string, skill: Pick<PackageSkill, "instructions" | "files">, stamp: SkillPackageStamp, expected: SkillPackageStamp):
       { updated: true } | { stale: true } | { error: string; retryable?: boolean };
-    recoverOrg?(botId: string): { ok: true; pending?: true } | { error: string; retryable: true };
+    recoverOrg?(botId: string, name?: string): { ok: true; pending?: true } | { error: string; retryable: true };
   };
   /** A team's brief, by its section; without it an update leaves the brief as it is. */
   sections?: { read(section: string): string; write(section: string, text: string): void };

@@ -62,7 +62,7 @@ export interface TeamRouteDeps {
 }
 
 function reviewHash(document: PackageDocument, skipped: readonly TeamExportSkip[]): string | undefined {
-  if (document.package.skills?.version !== 3) return undefined;
+  if (!document.package.skills || document.package.skills.version === 1) return undefined;
   return partHash({ skills: document.package.skills, skipped: skipped.filter((item) => item.part.startsWith("skills[") || /^presets\[[^\]]+\]\.skills\[/.test(item.part)) });
 }
 

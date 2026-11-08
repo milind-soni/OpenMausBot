@@ -92,6 +92,14 @@ describe("preparing a folder for storage", () => {
     expect(prepared.files.map((file) => file.path)).toEqual(["assets/blob.bin", "references/hidden.md", "scripts/install.sh"]);
   });
 
+  it("fails closed when Windows cannot preserve an admitted executable bit", () => {
+    const executable = [{ path: "SKILL.md", content: SKILL }, { path: "scripts/run.sh", content: "exit 0", executable: true }];
+    expect(prepareSkillFolder(executable, "win32")).toEqual({ error: expect.stringContaining("cannot be preserved on Windows") });
+    expect(prepareSkillFolder(executable, "linux")).not.toHaveProperty("error");
+    expect(prepareSkillFolder([{ path: "SKILL.md", content: SKILL }, { path: "notes.md", content: "ok" }], "win32")).not.toHaveProperty("error");
+    expect(prepareSkillFolder([{ path: "SKILL.md", content: SKILL }, { path: ".hidden/run.sh", content: "exit 0", executable: true }], "win32")).not.toHaveProperty("error");
+  });
+
   it("refuses a folder without SKILL.md, one too long or one that is not text", () => {
     expect(prepareSkillFolder([{ path: "README.md", content: "x" }])).toEqual({ error: "no SKILL.md found at that location" });
     expect(prepareSkillFolder([{ path: "SKILL.md", content: `${SKILL}${"x".repeat(256 * 1024)}` }])).toEqual({ error: expect.stringContaining("larger than 256KB") });

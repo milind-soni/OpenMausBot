@@ -25,8 +25,9 @@ import {
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
 import { libraryDescriptionsAt, librarySkillFilePath, listLibrarySkills, type LibrarySkillListing } from "./skill-library.ts";
 import { readManagedLinks, writeManagedLinks } from "./skill-link-registry.ts";
-import { retireUnchangedSkillRoot, skillRootIdentity, type RetiredSkillRoot } from "./skill-retirement.ts";
+import { retireUnchangedSkillRoot, type RetiredSkillRoot } from "./skill-retirement.ts";
 import { skillMayBeInUse } from "./skill-use-guard.ts";
+import { removeOrganizationSkill } from "./skill-org-removal.ts";
 import {
   directoryEntryState, entryExistsWithoutFollowing, formatKb, isSkillReferencePath, learnedSkillDirectoryMatches, publishReviewedRevision,
   readReferenceFiles, referenceLimitError, referencePathError, REFERENCES_ADVICE, skillReferencesSha256, STAGED_SKILL_FILE_MAX_BYTES,
@@ -73,6 +74,7 @@ export interface SkillManifestEntry {
   retiredRoot?: RetiredSkillRoot;
   /** A prior organization revision is retained until links have been switched safely. */
   pendingRetirements?: Array<RetiredSkillRoot & { revision?: string }>;
+  pendingRemoval?: RetiredSkillRoot & { revision?: string };
   package?: SkillPackageStamp;
 }
 
@@ -106,6 +108,7 @@ const skillManifestEntrySchema = z.object({
   storageRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   retiredRoot: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
   pendingRetirements: z.array(z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), revision: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict()).max(32).optional(),
+  pendingRemoval: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), revision: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict().optional(),
   package: z.object({
     installId: z.string().regex(/^[a-f0-9]{32}$/),
     key: z.string().min(1).max(64),
@@ -228,7 +231,7 @@ function readManifest(botId: string): SkillManifest {
     // No workspace-authored bit may carry enablement into secure state.
     const {
       appliedStageId: _appliedStageId,
-      storageRevision: _storageRevision, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements,
+      storageRevision: _storageRevision, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements, pendingRemoval: _pendingRemoval,
       ...visible
     } = entry;
     migrated[name] = { ...visible, enabled: false };
@@ -280,7 +283,6 @@ function nativeLinkDirectlyTargetsOwnedSkill(
 }
 
 type NativeLinkRemoval = "removed" | "preserved" | "retry";
-
 /** renameSync is the identity boundary: a workspace process can replace the name, not which entry was moved. */
 function removeOwnedNativeLink(
   botId: string,
@@ -336,7 +338,6 @@ function writeManifest(botId: string, manifest: SkillManifest): void {
 }
 
 const NATIVE_SKILL_DIRS = [".claude/skills", ".agents/skills", ".grok/skills"];
-
 /** Compares link text, never real paths: an unsafe skills/ root is not followed, and a user-replaced link stays. */
 function removeNativeLinksForUnsafeSkillsRoot(
   botId: string,
@@ -383,29 +384,29 @@ function removeNativeLinksForUnsafeSkillsRoot(
 /** Links, not copies; junctions on Windows, where directory symlinks need privileges. */
 export function syncSkillLinks(
   botId: string,
-  options: { beforeRemove?: (link: string) => void; task?: { threadId: string; folder: string } } = {},
+  options: { beforeRemove?: (link: string) => void; task?: { threadId: string; folder: string }; onlyName?: string } = {},
 ): boolean {
-  const root = workspaceDir(botId);
-  const linkRoot = options.task?.folder ?? root, threadId = options.task?.threadId;
-  const previouslyManaged = readManagedLinks(botId, threadId);
+  const root = workspaceDir(botId), linkRoot = options.task?.folder ?? root, threadId = options.task?.threadId;
+  const allManaged = readManagedLinks(botId, threadId);
+  const previouslyManaged = options.onlyName ? allManaged.filter((name) => name === options.onlyName) : allManaged;
   // The bot can replace its skills root: never follow it, but still revoke existing app links.
   if (directoryEntryState(skillsDir(botId)) === "unsafe") {
-    removeNativeLinksForUnsafeSkillsRoot(botId, root, linkRoot, threadId, previouslyManaged, options.beforeRemove);
+    if (!options.onlyName) removeNativeLinksForUnsafeSkillsRoot(botId, root, linkRoot, threadId, previouslyManaged, options.beforeRemove);
     return false;
   }
   const manifest = readManifest(botId);
   const enabled = Object.entries(manifest).filter(
-    ([name, entry]) => entry.enabled && skillContentMatches(botId, name, entry),
+    ([name, entry]) => (!options.onlyName || name === options.onlyName) && entry.enabled && skillContentMatches(botId, name, entry),
   );
   const desired = new Map(enabled.map(([name, entry]) => [name, skillTarget(root, name, entry)]));
-  const managed = new Set<string>();
+  const managed = new Set(options.onlyName ? allManaged.filter((name) => name !== options.onlyName) : []);
   let complete = true;
   for (const dir of NATIVE_SKILL_DIRS) {
     const linkDir = nativeLinkDirectory(linkRoot, dir, enabled.length > 0);
     if (!linkDir) { if (enabled.length || previouslyManaged.length) complete = false; continue; }
     let existing: string[] = [];
     try {
-      existing = readdirSync(linkDir).filter(isSkillName);
+      existing = readdirSync(linkDir).filter((name) => isSkillName(name) && (!options.onlyName || name === options.onlyName));
     } catch {
       complete = false;
     }
@@ -491,7 +492,7 @@ function skillContentMatches(botId: string, name: string, entry: SkillManifestEn
   }
 }
 function skillListing(botId: string, name: string, entry: SkillManifestEntry): SkillListing {
-  const { appliedStageId, storageRevision: _storageRevision, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements, package: _package, ...visible } = entry;
+  const { appliedStageId, storageRevision: _storageRevision, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements, pendingRemoval: _pendingRemoval, package: _package, ...visible } = entry;
   const intact = skillContentMatches(botId, name, entry);
   return {
     name,
@@ -501,7 +502,8 @@ function skillListing(botId: string, name: string, entry: SkillManifestEntry): S
     warnings: [
       ...visible.warnings,
       ...(intact ? [] : ["stored skill files changed after review — enablement is blocked"]),
-      ...(entry.pendingRetirements?.length ? ["a previous skill revision is waiting for safe link synchronization"] : []),
+      ...(entry.pendingRetirements?.length ? ["a previous skill revision is waiting for safe link synchronization or cleanup"] : []),
+      ...(entry.pendingRemoval ? ["skill removal is waiting for safe cleanup"] : []),
     ],
   };
 }
@@ -560,6 +562,7 @@ export function setSkillEnabled(botId: string, name: string, enabled: boolean): 
   const manifest = readManifest(botId);
   const entry = manifest[name];
   if (!entry) return { error: `no imported skill named "${name}"` };
+  if (enabled && entry.pendingRemoval) return { error: "skill removal is waiting for safe cleanup" };
   if (enabled && !skillContentMatches(botId, name, entry)) {
     return { error: "stored skill files changed after review — remove and import or learn it again" };
   }
@@ -627,24 +630,24 @@ export function removeSkill(botId: string, name: string): { removed: true } | { 
   const entry = manifest[name];
   if (!entry) return { error: `no imported skill named "${name}"` };
   if (entry.source.startsWith("org:") && (entry.pendingRetirements?.length || skillMayBeInUse(botId))) return { error: "wait until the bot finishes and its previous skill revision is synchronized" };
+  if (entry.source.startsWith("org:")) return removeOrganizationSkill(botId, name, orgSkillStorage);
   const root = skillsDir(botId);
   if (directoryEntryState(root) === "unsafe") {
     return { error: "the workspace skills path is a symlink or file; refusing to remove through it" };
   }
   if (entry.storageRevision && entry.retiredRoot) { const retired = retireUnchangedSkillRoot(join(root, name), entry.retiredRoot, skillStateDir(botId)); if ("error" in retired) return retired; }
-  const target = entry.storageRevision ? null : join(root, name); const active = entry.storageRevision ? skillDirectory(botId, name, entry) : null; const activeId = active && skillRootIdentity(active);
+  const target = entry.storageRevision ? null : join(root, name);
   const targetState = target ? directoryEntryState(target) : "missing";
   delete manifest[name];
   writeManifest(botId, manifest);
   // While the target still exists, so ownership can be proven without deleting a user-replaced path.
   syncSkillLinks(botId);
   if (entry.storageRevision) {
-    if (entry.source.startsWith("org:") && active && activeId && entry.package) retireUnchangedSkillRoot(active, { identity: activeId, hash: entry.package.w }, skillStateDir(botId));
-    else removeReviewedRevision(botId, entry.storageRevision, entry.sha256, entry.referencesSha256);
+    removeReviewedRevision(botId, entry.storageRevision, entry.sha256, entry.referencesSha256);
   } else if (target && targetState === "directory") {
     rmSync(target, { recursive: true, force: true });
   }
-  if (!entry.source.startsWith("org:")) removeReviewedRevisionsNamed(botId, name);
+  removeReviewedRevisionsNamed(botId, name);
   return { removed: true };
 }
 
@@ -1333,6 +1336,7 @@ export interface MigratableSkillCopy {
   package?: SkillPackageStamp;
   files?: string[];
   filesSha256?: string;
+  referencesSha256?: string;
   retiredRoot?: RetiredSkillRoot;
   pendingRetirement?: boolean;
   github?: GitHubSkillOrigin;
@@ -1352,8 +1356,9 @@ export function listMigratableSkills(botId: string, onlyName?: string, checkInte
       ...(entry.compatibility ? { compatibility: entry.compatibility } : {}),
       ...(entry.package ? { package: { ...entry.package } } : {}),
       ...(entry.filesSha256 ? { files: [...entry.files ?? []], filesSha256: entry.filesSha256 } : {}),
+      ...(entry.referencesSha256 ? { referencesSha256: entry.referencesSha256 } : {}),
       ...(entry.retiredRoot ? { retiredRoot: { ...entry.retiredRoot } } : {}),
-      ...(entry.pendingRetirements?.length ? { pendingRetirement: true } : {}),
+      ...(entry.pendingRetirements?.length || entry.pendingRemoval ? { pendingRetirement: true } : {}),
       ...(entry.github ? { github: { ...entry.github } } : {}),
       intact: checkIntegrity && skillContentMatches(botId, name, entry),
     }))
@@ -1372,4 +1377,4 @@ export function removeManifestEntry(botId: string, name: string, expectSha256: s
   syncSkillLinks(botId);
   return { removed: true };
 }
-export const orgSkillStorage = { readManifest, writeManifest, ensureSkillsRoot, skillDirectory, skillContentMatches, syncSkillLinks, skillStateDir };
+export const orgSkillStorage = { readManifest, writeManifest, ensureSkillsRoot, skillDirectory, skillContentMatches, syncSkillLinks, skillStateDir, removeSkill };

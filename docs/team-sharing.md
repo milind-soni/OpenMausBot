@@ -14,7 +14,11 @@ the department name), or from **Templates → Share**.
 - **Skills.** All skills on the team's bots by default, or the ones you tick.
   The goal is a portable skill directory containing every asset needed to run
   the skill. UTF-8 text files, including HTML, nested references and scripts,
-  travel with `SKILL.md`; executable bits on text files are retained. Binary
+  travel with `SKILL.md`; executable bits on text files are retained on supported
+  filesystems. On Windows, imports that declare an executable bit are refused
+  because it cannot be preserved. Export cannot infer the original mode of a
+  Windows copy; an older copy may need to be reimported on a system that
+  supports it. Binary
   companions are left out unless you explicitly choose **Include binary skill
   files**. Binary files cannot be scanned or redacted for secrets or metadata;
   inspect them before sharing. The preview lists included and omitted files and
@@ -24,7 +28,7 @@ the department name), or from **Templates → Share**.
   512 KiB each and 2 MiB total per skill, within the 4 MiB package size limit.
   Package text redaction applies to text companions too, and can change their
   contents. Text companions can be opened in the preview. The app checks an
-  expanded bundle against the reviewed preview before saving. A source folder above 512 entries,
+  expanded bundle against the reviewed preview before saving. A source folder above 1,025 entries,
   or with reviewed files above 16 MiB total or 2 MiB each, cannot be safely snapshotted and its skill is left out. A file
   holds at most 30 skills per bot and 60 per team, and one skill per name.
   When you have not chosen, the dialog puts in what fits (switched-on skills

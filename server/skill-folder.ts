@@ -134,11 +134,17 @@ export function scanSkillFolder(skillMd: string, files: ReadonlyArray<{ path: st
 }
 
 /** The storage gate: whoever supplied `files`, only what the plan admits is written. */
-export function prepareSkillFolder(files: readonly SkillFolderFile[]): PreparedSkillFolder | { error: string } {
+export const EXECUTABLE_MODE_UNSUPPORTED = "Executable skill file permissions cannot be preserved on Windows.";
+export function executableSkillModeUnsupported(files: ReadonlyArray<{ executable?: boolean }>, platform: NodeJS.Platform = process.platform): boolean {
+  return platform === "win32" && files.some((file) => file.executable);
+}
+
+export function prepareSkillFolder(files: readonly SkillFolderFile[], platform: NodeJS.Platform = process.platform): PreparedSkillFolder | { error: string } {
   const entries = files.map((file) => ({ ...file, kind: "file" as const, size: Buffer.byteLength(file.content) }));
   const { take, skipped } = planSkillFolder(entries);
   const skillMdFile = take.find((file) => file.path === "SKILL.md");
   if (!skillMdFile) return { error: "no SKILL.md found at that location" };
+  if (executableSkillModeUnsupported(take.filter((file) => file !== skillMdFile), platform)) return { error: EXECUTABLE_MODE_UNSUPPORTED };
   if (skillMdFile.size > SKILL_FILE_MAX_BYTES) return { error: `SKILL.md is larger than ${SKILL_FILE_MAX_BYTES / 1024}KB` };
   const skillMd = skillFileText(skillMdFile.content);
   if (skillMd === null) return { error: "SKILL.md is not UTF-8 text" };
@@ -173,6 +179,7 @@ export function writeSkillFolder(
   skillMd: string | Uint8Array,
   files: ReadonlyArray<{ path: string; content: string | Uint8Array; executable?: boolean }>,
 ): void {
+  if (executableSkillModeUnsupported(files)) throw new Error(EXECUTABLE_MODE_UNSUPPORTED);
   mkdirSync(folder, { mode: 0o700 });
   writeFileSync(join(folder, "SKILL.md"), skillMd, { mode: 0o600, flag: "wx" });
   for (const file of files) {
@@ -202,8 +209,10 @@ const digests = new Map<string, { key: string; sha256: string }>();
  * when one is missing, is not a plain file, or is reached through a link at any level. SKILL.md keeps a hash of its own.
  * Security: only the files that came in are checked, so what a run adds beside them (a cache, a lockfile) leaves the
  * skill usable; a bot can add a file there, which a script may then load, but cannot change one that came in. */
-export function skillFolderDigest(dir: string, paths: readonly string[], options: { remember?: boolean } = {}): string | null {
+export function skillFolderDigest(dir: string, paths: readonly string[], options: { remember?: boolean; captured?: readonly SkillFolderFile[] } = {}): string | null {
   if (directoryEntryState(dir) !== "directory") return null;
+  const captured = options.captured && new Map(options.captured.map((file) => [file.path, file]));
+  if (captured && (captured.size !== options.captured!.length || [...captured.keys()].some((path) => !paths.includes(path)))) return null;
   const folders = new Set<string>();
   const files: Array<{ path: string; full: string; executable: boolean }> = [];
   const stats: string[] = [];
@@ -229,15 +238,16 @@ export function skillFolderDigest(dir: string, paths: readonly string[], options
   }
   const key = createHash("sha256").update(stats.join("\n")).digest("hex");
   const known = digests.get(dir);
-  if (known?.key === key) return known.sha256;
+  if (!captured && known?.key === key) return known.sha256;
   const hash = createHash("sha256");
   for (const file of files) {
-    const bytes = readNoFollow(file.full);
+    const snapshot = captured?.get(file.path);
+    const bytes = snapshot ? Buffer.from(snapshot.content) : readNoFollow(file.full);
     if (bytes === null) return null;
-    hash.update(`${file.path}\0${file.executable ? "x" : "-"}\0${createHash("sha256").update(bytes).digest("hex")}\n`);
+    hash.update(`${file.path}\0${(snapshot ? Boolean(snapshot.executable) : file.executable) ? "x" : "-"}\0${createHash("sha256").update(bytes).digest("hex")}\n`);
   }
   const sha256 = hash.digest("hex");
-  if (options.remember !== false) digests.set(dir, { key, sha256 });
+  if (!captured && options.remember !== false) digests.set(dir, { key, sha256 });
   return sha256;
 }
 

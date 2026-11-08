@@ -21,13 +21,29 @@ const identity = (path: string) => {
 type Options = { writeFolder?: typeof writeSkillFolder; writeManifest?: typeof orgSkillStorage.writeManifest; moveRevision?: typeof renameSync };
 
 /** Resume a committed switch independently of the package stamp, including after a restart. */
-export function recoverOrganizationSkillLinks(botId: string): { ok: true; pending?: true } | { error: string; retryable: true } {
+export function recoverOrganizationSkillLinks(botId: string, onlyName?: string): { ok: true; pending?: true } | { error: string; retryable: true } {
   const pendingError = (error: string) => ({ error, retryable: true as const });
   const initial = orgSkillStorage.readManifest(botId);
-  if (!Object.values(initial).some((entry) => entry.pendingRetirements?.length)) return { ok: true };
+  if (!onlyName) {
+    let failure: { error: string; retryable: true } | undefined, pending = false;
+    for (const [name, entry] of Object.entries(initial)) {
+      if (!entry.pendingRetirements?.length && !entry.pendingRemoval) continue;
+      const result = recoverOrganizationSkillLinks(botId, name);
+      if ("error" in result) failure ??= result;
+      else if (result.pending) pending = true;
+    }
+    return failure ?? (pending ? { ok: true, pending: true } : { ok: true });
+  }
+  if (!Object.entries(initial).some(([name, entry]) => name === onlyName && (entry.pendingRetirements?.length || entry.pendingRemoval))) return { ok: true };
   if (skillMayBeInUse(botId)) return pendingError("the bot is still using its skills");
   let stillReferenced = false;
   for (const [name, entry] of Object.entries(initial)) {
+    if (onlyName && name !== onlyName) continue;
+    if (entry.pendingRemoval) {
+      const removed = orgSkillStorage.removeSkill(botId, name);
+      if ("error" in removed) return pendingError(removed.error);
+      continue;
+    }
     const pending = entry.pendingRetirements;
     if (!pending?.length) continue;
     const root = orgSkillStorage.ensureSkillsRoot(botId);
@@ -36,7 +52,7 @@ export function recoverOrganizationSkillLinks(botId: string): { ok: true; pendin
       pending.some((revision) => revision.revision === entry.storageRevision) || !current ||
       partHash(skillReleaseValue(current)) !== entry.package.w) return pendingError("the current skill changed while its links were being synchronized");
     try {
-      if (!orgSkillStorage.syncSkillLinks(botId)) {
+      if (!orgSkillStorage.syncSkillLinks(botId, { onlyName: name })) {
         return pendingError("the skill's native links could not be switched; retrying with the previous revision retained");
       }
       const afterSync = orgSkillStorage.readManifest(botId)[name], checked = readInstalledSkillBundle(botId, name);
@@ -54,7 +70,7 @@ export function recoverOrganizationSkillLinks(botId: string): { ok: true; pendin
         }
         if (referenced[index]) { remaining.push(revision); continue; }
         const retired = retireUnchangedSkillRoot(oldDirectory, revision, orgSkillStorage.skillStateDir(botId));
-        if ("error" in retired) return pendingError(retired.error);
+        if ("error" in retired) { remaining.push(revision); continue; }
       }
       const latest = orgSkillStorage.readManifest(botId), now = latest[name];
       if (!now?.pendingRetirements || canonicalJson(now.pendingRetirements) !== canonicalJson(pending) || now.storageRevision !== entry.storageRevision) {
@@ -79,7 +95,7 @@ export function replaceOrganizationSkill(
 ): { updated: true } | { stale: true } | { error: string; retryable?: boolean } {
   if (!source.startsWith("org:") || (skill.files?.length && !portableFolderFilesSchema.safeParse(skill.files).success)) return { error: "invalid organization skill" };
   if (skillMayBeInUse(botId)) return { error: "the bot is still using its skills; the update will be retried", retryable: true };
-  const recovery = recoverOrganizationSkillLinks(botId);
+  const recovery = recoverOrganizationSkillLinks(botId, stamp.key);
   if ("error" in recovery) return recovery;
   const folder = prepareSkillFolder([{ path: "SKILL.md", content: skill.instructions }, ...portableFilesForDisk(skill.files ?? [])]);
   if ("error" in folder) return folder;
@@ -133,7 +149,7 @@ export function replaceOrganizationSkill(
       ...(folder.files.length ? { files: folder.files.map((file) => file.path), filesSha256 } : {}) };
     (options.writeManifest ?? orgSkillStorage.writeManifest)(botId, manifest);
     published = true;
-    const switched = recoverOrganizationSkillLinks(botId);
+    const switched = recoverOrganizationSkillLinks(botId, stamp.key);
     return "error" in switched ? switched : { updated: true };
   } catch (error) {
     if (published) return { error: `the skill's links need recovery: ${error instanceof Error ? error.message : String(error)}`, retryable: true };

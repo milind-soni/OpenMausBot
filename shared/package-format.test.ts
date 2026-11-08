@@ -328,6 +328,9 @@ describe("portable skill companions", () => {
       { path: "../outside.sh", content: "echo no" },
       { path: "a\\b", content: "x" },
       { path: "AUX", content: "x" },
+      { path: "auth.json", content: "fixture" },
+      { path: "secrets/reference.md", content: "fixture" },
+      { path: "assets/private.key", binary: { base64: "AA==" } },
       { path: "assets/image.bin", binary: { base64: "AB==" } },
       { path: "assets/image.bin", binary: { base64: "SGVsbG8=" } },
       { path: "assets/image.bin", binary: { base64: "AA==" }, executable: true },
@@ -358,7 +361,7 @@ describe("portable skill companions", () => {
       expect(() => parsePackageDocument(doc)).toThrow();
     }
   });
-  it.each(["../escape.md", "/absolute.md", "x/../../escape.md", "x\\escape.md", ".hidden.md", "folder/.hidden/x.md", "CON.md", "skill.md", "x/a.txt", "x/", "x/one./two.md"]) (
+  it.each(["../escape.md", "/absolute.md", "x/../../escape.md", "x\\escape.md", ".hidden.md", "folder/.hidden/x.md", "CON.md", "skill.md", "x/a.txt", "x/", "x/one./two.md", "secrets/guide.md"]) (
     "refuses unsafe path %s", (path) => {
       const doc = bundle();
       doc.package.skills.entries[0].files = [{ path, content: "x" }];

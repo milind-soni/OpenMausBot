@@ -133,6 +133,7 @@ class InstallUpdate {
 
   bots(): void {
     const playbookByKey = new Map((this.pkg.playbooks ?? []).map((playbook) => [playbook.key, playbook]));
+    let deferred: (Error & { retryable?: boolean }) | undefined;
     for (const agent of this.pkg.agents) {
       const bot = this.deps.store.bot(this.install.bots[agent.key] ?? "");
       if (!bot?.packageBase) continue;
@@ -150,22 +151,33 @@ class InstallUpdate {
         else profile[part] = String(released[part]);
         base[part] = pair(released[part], part === "playbooks" ? playbookValues(playbooks ?? []) : released[part]);
       }
-      if (this.skills(bot, agent)) base.skills = pair(released.skills, released.skills);
+      const skillUpdate = this.skills(bot, agent);
+      if (skillUpdate.error) {
+        if (!deferred) deferred = skillUpdate.error;
+        else if (skillUpdate.error.retryable) deferred.retryable = true;
+        continue;
+      }
+      if (skillUpdate.changed) base.skills = pair(released.skills, released.skills);
       if (Object.keys(profile).length) this.deps.store.patchBotProfile(bot.id, profile);
       const installed = bot.installedPackage && { ...bot.installedPackage, release: this.pkg.release, sha256: this.sha256 };
       // The stamps go last: a part written before a crash and not yet stamped is kept, never written twice.
       this.deps.store.patchBot(bot.id, { ...(playbooks ? { playbooks } : {}), packageBase: base, ...(installed ? { installedPackage: installed } : {}) });
     }
+    if (deferred) throw deferred;
   }
 
   /** Each skill the publisher changed and the person did not gets the new text; a skill new in this release is added, but
    * never one the person took off. Whether a skill is on is the person's and stays. */
-  private skills(bot: BotRecord, agent: PackageAgent): boolean {
+  private skills(bot: BotRecord, agent: PackageAgent): { changed: boolean; error?: Error & { retryable?: boolean } } {
     const entries = new Map((this.pkg.skills?.entries ?? []).map((skill) => [skill.name, skill]));
     const stamped = new Map(this.deps.skills.stamps(bot.id).filter((skill) => skill.stamp.installId === this.installId).map((skill) => [skill.stamp.key, skill]));
     const before = this.previous?.package.agents.find((candidate) => candidate.key === agent.key)?.skills;
     const source = `org:${this.ref}@${this.pkg.release}`;
-    let changed = false;
+    let changed = false, deferred: (Error & { retryable?: boolean }) | undefined;
+    const noteError = (error: Error & { retryable?: boolean }) => {
+      if (!deferred) deferred = error;
+      else if (error.retryable) deferred.retryable = true;
+    };
     for (const name of agent.skills ?? []) {
       const skill = entries.get(name);
       if (!skill) continue;
@@ -173,18 +185,26 @@ class InstallUpdate {
       const stamp = { installId: this.installId, key: name, release: this.pkg.release, ...pair(value, value) };
       const have = stamped.get(name);
       if (have) {
+        const recovered = this.deps.skills.recoverOrg?.(bot.id, name);
+        if (recovered && "error" in recovered) {
+          noteError(Object.assign(new Error(`skill ${name} could not be synchronized: ${recovered.error}`), { retryable: true }));
+          continue;
+        }
         if (partHash(value) === have.stamp.r || !this.deps.skills.replaceOrg) continue;
         const result = this.deps.skills.replaceOrg(bot.id, source, skill, stamp, have.stamp);
         if ("stale" in result) continue;
-        if ("error" in result) throw Object.assign(new Error(`skill ${name} could not be updated: ${result.error}`), { retryable: result.retryable === true });
+        if ("error" in result) {
+          noteError(Object.assign(new Error(`skill ${name} could not be updated: ${result.error}`), { retryable: result.retryable === true }));
+          continue;
+        }
         changed = true;
       } else if (before && !before.includes(name) && !this.deps.skills.list(bot.id).some((listed) => listed.name === name)) {
         const added = this.deps.skills.installOrg(bot.id, source, skill.instructions, stamp, skill.files);
-        if ("error" in added) throw new Error(`skill ${name} could not be added: ${added.error}`);
+        if ("error" in added) { noteError(new Error(`skill ${name} could not be added: ${added.error}`)); continue; }
         changed = true;
       }
     }
-    return changed;
+    return { changed, ...(deferred ? { error: deferred } : {}) };
   }
 
   rooms(): void {

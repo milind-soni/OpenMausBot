@@ -30,7 +30,7 @@ function readSkillText(directory: string): string | null {
   } catch { return null; }
 }
 
-function hasExpectedContent(directory: string, expected: string): boolean {
+export function skillRootHasExpectedContent(directory: string, expected: string): boolean {
   const snapshot = snapshotPortableSkill(directory, () => readSkillText(directory));
   return Boolean(snapshot && !snapshot.skipped.length && partHash(skillReleaseValue(snapshot)) === expected);
 }
@@ -85,7 +85,7 @@ export function retireUnchangedSkillRoot(
   const parentId = parentState === "directory" ? skillRootIdentity(parent) : null;
   let justMoved = false;
   if (movedState === "missing") {
-    if (!parentId || skillRootIdentity(directory) !== retired.identity || !hasExpectedContent(directory, retired.hash)) return changed;
+    if (!parentId || skillRootIdentity(directory) !== retired.identity || !skillRootHasExpectedContent(directory, retired.hash)) return changed;
     if (directoryState(marker) !== "missing" && readReceipt() !== record) return recoveryError;
     try {
       // Persist the original identity before the move so a crash leaves an attributable recovery path.
@@ -105,7 +105,7 @@ export function retireUnchangedSkillRoot(
   if (stableIdentity(skillRootIdentity(moved)) !== stableIdentity(retired.identity) ||
     stableIdentity(skillRootIdentity(stateDir)) !== stableIdentity(stateId) ||
     stableIdentity(skillRootIdentity(quarantine)) !== stableIdentity(quarantineId) ||
-    readReceipt() !== record || !hasExpectedContent(moved, retired.hash)) {
+    readReceipt() !== record || !skillRootHasExpectedContent(moved, retired.hash)) {
     // A partial deletion cannot be re-verified; retain it for explicit recovery, never delete blindly.
     if (justMoved) restore();
     return recoveryError;

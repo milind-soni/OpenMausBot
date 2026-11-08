@@ -2,7 +2,8 @@ import { chmodSync, linkSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, write
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { portableSkillFilesFromMemory, readPortableSkillFiles, selectPortableFiles } from "./portable-skill-files.ts";
+import { portableFilesForDisk, portableSkillFilesFromMemory, readPortableSkillFiles, selectPortableFiles, snapshotPortableSkill } from "./portable-skill-files.ts";
+import { skillFolderDigest } from "./skill-folder.ts";
 
 const roots: string[] = [];
 const makeRoot = () => { const root = mkdtempSync(join(tmpdir(), "omb-portable-skill-")); roots.push(root); return root; };
@@ -33,6 +34,7 @@ it("reads bounded text, scripts and binary assets, and reports private files and
     { path: "bad.md", binary: { base64: "/w==" } },
     { path: "run.sh", content: "#!/bin/sh\necho fixture\n", ...(process.platform === "win32" ? {} : { executable: true }) },
   ]));
+  expect(result.files.map((file) => file.path)).not.toContain("auth.json");
   expect(selectPortableFiles(result.files, false).skipped).toEqual([{ path: "bad.md", reason: "skill_file_binary" }]);
   expect(selectPortableFiles(result.files, true).files).toEqual(result.files);
   expect(result.skipped).toEqual(expect.arrayContaining([
@@ -51,6 +53,37 @@ it("caps file counts and refuses traversal and collisions for fetched defaults",
   expect(result.skipped).toEqual(expect.arrayContaining([
     { path: "../outside.md", reason: "skill_file_unsafe" }, { path: "a.md", reason: "skill_file_limit" },
   ]));
+});
+
+it("accepts the largest schema-valid tree with distinct deep directories", () => {
+  const root = makeRoot();
+  writeFileSync(join(root, "SKILL.md"), "instructions");
+  for (let index = 0; index < 128; index++) {
+    const directory = join(root, `dir-${index}`, "a", "b", "c", "d", "e", "f");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "guide.txt"), "fixture");
+  }
+  const result = readPortableSkillFiles(root);
+  expect(result?.files).toHaveLength(128);
+  expect(result?.skipped).toEqual([]);
+});
+
+it("binds the captured bytes to review even if the disk is restored before verification", () => {
+  const root = makeRoot(), guide = join(root, "guide.md"), paths = ["guide.md", "auth.json"];
+  writeFileSync(join(root, "SKILL.md"), "instructions");
+  writeFileSync(guide, "reviewed"); writeFileSync(join(root, "auth.json"), "private fixture");
+  const expected = skillFolderDigest(root, paths, { remember: false });
+  const verify = (files: Parameters<typeof portableFilesForDisk>[0]) => skillFolderDigest(root, paths,
+    { captured: portableFilesForDisk(files), remember: false }) === expected;
+  const intact = snapshotPortableSkill(root, () => "instructions", paths, verify);
+  expect(intact?.files).toEqual([{ path: "guide.md", content: "reviewed" }]);
+  expect(intact?.skipped).toContainEqual({ path: "auth.json", reason: "skill_file_unsafe" });
+  writeFileSync(guide, "unreviewed");
+  const raced = snapshotPortableSkill(root, () => "instructions", paths, (files) => {
+    writeFileSync(guide, "reviewed");
+    return verify(files);
+  });
+  expect(raced).toBeNull();
 });
 
 it("reports invalid UTF-8 text from memory as a file type omission", () => {

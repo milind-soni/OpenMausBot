@@ -12,6 +12,36 @@ const FIXTURES = join(import.meta.dirname, "..", "shared", "package-fixtures");
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 const skill = (name: string) => `---\nname: ${name}\ndescription: ${name} steps.\n---\n\n# ${name}\n`;
 
+it("requires a fresh review when Markdown-only preset companions change", async () => {
+  const fixture = await launchVerificationServer();
+  const call = async (method: string, path: string, body?: unknown) => {
+    const response = await fetch(`${fixture.info.url}${path}`, { method, headers: { "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: response.status, body: await response.json() as any };
+  };
+  const setGuide = (content: string) => call("PATCH", "/api/config", { newBotDefaults: { skills: [{ name: "follow-up",
+    description: "follow-up steps.", source: "fixture", text: skill("follow-up"), enabled: true, warnings: [],
+    files: [{ path: "references/guide.md", content }] }] } });
+  try {
+    expect((await call("POST", "/api/bots", { name: "Preset reviewer", section: "Review desk", useDefaults: false })).status).toBe(201);
+    for (const body of [
+      { format: "package", version: 2, kind: "library", presetName: "Review preset" },
+      { format: "package", version: 2, team: "Review desk", includeDefaultsPreset: true, presetName: "Review preset" },
+    ]) {
+      expect((await setGuide("reviewed")).status).toBe(200);
+      const preview = await call("POST", "/api/teams/export", { ...body, dryRun: true });
+      expect(preview.body.document.package.skills.version).toBe(2);
+      expect(preview.body.skillReviewHash).toEqual(expect.any(String));
+      expect((await setGuide("changed after preview")).status).toBe(200);
+      const stale = await call("POST", "/api/teams/export", { ...body, reviewedSkillHash: preview.body.skillReviewHash });
+      expect(stale).toMatchObject({ status: 409, body: { code: "skill_preview_stale" } });
+      const fresh = await call("POST", "/api/teams/export", { ...body, dryRun: true });
+      expect(fresh.body.skillReviewHash).not.toBe(preview.body.skillReviewHash);
+      expect((await call("POST", "/api/teams/export", { ...body, reviewedSkillHash: fresh.body.skillReviewHash })).status).toBe(200);
+    }
+  } finally { await fixture.close(); }
+}, 120_000);
+
 it("shares New bot defaults as a preset, imports it, and creates bots from file and organization presets", async () => {
   const fixture = await launchVerificationServer();
   console.log(JSON.stringify({ fixture: fixture.info }));
