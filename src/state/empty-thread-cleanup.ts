@@ -1,9 +1,8 @@
 import type { Action, AppState, Bot } from "./store";
 
-type Leaving = Pick<AppState, "selectedId" | "activeView">;
+type Shown = Pick<AppState, "selectedId" | "activeView"> & { bots: Bot[] };
 
-/** Whether `action` moves the person away from the thread `state` is showing. */
-function leavesThread(state: Leaving & { bots: Bot[] }, action: Action): boolean {
+function leavesThread(state: Shown, action: Action): boolean {
   switch (action.type) {
     case "select": return action.id !== state.selectedId;
     case "switchTask": return action.botId !== state.selectedId || action.threadId !== state.bots.find((bot) => bot.id === action.botId)?.threadId;
@@ -13,17 +12,19 @@ function leavesThread(state: Leaving & { bots: Bot[] }, action: Action): boolean
   }
 }
 
-/** The thread to delete when `action` leaves it: one this client created that never got a message, draft or turn. */
-export function abandonedNewThread(
-  state: Leaving & { bots: Bot[] },
-  action: Action,
-  createdHere: ReadonlySet<string>,
-  hasDraft: (draftId: string) => boolean,
-): { botId: string; threadId: string } | null {
-  if (state.activeView !== "chat" || !leavesThread(state, action)) return null;
-  const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
-  if (!bot || bot.switchingTo !== undefined || bot.awaitingThreadSnapshot) return null;
-  const draftId = `bot:${bot.id}:${bot.threadId}`;
-  if (!createdHere.has(draftId) || bot.messages.length > 0 || bot.busy || hasDraft(draftId)) return null;
-  return { botId: bot.id, threadId: bot.threadId };
+const draftId = (bot: Pick<Bot, "id" | "threadId">) => `bot:${bot.id}:${bot.threadId}`;
+
+/** Deletes a thread this client created when the person leaves it with no message, draft, attachment or running turn. */
+export function createEmptyThreadCleanup(hasDraft: (draftId: string) => boolean) {
+  const createdHere = new Set<string>();
+  return {
+    created: (bot: Pick<Bot, "id" | "threadId">) => { createdHere.add(draftId(bot)); },
+    leave(state: Shown, action: Action, dispatch: (action: Action) => void): void {
+      const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
+      if (!bot || state.activeView !== "chat" || !leavesThread(state, action) || !createdHere.has(draftId(bot))) return;
+      if (bot.switchingTo !== undefined || bot.awaitingThreadSnapshot || bot.messages.length > 0 || bot.busy || hasDraft(draftId(bot))) return;
+      createdHere.delete(draftId(bot));
+      dispatch({ type: "deleteTask", botId: bot.id, threadId: bot.threadId, silent: true });
+    },
+  };
 }
