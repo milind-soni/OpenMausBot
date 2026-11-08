@@ -82,7 +82,6 @@ export function InboxPanel() {
           <InboxReading view={view} row={reading} now={now} position={at >= 0 ? { index: at, count: rows.length } : null} onStep={step} />
         ) : (
           <>
-            <h2 className="border-b border-hairline/40 px-3.5 py-2.5 text-[13px] font-medium text-ink">{t("inbox.panel.title")}</h2>
             <div className="min-h-0 flex-1 overflow-y-auto">
               <label className="m-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
                 <Search size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
@@ -91,7 +90,15 @@ export function InboxPanel() {
               </label>
               <div role="list" data-inbox-list aria-label={t("inbox.panel.title")} className="space-y-0.5 px-1.5 pb-1.5">
                 {rows.length === 0
-                  ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t(query.trim() && listedRows(view).length ? "inbox.noMatch" : "inbox.empty")}</p>
+                  ? query.trim() && listedRows(view).length
+                    ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.noMatch")}</p>
+                    : (
+                      <div data-inbox-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
+                        <Inbox size={22} strokeWidth={1.5} aria-hidden="true" className="text-ink-tertiary" />
+                        <p className="mt-3 text-[14px] font-medium text-ink">{t("inbox.empty")}</p>
+                        <p className="mt-1 text-[13px] leading-[18px] text-ink-tertiary">{t("inbox.emptyHint")}</p>
+                      </div>
+                    )
                   : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
               </div>
               {!query.trim() && <InboxActive view={view} />}

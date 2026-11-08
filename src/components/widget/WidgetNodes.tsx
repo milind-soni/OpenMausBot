@@ -57,7 +57,7 @@ export function WidgetNodeView({ node, where }: { node: WidgetNode; where: Widge
       const ink = INK[widgetString(node, "color") ?? ""];
       if (!(where.item && where.lead)) return <WidgetGlyph name={node.name} size={size} className={ink} />;
       return (
-        <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-inset group-hover/row:bg-composer group-aria-checked/row:bg-composer", ink ?? "text-ink-secondary")}>
+        <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-[8px] bg-inset group-hover/row:bg-composer group-aria-checked/row:bg-composer", ink ?? "text-ink-secondary")}>
           <WidgetGlyph name={node.name} size={size} />
         </span>
       );

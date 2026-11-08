@@ -68,12 +68,18 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
             <ChromeRailRow />
             <WindowFrameRow />
             <ColorUserBubblesRow simple />
-            <LanguageRow simple />
-            <SendKeyRow simple />
-            <FollowUpRow simple />
             <SettingRow title={t("settings.simple.looks.title")}>
               <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.looks.change")}</button>
             </SettingRow>
+          </SettingsRows>
+        </SettingsGroup>
+      )}
+      {has("appearance") && (
+        <SettingsGroup label={t("settings.simple.group.typing")}>
+          <SettingsRows>
+            <LanguageRow simple />
+            <SendKeyRow simple />
+            <FollowUpRow simple />
           </SettingsRows>
         </SettingsGroup>
       )}

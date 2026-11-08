@@ -12,7 +12,7 @@ export const roundButtonCls = `flex size-[34px] shrink-0 items-center justify-ce
 const titleCls = "text-[14px] font-medium text-ink";
 const hintCls = "mt-px text-[13px] leading-[1.35] text-ink-secondary";
 export const buttonCls =
-  "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[9px] bg-control px-3.5 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] bg-control px-3.5 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50";
 export const chipCls = (on: boolean) =>
   cn(
     "rounded-full px-2.5 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
@@ -30,7 +30,7 @@ export function CardLabel({ children, action }: { children: ReactNode; action?: 
 
 export function LabelAction({ children, onClick, ...rest }: { children: ReactNode; onClick: () => void; "aria-label"?: string; "data-panel-action"?: string }) {
   return (
-    <button type="button" {...rest} onClick={onClick} className="shrink-0 rounded-[5px] px-1 py-px text-[13px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink">
+    <button type="button" {...rest} onClick={onClick} className="shrink-0 rounded-[6px] px-1 py-px text-[13px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink">
       {children}
     </button>
   );
@@ -44,8 +44,8 @@ export function Card({ label, action, anchor, children }: { label?: ReactNode; a
       <div
         data-panel-card-surface=""
         className={cn(
-          "divide-y divide-ink/[0.05] overflow-hidden max-md:rounded-[20px] max-md:border-hairline max-md:bg-card",
-          advanced ? "rounded-[14px] border border-ink/[0.04] bg-ink/[0.03]" : "rounded-[12px] bg-composer ring-1 ring-inset ring-ink/[0.06] max-md:border max-md:ring-0",
+          "divide-y divide-ink/[0.05] overflow-hidden max-md:rounded-[16px] max-md:border-hairline max-md:bg-card",
+          advanced ? "rounded-[12px] border border-ink/[0.04] bg-ink/[0.03]" : "rounded-[12px] bg-composer ring-1 ring-inset ring-ink/[0.06] max-md:border max-md:ring-0",
         )}
       >
         {children}
@@ -317,7 +317,7 @@ export function PageHeader({ back, title, intro, onBack }: { back: string; title
         type="button"
         data-panel-back
         onClick={onBack}
-        className="mt-0.5 inline-flex items-center gap-0.5 rounded-[7px] py-1 pl-0.5 pr-2 text-[13px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
+        className="mt-0.5 inline-flex items-center gap-0.5 rounded-[8px] py-1 pl-0.5 pr-2 text-[13px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
       >
         <ChevronLeft size={15} aria-hidden="true" />
         <span>{back}</span>

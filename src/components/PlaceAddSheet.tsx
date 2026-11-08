@@ -122,7 +122,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
 function Choice({ icon, title, sub, onClick, kind }: { icon: ReactNode; title: string; sub: string; onClick: () => void; kind: string }) {
   return <button type="button" data-place-add-choice={kind} onClick={onClick}
     className="flex min-w-0 flex-1 flex-col items-start gap-2 rounded-2xl border border-hairline bg-card p-5 text-start transition-colors hover:border-accent/60 hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
-    <span aria-hidden="true" className="grid size-9 place-items-center rounded-[10px] bg-accent/12 text-accent-text">{icon}</span>
+    <span aria-hidden="true" className="grid size-9 place-items-center rounded-[8px] bg-accent/12 text-accent-text">{icon}</span>
     <span className="text-[15px] font-semibold text-ink">{title}</span>
     <span className="text-[13px] leading-snug text-ink-secondary">{sub}</span>
   </button>;

@@ -213,7 +213,7 @@
   /* .chat-column: fills a narrow pane, then stops at this width and centers, so wider windows only grow the gutters. */
   --chat-column-max: 60rem;
   /* Menus; a phone rounds them like its sheets. */
-  --radius-menu: 14px;
+  --radius-menu: 12px;
 }
 :root[data-chat-width="wide"] {
   --chat-bubble-max: 64rem;
@@ -297,15 +297,15 @@
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
   /* One radius scale, shared with Daylight. What takes which step: buttons
-     and pills full; menu rows 6; fields 8; sidebar rows 10; menus 12;
-     dialogs 14; a card inside a bubble 16; bubbles 18; the composer 22
-     (18 once it wraps); a card in the transcript 24; the window's panes 0. */
+     and pills full; keycaps, chips and menu rows 6; fields, controls and
+     sidebar rows 8; cards and menus 12; dialogs 16; bubbles and the cards in
+     the transcript 18; the composer 22 (18 once it wraps); the window's panes 0. */
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 12px;
-  --radius-2xl: 14px;
+  --radius-2xl: 16px;
   --radius-3xl: 16px;
   --radius-4xl: 18px;
   --identity-green: #009957;
@@ -767,7 +767,7 @@
   --color-control: #e3e3e3;       /* a chip on a card */
   /* 24% ink: whole, the firm line; at /50, the 12% line between surfaces. */
   --color-hairline: #1c1c1c3d;
-  --color-edge: #1c1c1c14;
+  --color-edge: #1c1c1c1f;
 
   --color-ink: #1c1c1c;
   --color-ink-secondary: #1c1c1cad;
@@ -801,7 +801,7 @@
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 12px;
-  --radius-2xl: 14px;
+  --radius-2xl: 16px;
   --radius-3xl: 16px;
   --radius-4xl: 18px;
   --identity-green: #00864c;
@@ -1010,8 +1010,12 @@
 .popover-surface {
   background-color: var(--color-menu);
 }
+/* Lucide draws at 2px by default, heavy beside Geist; one lighter stroke for every icon left at that default. */
+:where(svg.lucide[stroke-width="2"]) {
+  stroke-width: 1.75;
+}
 :root[data-skin="midnight"] .popover-surface {
-  box-shadow: none;
+  box-shadow: 0 14px 32px -10px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.35);
 }
 :root[data-skin="daylight"] .popover-surface {
   box-shadow: 0 10px 20px -3px rgb(28 28 28 / 0.1), 0 4px 6px -4px rgb(28 28 28 / 0.1);
@@ -1128,6 +1132,26 @@
 }
 [data-chat-bubble="simple"] .chat-md > * + * {
   margin-top: 10px;
+}
+[data-chat-bubble="simple"] .chat-md > * + .md-heading {
+  margin-top: 18px;
+}
+[data-chat-bubble="simple"] .chat-md > .md-heading:first-child {
+  margin-top: 0;
+}
+/* One reply's prose bubbles and table cards stack as one group: where two meet, their start corners tighten to 6px. */
+[data-reply-blocks] > * + * [data-table-card],
+[data-reply-blocks] > * + [data-chat-bubble] {
+  border-start-start-radius: 6px;
+}
+[data-reply-blocks] > :has(+ *) [data-table-card],
+[data-reply-blocks] > [data-chat-bubble]:has(+ *),
+[data-reply-blocks] > :has(+ *) > [data-chat-bubble] {
+  border-end-start-radius: 6px;
+}
+/* A short line keeps the tight chat bubble; a structured reply gets room to breathe. */
+[data-chat-bubble="simple"]:has(.chat-md > :is(.md-heading, ul, ol, blockquote), .chat-md pre) {
+  padding: 12px 16px;
 }
 /* A card under its own bot's bubble (and a bubble under its card) sits 12px below it, not the 16px between senders. */
 [data-simple-rows] > [data-tuck] > :first-child {

@@ -19,7 +19,7 @@ export const PRIMARY_WIDE = `${PRIMARY} ui-button-lg w-full`;
 export const QUIET_WIDE = `${QUIET} ui-button-lg w-full`;
 export const ACTIONS = "flex flex-wrap items-center justify-end gap-2";
 export const LINK = "rounded-sm text-[13px] font-medium text-ink underline decoration-ink/30 underline-offset-[3px] hover:decoration-ink disabled:opacity-50";
-export const FIELD = "h-9 w-full rounded-[10px] border border-ink/15 bg-transparent px-3 text-[14px] text-ink outline-none transition-[border-color] duration-150 placeholder:text-ink-tertiary disabled:opacity-60 motion-reduce:transition-none";
+export const FIELD = "h-9 w-full rounded-[8px] border border-ink/15 bg-transparent px-3 text-[14px] text-ink outline-none transition-[border-color] duration-150 placeholder:text-ink-tertiary disabled:opacity-60 motion-reduce:transition-none";
 const TAG = "inline-flex min-h-5 items-center gap-1 rounded-full bg-ink/[0.06] px-2 text-[12px] font-medium leading-4 text-ink-secondary";
 
 export function Heading({ title, sub }: { title: string; sub?: ReactNode }) {
@@ -71,7 +71,7 @@ export function ProgressBar({ value, label }: { value: number; label: string }) 
 /** A saved server's colour as the switcher draws it: a rounded tile with the Cloud mark. */
 export function CloudTile({ color, size = 22 }: { color: unknown; size?: number }) {
   return <span aria-hidden="true" style={{ width: size, height: size, background: cloudColorFill(color) }}
-    className="grid shrink-0 place-items-center rounded-[7px] text-white"><Cloud size={Math.round(size * 0.62)} strokeWidth={2.2} /></span>;
+    className="grid shrink-0 place-items-center rounded-[8px] text-white"><Cloud size={Math.round(size * 0.62)} strokeWidth={2.2} /></span>;
 }
 
 export function Badge({ children }: { children: ReactNode }) {

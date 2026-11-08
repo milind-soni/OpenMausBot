@@ -358,7 +358,7 @@ it("the window's own rail: drawn at every width, 36px wide with small rounded ti
   expect(nav.textContent, "no name under the place on screen: its tile's ring marks it").toBe("MCCAACBCCO");
   expect(host.querySelector('[data-rail-place="home"]')?.getAttribute("title")).toBe("My Cloud");
   expect(host.querySelector('[data-rail-place="home"] span[style]')?.getAttribute("style")).toContain("width: 24px; height: 24px; border-radius: 7px");
-  expect(host.querySelector("[data-rail-add]")?.className).toContain("size-6 place-items-center rounded-[7px]");
+  expect(host.querySelector("[data-rail-add]")?.className).toContain("size-6 place-items-center rounded-[8px]");
   expect(expand.mock.calls.at(-1)).toEqual([false]);
   await click(host.querySelector("[data-rail-add]"));
   expect(expand.mock.calls.at(-1), "＋'s sheet covers the window").toEqual([true]);

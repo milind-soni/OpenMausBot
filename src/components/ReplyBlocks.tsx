@@ -26,7 +26,7 @@ export function ReplyBlocks({ blocks, join, citation, tray, render }: {
     >
       {blocks.map((block, index) => {
         const body = block.kind === "table"
-          ? <div key={index} data-reply-table className="my-2 w-full max-w-[var(--chat-card-pct)] first:mt-0 last:mb-0">{render(block.text)}</div>
+          ? <div key={index} data-reply-table className="w-full max-w-[var(--chat-card-pct)]">{render(block.text)}</div>
           : (
             <div key={index} data-chat-bubble="simple" className={cn("w-fit", SIMPLE_BUBBLE_MAX, SIMPLE_BOT_BUBBLE,
               joinedCorners("start", { above: index === 0 && Boolean(join?.above), below: index === last && Boolean(join?.below) }))}>

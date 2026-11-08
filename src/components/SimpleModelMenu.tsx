@@ -164,10 +164,10 @@ function Thinking({ thinking, labelId }: { thinking: SimpleThinking; labelId: st
       <div className="flex h-6 items-end justify-between gap-2 px-2 pb-0.5">
         <span id={labelId} className="text-[12px] font-medium leading-4 text-ink-tertiary">{t("botSettings.simple.thinking")}</span>
         {(levels.current === undefined
-          ? <span title={t("model.simple.thinkingDefault")} className="text-[12px] leading-4 text-ink-tertiary">{t("model.effort.default")}</span>
+          ? null
           : (
             <button type="button" data-simple-effort-default onClick={levels.onReset} title={t("model.simple.thinkingDefault")}
-              className="-mr-1 rounded-[5px] px-1 text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
+              className="-mr-1 rounded-[6px] px-1 text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
               {t("model.simple.useDefault")}
             </button>
           ))}
@@ -192,6 +192,9 @@ function Thinking({ thinking, labelId }: { thinking: SimpleThinking; labelId: st
           </button>
         ))}
       </div>
+      {levels.current === undefined && (
+        <p data-simple-effort-auto className="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">{t("model.simple.thinkingDefault")}</p>
+      )}
     </div>
   );
 }

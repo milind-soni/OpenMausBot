@@ -10,7 +10,7 @@ import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerive
 import { BotConversations } from "./Conversations";
 import type { SimplePageId } from "./page-registry";
 import { TryAsking } from "./TryAsking";
-import { Card, NavRow, RowIcon, rowCls, RowText } from "./rows";
+import { buttonCls, Card, CardLabel, NavRow, RowIcon, rowCls, RowText } from "./rows";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
@@ -63,17 +63,18 @@ export function DetailsTab({ bot, derived, onOpen }: {
       <BotConversations bot={bot} />
 
       {derived.botRoutines.length === 0 ? (
-        <div data-panel-empty="routines" className="px-3 py-7 text-center text-[13px] leading-[18px] text-ink-tertiary">
-          <p>{t("botPanel.routines.empty")}</p>
+        <section data-panel-empty="routines">
+          <CardLabel>{t("botSettings.simple.routines")}</CardLabel>
+          <p className="mx-1 text-[13px] leading-[18px] text-ink-tertiary">{t("botPanel.routines.empty")}</p>
           <button
             type="button"
             data-panel-page="routines"
             onClick={() => onOpen("routines")}
-            className="mt-1.5 rounded-md px-1.5 py-0.5 text-[13px] font-medium text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
+            className={cn(buttonCls, "mx-1 mt-2.5")}
           >
             {t("botPanel.routines.add")}
           </button>
-        </div>
+        </section>
       ) : (
         <Card label={t("botSettings.simple.routines")} anchor="routines">
           <NavRow
