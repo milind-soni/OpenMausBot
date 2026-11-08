@@ -7222,6 +7222,7 @@
   "chat.page.open": "Abrir",
   "chat.page.unpublish": "Tirar do ar",
   "chat.page.unpublished": "Tirada do ar. O link não abre mais.",
+  "chat.page.uncertain": "Esta página pode estar no ar. Tire do ar para removê-la.",
   "chat.page.unpublishFailed": "Não foi possível tirar esta página do ar. Tente novamente em instantes.",
   "chat.page.freeLimit": "Você chegou ao limite de páginas grátis: {limit}. Com o MausBot Cloud, você tem mais páginas, sem o selo.",
   "chat.page.planLimit": "Você chegou ao limite de páginas do plano {plan}: {limit}. Tire uma página do ar para abrir espaço.",
