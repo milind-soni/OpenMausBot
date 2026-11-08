@@ -112,10 +112,10 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
 function LooksRow({ onLooks }: { onLooks: () => void }) {
   const choice = useSkinChoice();
   const current = SKINS.find((skin) => skin.id === resolveSkin(choice))?.name;
-  // A fixed theme needs no words: the control above already says Light or Dark.
-  const hint = choice === "system" ? t("settings.simple.themes.followHint") : undefined;
+  // A fixed theme is named under the label; Follow system says which it switches between.
+  const hint = choice === "system" ? t("settings.simple.themes.followHint") : current;
   return (
-    <SettingRow title={current ? `${t("settings.theme.title")} · ${current}` : t("settings.theme.title")} subtitle={hint}>
+    <SettingRow title={t("settings.theme.title")} subtitle={hint}>
       <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.themes.browse")}</button>
     </SettingRow>
   );

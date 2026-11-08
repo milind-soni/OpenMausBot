@@ -76,7 +76,7 @@ export function DetailsTab({ bot, derived, onOpen }: {
 
       {derived.botRoutines.length === 0 ? (
         <section data-panel-empty="routines">
-          <CardLabel action={<LabelAction data-panel-automations="" onClick={() => dispatch({ type: "showRoutines", view: "list" })}>{t("botPanel.routines.seeAll")}</LabelAction>}>
+          <CardLabel action={<LabelAction data-panel-automations="" onClick={() => dispatch({ type: "showRoutines", view: "list" })}>{t("sidebar.nav.automations")}</LabelAction>}>
             {t("botSettings.simple.routines")}
           </CardLabel>
           <button

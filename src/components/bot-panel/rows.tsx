@@ -13,8 +13,9 @@ const titleCls = "text-[14px] font-medium text-ink";
 const hintCls = "mt-px text-[13px] leading-[1.35] text-ink-secondary";
 export const buttonCls =
   "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] bg-control px-3.5 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50";
-/** The panel's one action row: New conversation, Add a routine. */
-export const panelActionCls = "flex h-9 min-w-0 items-center gap-2.5 rounded-full [&>svg]:size-4 bg-ink/[0.05] px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/[0.09]";
+/** The panel's action rows, New conversation and Add a routine: flat like every other row, so the only fill in the
+ * tab is the conversation you are in. */
+export const panelActionCls = "flex h-9 min-w-0 items-center gap-2.5 rounded-[8px] [&>svg]:size-4 px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/[0.04]";
 export const chipCls = (on: boolean) =>
   cn(
     "rounded-full px-2.5 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
@@ -32,8 +33,9 @@ export function CardLabel({ children, action }: { children: ReactNode; action?: 
 
 export function LabelAction({ children, onClick, ...rest }: { children: ReactNode; onClick: () => void; "aria-label"?: string; "data-panel-action"?: string; "data-panel-automations"?: string }) {
   return (
-    <button type="button" {...rest} onClick={onClick} className="shrink-0 rounded-[6px] px-1 py-px text-[13px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink">
+    <button type="button" {...rest} onClick={onClick} className="inline-flex shrink-0 items-center gap-0.5 rounded-[6px] px-1 py-px text-[13px] font-normal text-ink-secondary hover:bg-ink/[0.04] hover:text-ink">
       {children}
+      <ChevronRight size={12} aria-hidden="true" className="text-ink-tertiary rtl:-scale-x-100" />
     </button>
   );
 }

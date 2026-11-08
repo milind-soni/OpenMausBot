@@ -618,11 +618,11 @@ describe("the Details tab", () => {
     expect(switches(rendered.html)).toBe(0);
   });
 
-  it("offers Add a routine, which says what routines are, and All routines while the bot has none, and lists them once it has some", () => {
+  it("offers Add a routine, which says what routines are, and Automations while the bot has none, and lists them once it has some", () => {
     const empty = botTab(makeBot());
     expect(empty.html).toContain('data-panel-empty="routines"');
     expect(empty.html).toContain('title="Jobs this bot runs on a schedule, like a news roundup every morning."');
-    expect(empty.html).toMatch(/data-panel-automations=""[^>]*>All routines<\/button>/);
+    expect(empty.html).toMatch(/data-panel-automations=""[^>]*>Automations<svg/);
     expect(empty.html.match(/data-panel-page="routines"/g)).toHaveLength(1);
     const add = find(empty, "data-panel-page", "routines");
     expect(empty.html).toMatch(/data-panel-page="routines"[^>]*>.*<span class="truncate">Add a routine<\/span><\/button>/);
