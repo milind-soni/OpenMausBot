@@ -182,9 +182,7 @@ export function connectorAvailability(
 
 /** Only a Cloud home calls a missing service an outage: its managed service registers itself, so a missing one means the service is down. A desktop host without a key is missing setup the person can add in Settings. */
 export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
-
 export type ConnectorSetupHost = "desktop" | "cloud-home" | "server";
-
 export function connectorSetup(
   cfg: AppConfig,
   host: ConnectorSetupHost = "server",
