@@ -2795,7 +2795,6 @@ ipcMain.handle("credential-store:reset", localOnly("credential-store:reset", (ev
     return response === 0;
   },
   quitting: () => desktopShutdownStarted,
-  exists: () => fs.existsSync(CREDENTIALS_FILE),
   moveAside: () => fs.renameSync(CREDENTIALS_FILE, `${CREDENTIALS_FILE}.unreadable-${Date.now()}`),
   failed: async (error) => {
     slog(`saved keys reset failed: ${error?.message ?? error}`);

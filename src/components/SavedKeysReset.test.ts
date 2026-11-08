@@ -9,7 +9,7 @@ import { SavedKeysReset } from "./SavedKeysReset";
 
 let host: HTMLDivElement;
 let root: Root;
-let answer: () => void;
+let answer: (() => void) | undefined;
 const reset = vi.fn(() => new Promise<void>((resolve) => { answer = resolve; }));
 
 beforeEach(() => {
@@ -19,7 +19,9 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
 });
-afterEach(() => {
+afterEach(async () => {
+  // The open question is shared by every button, so settle it before the next test.
+  await act(async () => { answer?.(); });
   act(() => root.unmount());
   host.remove();
   delete (window as unknown as { ogb?: unknown }).ogb;
@@ -36,10 +38,22 @@ describe("Reset saved keys", () => {
     await act(async () => { button.click(); button.click(); });
     expect(reset).toHaveBeenCalledTimes(1);
     expect(button.disabled).toBe(true);
-    await act(async () => { answer(); });
+    await act(async () => { answer?.(); });
     expect(button.disabled).toBe(false);
     await act(async () => { button.click(); });
     expect(reset).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps waiting for the open question when the warning it sits in is swapped for another", async () => {
+    await act(async () => { root.render(createElement(SavedKeysReset, { key: "inside the stale warning" })); });
+    await act(async () => { (host.querySelector("button") as HTMLButtonElement).click(); });
+    await act(async () => { root.render(createElement(SavedKeysReset, { key: "own warning line", notice: true })); });
+    const replacement = host.querySelector("button") as HTMLButtonElement;
+    expect(replacement.disabled).toBe(true);
+    await act(async () => { replacement.click(); });
+    expect(reset).toHaveBeenCalledTimes(1);
+    await act(async () => { answer?.(); });
+    expect(replacement.disabled).toBe(false);
   });
 
   it("comes with its own warning line when there is no other notice to sit in", async () => {

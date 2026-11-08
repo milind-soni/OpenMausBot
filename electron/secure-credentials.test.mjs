@@ -72,7 +72,6 @@ describe("resetUnreadableCredentials", () => {
     unreadable: true,
     confirm: vi.fn(async () => true),
     quitting: () => false,
-    exists: () => true,
     moveAside: vi.fn(),
     failed: vi.fn(async () => {}),
     restart: vi.fn(),
@@ -117,9 +116,18 @@ describe("resetUnreadableCredentials", () => {
   });
 
   it("still restarts when the file is already gone", async () => {
-    const d = resetDeps({ exists: () => false });
+    const gone = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+    const d = resetDeps({ moveAside: vi.fn(() => { throw gone; }) });
     await expect(resetUnreadableCredentials(d)).resolves.toBe("reset");
-    expect(d.moveAside).not.toHaveBeenCalled();
+    expect(d.failed).not.toHaveBeenCalled();
     expect(d.restart).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a folder it can no longer read instead of restarting as if the file were gone", async () => {
+    const denied = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    const d = resetDeps({ moveAside: vi.fn(() => { throw denied; }) });
+    await expect(resetUnreadableCredentials(d)).resolves.toBe("failed");
+    expect(d.failed).toHaveBeenCalledWith(denied);
+    expect(d.restart).not.toHaveBeenCalled();
   });
 });

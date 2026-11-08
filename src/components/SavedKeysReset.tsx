@@ -1,8 +1,11 @@
 import { TriangleAlert } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { t } from "@/lib/i18n";
 import { savedKeysUnreadable } from "@/lib/saved-keys-reset";
+
+/** The desktop's open "Reset saved keys" question, shared by every button so a remounted one cannot ask again. */
+let asking: Promise<void> | null = null;
 
 /** "Reset saved keys", shown only when this app's desktop could not read its saved keys this launch. The desktop asks
  * the person before it moves the unreadable file aside and restarts; the button waits for that answer, so a second
@@ -10,24 +13,23 @@ import { savedKeysUnreadable } from "@/lib/saved-keys-reset";
  * warning to sit in. */
 export function SavedKeysReset({ notice = false }: { notice?: boolean }) {
   const [unreadable, setUnreadable] = useState(false);
-  const [pending, setPending] = useState(false);
-  const asking = useRef(false);
+  const [pending, setPending] = useState(() => asking !== null);
   useEffect(() => {
     let live = true;
     void savedKeysUnreadable().then((answer) => { if (live) setUnreadable(answer); });
+    // The warning this button sits in can be swapped for another while the question is open: the new button waits too.
+    void asking?.finally(() => { if (live) setPending(false); });
     return () => { live = false; };
   }, []);
   if (!unreadable) return null;
   const reset = () => {
-    if (asking.current) return;
-    asking.current = true;
+    if (asking) return;
     setPending(true);
-    void Promise.resolve(window.ogb?.credentialStore?.reset())
-      .catch(() => {})
-      .finally(() => {
-        asking.current = false;
-        setPending(false);
-      });
+    const request = Promise.resolve(window.ogb?.credentialStore?.reset()).then(() => {}, () => {});
+    asking = request.finally(() => {
+      asking = null;
+      setPending(false);
+    });
   };
   const button = (
     <button
