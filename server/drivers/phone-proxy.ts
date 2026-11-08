@@ -145,18 +145,19 @@ type Shell = (...command: string[]) => Promise<string>;
 const deviceShell = (serial: string): Shell => async (...command) => (await onDevice(serial, ["shell", ...command])).toString("utf8");
 
 export async function typePhoneText(shell: Shell, text: string): Promise<string> {
-  if (!text || text.length > 256) throw new Error("Android text must be 1 to 256 characters");
+  if (!text || [...text].length > 256) throw new Error("Android text must be 1 to 256 characters");
   if (SAFE_TEXT.test(text)) {
     await shell("input", "text", text.replaceAll(" ", "%s"));
-  } else {
-    if ((await shell("settings", "get", "secure", "default_input_method")).trim() !== ADB_KEYBOARD) {
-      throw new Error("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard. Ask the person to set it up, or type only those characters.");
-    }
-    // ADBKeyBoard reads msg as Base64 UTF-8; Base64 also keeps the text out of the device shell's syntax.
-    // -p delivers it to ADBKeyBoard alone, not to any other app listening for the action.
-    await shell("am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", Buffer.from(text, "utf8").toString("base64"));
+    return "Typed text into the focused Android field";
   }
-  return "Typed text into the focused Android field";
+  if ((await shell("settings", "get", "secure", "default_input_method")).trim() !== ADB_KEYBOARD) {
+    throw new Error("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard. Ask the person to set it up, or type only those characters.");
+  }
+  // ADBKeyBoard reads msg as Base64 UTF-8; Base64 also keeps the text out of the device shell's syntax.
+  // -p delivers it to ADBKeyBoard alone, not to any other app listening for the action.
+  await shell("am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", Buffer.from(text, "utf8").toString("base64"));
+  // ADBKeyBoard drops the text when no field has focus, and the broadcast reports success either way.
+  return "Sent the text to ADBKeyBoard. Use read_screen to check that it reached the field.";
 }
 
 function normalize(value: string) {
@@ -263,7 +264,7 @@ export const TOOLS = [
   { name: "read_screen", description: "Read visible text, accessibility labels, resource ids, and pixel bounds from the connected Android screen. Use after every action to verify the result.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
   { name: "screenshot", description: "Capture the connected Android screen when accessibility text is insufficient. Returns a PNG image.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
   { name: "list_apps", description: "List installed launchable Android package names, optionally filtered by a human app name. Prefer open_app first.", inputSchema: { type: "object", properties: { query: { type: "string" }, serial: { type: "string" } } } },
-  { name: "open_app", description: "Open an installed Android app directly by its human name, such as Uber or Skyscanner. Do not scan the app drawer first.", inputSchema: { type: "object", properties: { name: { type: "string" }, serial: { type: "string" } }, required: ["name"] } },
+  { name: "open_app", description: "Open an installed Android app directly by its English name, such as Uber or Skyscanner, or by its package name. Do not scan the app drawer first.", inputSchema: { type: "object", properties: { name: { type: "string" }, serial: { type: "string" } }, required: ["name"] } },
   { name: "tap_text", description: "Tap visible Android text or an accessibility label, then use read_screen to verify.", inputSchema: { type: "object", properties: { text: { type: "string" }, exact: { type: "boolean" }, index: { type: "integer", minimum: 0 }, serial: { type: "string" } }, required: ["text"] } },
   { name: "tap", description: "Tap Android screen pixel coordinates obtained from read_screen or screenshot.", inputSchema: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, serial: { type: "string" } }, required: ["x", "y"] } },
   { name: "swipe", description: "Swipe the Android screen in a direction, then use read_screen to verify.", inputSchema: { type: "object", properties: { direction: { type: "string", enum: ["up", "down", "left", "right"] }, serial: { type: "string" } }, required: ["direction"] } },

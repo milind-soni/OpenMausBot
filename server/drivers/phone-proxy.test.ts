@@ -54,6 +54,7 @@ emulator-5554 device product:sdk model:Emulator transport_id:6
 describe("phone MCP text input", () => {
   const ADB_KEYBOARD = "com.android.adbkeyboard/.AdbIME";
   const VENDOR_KEYBOARD = "com.baidu.input_huawei/.ImeService";
+  const SENT = "Sent the text to ADBKeyBoard. Use read_screen to check that it reached the field.";
   const device = (keyboard: string) => {
     const commands: string[][] = [];
     const shell = async (...command: string[]) => {
@@ -71,16 +72,16 @@ describe("phone MCP text input", () => {
 
   it("types any other text through ADBKeyBoard as Base64 UTF-8", async () => {
     const phone = device(ADB_KEYBOARD);
-    await expect(typePhoneText(phone.shell, "二手 iPad +86 😀")).resolves.toBe("Typed text into the focused Android field");
+    await expect(typePhoneText(phone.shell, "二手 iPad +86 😀")).resolves.toBe(SENT);
     expect(phone.commands).toEqual([
       ["settings", "get", "secure", "default_input_method"],
       ["am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", "5LqM5omLIGlQYWQgKzg2IPCfmIA="],
     ]);
   });
 
-  it("types up to 256 characters of other text", async () => {
+  it.each(["二".repeat(256), "😀".repeat(256)])("types up to 256 characters of other text, counting each emoji once", async (text) => {
     const phone = device(ADB_KEYBOARD);
-    await expect(typePhoneText(phone.shell, "二".repeat(256))).resolves.toBe("Typed text into the focused Android field");
+    await expect(typePhoneText(phone.shell, text)).resolves.toBe(SENT);
     expect(phone.commands.map((command) => command[0])).toEqual(["settings", "am"]);
   });
 
@@ -98,7 +99,7 @@ describe("phone MCP text input", () => {
     expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"]]);
   });
 
-  it.each(["", "a".repeat(257)])("refuses empty or over-long text without touching the phone", async (text) => {
+  it.each(["", "a".repeat(257), "😀".repeat(257)])("refuses empty or over-long text without touching the phone", async (text) => {
     const phone = device(ADB_KEYBOARD);
     await expect(typePhoneText(phone.shell, text)).rejects.toThrow("Android text must be 1 to 256 characters");
     expect(phone.commands).toEqual([]);
