@@ -153,7 +153,8 @@ export async function typePhoneText(shell: Shell, text: string): Promise<string>
       throw new Error("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard. Ask the person to set it up, or type only those characters.");
     }
     // ADBKeyBoard reads msg as Base64 UTF-8; Base64 also keeps the text out of the device shell's syntax.
-    await shell("am", "broadcast", "-a", "ADB_INPUT_B64", "--es", "msg", Buffer.from(text, "utf8").toString("base64"));
+    // -p delivers it to ADBKeyBoard alone, not to any other app listening for the action.
+    await shell("am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", Buffer.from(text, "utf8").toString("base64"));
   }
   return "Typed text into the focused Android field";
 }

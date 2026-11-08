@@ -35,6 +35,10 @@ emulator-5554 device product:sdk model:Emulator transport_id:6
     expect(launchTarget("com.taobao.idlefish", packages)).toBe("com.taobao.idlefish");
   });
 
+  it("keeps naming the candidates when an app name is ambiguous", () => {
+    expect(() => launchTarget("taobao", ["com.taobao.idlefish", "com.taobao.taobao"])).toThrow("App name is ambiguous: com.taobao.idlefish, com.taobao.taobao");
+  });
+
   it("offers keys that turn the screen on and off", () => {
     const press = TOOLS.find((tool) => tool.name === "press") as { inputSchema: { properties: { key: { enum: string[] } } } } | undefined;
     expect(press?.inputSchema.properties.key.enum).toEqual(expect.arrayContaining(["wakeup", "sleep"]));
@@ -70,8 +74,22 @@ describe("phone MCP text input", () => {
     await expect(typePhoneText(phone.shell, "二手 iPad +86 😀")).resolves.toBe("Typed text into the focused Android field");
     expect(phone.commands).toEqual([
       ["settings", "get", "secure", "default_input_method"],
-      ["am", "broadcast", "-a", "ADB_INPUT_B64", "--es", "msg", "5LqM5omLIGlQYWQgKzg2IPCfmIA="],
+      ["am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", "5LqM5omLIGlQYWQgKzg2IPCfmIA="],
     ]);
+  });
+
+  it("types up to 256 characters of other text", async () => {
+    const phone = device(ADB_KEYBOARD);
+    await expect(typePhoneText(phone.shell, "二".repeat(256))).resolves.toBe("Typed text into the focused Android field");
+    expect(phone.commands.map((command) => command[0])).toEqual(["settings", "am"]);
+  });
+
+  it.each(["iPad", "二手"])("reports a failed adb command instead of claiming it typed (%s)", async (text) => {
+    const shell = async (...command: string[]) => {
+      if (command[0] === "settings") return `${ADB_KEYBOARD}\n`;
+      throw new Error("error: closed");
+    };
+    await expect(typePhoneText(shell, text)).rejects.toThrow("error: closed");
   });
 
   it("asks for ADBKeyBoard and types nothing when another keyboard is chosen", async () => {
