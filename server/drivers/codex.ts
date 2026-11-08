@@ -26,7 +26,7 @@ export { chatgptPlanCodexArgs } from "./codex-plan-token.ts";
 import { captureCliTree, describeSpawnFailure, killCliTree, spawnCli, waitForExit } from "../procs.ts";
 import { cliVersionProbe } from "../cli-version-probe.ts";
 import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tryCodexLaunchSlot } from "./codex-process.ts";
-import { isReservedMcpEnvEntry } from "../mcp-registry.ts";
+import { perTurnCustomMcp } from "../mcp-registry.ts";
 
 import type {
   DriverCreateInput,
@@ -509,13 +509,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const stopSignal = new AbortController();
       const { threadId } = turn;
       const approvalMode: ApprovalMode = turn.approvalMode ?? (config.fullAuto ? "full" : "ask");
-      for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
-        if ("url" in server) continue;
-        const reserved = Object.entries(server.env).find(([key, value]) => isReservedMcpEnvEntry(key, value));
-        if (reserved) {
-          throw new Error(`Custom MCP server “${name}” cannot set reserved environment variable “${reserved[0]}”`);
-        }
-      }
+      turn = perTurnCustomMcp(turn);
       let autoAcceptPermissions = approvalMode === "full";
       const chatgptTurn = ownLogin &&
         decodeCodexSelection(turn.model || models.default).modelProvider === OFFICIAL_CODEX_PROVIDER;

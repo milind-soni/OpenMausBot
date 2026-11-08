@@ -213,7 +213,7 @@
   /* .chat-column: fills a narrow pane, then stops at this width and centers, so wider windows only grow the gutters. */
   --chat-column-max: 60rem;
   /* Menus; a phone rounds them like its sheets. */
-  --radius-menu: 14px;
+  --radius-menu: 12px;
 }
 :root[data-chat-width="wide"] {
   --chat-bubble-max: 64rem;
@@ -297,15 +297,15 @@
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
   /* One radius scale, shared with Daylight. What takes which step: buttons
-     and pills full; menu rows 6; fields 8; sidebar rows 10; menus 12;
-     dialogs 14; a card inside a bubble 16; bubbles 18; the composer 22
-     (18 once it wraps); a card in the transcript 24; the window's panes 0. */
+     and pills full; keycaps, chips and menu rows 6; fields, controls and
+     sidebar rows 8; cards and menus 12; dialogs 16; bubbles and the cards in
+     the transcript 18; the composer 22 (18 once it wraps); the window's panes 0. */
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 12px;
-  --radius-2xl: 14px;
+  --radius-2xl: 16px;
   --radius-3xl: 16px;
   --radius-4xl: 18px;
   --identity-green: #009957;
@@ -767,7 +767,7 @@
   --color-control: #e3e3e3;       /* a chip on a card */
   /* 24% ink: whole, the firm line; at /50, the 12% line between surfaces. */
   --color-hairline: #1c1c1c3d;
-  --color-edge: #1c1c1c14;
+  --color-edge: #1c1c1c1f;
 
   --color-ink: #1c1c1c;
   --color-ink-secondary: #1c1c1cad;
@@ -801,7 +801,7 @@
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 12px;
-  --radius-2xl: 14px;
+  --radius-2xl: 16px;
   --radius-3xl: 16px;
   --radius-4xl: 18px;
   --identity-green: #00864c;
@@ -1005,13 +1005,80 @@
   --identity-chrome: #B3BAC4;
 }
 
+[data-skin="aurora"] {
+  --code-color-scheme: dark;
+  --color-app: #0b0c0b;
+  --color-panel: #131413;
+  --color-frame: var(--color-panel);
+  --color-raised: #1d1f1d;
+  --color-raised-hover: #272a27;
+  --color-composer: #161816;
+  --color-composer-ring: #2c302c;
+  --color-card: #1a1c1a;
+  --color-menu: #1a1c1a;
+  --color-menu-hover: color-mix(in srgb, var(--color-raised) 70%, transparent);
+  --color-menu-active: var(--color-raised);
+  --color-inset: #151715;
+  --color-control: #242724;
+  --color-hairline: #343834;
+
+  --color-ink: #f2f5f2;
+  --color-ink-secondary: #f2f5f2a8;
+  --color-ink-tertiary: #f2f5f291;
+
+  --color-accent: #3ccf73;
+  --color-accent-border: #5ad98a;
+  --color-accent-text: #6ee69a;
+  --color-focus: #5ad98a;
+  --color-accent-ink: #04170b;
+  --color-bubble-user: #18432c;
+  --color-bubble-user-ink: #ecfff2;
+
+  --color-success: #4ade80;
+  --color-danger: #ff5f6d;
+  --color-danger-ink: #2a0508;
+  --color-success-ink: #052e16;
+  --color-warning: #f5a524;
+  --color-scrollbar: #343834;
+  --color-maus-line: #f2f5f2;
+
+  --color-edge: #f2f5f20f;
+
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", system-ui, sans-serif;
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 14px;
+  --radius-3xl: 16px;
+  --radius-4xl: 18px;
+  --identity-green: #009957;
+  --identity-blue: #377FE6;
+  --identity-red: #D94B52;
+  --identity-orange: #E78531;
+  --identity-purple: #8a65cd;
+  --identity-cyan: #0EA5C6;
+  --identity-pink: #D84F8B;
+  --identity-yellow: #D8A729;
+  --identity-teal: #01A492;
+  --identity-coral: #E5634E;
+  --identity-silver: #A8ADB4;
+  --identity-chrome: #B3BAC4;
+}
+
 /* Every popover and menu in the menu tone, flat in Midnight and on a soft lift in Daylight. A popover's rim is its
    border, never a ring, so clearing box-shadow leaves the rim. */
 .popover-surface {
   background-color: var(--color-menu);
 }
+/* Lucide draws at 2px by default, heavy beside Geist; one lighter stroke for every icon left at that default. */
+:where(svg.lucide[stroke-width="2"]) {
+  stroke-width: 1.75;
+}
 :root[data-skin="midnight"] .popover-surface {
-  box-shadow: none;
+  box-shadow: 0 14px 32px -10px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.35);
 }
 :root[data-skin="daylight"] .popover-surface {
   box-shadow: 0 10px 20px -3px rgb(28 28 28 / 0.1), 0 4px 6px -4px rgb(28 28 28 / 0.1);
@@ -1128,6 +1195,56 @@
 }
 [data-chat-bubble="simple"] .chat-md > * + * {
   margin-top: 10px;
+}
+/* No lone last word in a bubble or a reply's paragraphs. */
+[data-chat-bubble="simple"],
+.chat-md :is(p, li, blockquote) {
+  text-wrap: pretty;
+}
+[data-chat-bubble="simple"] .chat-md > * + .md-heading {
+  margin-top: 18px;
+}
+[data-chat-bubble="simple"] .chat-md > .md-heading:first-child {
+  margin-top: 0;
+}
+/* A short line keeps the tight chat bubble; a structured reply gets room to breathe. */
+[data-chat-bubble="simple"]:has(> .chat-md > :is(.md-heading, ul, ol, blockquote), > .chat-md pre),
+[data-reply-bubble] {
+  padding: 12px 16px;
+}
+/* A table inside a reply is drawn in lines on the bubble, not as another grey box: a hairline edge, a faint header. */
+[data-reply-bubble] [data-table-card] {
+  width: 100%;
+  border-radius: 12px;
+  background: transparent;
+  /* An outline, not a border or inset shadow, so the header's fill can't paint over the top edge. */
+  outline: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+  outline-offset: -1px;
+}
+/* A code block in a reply is drawn the same way, so the reply's inset blocks speak one language. */
+/* The resting grey logos blend into the pill, so a favicon's own white disc or box drops out and only its mark is
+   left (Google's G read as ©): multiply on light skins, invert + screen on dark. In base, so hover utilities win. */
+@layer base {
+  [data-app-faces] { mix-blend-mode: multiply; }
+  @container style(--code-color-scheme: dark) {
+    [data-app-faces] { --tw-invert: invert(100%); mix-blend-mode: screen; }
+  }
+}
+
+[data-reply-bubble] .chat-code-block {
+  background: color-mix(in srgb, var(--color-card), var(--color-ink) 3%);
+  outline: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+  outline-offset: -1px;
+}
+[data-reply-bubble] [data-table-card] thead {
+  background: color-mix(in srgb, var(--color-card), var(--color-ink) 4%);
+}
+:root[data-skin="daylight"] [data-reply-bubble] [data-table-card] thead {
+  background: color-mix(in srgb, var(--color-card), var(--color-ink) 3%);
+}
+/* A section that opens right after a table keeps the space a heading gets elsewhere in the reply. */
+[data-reply-bubble] > [data-reply-table] + * .chat-md > .md-heading:first-child {
+  margin-top: 6px;
 }
 /* A card under its own bot's bubble (and a bubble under its card) sits 12px below it, not the 16px between senders. */
 [data-simple-rows] > [data-tuck] > :first-child {
@@ -1539,17 +1656,44 @@ body {
   border-color: var(--settings-edge);
 }
 :root[data-skin="midnight"] [data-settings-look] > .glass-scrim {
-  background: rgb(0 0 0 / 0.7);
+  background: rgb(0 0 0 / 0.55);
 }
 :root[data-skin="daylight"] [data-settings-look] > .glass-scrim {
-  background: rgb(0 0 0 / 0.5);
+  background: rgb(0 0 0 / 0.18);
+}
+/* Settings fades its bottom edge only while more lies below: the fade rides the pane's own scroll, so it is absent
+   when nothing scrolls and gone once the end is reached. */
+@property --settings-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes settings-fade {
+  0%, 94% { --settings-fade: 10px; }
+  100% { --settings-fade: 0px; }
+}
+/* A thin thumb that stays visible, so a long Settings page shows it goes on. */
+.settings-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+@supports (animation-timeline: scroll()) {
+  .settings-scroll {
+    mask-image: linear-gradient(to bottom, #000 calc(100% - var(--settings-fade)), transparent);
+    animation: settings-fade linear both;
+    animation-timeline: scroll(self);
+  }
+}
+/* Over a light scrim the sheet needs its own lift. */
+:root[data-skin="daylight"] [data-settings-look] .glass-surface {
+  box-shadow: 0 24px 64px -16px rgb(28 28 28 / 0.28), 0 2px 8px rgb(28 28 28 / 0.06);
 }
 @media (min-width: 768px) {
   .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] {
     padding: 48px 16px;
   }
   .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup {
-    width: min(900px, 100%);
+    width: min(860px, 100%);
     height: min(700px, 100%);
     border-radius: 12px;
   }
@@ -2815,6 +2959,53 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   }
 }
 
+/* Fixed to the window, so the band runs on unbroken from one pane to the next. Its dots are drawn at one CSS pixel
+   each, so the field scales up pixelated; the pane's contents scale as usual. */
+@scope ([data-skin="aurora"]:not([data-skin-preview])) to ([data-skin]) {
+  main.bg-app {
+    background-image: var(--aurora-field, none);
+    background-size: var(--aurora-field-size, cover);
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    image-rendering: pixelated;
+  }
+  main.bg-app > * {
+    image-rendering: auto;
+  }
+}
+
+@media (prefers-reduced-transparency: no-preference) and (forced-colors: none) {
+  @scope ([data-skin="aurora"]:not([data-skin-preview])) to ([data-skin]) {
+    main.bg-app :is(.bg-card, .bg-composer, .bg-bubble-user) {
+      -webkit-backdrop-filter: blur(28px) saturate(150%);
+      backdrop-filter: blur(28px) saturate(150%);
+    }
+    main.bg-app .glass-bar[data-glass-fade]::before,
+    main.bg-app [data-composer-backdrop] {
+      background: color-mix(in srgb, var(--color-app) 35%, transparent);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      backdrop-filter: blur(20px) saturate(140%);
+    }
+    main.bg-app .glass-bar[data-glass-fade]::before {
+      mask-image: linear-gradient(to bottom, black 40%, transparent);
+    }
+    main.bg-app [data-composer-backdrop] {
+      mask-image: linear-gradient(to bottom, transparent, black 20px);
+    }
+  }
+  /* In Tailwind's own layer, at a utility's weight, so hover and expanded fills still win over the glass. */
+  @layer utilities {
+    @scope ([data-skin="aurora"]:not([data-skin-preview])) to ([data-skin]) {
+      :where(main.bg-app) :is(.bg-card, .bg-composer) {
+        background-color: color-mix(in srgb, var(--color-card) 62%, transparent);
+      }
+      :where(main.bg-app) .bg-bubble-user {
+        background-color: color-mix(in srgb, var(--color-bubble-user) 78%, transparent);
+      }
+    }
+  }
+}
+
 /* Disabled buttons.
    Upstream fades them with `disabled:opacity-40`. On a dark ground that holds:
    the button stays darker than the page and the white label survives. On a
@@ -2965,9 +3156,9 @@ button:disabled.bg-danger {
   outline-offset: -1.5px;
 }
 :root,
-:is([data-skin="midnight"], [data-skin="foundry"], [data-skin="graphite"], [data-skin="dusk"], [data-skin="halloween"]) {
+:is([data-skin="midnight"], [data-skin="foundry"], [data-skin="graphite"], [data-skin="dusk"], [data-skin="halloween"], [data-skin="aurora"]) {
   --radius-menu: 12px;
-  --menu-shadow: 0 0 #0000;
+  --menu-shadow: 0 14px 32px -10px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.35);
 }
 :is([data-skin="atelier"], [data-skin="lagoon"], [data-skin="linen"], [data-skin="meadow"], [data-skin="pop"]) {
   --menu-shadow: 0 8px 24px -6px rgb(0 0 0 / 0.12), 0 1px 2px rgb(0 0 0 / 0.04);

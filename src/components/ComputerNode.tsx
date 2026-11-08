@@ -43,7 +43,7 @@ export const ComputerNode = memo(function ComputerNode({ computer, bots, frameUr
     <button type="button" onClick={onOpen} disabled={!onOpen} title={activity ? `${name} · ${activity}` : name}
       aria-label={t("mapComputer.open", { name, state: t(STATE_LABEL[state]) })}
       className="relative flex size-full flex-col rounded-[18px] border border-white/10 bg-[#0f1117] p-2 text-left shadow-[0_10px_30px_rgba(0,0,0,0.35)] outline-none transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-default">
-      <span className="relative block h-[160px] w-full overflow-hidden rounded-[10px] bg-[#06070b] [contain:paint]">
+      <span className="relative block h-[160px] w-full overflow-hidden rounded-[8px] bg-[#06070b] [contain:paint]">
         {frameUrl
           ? <img src={frameUrl} alt="" draggable={false} decoding="async" className={cn("size-full object-cover", state === "asleep" || state === "off" ? "opacity-40 grayscale" : "")} />
           : <span className="flex size-full flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_40%,#1b2030,#06070b_70%)] text-[11px] text-white/45">

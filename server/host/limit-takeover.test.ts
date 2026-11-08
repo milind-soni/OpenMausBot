@@ -130,6 +130,16 @@ describe("a model's own limit", () => {
     now.at = NOW + UNNAMED_LIMIT_MS + 1;
     expect(instance.modelHeld(on("claude", "claude-sonnet-5"))).toBeNull();
   });
+
+  it("holds every model one shared allowance covers", () => {
+    const { instance } = takeover();
+    instance.noteRuntimeEvent("kai", on("claude", "claude-opus-5-5"),
+      { ...error("model", NOW + 2 * HOUR), limitModels: ["claude-opus-5-5", "claude-sonnet-5"] } as RuntimeEvent);
+    expect(instance.modelHeld(on("claude", "claude-opus-5-5"))).toEqual({ until: NOW + 2 * HOUR, resetsAt: NOW + 2 * HOUR, scope: "model" });
+    expect(instance.modelHeld(on("claude", "claude-sonnet-5")), "the same allowance holds it too")
+      .toEqual({ until: NOW + 2 * HOUR, resetsAt: NOW + 2 * HOUR, scope: "model" });
+    expect(instance.modelHeld(on("codex", "gpt-6")), "another AI is untouched").toBeNull();
+  });
 });
 
 describe("what the person hears", () => {

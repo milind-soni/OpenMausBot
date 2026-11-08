@@ -90,11 +90,18 @@ describe("skins", () => {
     expect(css).toMatch(/@scope \(\[data-skin="pop"\]:not\(\[data-skin-preview\]\)\) to \(\[data-skin\]\)/);
   });
 
-  it("adds Halloween last, dark, with its atmosphere kept off the picker miniature", () => {
-    expect(SKIN_IDS.at(-1)).toBe("halloween");
+  it("adds Halloween after Pop, dark, with its atmosphere kept off the picker miniature", () => {
+    expect(SKIN_IDS[10]).toBe("halloween");
     expect(SKINS.find((s) => s.id === "halloween")?.name).toBe("Halloween");
     expect(css).toMatch(/@scope \(\[data-skin="halloween"\]:not\(\[data-skin-preview\]\)\) to \(\[data-skin\]\)\s*\{\s*main\.bg-app\s*\{/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\[data-skin="halloween"\] main\.bg-app::before/);
+  });
+
+  it("adds Aurora last, dark, with its light field kept off the picker miniature", () => {
+    expect(SKIN_IDS.at(-1)).toBe("aurora");
+    expect(SKINS.find((s) => s.id === "aurora")?.name).toBe("Aurora");
+    expect(css).toMatch(/\[data-skin="aurora"\] \{[^}]*--code-color-scheme: dark;/);
+    expect(css).toMatch(/@scope \(\[data-skin="aurora"\]:not\(\[data-skin-preview\]\)\) to \(\[data-skin\]\)\s*\{\s*main\.bg-app\s*\{/);
   });
 
   it("describes each skin exactly once", () => {

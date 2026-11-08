@@ -197,7 +197,7 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
 
 const POPOVER_WIDTH = 420;
 const POPOVER_HEIGHT = 600;
-export const SIMPLE_POPOVER_WIDTH = 300;
+export const SIMPLE_POPOVER_WIDTH = 324;
 const MENU_ITSELF = ":scope";
 
 export function ModelPicker({
@@ -440,7 +440,7 @@ export function ModelPicker({
   const follows = threadId ? profile.tasks?.find((task) => task.threadId === threadId)?.followsBotModel : undefined;
   const botModelInstance = state.instances.find((instance) => instance.instanceId === profile.modelSelection.instanceId);
   const botModelName = botModelInstance ? `${engineDisplayName(botModelInstance)} · ${modelLabel(botModelInstance, profile.modelSelection.model)}${variantSuffix(botModelInstance, profile.modelSelection.model, profile.modelSelection.variant)}` : profile.modelSelection.model;
-  const busyUpdatesBotDefault = Boolean(threadId) && (simpleView ? simpleUpdatesBotDefault : scope === "bot")
+  const busyUpdatesBotDefault = Boolean(threadId) && simpleUpdatesBotDefault && (simpleView || scope === "bot")
     && bot.modelSelection.instanceId === profile.modelSelection.instanceId && bot.modelSelection.model === profile.modelSelection.model;
   const ownModelThreads = threadsOnOwnModel(profile.modelSelection, profile.tasks ?? []).length;
 
@@ -466,7 +466,7 @@ export function ModelPicker({
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
     if (variant !== undefined) nextSelection.variant = variant;
-    const updateBotDefault = !threadId || (simpleView ? simpleUpdatesBotDefault : scope === "bot");
+    const updateBotDefault = !threadId || (simpleUpdatesBotDefault && (simpleView || scope === "bot"));
     const targets = [currentTaskBot(profile, threadId ?? bot.threadId), ...(updateBotDefault ? [profile] : [])];
     if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
       state.instances.find((candidate) => candidate.instanceId === target.modelSelection.instanceId)?.driverKind,
@@ -653,7 +653,7 @@ export function ModelPicker({
       className={cn(
         "group flex items-center rounded-full text-[13px] leading-[18px] text-ink-secondary disabled:cursor-not-allowed disabled:text-ink-tertiary",
         contained
-          ? "min-w-0 max-w-[58%] transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:hover:bg-transparent"
+          ? "min-w-0 max-w-[72%] transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:hover:bg-transparent"
           : cn("shrink-0", ELEVATED_FLOAT, ELEVATED_HOVER, "hover:text-ink aria-expanded:text-ink disabled:hover:bg-composer"),
         size === "sm" ? "h-7 pl-2 pr-1.5" : "h-8 pl-2.5 pr-2",
       )}
@@ -664,7 +664,7 @@ export function ModelPicker({
           : <span className="size-3.5 rounded-full bg-ink/[0.08]" aria-hidden="true" />}
         {attention && <span data-model-attention className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-warning ring-[1.5px] ring-app" />}
       </span>
-      <span className="min-w-0 max-w-[160px] truncate">{modelName(active, selection.model)}</span>
+      <span className={cn("min-w-0 truncate", !contained && "max-w-[160px]")}>{modelName(active, selection.model)}</span>
       {selection.variant !== undefined && <span className="shrink-0 whitespace-pre">{variantSuffix(active, selection.model, selection.variant)}</span>}
       <UsageBars engine={selection.instanceId} className="ml-1.5" />
       <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="ml-1 shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />
@@ -675,7 +675,7 @@ export function ModelPicker({
     instances,
     listed: pickerInstances,
     selection,
-    bot: { name: profile.name, selection: profile.modelSelection, follows },
+    bot: { name: profile.name, selection: profile.modelSelection, follows }, updatesBotDefault: !threadId || simpleUpdatesBotDefault,
     query,
     expanded,
     probing,
@@ -701,7 +701,7 @@ export function ModelPicker({
           onAddApiKeys={remote ? undefined : openApiKeys} />}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-          {threadId && (
+          {threadId && simpleUpdatesBotDefault && (
             <div className="shrink-0 border-b-[0.5px] border-ink/10 px-3.5 py-2">
               <div role="group" aria-label={t("model.scope.label")} className="flex gap-1">
                 {(["thread", "bot"] as const).map((value) => (
@@ -886,7 +886,7 @@ export function ModelPicker({
                   compact
                   bot={shown}
                   threadId={threadId}
-                  updateBotDefault={Boolean(threadId && scope === "bot")}
+                  updateBotDefault={Boolean(threadId && simpleUpdatesBotDefault && scope === "bot")}
                   className="shrink-0 border-t-[0.5px] border-ink/10 px-3.5 py-[5px]"
                   label={<span className="text-[13px] leading-[18px] text-ink">{active?.capabilities?.modelVariants ? t("model.simple.reasoning") : t("model.section.effort")}</span>}
                 />
