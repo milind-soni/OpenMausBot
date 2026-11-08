@@ -146,14 +146,17 @@ export function describePageChange(before: PageState, after: PageState): string 
   ].filter(Boolean).join(" ") + title;
 }
 
-/** agent-browser prints a failed Chrome launch's stderr after this line. */
-const CHROME_STDERR = "Chrome stderr:";
+/** agent-browser's own error when the Chrome it launched dies before DevTools is up. */
+const LAUNCH_FAILURE = "Chrome exited early (exit code:";
+/** agent-browser prints that launch's stderr after this line ("Chrome stderr:" or "Chrome stderr (last N lines):"). */
+const CHROME_STDERR = /^Chrome stderr(?: \(last \d+ lines\))?:$/m;
 const MAX_LIBRARY_NAME = 120;
 
 /** The library a failed Chrome launch's own stderr names, not one a page's text merely quotes. */
 function launchMissingLibrary(text: string): string | undefined {
-  const stderr = text.indexOf(CHROME_STDERR);
-  const library = stderr < 0 ? undefined : loaderMissingLibrary(text.slice(stderr));
+  if (!text.trimStart().startsWith(LAUNCH_FAILURE)) return undefined;
+  const stderr = CHROME_STDERR.exec(text);
+  const library = stderr ? loaderMissingLibrary(text.slice(stderr.index)) : undefined;
   return library && library.length > MAX_LIBRARY_NAME ? `${library.slice(0, MAX_LIBRARY_NAME)}…` : library;
 }
 
@@ -172,10 +175,11 @@ export function shapeBrowserToolResult(result: unknown, options: { toolName?: st
   if (!textParts) return { ...result, content };
   // agent-browser launches Chrome itself, so a host missing system libraries
   // only shows the loader's words; say how to install them, as our own launch does.
-  // The advice joins the first text part: some MCP clients show only that one.
+  // The advice leads the first text part: some MCP clients show only that one,
+  // and a long stderr can be cut off at the end.
   if (library) {
     const first = content.find((part): part is { text: string } => isRecord(part) && part.type === "text" && typeof part.text === "string");
-    if (first) first.text += `\n\n${new BrowserHostError("libraries", [library]).message}`;
+    if (first) first.text = `${new BrowserHostError("libraries", [library]).message}\n\n${first.text}`;
   }
   return { ...Object.fromEntries(Object.entries(result).filter(([key]) => key !== "structuredContent")), content };
 }

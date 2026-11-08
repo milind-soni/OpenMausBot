@@ -83,12 +83,18 @@ describe("browser tool shaping", () => {
       const shaped = shape({ content: [{ type: "text", text: launch }], isError: true });
       expect(shaped.isError).toBe(true);
       expect(shaped.content).toHaveLength(1);
-      expect(shaped.content[0].text.startsWith(launch)).toBe(true);
+      // the advice comes first, so a client that cuts a long stderr short still shows it
+      expect(shaped.content[0].text.startsWith("This host is missing libraries the browser needs (libatk-1.0.so.0)")).toBe(true);
+      expect(shaped.content[0].text.endsWith(launch)).toBe(true);
       expect(shaped.content[0].text).toContain("missing libraries the browser needs (libatk-1.0.so.0)");
+      // agent-browser's longer-stderr form of the marker counts too
+      expect(shape({ content: [{ type: "text", text: launch.replace("Chrome stderr:", "Chrome stderr (last 20 lines):") }], isError: true }).content[0].text).toContain("--with-deps");
       expect(shaped.content[0].text).toContain("`sudo openmausbot browser install --with-deps`");
       // a page that merely mentions the loader's words, or another failure, gets no install advice
       const echoed = "Error: page script failed: /usr/bin/app: error while loading shared libraries: libfoo.so.1: cannot open shared object file";
-      for (const result of [{ content: [{ type: "text", text: launch }] }, { content: [{ type: "text", text: "Chrome exited early (exit code: 1)" }], isError: true }, { content: [{ type: "text", text: echoed }], isError: true }]) {
+      // a page error that quotes a whole launch error, marker included, did not come from our launch
+      const quotedLaunch = `Error: page script failed: ${launch}`;
+      for (const result of [{ content: [{ type: "text", text: launch }] }, { content: [{ type: "text", text: "Chrome exited early (exit code: 1)" }], isError: true }, { content: [{ type: "text", text: echoed }], isError: true }, { content: [{ type: "text", text: quotedLaunch }], isError: true }]) {
         expect(shape(result).content).toEqual(result.content);
       }
       // an absurdly long library name is cut short
