@@ -154,7 +154,7 @@ test("the rail's channels: the list only for the rail's own page, a circle only 
   assert.deepEqual(r.sent.slice(2), ["page:workspaces:changed", "rail:workspaces:changed"], "the rail came beside the page (or went): the page reads it again");
 });
 
-test("Settings → Servers on this computer's own page looks a server up and connects to it; a page main doesn't vouch for can't (#4846)", () => {
+test("Settings → Servers on this computer's own page looks a server up and connects to it; a page main doesn't vouch for can't", () => {
   const r = rail();
   r.w.lists = false;
   r.call("workspaces:probe", " 192.168.1.20:8799 ", " abcd-efgh-jklm ");
