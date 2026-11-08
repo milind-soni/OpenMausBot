@@ -1595,7 +1595,7 @@ body {
   initial-value: 0px;
 }
 @keyframes settings-fade {
-  0%, 94% { --settings-fade: 20px; }
+  0%, 94% { --settings-fade: 10px; }
   100% { --settings-fade: 0px; }
 }
 /* A thin thumb that stays visible, so a long Settings page shows it goes on. */
