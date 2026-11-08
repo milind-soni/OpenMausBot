@@ -438,7 +438,8 @@ const support: AcpSupport = {
         if (!Array.isArray(catalog?.servers)) throw new Error("Grok could not confirm its MCP catalog. No prompt was sent.");
         for (const server of catalog.servers) {
           if (server?.session?.enabled === false) continue;
-          if (!available.has(server?.name)) throw new Error("Grok has an MCP connection outside the bot's selection. Disable native MCP connections before using tool selection. No prompt was sent.");
+          if (!available.has(server?.name)) throw new Error("Grok has an MCP connection outside the bot's selection. Remove the MCP servers from Grok's own settings, "
+            + "or set Tool selection back to all tools in this bot's settings (Access). No prompt was sent.");
           if (Array.isArray(server?.session?.tools) && server.session.tools.some((tool: { name?: unknown }) => typeof tool.name !== "string" || !allowsTool(turn.toolScope, { kind: "mcp", server: server.name, name: tool.name }))) {
             throw new Error("Grok could not enforce the selected MCP catalog. No prompt was sent.");
           }
