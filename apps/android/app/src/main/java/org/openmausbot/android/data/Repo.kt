@@ -179,6 +179,7 @@ object Repo {
         val descriptor = target.e2e
         scope.launch {
             var established: E2EConnection? = null
+            var plainHealth: JSONObject? = null
             try {
                 val api = if (descriptor != null) {
                     connection = connection.copy(detail = "正在建立端到端加密…")
@@ -186,17 +187,19 @@ object Repo {
                         E2EClient(
                             descriptor = descriptor,
                             credential = target.token,
-                            origins = (listOf(target.baseUrl) + target.endpoints).distinct(),
+                            origins = (target.endpoints + target.baseUrl).distinct(),
                         ).connect()
                     }
                     established = live
                     activeE2E = live
                     ApiClient(live.baseUrl, target.token, live.headerName, live.headerValue)
                 } else {
-                    ApiClient(target.baseUrl, target.token)
+                    val link = withContext(Dispatchers.IO) { openPlain(target) }
+                    plainHealth = link.health
+                    link.api
                 }
                 client = api
-                val health = withContext(Dispatchers.IO) { api.health() }
+                val health = plainHealth ?: withContext(Dispatchers.IO) { api.health() }
                 connection = connection.copy(
                     phase = ConnectionState.Phase.CONNECTING,
                     detail = health.optString("name", target.serverName),
@@ -227,6 +230,28 @@ object Repo {
                 connecting.set(false)
             }
         }
+    }
+
+    private data class PlainLink(val api: ApiClient, val health: JSONObject)
+
+    /** Saved LAN endpoints win over the pairing URL: a phone that comes back
+     *  to the same network must not keep retrying an expired public tunnel. */
+    private fun openPlain(target: PairedComputer): PlainLink {
+        val candidates = (target.endpoints + target.baseUrl)
+            .filter { it.isNotBlank() }
+            .distinct()
+        var last: Exception? = null
+        for (url in candidates) {
+            try {
+                val probe = ApiClient(url, target.token, connectTimeoutMs = 4_000, readTimeoutMs = 5_000)
+                val health = probe.health()
+                if (health.optString("app") != "openmausbot") throw java.io.IOException("不是 OpenMausBot")
+                return PlainLink(ApiClient(url, target.token), health)
+            } catch (e: Exception) {
+                last = e
+            }
+        }
+        throw last ?: java.io.IOException("没有可用的电脑地址")
     }
 
     private fun startStream(api: ApiClient, cursor: String?) {

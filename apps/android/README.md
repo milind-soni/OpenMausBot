@@ -1,6 +1,11 @@
-# OpenMausBot for Android
+# MausBot Android
 
 OpenMausBot 的原生 Android 客户端：在手机上查看电脑上各个 bot 的运行状态、读它们的回复、批准它们要执行的操作、随时打断或补一句要求。
+
+> 这是一个独立开发的社区客户端，不是 OpenMausBot 官方客户端，也不代表上游项目。
+> An independent community client for OpenMausBot. Not affiliated with or endorsed by the upstream project.
+
+**English** — A native Android client for OpenMausBot's companion protocol. Pair by QR code or link, watch bot runs, read streaming replies with Markdown, approve tool calls and answer questions, switch models per bot, and keep the session alive in the background. Kotlin + Jetpack Compose, no WebView, Apache-2.0. Upstream: [milind-soni/OpenMausBot](https://github.com/milind-soni/OpenMausBot).
 
 Kotlin + Jetpack Compose，单 Activity，无 WebView，不依赖任何第三方后端。最低 Android 8.0（API 26），targetSdk 36。界面文案为简体中文；Bot 的回复内容由电脑上的模型生成，仍按原始语言显示。
 

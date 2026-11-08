@@ -19,6 +19,8 @@ class ApiClient(
     private val token: String?,
     private val loopbackHeaderName: String? = null,
     private val loopbackHeaderValue: String? = null,
+    private val connectTimeoutMs: Int = TimeUnit.SECONDS.toMillis(12).toInt(),
+    private val readTimeoutMs: Int = TimeUnit.SECONDS.toMillis(30).toInt(),
 ) {
     val baseUrl: String = baseUrl.trimEnd('/')
     private val deviceName = android.os.Build.MODEL ?: "Android"
@@ -127,8 +129,8 @@ class ApiClient(
         val url = URL(baseUrl + path)
         val connection = url.openConnection() as HttpURLConnection
         connection.requestMethod = method
-        connection.connectTimeout = TimeUnit.SECONDS.toMillis(12).toInt()
-        connection.readTimeout = TimeUnit.SECONDS.toMillis(30).toInt()
+        connection.connectTimeout = connectTimeoutMs
+        connection.readTimeout = readTimeoutMs
         connection.setRequestProperty("Accept", "application/json")
         applyHeaders(connection)
         return connection
