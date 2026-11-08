@@ -5585,6 +5585,8 @@
   "chat.preview.openTabNeedsLink": "Comparte la página para abrirla en una pestaña nueva",
   "chat.preview.fullScreen": "Pantalla completa",
   "chat.preview.exitFullScreen": "Salir de pantalla completa",
+  "chat.preview.openPage": "Abrir página",
+  "chat.preview.closePage": "Cerrar página",
   "chat.preview.pointedPart": "una parte de la página",
   "chat.preview.removePoint": "Quitar {label}",
   "chat.preview.pointedAt": "Señalado: {parts}",

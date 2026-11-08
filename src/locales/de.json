@@ -2521,6 +2521,8 @@
   "chat.preview.openTabNeedsLink": "Teile die Seite, um sie in einem neuen Tab zu öffnen",
   "chat.preview.fullScreen": "Vollbild",
   "chat.preview.exitFullScreen": "Vollbild schließen",
+  "chat.preview.openPage": "Seite öffnen",
+  "chat.preview.closePage": "Seite schließen",
   "chat.preview.pointedPart": "ein Teil der Seite",
   "chat.preview.removePoint": "{label} entfernen",
   "chat.preview.pointedAt": "Gezeigt auf {parts}",
