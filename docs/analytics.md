@@ -1,6 +1,6 @@
 # Usage analytics
 
-OpenMausBot can send anonymous product analytics to PostHog (US cloud, `us.i.posthog.com`), so its maintainers can see
+MausBot can send anonymous product analytics to PostHog (US cloud, `us.i.posthog.com`), so its maintainers can see
 which features people set up and use. This page lists every event and every property the app can send. Nothing else is
 sent.
 

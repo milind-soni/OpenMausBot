@@ -1,6 +1,6 @@
 ---
 title: Deploy on a VPS
-description: From a blank Linux server to OpenMausBot running around the clock, reachable from your laptop, the desktop app and your phone.
+description: From a blank Linux server to MausBot running around the clock, reachable from your laptop, the desktop app and your phone.
 icon: Cloud
 ---
 
@@ -8,13 +8,13 @@ icon: Cloud
   A public address with one command, your own domain with Docker, or your Tailscale network. Whichever you pick, devices pair once with a short code and stay signed in: a session lasts 30 days, and using it with half that or less left renews it to a full 30, up to 180 days from pairing. A device in regular use re-pairs twice a year; one that goes quiet for a month re-pairs. No password.
 </Callout>
 
-From a blank Linux server to OpenMausBot running on it around the clock, reachable from your laptop, the desktop app and your phone, with your bots working while every laptop is closed. It assumes nothing beyond being able to open a terminal and paste commands. About twenty minutes, most of it waiting.
+From a blank Linux server to MausBot running on it around the clock, reachable from your laptop, the desktop app and your phone, with your bots working while every laptop is closed. It assumes nothing beyond being able to open a terminal and paste commands. About twenty minutes, most of it waiting.
 
 Three ways to make the server reachable are covered. Pick one; the rest of the guide is the same.
 
 | | You need | Who can reach it | Best for |
 |---|---|---|---|
-| **A. Public address, no domain** (`serve --tunnel`) | an OpenMausBot account (email code) | anyone with a pairing code, over HTTPS | the fastest path; a phone on cellular |
+| **A. Public address, no domain** (`serve --tunnel`) | a MausBot account (email code) | anyone with a pairing code, over HTTPS | the fastest path; a phone on cellular |
 | **B. Your own domain** (Docker + Caddy) | a domain name, ports 80/443 | anyone with a pairing code, over HTTPS | a permanent address you own |
 | **C. Your Tailscale network** (`serve --tailscale`) | Tailscale on the server and your devices | only your tailnet | the most private; nothing public at all |
 
@@ -194,7 +194,7 @@ engines you use. For path B, run the installed CLI inside the container, for
 example `docker compose exec omb claude`.
 
 Engine logins belong to the service user's home (for example `~/.codex` and
-`~/.claude`), separately from OpenMausBot's `~/.openmausbot`. Keep that home when
+`~/.claude`), separately from MausBot's `~/.openmausbot`. Keep that home when
 restarting or upgrading. The systemd example below includes `~/.local/bin` in PATH.
 
 ## Pair your first device
