@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { newBotDefaultsSchema, resolveBotCreationDefaults } from "./new-bot-defaults.ts";
+import { botSkillTemplateSchema, newBotDefaultsSchema, resolveBotCreationDefaults } from "./new-bot-defaults.ts";
 import { parseConfigPatch } from "./config.ts";
 
 describe("new-bot templates", () => {
+  it("requires bundle instructions to round-trip through UTF-8 without changing old text-only templates", () => {
+    const skill = { name: "runbook", description: "A guide", source: "fixture", text: "Guide \ud800", enabled: false };
+    expect(botSkillTemplateSchema.safeParse({ ...skill, files: [{ path: "guide.md", content: "Guide" }] }).success).toBe(false);
+    expect(botSkillTemplateSchema.safeParse(skill).success).toBe(true);
+    expect(botSkillTemplateSchema.safeParse({ ...skill, text: "Guide 😀", files: [{ path: "guide.md", content: "Guide" }] }).success).toBe(true);
+  });
   it("preserves restricted and empty tool defaults while allowing an explicit owner reset", () => {
     const defaults = newBotDefaultsSchema.parse({ profile: { toolScope: { allow: ["native:read", "native:read"] } } });
     expect(defaults.profile).toEqual({ toolScope: { allow: ["native:read"] } });

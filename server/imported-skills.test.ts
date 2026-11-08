@@ -54,6 +54,21 @@ const names = (skills: Array<{ name: string }>) => skills.map((skill) => skill.n
 const target = (link: string) => resolve(readlinkSync(link).replace(/^\\\\\?\\/, ""));
 
 describe("skills brought in from this computer", () => {
+  it("exports the intact imported folder, and never falls through a changed private collision", () => {
+    store([input("bundle", { files: [{ path: "references/guide.md", content: "imported guide", executable: false }, { path: "script.sh", content: "echo hi", executable: true }] })]);
+    const bot = newBot();
+    const host = createSkillsLibraryHost({
+      store: { bot: () => undefined, messagesFor: () => [], taskByThread: () => undefined } as unknown as Store,
+      cfg: {} as AppConfig, appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
+    });
+    const record = { id: bot } as BotRecord;
+    expect(host.exportBotSkill(record, "bundle")).toMatchObject({ files: [{ path: "references/guide.md", content: "imported guide" }],
+      skipped: [{ path: "script.sh", reason: "skill_file_type" }] });
+    installSkill(bot, "private", [{ path: "SKILL.md", content: skillMd("bundle") }, { path: "README.md", content: "private guide" }]);
+    expect(host.exportBotSkill(record, "bundle")?.files).toEqual([{ path: "README.md", content: "private guide" }]);
+    writeFileSync(join(DATA_DIR, "workspaces", bot, "skills", "bundle", "README.md"), "changed");
+    expect(host.exportBotSkill(record, "bundle")).toBeNull();
+  });
   it("reach a bot made after they came in exactly as the first: listing, index, /name and task folder links", () => {
     expect(names(store([input("pdf"), input("review", { source: "codex" })]))).toEqual(["pdf", "review"]);
     for (const bot of [newBot(), newBot()]) {

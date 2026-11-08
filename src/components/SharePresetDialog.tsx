@@ -7,6 +7,7 @@ import { describePart, describeSkip, preparePictures, saveShareFile, type ShareS
 import { api } from "@/state/store";
 import type { NewBotDefaults } from "../../shared/new-bot-defaults";
 import type { PackageDocument, PackageSummary } from "../../shared/package-format";
+import { SharedSkillFiles } from "./SharedSkillFiles";
 
 export interface PresetShareResponse {
   document: PackageDocument;
@@ -63,6 +64,7 @@ export function SharePresetContents({ preview, localSkips }: { preview: PresetSh
           </div>
         ))}
       </dl>
+      <SharedSkillFiles document={preview.document} />
       <p className="mt-3 flex items-start gap-2 text-[13px] leading-relaxed text-ink-secondary">
         <ShieldCheck size={15} className="mt-0.5 shrink-0 text-success" />
         <span>{t("presetShare.never")}</span>

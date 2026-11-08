@@ -8,7 +8,7 @@
 import type { PackageAgent, PackageDocument } from "../shared/package-format.ts";
 import type { OrgInstall, OrgLibraryDeps, OrgLibraryEntry } from "./org-library.ts";
 import {
-  agentReleaseValues, pair, partHash, playbookValues, roomReleaseValues, routineReleaseValues, scheduleValue,
+  agentReleaseValues, pair, partHash, playbookValues, roomReleaseValues, routineReleaseValues, scheduleValue, skillReleaseValue,
   type AgentPart, type PartPair, type RoomPart, type RoutinePart,
 } from "./package-parts.ts";
 import type { BotRecord, GroupRecord } from "./store.ts";
@@ -167,25 +167,17 @@ class InstallUpdate {
     for (const name of agent.skills ?? []) {
       const skill = entries.get(name);
       if (!skill) continue;
-      const stamp = { installId: this.installId, key: name, release: this.pkg.release, ...pair(skill.instructions, skill.instructions) };
+      const value = skillReleaseValue(skill);
+      const stamp = { installId: this.installId, key: name, release: this.pkg.release, ...pair(value, value) };
       const have = stamped.get(name);
       if (have) {
-        if (partHash(skill.instructions) === have.stamp.r || !this.deps.skills.read || !this.deps.skills.remove) continue;
-        const text = this.deps.skills.read(bot.id, name);
-        if (text === null || partHash(text) !== have.stamp.w) continue;
-        const was = this.deps.skills.list(bot.id).find((listed) => listed.name === name)?.source ?? source;
-        if ("error" in this.deps.skills.remove(bot.id, name)) continue;
-        const added = this.deps.skills.installOrg(bot.id, source, skill.instructions, stamp);
-        if ("error" in added) {
-          // Put the skill back as it was, so it is never mistaken later for one the person took off.
-          this.deps.skills.installOrg(bot.id, was, text, have.stamp);
-          if (!have.enabled) this.deps.skills.setEnabled(bot.id, name, false);
-          throw new Error(`skill ${name} could not be updated: ${added.error}`);
-        }
-        if (!have.enabled) this.deps.skills.setEnabled(bot.id, name, false);
+        if (partHash(value) === have.stamp.r || !this.deps.skills.replaceOrg) continue;
+        const result = this.deps.skills.replaceOrg(bot.id, source, skill, stamp, have.stamp);
+        if ("stale" in result) continue;
+        if ("error" in result) throw new Error(`skill ${name} could not be updated: ${result.error}`);
         changed = true;
       } else if (before && !before.includes(name) && !this.deps.skills.list(bot.id).some((listed) => listed.name === name)) {
-        const added = this.deps.skills.installOrg(bot.id, source, skill.instructions, stamp);
+        const added = this.deps.skills.installOrg(bot.id, source, skill.instructions, stamp, skill.files);
         if ("error" in added) throw new Error(`skill ${name} could not be added: ${added.error}`);
         changed = true;
       }

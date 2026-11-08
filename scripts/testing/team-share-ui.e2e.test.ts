@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
@@ -22,7 +23,7 @@ describe("Share team in the real renderer", () => {
   (enabled ? it : it.skip)("shows what a team's file holds, saves it, and adds it back as a new team", async () => {
     let stdout = "";
     let stderr = "";
-    let info: { ui: string; url: string; botId: string; logPath: string };
+    let info: { ui: string; url: string; botId: string; dataDir: string; logPath: string };
     child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], {
       cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
     });
@@ -44,7 +45,9 @@ describe("Share team in the real renderer", () => {
     const scout = (await control("new-bot", "--name", "Scout", "--section", "Sales desk")).bot;
     await api(`/api/section-context?section=${encodeURIComponent("Sales desk")}`, "PUT", { text: "Quote list prices only." });
     await api(`/api/bots/${scout.id}/skill-template`, "POST", { name: "research-brief", description: "Write a prospect brief.", source: "fixture",
-      text: "---\nname: research-brief\ndescription: Write a prospect brief.\n---\n\n# Brief\n", enabled: true });
+      text: "---\nname: research-brief\ndescription: Write a prospect brief.\n---\n\n# Brief\n", enabled: true,
+      files: [{ path: "references/guide.md", content: "Fixture guide.\n" }] });
+    writeFileSync(join(info!.dataDir, "workspaces", scout.id, "skills", "research-brief", "template.html"), "<p>Fixture</p>");
     // 31 skills on one bot, more than a file carries per bot, and the first
     // 17 fillers so long that even the 30 that fit pass the 4 MB file limit:
     // the dialog's very first look is refused.
@@ -84,6 +87,9 @@ describe("Share team in the real renderer", () => {
     await expect.poll(snapshot, { timeout: 20_000 }).toContain("What's in the file");
     dialog = await snapshot();
     for (const line of ["Chief of Staff", "Never included: chat history", "Save file"]) expect(dialog).toContain(line);
+    expect(dialog).toContain("Included skill files");
+    expect(dialog).toContain("references/guide.md");
+    expect(dialog).toContain("template.html");
     expect(dialog).not.toContain("too large to share");
     // Starter notes are in by default; unticking takes them out, ticking puts them back.
     await click("Include starter notes (each bot's MEMORY.md and topic notes)");

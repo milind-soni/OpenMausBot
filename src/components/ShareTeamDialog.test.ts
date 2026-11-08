@@ -60,6 +60,20 @@ describe("Share team", () => {
     expect(text(renderToStaticMarkup(createElement(ShareTeamContents, { preview, includeMemory: false, localSkips: [] })))).toContain("Starter notes None");
   });
 
+  it("names included, omitted and redacted companion files in the preview", () => {
+    const source = fixture();
+    source.package.skills.version = 2;
+    source.package.skills.entries[0].files = [{ path: "references/guide.md", content: "Guide" }];
+    const document = parsePackageDocument(source);
+    const name = document.package.skills!.entries[0]!.name;
+    const preview: ShareResponse = { document, filename: "f", summary: packageSummary(document), choices: { skills: [] },
+      redacted: [`skills[${name}].files[0].content`], skipped: [{ part: `skills[${name}].files[template.html]`, reason: "skill_file_type" }] };
+    const words = text(renderToStaticMarkup(createElement(ShareTeamContents, { preview, includeMemory: false, localSkips: [] })));
+    expect(words).toContain(`Included skill files ${name} · references/guide.md`);
+    expect(words).toContain(`${name} · template.html — only UTF-8 Markdown files are shared`);
+    expect(words).toContain(`Removed what looked like a key or password from: ${name} · references/guide.md`);
+  });
+
   it("keeps every skill box when a 31-skill bot's exact choice is refused", () => {
     const names = Array.from({ length: 31 }, (_, index) => `step-${String(index + 1).padStart(2, "0")}`);
     const refusal = new ApiError("Morgan has more than 30 skills. Choose fewer skills and try again.", 400,

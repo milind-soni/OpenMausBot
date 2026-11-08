@@ -35,7 +35,7 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
       const input = checked.data;
       const parsed = parseSkillMd(input.text);
       if ("error" in parsed || parsed.name !== input.name) return json(res, 400, { error: "Skill name does not match its contents" });
-      const installed = installSkill(m[1], input.source, [{ path: "SKILL.md", content: input.text }]);
+      const installed = installSkill(m[1], input.source, [{ path: "SKILL.md", content: input.text }, ...(input.files ?? [])]);
       if ("error" in installed) return json(res, 422, { error: installed.error });
       if (input.enabled) {
         const enabled = setSkillEnabled(m[1], input.name, true);

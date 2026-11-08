@@ -445,7 +445,9 @@ describe("install → review → enable lifecycle", () => {
     const secureManifest = readFileSync(join(stateDir, "skills.json"), "utf8");
     rmSync(stateDir, { recursive: true, force: true });
     const legacyManifest = join(workspaceDir(bot), "skills", "skills.json");
-    writeFileSync(legacyManifest, secureManifest);
+    const untrusted = JSON.parse(secureManifest);
+    untrusted["legacy-skill"].retiredRoot = { identity: "forged", hash: "a".repeat(64) };
+    writeFileSync(legacyManifest, JSON.stringify(untrusted));
 
     const external = join(scratch, "user-skill");
     mkdirSync(external, { recursive: true });
@@ -456,6 +458,7 @@ describe("install → review → enable lifecycle", () => {
     expect(existsSync(join(stateDir, "skills.json"))).toBe(true);
     expect(existsSync(legacyManifest)).toBe(false);
     expect(JSON.parse(readFileSync(join(stateDir, "skills.json"), "utf8"))["legacy-skill"].enabled).toBe(false);
+    expect(JSON.parse(readFileSync(join(stateDir, "skills.json"), "utf8"))["legacy-skill"]).not.toHaveProperty("retiredRoot");
 
     expect(skillsSystemPrompt(bot)).toBe("");
     for (const dir of [".claude/skills", ".agents/skills", ".grok/skills"]) {

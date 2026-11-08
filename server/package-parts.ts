@@ -8,6 +8,7 @@ import type {
   PackagePlaybook,
   PackageRoom,
   PackageRoutine,
+  PackageSkill,
 } from "../shared/package-format.ts";
 
 export interface PartPair { r: string; w: string }
@@ -28,6 +29,12 @@ export function partHash(value: unknown): string {
 }
 
 export const pair = (release: unknown, written: unknown): PartPair => ({ r: partHash(release), w: partHash(written) });
+
+/** Preserve the text-only stamp; a bundle binds the ordered paths and contents as well. */
+export function skillReleaseValue(skill: Pick<PackageSkill, "instructions" | "files">): unknown {
+  if (!skill.files?.length) return skill.instructions;
+  return { instructions: skill.instructions, files: [...skill.files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) };
+}
 
 export interface LookValue {
   color: string;

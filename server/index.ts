@@ -372,11 +372,9 @@ import {
   getStagedSkillWrite,
   installOrgSkill,
   installSkill,
-  parseSkillMd,
-  scanSkillText,
   listSkills,
   listStagedSkillWrites,
-  readSkillFile, removeSkill,
+  readSkillFile,
   rejectStagedSkillWrite,
   setSkillEnabled,
   skillPackageStamps,
@@ -390,7 +388,9 @@ import { skillReferencesSha256 } from "./skill-storage.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import { skillExport } from "./skill-export.ts";
 import { pickBotName } from "./names.ts";
-import { botSkillTemplateSchema, newBotDefaultsSchema } from "./new-bot-defaults.ts";
+import { newBotDefaultsSchema } from "./new-bot-defaults.ts";
+import { defaultSkillTemplates } from "./default-skill-preview.ts";
+import { replaceOrganizationSkill } from "./org-skill-update.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { setupSuggestionsFor } from "./setup-suggestions.ts"; import { createSetupRequestRoutes } from "./routes/setup-request.ts";
 import { isSkillSwitchAction, type SkillRequestCardData } from "../shared/skill-request.ts"; import { createSkillSwitchHost } from "./host/skill-switch-host.ts";
@@ -8920,7 +8920,7 @@ orgLibrary = new OrgLibrary({
   dataDir: DATA_DIR,
   store,
   routines: routines!,
-  skills: { list: listSkills, stamps: skillPackageStamps, setEnabled: setSkillEnabled, installOrg: installOrgSkill, read: readSkillFile, remove: removeSkill },
+  skills: { list: listSkills, stamps: skillPackageStamps, setEnabled: setSkillEnabled, installOrg: installOrgSkill, replaceOrg: replaceOrganizationSkill },
   presets: presetStore, sections: { read: (section) => readSectionContext(section)?.text ?? "", write: (section, text) => void writeSectionContext(section, text) },
   postState: (message) => utilityParentPort?.postMessage(message),
 });
@@ -14903,19 +14903,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const input = checked.data;
       const fetched = await fetchSkillFromSource(input.source);
       if ("error" in fetched) return json(res, 422, { error: fetched.error });
-      const skills = [];
-      for (const skill of fetched.skills) {
-        const text = skill.files.find(file => file.path === "SKILL.md")?.content.toString("utf8");
-        if (text === undefined) continue;
-        const parsed = parseSkillMd(text);
-        if ("error" in parsed) return json(res, 422, { error: parsed.error });
-        const extra = skill.files.length - 1, skippedWarnings = extra > 0 ? [`${extra} supporting file${extra === 1 ? "" : "s"} left out — a skill added while making a bot keeps only SKILL.md; import it from the bot's Skills afterwards for the whole folder`] : [];
-        const template = botSkillTemplateSchema.safeParse({ name: parsed.name, description: parsed.description, source: skill.source, text,
-          enabled: false, warnings: [...scanSkillText(text), ...skippedWarnings] });
-        if (!template.success) return json(res, 422, { error: template.error.message });
-        skills.push(template.data);
-      }
-      return json(res, 200, { skills });
+      const result = defaultSkillTemplates(fetched.skills);
+      if ("error" in result) return json(res, 422, { error: result.error });
+      return json(res, 200, result);
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/soul$/);

@@ -42,6 +42,19 @@ describe("Share as preset", () => {
     ]) expect(words).toContain(line);
   });
 
+  it("shows included and omitted companion paths", () => {
+    const source = fixture("library-only.v2.json");
+    source.package.skills.version = 2;
+    source.package.skills.entries[0].files = [{ path: "references/guide.md", content: "Guide" }];
+    const document = parsePackageDocument(source);
+    const name = document.package.skills!.entries[0]!.name;
+    const preview: PresetShareResponse = { document, filename: "f", summary: packageSummary(document), redacted: [],
+      skipped: [{ part: `skills[${name}].files[script.sh]`, reason: "skill_file_type" }] };
+    const words = text(renderToStaticMarkup(createElement(SharePresetContents, { preview, localSkips: [] })));
+    expect(words).toContain(`Included skill files ${name} · references/guide.md`);
+    expect(words).toContain(`${name} · script.sh — only UTF-8 Markdown files are shared`);
+  });
+
   it("counts preset bots in a team file", () => {
     const document = parsePackageDocument(fixture("full-team.v2.json"));
     const preview: ShareResponse = { document, filename: "f", summary: packageSummary(document), choices: { skills: [] }, redacted: [], skipped: [] };

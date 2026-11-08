@@ -12,7 +12,15 @@ the department name), or from **Templates → Share**.
   its colour and mascot, and its picture (downscaled to at most 256 × 256 and
   64 KB; the dialog stops adding pictures after about 2 MB of them).
 - **Skills.** All skills on the team's bots by default, or the ones you tick.
-  Only the `SKILL.md` text travels, never scripts or other files. A file
+  The goal is a portable skill directory containing every asset needed to run
+  the skill. Currently `SKILL.md` and UTF-8 Markdown companions travel, including
+  sibling files and nested `references/` files. The preview lists included and
+  omitted files. Scripts, HTML, images, other non-Markdown files, symlinks and
+  hard links and unsafe paths are left out, so check the list before sharing a skill that needs
+  them. Companions are limited to 32 files, 64 KiB each and 512 KiB total per
+  skill, within the existing package size limit. Package text redaction applies
+  to companions too. A source folder above 512 entries, 16 MiB total, or with
+  a file over 2 MiB cannot be safely snapshotted and its skill is left out. A file
   holds at most 30 skills per bot and 60 per team, and one skill per name.
   When you have not chosen, the dialog puts in what fits (switched-on skills
   first) and lists the rest under **Left out**, including a name two bots
@@ -65,6 +73,13 @@ the same check again and refuses a file that still contains one.
 The dialog shows, before you save, exactly what the file holds (counted by the
 server from the same export), and afterwards what was removed or left out.
 There is no confirmation step: **Save file** is the decision.
+
+Files with companions use `skills.version: 2` inside the existing package
+envelope. Older readers reject that section rather than silently dropping the
+files; both the receiving app and an organization's Admin must support it.
+Text-only files keep `skills.version: 1` and their existing stamps. The older
+BotMRR export cannot carry companions and refuses such a selection;
+use department sharing to review its included and omitted files.
 
 ## Versions and identity
 

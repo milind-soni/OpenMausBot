@@ -5,6 +5,8 @@
 // model choices, computers, visibility or personal settings, and unknown
 // fields are stripped.
 import { parse as parseYaml } from "yaml";
+import { isUtf8Text, skillCompanionsSchema } from "./portable-skill-bundle.ts";
+export { isPortableSkillPath, skillCompanionsSchema, SKILL_BUNDLE_MAX_FILES, SKILL_BUNDLE_FILE_MAX_BYTES, SKILL_BUNDLE_MAX_BYTES } from "./portable-skill-bundle.ts";
 import { z } from "zod";
 
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "./bot-profile.ts";
@@ -91,6 +93,7 @@ const portableSkillSchema = z.object({
   compatibility: optionalText(200),
   instructions: skillInstructions,
 });
+const bundledSkillSchema = portableSkillSchema.extend({ files: skillCompanionsSchema.optional() });
 const soulSchema = z.string().refine((value) => utf8Bytes(value) <= BOT_PROFILE_LIMITS.soul, {
   error: "standing instructions must be at most 24000 bytes",
 });
@@ -459,8 +462,8 @@ export const packageDocumentSchema = z.object({
     routines: z.array(routineSchema).max(50).optional(),
     playbooks: z.array(playbookSchema).max(80).optional(),
     skills: z.object({
-      version: z.literal(1),
-      entries: z.array(portableSkillSchema).min(1).max(PACKAGE_MAX_SKILLS),
+      version: z.union([z.literal(1), z.literal(2)]),
+      entries: z.array(bundledSkillSchema).min(1).max(PACKAGE_MAX_SKILLS),
     }).optional(),
     presets: z.array(presetSchema).max(PACKAGE_MAX_PRESETS).optional(),
     connections: z.array(connectionSchema).max(PACKAGE_MAX_CONNECTIONS).optional(),
@@ -716,6 +719,10 @@ export function isPackageDocument(value: unknown): boolean {
 /** Parse exactly one v1 document (JSON object or Markdown) with the v1 rules. */
 export function parsePackageV1(value: unknown): PackageDocumentV1 {
   const source = typeof value === "string" ? markdownDocument(value) : value;
+  const entries = (source as { package?: { skills?: { entries?: unknown } } } | null)?.package?.skills?.entries;
+  if (Array.isArray(entries) && entries.some((entry) => entry && typeof entry === "object" && "files" in entry)) {
+    throw invalid("Skill files require skills version 2");
+  }
   const parsed = packageDocumentV1Schema.safeParse(source);
   if (!parsed.success) throw new PackageFormatError("invalid", v1SchemaSentence(parsed.error));
   checkV1References(parsed.data.package);
@@ -725,6 +732,13 @@ export function parsePackageV1(value: unknown): PackageDocumentV1 {
 function validateV2(source: unknown): PackageDocument {
   const parsed = packageDocumentSchema.safeParse(source);
   if (!parsed.success) throw invalid(schemaSentence(parsed.error, source));
+  if (parsed.data.package.skills?.version === 1 && parsed.data.package.skills.entries.some((skill) => skill.files)) {
+    throw invalid("Skill files require skills version 2");
+  }
+  for (const skill of parsed.data.package.skills?.entries ?? []) {
+    if (skill.files && !isUtf8Text(skill.instructions)) throw invalid("Bundled skill instructions must be UTF-8 text");
+    if (skill.files) skill.files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  }
   checkV2References(parsed.data.package);
   return parsed.data;
 }
@@ -785,6 +799,9 @@ export function parsePackageDocument(value: unknown, options: { trust?: PackageT
 export function downgradeToV1(document: PackageDocument):
   { document: PackageDocumentV1; dropped: string[] } | { error: string } {
   const pkg = document.package;
+  if (pkg.skills?.entries.some((skill) => skill.files?.length)) {
+    return { error: "Packages with skill files cannot be opened by older versions of OpenMausBot." };
+  }
   if (!pkg.agents.length || !pkg.team) return { error: "Packages without bots cannot be opened by older versions of OpenMausBot." };
   const referenced = new Set(pkg.agents.flatMap((agent) => agent.skills ?? []));
   const skills = (pkg.skills?.entries ?? []).filter((skill) => referenced.has(skill.name));

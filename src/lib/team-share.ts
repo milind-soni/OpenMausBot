@@ -184,6 +184,12 @@ const FIELD_WORDS: Record<string, LocaleKey> = {
 
 export function describePart(part: string, document?: PackageDocument): string {
   const pkg = document?.package;
+  const skillFile = /^skills\[([^\]]+)\]\.files\[([^\]]+)\]/.exec(part);
+  if (skillFile) {
+    const [, name, item] = skillFile;
+    const path = /^\d+$/.test(item!) ? pkg?.skills?.entries.find((skill) => skill.name === name)?.files?.[Number(item)]?.path ?? item : item;
+    return `${name} · ${path}`;
+  }
   part = part.replace(/^(presets\[[^\]]+\])\.bot\./, "$1.");
   const match = /^(agents|rooms|routines|skills|connections|presets|playbooks)\[([^\]]+)\](?:\.([a-zA-Z]+)(?:\[([^\]]+)\])?)?/.exec(part);
   if (match) {

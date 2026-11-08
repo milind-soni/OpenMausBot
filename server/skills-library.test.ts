@@ -24,6 +24,14 @@ beforeEach(() => {
 });
 
 describe("skills library store", () => {
+  it("exports a reviewed library folder only while its recorded files remain intact", () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-library-bundle-"));
+    library.installLibrarySkill({ name: "bundle", instructions: SKILL("bundle"), source: "fixture", root, reviewState: "approved",
+      files: [{ path: "references/guide.md", content: "library guide" }] });
+    expect(library.exportLibrarySkill("bundle", root)?.files).toEqual([{ path: "references/guide.md", content: "library guide" }]);
+    writeFileSync(join(root, "skills", "bundle", "references", "guide.md"), "changed");
+    expect(library.exportLibrarySkill("bundle", root)).toBeNull();
+  });
   it("installs a skill: bytes on disk, entry in the index, listing, invalidation event", () => {
     const events: Array<{ kind: string; name: string }> = [];
     library.skillLibraryEvents.on("invalidate", (event) => events.push(event));

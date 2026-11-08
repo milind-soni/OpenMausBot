@@ -9,6 +9,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { githubSkillOriginSchema, skillFolderDigest, skillFolderRecordSchema, writeSkillFolder } from "./skill-folder.ts";
 import { entryExistsWithoutFollowing } from "./skill-storage.ts";
+import { snapshotPortableSkill } from "./portable-skill-files.ts";
 import type { GitHubSkillOrigin } from "../shared/skill-import.ts";
 import { isSkillName, parseSkillMd, SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
 import type { SkillPackageStamp } from "./skills.ts";
@@ -428,6 +429,13 @@ export function readLibrarySkillFile(name: string, root: string = skillsLibraryR
   } catch {
     return null;
   }
+}
+
+export function exportLibrarySkill(name: string, root: string = skillsLibraryRoot()) {
+  if (!isSkillName(name)) return null;
+  const entry = readSkillLibraryIndex(root)[name];
+  if (!entry) return null;
+  return snapshotPortableSkill(librarySkillDirectory(root, name), () => libraryContentMatches(root, entry) ? readLibrarySkillFile(name, root) : null);
 }
 
 export function setLibrarySkillReviewState(

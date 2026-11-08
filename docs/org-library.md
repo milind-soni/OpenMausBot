@@ -71,7 +71,7 @@ the person changed keeps their version, now and in later releases.
 | Part | Updated |
 |---|---|
 | A bot's name, title, description, instructions and playbooks | yes; a new name another bot already has is kept back |
-| A bot's skills | each skill's text, and a skill new to that bot in this release (while the file of the release it had is still kept, which is how a new skill is told from one the person took off); never one the person took off, and a skill switched off stays off |
+| A bot's skills | each skill's instructions and included Markdown companions, and a skill new to that bot in this release (while the file of the release it had is still kept, which is how a new skill is told from one the person took off); never one the person took off, and a skill switched off stays off |
 | A group chat's name and bulletin | yes |
 | A routine's name, prompt and schedule | yes; whether it is on stays the person's |
 | The team brief | yes |
@@ -82,8 +82,14 @@ An update never raises approval, switches a routine on, or adds a
 connection. The install, each bot's `installedPackage` and each updated
 skill's stamp move to the new release. If a part can't be written, the parts
 written so far keep their new stamps, the install stays on its release, and
-the next catalog finishes it; a skill whose new text can't be written is put
-back as it was.
+the next catalog finishes it. An updated skill is staged as a complete folder
+before its manifest changes, so a failed write leaves the previous files in
+place. A reference-only change is an update; an edited, missing or extra local
+file blocks replacement of that skill. If an interrupted update left the old
+folder behind, the app cleans it up when the skill is removed or moved only
+while its contents are unchanged; a changed folder is kept for you to move.
+If an updated organization's active skill folder has changed, removing the
+skill keeps that folder for recovery instead of deleting its local edits.
 
 ## Withdrawn releases
 

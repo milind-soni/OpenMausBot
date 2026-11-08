@@ -229,7 +229,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
           if (presetSkills.has(skill.name)) continue;
           const parsed = parseSkillMd(skill.text);
           if ("error" in parsed || parsed.name !== skill.name) throw Object.assign(new Error("Skill name does not match its contents"), { status: 400 });
-          const installed = installSkill(bot.id, skill.source, [{ path: "SKILL.md", content: skill.text }]);
+          const installed = installSkill(bot.id, skill.source, [{ path: "SKILL.md", content: skill.text }, ...(skill.files ?? [])]);
           if ("error" in installed) throw Object.assign(new Error(installed.error), { status: 422 });
           if (skill.enabled) {
             const enabled = setSkillEnabled(bot.id, skill.name, true);

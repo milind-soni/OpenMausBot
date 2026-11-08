@@ -9,7 +9,7 @@ import { DATA_DIR } from "./config.ts";
 import type { NewBotDefaults } from "./new-bot-defaults.ts";
 import type { ExportablePackageSkill, TeamExportSkip } from "./package-export.ts";
 import type { OrgImportContext } from "./package-import.ts";
-import { pair } from "./package-parts.ts";
+import { pair, skillReleaseValue } from "./package-parts.ts";
 import type { SkillListing, SkillPackageStamp } from "./skills.ts";
 import type { InstalledPackageMetadata, Store } from "./store.ts";
 import {
@@ -28,6 +28,7 @@ import {
   type PackageSkill,
 } from "../shared/package-format.ts";
 import { parseSkillMd } from "../shared/skill-md.ts";
+import { redactSecretsInText } from "../shared/redact.ts";
 
 export const PRESETS_FILE = join(DATA_DIR, "org-library", "presets.json");
 export const PUBLISHED_LIBRARY_FILE = join(DATA_DIR, "published-library.json");
@@ -115,7 +116,7 @@ function resolveRow(row: StoredPreset, content: InstallContent | undefined): Res
         setupMinutes: 1,
         requirements: { apps: [], capabilities: [] },
         presets: [storedPresetObject(row)],
-        ...(skills.length ? { skills: { version: 1, entries: skills } } : {}),
+        ...(skills.length ? { skills: { version: skills.some((skill) => skill.files?.length) ? 2 : 1, entries: skills } } : {}),
         ...(playbooks.length ? { playbooks } : {}),
       },
     }, { trust: "file" });
@@ -340,7 +341,7 @@ export interface PresetApplyDeps {
   skills: {
     install(botId: string, source: string, files: Array<{ path: string; content: string }>): SkillListing | { error: string };
     setEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string };
-    installOrg(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp): SkillListing | { error: string };
+    installOrg(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp, files?: PackageSkill["files"]): SkillListing | { error: string };
   };
   memory: {
     writeIndex(botId: string, text: string): void;
@@ -378,11 +379,11 @@ export function applyPresetToBot(botId: string, resolved: ResolvedPreset, deps: 
     // The organization channel names its own source; a file's is display only.
     const source = org && row.ref ? `org:${row.ref}@${row.release}` : skill.source ?? `package:${row.packageId}`;
     if (stamped) {
-      const stamp: SkillPackageStamp = { installId: row.installId, key: skill.name, release: row.release, ...pair(skill.instructions, skill.instructions), via: "preset" };
-      const added = deps.skills.installOrg(botId, source, skill.instructions, stamp);
+      const stamp: SkillPackageStamp = { installId: row.installId, key: skill.name, release: row.release, ...pair(skillReleaseValue(skill), skillReleaseValue(skill)), via: "preset" };
+      const added = deps.skills.installOrg(botId, source, skill.instructions, stamp, skill.files);
       if ("error" in added) throw new Error(`The preset's skill "${name}" could not be added: ${added.error}`);
     } else {
-      const added = deps.skills.install(botId, source, [{ path: "SKILL.md", content: skill.instructions }]);
+      const added = deps.skills.install(botId, source, [{ path: "SKILL.md", content: skill.instructions }, ...(skill.files ?? [])]);
       if ("error" in added) throw new Error(`The preset's skill "${name}" could not be added: ${added.error}`);
       if (org) {
         const enabled = deps.skills.setEnabled(botId, name, true);
@@ -448,6 +449,7 @@ export function presetFromDefaults(defaults: NewBotDefaults | undefined, options
       skipped.push({ part: `${part}.skills[${template.name}]`, reason: "bot_skill_limit" });
       continue;
     }
+    for (const file of template.omittedFiles ?? []) skipped.push({ part: `skills[${template.name}].files[${redactSecretsInText(file.path)}]`, reason: file.reason });
     skills.push({
       name: parsed.name,
       description: parsed.description,
@@ -455,6 +457,7 @@ export function presetFromDefaults(defaults: NewBotDefaults | undefined, options
       ...(parsed.license ? { license: parsed.license } : {}),
       ...(parsed.compatibility ? { compatibility: parsed.compatibility } : {}),
       instructions: template.text,
+      ...(template.files?.length ? { files: template.files } : {}),
       enabled: template.enabled,
     });
   }

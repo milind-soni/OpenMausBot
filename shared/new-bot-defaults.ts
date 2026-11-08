@@ -30,6 +30,8 @@ export interface BotSkillTemplate {
   text: string;
   enabled: boolean;
   warnings: string[];
+  files?: Array<{ path: string; content: string }>;
+  omittedFiles?: Array<{ path: string; reason: "skill_file_type" | "skill_file_unsafe" | "skill_file_limit" }>;
 }
 export interface NewBotDefaults {
   profile: BotDefaultsProfile;

@@ -266,3 +266,76 @@ describe("files for older apps", () => {
     expect(downgradeToV1(document)).toEqual({ error: expect.stringContaining("5 to 240 minutes") });
   });
 });
+
+describe("portable skill companions", () => {
+  const bundle = () => {
+    const doc = fixture("full-team.v2.json");
+    doc.package.skills.version = 2;
+    doc.package.skills.entries[0].files = [
+      { path: "references/deep/rules.md", content: "password=fixture-secret-123456\n" },
+      { path: "README.md", content: "Open the rules.\n" },
+    ];
+    return doc;
+  };
+  it("retains, sorts, redacts and scans companions, and refuses a lossy downgrade", () => {
+    const doc = parsePackageDocument(bundle());
+    expect(doc.package.skills!.entries[0]!.files!.map((file) => file.path)).toEqual(["README.md", "references/deep/rules.md"]);
+    expect(packageSecretFindings(doc)).toContain("skills[pricing-policy].files[1].content");
+    const redacted = redactPackageSecrets(doc);
+    expect(JSON.stringify(redacted.document)).not.toContain("fixture-secret-123456");
+    expect(parsePackageDocument(redacted.document).package.skills!.entries[0]!.files).toHaveLength(2);
+    expect(downgradeToV1(doc)).toEqual({ error: expect.stringContaining("skill files") });
+    const legacy = fixture("legacy-team.v1.json");
+    legacy.package.skills.version = 2;
+    legacy.package.skills.entries[0].files = [{ path: "x.md", content: "x" }];
+    expect(() => parsePackageV1(legacy)).toThrow();
+    legacy.package.skills.version = 1;
+    expect(() => parsePackageV1(legacy)).toThrow("Skill files require skills version 2");
+  });
+  it("refuses files disguised as the legacy skills section", () => {
+    const doc = bundle();
+    doc.package.skills.version = 1;
+    expect(() => parsePackageDocument(doc)).toThrow("Skill files require skills version 2");
+  });
+  it.each(["../escape.md", "/absolute.md", "x/../../escape.md", "x\\escape.md", ".hidden.md", "folder/.hidden/x.md", "CON.md", "skill.md", "x/a.txt", "x/", "x/one./two.md"]) (
+    "refuses unsafe path %s", (path) => {
+      const doc = bundle();
+      doc.package.skills.entries[0].files = [{ path, content: "x" }];
+      expect(() => parsePackageDocument(doc)).toThrow();
+    },
+  );
+  it("refuses colliding paths, oversized content, too many files and NUL text", () => {
+    for (const files of [
+      [{ path: "Guide.md", content: "a" }, { path: "guide.md", content: "b" }],
+      [{ path: "a.md", content: "a" }, { path: "A.md/b.md", content: "b" }],
+      [{ path: "large.md", content: "a".repeat(65537) }],
+      Array.from({ length: 9 }, (_, i) => ({ path: `${i}.md`, content: "a".repeat(65536) })),
+      Array.from({ length: 33 }, (_, i) => ({ path: `${i}.md`, content: "x" })),
+      [{ path: "binary.md", content: "a\0b" }],
+    ]) {
+      const doc = bundle(); doc.package.skills.entries[0].files = files;
+      expect(() => parsePackageDocument(doc)).toThrow();
+    }
+  });
+  it("refuses text that cannot round-trip through UTF-8 while keeping valid Unicode", () => {
+    for (const file of [
+      { path: "references/\ud800.md", content: "guide" },
+      { path: "references/\udc00.md", content: "guide" },
+      { path: "references/guide.md", content: "before \ud800 after" },
+      { path: "references/guide.md", content: "before \udc00 after" },
+    ]) {
+      const doc = bundle(); doc.package.skills.entries[0].files = [file];
+      expect(() => parsePackageDocument(doc)).toThrow();
+    }
+    const doc = bundle();
+    doc.package.skills.entries[0].files = [{ path: "references/手冊-😀.md", content: "Guide 😀\n" }];
+    expect(parsePackageDocument(doc).package.skills!.entries[0]!.files).toEqual(doc.package.skills.entries[0].files);
+    doc.package.skills.entries[0].instructions += "\n\ud800";
+    expect(() => parsePackageDocument(doc)).toThrow("Bundled skill instructions must be UTF-8 text");
+    doc.package.skills.entries[0].instructions = doc.package.skills.entries[0].instructions.replace("\ud800", "\0");
+    expect(() => parsePackageDocument(doc)).toThrow("Bundled skill instructions must be UTF-8 text");
+    delete doc.package.skills.entries[0].files;
+    doc.package.skills.version = 1;
+    expect(() => parsePackageDocument(doc)).not.toThrow();
+  });
+});

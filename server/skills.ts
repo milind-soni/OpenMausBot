@@ -29,11 +29,14 @@ import {
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
 import { libraryDescriptionsAt, librarySkillFilePath, listLibrarySkills, type LibrarySkillListing } from "./skill-library.ts";
 import { readManagedLinks, writeManagedLinks } from "./skill-link-registry.ts";
+import { retireUnchangedSkillRoot, skillRootIdentity, type RetiredSkillRoot } from "./skill-retirement.ts";
 import {
   directoryEntryState, entryExistsWithoutFollowing, formatKb, isSkillReferencePath, learnedSkillDirectoryMatches, publishReviewedRevision,
   readReferenceFiles, referenceLimitError, referencePathError, REFERENCES_ADVICE, skillReferencesSha256, STAGED_SKILL_FILE_MAX_BYTES,
 } from "./skill-storage.ts";
 import { workspaceDir } from "./workspace.ts";
+import { preparePackageSkill } from "./portable-skill-files.ts";
+import type { PackageSkill } from "../shared/package-format.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 
 export {
@@ -46,13 +49,12 @@ export {
   type ParsedSkill,
 } from "../shared/skill-md.ts";
 export { STAGED_SKILL_FILE_MAX_BYTES } from "./skill-storage.ts";
-
 export const INDEX_MAX_SKILLS = 30;
 export const INDEX_MAX_BYTES = 4_000;
 const loggedIndexOmissions = new Map<string, string>();
 export const MAX_STAGED_SKILLS = 20;
 export const STAGED_GIST_MAX = 240;
-interface SkillManifestEntry {
+export interface SkillManifestEntry {
   description: string;
   enabled: boolean;
   source: string;
@@ -70,6 +72,7 @@ interface SkillManifestEntry {
   /** Replay guard for a crash between promotion and card settlement. Never exposed to agents. */
   appliedStageId?: string;
   storageRevision?: string;
+  retiredRoot?: RetiredSkillRoot;
   package?: SkillPackageStamp;
 }
 
@@ -101,6 +104,7 @@ const skillManifestEntrySchema = z.object({
   github: githubSkillOriginSchema.optional(),
   appliedStageId: z.string().optional(),
   storageRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  retiredRoot: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
   package: z.object({
     installId: z.string().regex(/^[a-f0-9]{32}$/),
     key: z.string().min(1).max(64),
@@ -111,16 +115,13 @@ const skillManifestEntrySchema = z.object({
   }).optional(),
 });
 const skillManifestSchema = z.record(z.string(), skillManifestEntrySchema);
-
 function skillsDir(botId: string): string {
   return join(workspaceDir(botId), "skills");
 }
-
 function existingSkillsRoot(botId: string): string | null {
   const root = skillsDir(botId);
   return directoryEntryState(root) === "directory" ? root : null;
 }
-
 function ensureSkillsRoot(botId: string): string | null {
   const root = skillsDir(botId);
   const state = directoryEntryState(root);
@@ -226,7 +227,7 @@ function readManifest(botId: string): SkillManifest {
     // No workspace-authored bit may carry enablement into secure state.
     const {
       appliedStageId: _appliedStageId,
-      storageRevision: _storageRevision,
+      storageRevision: _storageRevision, retiredRoot: _retiredRoot,
       ...visible
     } = entry;
     migrated[name] = { ...visible, enabled: false };
@@ -483,9 +484,8 @@ function skillContentMatches(botId: string, name: string, entry: SkillManifestEn
     return false;
   }
 }
-
 function skillListing(botId: string, name: string, entry: SkillManifestEntry): SkillListing {
-  const { appliedStageId, storageRevision: _storageRevision, package: _package, ...visible } = entry;
+  const { appliedStageId, storageRevision: _storageRevision, retiredRoot: _retiredRoot, package: _package, ...visible } = entry;
   const intact = skillContentMatches(botId, name, entry);
   return {
     name,
@@ -548,13 +548,10 @@ export function installSkill(botId: string, source: string, files: readonly Skil
 
 /** Arrives enabled (the Admin is the review); `source` comes from the caller, never from the package. */
 export function installOrgSkill(
-  botId: string,
-  source: string,
-  skillMd: string,
-  stamp: SkillPackageStamp,
+  botId: string, source: string, skillMd: string, stamp: SkillPackageStamp, files?: PackageSkill["files"],
 ): SkillListing | { error: string } {
   if (!source.startsWith("org:")) return { error: "organization skills need an org: source" };
-  const prepared = preparedSkillFiles(skillMd);
+  const prepared = files?.length ? preparePackageSkill(skillMd, files) : preparedSkillFiles(skillMd);
   if ("error" in prepared) return prepared;
   if (prepared.parsed.name !== stamp.key) return { error: `the skill is named "${prepared.parsed.name}", not "${stamp.key}"` };
   return installPreparedSkill(botId, source, prepared, { enabled: true, package: { ...stamp } });
@@ -641,23 +638,24 @@ export function removeSkill(botId: string, name: string): { removed: true } | { 
   if (directoryEntryState(root) === "unsafe") {
     return { error: "the workspace skills path is a symlink or file; refusing to remove through it" };
   }
-  const target = entry.storageRevision ? null : join(root, name);
+  if (entry.storageRevision && entry.retiredRoot) { const retired = retireUnchangedSkillRoot(join(root, name), entry.retiredRoot, skillStateDir(botId)); if ("error" in retired) return retired; }
+  const target = entry.storageRevision ? null : join(root, name); const active = entry.storageRevision ? skillDirectory(botId, name, entry) : null; const activeId = active && skillRootIdentity(active);
   const targetState = target ? directoryEntryState(target) : "missing";
   delete manifest[name];
   writeManifest(botId, manifest);
   // While the target still exists, so ownership can be proven without deleting a user-replaced path.
   syncSkillLinks(botId);
   if (entry.storageRevision) {
-    removeReviewedRevision(botId, entry.storageRevision, entry.sha256, entry.referencesSha256);
+    if (entry.source.startsWith("org:") && active && activeId && entry.package) retireUnchangedSkillRoot(active, { identity: activeId, hash: entry.package.w }, skillStateDir(botId));
+    else removeReviewedRevision(botId, entry.storageRevision, entry.sha256, entry.referencesSha256);
   } else if (target && targetState === "directory") {
     rmSync(target, { recursive: true, force: true });
   }
-  removeReviewedRevisionsNamed(botId, name);
+  if (!entry.source.startsWith("org:")) removeReviewedRevisionsNamed(botId, name);
   return { removed: true };
 }
 
 export type StagedSkillAction = "create" | "update";
-
 export interface StagedSkillWrite {
   id: string;
   action: StagedSkillAction;
@@ -1342,12 +1340,13 @@ export interface MigratableSkillCopy {
   package?: SkillPackageStamp;
   files?: string[];
   filesSha256?: string;
+  retiredRoot?: RetiredSkillRoot;
   github?: GitHubSkillOrigin;
   intact: boolean;
 }
-
-export function listMigratableSkills(botId: string): MigratableSkillCopy[] {
+export function listMigratableSkills(botId: string, onlyName?: string, checkIntegrity = true): MigratableSkillCopy[] {
   return Object.entries(readManifest(botId))
+    .filter(([name]) => onlyName === undefined || name === onlyName)
     .map(([name, entry]) => ({
       name,
       directory: skillDirectory(botId, name, entry),
@@ -1359,12 +1358,12 @@ export function listMigratableSkills(botId: string): MigratableSkillCopy[] {
       ...(entry.compatibility ? { compatibility: entry.compatibility } : {}),
       ...(entry.package ? { package: { ...entry.package } } : {}),
       ...(entry.filesSha256 ? { files: [...entry.files ?? []], filesSha256: entry.filesSha256 } : {}),
+      ...(entry.retiredRoot ? { retiredRoot: { ...entry.retiredRoot } } : {}),
       ...(entry.github ? { github: { ...entry.github } } : {}),
-      intact: skillContentMatches(botId, name, entry),
+      intact: checkIntegrity && skillContentMatches(botId, name, entry),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
-
 export function removeManifestEntry(botId: string, name: string, expectSha256: string): { removed: true } | { error: string } {
   if (!isSkillName(name)) return { error: "invalid skill name" };
   const manifest = readManifest(botId);
@@ -1378,3 +1377,4 @@ export function removeManifestEntry(botId: string, name: string, expectSha256: s
   syncSkillLinks(botId);
   return { removed: true };
 }
+export const orgSkillStorage = { readManifest, writeManifest, ensureSkillsRoot, skillDirectory, skillContentMatches, syncSkillLinks, skillStateDir };

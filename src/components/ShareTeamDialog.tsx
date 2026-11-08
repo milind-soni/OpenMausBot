@@ -22,6 +22,7 @@ import {
 } from "@/lib/team-share";
 import { api, useStore } from "@/state/store";
 import type { NewBotDefaults } from "../../shared/new-bot-defaults";
+import { SharedSkillFiles } from "./SharedSkillFiles";
 
 export function ShareTeamContents({ preview, includeMemory, localSkips }: {
   preview: ShareResponse;
@@ -58,6 +59,7 @@ export function ShareTeamContents({ preview, includeMemory, localSkips }: {
           </div>
         ))}
       </dl>
+      <SharedSkillFiles document={preview.document} />
       {pkg.connections?.length ? (
         // Security: the whole address shows before Save, since hosted server URLs often carry a key.
         <div className="mt-3 text-[13px] text-ink-secondary">

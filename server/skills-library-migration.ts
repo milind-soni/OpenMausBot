@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync } 
 import { dirname, join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { DATA_DIR } from "./config.ts";
 import {
   installLibrarySkill,
   libraryArchiveDirectory,
@@ -11,6 +12,8 @@ import {
   skillsLibraryRoot,
 } from "./skill-library.ts";
 import { listMigratableSkills, removeManifestEntry } from "./skills.ts";
+import { retireUnchangedSkillRoot } from "./skill-retirement.ts";
+import { workspaceDir } from "./workspace.ts";
 
 export interface SkillMigrationOutcome {
   botId: string;
@@ -57,6 +60,10 @@ export function migrateBotSkillsToLibrary(botId: string, root: string = skillsLi
     if (!copy.intact || !copy.directory) {
       outcomes.push({ botId, name: copy.name, outcome: "skipped", detail: "stored SKILL.md is missing or changed after review" });
       continue;
+    }
+    if (copy.retiredRoot) {
+      const retired = retireUnchangedSkillRoot(join(workspaceDir(botId), "skills", copy.name), copy.retiredRoot, join(DATA_DIR, "skill-state", botId));
+      if ("error" in retired) { outcomes.push({ botId, name: copy.name, outcome: "skipped", detail: retired.error }); continue; }
     }
     try {
       if (readdirSync(copy.directory).some((name) => name !== "SKILL.md")) {

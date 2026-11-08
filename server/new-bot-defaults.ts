@@ -5,6 +5,7 @@ import { EFFORT_LEVELS, MAUS_COLOR_NAMES } from "../shared/wire.ts";
 import { isModelVariant } from "./contracts.ts";
 import { normalizeCronSchedule } from "../shared/routine-schedule.ts";
 import { parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
+import { isUtf8Text, skillCompanionsSchema } from "../shared/portable-skill-bundle.ts";
 
 const strings = (max: number, length: number) => z.array(z.string().max(length)).max(max);
 const clock = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
@@ -93,7 +94,9 @@ export const botSkillTemplateSchema = z.object({
   source: z.string().min(1).max(2000),
   text: z.string().refine(value => Buffer.byteLength(value, "utf8") <= 262_144, "Skill exceeds 256 KiB"),
   enabled: z.boolean(),
-}).strict();
+  files: skillCompanionsSchema.optional(),
+  omittedFiles: z.array(z.object({ path: z.string().max(512), reason: z.enum(["skill_file_type", "skill_file_unsafe", "skill_file_limit"]) }).strict()).max(200).optional(),
+}).strict().refine((skill) => !skill.files?.length || isUtf8Text(skill.text), { path: ["text"], message: "Bundled skill instructions must be UTF-8 text" });
 
 export const newBotDefaultsSchema = z.object({
   profile: botDefaultsProfileSchema.default({}),

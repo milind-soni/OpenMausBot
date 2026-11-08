@@ -21,7 +21,8 @@ A preset is an allowlist. It can carry only:
 - the new bot's name, title, description and standing instructions;
 - its look: colour, mascot and picture;
 - playbooks;
-- skills (the `SKILL.md` text only, never scripts);
+- skills (`SKILL.md` and bounded UTF-8 Markdown companions; scripts and other
+  assets are omitted and listed in the export preview);
 - starter notes (`MEMORY.md` and topic notes).
 
 It has no field for a model, a folder, a computer, an approval level,
@@ -39,7 +40,7 @@ still says only what a file may.
 - **From your organization:** the skills are added **switched on**, because
   your organization's Admin published them. Each also carries the install's
   skill stamp (contract §3.2: the install, the skill's name, the release, and
-  the `SKILL.md` hashes as released and as written), marked `via: "preset"`,
+  hashes of the released and written skill content), marked `via: "preset"`,
   so a later automatic update can tell your own edits from the publisher's
   changes. The bot is still yours, not part of the package: it never keeps
   the package added, so a team you deleted can be added again.
@@ -77,6 +78,11 @@ Either way the preset is made from your saved New bot defaults through the
 allowlist above, and every text part passes through the same secret redaction
 as a team file. The dialog lists what was removed or left out. There is no
 confirmation step: **Save file** is the decision.
+
+Newly fetched skill folders in New bot defaults retain supported Markdown
+companions. Defaults saved before this support contained only `SKILL.md`;
+re-import their source to include companions. The long-term portable unit is
+the whole skill folder; non-Markdown assets remain outside this initial subset.
 
 A preset file is added in **Templates → Import** like a team file. The
 preview shows the preset bots and any skills the file only offers; **Add

@@ -22,6 +22,7 @@ import { isSkillName } from "../shared/skill-md.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { directoryEntryState, entryExistsWithoutFollowing } from "./skill-storage.ts";
+import { snapshotPortableSkill } from "./portable-skill-files.ts";
 import { INDEX_MAX_BYTES, INDEX_MAX_SKILLS, type SkillListing } from "./skills.ts";
 
 export const IMPORTED_SKILLS_DIR = join(DATA_DIR, "imported-skills");
@@ -367,6 +368,11 @@ export function readImportedSkillFile(name: string): string | null {
   const bytes = readFileNoFollow(join(IMPORTED_SKILLS_DIR, name, "SKILL.md"));
   const text = bytes?.toString("utf8") ?? null;
   return text !== null && createHash("sha256").update(text).digest("hex") === entry.sha256 ? text : null;
+}
+
+export function exportImportedSkill(name: string) {
+  if (!isSkillName(name)) return null;
+  return snapshotPortableSkill(join(IMPORTED_SKILLS_DIR, name), () => readImportedSkillFile(name));
 }
 
 /** One bot's switch. Off stays off whatever is brought in later, and out of its search; on puts it in the bot's list and,

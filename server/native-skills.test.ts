@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import { skillExport } from "./skill-export.ts";
-import { installSkill, setSkillEnabled } from "./skills.ts";
+import { applyStagedSkillWrite, installSkill, setSkillEnabled, stageSkillWrite } from "./skills.ts";
 import type { BotRecord, Store } from "./store.ts";
 import { noteTypedSend } from "./typed-sends.ts";
 import { TASK_WORKSPACES_DIR } from "./workspace.ts";
@@ -101,6 +101,17 @@ describe("skills the engine loads by itself", () => {
     const team = skillExport(host).collectTeamSkills([bot], "all");
     expect(team.ok && [...team.skillsByBot.values()].flat().map((skill) => skill.name)).toEqual(["mine"]);
     expect(skillExport(host).checkedExportSkillNames(["personal-notes"], [bot])).toMatchObject({ ok: false });
+  });
+
+  it("exports references from a reviewed learned-skill revision", () => {
+    const { host, bot } = hostFor("claudeAgent");
+    const staged = stageSkillWrite(bot.id, { action: "create", files: [
+      { path: "SKILL.md", content: skillMd("learned") }, { path: "references/guide.md", content: "reviewed guide" },
+    ] });
+    expect("error" in staged).toBe(false);
+    if ("error" in staged) return;
+    expect(applyStagedSkillWrite(bot.id, staged.id)).not.toHaveProperty("error");
+    expect(host.exportBotSkill(bot, "learned")?.files).toEqual([{ path: "references/guide.md", content: "reviewed guide" }]);
   });
 
   it("never run one under the name of the bot's own skill that is switched off", () => {

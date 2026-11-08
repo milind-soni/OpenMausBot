@@ -19,7 +19,7 @@ import {
   type PackageImportDeps,
   type PackageImportResult,
 } from "./package-import.ts";
-import { pair, partHash, sha256Hex, type PartPair, type TeamPart } from "./package-parts.ts";
+import { pair, partHash, sha256Hex, skillReleaseValue, type PartPair, type TeamPart } from "./package-parts.ts";
 import { storedPresetObject, type StoredPreset } from "./presets.ts";
 import { applyUpdates, handleWithdrawn, type ReleaseContext } from "./org-library-releases.ts";
 import type { RoutineManager } from "./routines.ts";
@@ -31,6 +31,7 @@ import {
   PackageFormatError,
   parsePackageDocument,
   type PackageDocument,
+  type PackageSkill,
 } from "../shared/package-format.ts";
 
 export const ORG_LIBRARY_FORMAT = "openmaus.org-library";
@@ -248,10 +249,9 @@ export interface OrgLibraryDeps {
     list(botId: string): SkillListing[];
     stamps(botId: string): Array<{ name: string; enabled: boolean; stamp: SkillPackageStamp }>;
     setEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string };
-    installOrg(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp): SkillListing | { error: string };
-    /** An update replaces a skill's text only through these; without them skills keep the text they were added with. */
-    read?(botId: string, name: string): string | null;
-    remove?(botId: string, name: string): { removed: true } | { error: string };
+    installOrg(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp, files?: PackageSkill["files"]): SkillListing | { error: string };
+    replaceOrg?(botId: string, source: string, skill: Pick<PackageSkill, "instructions" | "files">, stamp: SkillPackageStamp, expected: SkillPackageStamp):
+      { updated: true } | { stale: true } | { error: string };
   };
   /** A team's brief, by its section; without it an update leaves the brief as it is. */
   sections?: { read(section: string): string; write(section: string, text: string): void };
@@ -954,7 +954,7 @@ export class OrgLibrary {
       return refusal(409, "skill_exists", `${bot.name} already has a skill named ${name}.`);
     }
     const added = this.deps.skills.installOrg(botId, `org:${install.ref}@${install.release}`, skill.instructions,
-      { installId, key: skill.name, release: install.release, ...pair(skill.instructions, skill.instructions) });
+      { installId, key: skill.name, release: install.release, ...pair(skillReleaseValue(skill), skillReleaseValue(skill)) }, skill.files);
     if ("error" in added) return refusal(422, "skill_failed", `The skill could not be added: ${added.error}`);
     return { ok: true, status: 201, value: added };
   }
