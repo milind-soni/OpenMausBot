@@ -79,6 +79,8 @@ One GitHub App serves every workspace on the instance, so only the instance oper
 
 Then install the App on the accounts that own the repositories and finish account authorization for each workspace from **Settings > Integrations**.
 
+The setup button posts GitHub's App manifest to `https://github.com/settings/apps/new`. Origin's CSP permits that exact external form destination, not arbitrary external form submissions; preserve this exception if a reverse proxy adds its own CSP. Setup remains limited to three attempts per minute per authorized operator and returns HTTP 429 with `Retry-After` when exhausted.
+
 An older workspace's legacy GitHub token does not configure this instance-wide App. New workspaces remain unavailable until the operator completes App setup. The web OAuth callback then shares the verified App installation through `teamGitHub`, so backend repository creation and scoped runner credentials use the same workspace connection. Reconnect preserves other workspaces; disconnect removes only the selected workspace's shared connection and retains its repositories. Authorization is checked again when the connection is committed.
 
 Existing App installations must approve added read-only Commit statuses and Deployments permissions. Merge checks still respect required reviews, branch protection and rulesets; the integration never bypasses them.
@@ -206,7 +208,7 @@ Boxd admission uses a dedicated native billing collector, not the SDK's subscrip
 
 The authenticated collector first obtains the API-key-bound organization and credential revision from Origin, then checks that the native CLI reports that exact organization. Only supported EUR/USD credit balances with safe integer amounts, unsettled charges deducted and evidence no older than 60 seconds authorize admission. Failed collection, stale evidence, organization/revision mismatch and unknown billing fail closed; native OAuth credentials never leave the collector's private HOME.
 
-Before enabling Boxd, the owner must independently turn off provider-side auto-top-up and confirm it in **Settings > Execution settings**. This checkbox records an owner attestation, not an API-verified billing setting. Replacing the API key clears that confirmation and its billing evidence. Leave the provider disabled until this confirmation, fresh native billing and the private worker's own coding-account login are complete.
+Automatic top-up remains the owner's choice in Boxd Billing. Origin neither inspects nor changes that setting and does not require it to be OFF. If enabled there, Boxd may charge the configured payment method; the native credit check is not a card-spending cap. Fresh positive credits, project authorization, local-offline eligibility and the private worker's own coding-account login are still required. Replacing the API key invalidates its previous billing evidence.
 
 ### Updates and the phone gateway
 

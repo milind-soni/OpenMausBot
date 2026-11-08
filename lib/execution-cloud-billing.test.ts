@@ -20,18 +20,18 @@ beforeEach(() => {
   vi.stubEnv("ORIGIN_EXECUTION_CONTROLLER_TOKEN_HASH", executionTokenHash(token));
   executionDb().exec("DELETE FROM execution_settings");
   provider = { provider: "boxd", enabled: true, sealedKey: "fixture-sealed", keyConfigured: true, updatedAt: now, usage: { status: "unknown" },
-    boxdBinding: { orgId: "org", revision, autoTopUpOffConfirmedAt: now, confirmedBy: "owner" },
+    boxdBinding: { orgId: "org", revision },
     nativeBilling: { source: "boxd-native-cli", version: "0.3.3", orgId: "org", revision, observedAt: now, status: "available", billingMode: "credits", currency: "EUR", balanceMicro: 50_000_000, accruingMicro: 438 } };
 });
 afterEach(() => { vi.restoreAllMocks(); });
 afterAll(() => { executionDb().close(); rmSync(directory, { recursive: true, force: true }); vi.unstubAllEnvs(); });
 
-test.each(["EUR", "USD"] as const)("native prepaid admission preserves %s and subtracts unsettled usage without FX", currency => {
+test.each(["EUR", "USD"] as const)("native credit admission needs no top-up attestation, preserves %s and subtracts unsettled usage", currency => {
   provider.nativeBilling!.currency = currency;
   expect(nativeBoxdUsage(provider, now)).toMatchObject({ status: "available", unit: currency, balance: 49.999562, source: "boxd-native-cli", observedAt: now });
   expect(boxdAdmissionFailure(provider, now)).toBeUndefined();
 });
-test.each(["missing", "expired", "future", "org", "revision", "unknown", "subscription", "exhausted", "unsettled", "consent", "disabled"])("%s native billing fails closed", scenario => {
+test.each(["missing", "expired", "future", "org", "revision", "unknown", "subscription", "exhausted", "unsettled", "disabled"])("%s native billing fails closed", scenario => {
   if (scenario === "missing") provider.nativeBilling = undefined;
   else if (scenario === "expired") provider.nativeBilling!.observedAt = now - 60_001;
   else if (scenario === "future") provider.nativeBilling!.observedAt = now + 1;
@@ -41,7 +41,6 @@ test.each(["missing", "expired", "future", "org", "revision", "unknown", "subscr
   else if (scenario === "subscription") provider.nativeBilling!.billingMode = "stripe";
   else if (scenario === "exhausted") provider.nativeBilling!.balanceMicro = 0;
   else if (scenario === "unsettled") provider.nativeBilling!.accruingMicro = 50_000_001;
-  else if (scenario === "consent") provider.boxdBinding!.autoTopUpOffConfirmedAt = undefined;
   else if (scenario === "disabled") provider.enabled = false;
   expect(boxdAdmissionFailure(provider, now)).toEqual(expect.any(String));
 });

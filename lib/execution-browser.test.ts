@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { executionAction, executionRunDetail, executionSnapshot } from "./execution-browser";
-import { accountIdentity, atomicExecution, executionAccounts, executionDb, executionSetting, readExecutionRun, replaceExecutionAccounts, saveExecutionHost, saveExecutionRun, type ExecutionPrincipal } from "./execution-store";
+import { accountIdentity, atomicExecution, executionAccounts, executionDb, executionSetting, readExecutionRun, replaceExecutionAccounts, saveExecutionHost, saveExecutionRun, setExecutionSetting, type ExecutionPrincipal } from "./execution-store";
 import { cloudAccountUsage } from "./execution-cloud";
 import { enrolledHost } from "./execution-common";
 import { boxdOrganization } from "./execution-cloud/boxd";
@@ -165,22 +165,20 @@ test("cloud keys and automation values are write-only; snapshots expose only nam
   expect(executionSnapshot(actor).environments).toEqual([]);
 });
 
-test("Boxd consent binds the resolved organization and is cleared on credential replacement", async () => {
+test("Boxd credential replacement clears evidence bound to the previous organization and revision", async () => {
   const actor = principal();
   await executionAction(actor, { action: "saveCloudProvider", provider: "boxd", apiKey: "first-fixture-key", enabled: false });
   const first = executionSetting<StoredCloudProvider>(actor.teamId, "cloud", "boxd")!;
   expect(first.boxdBinding).toMatchObject({ orgId: "org-fixture" });
-  expect(first.boxdBinding?.autoTopUpOffConfirmedAt).toBeUndefined();
-  await executionAction(actor, { action: "saveCloudProvider", provider: "boxd", enabled: false, boxdAutoTopUpOff: true, boxdBillingRevision: first.boxdBinding!.revision });
-  expect(executionSetting<StoredCloudProvider>(actor.teamId, "cloud", "boxd")!.boxdBinding).toMatchObject({ confirmedBy: actor.userId, autoTopUpOffConfirmedAt: now });
+  first.nativeBilling = { source: "boxd-native-cli", version: "0.3.3", orgId: first.boxdBinding!.orgId, revision: first.boxdBinding!.revision, observedAt: now, status: "available", billingMode: "credits", currency: "EUR", balanceMicro: 50_000_000, accruingMicro: 0 };
+  setExecutionSetting(actor.teamId, "cloud", "boxd", first);
   vi.mocked(boxdOrganization).mockResolvedValueOnce("another-org");
   await executionAction(actor, { action: "saveCloudProvider", provider: "boxd", apiKey: "replacement-key", enabled: false });
   const replaced = executionSetting<StoredCloudProvider>(actor.teamId, "cloud", "boxd")!;
   expect(replaced.boxdBinding?.orgId).toBe("another-org");
   expect(replaced.boxdBinding?.revision).not.toBe(first.boxdBinding!.revision);
-  expect(replaced.boxdBinding?.autoTopUpOffConfirmedAt).toBeUndefined();
   expect(replaced.nativeBilling).toBeUndefined();
-  await expect(executionAction(actor, { action: "saveCloudProvider", provider: "boxd", enabled: true, boxdAutoTopUpOff: true, boxdBillingRevision: first.boxdBinding!.revision })).rejects.toThrow(/Save the Boxd credential first/);
+  expect(executionSnapshot(actor).cloudProviders.find(provider => provider.provider === "boxd")?.usage.status).toBe("unknown");
 });
 
 test("Boxd unresolved key identity cannot overwrite the existing provider", async () => {

@@ -1,5 +1,30 @@
 import { test, expect, local } from '../support/fixtures.mjs';
 
+test('O-110 GitHub manifest form navigation is allowed without opening arbitrary form destinations', async ({ page }) => {
+  // Intercept external destinations: exercise real browser CSP without creating a GitHub App.
+  await page.route('https://github.com/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Manifest destination</title>' }));
+  await page.route('https://untrusted.invalid/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Untrusted destination</title>' }));
+  await page.goto('/login');
+  await page.evaluate(() => {
+    const form = document.createElement('form');
+    form.method = 'POST'; form.action = 'https://github.com/settings/apps/new?state=csp-smoke';
+    document.body.append(form); form.submit();
+  });
+  await expect(page).toHaveURL('https://github.com/settings/apps/new?state=csp-smoke');
+  for (const destination of ['https://untrusted.invalid/receive', 'https://github.com/unrelated']) {
+    await page.goto('/login');
+    const violation = await page.evaluate(destination => new Promise(resolve => {
+      document.addEventListener('securitypolicyviolation', event => {
+        if (event.effectiveDirective === 'form-action') resolve(event.blockedURI);
+      });
+      const form = document.createElement('form');
+      form.method = 'POST'; form.action = destination;
+      document.body.append(form); form.submit();
+    }), destination);
+    expect(new URL(violation).origin).toBe(new URL(destination).origin);
+  }
+});
+
 test('O-001 O-003 sign-in, persistent session and logout', async ({ page, f }) => {
   await page.goto('/login');
   await page.getByLabel('Email', { exact: true }).fill(f.member.email);

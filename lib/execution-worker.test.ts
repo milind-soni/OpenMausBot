@@ -125,7 +125,7 @@ async function cloudFixture(enabled: boolean) {
   saveCloudAllocation({ id: "allocation", teamId: f.teamId, ownerId: f.owner.id, projectId: f.projectId, provider: "boxd", status: "ready", hostId: f.host.hostId, machineId: "private-machine", name: "Private cloud", idempotencyKey: "one-machine", createdAt: now, updatedAt: now, lastActiveAt: now });
   const revision = "e9f4f673-34f1-44e8-a0a8-0b2a5c005baf";
   setExecutionSetting(f.teamId, "cloud", "boxd", { provider: "boxd", enabled, sealedKey: "fixture-sealed", keyConfigured: true, updatedAt: now, usage: { status: "unknown" },
-    boxdBinding: { orgId: "org-fixture", revision, autoTopUpOffConfirmedAt: now, confirmedBy: f.owner.id },
+    boxdBinding: { orgId: "org-fixture", revision },
     nativeBilling: { source: "boxd-native-cli", version: "0.3.3", orgId: "org-fixture", revision, observedAt: now, status: "available", billingMode: "credits", currency: "EUR", balanceMicro: 50_000_000, accruingMicro: 0 } });
   const queued = await f.start(f.principal, { cloudEnabled: true });
   return { ...f, queued };
@@ -306,14 +306,13 @@ test.each([false, true])("provider disablement fences a ready worker, including 
   expect(readExecutionRun(f.queued.id)?.leaseHash).toBeNull();
 });
 
-test.each(["stale", "org", "revision", "consent", "exhausted"] as const)("Boxd %s evidence fences a reused worker even after Git preparation", async failure => {
+test.each(["stale", "org", "revision", "exhausted"] as const)("Boxd %s evidence fences a reused worker even after Git preparation", async failure => {
   const f = await cloudFixture(true);
   vi.mocked(prepareRunRepository).mockImplementationOnce(async () => {
     const provider = executionSetting<StoredCloudProvider>(f.teamId, "cloud", "boxd")!;
     if (failure === "stale") provider.nativeBilling!.observedAt = now - 60_001;
     if (failure === "org") provider.nativeBilling!.orgId = "another-org";
     if (failure === "revision") provider.boxdBinding!.revision = "changed-revision";
-    if (failure === "consent") provider.boxdBinding!.autoTopUpOffConfirmedAt = undefined;
     if (failure === "exhausted") provider.nativeBilling!.balanceMicro = 0;
     setExecutionSetting(f.teamId, "cloud", "boxd", provider);
     return f.repository;

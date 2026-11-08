@@ -113,7 +113,7 @@ export type ExecutionCloudProviderStatus = {
   keyConfigured: boolean;
   updatedAt: number;
   usage: { status: "available" | "unknown"; balance?: number; unit?: string; balanceScope?: "credit_wallet" | "overage_wallet"; label?: string; error?: string; observedAt?: number; source?: "boxd-native-cli" };
-  boxdBilling?: { orgId: string; revision: string; autoTopUpOffConfirmedAt?: number };
+  boxdBilling?: { orgId: string; revision: string };
 };
 export type ExecutionUpdate = { hostId?: string; component: string; currentVersion?: string; availableVersion?: string; status: "unknown" | "current" | "available" | "pending" | "updating" | "failed"; message?: string; checkedAt?: number };
 export type ExecutionSnapshot = {

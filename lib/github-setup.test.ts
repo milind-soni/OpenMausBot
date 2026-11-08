@@ -9,6 +9,7 @@ import { GET } from "../app/api/github/setup/callback/route";
 import { GET as workspaceGET } from "../app/api/github/workspace/route";
 import { createGithubState, githubAppConfig, saveGitHubApp } from "./github-workspace";
 import { integrationDb } from "./githubConnection";
+import { limitLocalAction, TooManyRequests } from "./localRealtime";
 
 const current = vi.hoisted(() => ({ role: "owner", email: "operator@pg3.test", userId: "operator-user", legacy: "", operator: "operator-user" as string | null | Error }));
 vi.mock("../convex/lib/auth", async importOriginal => ({ ...await importOriginal<typeof import("../convex/lib/auth")>(), get DEFAULT_OWNER_EMAIL() { return current.legacy; } }));
@@ -17,7 +18,8 @@ vi.mock("./integration-bridge", async importOriginal => ({ ...await importOrigin
   if (current.operator instanceof Error) throw current.operator;
   return current.operator ? { userId: current.operator } : null;
 } }));
-vi.mock("./localRealtime", () => ({
+vi.mock("./localRealtime", async importOriginal => ({
+  ...await importOriginal<typeof import("./localRealtime")>(),
   localDataDir: () => process.env.ORIGIN_LOCAL_DATA_DIR!,
   limitLocalAction: vi.fn(),
   sessionTokenFromRequest: () => "fixture-session",
@@ -57,6 +59,15 @@ test("GitHub App setup: on an open-signup instance a stranger who owns their own
     expect((await manifest()).status).toBe(403);
     expect(await workspaceStatus()).toMatchObject({ configured: false, canSetup: false });
   }
+});
+
+test("GitHub App setup returns a retryable 429 without issuing state when throttled", async () => {
+  vi.mocked(limitLocalAction).mockImplementationOnce(() => { throw new TooManyRequests(); });
+  const response = await manifest();
+  expect(response.status).toBe(429);
+  expect(Number(response.headers.get("retry-after"))).toBeGreaterThan(0);
+  expect(response.headers.has("set-cookie")).toBe(false);
+  expect(integrationDb().prepare("SELECT count(*) AS count FROM github_oauth_states").get()).toEqual({ count: 0 });
 });
 
 test("GitHub App setup: without ORIGIN_ADMIN_EMAILS only the first workspace's owner, as owner/admin, gets the manifest", async () => {

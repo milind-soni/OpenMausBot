@@ -3,7 +3,7 @@ import type { StoredCloudProvider } from "../execution-common";
 import type { ExecutionCloudProviderStatus } from "../execution-types";
 
 export const BOXD_BILLING_MAX_AGE_MS = 60_000;
-export type BoxdBillingBinding = { orgId: string; revision: string; autoTopUpOffConfirmedAt?: number; confirmedBy?: string };
+export type BoxdBillingBinding = { orgId: string; revision: string };
 export const boxdBillingReport = z.object({
   source: z.literal("boxd-native-cli"), version: z.literal("0.3.3"), orgId: z.string().min(1).max(200), revision: z.string().uuid(),
   observedAt: z.number().int().nonnegative(), status: z.enum(["available", "unknown"]),
@@ -28,8 +28,7 @@ export function nativeBoxdUsage(stored: StoredCloudProvider, now = Date.now()): 
 }
 export function boxdAdmissionFailure(stored: StoredCloudProvider | undefined, now = Date.now()): string | undefined {
   if (!stored?.enabled || !stored.sealedKey) return "Boxd provider is disabled or unconfigured";
-  if (!stored.boxdBinding?.autoTopUpOffConfirmedAt || !stored.boxdBinding.confirmedBy) return "Owner must confirm automatic top-up is off for the configured Boxd organization";
   const usage = nativeBoxdUsage(stored, now);
   if (usage.status !== "available") return usage.error;
-  if (usage.balance! <= 0) return "Boxd prepaid credits are exhausted after unsettled usage; no card charge or Boat switch is authorized";
+  if (usage.balance! <= 0) return "Boxd credits are exhausted after unsettled usage; waiting for available credits or an explicit provider change";
 }

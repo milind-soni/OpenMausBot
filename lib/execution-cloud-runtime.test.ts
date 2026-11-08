@@ -81,7 +81,7 @@ beforeEach(() => {
   for (const provider of ["boxd", "boat"]) {
     state.settings.set(provider, {
       provider, enabled: true, sealedKey: "sealed-provider", keyConfigured: true, updatedAt: NOW, usage: { status: "unknown" },
-      ...(provider === "boxd" ? { boxdBinding: { orgId: "org", revision: BOXD_BILLING_REVISION, autoTopUpOffConfirmedAt: NOW, confirmedBy: "owner" } } : {}),
+      ...(provider === "boxd" ? { boxdBinding: { orgId: "org", revision: BOXD_BILLING_REVISION } } : {}),
     });
   }
   observeBoxdCredits();
