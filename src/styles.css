@@ -1150,6 +1150,7 @@
   background: color-mix(in srgb, var(--color-card), var(--color-ink) 4%);
 }
 [data-reply-bubble] [data-table-card] {
+  width: 100%;
   border-radius: 12px;
 }
 /* A card under its own bot's bubble (and a bubble under its card) sits 12px below it, not the 16px between senders. */
@@ -1562,10 +1563,14 @@ body {
   border-color: var(--settings-edge);
 }
 :root[data-skin="midnight"] [data-settings-look] > .glass-scrim {
-  background: rgb(0 0 0 / 0.7);
+  background: rgb(0 0 0 / 0.55);
 }
 :root[data-skin="daylight"] [data-settings-look] > .glass-scrim {
-  background: rgb(0 0 0 / 0.5);
+  background: rgb(0 0 0 / 0.18);
+}
+/* Over a light scrim the sheet needs its own lift. */
+:root[data-skin="daylight"] [data-settings-look] .glass-surface {
+  box-shadow: 0 24px 64px -16px rgb(28 28 28 / 0.28), 0 2px 8px rgb(28 28 28 / 0.06);
 }
 @media (min-width: 768px) {
   .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] {

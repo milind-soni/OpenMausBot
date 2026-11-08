@@ -621,7 +621,7 @@ describe("the Details tab", () => {
   it("says what routines are while the bot has none, with Add a routine, and lists them once it has some", () => {
     const empty = botTab(makeBot());
     expect(empty.html).toContain('data-panel-empty="routines"');
-    expect(empty.html).toContain(">Jobs this bot runs on a schedule, like a news roundup every morning.<");
+    expect(empty.html).toContain(">Jobs this bot runs on a schedule, like a news roundup every morning. Every bot&#x27;s routines are also in Automations.<");
     expect(empty.html.match(/data-panel-page="routines"/g)).toHaveLength(1);
     const add = find(empty, "data-panel-page", "routines");
     expect(empty.html).toMatch(/data-panel-page="routines"[^>]*>.*<span class="truncate">Add a routine<\/span><\/button>/);

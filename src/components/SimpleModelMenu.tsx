@@ -160,7 +160,7 @@ function Thinking({ thinking, labelId }: { thinking: SimpleThinking; labelId: st
   const levels = thinking;
   const auto = levels.current === undefined;
   const pill = (pressed: boolean) => cn(
-    "h-6 min-w-0 truncate rounded-full px-1 text-[12px] leading-4 transition-colors touch:h-8",
+    "h-7 min-w-0 truncate rounded-full px-1.5 text-[12px] leading-4 transition-colors touch:h-8",
     pressed ? "bg-ink/[0.1] font-medium text-ink" : "text-ink-secondary hover:text-ink",
   );
   return (
@@ -189,9 +189,9 @@ function Thinking({ thinking, labelId }: { thinking: SimpleThinking; labelId: st
           </button>
         ))}
       </div>
-      {auto && (
-        <p data-simple-effort-auto className="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">{t("model.simple.thinkingDefault")}</p>
-      )}
+      <p data-simple-effort-auto={auto || undefined} className="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">
+        {auto ? t("model.simple.thinkingDefault") : t("model.simple.thinkingLevel", { level: effortLabel(levels.current!) })}
+      </p>
     </div>
   );
 }

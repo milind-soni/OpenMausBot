@@ -330,7 +330,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         </span>}
         {panel ? <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           {heading}
-          {preview && <span dir="auto" className="truncate text-[13px] font-normal text-ink-secondary">{preview}</span>}
+          {(preview || updatedLabel) && <span className="flex min-w-0 items-baseline gap-2 text-[13px] font-normal text-ink-secondary">
+            <span dir="auto" className="min-w-0 flex-1 truncate">{preview}</span>
+            {updatedLabel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 text-[12px] tabular-nums text-ink-tertiary">{updatedLabel}</time>}
+          </span>}
           {isWorking(task) && <span data-thread-working="" className="flex items-center gap-1 text-[12px] font-normal text-success">
             {t("chat.activity.working")}{task.turnStartedAt ? <><span aria-hidden="true">·</span><WorkingTimer since={task.turnStartedAt} /></> : null}
           </span>}
@@ -339,7 +342,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
       {task.link && <a href={task.link} target="_blank" rel="noreferrer" dir="ltr" title={task.link} aria-label={t("task.openLink", { link: threadLinkLabel(task.link) ?? task.link })}
         className={cn("shrink-0 rounded px-1 font-mono text-[11px] text-ink-secondary hover:bg-raised hover:text-ink outline-none focus-visible:ring-1 focus-visible:ring-accent/60 [unicode-bidi:isolate]", panel && "mt-2.5")}>{threadLinkLabel(task.link) ?? t("task.link")}</a>}
       {!renaming && <span className={cn("flex shrink-0 items-center gap-2 px-1", panel && "pt-2.5")} onClick={choose} onContextMenu={contextMenu}>
-        {updatedLabel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 tabular-nums text-[10px] text-ink-secondary">{updatedLabel}</time>}
+        {updatedLabel && !panel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 tabular-nums text-[10px] text-ink-secondary">{updatedLabel}</time>}
         {task.pinned === true && <Pin size={11} className="shrink-0 text-ink-secondary" aria-label={t("sidebar.bot.pin")} />}
         {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWaitingOnTeammate(task) ? <Clock3 size={11} className="shrink-0 text-ink-secondary" aria-label={t("task.waitingOnTeammate")} /> : isWorking(task) && !panel ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={activityLabel ?? t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
         {task.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}

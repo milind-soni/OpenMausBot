@@ -151,7 +151,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-6 pt-[14vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-6 pt-[14vh] [:root[data-skin=daylight]_&]:bg-black/[0.18]"
       onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}
       onKeyDown={onKeyDown}
     >

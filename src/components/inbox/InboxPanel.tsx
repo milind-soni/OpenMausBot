@@ -12,8 +12,8 @@ import { InboxRowItem } from "./InboxRow";
 import { matchesSearch, nextAfter } from "./inbox-answer";
 import { listedRows, waitingCount } from "./inbox-view";
 import { useInboxActions } from "./use-inbox-actions";
+import { roundButtonCls } from "../bot-panel/rows";
 
-const BAR_BUTTON = "flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink pointer-coarse:size-9";
 
 export function InboxPanel() {
   const view = useInboxView();
@@ -59,20 +59,20 @@ export function InboxPanel() {
   const count = waitingCount(view);
   const body = (
     <>
-      <div className="flex items-center gap-1 px-3 pb-1 pt-2">
-        <div data-inbox-tab-chip className="flex h-8 min-w-0 flex-1 items-center gap-2 ps-1 text-[14px]">
+      <div className="flex h-[50px] shrink-0 items-start gap-2.5 px-[13px] pt-[13px]">
+        <div data-inbox-tab-chip className="flex h-[34px] min-w-0 flex-1 items-center gap-2 ps-1 text-[14px]">
           <Inbox size={16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
           <span className="min-w-0 truncate font-medium text-ink">{t("inbox.panel.title")}</span>
           {count > 0 && <span data-inbox-tab-count className="shrink-0 tabular-nums text-ink-tertiary">{count}</span>}
         </div>
         {!phone && (
           <button type="button" onClick={() => widenInbox(!panel.wide)} aria-pressed={Boolean(panel.wide)} aria-label={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")}
-            title={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")} className={BAR_BUTTON}>
-            {panel.wide ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
+            title={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")} className={roundButtonCls}>
+            {panel.wide ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
           </button>
         )}
-        <button type="button" onClick={closeInbox} aria-label={t("inbox.action.closePanel")} title={t("inbox.action.closePanel")} className={BAR_BUTTON}>
-          <X size={15} aria-hidden="true" />
+        <button type="button" onClick={closeInbox} aria-label={t("inbox.action.closePanel")} title={t("inbox.action.closePanel")} className={roundButtonCls}>
+          <X size={16} aria-hidden="true" />
         </button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

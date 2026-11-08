@@ -102,7 +102,7 @@ export function SettingsGroup({ label, block, actions, footnote, children }: {
     >
       {(label || actions) && (
         <div className="flex min-h-4 items-center justify-between gap-3 pl-4 pr-1">
-          {label && <h3 id={labelId} className="text-[12px] leading-4 font-normal text-ink-secondary">{label}</h3>}
+          {label && <h3 id={labelId} className="text-[13px] leading-4 font-semibold text-ink-secondary">{label}</h3>}
           {actions}
         </div>
       )}

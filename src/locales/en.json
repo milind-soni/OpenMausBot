@@ -4255,7 +4255,7 @@
   "botPanel.tab.details": "Details",
   "botPanel.tab.library": "Library",
   "botPanel.routines.empty": "Routines are recurring tasks this bot runs on a schedule. Ask it in chat to set one up.",
-  "botPanel.routines.emptyHint": "Jobs this bot runs on a schedule, like a news roundup every morning.",
+  "botPanel.routines.emptyHint": "Jobs this bot runs on a schedule, like a news roundup every morning. Every bot's routines are also in Automations.",
   "botPanel.routines.add": "Add a routine",
   "botPanel.library.empty": "Pages, files, and apps this bot makes show up here",
   "botPanel.library.pages": "Pages",
