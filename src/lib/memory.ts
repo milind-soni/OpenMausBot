@@ -3,6 +3,7 @@ import { intlLocale, t } from "@/lib/i18n";
 import { serverErrorText } from "@/lib/server-error";
 
 export const MEMORY_INDEX = "MEMORY.md";
+export const SOUL_PATH = "SOUL.md";
 
 export interface MemoryCapacity {
   lines: number;
@@ -100,6 +101,14 @@ export async function fetchMemoryJournal(botId: string, limit = 50): Promise<Mem
 
 export function revertMemoryChange(botId: string, entryId: string): Promise<MemoryDoc & { overview: MemoryOverview }> {
   return api(`/api/bots/${botId}/memory/journal/${encodeURIComponent(entryId)}/revert`, { method: "POST" });
+}
+
+export function fetchSoulChanges(botId: string): Promise<{ rows: MemoryJournalRow[]; revision: string }> {
+  return api(`/api/bots/${botId}/history?view=changes&limit=20`);
+}
+
+export function undoSoulChange(botId: string, id: string, expectedRevision: string): Promise<unknown> {
+  return api(`/api/bots/${botId}/history/rollback`, { method: "POST", body: JSON.stringify({ id, expectedRevision }) });
 }
 
 export interface TidyReport {

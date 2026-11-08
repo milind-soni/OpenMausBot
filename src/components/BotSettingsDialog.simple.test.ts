@@ -1102,8 +1102,10 @@ describe("the drill-in pages", () => {
     expect(rendered.html).toContain("Likes short replies");
     expect(rendered.html).toContain("Uses Resolve Studio");
     expect(rendered.html).not.toContain("# Notes");
-    expect(switches(rendered.html)).toBe(0);
-    for (const text of ["Tidy now", "Upkeep", "Obsidian", "Daily logs", "Journal"]) expect(rendered.html).not.toContain(text);
+    // Memory upkeep is the page's one switch; the rest of advanced Memory stays out.
+    expect(switches(rendered.html)).toBe(1);
+    expect(rendered.html).toContain("Memory upkeep");
+    for (const text of ["Tidy now", "Obsidian", "Daily logs", "Journal"]) expect(rendered.html).not.toContain(text);
     click(rendered.nodes.filter((node) => node.props.label === "Forget")[0]!);
     await Promise.resolve();
     expect(fixture.saveMemory).toHaveBeenLastCalledWith("scout", "MEMORY.md", "# Notes\n\n- Uses Resolve Studio\n", "h1", false);

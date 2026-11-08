@@ -2449,9 +2449,14 @@
   "chat.preview.updatedLink": "उसी लिंक पर अपडेट हुआ",
   "chat.preview.publishFailed": "यह पेज प्रकाशित नहीं हो सका। थोड़ी देर में फिर कोशिश करें।",
   "chat.preview.openTab": "नए टैब में खोलें",
+  "chat.preview.save": "डिवाइस पर सहेजें",
+  "chat.preview.saveFailed": "पेज सहेजा नहीं जा सका।",
+  "serverError.page.downloadHasFiles": "इस पेज के साथ और फ़ाइलें हैं, इसलिए इसे एक फ़ाइल के रूप में सहेजा नहीं जा सकता। इसके बजाय लिंक के लिए इसे शेयर करें।",
   "chat.preview.openTabNeedsLink": "नए टैब में खोलने के लिए पेज शेयर करें",
   "chat.preview.fullScreen": "पूरी स्क्रीन",
   "chat.preview.exitFullScreen": "पूरी स्क्रीन बंद करें",
+  "chat.preview.openPage": "पेज खोलें",
+  "chat.preview.closePage": "पेज बंद करें",
   "chat.preview.pointedPart": "पेज का एक हिस्सा",
   "chat.preview.removePoint": "{label} हटाएं",
   "chat.preview.pointedAt": "दिखाया: {parts}",
@@ -3141,5 +3146,11 @@
   "remote.client.endsDec7": "यह कनेक्शन तरीका 7 दिसंबर को खत्म होगा। उसके बाद दूसरे कंप्यूटर के फ़ोन और डिवाइस से इस कंप्यूटर को फिर से जोड़ें।",
   "phone.code.pairingCode": "पेयरिंग कोड",
   "phone.code.typeIntro": "{app} ऐप खोलें और यह पेयरिंग कोड डालें।",
-  "phone.signIn.emailCode": "आपके ईमेल का साइन-इन कोड"
+  "phone.signIn.emailCode": "आपके ईमेल का साइन-इन कोड",
+  "settings.profile.everyBotRules": "हर बॉट के लिए नियम",
+  "settings.profile.everyBotRulesPlaceholder": "हर बॉट इन्हें मानता है। जहाँ ये अलग हों, वहाँ बॉट के अपने निर्देश लागू होते हैं।",
+  "botPanel.heavy": "यह बॉट हर बार बहुत कुछ लोड करता है।",
+  "botPanel.tidyMemory": "मेमोरी व्यवस्थित करें",
+  "memory.journal.instructions": "निर्देश",
+  "memory.journal.actor.teamSetup": "टीम सेटअप"
 }

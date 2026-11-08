@@ -2449,9 +2449,14 @@
   "chat.preview.updatedLink": "Mise à jour au même lien",
   "chat.preview.publishFailed": "Impossible de publier cette page. Réessayez dans un instant.",
   "chat.preview.openTab": "Ouvrir dans un nouvel onglet",
+  "chat.preview.save": "Enregistrer sur l'appareil",
+  "chat.preview.saveFailed": "Impossible d'enregistrer la page.",
+  "serverError.page.downloadHasFiles": "Cette page a des fichiers à côté d'elle, elle ne peut donc pas être enregistrée en un seul fichier. Partagez-la pour obtenir un lien.",
   "chat.preview.openTabNeedsLink": "Partagez la page pour l’ouvrir dans un nouvel onglet",
   "chat.preview.fullScreen": "Plein écran",
   "chat.preview.exitFullScreen": "Quitter le plein écran",
+  "chat.preview.openPage": "Ouvrir la page",
+  "chat.preview.closePage": "Fermer la page",
   "chat.preview.pointedPart": "une partie de la page",
   "chat.preview.removePoint": "Retirer {label}",
   "chat.preview.pointedAt": "Montré : {parts}",
@@ -3289,5 +3294,11 @@
   "remote.client.endsDec7": "Ce type de connexion prend fin le 7 décembre. Ensuite, appairez à nouveau cet ordinateur depuis Téléphone et appareils sur l'autre ordinateur.",
   "phone.code.pairingCode": "Code d'appairage",
   "phone.code.typeIntro": "Ouvrez l'app {app} et saisissez ce code d'appairage.",
-  "phone.signIn.emailCode": "Code de connexion reçu par e-mail"
+  "phone.signIn.emailCode": "Code de connexion reçu par e-mail",
+  "settings.profile.everyBotRules": "Règles pour tous les bots",
+  "settings.profile.everyBotRulesPlaceholder": "Tous les bots les suivent. En cas de désaccord, les instructions propres à un bot l'emportent.",
+  "botPanel.heavy": "Ce bot charge beaucoup à chaque tour.",
+  "botPanel.tidyMemory": "Ranger la mémoire",
+  "memory.journal.instructions": "les instructions",
+  "memory.journal.actor.teamSetup": "La configuration de l'équipe"
 }
