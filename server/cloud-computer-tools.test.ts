@@ -57,6 +57,7 @@ describe("cloud computer tools", () => {
     const exec = listed.tools.find(tool => tool.name === "exec")!;
     expect(exec.description).toContain("Completion does not automatically resume this turn or notify a delegator");
     expect(exec.description).toContain("use exec_status with wait_seconds in this turn");
+    expect(exec.description).toContain("check its exit code and output");
     expect(exec.description).toContain("report the work as unfinished with the process_id");
   });
 

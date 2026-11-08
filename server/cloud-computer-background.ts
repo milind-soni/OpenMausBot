@@ -146,8 +146,9 @@ export async function backgroundStatus(
     if (!response.ok) return text(boatErrorMessage(response.status, "Reading the command's status", body, included(cfg)), true);
     if (typeof body?.running !== "boolean") return text("The cloud computer gave an unreadable answer about this command. Call exec_status again.", true);
     if (!body.running) untrack(boxId, processId);
-    if (!body.running || Date.now() + POLL_MS > until) return describeStatus(args.process_id, body);
-    await delay(POLL_MS, undefined, { signal });
+    const remaining = until - Date.now();
+    if (!body.running || remaining <= 0) return describeStatus(args.process_id, body);
+    await delay(Math.min(POLL_MS, remaining), undefined, { signal });
   }
 }
 

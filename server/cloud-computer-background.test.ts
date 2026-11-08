@@ -93,6 +93,7 @@ describe.each([
     expect(json(result)).toMatchObject({ processId: expect.stringMatching(new RegExp(background.PROCESS_ID_PATTERN)), status: "running" });
     expect(json(result).next).toContain("completion will not automatically resume this turn or notify a delegator");
     expect(json(result).next).toContain("use exec_status with wait_seconds in this turn");
+    expect(json(result).next).toContain("check its exit code and output");
     expect(json(result).next).toContain("report it as unfinished with the process_id");
     expect([started.gated(), started.checks()]).toEqual([1, 2]);
     expect(calls).toHaveLength(1);
@@ -135,6 +136,16 @@ describe.each([
     const processId = await start();
     processes.get(`${BOX}:${processId.split("-")[1]}`)!.runningFor = 100;
     expect(json(await call("exec_status", { process_id: processId, wait_seconds: 3 }).done)).toMatchObject({ status: "running", exitCode: null });
+    expect(calls.filter(entry => entry.method === "GET")).toHaveLength(3);
+  });
+
+  it.each([true, false])("honors a one-second wait and reports whether the command finished: %s", async (finishes) => {
+    const processId = await start();
+    Object.assign(processes.get(`${BOX}:${processId.split("-")[1]}`)!, { runningFor: finishes ? 1 : 100, exitCode: 3 });
+    const began = Date.now();
+    const result = json(await call("exec_status", { process_id: processId, wait_seconds: 1 }).done);
+    expect(Date.now() - began).toBeGreaterThanOrEqual(900);
+    expect(result).toMatchObject({ status: finishes ? "finished" : "running", exitCode: finishes ? 3 : null });
     expect(calls.filter(entry => entry.method === "GET")).toHaveLength(2);
   });
 
