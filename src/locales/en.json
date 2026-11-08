@@ -3026,6 +3026,7 @@
   "model.orgBlocked": "Turned off by your organization",
   "model.simple.signIn": "Sign in",
   "model.simple.lookingModels": "Looking for models…",
+  "model.simple.auto": "Auto",
   "model.simple.useDefault": "Use default",
   "model.simple.back": "Back",
   "model.simple.clearSearch": "Clear search",

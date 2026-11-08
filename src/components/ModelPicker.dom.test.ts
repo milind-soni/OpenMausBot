@@ -163,7 +163,7 @@ describe("choosing a model with the keyboard", () => {
 
   it("moves through the Thinking steps with the arrow keys and applies one only on Enter, staying open", async () => {
     await openWith("click");
-    const low = document.querySelector<HTMLElement>("[data-effort-pill]")!;
+    const low = document.querySelector<HTMLElement>("[data-effort-pill]:not([data-effort-auto])")!;
     low.focus();
     press("ArrowRight");
     expect(focused()?.textContent).toBe("Medium");

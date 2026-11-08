@@ -1385,7 +1385,7 @@ describe("Simple mode's code block", () => {
 
   it("drops the header bar for a quiet surface, with Copy and a ⋯ menu on a hover plate", () => {
     const html = simple(() => renderToStaticMarkup(createElement(CodeBlock, { code: "const a = 1;", lang: "js" })));
-    expect(html).toMatch(/class="chat-code-block group\/code relative my-2\.5 overflow-hidden rounded-lg bg-ink\/\[0\.04\]"/);
+    expect(html).toMatch(/class="chat-code-block group\/code relative my-2\.5 overflow-hidden rounded-xl bg-ink\/\[0\.04\]"/);
     expect(html).not.toContain("border-hairline");
     expect(html).not.toContain('aria-label="Wrap long lines"');
     const plate = html.match(/<div data-code-plate="[^"]*" class="([^"]*)"/)?.[1] ?? "";

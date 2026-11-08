@@ -624,7 +624,7 @@ describe("the Details tab", () => {
     expect(empty.html).toContain(">Routines are recurring tasks this bot runs on a schedule. Ask it in chat to set one up.<");
     expect(empty.html.match(/data-panel-page="routines"/g)).toHaveLength(1);
     const add = find(empty, "data-panel-page", "routines");
-    expect(add.props.children).toBe("Add a routine");
+    expect(empty.html).toMatch(/data-panel-page="routines"[^>]*>.*<span class="truncate">Add a routine<\/span><\/button>/);
     click(add);
     expect(onOpen).toHaveBeenLastCalledWith("routines");
     fixture.derived.botRoutines = [routine()];

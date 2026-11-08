@@ -257,7 +257,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
   </>;
   if (simple) {
     return (
-      <div ref={frame} dir="ltr" className="group/code relative my-2.5 overflow-hidden rounded-lg bg-ink/[0.04]">
+      <div ref={frame} dir="ltr" className="group/code relative my-2.5 overflow-hidden rounded-xl bg-ink/[0.04]">
         <CodePlate copied={copied} onCopy={copy} copyLabel={t("code.copySource")} items={[
           { key: "source", label: t(showSource ? "code.hideSource" : "code.showSource"), icon: <WrapText size={14} aria-hidden="true" />, active: showSource, onSelect: () => setShowSource((shown) => !shown) },
           { key: "about", label: t("code.mermaid"), disabled: true, separatorBefore: true, onSelect: () => {} },

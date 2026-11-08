@@ -1139,19 +1139,18 @@
 [data-chat-bubble="simple"] .chat-md > .md-heading:first-child {
   margin-top: 0;
 }
-/* One reply's prose bubbles and table cards stack as one group: where two meet, their start corners tighten to 6px. */
-[data-reply-blocks] > * + * [data-table-card],
-[data-reply-blocks] > * + [data-chat-bubble] {
-  border-start-start-radius: 6px;
-}
-[data-reply-blocks] > :has(+ *) [data-table-card],
-[data-reply-blocks] > [data-chat-bubble]:has(+ *),
-[data-reply-blocks] > :has(+ *) > [data-chat-bubble] {
-  border-end-start-radius: 6px;
-}
 /* A short line keeps the tight chat bubble; a structured reply gets room to breathe. */
-[data-chat-bubble="simple"]:has(.chat-md > :is(.md-heading, ul, ol, blockquote), .chat-md pre) {
+[data-chat-bubble="simple"]:has(> .chat-md > :is(.md-heading, ul, ol, blockquote), > .chat-md pre),
+[data-reply-bubble] {
   padding: 12px 16px;
+}
+/* A table inside a reply sits on the bubble as an inset card, like a code block. */
+[data-reply-bubble] [data-table-card],
+[data-reply-bubble] [data-table-card] thead {
+  background: color-mix(in srgb, var(--color-card), var(--color-ink) 4%);
+}
+[data-reply-bubble] [data-table-card] {
+  border-radius: 12px;
 }
 /* A card under its own bot's bubble (and a bubble under its card) sits 12px below it, not the 16px between senders. */
 [data-simple-rows] > [data-tuck] > :first-child {

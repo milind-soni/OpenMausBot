@@ -1,4 +1,4 @@
-import { Calendar, Sparkles } from "lucide-react";
+import { Calendar, CalendarPlus, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -10,7 +10,7 @@ import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerive
 import { BotConversations } from "./Conversations";
 import type { SimplePageId } from "./page-registry";
 import { TryAsking } from "./TryAsking";
-import { buttonCls, Card, CardLabel, NavRow, RowIcon, rowCls, RowText } from "./rows";
+import { Card, CardLabel, panelActionCls, NavRow, RowIcon, rowCls, RowText } from "./rows";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
@@ -55,7 +55,7 @@ export function DetailsTab({ bot, derived, onOpen }: {
             bot={bot}
             contained
             threadId={bot.threadId}
-            label={<span className="flex min-w-0 flex-1 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.model")} /></span>}
+            label={<span className="flex shrink-0 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.model")} /></span>}
           />
         </div>
       </Card>
@@ -70,9 +70,10 @@ export function DetailsTab({ bot, derived, onOpen }: {
             type="button"
             data-panel-page="routines"
             onClick={() => onOpen("routines")}
-            className={cn(buttonCls, "mx-1 mt-2.5")}
+            className={cn(panelActionCls, "mt-2.5 w-full")}
           >
-            {t("botPanel.routines.add")}
+            <CalendarPlus size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+            <span className="truncate">{t("botPanel.routines.add")}</span>
           </button>
         </section>
       ) : (

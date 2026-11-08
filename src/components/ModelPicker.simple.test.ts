@@ -350,7 +350,7 @@ describe("the model picker in Simple mode", () => {
     expect(bottom).toContain('role="group" aria-labelledby=');
     expect(bottom).toMatch(/data-simple-effort="true"[^>]*class="[^"]*rounded-full bg-ink\/\[0.05\] p-\[3px\]/);
     expect(bottom).toContain('title="High thinking. Higher is slower but more careful."');
-    expect(bottom).toMatch(/title="The model decides how hard to think."[^>]*>Use default<\/button>/);
+    expect(bottom).toMatch(/data-effort-auto="true" aria-pressed="false"[^>]*title="The model decides how hard to think."[^>]*>Auto<\/button>/);
     thinking(opened).onReset();
     expect(fixture.dispatch).toHaveBeenLastCalledWith({
       type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
@@ -358,8 +358,8 @@ describe("the model picker in Simple mode", () => {
     });
     fixture.values = [];
     const atDefault = region(menu(open(bot()).html), "data-simple-effort-band");
-    expect(atDefault).not.toContain('aria-pressed="true"');
-    expect(atDefault).not.toContain("Use default");
+    expect(atDefault.match(/aria-pressed="true"/g)).toHaveLength(1);
+    expect(atDefault).toMatch(/data-effort-auto="true" aria-pressed="true"[^>]*>Auto<\/button>/);
     expect(atDefault).toContain('data-simple-effort-auto="true" class="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">The model decides how hard to think.</p>');
   });
 
@@ -980,7 +980,7 @@ describe("every capability of the picker stays reachable", () => {
       "a signed-out account signs in": body("claude-work") === "signIn",
       "a managed provider says who manages it": body("openai") === "policy" && html.includes("Managed by Acme"),
       "a provider with nothing listed checks again": body("chatgpt") === "empty" && html.includes("data-simple-refresh"),
-      "thinking levels in the provider's own names, and back to Default": html.includes(">X-High</button>") && html.includes(">Use default</button>"),
+      "thinking levels in the provider's own names, and back to Default": html.includes(">X-High</button>") && html.includes(">Auto</button>"),
       "AI accounts in Settings": html.includes("data-simple-manage"),
     };
     expect(missingFrom(before)).toEqual([]);
