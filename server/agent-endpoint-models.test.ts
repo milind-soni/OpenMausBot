@@ -81,3 +81,19 @@ it("explains a gateway that drops the connection mid-catalog without exposing th
   expect(failure.message).not.toContain("fixture-secret");
   expect(failure.status).toBe(400);
 });
+it.each([true, false])("never sends the key to a plain-HTTP host off this computer (Codex=%s)", async codex => {
+  const entry = endpoint(codex, "http://gateway.example/v1");
+  const request = vi.fn<typeof fetch>();
+  const failure = await discoverAgentEndpointModels(entry, request).catch(error => error);
+  expect(request).not.toHaveBeenCalled();
+  expect(failure.message).toContain("only over HTTPS or from this computer");
+  expect(failure.message).toContain("type the model");
+  expect(failure.status).toBe(400);
+});
+it.each(["http://127.0.0.1:8317/v1", "http://[::1]:8317/v1"])("still reads a loopback catalog over plain HTTP (%s)", async url => {
+  const entry = endpoint(false, url);
+  const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: [{ id: "model-a" }] }));
+  await discoverAgentEndpointModels(entry, request);
+  expect(request).toHaveBeenCalledTimes(1);
+  expect((entry.config as any).endpointModels).toEqual(["model-a"]);
+});

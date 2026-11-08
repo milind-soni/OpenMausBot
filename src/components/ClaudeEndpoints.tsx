@@ -8,26 +8,29 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { KEY_FIELD } from "./keys/KeyRow";
 
 type Engine = "claude" | "codex";
-const OFFICIAL = { claude: { name: "Anthropic", url: "https://api.anthropic.com" }, codex: { name: "OpenAI", url: "https://api.openai.com/v1" } };
+// Placeholders only: an Anthropic key already has its own engine in Settings → Keys. An empty Codex URL means OpenAI.
+const OFFICIAL = { claude: { url: "https://api.anthropic.com", model: "deepseek-chat" }, codex: { url: "https://api.openai.com/v1", model: "" } };
 const INPUT = cn(KEY_FIELD, "font-sans");
 interface Draft {
   name: string;
   url: string;
   token: string;
+  model: string;
 }
 
-const EMPTY: Draft = { name: "", url: "", token: "" };
+const EMPTY: Draft = { name: "", url: "", token: "", model: "" };
 
 const draftOf = (instance: InstanceInfo): Draft => ({
   name: instance.displayName,
   url: (instance.claudeEndpoint ?? instance.codexEndpoint)?.baseUrl ?? "",
   token: "",
+  model: "",
 });
 
 function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; engine: Engine; onDone: () => void }) {
   const { dispatch } = useStore();
   const official = OFFICIAL[engine];
-  const [draft, setDraft] = useState<Draft>(instance ? draftOf(instance) : { ...EMPTY, name: official.name, url: official.url });
+  const [draft, setDraft] = useState<Draft>(instance ? draftOf(instance) : EMPTY);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const field = (key: keyof Draft) => ({
@@ -36,7 +39,7 @@ function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; e
     spellCheck: false,
     disabled: saving,
   });
-  const ready = Boolean(draft.name.trim() && draft.url.trim() && (instance || draft.token.trim()));
+  const ready = Boolean(draft.name.trim() && (draft.url.trim() || engine === "codex") && (instance || draft.token.trim()));
 
   const save = async () => {
     if (saving || !ready) return;
@@ -44,8 +47,10 @@ function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; e
     setError(null);
     const body = {
       displayName: draft.name.trim(),
-      baseUrl: draft.url.trim(),
+      baseUrl: draft.url.trim() || official.url,
       ...(draft.token.trim() ? { token: draft.token.trim() } : {}),
+      // Empty lets the server read the host's model list.
+      ...(draft.model.trim() ? { model: draft.model.trim() } : {}),
     };
     try {
       const result = instance
@@ -76,6 +81,10 @@ function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; e
         {t("claudeEndpoints.token")}
         <input {...field("token")} type="password" maxLength={4096} autoComplete="off" aria-label={t("claudeEndpoints.token")} className={cn(INPUT, "font-mono")}
           placeholder={instance ? t("claudeEndpoints.tokenKeep") : ""} />
+      </label>
+      <label className="flex flex-col gap-1 text-[12px] font-medium text-ink">
+        {t("claudeEndpoints.model")}
+        <input {...field("model")} maxLength={160} placeholder={official.model} aria-label={t("claudeEndpoints.model")} className={cn(INPUT, "font-mono")} />
       </label>
       <p className="text-[12px] leading-4 text-ink-secondary">{t("claudeEndpoints.modelHint")}</p>
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}

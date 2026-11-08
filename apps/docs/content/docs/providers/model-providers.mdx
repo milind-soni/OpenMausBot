@@ -161,10 +161,10 @@ To run Claude bots on DeepSeek, GLM or another host that speaks Claude
 Code's API, add a **custom endpoint** in Settings → Engines, in the Claude
 card:
 
-- **Add endpoint** takes a name, base URL and API key. The URL starts with
-  Anthropic's official API and can be edited for another gateway. Choose a
-  model separately in each bot's configuration. Official providers use the
-  standard catalog; custom gateways supply their models through `/v1/models`.
+- **Add endpoint** takes a name, the host's base URL, its API key and,
+  optionally, a model. Leave **Model** empty and OpenMausBot reads the host's
+  model list at `/v1/models`; type the model id (such as `deepseek-chat`)
+  when the host doesn't list its models.
 - Each endpoint is its own engine with its own directory, so a bot chooses
   it like any other AI. It never reads or writes this computer's
   `~/.claude`, and the Claude Code on this computer keeps its own sign-in.
@@ -204,10 +204,9 @@ Codex bots can also run on an API key instead of a ChatGPT sign-in:
 
 1. Open **Settings → Engines** and expand the Codex/ChatGPT card.
 2. Under **Codex direct API**, choose **Add endpoint**.
-3. The base URL starts as `https://api.openai.com/v1`. Keep it for OpenAI, or
-   replace it with another gateway's URL, such as
-   `https://gateway.example.com/v1`.
-4. Enter a name and API key, then save.
+3. Leave the base URL empty for OpenAI, or enter another gateway's URL, such
+   as `https://gateway.example.com/v1`.
+4. Enter a name and API key. **Model** is optional; then save.
 5. Choose the new engine and a model in a bot's settings.
 
 - Usage is billed by the provider behind the URL. Saving an endpoint doesn't
@@ -219,16 +218,18 @@ Codex bots can also run on an API key instead of a ChatGPT sign-in:
   calls. A gateway that only offers Chat Completions works with the chat
   engine instead.
 - Each bot chooses its model. OpenAI uses the standard catalog; another
-  gateway must list its models at `/models` under its base URL.
+  gateway's list is read from `/models` under its base URL, unless you typed
+  a model.
 - Remove an endpoint after moving its bots and the default model off it.
 
 ### When an endpoint won't save
 
-Saving a custom gateway reads its model list and says whether the network,
-the API key, the HTTP response or an empty model list failed. Saving the
-official Anthropic or OpenAI URL doesn't check the key; a wrong key shows up
-on the bot's first turn. **Refresh models** reads a gateway's list again.
-Check that:
+Saving a custom gateway without a model reads its model list and says whether
+the network, the API key, the HTTP response or an empty model list failed.
+Saving with a typed model, or with the official Anthropic or OpenAI URL,
+doesn't check the key; a wrong key shows up on the bot's first turn.
+**Refresh models** reads a gateway's list again. The key is sent to read the
+list only over HTTPS or to this computer. Check that:
 
 - The URL is reachable from the computer or container running OpenMausBot,
   not just from the one showing the app. Inside a container, `localhost`

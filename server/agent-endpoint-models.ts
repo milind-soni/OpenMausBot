@@ -6,6 +6,7 @@ import { isLoopback, providerModelsUrl } from "./provider-key-check.ts";
 const OFFICIAL_URL = { codex: "https://api.openai.com/v1", claude: "https://api.anthropic.com" } as const;
 const MAX_CATALOG_BYTES = 2 * 1024 * 1024;
 const MAX_MODELS = 1000;
+const TYPE_MODEL = " Or type the model the host serves in Model.";
 
 export function agentEndpointAddress(entry: InstanceConfig): string {
   return entry.driver === "codex"
@@ -56,6 +57,11 @@ export async function discoverAgentEndpointModels(entry: InstanceConfig, fetchIm
   const headers = codex ? { authorization: `Bearer ${token}` } : { authorization: `Bearer ${token}`, "x-api-key": token!, "anthropic-version": "2023-06-01" };
   const modelsUrl = providerModelsUrl(codex ? "openai" : "anthropic", agentEndpointAddress(entry));
   const failure = (detail: string) => Object.assign(new Error(`Could not discover gateway models: ${detail}`), { status: 400 });
+  // Same rule as checkProviderKey: the key goes out only over HTTPS, or over plain HTTP to this computer.
+  const target = new URL(modelsUrl);
+  if (target.protocol !== "https:" && !(target.protocol === "http:" && isLoopback(target.hostname))) {
+    throw failure(`OpenMausBot reads a model list only over HTTPS or from this computer, so your key is not sent in the clear.${TYPE_MODEL}`);
+  }
   let response: Response;
   try {
     // A redirect must never replay the credential to another address.
@@ -73,7 +79,7 @@ export async function discoverAgentEndpointModels(entry: InstanceConfig, fetchIm
   if (response.status === 401 || response.status === 403) {
     throw failure(`The gateway rejected the API key (HTTP ${response.status}). Use the gateway's client API key, not a ChatGPT or Claude login token.`);
   }
-  if (response.status === 404) throw failure("The model catalog was not found (HTTP 404). Check the base URL; Codex usually needs /v1 and requests /v1/models.");
+  if (response.status === 404) throw failure(`The model catalog was not found (HTTP 404). Check the base URL; Codex usually needs /v1 and requests /v1/models.${TYPE_MODEL}`);
   if (response.status >= 300 && response.status < 400) throw failure("The gateway redirected the model request. Enter the final API base URL; credentials are never forwarded through redirects.");
   if (!response.ok) throw failure(`The model request failed (HTTP ${response.status}). Check the gateway's status and model catalog support.`);
   const text = await readCatalog(response, MAX_CATALOG_BYTES)
@@ -90,6 +96,6 @@ export async function discoverAgentEndpointModels(entry: InstanceConfig, fetchIm
     // Claude Code reads `--model default` as its own default model, not a gateway model id.
     if (typeof id === "string" && id.length <= 160 && pattern.test(id) && (codex || id !== "default")) models.add(id);
   }
-  if (!models.size) throw failure("The gateway returned no supported model IDs. Connect a provider account in the gateway and check its /models catalog.");
+  if (!models.size) throw failure(`The gateway returned no supported model IDs. Connect a provider account in the gateway and check its /models catalog.${TYPE_MODEL}`);
   setModels([...models]);
 }

@@ -129,7 +129,7 @@ after the first one is gone, the way an app restart does.
 ## Direct API endpoints for native agents
 
 ```sh
-pnpm exec vitest run server/claude-account-api.test.ts server/claude-endpoints.test.ts server/codex-endpoints.test.ts server/drivers/codex.test.ts server/drivers/codex-background-text.test.ts src/components/AgentEndpoints.dom.test.ts src/components/ClaudeEndpoints.test.ts
+pnpm exec vitest run server/claude-account-api.test.ts server/claude-endpoints.test.ts server/codex-endpoints.test.ts server/drivers/codex.test.ts server/drivers/codex-background-text.test.ts src/components/AgentEndpoints.dom.test.ts src/components/ClaudeEndpoints.test.ts server/agent-endpoint-models.test.ts
 ```
 
 The API fixture launches a disposable server and synthetic CLIs. It checks
@@ -137,8 +137,10 @@ Codex endpoint creation, persistence, updates, removal guards, admin-only
 mutations and write-only keys. Driver fixtures check direct routing across
 native thread restarts, background calls, missing-key refusal, and exclusion
 of the key from shell environments and command arguments. Renderer tests
-check that both forms start with the official URL, keep it editable, and
-save a custom gateway URL.
+check that both forms start empty (the official URL is only a placeholder;
+an empty Codex URL saves OpenAI), send a typed model, and save a custom
+gateway URL. Discovery tests check that the key never goes to a plain-HTTP
+host off this computer.
 
 These fixtures do not prove a real gateway's Responses or Messages protocol,
 streaming, tool execution, TLS, DNS, or account authentication. Verify those

@@ -4434,7 +4434,6 @@
   "claudeEndpoints.token": "權杖",
   "claudeEndpoints.tokenKeep": "留空以保留已儲存的權杖",
   "claudeEndpoints.model": "模型",
-  "claudeEndpoints.modelHint": "端點提供的模型 ID，例如 deepseek-chat。除非你選擇它的其他模型，否則此端點上的機器人會使用這個模型。",
   "claudeEndpoints.mappings": "模型對應（選填）",
   "claudeEndpoints.mappingsHint": "端點在 Opus、Sonnet 和 Haiku 工作時分別使用哪個模型。",
   "claudeEndpoints.opus": "Opus 模型",
