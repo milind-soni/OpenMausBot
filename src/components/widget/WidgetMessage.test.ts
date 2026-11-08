@@ -557,6 +557,32 @@ describe("pressing", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("opens a brief routine's conversation on this device and posts nothing", async () => {
+    const dispatch = vi.fn();
+    const withRoutine = { ...store, dispatch, state: { selectedId: "scout", bots: [{ id: "scout", name: "Scout", threadId: "t-routine", tasks: [] }], groups: [], config: { features: {}, browserEngine: { kind: "engine" } } } } as unknown as ReturnType<typeof useStore>;
+    const parsed = parseWidgetInput({
+      type: "Card", title: "Your brief",
+      children: [
+        { type: "Title", value: "Routines" },
+        { type: "Row", gap: 3, align: "center", children: [
+          { type: "Col", flex: 1, children: [{ type: "Text", value: "Standup", weight: "medium" }] },
+          { type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: "scout", threadId: "t-routine" } } },
+        ] },
+      ],
+    });
+    if (!parsed.ok) throw new Error(parsed.error);
+    act(() => root.render(createElement(BotEditorStore, { value: withRoutine, children: createElement(WidgetMessage, { botId: "scout", threadId: "t1", message: row(parsed.value) }) })));
+    const open = button("Open")!;
+    expect(open.disabled).toBe(false);
+    await press(open);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(dispatch.mock.calls).toEqual([
+      [{ type: "select", id: "scout" }],
+      [{ type: "switchTask", botId: "scout", threadId: "t-routine" }],
+      [{ type: "revealThread", threadId: "t-routine" }],
+    ]);
+  });
+
   it("shows the server's sentence in the card when a press is refused, and stays live", async () => {
     fetchMock.mockImplementation(async () => reply(409, { error: "This was already answered." }));
     mount(row(sample("routineForm")));

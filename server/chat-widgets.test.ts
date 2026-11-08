@@ -4,7 +4,8 @@ import { WATCHER_OPTIONS_CARD_BOT_ID } from "../shared/options-card.ts";
 import { redactSecretsInText } from "../shared/redact.ts";
 import { WIDGET_SAMPLES } from "../shared/widget-samples.ts";
 import { WIDGET_LIMITS, widgetActions, widgetToText, type WidgetNode, type WidgetPayload } from "../shared/widget.ts";
-import { createAgentCard, prepareWidgetPress, reopenCancelledPress, type AgentCardStore } from "./chat-widgets.ts";
+import { createAgentCard, prepareDevicePress, prepareWidgetPress, reopenCancelledPress, type AgentCardStore } from "./chat-widgets.ts";
+import { briefCard } from "./host/brief-cards.ts";
 import type { Message } from "./store.ts";
 
 const THREAD = "thread-scout";
@@ -31,6 +32,7 @@ function fakeStore(rooms: string[] = []) {
   });
   const store: AgentCardStore = {
     groupByThread: (threadId) => (rooms.includes(threadId) ? { id: "room-1" } : undefined),
+    taskByThread: (botId: string, threadId: string) => (botId === SCOUT.id && threadId === THREAD ? { threadId } : undefined),
     messagesFor: rows,
     appendMessage,
     patchMessage,
@@ -551,6 +553,54 @@ describe("prepareWidgetPress", () => {
         ok: false, status: 400, error: "widgetAction must be {messageId, ref, values?, other?, rev?}, with values an object of text and on/off fields and other an object of text.",
       });
     }
+    expect(fake.patchMessage).not.toHaveBeenCalled();
+  });
+
+  it("answers a posted open_thread press with the conversation to open, and sends nothing", () => {
+    const fake = fakeStore();
+    const card = briefCard({ now: 1, intro: false, needs: [], meetings: [], emails: [], routines: [{ text: "Standup", note: "Finished", open: { botId: SCOUT.id, threadId: THREAD } }] });
+    const shownCard = show(fake, card.card);
+    if (!shownCard.ok) throw new Error(shownCard.error);
+    const open = widgetActions(payloadOf(fake, shownCard.messageId).root).find((entry) => entry.action.type === "open_thread")!;
+    expect(open.label).toBe("Open");
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: shownCard.messageId, ref: open.ref }, undefined))
+      .toEqual({ ok: true, messageId: shownCard.messageId, device: { openThread: { botId: SCOUT.id, threadId: THREAD } } });
+    expect(fake.patchMessage).not.toHaveBeenCalled();
+    expect(payloadOf(fake, shownCard.messageId).settled).toBeUndefined();
+  });
+
+  it("answers a posted open_thread press for a room, and refuses one whose conversation is gone", () => {
+    const fake = fakeStore(["thread-room"]);
+    const room = show(fake, { type: "Card", children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { groupId: "room-1", threadId: "thread-room" } } }] });
+    if (!room.ok) throw new Error(room.error);
+    const ref = widgetActions(payloadOf(fake, room.messageId).root)[0]!.ref;
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: room.messageId, ref }, undefined))
+      .toEqual({ ok: true, messageId: room.messageId, device: { openThread: { groupId: "room-1", threadId: "thread-room" } } });
+    const gone = show(fake, { type: "Card", children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: SCOUT.id, threadId: "thread-gone" } } }] });
+    if (!gone.ok) throw new Error(gone.error);
+    const goneRef = widgetActions(payloadOf(fake, gone.messageId).root)[0]!.ref;
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: gone.messageId, ref: goneRef }, undefined))
+      .toEqual({ ok: false, status: 404, error: "That conversation is no longer here." });
+    const wrongRoom = show(fake, { type: "Card", children: [{ type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { groupId: "room-2", threadId: "thread-room" } } }] });
+    if (!wrongRoom.ok) throw new Error(wrongRoom.error);
+    const wrongRef = widgetActions(payloadOf(fake, wrongRoom.messageId).root)[0]!.ref;
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: wrongRoom.messageId, ref: wrongRef }, undefined))
+      .toEqual({ ok: false, status: 404, error: "That conversation is no longer here." });
+    expect(fake.patchMessage).not.toHaveBeenCalled();
+  });
+
+  it("answers a posted open_url press with the link, and still refuses a phone-pairing press", () => {
+    const fake = fakeStore();
+    const sources = shown(fake, "sources");
+    const link = widgetActions(sources.widget!.root)[0]!;
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: sources.id, ref: link.ref }, undefined))
+      .toEqual({ ok: true, messageId: sources.id, device: { openUrl: "https://developers.openai.com/api/docs/guides/chatkit-widgets" } });
+    const pairing = show(fake, { type: "Card", children: [{ type: "Button", label: "Pair phone", onClickAction: { type: "open_phone_pairing" } }] });
+    if (!pairing.ok) throw new Error(pairing.error);
+    const pairRef = widgetActions(payloadOf(fake, pairing.messageId).root)[0]!.ref;
+    expect(prepareDevicePress(fake.store, THREAD, { messageId: pairing.messageId, ref: pairRef }, undefined)).toBeUndefined();
+    expect(prepareWidgetPress(fake.store, THREAD, { messageId: pairing.messageId, ref: pairRef }, undefined))
+      .toEqual({ ok: false, status: 400, error: "That action opens on the device and is not sent." });
     expect(fake.patchMessage).not.toHaveBeenCalled();
   });
 });

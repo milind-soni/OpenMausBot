@@ -6,7 +6,9 @@ import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WIDGET_SAMPLES } from "../../shared/widget-samples.ts";
+import { widgetActions } from "../../shared/widget.ts";
 import { createAgentCard } from "../chat-widgets.ts";
+import { briefCard } from "../host/brief-cards.ts";
 import { DATA_DIR } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
 import { json, readBody } from "../harness/http.ts";
@@ -272,6 +274,29 @@ describe("POST /api/bots/:id/messages and who typed it", () => {
 });
 
 describe("POST /api/bots/:id/messages with widgetAction", () => {
+  it("answers a posted open_thread press with the conversation to open, and sends nothing", async () => {
+    const { store, bot, threadId, state, post, sent, row } = await fixture();
+    const card = briefCard({ now: Date.now(), intro: false, needs: [], meetings: [], emails: [], routines: [{ text: "Standup", note: "Finished", open: { botId: bot.id, threadId } }] });
+    const shown = createAgentCard({ store, bot, threadId, input: { tool: "show_widget", widget: card.card } });
+    if (!shown.ok) throw new Error(shown.error);
+    const open = widgetActions(row(shown.messageId).widget!.root).find((entry) => entry.action.type === "open_thread")!;
+    expect(await post({ threadId, sendId: SEND, widgetAction: { messageId: shown.messageId, ref: open.ref } }))
+      .toEqual({ status: 202, body: { ok: true, threadId, openThread: { botId: bot.id, threadId } } });
+    expect(state.accepted).toEqual([]);
+    expect(state.serverPresses).toEqual([]);
+    expect(sent()).toEqual([]);
+    expect(row(shown.messageId).widget!.settled).toBeUndefined();
+
+    // A card stored before its conversation went away names no thread the bot still has.
+    const stale = briefCard({ now: Date.now(), intro: false, needs: [], meetings: [], emails: [], routines: [{ text: "Standup", note: "Finished", open: { botId: bot.id, threadId: "thread-gone" } }] });
+    const stored = createAgentCard({ store, bot, threadId, input: { tool: "show_widget", widget: stale.card } });
+    if (!stored.ok) throw new Error(stored.error);
+    const staleOpen = widgetActions(row(stored.messageId).widget!.root).find((entry) => entry.action.type === "open_thread")!;
+    expect(await post({ threadId, widgetAction: { messageId: stored.messageId, ref: staleOpen.ref } }))
+      .toEqual({ status: 404, body: { error: "That conversation is no longer here." } });
+    expect(state.accepted).toEqual([]);
+  });
+
   it("lets the server answer a press on its own card with no turn, refuses it for someone else, and reads no widget in another bot's chat", async () => {
     const { store, threadId, state, post, show, sent } = await fixture();
     const widgetId = show("routineForm");
