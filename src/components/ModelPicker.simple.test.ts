@@ -186,15 +186,15 @@ describe("the model picker in Simple mode", () => {
     expect(html).not.toContain("new chats too");
   });
 
-  it("is a 300px menu on the shared menu surface, and the full picker keeps its own 420px", () => {
-    expect(SIMPLE_POPOVER_WIDTH).toBe(300);
+  it("is a 324px menu on the shared menu surface, and the full picker keeps its own 420px", () => {
+    expect(SIMPLE_POPOVER_WIDTH).toBe(324);
     fixture.instances = [claude(false)];
     const forBot = bot();
     const opened = open(forBot);
     const content = opened.nodes.find((node) => node.props["data-model-picker-content"] !== undefined)!;
     expect(String(content.props.className)).toContain("menu-surface");
     expect(String(content.props.className)).not.toMatch(/\bborder\b|shadow-2xl|rounded-2xl/);
-    expect(menu(opened.html)).toContain("width:300px");
+    expect(menu(opened.html)).toContain("width:324px");
     pane(opened)!.props.onSetUp(instance("claude"), false);
     expect(menu(render(forBot).html)).toContain("width:420px");
   });
@@ -237,11 +237,10 @@ describe("the model picker in Simple mode", () => {
     expect(renderToStaticMarkup(chip)).toContain(">Claude Sonnet 5</span>");
   });
 
-  it("names models without a second line; a blurb is only the row's tooltip", () => {
+  it("names models without a second line or a ranking claim, in the row and its tooltip", () => {
     const html = menu(open(bot()).html);
-    const blurb = "Fast and smart. Good for most work.";
-    expect(html).not.toContain(`>${blurb}<`);
-    expect(html).toContain(`title="Sonnet 5.5 · ${blurb}"`);
+    expect(html).not.toContain("Fast and smart. Good for most work.");
+    expect(html).toMatch(/title="Sonnet 5\.5( · [^"]+)?"/);
   });
 
   it("opens a provider's long list in place with Show all, and offers a search once the menu holds more than twelve models", () => {
@@ -350,7 +349,7 @@ describe("the model picker in Simple mode", () => {
     expect(bottom).toContain('role="group" aria-labelledby=');
     expect(bottom).toMatch(/data-simple-effort="true"[^>]*class="[^"]*rounded-full bg-ink\/\[0.05\] p-\[3px\]/);
     expect(bottom).toContain('title="High thinking. Higher is slower but more careful."');
-    expect(bottom).toMatch(/title="The model decides how hard to think."[^>]*>Use default<\/button>/);
+    expect(bottom).toMatch(/data-effort-auto="true" aria-pressed="false"[^>]*title="The model decides how hard to think."[^>]*>Auto<\/button>/);
     thinking(opened).onReset();
     expect(fixture.dispatch).toHaveBeenLastCalledWith({
       type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
@@ -358,9 +357,9 @@ describe("the model picker in Simple mode", () => {
     });
     fixture.values = [];
     const atDefault = region(menu(open(bot()).html), "data-simple-effort-band");
-    expect(atDefault).not.toContain('aria-pressed="true"');
-    expect(atDefault).not.toContain("Use default");
-    expect(atDefault).toContain('title="The model decides how hard to think." class="text-[12px] leading-4 text-ink-tertiary">Default</span>');
+    expect(atDefault.match(/aria-pressed="true"/g)).toHaveLength(1);
+    expect(atDefault).toMatch(/data-effort-auto="true" aria-pressed="true"[^>]*>Auto<\/button>/);
+    expect(atDefault).toContain('data-simple-effort-auto="true" class="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">Recommended. Effort is picked per message.</p>');
   });
 
   it("names the model on the Simple chip, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
@@ -374,7 +373,7 @@ describe("the model picker in Simple mode", () => {
     expect(String(chip.props.className)).toContain("rounded-full");
     expect(String(chip.props.className)).not.toMatch(/\bborder\b|bg-control/);
     expect(markup).not.toContain("@max-4xl/chathead");
-    expect(markup).toContain('<span class="min-w-0 max-w-[160px] truncate">Opus 5.5</span>');
+    expect(markup).toContain('<span class="min-w-0 truncate max-w-[160px]">Opus 5.5</span>');
     expect(markup).toContain("opacity-60");
     fixture.advanced = true;
     const advanced = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
@@ -403,11 +402,11 @@ describe("the model picker in Simple mode", () => {
 
   it("lets the contained trigger shrink inside the bot panel's Model row, and the loose one keep its size", () => {
     const contained = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
-    expect(String(contained.props.className)).toContain("min-w-0 max-w-[58%]");
+    expect(String(contained.props.className)).toContain("min-w-0 max-w-[72%]");
     expect(String(contained.props.className)).not.toMatch(/\bshrink-0\b/);
     const loose = render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!;
     expect(String(loose.props.className)).toContain("shrink-0");
-    expect(String(loose.props.className)).not.toContain("max-w-[58%]");
+    expect(String(loose.props.className)).not.toContain("max-w-[72%]");
   });
 
   it("puts the provider before a model the catalog names in one bare word, on the chip and the current row", () => {
@@ -901,7 +900,7 @@ describe("a thread's picker and its bot's model", () => {
   it("says on the current model that a thread follows its bot, with no follow row to click", () => {
     const opened = open(scout(null));
     expect(list(opened).follow).toBe(false);
-    expect(list(opened).current!.meta).toBe("Scout's model");
+    expect(list(opened).current!.meta).toBe("Scout's model, used in all its chats");
     expect(menu(opened.html)).not.toContain("data-follow-bot-model");
     expect(render(scout(null)).nodes.find((node) => node.props["data-tour"] === "model")!.props.title).toContain("Uses Scout's model");
   });
@@ -995,7 +994,7 @@ describe("every capability of the picker stays reachable", () => {
       "a signed-out account signs in": body("claude-work") === "signIn",
       "a managed provider says who manages it": body("openai") === "policy" && html.includes("Managed by Acme"),
       "a provider with nothing listed checks again": body("chatgpt") === "empty" && html.includes("data-simple-refresh"),
-      "thinking levels in the provider's own names, and back to Default": html.includes(">X-High</button>") && html.includes(">Use default</button>"),
+      "thinking levels in the provider's own names, and back to Default": html.includes(">X-High</button>") && html.includes(">Auto</button>"),
       "AI accounts in Settings": html.includes("data-simple-manage"),
     };
     expect(missingFrom(before)).toEqual([]);
@@ -1037,7 +1036,7 @@ describe("every capability of the picker stays reachable", () => {
       if (!advanced) {
         const band = region(html, "data-simple-effort-band");
         expect(band).toContain(">X-High</button>");
-        expect(band).not.toContain('role="separator"');
+        expect(band.lastIndexOf('role="separator"')).toBeLessThan(band.indexOf(">X-High</button>"));
       }
     } finally {
       delete window.ogb;

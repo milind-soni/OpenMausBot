@@ -242,7 +242,7 @@ export function FollowUpRow({ simple = false }: { simple?: boolean }) {
 export function ColorUserBubblesRow({ simple = false }: { simple?: boolean }) {
   const enabled = useColorUserBubbles();
   return (
-    <SettingRow title={t("settings.userBubbles.title")} subtitle={simple ? undefined : t("settings.userBubbles.subtitle")}>
+    <SettingRow title={t(simple ? "settings.userBubbles.simpleTitle" : "settings.userBubbles.title")} subtitle={simple ? undefined : t("settings.userBubbles.subtitle")}>
       <Switch
         checked={enabled}
         aria-label={t("settings.userBubbles.aria")}
