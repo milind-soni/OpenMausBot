@@ -539,7 +539,13 @@ describe("unpublishing a page", () => {
     const first = hold(1), third = hold(3);
     const fromDraft = f.publish({ path: "draft", pageId: p });
     await first.reached;
+    // The folder's publish must pick its page (p) before anything below moves the folder to q.
+    const read = vi.spyOn(bundle, "readPageBundle");
     const fromSite = f.publish({ path: "site" });
+    await vi.waitFor(() => expect(read).toHaveBeenCalled());
+    await read.mock.results[0]!.value;
+    await new Promise((resolve) => setTimeout(resolve));
+    read.mockRestore();
     await f.publish({ path: "site", pageId: q });
     first.release();
     await third.reached;
