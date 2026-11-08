@@ -59,6 +59,12 @@ describe("MarkdownFileView (#4765)", () => {
     await expect(readTableResponse(new Response(new Uint8Array(MARKDOWN_PREVIEW_MAX_BYTES + 1)), signal, MARKDOWN_PREVIEW_MAX_BYTES)).rejects.toThrow("size");
   });
 
+  it("still reports the cap when the oversized body already errored", async () => {
+    const body = new ReadableStream({ start(controller) { controller.error(new Error("network")); } });
+    const response = new Response(body, { headers: { "content-length": String(MARKDOWN_PREVIEW_MAX_BYTES + 1) } });
+    await expect(readTableResponse(response, new AbortController().signal, MARKDOWN_PREVIEW_MAX_BYTES)).rejects.toThrow("size");
+  });
+
   it("keeps Save and Retry on screen while the file is still loading, wrapping for long names", () => {
     const name = `${"a".repeat(120)}.md`;
     const html = renderToStaticMarkup(createElement(MarkdownFileContent, { path: `/workspace/${name}`, name, message }));
