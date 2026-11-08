@@ -2,7 +2,7 @@ import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type Rea
 import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp, Check, Copy, Download, Maximize2, Search, WrapText, X } from "lucide-react";
-import { isTableNumber, tableCsv, tableRowOrder, type TableSort } from "@/lib/table-data";
+import { isTableAmount, tableCsv, tableRowOrder, type TableSort } from "@/lib/table-data";
 import { intlLocale, t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
 import { columnMinimums, fitsColumns } from "@/lib/table-fit";
@@ -170,7 +170,7 @@ function TableViewport({ columns, rows, order, name, wrap, large, sort, onSort, 
   ))), [columns, rows]);
   const numeric = useMemo(() => columns.map((_, index) => {
     const nonempty = rows.slice(0, 200).map((row) => row[index]?.text.trim() ?? "").filter(Boolean);
-    return nonempty.length > 0 && nonempty.every(isTableNumber);
+    return nonempty.length > 0 && nonempty.every(isTableAmount);
   }), [columns, rows]);
   const virtualizer = useVirtualizer({ count: order.length, getScrollElement: () => scroll.current, estimateSize: () => 42,
     getItemKey: (index) => order[index]!, overscan: 6, enabled: virtual, initialRect: { width: 800, height: 400 }, scrollMargin: headingHeight });

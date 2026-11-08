@@ -1153,6 +1153,13 @@
   width: 100%;
   border-radius: 12px;
 }
+[data-reply-bubble] [data-table-card] thead {
+  background: color-mix(in srgb, var(--color-card), var(--color-ink) 7%);
+}
+/* A section that opens right after a table keeps the space a heading gets elsewhere in the reply. */
+[data-reply-bubble] > [data-reply-table] + * .chat-md > .md-heading:first-child {
+  margin-top: 6px;
+}
 /* A card under its own bot's bubble (and a bubble under its card) sits 12px below it, not the 16px between senders. */
 [data-simple-rows] > [data-tuck] > :first-child {
   margin-top: -4px;
