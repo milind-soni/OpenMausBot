@@ -3,6 +3,8 @@
 import { EXAMPLE_ADDRESS, isLoopbackHost, parseServerInput, serverTransport } from "./server-address.mjs";
 
 const DESCRIPTOR = "/.well-known/openmausbot/environment";
+/** A MausBot desktop app's Remote access (companion/src/routes.ts) refuses the descriptor with this until a phone pairs. */
+const DESKTOP_APP_REFUSAL = /^pair this device from Remote access settings/;
 
 /** The sentence for each problem, in the window's catalog and main's alike ({host}, {example} filled in). */
 export const CONNECT_PROBLEM_KEYS = Object.freeze({
@@ -19,6 +21,7 @@ export const CONNECT_PROBLEM_KEYS = Object.freeze({
   dns: "native.connect.dns",
   certificate: "native.connect.certificate",
   notMausBot: "native.connect.notMausBot",
+  desktopApp: "native.connect.desktopApp",
   loopback: "native.connect.loopback",
   localNetwork: "native.connect.localNetwork",
 });
@@ -40,8 +43,9 @@ async function describe(origin, fetchImpl, timeoutMs) {
   } catch (error) {
     return { ok: false, kind: failureKind(error) };
   }
-  const body = response.ok ? await response.json().catch(() => null) : null;
-  if (typeof body?.environmentId !== "string" || !body.environmentId) return { ok: false, kind: "notMausBot" };
+  const body = await response.json().catch(() => null);
+  if (response.status === 401 && DESKTOP_APP_REFUSAL.test(String(body?.error ?? ""))) return { ok: false, kind: "desktopApp" };
+  if (!response.ok || typeof body?.environmentId !== "string" || !body.environmentId) return { ok: false, kind: "notMausBot" };
   return { ok: true, environmentId: body.environmentId, label: typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 60) : new URL(origin).host,
     version: typeof body.version === "string" ? body.version.slice(0, 32) : null };
 }
@@ -49,7 +53,7 @@ async function describe(origin, fetchImpl, timeoutMs) {
 /**
  * Reads the sheet's fields and finds the server: `{ outcome: "found", origin, label, version, transport, code, credential }`,
  * or `{ outcome: "problem", problem, host?, code? }` with one of parseServerInput's problems or: unreachable, dns,
- * certificate, notMausBot, loopback (an address on this computer that is this app's own workspace, or nothing at all).
+ * certificate, notMausBot, desktopApp (another computer's MausBot desktop app, which can't be a server), loopback (an address on this computer that is this app's own workspace, or nothing at all).
  * `ownEnvironmentId()`: this app's own local workspace, so a "this computer" link copied off a server is caught.
  */
 export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnvironmentId = async () => null, timeoutMs = 6_000, platform = process.platform }) {
@@ -66,6 +70,8 @@ export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnv
     if (!found.ok) {
       // macOS 15 blocks an app from the local network until the person allows it, and the request then just fails.
       const blockedOnMac = platform === "darwin" && serverTransport(origin) === "private-http" && (found.kind === "unreachable" || found.kind === "timeout");
+      // Another computer's desktop app answered: keep that over a later candidate that just didn't answer.
+      if (failure?.problem === "desktopApp") continue;
       failure = loopback ? { problem: "loopback", host } : blockedOnMac ? { problem: "localNetwork", host }
         : { problem: found.kind === "refused" || found.kind === "timeout" ? "unreachable" : found.kind, host, ...(found.kind === "refused" || found.kind === "timeout" ? { reason: found.kind } : {}) };
       continue;
