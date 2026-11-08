@@ -59,4 +59,20 @@ describe("OAuth tab reservation", () => {
     expect(await launch.open("https://auth.example.test/flow")).toBe(true);
     expect(openExternal).toHaveBeenCalledWith("https://auth.example.test/flow");
   });
+
+  it("hands the link to the desktop app when a server page has no external opener", async () => {
+    // The desktop app showing a self-hosted server page exposes window.ogb without openExternal.
+    // Its window-open handler refuses a blank tab, but opens a real link in the system browser.
+    const open = vi.fn(() => null);
+    vi.stubGlobal("window", { ogb: { platform: "darwin" }, open });
+    const launch = reserveConnectionPage();
+    expect(open).not.toHaveBeenCalled();
+    expect(await launch.open("https://auth.example.test/flow")).toBe(true);
+    expect(open).toHaveBeenCalledWith("https://auth.example.test/flow", "_blank", "noopener");
+
+    const cancelled = reserveConnectionPage();
+    cancelled.cancel();
+    expect(await cancelled.open("https://auth.example.test/late")).toBe(false);
+    expect(open).toHaveBeenCalledTimes(1);
+  });
 });

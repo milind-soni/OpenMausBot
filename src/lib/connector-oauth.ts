@@ -12,11 +12,12 @@ export function reusableConnectionUrl(page: PendingAuthorization | null | undefi
 
 /** Reserve the tab during the click, before an authorization request consumes the browser's user activation. */
 export function reserveConnectionPage() {
-  const openExternal = window.ogb?.openExternal;
+  const desktop = window.ogb;
+  const openExternal = desktop?.openExternal;
   let page: Window | null = null;
   let navigated = false;
   let cancelled = false;
-  if (!openExternal) {
+  if (!desktop) {
     try {
       page = window.open("", "_blank");
       if (page) page.opener = null;
@@ -31,6 +32,12 @@ export function reserveConnectionPage() {
       if (openExternal) {
         await openExternal(url);
         return !cancelled;
+      }
+      if (desktop) {
+        // A server page inside the desktop app has no openExternal. Its window-open handler
+        // refuses a blank tab but sends any web link to the system browser, with no click needed.
+        window.open(url, "_blank", "noopener");
+        return true;
       }
       if (!page || page.closed) return false;
       try {
