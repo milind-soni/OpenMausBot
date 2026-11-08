@@ -245,6 +245,25 @@ describe("Show in folder for a file outside the workspace", () => {
     assert.deepEqual(shown, []);
   });
 
+  it("reveals application bundles without dispatching to a default application opener", async () => {
+    const { shown, reveal } = shell();
+    const opened = [];
+    const openDirectory = async (folder) => { opened.push(folder); return ""; };
+    const fsp = { stat: async () => ({ isDirectory: () => true, isFile: () => false }) };
+    for (const target of ["/Applications/Example.app", "/Applications/Example.APP", "/Users/fixture/project"]) {
+      assert.equal(await revealInFolder(target, { reveal, openDirectory, fsp, pathApi: path.posix }), "shown");
+    }
+    assert.deepEqual(shown, ["/Applications/Example.app", "/Applications/Example.APP", "/Users/fixture/project"]);
+    assert.deepEqual(opened, []);
+  });
+
+  it("keeps the renderer reveal bridge wired only to file-manager selection", () => {
+    const main = fs.readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+    const handler = main.slice(main.indexOf('ipcMain.handle("desktop:reveal-file"'), main.indexOf('ipcMain.handle("desktop:open-html"'));
+    assert.match(handler, /shell\.showItemInFolder\(target\)/);
+    assert.doesNotMatch(handler, /shell\.openPath|shell\.openExternal/);
+  });
+
   it("refuses relative paths, URLs and network shares without touching the disk", async () => {
     const { shown, reveal } = shell();
     const fsp = { stat: () => assert.fail("an invalid path must not be looked up") };

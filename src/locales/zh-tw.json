@@ -9809,5 +9809,14 @@
   "remote.client.endsDec7": "這種連線方式將於 12 月 7 日停止。之後請在另一台電腦的「手機和裝置」中重新配對這台電腦。",
   "phone.code.pairingCode": "配對碼",
   "phone.code.typeIntro": "開啟 {app} 應用程式並輸入這個配對碼。",
-  "phone.signIn.emailCode": "電子郵件中的登入碼"
+  "phone.signIn.emailCode": "電子郵件中的登入碼",
+  "botFolder.open": "開啟工作資料夾",
+  "botFolder.openLocal": "開啟這台電腦上的工作資料夾",
+  "botFolder.copy": "複製路徑",
+  "botFolder.copyLabel": "複製工作資料夾路徑",
+  "botFolder.unavailable": "這台電腦上沒有可用的工作資料夾",
+  "botFolder.loadFailed": "無法載入工作資料夾。",
+  "botFolder.openFailed": "無法開啟工作資料夾。請檢查其位置與存取權限，或複製其路徑。",
+  "botFolder.copied": "已複製路徑",
+  "botFolder.copyFailed": "無法複製路徑。"
 }

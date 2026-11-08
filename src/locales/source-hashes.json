@@ -3426,7 +3426,16 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -9502,7 +9511,16 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -12795,7 +12813,16 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -15940,7 +15967,16 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -23693,7 +23729,16 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -33556,6 +33601,15 @@
       "chat.setupCard.heading": "c55d59f402bbe025ee81dbf0efa20086040334938ed8617f340ab81db478b196",
       "settings.simple.account.noNameHint": "488c9a6a017d6ea2f145c838bee156e762ffcebdaddc173135f4d0590f0b6271",
       "settings.simple.account.yourName": "2c6b2e253c01fb2ed7209c15766745ccee92a35ac8209f544789bdf9500e0944",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517",
       "botPanel.avatar.diwali": "579b0bec9023767ce1e4cea28a6ed9a08ad7da5421fc5019929b5684edfe9e14",
       "mascot.body.rocket": "d40a5aca994e2515589d71a99faba3f6bafaa9ef19fc72228d87b341e0614472",
       "mascot.body.anaar": "63dbf299ebde5cc72c761c61c6343555805326dba19a667e1528845882c7d382",
@@ -41207,6 +41261,15 @@
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
       "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517",
       "task.untitledChat": "4d4e126c2185da5e86b7478f0f12fc30009339941ef0d8627959aeb4641b6f69"
     },
     "zh-tw": {
@@ -51019,6 +51082,15 @@
       "backup.serverRestarting": "87acdeac7f4a0d79c9991c75c303459ab5fe9ab8171d762f0a92a8368c447ad8",
       "backup.serverRestartSlow": "6c3051a9ea04b2e6157c376b2359866c0038915ce7f77064b3e792d38d3cfb9c",
       "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517",
       "task.untitledChat": "4d4e126c2185da5e86b7478f0f12fc30009339941ef0d8627959aeb4641b6f69"
     },
     "uk": {
@@ -54605,7 +54677,16 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -60181,7 +60262,16 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -65757,7 +65847,16 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72595,7 +72694,16 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -79495,7 +79603,16 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -86195,7 +86312,16 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -93617,7 +93743,16 @@
       "server.connect.emailOutgoingNote": "a4a9c913ec6e782b729b668fb53e799b131d0442bcbf43405f332607c7bd482b",
       "server.connect.emailOutgoingPlaceholder": "4bb31e7a93129511e0ed4d2e47296f0cc8f602f9c03e61b2f8ddcd7169242c68",
       "connect.checking": "ed56f22b046c20ebb7533d3c8200388572b5e2c979f4f3081e9f1c1d858a8cf0",
-      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a"
+      "native.connect.localNetwork": "cc56fca3ebf551f882e7a60c6d146c1681ca530531dc80250908d591d2b0000a",
+      "botFolder.open": "000dcba2197a1236a1869b4bd5864eac58daea4a548ab8688e9692ef3e106e2a",
+      "botFolder.openLocal": "b74b9600006c13f0a641dc2e603bcc77bdac8d8acc8702dd70403a012d9ff133",
+      "botFolder.copy": "720ff4160412b943370afdb8fc1c082ff057d54713d5fb4b4b7a9634bfabf5fe",
+      "botFolder.copyLabel": "9fc98c482879ca44bee5031d61b9379de5a200912d6a5520a4ddba814f3b6128",
+      "botFolder.unavailable": "0814623df2d6e94d9480b90b6ac0254a9adcd636dd55ec33f97f3d8b61d72c03",
+      "botFolder.loadFailed": "c5c75b746c0477a7b3deb593241a1a252df665b282262ab5167a807b48083e2e",
+      "botFolder.openFailed": "85f729c338bd118a33a5550abca0234bacab4d332cea0112dec817e37538fe15",
+      "botFolder.copied": "b942ecef1a9c29a4d733a1b93ad80efb22a7f20512a695b0386c462740e7ead3",
+      "botFolder.copyFailed": "b3badb84cc97a921ba1ba3442cf4d649fccc5c7e32272e9212abfa4a3a3e6517"
     }
   }
 }
