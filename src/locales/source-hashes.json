@@ -3412,7 +3412,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -7511,7 +7517,6 @@
       "skills.learned.hintOn": "ff18ab90b4f16073eead025c8ae9247beda43d6f0b63f857bcc25d43db568825",
       "skills.learned.hintOff": "f3477db333415d4fdb93b9f40229ca082915b4e47e1749acaac94588a5836ab7",
       "skills.origin.imported": "058bf37c9767891850a04e77e252c5bcd5036c4a1d0cec568d498dc4c8437379",
-      "skills.origin.importedHint": "4e748bae5d988bfa52a5cd41454f4f04c512b7ca9184eff6cb90c0786d11ca84",
       "skills.write.title": "247262706fab09d0262162ba8a4fe4493b9abf4cd9a4eb5236094437f661e344",
       "skills.write.hint": "502d59dd98da355ebdd92770ec84323129cb4f8dd5156b6a3a06d0dd86c0f88e",
       "skills.write.name": "5af23acc15079d189a6abaefdd7e13ece4ec7fc5ae94aaa3f665407ce8a61d61",
@@ -9475,7 +9480,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -12754,7 +12765,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -15885,7 +15902,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -20407,7 +20430,6 @@
       "skills.learned.hintOn": "ff18ab90b4f16073eead025c8ae9247beda43d6f0b63f857bcc25d43db568825",
       "skills.learned.hintOff": "f3477db333415d4fdb93b9f40229ca082915b4e47e1749acaac94588a5836ab7",
       "skills.origin.imported": "058bf37c9767891850a04e77e252c5bcd5036c4a1d0cec568d498dc4c8437379",
-      "skills.origin.importedHint": "4e748bae5d988bfa52a5cd41454f4f04c512b7ca9184eff6cb90c0786d11ca84",
       "skills.write.title": "247262706fab09d0262162ba8a4fe4493b9abf4cd9a4eb5236094437f661e344",
       "skills.write.hint": "502d59dd98da355ebdd92770ec84323129cb4f8dd5156b6a3a06d0dd86c0f88e",
       "skills.write.name": "5af23acc15079d189a6abaefdd7e13ece4ec7fc5ae94aaa3f665407ce8a61d61",
@@ -23625,7 +23647,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -29195,7 +29223,7 @@
       "skills.learned.hintOn": "ff18ab90b4f16073eead025c8ae9247beda43d6f0b63f857bcc25d43db568825",
       "skills.learned.hintOff": "f3477db333415d4fdb93b9f40229ca082915b4e47e1749acaac94588a5836ab7",
       "skills.origin.imported": "058bf37c9767891850a04e77e252c5bcd5036c4a1d0cec568d498dc4c8437379",
-      "skills.origin.importedHint": "4e748bae5d988bfa52a5cd41454f4f04c512b7ca9184eff6cb90c0786d11ca84",
+      "skills.origin.importedHint": "1a0a4444bcb02305a59f0659abae2383385bf60c954dc84baade1d33d8b43ac1",
       "skills.origin.native": "11fb682be0a0233d5fb899721ecfc1827d20f0d2ff2e093310efa61efca8af1c",
       "skills.origin.nativeHint": "a90b8779cbcb4548b666ab2b46cf98c6e9e94668c7b5db78a8ecd48152aa3a85",
       "skills.write.title": "247262706fab09d0262162ba8a4fe4493b9abf4cd9a4eb5236094437f661e344",
@@ -33422,7 +33450,23 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "computerSharing.ownIntro": "054fa8e486f6758f0b41505f99cceecc24bf68cb1cee5bdd9ac6d423d3407eee",
+      "computerSharing.pauseHint": "46aa1fa8bc0e2d4d8bafa163af32f1485d2373eaa99d0916ed206751a1e00e0d",
+      "computerSharing.paused": "8f4d6a8680cb5e9d62d4e82c774c604297d07ba87bd123959a40770379be5e71",
+      "computerSharing.pause": "858e4ba7a29fd38b630ed73a79e2738333b3fc6778fafa90252f5556c1262fdc",
+      "computerSharing.resume": "d640c7421da066618a39daf4266da5f61f66a9b1afcd626481b831a17064965d",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "skills.foundWhenNeeded": "2ca7e63c87359c6d2c2b9f071a125d32e0bab406da166526421cab80e367ea67",
+      "native.lend.own.title": "e0c0ec1959aef8a27ef00e5524990219d7e3d1f3d4ae97103b78e1e0469b9201",
+      "native.lend.own.detail": "6dbcd74c9c925e16d72b6e641fedcdfb27f2554697a843ff647050a5115cd293",
+      "native.lend.own.allow": "e213c161d5cefa520c8dd4155c9569076d9a40406111465136a6f1b207045761",
+      "native.lend.notOwnServer": "6ec1c2fc26d171727a4509b66ee7a9f4848733a2b4572c01b629a31c5a255cf0"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -39500,7 +39544,6 @@
       "botAccess.recordSteps.myChrome": "6fc8728673d3b750b3152d7375c4b426621ce5657e3b811cc717bb53ee9aca74",
       "skills.learned.hintOn": "ff18ab90b4f16073eead025c8ae9247beda43d6f0b63f857bcc25d43db568825",
       "skills.origin.imported": "058bf37c9767891850a04e77e252c5bcd5036c4a1d0cec568d498dc4c8437379",
-      "skills.origin.importedHint": "4e748bae5d988bfa52a5cd41454f4f04c512b7ca9184eff6cb90c0786d11ca84",
       "skills.origin.native": "11fb682be0a0233d5fb899721ecfc1827d20f0d2ff2e093310efa61efca8af1c",
       "skills.origin.nativeHint": "a90b8779cbcb4548b666ab2b46cf98c6e9e94668c7b5db78a8ecd48152aa3a85",
       "skills.write.title": "247262706fab09d0262162ba8a4fe4493b9abf4cd9a4eb5236094437f661e344",
@@ -41048,7 +41091,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -47906,7 +47955,6 @@
       "botAccess.recordSteps.needsBrowser": "8578dc327f17e3400270edb87c561f0c2b70af441e30be267d697f2b3d6fcc45",
       "botAccess.recordSteps.myChrome": "6fc8728673d3b750b3152d7375c4b426621ce5657e3b811cc717bb53ee9aca74",
       "skills.origin.imported": "058bf37c9767891850a04e77e252c5bcd5036c4a1d0cec568d498dc4c8437379",
-      "skills.origin.importedHint": "4e748bae5d988bfa52a5cd41454f4f04c512b7ca9184eff6cb90c0786d11ca84",
       "skills.origin.native": "11fb682be0a0233d5fb899721ecfc1827d20f0d2ff2e093310efa61efca8af1c",
       "skills.origin.nativeHint": "a90b8779cbcb4548b666ab2b46cf98c6e9e94668c7b5db78a8ecd48152aa3a85",
       "skills.write.title": "247262706fab09d0262162ba8a4fe4493b9abf4cd9a4eb5236094437f661e344",
@@ -50835,7 +50883,22 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "computerSharing.ownIntro": "054fa8e486f6758f0b41505f99cceecc24bf68cb1cee5bdd9ac6d423d3407eee",
+      "computerSharing.pauseHint": "46aa1fa8bc0e2d4d8bafa163af32f1485d2373eaa99d0916ed206751a1e00e0d",
+      "computerSharing.paused": "8f4d6a8680cb5e9d62d4e82c774c604297d07ba87bd123959a40770379be5e71",
+      "computerSharing.pause": "858e4ba7a29fd38b630ed73a79e2738333b3fc6778fafa90252f5556c1262fdc",
+      "computerSharing.resume": "d640c7421da066618a39daf4266da5f61f66a9b1afcd626481b831a17064965d",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e",
+      "native.lend.own.title": "e0c0ec1959aef8a27ef00e5524990219d7e3d1f3d4ae97103b78e1e0469b9201",
+      "native.lend.own.detail": "6dbcd74c9c925e16d72b6e641fedcdfb27f2554697a843ff647050a5115cd293",
+      "native.lend.own.allow": "e213c161d5cefa520c8dd4155c9569076d9a40406111465136a6f1b207045761",
+      "native.lend.notOwnServer": "6ec1c2fc26d171727a4509b66ee7a9f4848733a2b4572c01b629a31c5a255cf0"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -54407,7 +54470,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -59969,7 +60038,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -65531,7 +65606,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -70003,7 +70084,6 @@
       "skills.learned.hintOn": "ff18ab90b4f16073eead025c8ae9247beda43d6f0b63f857bcc25d43db568825",
       "skills.learned.hintOff": "f3477db333415d4fdb93b9f40229ca082915b4e47e1749acaac94588a5836ab7",
       "skills.origin.imported": "058bf37c9767891850a04e77e252c5bcd5036c4a1d0cec568d498dc4c8437379",
-      "skills.origin.importedHint": "4e748bae5d988bfa52a5cd41454f4f04c512b7ca9184eff6cb90c0786d11ca84",
       "skills.write.title": "247262706fab09d0262162ba8a4fe4493b9abf4cd9a4eb5236094437f661e344",
       "skills.write.hint": "502d59dd98da355ebdd92770ec84323129cb4f8dd5156b6a3a06d0dd86c0f88e",
       "skills.write.name": "5af23acc15079d189a6abaefdd7e13ece4ec7fc5ae94aaa3f665407ce8a61d61",
@@ -72356,7 +72436,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -76926,7 +77012,6 @@
       "skills.learned.hintOn": "ff18ab90b4f16073eead025c8ae9247beda43d6f0b63f857bcc25d43db568825",
       "skills.learned.hintOff": "f3477db333415d4fdb93b9f40229ca082915b4e47e1749acaac94588a5836ab7",
       "skills.origin.imported": "058bf37c9767891850a04e77e252c5bcd5036c4a1d0cec568d498dc4c8437379",
-      "skills.origin.importedHint": "4e748bae5d988bfa52a5cd41454f4f04c512b7ca9184eff6cb90c0786d11ca84",
       "skills.write.title": "247262706fab09d0262162ba8a4fe4493b9abf4cd9a4eb5236094437f661e344",
       "skills.write.hint": "502d59dd98da355ebdd92770ec84323129cb4f8dd5156b6a3a06d0dd86c0f88e",
       "skills.write.name": "5af23acc15079d189a6abaefdd7e13ece4ec7fc5ae94aaa3f665407ce8a61d61",
@@ -79243,7 +79328,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -83657,7 +83748,6 @@
       "skills.learned.hintOn": "ff18ab90b4f16073eead025c8ae9247beda43d6f0b63f857bcc25d43db568825",
       "skills.learned.hintOff": "f3477db333415d4fdb93b9f40229ca082915b4e47e1749acaac94588a5836ab7",
       "skills.origin.imported": "058bf37c9767891850a04e77e252c5bcd5036c4a1d0cec568d498dc4c8437379",
-      "skills.origin.importedHint": "4e748bae5d988bfa52a5cd41454f4f04c512b7ca9184eff6cb90c0786d11ca84",
       "skills.write.title": "247262706fab09d0262162ba8a4fe4493b9abf4cd9a4eb5236094437f661e344",
       "skills.write.hint": "502d59dd98da355ebdd92770ec84323129cb4f8dd5156b6a3a06d0dd86c0f88e",
       "skills.write.name": "5af23acc15079d189a6abaefdd7e13ece4ec7fc5ae94aaa3f665407ce8a61d61",
@@ -85930,7 +86020,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -91073,7 +91169,6 @@
       "skills.learned.hintOn": "ff18ab90b4f16073eead025c8ae9247beda43d6f0b63f857bcc25d43db568825",
       "skills.learned.hintOff": "f3477db333415d4fdb93b9f40229ca082915b4e47e1749acaac94588a5836ab7",
       "skills.origin.imported": "058bf37c9767891850a04e77e252c5bcd5036c4a1d0cec568d498dc4c8437379",
-      "skills.origin.importedHint": "4e748bae5d988bfa52a5cd41454f4f04c512b7ca9184eff6cb90c0786d11ca84",
       "skills.origin.native": "11fb682be0a0233d5fb899721ecfc1827d20f0d2ff2e093310efa61efca8af1c",
       "skills.origin.nativeHint": "a90b8779cbcb4548b666ab2b46cf98c6e9e94668c7b5db78a8ecd48152aa3a85",
       "skills.write.title": "247262706fab09d0262162ba8a4fe4493b9abf4cd9a4eb5236094437f661e344",
@@ -93339,7 +93434,13 @@
       "botLimit.paused.chosen": "bb6b6546373e7d0c6fb29ab15dc00f64cdc965f77cf5689478c71c51fbc6549f",
       "botLimit.paused.badge": "e159b06187d369a0615f66ce577582b5c983d4ea59b3a62b702049f61753f0bf",
       "botLimit.paused.saveFailed": "680c88ccf5d4c9fe60c44c3a541c39e5aa80c9d6e76377c886e7c00a1421dc0d",
-      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e"
+      "botLimit.paused.chooseAction": "a79a6acb715b89549164ec01e72282653c74175dff445e98a40612870f8e650e",
+      "servers.share.title": "2c40cfa147bedaaaf7df80722e5fa8e29a34d8369cc064b4665236d4c6590c15",
+      "servers.share.off": "d50382f1539e4c2d70f5d4bef40d9448a489f2a6dd61f2d876c9247482a963f2",
+      "servers.share.on": "f093c4671644b262324e38cb3fa9bf9a6d8090cd3eeab37e31a45c5ddf825b26",
+      "servers.share.paused": "4759afcb7a4df0ddee985cea995d4986bd6c1cf969b31475296b9cb3e7ce0bbc",
+      "servers.share.choose": "0084a52a93797f504574fa33c4191a5c8bb1f68f5de62273e7c67d3d75d5b88b",
+      "servers.share.for": "a3b3b5a3611c4c9206ba66ffcfb49bac1488ec4a03c077341a34a36a7027b38e"
     }
   }
 }

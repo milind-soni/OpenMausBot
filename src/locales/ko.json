@@ -5499,7 +5499,6 @@
   "skills.learned.hintOn": "검증 카드에서 봇의 검증 실행을 스킬로 저장하거나 아래에서 가져오세요. 새로 만들거나 바뀐 스킬은 채팅에 되돌리기와 함께 표시돼요.",
   "skills.learned.hintOff": "스킬 작성은 꺼져 있지만, 이미 켠 스킬은 여기서 계속 관리할 수 있어요.",
   "skills.origin.imported": "이 컴퓨터",
-  "skills.origin.importedHint": "이 컴퓨터에서 모든 봇용으로 가져왔어요. 이 봇에서만 끄려면 여기서 끄세요.",
   "skills.origin.native": "엔진",
   "skills.origin.nativeHint": "봇의 엔진이 소스 아래 폴더에서 불러와요. 수정이나 제거는 그곳에서 하세요.",
   "skills.write.title": "명령 만들기",

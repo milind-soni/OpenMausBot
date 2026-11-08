@@ -5078,7 +5078,6 @@
   "skills.learned.hintOn": "Zapisz uruchomienie weryfikacji bota jako umiejętność z karty Weryfikacja lub zaimportuj ją poniżej. Każda nowa lub zmieniona umiejętność pojawia się na czacie z opcją Cofnij.",
   "skills.learned.hintOff": "Tworzenie umiejętności jest wyłączone, ale włączone już umiejętności pozostają pod twoją kontrolą.",
   "skills.origin.imported": "ten komputer",
-  "skills.origin.importedHint": "Zaimportowano z tego komputera dla wszystkich botów. Wyłącz ją tutaj tylko dla tego bota.",
   "skills.write.title": "Napisz polecenie",
   "skills.write.hint": "Daj botowi krótkie polecenie do czegoś, o co często prosisz. Wpisz /name na czacie, aby je uruchomić. Wszystko po nazwie trafia w miejsce {input}.",
   "skills.write.name": "Nazwa polecenia",
