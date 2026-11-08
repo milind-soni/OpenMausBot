@@ -4,7 +4,7 @@
 // it under the same id, switched off, as its owner's, with this computer's folder named as its own; DELETE lets this
 // computer go of an app event My Cloud now collects. Admin scope; My Cloud takes an item only over its owner's session.
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { lstatSync, opendirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -21,7 +21,9 @@ import type { CloudOwner } from "./cloud-owner-lines.ts";
 import type { CloudSendItem } from "./cloud-send.ts";
 import { retireUnusedStarter, takeArrivingDefaultBot } from "./default-bot.ts";
 import { watchAsMade } from "./host/default-watch.ts";
-import { IMPORTED_SKILLS_DIR, readImportedSkills, storeImportedSkills, type ImportedSkillInput } from "./imported-skills.ts";
+import { IMPORTED_SKILLS_DIR, importedSkillCaptureIntact, readFileNoFollow, readImportedSkills, storeImportedSkills, type ImportedSkillEntry, type ImportedSkillInput } from "./imported-skills.ts";
+import { containsSkillPathControls } from "./skill-folder.ts";
+import type { PortableSkillFile } from "./portable-skill-files.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { withCheckFields } from "./routine-load.ts";
 import type { Routine, RoutineManager, RoutineRun } from "./routines.ts";
@@ -84,31 +86,47 @@ function finishedRuns(routines: Pick<RoutineManager, "listRuns">, routineId: str
 }
 
 /** An imported skill's files as they are kept here, SKILL.md apart. */
-function importedSkillFiles(name: string): { skillMd: string; files: Array<{ path: string; content: string; executable: boolean }> } | null {
+function importedSkillFiles(name: string, entry: ImportedSkillEntry): Pick<ImportedSkillInput, "skillMd" | "files" | "executableIntentVersion"> | null {
   const root = join(IMPORTED_SKILLS_DIR, name);
-  const files: Array<{ path: string; content: string; executable: boolean }> = [];
+  const files: Array<{ path: string; content: string; executable: boolean | null }> = [], captured: PortableSkillFile[] = [];
+  const known = !entry.modeUnknown && (entry.executableFiles !== undefined || process.platform !== "win32"), executable = entry.executableFiles && new Set(entry.executableFiles);
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+  let visited = 0, bytesRead = 0;
   let skillMd: string | null = null;
   const walk = (folder: string, prefix: string, depth: number): boolean => {
     if (depth > 8) return false;
-    for (const entry of readdirSync(folder).sort()) {
-      const full = join(folder, entry), path = prefix ? `${prefix}/${entry}` : entry;
+    const names: string[] = [], handle = opendirSync(folder);
+    try {
+      for (let item = handle.readSync(); item; item = handle.readSync()) {
+        if (++visited > 1 + 200 * 9 || containsSkillPathControls(item.name)) return false;
+        names.push(item.name);
+      }
+    } finally { handle.closeSync(); }
+    for (const name of names.sort()) {
+      const full = join(folder, name), path = prefix ? `${prefix}/${name}` : name;
       const info = lstatSync(full);
       if (info.isDirectory()) { if (!walk(full, path, depth + 1)) return false; continue; }
-      if (!info.isFile()) return false;
-      const content = readFileSync(full, "utf8");
+      if (!info.isFile() || info.size > 2 * 1024 * 1024 || (bytesRead += info.size) > 16 * 1024 * 1024 || (path !== "SKILL.md" && files.length >= 200)) return false;
+      const bytes = readFileNoFollow(full);
+      if (!bytes) return false;
+      const content = decoder.decode(bytes);
       if (path === "SKILL.md") skillMd = content;
-      else files.push({ path, content, executable: (info.mode & 0o100) !== 0 });
+      else {
+        const intent = process.platform === "win32" && executable ? executable.has(path) : (info.mode & 0o100) !== 0;
+        files.push({ path, content, executable: known ? intent : null });
+        captured.push({ path, content, ...(intent ? { executable: true as const } : {}) });
+      }
     }
     return true;
   };
   try { if (!walk(root, "", 0)) return null; } catch { return null; }
-  return skillMd === null ? null : { skillMd, files };
+  return skillMd === null || !importedSkillCaptureIntact(name, entry, skillMd, captured) ? null : { skillMd, files, ...(known ? { executableIntentVersion: 1 as const } : {}) };
 }
 
 /** An imported skill by its content: SKILL.md and each file with its executable bit. */
-export function importedSkillHash(skill: { skillMd: string; files: ReadonlyArray<{ path: string; content: string; executable: boolean }> }): string {
+export function importedSkillHash(skill: { skillMd: string; files: ReadonlyArray<{ path: string; content: string; executable: boolean | null }> }): string {
   const lines = [`SKILL.md ${sha256(skill.skillMd)}`, ...[...skill.files].sort((a, b) => a.path.localeCompare(b.path))
-    .map((file) => `${file.executable ? "x" : "-"} ${file.path} ${sha256(file.content)}`)];
+    .map((file) => `${file.executable === null ? "?" : file.executable ? "x" : "-"} ${file.path} ${sha256(file.content)}`)];
   return sha256(lines.join("\n")).slice(0, 24);
 }
 
@@ -117,9 +135,9 @@ export function importedSkillHash(skill: { skillMd: string; files: ReadonlyArray
 function importedSkills(deps: MoveKindsDeps): ImportedSkillInput[] {
   const out: ImportedSkillInput[] = [];
   for (const [name, entry] of Object.entries(readImportedSkills())) {
-    const files = importedSkillFiles(name);
-    if (!files) continue;
-    const { filesSha256: _files, importedAt: _at, ...kept } = entry;
+    const files = importedSkillFiles(name, entry);
+    if (!files) throw new Error(`Imported skill "${name}" changed or could not be checked safely; bring it in again before moving it.`);
+    const { filesSha256: _files, importedAt: _at, executableFiles: _executable, modeUnknown: _unknown, ...kept } = entry;
     out.push({ name, entry: kept, ...files });
   }
   const held = new Set(out.map((skill) => skill.name));
@@ -254,11 +272,13 @@ const botFieldsSchema = z.object({
   sidebarHidden: z.boolean().nullable().optional(),
   welcomed: z.boolean().nullable().optional(),
 }).strict();
-const skillFileSchema = z.object({ path: z.string().max(400).refine(validRelative), content: z.string().max(512 * 1024), executable: z.boolean() });
+const skillFileSchema = z.object({ path: z.string().max(400).refine((path) => validRelative(path) && !containsSkillPathControls(path)), content: z.string().max(512 * 1024), executable: z.boolean().nullable() });
 const importedSkillSchema = z.object({ name: z.string().refine(isSkillName), skillMd: z.string().max(512 * 1024), files: z.array(skillFileSchema).max(200),
+  executableIntentVersion: z.literal(1).optional(),
   entry: z.object({ description: z.string().max(4000), source: z.enum(["claudeCode", "codex"]), root: z.string().max(4096), origin: z.string().max(4096),
     label: z.string().max(400), sha256: z.string().regex(/^[a-f0-9]{64}$/u), warnings: z.array(z.string().max(2000)).max(100),
-    license: z.string().max(400).optional(), compatibility: z.string().max(400).optional() }) });
+    license: z.string().max(400).optional(), compatibility: z.string().max(400).optional() }) }).refine((skill) =>
+      skill.executableIntentVersion === 1 ? skill.files.every((file) => file.executable !== null) : skill.files.every((file) => file.executable === null));
 const librarySkillSchema = z.object({ text: z.string().max(512 * 1024), entry: z.object({ name: z.string().refine(isSkillName), description: z.string().max(4000),
   source: z.string().max(2000), reviewState: z.enum(["approved", "disabled"]), license: z.string().max(400).optional(), compatibility: z.string().max(400).optional(),
   tags: z.array(z.string().max(80)).max(40).optional(), warnings: z.array(z.string().max(2000)).max(100).optional() }).passthrough() });
@@ -355,6 +375,7 @@ async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, 
   if (kind === "imported-skill") {
     const parsed = importedSkillSchema.safeParse(raw);
     if (!parsed.success || parsed.data.name !== id) refuse(400, "send the skill's files as this computer holds them");
+    if (parsed.data!.files.some((file) => file.executable === null)) refuse(409, "This skill's executable intent is unknown. Bring it in from a source that records file modes before moving it.");
     if (!storeImportedSkills([parsed.data!])[0]?.stored) refuse(500, "My Cloud could not keep this skill.");
     return;
   }

@@ -34,6 +34,7 @@ function input(name: string, options: { source?: "claudeCode" | "codex"; root?: 
   return {
     name,
     skillMd: skillMd(name),
+    executableIntentVersion: 1,
     files: options.files ?? [{ path: "scripts/run.sh", content: "echo run\n", executable: process.platform !== "win32" }],
     entry: {
       description: options.description ?? `Works with ${name}.`, source, root, origin: join(root, name), label: `~/${source}/${name}`,
@@ -54,6 +55,18 @@ const names = (skills: Array<{ name: string }>) => skills.map((skill) => skill.n
 const target = (link: string) => resolve(readlinkSync(link).replace(/^\\\\\?\\/, ""));
 
 describe("skills brought in from this computer", () => {
+  it("does not create executable files when their intent was not established", () => {
+    const { executableIntentVersion: _version, ...unknown } = input("unknown-executable", { files: [{ path: "scripts/run.sh", content: "echo fixture\n", executable: true }] });
+    expect(store([unknown])).toEqual([expect.objectContaining({ stored: false })]);
+    expect(existsSync(join(IMPORTED_SKILLS_DIR, "unknown-executable"))).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32")("refuses a changed import whose path could confuse the folder digest", () => {
+    store([input("path-check", { files: [{ path: "guide.md", content: "guide\n", executable: false }] })]);
+    writeFileSync(join(IMPORTED_SKILLS_DIR, "path-check", "other\nfile.md"), "local work\n");
+    expect(readImportedSkillFile("path-check")).toBeNull();
+  });
+
   it("keeps a valid cloud import with 200 distinct deeply nested files", () => {
     const files = Array.from({ length: 200 }, (_, index) => ({
       path: [`folder-${index}`, ...Array.from({ length: 15 }, () => "d"), "guide.md"].join("/"),
@@ -73,9 +86,8 @@ describe("skills brought in from this computer", () => {
     });
     const record = { id: bot } as BotRecord;
     const imported = host.exportBotSkill(record, "bundle");
-    if (process.platform === "win32") expect(imported).toBeNull();
-    else expect(imported).toMatchObject({ files: [
-      { path: "references/guide.md", content: "imported guide" }, { path: "script.sh", content: "echo hi", executable: true },
+    expect(imported).toMatchObject({ files: [
+      { path: "references/guide.md", content: "imported guide" }, { path: "script.sh", content: "echo hi", ...(process.platform === "win32" ? {} : { executable: true }) },
     ], skipped: [] });
     installSkill(bot, "private", [{ path: "SKILL.md", content: skillMd("bundle") }, { path: "README.md", content: "private guide" }]);
     expect(host.exportBotSkill(record, "bundle")?.files).toEqual([{ path: "README.md", content: "private guide" }]);

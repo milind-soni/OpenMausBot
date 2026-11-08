@@ -13,7 +13,7 @@ import type { SetupDetection, SetupImportRequest, SetupImportResult, SetupSource
 import { holdsCredential } from "../shared/redact.ts";
 import { parseSkillMd, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 import { importedSkillIntact, readImportedSkills, storeImportedSkills, type ImportedSkillEntry, type ImportedSkillInput } from "./imported-skills.ts";
-import { scanSkillFolder } from "./skill-folder.ts";
+import { containsSkillPathControls, scanSkillFolder } from "./skill-folder.ts";
 import { secretName } from "./skill-secret-names.ts";
 import { importedMcpServerName, isRemoteMcpServer, MAX_MCP_SERVERS, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
 import { parseToml } from "./toml-lite.ts";
@@ -69,7 +69,7 @@ const nodeFs: SetupFs = {
       const nonBlock = process.platform !== "win32" ? constants.O_NONBLOCK : 0;
       fd = openSync(path, constants.O_RDONLY | noFollow | nonBlock);
       const opened = fstatSync(fd);
-      if (!opened.isFile() || opened.size > max || (oneLink && opened.nlink > 1)) return null;
+      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size > max || (oneLink && opened.nlink > 1)) return null;
       const buffer = Buffer.alloc(opened.size);
       let offset = 0;
       while (offset < buffer.length) {
@@ -77,7 +77,8 @@ const nodeFs: SetupFs = {
         if (count <= 0) break;
         offset += count;
       }
-      return buffer.subarray(0, offset);
+      const after = fstatSync(fd);
+      return offset === opened.size && after.size === opened.size && after.mtimeMs === opened.mtimeMs && after.ctimeMs === opened.ctimeMs ? buffer : null;
     } catch {
       return null;
     } finally {
@@ -272,7 +273,7 @@ export const SKILL_COPY_LIMITS = {
 interface SkillFile {
   path: string;
   content: string;
-  executable: boolean;
+  executable: boolean | null;
 }
 
 function textFile(name: string): boolean {
@@ -293,13 +294,14 @@ function utf8(bytes: Buffer): string | null {
 
 /** The text files beside SKILL.md, within the limits. Links are never followed, a file with another hard link (which
  * may be a credential elsewhere) is not read, and one holding a credential is not copied; anything left out is counted. */
-function skillFiles(fs: SetupFs, dir: string, budget: { bytes: number }): { files: SkillFile[]; leftOut: number } {
+function skillFiles(fs: SetupFs, dir: string, budget: { bytes: number }, modeKnown: boolean): { files: SkillFile[]; leftOut: number } {
   const files: SkillFile[] = [];
   let leftOut = 0;
   let bytes = 0;
   const walk = (folder: string, relative: string, depth: number) => {
     for (const name of (fs.readdir(folder) ?? []).sort()) {
       if (name.startsWith(".")) continue;
+      if (containsSkillPathControls(name)) { leftOut += 1; continue; }
       // Decided by name before anything is opened.
       if (secretName(name)) {
         leftOut += 1;
@@ -322,11 +324,13 @@ function skillFiles(fs: SetupFs, dir: string, budget: { bytes: number }): { file
           bytes + info.size <= SKILL_COPY_LIMITS.skillBytes && budget.bytes + info.size <= SKILL_COPY_LIMITS.totalBytes;
         const raw = fits ? fs.read(full, SKILL_COPY_LIMITS.fileBytes, false, true) : null;
         const content = raw ? utf8(raw) : null;
-        if (content === null || holdsCredential(content)) {
+        const after = raw && fs.lstat(full);
+        if (content === null || !after?.isFile() || after.nlink > 1 || raw!.length !== info.size || after.dev !== info.dev || after.ino !== info.ino ||
+            after.size !== info.size || after.mode !== info.mode || after.mtimeMs !== info.mtimeMs || after.ctimeMs !== info.ctimeMs || holdsCredential(content)) {
           leftOut += 1;
           continue;
         }
-        files.push({ path, content, executable: (info.mode & 0o111) !== 0 });
+        files.push({ path, content, executable: modeKnown ? (info.mode & 0o100) !== 0 : null });
         bytes += raw!.length;
         budget.bytes += raw!.length;
       }
@@ -348,13 +352,15 @@ function freshSkill(skill: FoundSkill, held: ImportedSkillEntry | undefined): bo
 
 /** A found skill as an import stores it: SKILL.md and the text files beside it, with the scan's warnings. */
 function skillInput(machine: SetupMachine, skill: FoundSkill, budget: { bytes: number }): { input: ImportedSkillInput; leftOut: number } {
-  const copy = skillFiles(machine.fs, skill.folder, budget);
+  const modeKnown = machine.platform !== "win32";
+  const copy = skillFiles(machine.fs, skill.folder, budget, modeKnown);
   return {
     leftOut: copy.leftOut,
     input: {
       name: skill.name,
       skillMd: skill.text,
       files: copy.files,
+      ...(modeKnown ? { executableIntentVersion: 1 as const } : {}),
       entry: {
         description: skill.parsed.description,
         source: skill.source,

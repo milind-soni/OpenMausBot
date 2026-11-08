@@ -17,7 +17,8 @@ export const SKILL_FOLDER_LIMITS = { files: 200, bytes: 16 * 1024 * 1024, fileBy
 const SKIPPED_LIST_MAX = 20;
 const MAX_WARNINGS = 20;
 const GENERATED = new Set(["__pycache__", "node_modules", "venv"]);
-const unsafeCharacter = (char: string) => char < " " || char === "\u007f" || '<>:"|?*\\'.includes(char);
+export const containsSkillPathControls = (value: string) => [...value].some((char) => char < " " || char === "\u007f");
+const unsafeCharacter = (char: string) => containsSkillPathControls(char) || '<>:"|?*\\'.includes(char);
 // Windows refuses these names in any folder, with or without an extension.
 const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\..*)?$/i;
 const SCRIPT = /\.(?:sh|bash|zsh|fish|ps1|psm1|bat|cmd|py|rb|pl|php|lua|js|mjs|cjs|ts)$/i;

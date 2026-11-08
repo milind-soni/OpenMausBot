@@ -14,7 +14,7 @@ import { exportLibrarySkill, installLibrarySkill, readSkillLibraryIndex, setLibr
 import { workspaceDir } from "./workspace.ts";
 import { setSkillUseGuard } from "./skill-use-guard.ts";
 import { ensureTaskWorkspaceWithSkills } from "./skill-task-links.ts";
-import { exportImportedSkill, IMPORTED_SKILLS_DIR, storeImportedSkills } from "./imported-skills.ts";
+import { exportImportedSkill, IMPORTED_SKILLS_DIR, readImportedSkillFile, readImportedSkills, storeImportedSkills } from "./imported-skills.ts";
 import { removeOrganizationSkill } from "./skill-org-removal.ts";
 import { retireUnchangedSkillRoot } from "./skill-retirement.ts";
 
@@ -93,6 +93,56 @@ describe("reviewed executable intent on Windows", () => {
     expect(storeImportedSkills([{ ...input, files: [{ ...input.files[0]!, executable: true }] }])).toEqual([expect.objectContaining({ stored: false })]);
     expect(readFileSync(join(IMPORTED_SKILLS_DIR, name, "scripts", "run.sh"), "utf8")).toBe("echo fixture\n");
     expect(exportImportedSkill(name)).toBeNull();
+  }));
+
+  it("retains trusted imported modes and rejects changed bytes or mode metadata", () => simulateWindows(() => {
+    const source = join(DATA_DIR, "source"), index = join(DATA_DIR, "skill-state", "imported-skills.json");
+    const input = { name, skillMd: instructions, executableIntentVersion: 1 as const, files: [
+      { path: "references/guide.md", content: "Read the guide.\n", executable: false },
+      { path: "scripts/run.sh", content: "echo fixture\n", executable: true },
+    ], entry: { description: "fixture", source: "codex" as const, root: source, origin: join(source, name), label: "fixture",
+      sha256: createHash("sha256").update(instructions).digest("hex"), warnings: [] } };
+    expect(storeImportedSkills([input])).toEqual([expect.objectContaining({ stored: true })]);
+    expect(readImportedSkills()[name]!.executableFiles).toEqual(["scripts/run.sh"]);
+    expect(exportImportedSkill(name)!.files).toEqual([
+      { path: "references/guide.md", content: "Read the guide.\n" },
+      { path: "scripts/run.sh", content: "echo fixture\n", executable: true },
+    ]);
+    const manifest = JSON.parse(readFileSync(index, "utf8"));
+    manifest[name].executableFiles = [];
+    writeFileSync(index, JSON.stringify(manifest));
+    expect(readImportedSkillFile(name)).toBeNull();
+    expect(exportImportedSkill(name)).toBeNull();
+    manifest[name].executableFiles = ["scripts/run.sh"];
+    writeFileSync(index, JSON.stringify(manifest));
+    writeFileSync(join(IMPORTED_SKILLS_DIR, name, "references", "guide.md"), "changed\n");
+    expect(exportImportedSkill(name)).toBeNull();
+  }));
+
+  it("distinguishes a trusted non-executable companion from unknown and legacy modes", () => simulateWindows(() => {
+    const source = join(DATA_DIR, "source"), index = join(DATA_DIR, "skill-state", "imported-skills.json");
+    const input = { name, skillMd: instructions, executableIntentVersion: 1 as const, files: [{ path: "references/guide.md", content: "guide\n", executable: false }],
+      entry: { description: "fixture", source: "codex" as const, root: source, origin: join(source, name), label: "fixture",
+        sha256: createHash("sha256").update(instructions).digest("hex"), warnings: [] } };
+    expect(storeImportedSkills([input])[0]!.stored).toBe(true);
+    expect(readImportedSkills()[name]!.executableFiles).toEqual([]);
+    expect(exportImportedSkill(name)!.files).toEqual([{ path: "references/guide.md", content: "guide\n" }]);
+    const legacy = JSON.parse(readFileSync(index, "utf8"));
+    delete legacy[name].executableFiles;
+    writeFileSync(index, JSON.stringify(legacy));
+    expect(readImportedSkillFile(name)).toBe(instructions);
+    expect(exportImportedSkill(name)).toBeNull();
+    const { executableIntentVersion: _version, ...unknown } = input;
+    expect(storeImportedSkills([{ ...unknown, files: [{ ...input.files[0]!, executable: null }] }])[0]!.stored).toBe(true);
+    expect(readImportedSkills()[name]).toHaveProperty("modeUnknown", true);
+    expect(exportImportedSkill(name)).toBeNull();
+    const altered = JSON.parse(readFileSync(index, "utf8"));
+    delete altered[name].modeUnknown;
+    writeFileSync(index, JSON.stringify(altered));
+    expect(readImportedSkillFile(name)).toBeNull();
+    expect(exportImportedSkill(name)).toBeNull();
+    expect(storeImportedSkills([{ ...unknown, files: [] }])[0]!.stored).toBe(true);
+    expect(exportImportedSkill(name)).toMatchObject({ instructions, files: [] });
   }));
 
   it("retains intent in the library index without enabling an unreviewed skill", () => simulateWindows(() => {

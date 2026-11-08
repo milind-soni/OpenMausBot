@@ -6,10 +6,10 @@ import { dirname, join, relative, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
-import { IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, readImportedSkills, setImportedSkillEnabled } from "./imported-skills.ts";
+import { exportImportedSkill, IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, readImportedSkills, setImportedSkillEnabled, storeImportedSkills } from "./imported-skills.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import {
-  applySetupImport, detectSetup, secretName, setupPaths, SKILL_COPY_LIMITS, thisMachine, topLevelJsonMember, withoutJsonComments,
+  applySetupImport, claudeCodeSkillInputs, detectSetup, secretName, setupPaths, SKILL_COPY_LIMITS, thisMachine, topLevelJsonMember, withoutJsonComments,
   type SetupFs, type SetupHost, type SetupMachine,
 } from "./setup-import.ts";
 import { installSkill, listSkills } from "./skills.ts";
@@ -452,6 +452,49 @@ describe("finding what another AI tool already set up on this computer", () => {
 });
 
 describe("bringing skills in", () => {
+  it.skipIf(process.platform === "win32")("marks POSIX source modes known and Windows source modes unknown", () => {
+    const home = fixtureHome();
+    put(home, ".claude/skills/mode-sample/SKILL.md", skillMd("mode-sample"));
+    put(home, ".claude/skills/mode-sample/references/guide.md", "guide\n", 0o600);
+    put(home, ".claude/skills/mode-sample/scripts/run.sh", "echo fixture\n", 0o700);
+    const posix = claudeCodeSkillInputs(machineFor(home, "linux").machine)[0]!;
+    expect(posix.executableIntentVersion).toBe(1);
+    expect(posix.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: "references/guide.md", executable: false }),
+      expect.objectContaining({ path: "scripts/run.sh", executable: true }),
+    ]));
+    const machine = machineFor(home, "win32").machine, windows = claudeCodeSkillInputs(machine)[0]!;
+    expect(windows.executableIntentVersion).toBeUndefined();
+    expect(windows.files.every((file) => file.executable === null)).toBe(true);
+    expect(applySetupImport(machine, hostFor().host, { skills: true }).skills?.added).toContain("mode-sample");
+    expect(readImportedSkills()["mode-sample"]!.modeUnknown).toBe(true);
+    expect(exportImportedSkill("mode-sample")).toBeNull();
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    try {
+      Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+      expect(storeImportedSkills([posix])[0]!.stored).toBe(true);
+      expect(exportImportedSkill("mode-sample")!.files).toEqual(expect.arrayContaining([
+        { path: "references/guide.md", content: "guide\n" },
+        { path: "scripts/run.sh", content: "echo fixture\n", executable: true },
+      ]));
+    } finally { Object.defineProperty(process, "platform", platform); }
+  });
+
+  it.skipIf(process.platform === "win32")("does not record a mode that changes while the source file is read", () => {
+    const home = fixtureHome();
+    put(home, ".claude/skills/mode-race/SKILL.md", skillMd("mode-race"));
+    const file = put(home, ".claude/skills/mode-race/references/guide.md", "guide\n", 0o600);
+    const { machine } = machineFor(home, "linux"), read = machine.fs.read;
+    machine.fs.read = (path, ...options) => {
+      const bytes = read(path, ...options);
+      if (path === file) chmodSync(file, 0o700);
+      return bytes;
+    };
+    const result = applySetupImport(machine, hostFor().host, { skills: true });
+    expect(result.skills?.filesLeftOut).toBe(1);
+    expect(existsSync(join(IMPORTED_SKILLS_DIR, "mode-race", "references", "guide.md"))).toBe(false);
+  });
+
   it("copies each skill's text files once, read-only, for every bot, and leaves out binary, oversized, linked and private files", () => {
     const home = fixtureHome();
     plantSkills(home);

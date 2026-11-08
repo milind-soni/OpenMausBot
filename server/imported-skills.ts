@@ -21,7 +21,7 @@ import { rankSkills } from "../shared/skill-fit.ts";
 import { isSkillName } from "../shared/skill-md.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
-import { executableSkillModeUnsupported } from "./skill-folder.ts";
+import { containsSkillPathControls } from "./skill-folder.ts";
 import { directoryEntryState, entryExistsWithoutFollowing } from "./skill-storage.ts";
 import { portableFilesForDisk, snapshotPortableSkill, type PortableSkillFile } from "./portable-skill-files.ts";
 import { readBoundedSkillFile } from "./bounded-skill-read.ts";
@@ -45,6 +45,8 @@ const entrySchema = z.object({
   filesSha256: sha256Hex,
   importedAt: z.string(),
   warnings: z.array(z.string()),
+  executableFiles: z.array(z.string().min(1).max(2048)).max(200).optional(),
+  modeUnknown: z.literal(true).optional(),
   license: z.string().optional(),
   compatibility: z.string().optional(),
 });
@@ -111,12 +113,15 @@ interface Digest {
 const MAX_DIGEST_DEPTH = 16;
 const MAX_DIGEST_ENTRIES = 1 + 200 * (MAX_DIGEST_DEPTH + 1), MAX_DIGEST_BYTES = 16 * 1024 * 1024, MAX_DIGEST_FILE_BYTES = 2 * 1024 * 1024;
 const digests = new Map<string, Digest>();
+const storedDigest = (sha256: string, unknown: boolean) => unknown ? createHash("sha256").update(`unknown-executable-intent\0${sha256}`).digest("hex") : sha256;
 
 /** One hash over every entry below `dir`, each file with its executable bit and content; null when anything there is
  * not a plain file or folder. */
-function folderDigest(dir: string, capturedFiles?: readonly PortableSkillFile[]): Digest | null {
+function folderDigest(dir: string, capturedFiles?: readonly PortableSkillFile[], executableFiles?: readonly string[]): Digest | null {
   const captured = capturedFiles && new Map(portableFilesForDisk(capturedFiles).map((file) => [file.path, file]));
   if (captured && captured.size !== capturedFiles!.length) return null;
+  const executable = executableFiles && new Set(executableFiles);
+  if (executable && executable.size !== executableFiles!.length) return null;
   const stats: string[] = [];
   const entries: Array<{ path: string; full: string; executable: boolean } | { path: string; folder: true }> = [];
   let visited = 0, bytes = 0;
@@ -132,7 +137,7 @@ function folderDigest(dir: string, capturedFiles?: readonly PortableSkillFile[])
         for (;;) {
           const item = handle.readSync();
           if (!item) break;
-          if (++visited > MAX_DIGEST_ENTRIES) return false;
+          if (++visited > MAX_DIGEST_ENTRIES || containsSkillPathControls(item.name)) return false;
           names.push(item.name);
         }
       } finally { handle.closeSync(); }
@@ -171,6 +176,9 @@ function folderDigest(dir: string, capturedFiles?: readonly PortableSkillFile[])
   }
   if (!walk(dir, "", 0)) return null;
   if (captured && [...captured.keys()].some((path) => !entries.some((entry) => entry.path === path && !("folder" in entry)))) return null;
+  if (executable && [...executable].some((path) => path === "SKILL.md" || !entries.some((entry) => entry.path === path && !("folder" in entry)))) return null;
+  if (executable && process.platform !== "win32" && entries.some((entry) => !("folder" in entry) && entry.executable !== executable.has(entry.path))) return null;
+  if (executable) stats.push(JSON.stringify([...executable].sort()));
   const key = createHash("sha256").update(stats.join("\n")).digest("hex");
   const known = digests.get(dir);
   if (!captured && known?.key === key) return known;
@@ -183,7 +191,9 @@ function folderDigest(dir: string, capturedFiles?: readonly PortableSkillFile[])
     const snapshot = captured?.get(entry.path);
     const bytes = snapshot ? Buffer.from(snapshot.content) : readFileNoFollow(entry.full);
     if (bytes === null) return null;
-    hash.update(`f ${(snapshot ? Boolean(snapshot.executable) : entry.executable) ? "x" : "-"} ${entry.path} ${createHash("sha256").update(bytes).digest("hex")}\n`);
+    const expected = executable && process.platform === "win32" ? executable.has(entry.path) : entry.executable;
+    if (snapshot && Boolean(snapshot.executable) !== expected) return null;
+    hash.update(`f ${expected ? "x" : "-"} ${entry.path} ${createHash("sha256").update(bytes).digest("hex")}\n`);
   }
   const digest = { key, sha256: hash.digest("hex") };
   if (!captured) digests.set(dir, digest);
@@ -192,15 +202,18 @@ function folderDigest(dir: string, capturedFiles?: readonly PortableSkillFile[])
 
 /** Whether the copy of `name` is still exactly what was brought in. */
 export function importedSkillIntact(name: string, entry: ImportedSkillEntry): boolean {
-  return isSkillName(name) && folderDigest(join(IMPORTED_SKILLS_DIR, name))?.sha256 === entry.filesSha256;
+  if (!isSkillName(name) || (entry.modeUnknown && entry.executableFiles)) return false;
+  const digest = folderDigest(join(IMPORTED_SKILLS_DIR, name), undefined, entry.executableFiles);
+  return Boolean(digest && storedDigest(digest.sha256, Boolean(entry.modeUnknown)) === entry.filesSha256);
 }
 
 export interface ImportedSkillInput {
   name: string;
-  entry: Omit<ImportedSkillEntry, "filesSha256" | "importedAt">;
+  entry: Omit<ImportedSkillEntry, "filesSha256" | "importedAt" | "executableFiles" | "modeUnknown">;
   skillMd: string;
+  executableIntentVersion?: 1;
   /** The text files beside SKILL.md, by path inside the skill. */
-  files: ReadonlyArray<{ path: string; content: string; executable: boolean }>;
+  files: ReadonlyArray<{ path: string; content: string; executable: boolean | null }>;
 }
 
 export interface StoredImport {
@@ -215,8 +228,9 @@ export interface StoredImport {
 const fileMode = (executable: boolean) => (process.platform === "win32" ? 0o600 : executable ? 0o500 : 0o400);
 
 /** Into a fresh folder nothing links to: parents level by level, never over a file. */
-function writeStaged(folder: string, input: ImportedSkillInput): number {
+function writeStaged(folder: string, input: ImportedSkillInput): { leftOut: number; executableFiles: string[] } {
   let leftOut = 0;
+  const executableFiles: string[] = [];
   mkdirSync(folder, { mode: 0o700 });
   writeFileSync(join(folder, "SKILL.md"), input.skillMd, { mode: fileMode(false), flag: "wx" });
   for (const file of input.files) {
@@ -240,7 +254,8 @@ function writeStaged(folder: string, input: ImportedSkillInput): number {
     }
     if (placed) {
       try {
-        writeFileSync(join(at, parts[parts.length - 1]!), file.content, { mode: fileMode(file.executable), flag: "wx" });
+        writeFileSync(join(at, parts[parts.length - 1]!), file.content, { mode: fileMode(file.executable === true), flag: "wx" });
+        if (file.executable === true) executableFiles.push(file.path);
       } catch (error) {
         const code = (error as { code?: string }).code;
         // README.md beside readme.md on a disk that cannot tell them apart: that one file stays out, not the skill.
@@ -250,7 +265,7 @@ function writeStaged(folder: string, input: ImportedSkillInput): number {
     }
     if (!placed) leftOut += 1;
   }
-  return leftOut;
+  return { leftOut, executableFiles };
 }
 
 function ensureRealDirectory(path: string): void {
@@ -272,16 +287,17 @@ export function storeImportedSkills(inputs: readonly ImportedSkillInput[]): Stor
       const staged = join(staging, randomUUID());
       try {
         if (!isSkillName(input.name)) throw new Error("invalid skill name");
-        if (executableSkillModeUnsupported(input.files)) throw new Error("executable skill file permissions cannot be preserved");
-        const leftOut = writeStaged(staged, input);
-        const digest = folderDigest(staged);
+        const known = input.executableIntentVersion === 1 && input.files.every((file) => typeof file.executable === "boolean");
+        if (!known && input.files.some((file) => file.executable === true)) throw new Error("executable skill file intent is unknown");
+        const { leftOut, executableFiles } = writeStaged(staged, input);
+        const digest = folderDigest(staged, undefined, known ? executableFiles : undefined);
         if (!digest) throw new Error("the staged copy could not be read back");
         const target = join(IMPORTED_SKILLS_DIR, input.name);
         if (entryExistsWithoutFollowing(target)) renameSync(target, join(staging, `${randomUUID()}-replaced`));
         renameSync(staged, target);
         digests.delete(staged);
         digests.delete(target);
-        index[input.name] = { ...input.entry, filesSha256: digest.sha256, importedAt: new Date().toISOString() };
+        index[input.name] = { ...input.entry, filesSha256: storedDigest(digest.sha256, !known), importedAt: new Date().toISOString(), ...(known ? { executableFiles } : { modeUnknown: true }) };
         results.push({ name: input.name, stored: true, leftOut });
       } catch {
         results.push({ name: input.name, stored: false, leftOut: 0 });
@@ -383,8 +399,18 @@ export function exportImportedSkill(name: string) {
   if (!isSkillName(name)) return null;
   const entry = readImportedSkills()[name], directory = join(IMPORTED_SKILLS_DIR, name);
   if (!entry) return null;
-  return snapshotPortableSkill(directory, () => readImportedSkillFile(name), undefined,
-    (files) => folderDigest(directory, files)?.sha256 === entry.filesSha256, null);
+  const unknown = entry.modeUnknown || (process.platform === "win32" && !entry.executableFiles);
+  const snapshot = snapshotPortableSkill(directory, () => readImportedSkillFile(name), undefined,
+    (files) => { const digest = folderDigest(directory, files, entry.executableFiles); return Boolean(digest && storedDigest(digest.sha256, Boolean(entry.modeUnknown)) === entry.filesSha256); },
+    unknown && process.platform === "win32" ? null : entry.executableFiles);
+  return unknown && (snapshot?.files.length || snapshot?.skipped.length) ? null : snapshot;
+}
+
+export function importedSkillCaptureIntact(name: string, entry: ImportedSkillEntry, skillMd: string, files: readonly PortableSkillFile[]): boolean {
+  if (!isSkillName(name)) return false;
+  const digest = folderDigest(join(IMPORTED_SKILLS_DIR, name), files, entry.executableFiles);
+  return JSON.stringify(readImportedSkills()[name]) === JSON.stringify(entry) &&
+    readImportedSkillFile(name) === skillMd && Boolean(digest && storedDigest(digest.sha256, Boolean(entry.modeUnknown)) === entry.filesSha256);
 }
 
 /** One bot's switch. Off stays off whatever is brought in later, and out of its search; on puts it in the bot's list and,

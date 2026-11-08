@@ -18,9 +18,10 @@ the department name), or from **Templates → Share**.
   filesystems. On Windows, bot-owned, library and organization imports retain
   reviewed executable intent in protected state for hashing and later export;
   this does not run the file or grant it execution privileges. Older Windows
-  copies and welcome imports may lack trustworthy mode information; their
-  companions cannot be exported until the folder is recovered from a trusted
-  source. Binary
+  copies and Windows welcome scans may lack trustworthy mode information; their
+  companions cannot be exported until brought in again from a trusted source.
+  Welcome imports with recorded source modes keep them, including on Windows.
+  Binary
   companions are left out unless you explicitly choose **Include binary skill
   files**. Binary files cannot be scanned or redacted for secrets or metadata;
   inspect them before sharing. The preview lists included and omitted files and

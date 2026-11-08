@@ -1,11 +1,13 @@
-import { mkdtempSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { itemKey } from "../electron/cloud-send-parts.mjs";
 import { CalendarCallManager } from "./calendar-calls.ts";
 import { importedSkillHash, kindRecord, moveItems, moveKindsRoute, type MoveKindsDeps } from "./cloud-send-kinds.ts";
-import { readImportedSkills } from "./imported-skills.ts";
+import { exportImportedSkill, IMPORTED_SKILLS_DIR, readImportedSkills, storeImportedSkills } from "./imported-skills.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import { installLibrarySkill, readSkillLibraryIndex } from "./skill-library.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -184,7 +186,8 @@ describe("My Cloud sets a bot's move-only fields", () => {
 describe("skill extras", () => {
   it("an imported skill arrives with every file and hashes the same as the copy this computer keeps", async () => {
     const input = { name: "invoice-check", skillMd: "---\nname: invoice-check\ndescription: Check.\n---\n\nCheck.\n", files: [{ path: "references/rules.md", content: "Add up.\n", executable: false }],
-      entry: { description: "Check.", source: "claudeCode" as const, root: "~/.claude/skills", origin: "~/.claude/skills/invoice-check", label: "Claude Code/invoice-check", sha256: "a".repeat(64), warnings: [] } };
+      executableIntentVersion: 1 as const,
+      entry: { description: "Check.", source: "claudeCode" as const, root: "~/.claude/skills", origin: "~/.claude/skills/invoice-check", label: "Claude Code/invoice-check", sha256: createHash("sha256").update("---\nname: invoice-check\ndescription: Check.\n---\n\nCheck.\n").digest("hex"), warnings: [] } };
     const d = deps("/data", { claudeCodeSkills: () => [input] });
     const [listed] = moveItems(d, new Set()).filter((item) => item.kind === "imported-skill");
     expect(listed).toEqual({ key: itemKey.moved("imported-skill", "invoice-check"), kind: "imported-skill", label: "invoice-check", id: "invoice-check", parts: { files: importedSkillHash(input) } });
@@ -193,6 +196,34 @@ describe("skill extras", () => {
     const kept = moveItems(deps("/data"), new Set()).find((item) => item.key === listed!.key);
     expect(kept, "the copy kept here now hashes as the person's own folder did").toEqual(listed);
     expect((await take(deps("/data"), listed!.key, { ...input, files: [{ path: "../escape.md", content: "x", executable: false }] })).status).toBe(400);
+    expect((await take(deps("/data"), listed!.key, { ...input, files: [{ path: "guide\nfile.md", content: "x", executable: false }] })).status).toBe(400);
+    const { executableIntentVersion: _version, ...oldSender } = input;
+    expect((await take(deps("/data"), listed!.key, oldSender)).status).toBe(400);
+    expect((await take(deps("/data"), listed!.key, { ...input, files: [{ ...input.files[0], executable: null }] })).status).toBe(400);
+    const file = join(IMPORTED_SKILLS_DIR, input.name, "references", "rules.md");
+    chmodSync(file, 0o600);
+    try {
+      writeFileSync(file, "changed after import\n");
+      expect(() => moveItems(deps("/data"), new Set())).toThrow(/changed or could not be checked safely/);
+    } finally { writeFileSync(file, "Add up.\n"); chmodSync(file, process.platform === "win32" ? 0o600 : 0o400); }
+  });
+
+  it("carries unknown modes without converting them into non-executable intent", async () => {
+    const skillMd = "---\nname: unknown-mode\ndescription: Check.\n---\n\nCheck.\n";
+    const input = { name: "unknown-mode", skillMd, files: [{ path: "references/rules.md", content: "Add up.\n", executable: null }],
+      entry: { description: "Check.", source: "codex" as const, root: "~/.codex/skills", origin: "~/.codex/skills/unknown-mode", label: "Codex/unknown-mode",
+        sha256: createHash("sha256").update(skillMd).digest("hex"), warnings: [] } };
+    const key = itemKey.moved("imported-skill", input.name);
+    expect((await take(deps("/data"), key, input)).status).toBe(409);
+    expect(readImportedSkills()[input.name]).toBeUndefined();
+    expect(storeImportedSkills([input])[0]!.stored).toBe(true);
+    expect(readImportedSkills()[input.name]).toHaveProperty("modeUnknown", true);
+    expect(exportImportedSkill(input.name)).toBeNull();
+    const record = kindRecord(deps("/data"), "imported-skill", input.name)!.record as typeof input;
+    expect(record.files).toEqual(input.files);
+    expect(importedSkillHash(record)).toBe(importedSkillHash(input));
+    expect(importedSkillHash(record)).not.toBe(importedSkillHash({ ...input, files: [{ ...input.files[0]!, executable: false }] }));
+    expect(z.object({ executable: z.boolean() }).safeParse(record.files[0]).success).toBe(false);
   });
 
   it("a library skill arrives with its review state, and a changed one replaces My Cloud's copy", async () => {

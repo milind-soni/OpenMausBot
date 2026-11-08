@@ -9,9 +9,19 @@ new bot-owned, library and organization imports record reviewed executable
 intent in protected state because the filesystem mode cannot preserve it.
 This metadata does not execute files or grant new permissions. Existing Windows
 copies without trusted mode metadata cannot be exported with companions; an
-organization copy needs manual recovery before update or removal. Welcome
-imports from this computer cannot reliably infer executable intent and still
-refuse a skill that declares executable files.
+organization copy needs manual recovery before update or removal. A welcome
+import records modes when its source can report them, and keeps those modes
+when an updated source moves the import to Windows. A welcome scan on Windows
+cannot determine POSIX executable intent; those companions cannot be exported
+until brought in again from a trusted source that supplies it.
+
+When an imported skill with companions moves to My Cloud, both sides need a
+version that carries executable intent. An older sender cannot establish that
+its flags were observed on a filesystem with POSIX modes, and an older receiver
+cannot represent unknown modes; the move is refused rather than guessing. A
+skill whose source mode is unknown cannot be moved with companions until it is
+brought in from a source with known modes. A text-only imported skill can
+still move between versions.
 
 There is no automatic in-place recovery for an older Windows organization
 skill whose executable intent is unknown. Switch it off and keep a private
