@@ -935,22 +935,44 @@ describe("OpenCode catalog probes", () => {
   afterEach(() => resetOpenCodeModelCache());
 
   const rpcLines = (file: string) => readFileSync(file, "utf8").trim().split("\n")
-    .map((line) => JSON.parse(line) as { method: string; sessionId?: string });
+    .map((line) => JSON.parse(line) as { method: string; sessionId?: string; cwd?: string });
 
-  it("deletes the sessions it opens and those an earlier probe left behind, but not one still in use", async () => {
+  it("deletes only sessions a probe opened: its own, and those an earlier probe left behind", async () => {
     const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-delete-"));
+    let ledger = "";
+    try {
+      const discover = async (rpc: string) => {
+        resetOpenCodeModelCache();
+        await discoverOpenCodeModels({
+          ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle",
+          FAKE_ACP_SESSION_DELETE: "1", FAKE_ACP_RPC_APPEND_FILE: rpc,
+        }, FAKE_CLI);
+        const lines = rpcLines(rpc);
+        ledger = join(lines.find((entry) => entry.method === "session/new")!.cwd!, ".openmaus-probe-sessions.json");
+        return lines.filter((entry) => entry.method === "session/delete").map((entry) => entry.sessionId).sort();
+      };
+      expect(await discover(join(scratch, "first.jsonl"))).toEqual(["fake-acp-session"]);
+      expect(JSON.parse(readFileSync(ledger, "utf8"))).toEqual({});
+
+      const stillOpening = Date.now();
+      writeFileSync(ledger, JSON.stringify({ ses_left_behind: Date.now() - 10 * 60_000, ses_other_probe: stillOpening }));
+      expect(await discover(join(scratch, "second.jsonl"))).toEqual(["fake-acp-session", "ses_left_behind"]);
+      expect(JSON.parse(readFileSync(ledger, "utf8"))).toEqual({ ses_other_probe: stillOpening });
+    } finally {
+      if (ledger) writeFileSync(ledger, "{}");
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("neither deletes nor records sessions when OpenCode cannot delete them", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-probe-no-delete-"));
     try {
       const rpc = join(scratch, "rpc.jsonl");
-      const listed = [
-        { sessionId: "ses_left_behind", updatedAt: new Date(Date.now() - 10 * 60_000).toISOString() },
-        { sessionId: "ses_other_probe", updatedAt: new Date().toISOString() },
-      ];
-      await discoverOpenCodeModels({
-        ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle",
-        FAKE_ACP_LISTED_SESSIONS: JSON.stringify(listed), FAKE_ACP_RPC_APPEND_FILE: rpc,
-      }, FAKE_CLI);
-      const deleted = rpcLines(rpc).filter((entry) => entry.method === "session/delete").map((entry) => entry.sessionId);
-      expect(deleted.sort()).toEqual(["fake-acp-session", "ses_left_behind"]);
+      await discoverOpenCodeModels({ ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_RPC_APPEND_FILE: rpc }, FAKE_CLI);
+      const lines = rpcLines(rpc);
+      expect(lines.some((entry) => entry.method === "session/delete")).toBe(false);
+      const ledger = join(lines.find((entry) => entry.method === "session/new")!.cwd!, ".openmaus-probe-sessions.json");
+      expect(existsSync(ledger) ? JSON.parse(readFileSync(ledger, "utf8")) : {}).toEqual({});
     } finally {
       await removeTempDir(scratch);
     }

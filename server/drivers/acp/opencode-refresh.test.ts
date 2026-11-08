@@ -123,6 +123,7 @@ describe("OpenCode Refresh", () => {
     expect(ids(await discoverOpenCodeModels(env, FAKE_CLI))).not.toContain("venice/deepseek-v4-1-flash-uncensored");
     const rpc = join(env.HOME!, "rpc.jsonl");
     env.FAKE_ACP_RPC_APPEND_FILE = rpc;
+    env.FAKE_ACP_SESSION_DELETE = "1";
     expect(ids(await discoverOpenCodeModels(env, FAKE_CLI, { refresh: true, settleMs: 1_500 }))).toContain("venice/deepseek-v4-1-flash-uncensored");
     const calls = readFileSync(rpc, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { method: string; sessionId?: string });
     expect(calls.filter((call) => call.method === "session/delete").map((call) => call.sessionId).sort())
