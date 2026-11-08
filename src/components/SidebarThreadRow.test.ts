@@ -322,7 +322,7 @@ describe("thread title direction", () => {
   it("renders the title with dir=auto and leaves the time a fixed column", () => {
     const arabic = "انسخ محتوى الذكاء الاصطناعي وصمم منشورات";
     const arabicClass = titleSpan(row(arabic), arabic);
-    const englishClass = titleSpan(row("New thread"), "New thread");
+    const englishClass = titleSpan(row("New thread"), "Untitled chat");
     const withByline = titleSpan(row("QA PR 245", { botId: "scout", name: "Scout", at: 1 }), "QA PR 245");
     for (const classes of [arabicClass, englishClass, withByline]) {
       expect(classes).toContain("min-w-0");
@@ -685,6 +685,18 @@ describe("Thread link", () => {
     }));
     expect(markup.indexOf("</button>")).toBeLessThan(markup.indexOf(">#42</a>"));
     expect(markup.indexOf(">#42</a>")).toBeLessThan(markup.indexOf("<time"));
+  });
+
+  // The bot panel's taller rows align to the top; the time column is pushed down to the title line and the chip must be too.
+  it("lines the chip up with the title in the bot panel's taller rows", () => {
+    const now = Date.UTC(2026, 8, 25, 12, 0, 0);
+    const render = (panel: boolean) => renderToStaticMarkup(createElement(SidebarThreadRow, {
+      task: { threadId: "t", title: "Fix", updatedAt: now - 3_600_000, link: "https://github.com/o/r/pull/42" },
+      ownerId: "b", current: false, now, panel, preview: "Last line", onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
+    }));
+    const chipClass = (markup: string) => /<a [^>]*class="([^"]*)"[^>]*>#42<\/a>/.exec(markup)?.[1].split(" ") ?? [];
+    expect(chipClass(render(true))).toContain("mt-2.5");
+    expect(chipClass(render(false))).not.toContain("mt-2.5");
   });
 });
 

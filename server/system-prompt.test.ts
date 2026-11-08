@@ -424,11 +424,30 @@ describe("longCommandsPrompt", () => {
       const text = longCommandsPrompt(kind);
       expect(text).toContain("`timeout` in milliseconds, up to 600000");
       expect(text).toContain("Never wait inside a command for CI, a deploy or any other job to finish (no sleep loops or repeated polls): check it once");
-      expect(text).toContain("tell the person what you made (with links), set wait_until or a one-time trigger to check back, and end your turn. When the person writes while you work, answer them first.");
+      expect(text).toContain("tell the person what you made (with links). Only on a turn the person started in their own chat, set wait_until or a one-time trigger to check back and end your turn");
+      expect(text).toContain("When the person writes while you work, answer them first.");
       expect(text).not.toContain("vm_exec");
     }
     for (const kind of ["vm-private", "vm-shared"] as const) {
       expect(longCommandsPrompt(kind)).toContain("vm_exec takes `timeout_seconds` instead (default 60, at most 300)");
+    }
+  });
+
+  it("keeps a long command in the foreground, and trusts only its own fresh exit code", () => {
+    for (const kind of [null, "local", "vps", "box"] as const) {
+      const text = longCommandsPrompt(kind);
+      expect(text).toContain("keep the command in the foreground until it exits");
+      expect(text).toContain("split work that cannot finish within that into shorter pieces");
+      expect(text).toContain("A detached job may be killed when the call ends");
+      expect(text).not.toContain("nohup");
+      expect(text).toContain("trust only the command's own fresh exit code and output");
+      expect(text).toContain("cannot set a wait, so finish it in this turn");
+    }
+  });
+
+  it("keeps the Local VM's own detached path, where the container outlives the call", () => {
+    for (const kind of ["vm-private", "vm-shared"] as const) {
+      expect(longCommandsPrompt(kind)).toContain("may start detached inside it (`nohup <command> > /tmp/<job>.log 2>&1 &`)");
     }
   });
 });

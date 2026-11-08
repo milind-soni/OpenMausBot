@@ -13,7 +13,8 @@ import type { Upgrades } from "./upgrades.ts";
 const LINK = /^\/api\/shared-computers\/([\w-]+)\/link$/;
 
 export function createSharedComputerRoutes(deps: {
-  enabled: () => boolean;
+  /** For this request: the maintainer flag, a Cloud home or a moved home; or, on a server only its one owner signs in to, that owner. */
+  enabled: (auth: RequestAuth) => boolean;
   computers: SharedComputers;
   sessionLive: (id: string) => boolean;
   environmentId: string;
@@ -33,11 +34,11 @@ export function createSharedComputerRoutes(deps: {
   deps.upgrades.route((path) => LINK.test(path));
   return async ({ req, res, path, method, auth, json, readBody }: RouteContext): Promise<typeof PASS | void> => {
     if (path !== "/api/shared-computers" && !path.startsWith("/api/shared-computers/")) return PASS;
-    if (method === "GET" && path === "/api/shared-computers" && deps.enabled()) {
+    if (method === "GET" && path === "/api/shared-computers" && deps.enabled(auth)) {
       return json(res, 200, { computers: deps.computers.status(deps.principal(auth)), known: deps.computers.known(deps.principal(auth)) });
     }
     const link = LINK.exec(path);
-    if (link && method === "GET" && deps.enabled() && deps.links) {
+    if (link && method === "GET" && deps.enabled(auth) && deps.links) {
       const pending = deps.upgrades.pending(req);
       if (!pending) return json(res, 426, { error: "WebSocket upgrade required" });
       if (auth.kind !== "session") return json(res, 403, { error: "Pair this desktop first" });
@@ -49,11 +50,11 @@ export function createSharedComputerRoutes(deps: {
       res.detachSocket(pending.socket);
       return;
     }
-    if (method !== "POST" || path === "/api/shared-computers" || !deps.enabled()) return PASS;
+    if (method !== "POST" || path === "/api/shared-computers" || !deps.enabled(auth)) return PASS;
     if (auth.kind !== "session") return json(res, 403, { error: "Pair this desktop first" });
     if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) return json(res, 415, { error: "JSON required" });
     const body = await readBody(req, 4_000_000);
-    if (!deps.enabled()) return json(res, 404, { error: `no route: ${method} ${path}` });
+    if (!deps.enabled(auth)) return json(res, 404, { error: `no route: ${method} ${path}` });
     if (!deps.sessionLive(auth.session.id)) return json(res, 401, { error: "Session ended" });
     const secret = String(req.headers["x-omb-computer-secret"] ?? "");
     if (path === "/api/shared-computers/connect") {

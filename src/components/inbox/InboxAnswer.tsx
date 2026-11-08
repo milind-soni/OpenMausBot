@@ -32,7 +32,7 @@ function ApprovalAnswer({ row, threadId, asker }: AnswerProps) {
   const approval = threadId ? pendingApprovals([asMessage(row)])[0] : undefined;
   if (!approval || !threadId) return null;
   return (
-    <div className={cn("rounded-[24px]", ELEVATED_CARD)}>
+    <div className={cn("rounded-[18px]", ELEVATED_CARD)}>
       <PendingApprovalPanel pending={approval} count={1} index={0} botName={asker?.name ?? row.from.name} asker={asker}
         actions={<PendingApprovalActions part="primary" tag="inbox" pending={approval} threadId={threadId} bot={asker} onCancelTurn={() => {}} />} />
     </div>

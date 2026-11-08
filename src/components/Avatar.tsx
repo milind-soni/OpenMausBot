@@ -13,8 +13,8 @@ import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMot
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotFaceInk, type BotAvatarCrop, type MascotFaceColor } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
-import { isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
-import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
+import { isCarvedBody, type BotBodyId } from "../../shared/bot-body";
+import { useFestivalDress, wornBody } from "@/lib/festival-dress";
 import { t } from "@/lib/i18n";
 import { CarvedAvatar } from "./CarvedAvatar";
 import { steelBodyImage } from "@/lib/steel-body";
@@ -101,7 +101,7 @@ export type MausAvatarProps = {
 
 function MausAvatarComponent(props: MausAvatarProps, ref: React.Ref<MausAvatarHandle>) {
   const { bodyId, color, size, state, motion, motionKey, gaze, trackPointer, animated, label } = props;
-  if (isHalloweenBody(bodyId)) {
+  if (isCarvedBody(bodyId)) {
     return (
       <CarvedAvatar
         ref={ref}
@@ -247,7 +247,7 @@ export function resolveBotAvatarOutcome(params: {
 
 export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotProps }: BotAvatarProps) {
   const profile = botAvatarProfile(bot);
-  const dressed = useHalloweenDressed();
+  const festival = useFestivalDress();
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => setImageFailed(false), [profile.avatarUrl]);
@@ -261,7 +261,7 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
   if (outcome !== "flatImage") {
     return (
       <MausAvatar
-        bodyId={wornBody(bot.mascotBody, bot.color, dressed)}
+        bodyId={wornBody(bot.mascotBody, bot.color, festival)}
         {...mascotProps}
         color={bot.color}
         faceColor={bot.mascotFaceColor}

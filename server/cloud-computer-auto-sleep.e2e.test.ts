@@ -161,6 +161,9 @@ describe("a cloud computer goes to sleep after use and wakes on the next", () =>
     mkdirSync(join(home, "bin"), { recursive: true });
     writeFileSync(join(home, "bin", "docker"), FAKE_DOCKER);
     chmodSync(join(home, "bin", "docker"), 0o755);
+    // A fake ssh, so VPS commands reach the fake docker instead of a real host.
+    writeFileSync(join(home, "bin", "ssh"), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(home, "bin", "ssh"), 0o755);
     writeFileSync(join(data, "config.json"), JSON.stringify({ instances: {
       // Every turn first takes one screenshot through the cloud computer's tools, as a model's first computer call does.
       uses: { driver: "claudeAgent", config: { cli: FAKE_CLAUDE }, environment: { FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1" } },

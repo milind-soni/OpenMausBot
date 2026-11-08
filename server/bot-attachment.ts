@@ -56,13 +56,14 @@ export interface SaveBotAttachmentInput {
   savedThisTurn?: { since: number; refuse: readonly string[] };
 }
 
-/** Only the roots' outside_workspace refusal falls through, so a missing or oversized file in the folder says exactly that. */
+/** Only the roots' outside_workspace refusal falls through, so a missing or oversized file in the folder says exactly that.
+ * Opened at the store's limit, not the preview one: the copy streams, and a person may send the same size. */
 async function openSource(path: string, roots: readonly string[], savedThisTurn: SaveBotAttachmentInput["savedThisTurn"]): Promise<OpenedMessageFile> {
   try {
-    return await openMessageFile(path, roots);
+    return await openMessageFile(path, roots, FILE_MAX_BYTES);
   } catch (error) {
     if (!savedThisTurn || (error as { code?: unknown } | null)?.code !== "outside_workspace") throw error;
-    return openFileSavedSince(path, savedThisTurn);
+    return openFileSavedSince(path, savedThisTurn, FILE_MAX_BYTES);
   }
 }
 

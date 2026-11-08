@@ -17,7 +17,7 @@ import { ServiceIcon } from "../ServiceIcon";
 import { RoutineEditor } from "../RoutinesPage";
 import { useWorkingFolder } from "../bot-settings/AccessSection";
 import { useBotEditor } from "../bot-settings/BotEditorContext";
-import { SkillReviewDialog, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
+import { SkillReviewDialog, skillSwitchOn, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
 import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { RoutineList } from "../routines/RoutineList";
@@ -129,7 +129,8 @@ export function AppsPage({ bot, derived }: PageContext) {
 
 export function RoutinesPage({ bot, derived }: PageContext) {
   const { state, dispatch } = useStore();
-  const [editing, setEditing] = useState<Routine | "new" | null>(null);
+  // Arriving with no routines means the person asked to add one, so the editor opens straight away.
+  const [editing, setEditing] = useState<Routine | "new" | null>(() => derived.botRoutines.length === 0 ? "new" : null);
   return (
     <>
       <RoutineList
@@ -311,7 +312,7 @@ export function SkillsPage({ bot }: PageContext) {
             hint={skill.description || skill.source}
             label={t("botSettings.simple.skillToggle", { name: skill.name })}
             color={bot.color}
-            checked={skill.enabled}
+            checked={skillSwitchOn(skill)}
             disabled={Boolean(skills.working)}
             onChange={() => void skills.toggle(skill)}
             extra={<TrashButton data-panel-action={`remove-skill:${skill.name}`} label={t("botPanel.skills.remove", { name: skill.name })} disabled={Boolean(skills.working)} onClick={() => void remove(skill)} />}

@@ -332,12 +332,6 @@ export function markNotificationLogRead(ids: readonly string[]): void {
   db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0 AND id IN (SELECT value FROM json_each(?))").run(JSON.stringify(ids));
 }
 
-/** Opening a conversation reads its notifications, questions and approvals included. Returns the ids it flipped. */
-export function markThreadNotificationLogRead(threadId: string, includeSpend = true): string[] {
-  const rows = db().prepare("UPDATE notification_log SET read = 1 WHERE thread_id = ? AND read = 0 AND (? OR kind != 'spend') RETURNING id").all(threadId, includeSpend ? 1 : 0) as Array<{ id: string }>;
-  return rows.map((row) => row.id);
-}
-
 export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {
   writeFollowups((connection) => connection.prepare(
     "INSERT INTO chat_followups(id, kind, owner_id, thread_id, send_id, status, payload) VALUES (?, ?, ?, ?, ?, 'pending', ?)",
@@ -695,6 +689,11 @@ export function appDocRefs(): string[] {
   return rows.flatMap((row) => (typeof row.doc === "string" && row.doc ? [row.doc] : []));
 }
 
+/** Pages shown with show_html `live`, newest first: the rows a server picks up again after a restart. */
+export function liveAppRows(limit = 100): Array<{ threadId: string; messageId: string }> {
+  return db().prepare("SELECT thread_id AS threadId, id AS messageId FROM messages WHERE kind = 'app' AND json_extract(json, '$.app.live') = 1 ORDER BY rowid DESC LIMIT ?").all(limit) as Array<{ threadId: string; messageId: string }>;
+}
+
 export function threadsReferencing(fragment: string): string[] {
   if (!fragment) return [];
   const rows = db().prepare("SELECT DISTINCT thread_id FROM messages WHERE instr(json, ?) > 0").all(fragment) as Array<{ thread_id: string }>;
@@ -764,7 +763,7 @@ const RECALL_FILLER = new Set(
 
 export function recallTerms(query: string): string[] {
   const out: string[] = [];
-  for (const raw of query.split(/\s+|(?<=\p{L})[/,;:.—–-]+(?=\p{L})/u)) {
+  for (const raw of query.split(/[\s、。！？；：，（）【】《》〈〉「」『』]+|(?<=\p{L})[/,;:.—–-]+(?=\p{L})/u)) {
     const token = raw.replace(/"/g, "").replace(/^[\s.,;:!?()[\]{}'`“”‘’]+|[\s.,;:!?()[\]{}'`“”‘’]+$/g, "").toLowerCase();
     if (token.length < 2 && !/\d/.test(token)) continue;
     if (!/[\p{L}\p{N}]/u.test(token)) continue;

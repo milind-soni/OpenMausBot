@@ -1,3 +1,4 @@
+import { pageIsThisComputer } from "@/lib/companion-bridge";
 import type { ReactNode } from "react";
 import type { AppSettingsSection } from "@/state/store";
 import { t } from "@/lib/i18n";
@@ -24,6 +25,8 @@ import { SettingRow, SettingsDisclosureRow, SettingsGroup, SettingsRows } from "
 import { UsageSection } from "./UsageSection";
 import { PlanUsageSummary } from "./PlanUsage";
 import { SkinPicker } from "./SkinPicker";
+import { useSkinChoice } from "./ThemeRow";
+import { resolveSkin, SKINS } from "@/lib/skins";
 import { PlaceLookRows } from "./PlaceLookCard";
 import { ChromeRailRow } from "./ChromeRailToggle";
 import { WindowFrameRow } from "./WindowFrameRow";
@@ -63,16 +66,20 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
         <SettingsGroup label={t("settings.section.appearance")} block="appearance">
           <SettingsRows>
             <ThemeRow simple />
+            <LooksRow onLooks={onLooks} />
             <PlaceLookRows />
             <ChromeRailRow />
             <WindowFrameRow />
             <ColorUserBubblesRow simple />
+          </SettingsRows>
+        </SettingsGroup>
+      )}
+      {has("appearance") && (
+        <SettingsGroup label={t("settings.simple.group.typing")}>
+          <SettingsRows>
             <LanguageRow simple />
             <SendKeyRow simple />
             <FollowUpRow simple />
-            <SettingRow title={t("settings.simple.looks.title")}>
-              <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.looks.change")}</button>
-            </SettingRow>
           </SettingsRows>
         </SettingsGroup>
       )}
@@ -99,6 +106,18 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks }: { has: Has; peop
         <SettingsRows><AdvancedModeRow simple /></SettingsRows>
       </div>
     </>
+  );
+}
+
+function LooksRow({ onLooks }: { onLooks: () => void }) {
+  const choice = useSkinChoice();
+  const current = SKINS.find((skin) => skin.id === resolveSkin(choice))?.name;
+  // A fixed theme is named under the label; Follow system says which it switches between.
+  const hint = choice === "system" ? t("settings.simple.themes.followHint") : current;
+  return (
+    <SettingRow title={t("settings.theme.title")} subtitle={hint}>
+      <button type="button" className="ui-button" onClick={onLooks}>{t("settings.simple.themes.browse")}</button>
+    </SettingRow>
   );
 }
 
@@ -133,9 +152,10 @@ export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { h
     <>
       {has("computer") && <SettingsGroup label={t("settings.simple.computer.bots")} block="computer"><AdminOnly><LocalComputerSection /></AdminOnly></SettingsGroup>}
       {has("companion") && (
-        <SettingsGroup label={t("settings.simple.computer.devices")} block="companion">
-          {remoteAccess.pairing}
+        <SettingsGroup label={t(pageIsThisComputer() ? "settings.section.phoneDevices" : "settings.section.thisServer")} block="companion">
           {remoteAccess.companion}
+          {remoteAccess.pairing}
+          {remoteAccess.domain}
         </SettingsGroup>
       )}
       {has("computer") && (
@@ -147,8 +167,8 @@ export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { h
       {has("logins") && <div data-settings-block="logins" className="scroll-mt-4"><LoginsSettings /></div>}
       {(has("companion") || has("desktopWorkspaces")) && (
         <SettingsDisclosureRow title={t("settings.simple.computer.elsewhere")} block="elsewhere" {...disclose("computer-elsewhere")}>
-          {has("companion") && <div data-settings-block="remote" className="flex scroll-mt-4 flex-col gap-4 empty:hidden">{remoteAccess.client}{remoteAccess.domain}</div>}
           {has("desktopWorkspaces") && <div data-settings-block="desktopWorkspaces" className="flex scroll-mt-4 flex-col gap-4">{servers}</div>}
+          {has("companion") && <div data-settings-block="remote" className="flex scroll-mt-4 flex-col gap-4 empty:hidden">{remoteAccess.client}</div>}
         </SettingsDisclosureRow>
       )}
     </>

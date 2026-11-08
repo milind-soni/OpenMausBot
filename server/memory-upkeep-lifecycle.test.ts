@@ -201,4 +201,24 @@ describe("scheduled memory upkeep", () => {
     expect(loop.status(BOT.id).lastCapture).toBeUndefined();
     expect(addToAboutMe).not.toHaveBeenCalled();
   });
+
+  it("keeps a capture that began before the first start", async () => {
+    let release!: (answer: string) => void;
+    const held = new Promise<string>((resolve) => { release = resolve; });
+    const generateText = vi.fn((prompt: string) => prompt.startsWith(ORGANIZE_MARKER) ? Promise.resolve("{}") : held);
+    loop = createMemoryUpkeep({
+      bots: () => [BOT], bot: () => BOT, engine: () => ({ generateText }), busy: () => false,
+      addToAboutMe: () => 0, sourceLabel: () => "chat", quietMs: () => 60_000, tidyHour: () => 3,
+    });
+    // A chat answered at boot, while the engines are still being read: upkeep starts during its capture call.
+    const capture = loop.capture({ botId: BOT.id, threadId: "chat", turns: [{ person: "Acme launches Friday.", bot: "Noted" }] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(generateText).toHaveBeenCalledTimes(1);
+    loop.start();
+    release('[{"text":"Acme launches Friday","kind":"fact","evidence":"Acme launches Friday"}]');
+    await capture;
+    await loop.idle();
+    expect(memory()).toContain("Acme launches Friday");
+    expect(loop.status(BOT.id).lastCapture).toMatchObject({ added: 1 });
+  });
 });

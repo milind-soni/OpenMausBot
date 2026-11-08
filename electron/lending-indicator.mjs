@@ -11,8 +11,9 @@ const short = (names, t) => names.length < 3 ? listed(names, t) : t("native.lend
  * can't use, and `screen` why. */
 /** `waiting`: lent Clouds that haven't accepted this computer yet; they are never said to be able to use it, and
  * `pending` says who is still being waited for. */
-export function indicatorText({ clouds, using, paused, screen = null, waiting = [] }, device, t = nativeText.englishText.t) {
+export function indicatorText({ clouds, using, paused, pauseError, screen = null, waiting = [] }, device, t = nativeText.englishText.t) {
   const named = device === "computer" ? t("native.lendTray.computer") : device;
+  if (pauseError) return { line: t("native.lendTray.pauseUnsaved"), title: t("native.lendTray.pauseUnsavedTitle"), screen: null };
   if (paused) return { line: t("native.lendTray.pausedLine", { clouds: listed(clouds, t), device: named }), title: t("native.lendTray.paused"), screen: null };
   const why = screenLine(screen, device, t);
   const pending = waiting.length ? { pending: t("native.lendTray.waiting", { clouds: listed(waiting, t), device: named }) } : {};
@@ -42,16 +43,18 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
       ...screen ? [{ label: screen, enabled: false }] : [],
       ...fix ? [{ label: fix, click: () => onStartScreen() }] : [],
       { type: "separator" },
+      ...view.pauseError ? [{ label: t("native.lendTray.retryPause"), click: () => onPause() }] : [],
       view.paused ? { label: t("native.lendTray.resume"), click: () => onResume() } : { label: t("native.lendTray.pause"), click: () => onPause() },
-      ...view.paused ? [] : [{ label: t("native.lendTray.terminal", { device: device === "computer" ? t("native.lendTray.computer") : device }), type: "checkbox", checked: view.terminal,
+      ...view.paused || !view.terminalSwitch ? [] : [{ label: t("native.lendTray.terminal", { device: device === "computer" ? t("native.lendTray.computer") : device }), type: "checkbox", checked: view.terminal,
         // Electron 43 ticks a checkbox on click by itself: the menu keeps the saved choice until the person confirms one.
         click: () => { draw(view); onTerminal(!view.terminal); } }],
       { label: t("native.lendTray.activity"), click: () => onActivity() },
     ]));
   };
   return {
-    update({ clouds = [], using = [], paused = false, terminal = false, screen = null, waiting = [] }) {
-      const next = { clouds: [...clouds], using: paused ? [] : [...using], waiting: paused ? [] : [...waiting], paused: paused === true, terminal: terminal === true,
+    update({ clouds = [], using = [], paused = false, pauseError, terminal = false, terminalSwitch = true, screen = null, waiting = [] }) {
+      const next = { clouds: [...clouds], using: paused ? [] : [...using], waiting: paused ? [] : [...waiting], paused: paused === true, ...pauseError ? { pauseError } : {},
+        terminal: terminal === true, terminalSwitch: terminalSwitch !== false,
         screen: screen ? { ready: screen.ready === true, reason: screen.reason ?? null, fix: screen.fix ?? null, ...(screen.message ? { message: screen.message } : {}) } : null };
       if (shown && JSON.stringify(next) === JSON.stringify(shown)) return;
       shown = next;

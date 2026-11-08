@@ -1,8 +1,9 @@
 import { useSyncExternalStore } from "react";
-import { COSTUME_FOR_COLOR, isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
+import { FESTIVALS, isFestival, type BotBodyId, type FestivalId } from "../../shared/bot-body";
 import type { MausColor } from "@/lib/mascot";
 
-export const HALLOWEEN_DRESS_KEY = "omb-halloween-dress";
+/** Shared by every festival; the stored key keeps its Halloween name so a saved choice still applies. */
+export const DRESS_UP_KEY = "omb-halloween-dress";
 
 let sessionChoice: boolean | undefined;
 const listeners = new Set<() => void>();
@@ -19,15 +20,16 @@ function storage(): Storage | undefined {
 export function readDressUp(): boolean {
   if (sessionChoice !== undefined) return sessionChoice;
   try {
-    return storage()?.getItem(HALLOWEEN_DRESS_KEY) !== "0";
+    return storage()?.getItem(DRESS_UP_KEY) !== "0";
   } catch {
     return true;
   }
 }
 
-function readDressed(): boolean {
-  if (typeof document === "undefined") return false;
-  return document.documentElement.dataset.skin === "halloween" && readDressUp();
+function readFestival(): FestivalId | null {
+  if (typeof document === "undefined") return null;
+  const skin = document.documentElement.dataset.skin;
+  return isFestival(skin) && readDressUp() ? skin : null;
 }
 
 function notify() {
@@ -35,7 +37,7 @@ function notify() {
 }
 
 function onStorage(event: StorageEvent) {
-  if (event.key !== HALLOWEEN_DRESS_KEY && event.key !== null) return;
+  if (event.key !== DRESS_UP_KEY && event.key !== null) return;
   if (event.storageArea && event.storageArea !== storage()) return;
   sessionChoice = undefined;
   notify();
@@ -63,7 +65,7 @@ function subscribe(listener: () => void): () => void {
 export function setDressUp(enabled: boolean): void {
   sessionChoice = enabled;
   try {
-    storage()?.setItem(HALLOWEEN_DRESS_KEY, enabled ? "1" : "0");
+    storage()?.setItem(DRESS_UP_KEY, enabled ? "1" : "0");
   } catch {
   }
   notify();
@@ -73,13 +75,14 @@ export function useDressUp(): boolean {
   return useSyncExternalStore(subscribe, readDressUp, readDressUp);
 }
 
-/** True while the Halloween skin is on and the bots are dressed for it. */
-export function useHalloweenDressed(): boolean {
-  return useSyncExternalStore(subscribe, readDressed, () => false);
+/** The festival whose skin is on while the bots are dressed for it, or null. */
+export function useFestivalDress(): FestivalId | null {
+  return useSyncExternalStore(subscribe, readFestival, () => null);
 }
 
-/** The body a bot shows: its own, or its colour's costume while dressed up. A Halloween body it already wears is kept. */
-export function wornBody(body: BotBodyId | null | undefined, color: MausColor, dressed: boolean): BotBodyId | undefined {
-  if (!dressed || isHalloweenBody(body) || color === "silver" || color === "chrome") return body ?? undefined;
-  return COSTUME_FOR_COLOR[color];
+/** The body a bot shows: its own, or its colour's costume for the festival it is dressed for. A body from that festival it already wears is kept. */
+export function wornBody(body: BotBodyId | null | undefined, color: MausColor, festival: FestivalId | null): BotBodyId | undefined {
+  if (!festival || color === "silver" || color === "chrome") return body ?? undefined;
+  const { bodies, costumes } = FESTIVALS[festival];
+  return (bodies as readonly unknown[]).includes(body) ? body ?? undefined : costumes[color];
 }

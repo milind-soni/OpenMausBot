@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
 import { createCloudAccountClient as cloudAccountClient } from "./cloud-account.mjs";
 import { createDesktopPrefs, createDesktopText, relabelDesktop } from "./desktop-prefs.mjs";
+import { createActivityWindow } from "./lending-activity-window.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
 import { createSystemTray } from "./system-tray.mjs";
 
@@ -30,6 +32,40 @@ test("main's Cloud account factory keeps the same client in the current app lang
   await assert.rejects(client.pairHome(), { message: "Ainda não é possível se conectar ao Cloud." });
   text.set("en");
   await assert.rejects(client.pairHome(), { message: "My Cloud is not ready to connect yet." });
+});
+
+test("main's activity window follows the shown Chinese language without a saved preference on an English OS", () => {
+  const app = { isReady: () => true, getLocale: () => "en-US", getPath: () => "/unused" };
+  const prefs = createDesktopPrefs({ read: () => ({}), write: () => assert.fail("unexpected preference write") });
+  const nativeText = createDesktopText(app, prefs);
+  const windows = [];
+  class BrowserWindow {
+    constructor(options) {
+      this.options = options;
+      this.webContents = { setWindowOpenHandler() {}, on() {} };
+      windows.push(this);
+    }
+    isDestroyed() { return false; }
+    once() {} on() {} show() {} focus() {}
+    loadURL(url) { this.html = decodeURIComponent(url.slice(url.indexOf(",") + 1)); return Promise.resolve(); }
+  }
+  const initialization = MAIN.match(/^const lendingActivity = createActivityWindow\([\s\S]+?\}\);/m)?.[0];
+  assert.ok(initialization, "main initializes its activity window");
+  const activity = vm.runInNewContext(`${initialization}\nlendingActivity`, {
+    app, nativeText, BrowserWindow, createActivityWindow, APP_ICON: "icon.png",
+    nativeTheme: { shouldUseDarkColors: false }, windowBackground: () => "#fff",
+    sharingController: () => ({ activity: () => [{ at: Date.UTC(2026, 9, 1), server: "Test Cloud", action: "read_file", ok: false }] }),
+    jsonFile: () => ({ read: () => ({}) }), path,
+  });
+  activity.show();
+  assert.match(windows[0].html, /<html lang="en-US">/);
+  assert.equal(nativeText.follow("zh-Hant"), true);
+  activity.show();
+  assert.match(windows[0].html, /<html lang="zh-TW">/);
+  assert.match(windows[0].html, /<h1>這台電腦上的活動<\/h1>/);
+  assert.match(windows[0].html, /讀取檔案 · 已拒絕/);
+  assert.equal(prefs.language(), null);
+  assert.equal(windows.length, 1);
 });
 
 test("a new language redraws main's menu, both trays, the window title and the badge", () => {

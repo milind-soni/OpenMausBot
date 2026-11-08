@@ -78,6 +78,11 @@ describe("spoken prompts", () => {
       "Ask the user, in your own words: Which one? Then delegate their answer.",
     );
   });
+  it.each(["选哪一个？", "选哪一个？?"])("does not append an ASCII question mark to %s", (subtitle) => {
+    expect(spokenQuestionPrompt(card({ requestId: "r1", subtitle, options: ["主账户", "储蓄账户"] }))).toBe(
+      "Ask the user, in your own words: 选哪一个？ The options are 主账户, 储蓄账户. Then delegate their answer.",
+    );
+  });
   it("has fixed copy for the call", () => {
     expect(LIVE_COPY.granted).toBe("Thanks, I'll go ahead.");
     expect(LIVE_COPY.denied).toBe("Okay, I won't do it.");

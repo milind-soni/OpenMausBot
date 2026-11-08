@@ -88,6 +88,24 @@ describe("tasks", () => {
     expect(titleFromMessage("x".repeat(80))).toHaveLength(48);
   });
 
+  it("clips first-message titles at complete code points within 48 UTF-16 units", async () => {
+    const { store, titleFromMessage } = await freshStore();
+    const bot = store.createBot();
+    for (const [text, expected] of [
+      ["中".repeat(44) + "𠮷收尾", "中".repeat(44) + "𠮷收尾"],
+      ["中".repeat(45) + "𠮷收尾", "中".repeat(45) + "𠮷…"],
+      ["中".repeat(46) + "𠮷收尾", "中".repeat(46) + "…"],
+      ["中".repeat(47) + "𠮷收尾", "中".repeat(47) + "…"],
+      ["x".repeat(46) + " trailing words", "x".repeat(46) + " …"],
+    ]) {
+      const title = titleFromMessage(text);
+      expect(title).toBe(expected);
+      expect(title.length).toBeLessThanOrEqual(48);
+      const task = store.createTask(bot.id)!;
+      expect(store.titleTaskFromFirstMessage(bot.id, text, task.threadId)?.title).toBe(expected);
+    }
+  });
+
   it("returns the task it named, so a caller knows which title it may replace", async () => {
     const { store } = await freshStore();
     const bot = store.createBot();

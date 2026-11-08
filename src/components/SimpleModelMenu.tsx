@@ -1,9 +1,8 @@
-import type { ReactNode } from "react";
-import { Check, ChevronDown, ChevronRight, ChevronUp, Download, Loader2, LogIn, RefreshCw, Search, Settings, X } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, Download, Lightbulb, Loader2, LogIn, RefreshCw, Search, Settings, X } from "lucide-react";
 import type { Bot, InstanceInfo } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
 import type { MenuGroup, MenuModelRow, SimpleMenu } from "@/lib/simple-model-menu";
-import { modelBlurb } from "@/lib/model-friendly";
 import { modelOptionLabel } from "@/lib/model-label";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -62,7 +61,7 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
       disabled={row.blocked}
       aria-pressed={row.current}
       aria-label={[modelOptionLabel(option), option.provider, reason].filter(Boolean).join(" · ")}
-      title={[modelOptionLabel(option), option.provider, reason ?? modelBlurb(option)].filter(Boolean).join(" · ")}
+      title={[modelOptionLabel(option), option.provider, reason].filter(Boolean).join(" · ")}
       tabIndex={-1}
       onClick={() => onPick(instance, row.model ?? option.id, row.variant)}
       className={SIMPLE_MENU_ROW}
@@ -72,7 +71,7 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
         {row.route && <span data-simple-route className={SIMPLE_MENU_META}>{row.route}</span>}
         {reason && <span data-simple-org-blocked className={SIMPLE_MENU_META}>{reason}</span>}
       </RowLines>
-      {row.current && <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />}
+      {row.current && <Check size={14} className="shrink-0 text-ink" aria-hidden="true" />}
     </button>
   );
 }
@@ -155,42 +154,52 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
   }
 }
 
+/** Thinking folds to one row that names the level; the steps open under it, so most people only ever read "Auto". */
 function Thinking({ thinking, labelId }: { thinking: SimpleThinking; labelId: string }) {
+  const [open, setOpen] = useState(false);
   if ("variants" in thinking) return <div data-simple-thinking>{thinking.variants}</div>;
   const levels = thinking;
-  const tabStop = Math.max(0, levels.levels.findIndex((level) => level === levels.current));
+  const auto = levels.current === undefined;
+  const pill = (pressed: boolean) => cn(
+    "h-8 min-w-0 truncate rounded-full px-1.5 text-[13px] leading-4 transition-colors",
+    pressed ? "bg-ink/[0.1] font-medium text-ink" : "text-ink-secondary hover:text-ink",
+  );
   return (
     <div data-simple-thinking className="flex flex-col">
-      <div className="flex h-6 items-end justify-between gap-2 px-2 pb-0.5">
-        <span id={labelId} className="text-[12px] font-medium leading-4 text-ink-tertiary">{t("botSettings.simple.thinking")}</span>
-        {(levels.current === undefined
-          ? <span title={t("model.simple.thinkingDefault")} className="text-[12px] leading-4 text-ink-tertiary">{t("model.effort.default")}</span>
-          : (
-            <button type="button" data-simple-effort-default onClick={levels.onReset} title={t("model.simple.thinkingDefault")}
-              className="-mr-1 rounded-[5px] px-1 text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
-              {t("model.simple.useDefault")}
+      <button type="button" data-menu-row data-simple-thinking-toggle tabIndex={-1} aria-expanded={open} aria-controls={`${labelId}-steps`}
+        onClick={() => setOpen(!open)} className={cn(MENU_ROW, open && "hover:bg-transparent focus:bg-transparent")}>
+        <Gutter><Lightbulb size={16} strokeWidth={MENU_STROKE} className={MENU_ICON} aria-hidden="true" /></Gutter>
+        <span id={labelId} className="min-w-0 flex-1 truncate">{t("botSettings.simple.thinking")}</span>
+        {!open && <span className="shrink-0 text-ink-secondary">{auto ? t("model.simple.auto") : effortLabel(levels.current!)}</span>}
+        {open
+          ? <ChevronUp size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />
+          : <ChevronDown size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />}
+      </button>
+      <div id={`${labelId}-steps`} hidden={!open}>
+        <div data-simple-effort role="group" aria-labelledby={labelId} className="m-1 grid rounded-full bg-ink/[0.05] p-[3px]"
+          style={{ gridTemplateColumns: `repeat(${levels.levels.length + 1}, auto)` }}>
+          <button type="button" data-effort-pill data-effort-auto aria-pressed={auto} tabIndex={auto ? 0 : -1}
+            title={t("model.simple.thinkingDefault")} onClick={levels.onReset} className={pill(auto)}>
+            {t("model.simple.auto")}
+          </button>
+          {levels.levels.map((level) => (
+            <button
+              key={level}
+              type="button"
+              data-effort-pill
+              aria-pressed={levels.current === level}
+              tabIndex={levels.current === level ? 0 : -1}
+              title={t("model.simple.thinkingLevel", { level: effortLabel(level) })}
+              onClick={() => levels.onPick(level)}
+              className={pill(levels.current === level)}
+            >
+              {effortLabel(level)}
             </button>
           ))}
-      </div>
-      <div data-simple-effort role="group" aria-labelledby={labelId} className="m-1 grid rounded-full bg-ink/[0.05] p-[3px]"
-        style={{ gridTemplateColumns: `repeat(${levels.levels.length}, minmax(0, 1fr))` }}>
-        {levels.levels.map((level, index) => (
-          <button
-            key={level}
-            type="button"
-            data-effort-pill
-            aria-pressed={levels.current === level}
-            tabIndex={index === tabStop ? 0 : -1}
-            title={t("model.simple.thinkingLevel", { level: effortLabel(level) })}
-            onClick={() => levels.onPick(level)}
-            className={cn(
-              "h-6 min-w-0 truncate rounded-full px-1 text-[12px] leading-4 transition-colors touch:h-8",
-              levels.current === level ? "bg-ink/[0.1] font-medium text-ink" : "text-ink-secondary hover:text-ink",
-            )}
-          >
-            {effortLabel(level)}
-          </button>
-        ))}
+        </div>
+        <p data-simple-effort-auto={auto || undefined} className="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">
+          {auto ? t("model.simple.thinkingAuto") : t(`model.simple.effortHint.${levels.current!}`)}
+        </p>
       </div>
     </div>
   );
@@ -249,7 +258,7 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
                 {current.meta && <span className={cn(SIMPLE_MENU_META, current.warning && "text-warning")}>{current.meta}</span>}
               </RowLines>
               {current.pending && <Loader2 size={14} className="shrink-0 animate-spin text-ink-tertiary" aria-hidden="true" />}
-              <Check size={14} className="shrink-0 text-accent" aria-hidden="true" />
+              <Check size={14} className="shrink-0 text-ink" aria-hidden="true" />
             </button>
           )}
           {menu.follow && (
@@ -291,7 +300,8 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
       </div>
 
       {(props.thinking || props.onResetVariant || props.onManage) && (
-        <div data-simple-effort-band className="flex shrink-0 flex-col gap-0.5 border-t-[0.5px] border-ink/10 p-1.5">
+        <div data-simple-effort-band className="flex shrink-0 flex-col gap-0.5 p-1.5 pt-0">
+          <div role="separator" className={MENU_SEPARATOR} />
           {props.thinking && (
             <>
               <Thinking thinking={props.thinking} labelId={`${idPrefix}-thinking`} />

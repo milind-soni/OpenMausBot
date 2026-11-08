@@ -90,7 +90,7 @@ export interface RuntimeStore {
   root(id: string): Assignment | undefined;
   /** `openSince`: only rows not finished before that time. */
   all(filter?: { rootId?: string; nonTerminal?: boolean; ownerThreadId?: string; assignee?: { botId: string; threadId: string };
-    roots?: boolean; openSince?: number }): Assignment[];
+    assigneeThreadId?: string; roots?: boolean; openSince?: number }): Assignment[];
   insert(a: Assignment, event: { kind: EventKind; detail?: string; at?: number }): void;
   update(a: Assignment, event?: { kind: EventKind; detail?: string; at?: number }): void;
   /** Nested calls join the outer transaction (a savepoint inside it). */
@@ -292,6 +292,7 @@ export function openRuntimeStore(path: string): RuntimeStore {
         where.push("assignee_bot_id = ? AND assignee_thread_id = ?");
         params.push(filter.assignee.botId, filter.assignee.threadId);
       }
+      if (filter.assigneeThreadId !== undefined) { where.push("assignee_thread_id = ?"); params.push(filter.assigneeThreadId); }
       if (filter.roots) where.push("parent_id IS NULL");
       if (filter.openSince !== undefined) { where.push("(finished_at IS NULL OR finished_at >= ?)"); params.push(filter.openSince); }
       const sql = `SELECT id, json FROM assignments${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at, rowid`;

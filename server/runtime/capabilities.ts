@@ -35,6 +35,7 @@ const ENGINES: Readonly<Record<string, EngineRow>> = {
   clineAgent: { resume: true },
   copilotAgent: { resume: true },
   commandCodeAgent: { resume: true },
+  kiroAgent: { resume: true },
   customAcp: { resume: true },
   "openai-compat": CHAT_ROW,
   grok: CHAT_ROW,

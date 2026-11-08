@@ -169,6 +169,27 @@ it("a pasted link main can't open says so and keeps the sheet; cancelling main's
 
 const settle = () => act(async () => { await new Promise((done) => setTimeout(done, 450)); });
 
+it("Connect to a server never sits grey without saying why: it says it is looking, and says so when the check itself fails", async () => {
+  let answer: (value: unknown) => void = () => {};
+  const probe = vi.fn((): Promise<unknown> => new Promise((resolve, reject) => { answer = resolve; void reject; }));
+  Object.assign(window, { ogb: { workspaces: { ...workspaces, probe }, cloudAdd } });
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector("[data-rail-add]"));
+  await click(document.querySelector('[data-place-add-choice="server"]'));
+  const form = document.querySelector('[data-place-add="own-server"]')!;
+  await type(form.querySelector("[data-own-server-link]"), "http://192.168.1.20:8799/#pair=ABCD-EFGH-JKLM");
+  await settle();
+  expect(form.querySelector("[data-connect-checking]")?.textContent).toBe("Looking for the server…");
+  expect((form.querySelector("[data-own-server-connect]") as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => { answer({ outcome: "problem", problem: "localNetwork", host: "192.168.1.20:8799" }); });
+  expect(form.querySelector("[data-connect-checking]")).toBeNull();
+  expect(form.querySelector("[data-connect-problem]")?.textContent).toContain("Privacy & Security → Local Network");
+  probe.mockImplementation(() => Promise.reject(new Error("IPC failed")));
+  await type(form.querySelector("[data-own-server-link]"), "http://192.168.1.21:8799/#pair=ABCD-EFGH-JKLM");
+  await settle();
+  expect(form.querySelector("[data-connect-problem]")?.textContent).toBe("Can't reach 192.168.1.21:8799. Check the server is running and reachable from this computer.");
+});
+
 it("Connect to a server takes an address and a code typed apart: a code pasted alone moves to its field, and main names the server it found", async () => {
   const probe = vi.fn(async (address: string): Promise<unknown> => (address.includes("192.168.1.20")
     ? { outcome: "found", origin: "http://192.168.1.20:8799", label: "kitchen-box", version: "0.1.147", transport: "private-http", code: null, credential: null }
@@ -358,7 +379,7 @@ it("the window's own rail: drawn at every width, 36px wide with small rounded ti
   expect(nav.textContent, "no name under the place on screen: its tile's ring marks it").toBe("MCCAACBCCO");
   expect(host.querySelector('[data-rail-place="home"]')?.getAttribute("title")).toBe("My Cloud");
   expect(host.querySelector('[data-rail-place="home"] span[style]')?.getAttribute("style")).toContain("width: 24px; height: 24px; border-radius: 7px");
-  expect(host.querySelector("[data-rail-add]")?.className).toContain("size-6 place-items-center rounded-[7px]");
+  expect(host.querySelector("[data-rail-add]")?.className).toContain("size-6 place-items-center rounded-[8px]");
   expect(expand.mock.calls.at(-1)).toEqual([false]);
   await click(host.querySelector("[data-rail-add]"));
   expect(expand.mock.calls.at(-1), "＋'s sheet covers the window").toEqual([true]);

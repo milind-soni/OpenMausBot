@@ -34,16 +34,25 @@ function problemText(problem: ServerProbeProblem, host?: string): string {
   return t(CONNECT_PROBLEM_KEYS[problem] as LocaleKey, { host: host ?? "", example: EXAMPLE_ADDRESS });
 }
 
+/** The host the person typed, for a line about a check that failed before it could name one. */
+function hostOf(address: string, code: string): string | undefined {
+  const parsed = parseServerInput(address, code);
+  if (parsed.ok && parsed.candidates[0]) return new URL(parsed.candidates[0]).host;
+  try { return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(address.trim()) ? address.trim() : `http://${address.trim()}`).host || undefined; } catch { return undefined; }
+}
+
 const TRANSPORT_KEY = { https: "connect.found.https", tailscale: "connect.found.tailscale", "private-http": "connect.found.privateHttp", loopback: "connect.found.loopback" } as const;
 
 /** Connect to a server: a link, or an address with the pairing code typed apart (a code pasted alone is moved to its
  * field). Main looks the address up as the person types and connects only to the server it found, opening that server's
  * own /pair page with the code. `connect`: a server of theirs that signed in with their account, not connected yet. */
-export function OwnServerLink({ onBack, onConnected, connect = null }: { onBack: (() => void) | null; onConnected: () => void; connect?: { name: string } | null }) {
-  const [address, setAddress] = useState("");
+export function OwnServerLink({ onBack, onConnected, connect = null, start = null }: { onBack: (() => void) | null; onConnected: () => void; connect?: { name: string } | null;
+  start?: { address: string; locked: boolean; title: string } | null }) {
+  const [address, setAddress] = useState(start?.address ?? "");
   const [code, setCode] = useState("");
   const [movedCode, setMovedCode] = useState(false);
   const [probe, setProbe] = useState<ServerProbe | null>(null);
+  const [probing, setProbing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const codeField = useRef<HTMLInputElement>(null);
@@ -53,10 +62,14 @@ export function OwnServerLink({ onBack, onConnected, connect = null }: { onBack:
   const linkHasCode = parsed.ok && !code.trim() && (parsed.code !== null || parsed.credential !== null);
   const showCode = movedCode || (address.trim() !== "" && !linkHasCode && !(parsed.ok === false && parsed.problem === "codeOnly"));
   useEffect(() => {
-    if (!canProbe || !address.trim()) { setProbe(null); return; }
+    if (!canProbe || !address.trim()) { setProbe(null); setProbing(false); return; }
     let current = true;
+    setProbing(true);
     const timer = window.setTimeout(() => {
-      void workspaces!.probe!(address, code).then((found) => { if (current) setProbe(found); }).catch(() => { if (current) setProbe(null); });
+      void workspaces!.probe!(address, code)
+        .then((found) => { if (current) setProbe(found); })
+        .catch(() => { if (current) setProbe({ outcome: "problem", problem: "unreachable", host: hostOf(address, code) }); })
+        .finally(() => { if (current) setProbing(false); });
     }, 400);
     return () => { current = false; window.clearTimeout(timer); };
   }, [address, code, canProbe, workspaces]);
@@ -95,9 +108,9 @@ export function OwnServerLink({ onBack, onConnected, connect = null }: { onBack:
   const codeOnlyHint = movedCode && !address.trim();
   return <form data-place-add={connect ? "connect-server" : "own-server"} onSubmit={(event) => void submit(event)} className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
     {onBack && <div><BackLink label={t("rail.back")} onClick={onBack} /></div>}
-    <Heading title={connect ? t("rail.connectTitle", { name: connect.name }) : t("connect.title")} sub={t(connect ? "connect.signedInLede" : "connect.lede")} />
+    <Heading title={connect ? t("rail.connectTitle", { name: connect.name }) : start?.title ?? t("connect.title")} sub={t(connect ? "connect.signedInLede" : "connect.lede")} />
     <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.address")}
-      <input data-autofocus data-own-server-link value={address} disabled={busy} onChange={(event) => typeAddress(event.target.value)}
+      <input data-autofocus={start?.locked ? undefined : true} data-own-server-link value={address} disabled={busy} readOnly={start?.locked === true} onChange={(event) => { if (!start?.locked) typeAddress(event.target.value); }}
         placeholder={t("connect.addressPlaceholder")} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} aria-invalid={Boolean(shownProblem) || undefined}
         className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink outline-none focus:border-accent/50" />
     </label>
@@ -106,12 +119,15 @@ export function OwnServerLink({ onBack, onConnected, connect = null }: { onBack:
       ✓ {found.version ? t("connect.found", { name: found.label, version: found.version }) : found.label} · {t(TRANSPORT_KEY[found.transport])}
     </p>}
     {showCode && <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.code")}
-      <input ref={codeField} data-own-server-code value={code} disabled={busy} onChange={(event) => { setCode(event.target.value); setFailure(null); }}
+      <input ref={codeField} data-autofocus={start?.locked ? true : undefined} data-own-server-code value={code} disabled={busy} onChange={(event) => { setCode(event.target.value); setFailure(null); }}
         placeholder="7KQ2-M9XD-H4TP" autoCapitalize="characters" autoCorrect="off" autoComplete="off" spellCheck={false}
         className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[14px] font-normal text-ink outline-none focus:border-accent/50" />
       <span className="flex flex-col gap-1 text-[12px] font-normal text-ink-secondary">{t("connect.noCode")}<CommandLine command={PAIR_COMMAND} /></span>
     </label>}
     {shownProblem && <p role="alert" data-connect-problem className="text-[13px] text-danger">{shownProblem}</p>}
+    {canProbe && probing && !found && !shownProblem && <p data-connect-checking className="inline-flex items-center gap-1.5 text-[13px] text-ink-secondary">
+      <Loader2 size={13} className="animate-spin" aria-hidden="true" />{t("connect.checking")}
+    </p>}
     <div><button type="submit" data-own-server-connect disabled={busy || !address.trim() || (canProbe && !found)} className="ui-button ui-button-primary inline-flex items-center gap-2">
       {busy && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}{found ? t("connect.to", { name: found.label }) : t("rail.connect")}
     </button></div>
@@ -121,7 +137,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null }: { onBack:
 function Choice({ icon, title, sub, onClick, kind }: { icon: ReactNode; title: string; sub: string; onClick: () => void; kind: string }) {
   return <button type="button" data-place-add-choice={kind} onClick={onClick}
     className="flex min-w-0 flex-1 flex-col items-start gap-2 rounded-2xl border border-hairline bg-card p-5 text-start transition-colors hover:border-accent/60 hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
-    <span aria-hidden="true" className="grid size-9 place-items-center rounded-[10px] bg-accent/12 text-accent-text">{icon}</span>
+    <span aria-hidden="true" className="grid size-9 place-items-center rounded-[8px] bg-accent/12 text-accent-text">{icon}</span>
     <span className="text-[15px] font-semibold text-ink">{title}</span>
     <span className="text-[13px] leading-snug text-ink-secondary">{sub}</span>
   </button>;

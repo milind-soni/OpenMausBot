@@ -261,10 +261,13 @@ const bridge = {
   },
   companion: {
     state: () => ipcRenderer.invoke("companion:state"),
-    start: () => ipcRenderer.invoke("companion:start"),
+    start: (routes) => ipcRenderer.invoke("companion:start", Array.isArray(routes) ? routes.filter((route) => typeof route === "string") : undefined),
     stop: () => ipcRenderer.invoke("companion:stop"),
     keepAwake: (enabled) => ipcRenderer.invoke("companion:keep-awake", enabled),
     refreshTailscale: () => ipcRenderer.invoke("companion:refresh-tailscale"),
+    setTailscale: (on) => ipcRenderer.invoke("companion:tailscale", on === true),
+    setRoute: (route, on) => ipcRenderer.invoke("companion:route", String(route), on === true),
+    dismissNotice: (route) => ipcRenderer.invoke("companion:notice-dismiss", String(route)),
     pairing: (open, expectedToken) => ipcRenderer.invoke("companion:pairing", open, expectedToken),
     cloudDesktop: (deviceId, allowed) => ipcRenderer.invoke("companion:cloud-desktop", deviceId, allowed),
     browserControl: (deviceId, allowed) => ipcRenderer.invoke("companion:browser-control", deviceId, allowed),
@@ -440,6 +443,13 @@ const bridge = {
     create: (name, dataDir) => ipcRenderer.invoke("environments:create", name, dataDir),
     pickDir: () => ipcRenderer.invoke("environments:pick-dir"),
     forget: (id, purge) => ipcRenderer.invoke("environments:forget", id, purge === true),
+    status: () => ipcRenderer.invoke("environments:status"),
+    retry: (id) => ipcRenderer.invoke("environments:retry", ...(typeof id === "string" ? [id] : [])),
+    onStatus: (cb) => {
+      const handler = () => cb();
+      ipcRenderer.on("environments:status-changed", handler);
+      return () => ipcRenderer.removeListener("environments:status-changed", handler);
+    },
     onOpenSettings: (cb) => {
       const handler = (_event, computerId) => cb(computerId);
       ipcRenderer.on("workspaces:open-settings", handler);
@@ -625,6 +635,10 @@ const bridge = {
     save: (id, grant) => ipcRenderer.invoke("sharing:save", id, grant),
     revoke: id => ipcRenderer.invoke("sharing:revoke", id),
     activity: id => ipcRenderer.invoke("sharing:activity", id),
+    servers: () => ipcRenderer.invoke("sharing:servers"),
+    allow: id => ipcRenderer.invoke("sharing:allow", id),
+    pause: () => ipcRenderer.invoke("sharing:pause"),
+    resume: () => ipcRenderer.invoke("sharing:resume"),
   },
   confirm: message => ipcRenderer.invoke("dialog:confirm", message),
   /** The window onto My Cloud once it is the person's home: this computer's screen while My Cloud can't be opened, and

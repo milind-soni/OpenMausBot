@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -121,7 +121,13 @@ describe("OpenCode Refresh", () => {
     const { env } = home(STALE, FRESH);
     env.FAKE_ACP_MODELS_LIST = "v2";
     expect(ids(await discoverOpenCodeModels(env, FAKE_CLI))).not.toContain("venice/deepseek-v4-1-flash-uncensored");
+    const rpc = join(env.HOME!, "rpc.jsonl");
+    env.FAKE_ACP_RPC_APPEND_FILE = rpc;
+    env.FAKE_ACP_SESSION_DELETE = "1";
     expect(ids(await discoverOpenCodeModels(env, FAKE_CLI, { refresh: true, settleMs: 1_500 }))).toContain("venice/deepseek-v4-1-flash-uncensored");
+    const calls = readFileSync(rpc, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { method: string; sessionId?: string });
+    expect(calls.filter((call) => call.method === "session/delete").map((call) => call.sessionId).sort())
+      .toEqual(["fake-acp-session", "fake-acp-session-2"]);
   });
 
   it("starts a fresh OpenCode for the next turn only when the refresh changed the models", async () => {

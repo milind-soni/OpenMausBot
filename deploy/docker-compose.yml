@@ -33,6 +33,7 @@ services:
       OMB_WEBHOOK_PUBLIC_URL: https://${DOMAIN}
       # pairing links for remote clients point here (docs/self-hosting.md)
       OMB_PUBLIC_URL: https://${DOMAIN}
+      OMB_SERVER_NAME: ${OMB_SERVER_NAME:-${DOMAIN}}
       # Who may sign in with an emailed code at /pair (docs/self-hosting.md,
       # "Sign in with your email"). Empty means pairing codes only.
       OMB_SIGNIN_EMAILS: ${OMB_SIGNIN_EMAILS:-}

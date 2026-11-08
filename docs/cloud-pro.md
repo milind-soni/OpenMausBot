@@ -587,8 +587,12 @@ Cloud and each other Cloud the verified session lists as theirs
 never a server that only signed in with their account. A server of the person's
 own that they made their bots' home (**Make <server> my home**, docs/self-hosting.md)
 is lent the same way, last, once the move is done and while that server says it
-is theirs alone. Other users (desktop only, self-hosted, hosted team workspaces)
-keep computer sharing exactly as before: off unless a maintainer sets
+is theirs alone. A self-hosted server this desktop paired with as its owner
+(admin scope, no team or Cloud) is asked about once, in a popup, and lent only
+after the person's Allow (`lendOwn`, `electron/server-lending.mjs`); the server
+takes a computer from its admin pairings alone unless `features.sharedComputers`
+is `false` (off) or `true` (every paired session, as before). Other servers and
+hosted team workspaces keep computer sharing off unless a maintainer sets
 `features.sharedComputers` by hand.
 
 ### What each Cloud gets
@@ -653,6 +657,10 @@ to resume, a menu-bar item (the notification area on Windows) shows it
   **Resume**, which lends every Cloud again. Files keeps copying lent folders
   while paused, but bots' changes made on My Cloud wait there until Resume, as
   they do while this computer is away.
+- If saving Pause fails, sharing stops at once and the item says the pause is
+  not saved. **Retry saving pause** saves it without resuming. A Resume that
+  can't be saved keeps sharing paused, and an ask's Turn on answers that it
+  failed.
 - **See activity** opens this computer's own record of what its Clouds did here
   (`electron/lending-activity-window.mjs`): every request, refused ones
   included, and each website opened through its internet connection (**Opened a
@@ -1386,7 +1394,7 @@ For each service the Admin has configured, it also sets:
 | `OMB_CLOUD_VOICE_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/voice/v1`, the Admin's voice relay. |
 | `OMB_CLOUD_VOICE_TOKEN` | secret | This machine's voice relay token (`omb_voice_…`). |
 | `OMB_TTS_DEFAULT_VOICE` | env | An ElevenLabs voice id, used until the person picks a voice or another speech provider in Settings. |
-| `OMB_CLOUD_DECIDER_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/decider`, the Admin's Jev relay. It is a Jev base URL, used as it is: the decider adds `/v1/systemone`, the relay's only route, so every included decision goes to exactly `<OMB_CLOUD_DECIDER_URL>/v1/systemone`. |
+| `OMB_CLOUD_DECIDER_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/decider`, the Admin's Jev relay. It is a Jev base URL, used as it is: the decider adds `/v1/systemone`, so every included decision goes to exactly `<OMB_CLOUD_DECIDER_URL>/v1/systemone`, and extraction adds `/v1/extract`. |
 | `OMB_CLOUD_DECIDER_TOKEN` | secret | This machine's decision relay token (`omb_decide_…`). It is not a Jev key and works only through the relay. |
 | `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools, and `GET /usage` for the month's calls on the Apps page's X card (`GET /api/x/status`). The home asks `GET /research/search` with no job at start, which spends nothing: a 400 means research is on, an off answer hides the research tools (x_search stays) until an hour later or a restart, and a research call refused as off does the same. A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
 | `OMB_CLOUD_X_TOKEN` | secret | This machine's X research relay token (`omb_x_…`). Not a treg key; it works only through the relay, within the plan's monthly X research calls. A signed-in desktop gets its own (`omb_xd_…`) from `POST /api/cloud/desktop/services/x` and hands it to its server in memory. |
@@ -1398,8 +1406,10 @@ computers belong to this machine on every request.
 
 - **The person's own key always wins.** An included token is a fallback, used
   only while the person has no key of their own: none saved in Settings
-  (`box.token`, `tts.key`, `decider.key`) and no `BOX_TOKEN`, `OMB_TTS_KEY`
-  or `OMB_JEV_API_KEY` in the environment. Adding a key switches to it at
+  (`box.token`, `tts.key`, `decider.key`, `decider.workersAiToken`) and no
+  `BOX_TOKEN`, `OMB_TTS_KEY`, `OMB_JEV_API_KEY` or `OMB_WORKERS_AI_TOKEN` in
+  the environment (for extraction, only a Workers AI token with its account ID
+  counts: a Jev key does not read). Adding a key switches to it at
   once; removing it falls back to the included service again (for Boat, once
   that key's cloud computers are deleted: removing a Boat key that still has
   computers is refused). The choice is made on every request.
@@ -1408,36 +1418,55 @@ computers belong to this machine on every request.
   `OMB_ELEVENLABS_API` or `decider.baseUrl` when set, for development and
   tests, else Boat's, ElevenLabs' and Jev's own APIs) and an included token
   only to its relay, whatever those settings say.
-- **The decision relay takes two requests, and the app sends it nothing
-  else.** Through the included token the app sends only room routing's
-  request (one question `answer`, a choice with the fixed instructions in
-  `server/decider/room-routing.ts`, and state keys `room`, `humans_in_room`,
-  `bots_in_room`, `new_message` and, when there are recent lines,
-  `recent_messages`) and the Settings key check's fixed request, within the
-  relay's caps (a body of at most 64 KiB, a state of at most 24,000 bytes as
-  JSON). `server/decider/relay.ts` checks each request before it is sent; one
-  that does not fit is not sent, and the room falls back as for any other
-  decision-model failure. Any other decision job, now or added later, uses
-  only the person's own Jev key until the relay accepts it too. The relay
-  speaks Jev's API only: included decisions are Jev's, and with OpenRouter
-  selected in **Settings → Decision model** nothing is included (it needs an
-  OpenRouter key: one saved there, or the one under **Settings → API keys**).
+- **The decision relay takes four decision requests and three extraction
+  requests, and the app sends it nothing else.** Through the included token
+  the app sends only these decision requests, to `/v1/systemone`:
+  - room routing's request: one question `answer`, a choice with the fixed
+    instructions in `server/decider/room-routing.ts`, and state keys `room`,
+    `humans_in_room`, `bots_in_room`, `new_message` and, when there are recent
+    lines, `recent_messages`;
+  - inbox triage's request: one choice with the fixed instructions and
+    options in `server/decider/inbox-triage.ts`, and state keys `email`
+    (`from`, `subject`, `preview`), `details` (each text value at most
+    300 characters) and `dismissed_senders` (at most 20);
+  - a bot's own `decide` call: 1 to 8 questions within `BOT_DECIDE_LIMITS`;
+  - the Settings key check's fixed request.
+
+  Each stays within the relay's caps (a body of at most 64 KiB, a state of at
+  most 24,000 bytes as JSON). `server/decider/relay.ts` checks each request
+  before it is sent, and Cloud's Admin runs the same checks from
+  `server/decider/fixtures/relay-seams.json`. One that does not fit is not
+  sent, and the job falls back as for any other decision-model failure.
+
+  It also takes these extraction requests, to `/v1/extract`: inbox reading (the
+  fixed fields in `server/extractor/contract.ts`, one email's text of at most
+  8,000 characters, no images), a bot's own `extract` call (text, an image or
+  both, within `EXTRACT_LIMITS`) and the extraction key check.
+  `server/extractor/contract.ts` checks each one before it is sent, and the
+  Admin runs the same checks from
+  `server/extractor/fixtures/extract-relay.json`.
+
+  Any decision job added later uses only a key of the person's own (Jev,
+  Workers AI or OpenRouter) until the relay accepts it too. For decisions the
+  relay speaks Jev's API only: included decisions are Jev's. An own Jev or
+  Workers AI key comes before them; an OpenRouter key comes after them,
+  whichever provider is selected in **Settings → Decision and extraction**.
 - **Included decisions are on until switched off.** While the decision model
   runs on the included token, its master switch counts as on unless the person
-  switched it off in **Settings → Decision model**; an explicit off always
-  wins, and switching it back on needs no key. The per-job switches keep their
-  defaults, so rooms set to Auto ask who answers, and new rooms start on Auto,
-  as with a saved key. An own Jev key is on once saved, as anywhere else, and
-  clearing it falls back to the included decisions without switching them
+  switched it off in **Settings → Decision and extraction**; an explicit off
+  always wins, and switching it back on needs no key. The per-job switches keep
+  their defaults, so rooms set to Auto ask who answers, and new rooms start on
+  Auto, as with a saved key. An own Jev key is on once saved, as anywhere else,
+  and clearing it falls back to the included decisions without switching them
   off.
 - **An included token is never the person's key.** It is never written to
   `config.json`, never sent to a client (Settings sees `configured` and
-  `included: true`, and says "Included with your Cloud plan"), and Settings never
-  verifies, rotates or clears it. The decision model's **Test** button, with
-  no key pasted, makes one tiny call through the relay, never to Jev
-  directly. Boat's account-change rules still apply: adding an own Boat key
-  while included cloud computers exist is refused until they are deleted,
-  because the new account cannot reach them.
+  `included: true`, and says "Included with your Cloud plan"), and Settings
+  never verifies, rotates or clears it. The decision model's **Test** button,
+  with no key pasted, makes one tiny decision call and one extraction check
+  through the relay, never to Jev directly. Boat's account-change rules still
+  apply: adding an own Boat key while included cloud computers exist is refused
+  until they are deleted, because the new account cannot reach them.
 - **What holding the tokens does and does not do.** The server receives the
   tokens over the launcher's pipe, never its environment, keeps them in
   memory, and they are on the credential list. So no process the server

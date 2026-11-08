@@ -7,6 +7,7 @@ import type { ModelCatalog } from "../../contracts.ts";
 import type { AcpConfig } from "./core.ts";
 import { killCliTree, spawnCli } from "../../procs.ts";
 import { acpModelOption, acpVariantOption } from "./config-options.ts";
+import { deleteAcpSessions, deletesAcpSessions } from "./session-delete.ts";
 
 const REQUEST_TIMEOUT_MS = 8_000;
 const DISCOVERY_TIMEOUT_MS = 60_000;
@@ -32,7 +33,7 @@ export interface AcpDiscoveryOptions {
   /** Close stdin and give the agent this many milliseconds to exit on its own, so it can release what it holds,
    * before it is killed. Without it the agent is killed at once. */
   exitGraceMs?: number;
-  /** Remove what the agent kept of the discovery session, once its process has stopped. */
+  /** Remove what the agent kept of the discovery session, once its process has stopped, when session/delete did not. */
   forgetSession?(session: { sessionId: string; cwd: string; env: Record<string, string | undefined> }): Promise<void>;
 }
 
@@ -68,6 +69,26 @@ async function stopDiscovery(child: ReturnType<typeof spawnCli> | undefined, gra
 
 const AGENT_DEFAULT = { id: "agent-default", label: "Agent default" };
 
+/** A discovered model or variant id is an opaque key the picker, the request rebuild and the set_model round-trips
+ * treat as trusted; the agent advertising it is untrusted, so traversal, control characters, quotes and shell
+ * metacharacters are skipped. Real ids include parameterised forms (`grok-4.7[context=256k,fast=true]`). */
+function usableDiscoveredId(id: unknown): id is string {
+  return typeof id === "string" && id.length <= 200 && !id.includes("..")
+    && /^[A-Za-z0-9][A-Za-z0-9 ._():[\]{}=,@+/:-]*$/.test(id);
+}
+
+/** Bidirectional controls can reorder or hide picker text, so a label rendered for one model must not carry them. */
+const BIDI_CONTROLS = new Set([0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069]);
+
+function usableDiscoveredLabel(label: unknown): label is string {
+  if (typeof label !== "string" || label.length > 200) return false;
+  for (const char of label) {
+    const code = char.codePointAt(0)!;
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f) || BIDI_CONTROLS.has(code)) return false;
+  }
+  return true;
+}
+
 export function resolveCustomAcpModels(
   env: Record<string, string | undefined>,
   config: Pick<AcpConfig, "cli">,
@@ -91,6 +112,7 @@ export async function discoverAcpModels(
   let sequence = 0;
   let updateSequence = 0;
   let sessionId: string | undefined;
+  let initialized: unknown;
   let latestUpdate: unknown;
   let outputBytes = 0;
   let buffer = "";
@@ -169,7 +191,7 @@ export async function discoverAcpModels(
     });
     child.stderr.on("data", (chunk: Buffer) => { count(chunk); });
     globalTimer = setTimeout(() => fail("ACP model discovery timed out."), DISCOVERY_TIMEOUT_MS);
-    await request("initialize", {
+    initialized = await request("initialize", {
       protocolVersion: 1,
       clientInfo: { name: DISCOVERY_CLIENT_NAME, version: "1" },
       clientCapabilities: {
@@ -188,9 +210,12 @@ export async function discoverAcpModels(
     const mark = discovery.custom ? { custom: true } : {};
     const { passthrough } = discovery;
     const options: ModelCatalog["options"] = passthrough ? [{ ...passthrough, ...mark }] : [];
+    let discovered = 0;
     for (const model of modelOption.options) {
       if (model.id === passthrough?.id) continue;
       if (failure) throw failure;
+      if (!usableDiscoveredId(model.id)) continue;
+      discovered++;
       let confirmed: unknown;
       if (model.id === modelOption.currentValue) {
         confirmed = initial;
@@ -206,22 +231,35 @@ export async function discoverAcpModels(
           if (failure) throw failure;
         }
       }
-      const variants = confirmed ? acpVariantOption(confirmed)?.options : undefined;
-      const label = discovery.label ? discovery.label(model, initial) : model.label;
-      options.push({ ...model, label, ...mark, ...(variants?.length ? { variants } : {}) });
+      const variants = confirmed ? acpVariantOption(confirmed)?.options.flatMap((variant) => usableDiscoveredId(variant.id)
+        ? [{ ...variant, label: usableDiscoveredLabel(variant.label) ? variant.label : variant.id }]
+        : []) : undefined;
+      const named = discovery.label ? discovery.label(model, initial) : model.label;
+      const label = usableDiscoveredLabel(named) ? named : model.id;
+      const provider = usableDiscoveredLabel(model.provider) ? model.provider : undefined;
+      options.push({
+        id: model.id, label,
+        ...(provider ? { provider } : {}), ...mark,
+        ...(variants?.length ? { variants } : {}),
+      });
     }
     if (failure) throw failure;
+    // Only the passthrough default left means every advertised model was unusable: keeping the previous catalog
+    // beats replacing it with a picker that has lost its models.
+    if (!discovered) throw new Error("The ACP agent did not advertise any usable models. The previous catalog was kept.");
     const preferred = discovery.default && options.some((option) => option.id === discovery.default) ? discovery.default : undefined;
-    catalog = { default: passthrough?.id ?? preferred ?? modelOption.currentValue ?? options[0].id, options };
+    const current = usableDiscoveredId(modelOption.currentValue) ? modelOption.currentValue : undefined;
+    catalog = { default: passthrough?.id ?? preferred ?? current ?? options[0].id, options };
   } catch (error) {
     thrown = error;
   } finally {
     if (globalTimer) clearTimeout(globalTimer);
+    const deleted = sessionId && deletesAcpSessions(initialized) ? (await deleteAcpSessions(request, [sessionId])).length > 0 : false;
     fail("ACP model discovery finished.");
     let stopped = false;
     try {
       stopped = await stopDiscovery(child, discovery.exitGraceMs);
-      if (stopped && sessionId) await discovery.forgetSession?.({ sessionId, cwd, env }).catch(() => undefined);
+      if (stopped && sessionId && !deleted) await discovery.forgetSession?.({ sessionId, cwd, env }).catch(() => undefined);
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }

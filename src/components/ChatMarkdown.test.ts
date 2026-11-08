@@ -352,7 +352,7 @@ describe("repaired tables", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
       text: "Pros | Cons\n---\n\n| a \\| b | c |\n| --- | --- |\n| 1 | 2 |",
     }));
-    expect(html).toContain('font-semibold">Pros | Cons</div>');
+    expect(html).toContain('tracking-[-0.005em]">Pros | Cons</div>');
     expect(html.match(/<table\b/g)).toHaveLength(1);
     expect(html).toContain(">a | b</span>");
     expect(html.match(/<th\b/g)).toHaveLength(2);
@@ -555,7 +555,7 @@ describe("#Title thread links in markdown", () => {
     const markup = render("`#QA PR 245` in code, [#QA PR 245](https://example.test) as a link, #123 an issue\n\n# QA PR 245\n\nplain");
     expect(markup).not.toContain("data-thread-link");
     expect(markup).toContain("<code");
-    expect(markup).toContain('font-semibold">QA PR 245</div>');
+    expect(markup).toContain('tracking-[-0.01em]">QA PR 245</div>');
   });
 
   it("does nothing without any visible threads", () => {
@@ -851,6 +851,7 @@ describe("ChatMarkdown attachments", () => {
       reason: "",
       savedTo: "",
       outsideWorkspace: false,
+      retryable: false,
       folder: {
         name: "04_post",
         entries: [{ name: "cover.png", bytes: 2048, mime: "image/png" }],
@@ -878,6 +879,7 @@ describe("ChatMarkdown attachments", () => {
         reason: "the linked file is outside this conversation's workspace",
         savedTo: "",
         outsideWorkspace,
+        retryable: !outsideWorkspace,
         folder: null,
         save: vi.fn(async () => undefined),
       });
@@ -1221,7 +1223,7 @@ describe("bidi: message content carries its own direction", () => {
       ].join("\n"),
     }));
 
-    expect(html).toContain('<div dir="rtl" class="mt-3 text-[18px] font-semibold">');
+    expect(html).toContain('<div dir="rtl" class="md-heading mt-3 text-[20px] font-semibold leading-[26px] tracking-[-0.01em]">');
     expect(html).toContain('<p dir="rtl">');
     expect(html).toContain('<p dir="ltr">An English paragraph');
     expect(html).toContain('<blockquote dir="rtl"');
@@ -1383,7 +1385,7 @@ describe("Simple mode's code block", () => {
 
   it("drops the header bar for a quiet surface, with Copy and a ⋯ menu on a hover plate", () => {
     const html = simple(() => renderToStaticMarkup(createElement(CodeBlock, { code: "const a = 1;", lang: "js" })));
-    expect(html).toMatch(/class="chat-code-block group\/code relative my-2\.5 overflow-hidden rounded-lg bg-ink\/\[0\.04\]"/);
+    expect(html).toMatch(/class="chat-code-block group\/code relative my-2\.5 overflow-hidden rounded-xl bg-ink\/\[0\.04\]"/);
     expect(html).not.toContain("border-hairline");
     expect(html).not.toContain('aria-label="Wrap long lines"');
     const plate = html.match(/<div data-code-plate="[^"]*" class="([^"]*)"/)?.[1] ?? "";
