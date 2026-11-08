@@ -157,7 +157,6 @@ export async function backgroundStatus(
   let last: { body: any; observedAt: number } | undefined;
   for (;;) {
     assertBoatNotDeleting(boxId);
-    // The first read keeps the call's own time limit: a short wait must not cut off a status a slow Boat answer is about to give.
     const deadline = waitMs && last ? clock.timeout(Math.max(1, until - clock.now())) : null;
     const readSignal = deadline ? AbortSignal.any([signal, deadline]) : signal;
     let response: Response, body: any;

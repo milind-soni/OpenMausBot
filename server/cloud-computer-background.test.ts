@@ -62,7 +62,7 @@ beforeAll(async () => {
 describe("background status deadlines", () => {
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-  it("reports an initial read timeout without inventing a status", async () => {
+  it("waits out a slow first status read instead of cutting it at the requested wait", async () => {
     vi.useFakeTimers();
     const clock = {
       now: () => Date.now(),
@@ -73,13 +73,13 @@ describe("background status deadlines", () => {
         return controller.signal;
       },
     };
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Promise<Response>(resolve => {
+      setTimeout(() => resolve(Response.json({ running: false, exitCode: 0, stdout: "done", stderr: "" })), 1_500);
     }));
     const pending = background.backgroundStatus({ box: { token: OWN_KEY } } as AppConfig, BOX,
       { process_id: background.processIdOn(BOX, 41), wait_seconds: 1 }, new AbortController().signal, clock);
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(await pending).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("call exec_status again") }] });
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(json(await pending)).toMatchObject({ status: "finished", exitCode: 0, stdout: "done" });
   });
 
   it.each(["finished", "running", "timeout"] as const)("checks a short wait on a controlled clock: %s", async outcome => {
