@@ -1,0 +1,5 @@
+name,url,username,password
+Existing,https://example.test,fixture-user,fixture-only-duplicate
+Example account,https://accounts.example.org,alice@example.org,fixture-only-alice
+Second account,https://example.net,bob@example.net,"fixture-only,bob"
+Invalid,ftp://invalid.example.org,invalid,fixture-only-invalid

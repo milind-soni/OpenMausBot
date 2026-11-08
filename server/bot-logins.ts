@@ -98,6 +98,7 @@ export class BotLogins {
     return {
       list: () => this.store.list(),
       create: (input) => this.store.create(input),
+      importMany: (input) => this.store.importMany(input),
       update: (id, patch) => this.store.update(id, patch),
       remove: (id) => this.store.remove(id),
       botExists,

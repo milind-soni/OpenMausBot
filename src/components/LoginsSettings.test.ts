@@ -54,6 +54,44 @@ async function submit() {
 }
 
 describe("Settings → Logins", () => {
+  it("previews a browser export without secrets and imports all new logins for selected bots", async () => {
+    fixture.api.mockResolvedValueOnce({ logins: [SHARED_LOGIN], onePassword: OFF });
+    await render();
+    await click("Import from browser");
+    const input = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const file = new File([], "passwords.csv", { type: "text/csv" });
+    Object.defineProperty(file, "text", { value: async () => 'url,username,password\nhttps://crm.example.org,team,fake-duplicate\nhttps://new.example.com,alice,fake-import-secret\nftp://wrong.example.com,other,fake-invalid' });
+    Object.defineProperty(input, "files", { configurable: true, value: [file] });
+    await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+    expect(host.textContent).toContain("1 ready to import. 1 duplicates skipped. 1 invalid rows skipped.");
+    expect(host.innerHTML).not.toContain("fake-import-secret");
+    expect(fixture.api).toHaveBeenCalledTimes(1);
+    await act(async () => { [...host.querySelectorAll<HTMLInputElement>('input[type="radio"]')][1]!.click(); });
+    await act(async () => { host.querySelector<HTMLInputElement>('fieldset input[type="checkbox"]')!.click(); });
+    fixture.api.mockResolvedValueOnce({ imported: 1, skipped: 0 }).mockResolvedValueOnce({ logins: [SHARED_LOGIN], onePassword: OFF });
+    await click("Import 1 logins");
+    expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/import", { method: "POST", body: JSON.stringify({
+      entries: [{ site: "https://new.example.com", username: "alice", password: "fake-import-secret" }], bots: ["pepper"],
+    }) });
+    expect(host.textContent).toContain("Imported 1 logins. Skipped 0 already saved.");
+    expect(host.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  it("cancels an import without saving and ignores a file read that finishes after cancellation", async () => {
+    fixture.api.mockResolvedValueOnce({ logins: [], onePassword: OFF });
+    await render(); await click("Import from browser");
+    let finish!: (text: string) => void;
+    const file = new File([], "passwords.csv");
+    Object.defineProperty(file, "text", { value: () => new Promise<string>((resolve) => { finish = resolve; }) });
+    const input = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, "files", { value: [file] });
+    await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+    await click("Cancel");
+    await act(async () => finish('url,username,password\nhttps://example.com,alice,fake-secret'));
+    await click("Import from browser");
+    expect(host.textContent).not.toContain("ready to import");
+    expect(fixture.api).toHaveBeenCalledTimes(1);
+  });
   it("lists each login by site, the sign-in hosts it also fills on, username, 2FA, source, who may use it and last use", async () => {
     fixture.api.mockResolvedValueOnce({ logins: [CARD_LOGIN, SHARED_LOGIN, TENANT_LOGIN], onePassword: OFF });
     await render();

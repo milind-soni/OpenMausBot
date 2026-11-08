@@ -1,6 +1,11 @@
 import type { LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
 import type { ComputerHelpRef } from "../../shared/wire";
 import { api } from "@/state/store";
+import type { ImportedLogin } from "../../shared/login-import";
+
+export async function importLogins(entries: ImportedLogin[], bots: LoginBots): Promise<{ imported: number; skipped: number }> {
+  return await api("/api/logins/import", { method: "POST", body: JSON.stringify({ entries, bots }) });
+}
 
 /** What the person typed into a login form. Kept only until it is sent. */
 export interface LoginFieldsInput {
