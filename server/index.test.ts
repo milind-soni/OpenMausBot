@@ -8610,7 +8610,7 @@ describe("harness HTTP API", () => {
     expect(after).toEqual({ status: 200, body: { servers: [] } });
   });
 
-  it("lets a bot below Full access file an MCP server only as a disabled row", async () => {
+  it("lets a bot below Full access file a command server or a URL on the person's network only as a disabled row", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" })).status).toBe(200);
     const token = await mintTestCapability(BASE, bot.id, bot.threadId);
@@ -8645,7 +8645,7 @@ describe("harness HTTP API", () => {
 
       const remote = await fileServer({
         name: "botdocs",
-        url: "https://docs.example/mcp",
+        url: "https://docs.internal/mcp",
         type: "sse",
         headers: { Authorization: headerSecret },
         oauth: { clientId: "corp-app", clientSecret: oauthSecret },
@@ -8658,7 +8658,7 @@ describe("harness HTTP API", () => {
       expect(remoteText).not.toContain(oauthSecret);
       const savedRemote = JSON.parse(readFileSync(configFile, "utf8")).mcpServers.botdocs;
       expect(savedRemote).toEqual({
-        type: "sse", url: "https://docs.example/mcp", headers: { Authorization: headerSecret },
+        type: "sse", url: "https://docs.internal/mcp", headers: { Authorization: headerSecret },
         oauth: { clientId: "corp-app", clientSecret: oauthSecret }, enabled: false,
       });
 
@@ -13658,6 +13658,37 @@ describe("bot memory API", () => {
       expect(restored.status).toBe(200);
       expect(restored.body.bot.soul).toBe("one");
     } finally { await api("DELETE", `/api/bots/${bot.id}`); }
+  });
+
+  it("lists instruction changes in the Changes list's shape, and its Undo puts the old text back", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Soul changes" })).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Be brief." });
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Be brief.\nUse metric units." });
+      const list = (await api("GET", `/api/bots/${bot.id}/history?view=changes`)).body;
+      expect(list.rows.map((row: any) => [row.path, row.actor, row.via, row.added, row.removed])).toEqual([["SOUL.md", "person", "api", 1, 0], ["SOUL.md", "person", "api", 1, 0]]);
+      expect(list.rows[0].diff).toContain("+Use metric units.");
+      const undone = await api("POST", `/api/bots/${bot.id}/history/rollback`, { id: list.rows[0].id, expectedRevision: list.revision });
+      expect(undone.body.bot.soul).toBe("Be brief.");
+      expect((await api("GET", `/api/bots/${bot.id}/history?view=changes`)).body.rows[0]).toMatchObject({ via: "revert", removed: 1, canRevert: true });
+    } finally { await api("DELETE", `/api/bots/${bot.id}`); }
+  });
+
+  it("puts rules for every bot ahead of a bot's own instructions, counted in what it loads every turn", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Rules reader" })).body.bot;
+    try {
+      expect((await api("PUT", "/api/config", { everyBotRules: "Answer in British English." })).body.everyBotRules).toBe("Answer in British English.");
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Be brief." });
+      const preview = (await api("GET", `/api/bots/${bot.id}/system-prompt`)).body;
+      const ids = preview.sections.map((section: any) => section.id);
+      expect(ids.indexOf("every-bot-rules")).toBe(ids.indexOf("soul") - 1);
+      expect(preview.sections.find((section: any) => section.id === "every-bot-rules").text).toContain("Answer in British English.");
+      expect(preview.totalBytes).toBe(preview.sections.reduce((n: number, section: any) => n + section.bytes, 0));
+      expect(preview.heavy).toBe(false);
+    } finally {
+      await api("PUT", "/api/config", { everyBotRules: "" });
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
   });
 
   it("refuses redacted history restores without changing SOUL and still restores exact safe text", async () => {

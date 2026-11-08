@@ -2518,9 +2518,14 @@
   "chat.preview.updatedLink": "Unter demselben Link aktualisiert",
   "chat.preview.publishFailed": "Die Seite konnte nicht veröffentlicht werden. Versuche es gleich noch einmal.",
   "chat.preview.openTab": "In neuem Tab öffnen",
+  "chat.preview.save": "Auf Gerät speichern",
+  "chat.preview.saveFailed": "Die Seite konnte nicht gespeichert werden.",
+  "serverError.page.downloadHasFiles": "Neben dieser Seite liegen weitere Dateien, daher kann sie nicht als eine Datei gespeichert werden. Teile sie stattdessen als Link.",
   "chat.preview.openTabNeedsLink": "Teile die Seite, um sie in einem neuen Tab zu öffnen",
   "chat.preview.fullScreen": "Vollbild",
   "chat.preview.exitFullScreen": "Vollbild schließen",
+  "chat.preview.openPage": "Seite öffnen",
+  "chat.preview.closePage": "Seite schließen",
   "chat.preview.pointedPart": "ein Teil der Seite",
   "chat.preview.removePoint": "{label} entfernen",
   "chat.preview.pointedAt": "Gezeigt auf {parts}",
@@ -3428,5 +3433,11 @@
   "markdown.loading": "Datei wird geöffnet…",
   "markdown.tooLarge": "Diese Datei ist zu groß für eine Vorschau in der App (2 MB). Lade das Original herunter, um sie anzusehen.",
   "markdown.loadFailed": "Datei konnte nicht geöffnet werden. Prüfe deine Verbindung und versuche es erneut. UTF-8-Textdateien werden unterstützt.",
-  "markdown.rendered": "Formatiert anzeigen"
+  "markdown.rendered": "Formatiert anzeigen",
+  "settings.profile.everyBotRules": "Regeln für alle Bots",
+  "settings.profile.everyBotRulesPlaceholder": "Alle Bots halten sich daran. Wo sie abweichen, gelten die eigenen Anweisungen eines Bots.",
+  "botPanel.heavy": "Dieser Bot lädt bei jedem Zug sehr viel.",
+  "botPanel.tidyMemory": "Gedächtnis aufräumen",
+  "memory.journal.instructions": "die Anweisungen",
+  "memory.journal.actor.teamSetup": "Die Team-Einrichtung"
 }

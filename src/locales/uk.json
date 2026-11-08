@@ -2921,9 +2921,14 @@
   "chat.preview.updatedLink": "Оновлено за тим самим посиланням",
   "chat.preview.publishFailed": "Не вдалося опублікувати цю сторінку. Спробуйте ще раз за мить.",
   "chat.preview.openTab": "Відкрити в новій вкладці",
+  "chat.preview.save": "Зберегти на пристрій",
+  "chat.preview.saveFailed": "Не вдалося зберегти сторінку.",
+  "serverError.page.downloadHasFiles": "Поруч із цією сторінкою є файли, тому її не можна зберегти одним файлом. Поділіться нею, щоб отримати посилання.",
   "chat.preview.openTabNeedsLink": "Поділіться сторінкою, щоб відкрити її в новій вкладці",
   "chat.preview.fullScreen": "На весь екран",
   "chat.preview.exitFullScreen": "Вийти з повноекранного режиму",
+  "chat.preview.openPage": "Відкрити сторінку",
+  "chat.preview.closePage": "Закрити сторінку",
   "chat.preview.pointedPart": "частина сторінки",
   "chat.preview.removePoint": "Прибрати {label}",
   "chat.preview.pointedAt": "Показано: {parts}",
@@ -3587,5 +3592,11 @@
   "markdown.loading": "Відкриваємо файл…",
   "markdown.tooLarge": "Цей файл завеликий для перегляду в застосунку (2 МБ). Завантажте оригінал, щоб його переглянути.",
   "markdown.loadFailed": "Не вдалося відкрити файл. Перевірте з’єднання і спробуйте ще раз. Підтримуються текстові файли UTF-8.",
-  "markdown.rendered": "Показати з форматуванням"
+  "markdown.rendered": "Показати з форматуванням",
+  "settings.profile.everyBotRules": "Правила для всіх ботів",
+  "settings.profile.everyBotRulesPlaceholder": "Їх дотримується кожен бот. Якщо вони розходяться, перемагають власні інструкції бота.",
+  "botPanel.heavy": "Цей бот завантажує багато на кожному ході.",
+  "botPanel.tidyMemory": "Упорядкувати пам'ять",
+  "memory.journal.instructions": "інструкції",
+  "memory.journal.actor.teamSetup": "Налаштування команди"
 }
