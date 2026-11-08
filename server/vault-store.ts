@@ -296,6 +296,10 @@ export class VaultStore {
     return matches.sort((a, b) => Number(b.bots !== "all") - Number(a.bots !== "all") || b.updatedAt - a.updatedAt)[0] ?? null;
   }
 
+  secretNamesFor(botId: string): Array<{ name: string; refOnly?: true }> {
+    return (this.read().secrets ?? []).filter((secret) => loginUsableBy(secret, botId)).map(({ name, refOnly }) => ({ name, ...(refOnly ? { refOnly } : {}) }));
+  }
+
   /** The same name saved again for the same bots replaces its value; otherwise it is a new secret. */
   saveSecret(input: NewSecret): VaultSecret {
     const data = this.read();

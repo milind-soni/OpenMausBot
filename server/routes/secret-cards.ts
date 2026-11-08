@@ -152,11 +152,11 @@ export function createSecretCardRoutes(deps: SecretCardRouteDeps): RouteHandler 
  * register this endpoint. */
 export function createInternalCredentialRequestRoutes(deps: {
   readBody(): ReturnType<RouteContext["readBody"]>;
-  request(body: Record<string, unknown>): { status: number; body: Record<string, unknown> };
+  request(body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }>;
 }): RouteHandler {
   return async ({ res, path, method, json }) => {
     if (method !== "POST" || path !== "/api/internal/request-credential") return PASS;
-    const result = deps.request(await deps.readBody());
+    const result = await deps.request(await deps.readBody());
     return json(res, result.status, result.body);
   };
 }

@@ -1,5 +1,5 @@
 // No answer ever carries a saved value: a saved secret is only ever replaced.
-import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX } from "../../shared/vault.ts";
+import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, type LinkedSecret } from "../../shared/vault.ts";
 import type { VaultStore } from "../vault-store.ts";
 import { isJson, parseBots, type LoginRouteDeps } from "./logins.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -7,6 +7,8 @@ import { PASS, type RouteHandler } from "./table.ts";
 export interface VaultRouteDeps {
   logins: Pick<LoginRouteDeps, "list" | "botExists" | "onePassword">;
   secrets: Pick<VaultStore, "listSecrets" | "saveSecret" | "updateSecret" | "removeSecret">;
+  /** A linked password manager's secrets, listed beside the saved ones and changed only in the manager. */
+  linked?: () => LinkedSecret[];
 }
 
 const SECRETS = "/api/vault/secrets";
@@ -38,7 +40,7 @@ export function createVaultRoutes(deps: VaultRouteDeps): RouteHandler {
     res.setHeader("cache-control", "no-store");
     if (path === "/api/vault") {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
-      return json(res, 200, { logins: [...deps.logins.list(), ...deps.logins.onePassword.list()], secrets: deps.secrets.listSecrets(), onePassword: deps.logins.onePassword.status() });
+      return json(res, 200, { logins: [...deps.logins.list(), ...deps.logins.onePassword.list()], secrets: [...deps.secrets.listSecrets(), ...(deps.linked?.() ?? [])], onePassword: deps.logins.onePassword.status() });
     }
     if (path !== SECRETS && !path.startsWith(`${SECRETS}/`)) return json(res, 404, { error: "not found" });
     // JSON only, so a form posted from another local page cannot add or change one.

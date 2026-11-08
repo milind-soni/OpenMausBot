@@ -5,6 +5,7 @@ import { agentsToolBridged } from "./drivers/agents-bridge.ts";
 import { teammateAvailabilityPrompt, type RosterMember } from "./peer-roster.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
 import { loginLabel, type LoginPlace } from "../shared/logins.ts";
+import { vaultNameKey } from "../shared/vault.ts";
 import { isConversational, type ReplyStyle } from "../shared/reply-style.ts";
 import { REPLY_HABITS_PROMPT } from "./reply-habits.ts";
 
@@ -142,6 +143,23 @@ export function savedLoginsPrompt(logins: ReadonlyArray<LoginPlace & { username:
   const shown = logins.slice(0, 40).map(loginLabel);
   const more = logins.length > shown.length ? ` and ${logins.length - shown.length} more` : "";
   return ` Your saved logins, for fill_login on these sites and their sign-in pages: ${shown.join(", ")}${more}.`;
+}
+
+const SECRET_NAMES_SHOWN = 40;
+const SECRET_NAME_SHOWN_MAX = 80;
+
+/** Names only, never a value. */
+export function savedSecretsPrompt(secrets: ReadonlyArray<{ name: string; refOnly?: true }>): string {
+  const names = new Map<string, string>();
+  for (const secret of [...secrets].sort((a, b) => Number(Boolean(a.refOnly)) - Number(Boolean(b.refOnly)))) {
+    const name = secret.name.replace(/[\p{Cc}\s]+/gu, " ").trim().slice(0, SECRET_NAME_SHOWN_MAX);
+    const key = vaultNameKey(name);
+    if (key && !names.has(key)) names.set(key, `${JSON.stringify(name)}${secret.refOnly ? " (ref only)" : ""}`);
+  }
+  if (!names.size) return "";
+  const shown = [...names.values()].slice(0, SECRET_NAMES_SHOWN);
+  const more = names.size > shown.length ? ` and ${names.size - shown.length} more` : "";
+  return ` Secrets in the Vault you may use: ${shown.join(", ")}${more}. To use one, call request_credential with its name as the label: OpenMausBot hands it over at once with no card, and you never see the value.`;
 }
 
 export function computerPrompt(kind: ComputerPromptKind | null): string {

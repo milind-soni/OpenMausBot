@@ -27,6 +27,7 @@ import {
   SANDBOX_DESKTOP_INPUT,
   SIGN_IN_PROMPT,
   savedLoginsPrompt,
+  savedSecretsPrompt,
   everyBotRulesPrompt,
   heavyPrompt,
   HEAVY_PROMPT_BYTES,
@@ -271,6 +272,15 @@ describe("computerPrompt", () => {
     ])).toBe(" Your saved logins, for fill_login on these sites and their sign-in pages: example.com (alice@example.com), acme.okta.com (ops), localhost.");
     const many = Array.from({ length: 45 }, (_, index) => ({ ...loginPlace(`site${index}.com`), username: "a" }));
     expect(savedLoginsPrompt(many)).toMatch(/site39\.com \(a\) and 5 more\.$/u);
+  });
+
+  it("names the Vault's secrets a bot may use, once each, so it asks for them by name", () => {
+    expect(savedSecretsPrompt([])).toBe("");
+    expect(savedSecretsPrompt([{ name: "Stripe key", refOnly: true }, { name: "stripe-key" }, { name: "Notion\n token" }, { name: "Acme", refOnly: true }]))
+      .toBe(' Secrets in the Vault you may use: "stripe-key", "Notion token", "Acme" (ref only). To use one, call request_credential with its name as the label: OpenMausBot hands it over at once with no card, and you never see the value.');
+    const many = Array.from({ length: 45 }, (_, index) => ({ name: `key ${index}` }));
+    expect(savedSecretsPrompt(many)).toContain('"key 39" and 5 more.');
+    expect(savedSecretsPrompt([{ name: "x".repeat(200) }])).toContain(`"${"x".repeat(80)}"`);
   });
 });
 

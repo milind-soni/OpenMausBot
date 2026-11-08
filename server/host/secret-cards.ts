@@ -55,7 +55,7 @@ export const phoneSecretEnvelopeSchema = z.object({
 export interface SecretCardsDeps {
   store: Pick<Store, "activePath" | "appendMessage" | "patchMessage" | "messagesFor" | "botByThread" | "groupByThread" | "onChange">;
   cfg: AppConfig;
-  botLogins: Pick<BotLogins, "credentialConfig">;
+  botLogins: Pick<BotLogins, "credentialConfig" | "linkedSecret">;
   /** Where a custom card's value is saved, and found again the next time the same bot asks for it by name. */
   vaultStore: Pick<VaultStore, "saveSecret" | "usableSecret" | "markUsed">;
   phoneSecrets: Pick<PhoneSecretBridge, "provide" | "open">;
@@ -463,7 +463,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
   }
 
   /** request_credential's card: the id is the whole authority, and a newer request supersedes the pending ones. */
-  function requestCredential(from: BotRecord, fromThreadId: string, body: Record<string, unknown>): { status: number; body: Record<string, unknown> } {
+  async function requestCredential(from: BotRecord, fromThreadId: string, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
     const owner = connectorThread(from.id, fromThreadId);
     if (!owner) return { status: 403, body: { error: "source conversation does not belong to sender" } };
     if (body.credentialId === undefined) return requestCustomSecret(from, fromThreadId, Boolean(owner.group), body);
@@ -561,19 +561,27 @@ export function createSecretCards(deps: SecretCardsDeps) {
     return { messageId: message.id, label: card.label };
   }
 
-  /** A secret the Vault holds for the bot by this name is handed over at once, with no card; otherwise a card asks for it,
-   * replacing the bot's pending card with the same name. */
-  function requestCustomSecret(from: BotRecord, threadId: string, room: boolean, body: Record<string, unknown>): { status: number; body: Record<string, unknown> } {
+  /** A secret the Vault holds for the bot by this name, saved or from a linked password manager, is handed over at once,
+   * with no card; otherwise a card asks for it, replacing the bot's pending card with the same name. */
+  async function requestCustomSecret(from: BotRecord, threadId: string, room: boolean, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
     const asked = customRequest(body);
     if ("error" in asked) return { status: 400, body: asked };
     const vm = asked.delivery === "file" ? deps.turnVm(threadId) : undefined;
-    const item = asked.replace ? null : vaultStore.usableSecret(asked.label, from.id, asked.delivery);
+    const saved = asked.replace ? null : vaultStore.usableSecret(asked.label, from.id, asked.delivery);
+    let item: { id: string; name: string; value: string } | null = saved;
+    if (!asked.replace && !item) {
+      try {
+        item = await botLogins.linkedSecret(asked.label, from.id);
+      } catch (error) {
+        return { status: 502, body: { error: `${asked.label} is in a linked password manager, but it could not be read: ${error instanceof Error ? error.message : String(error)}` } };
+      }
+    }
     if (item) {
       const owner = { botId: from.id, threadId };
       try {
-        const saved = asked.delivery === "file" ? { file: vault.mintFile(owner, item.id, item.value, fileHome(from.id, threadId, vm)) } : { ref: vault.mintRef(owner, item.name, item.value) };
-        vaultStore.markUsed(item.id);
-        return { status: 200, body: { label: asked.label, text: savedSecretText(asked.label, saved) } };
+        const handed = asked.delivery === "file" ? { file: vault.mintFile(owner, item.id, item.value, fileHome(from.id, threadId, vm)) } : { ref: vault.mintRef(owner, item.name, item.value) };
+        if (saved) vaultStore.markUsed(saved.id);
+        return { status: 200, body: { label: asked.label, text: savedSecretText(asked.label, handed) } };
       } catch (error) {
         console.warn(`secret card: could not hand over a saved secret: ${error instanceof Error ? error.message : String(error)}`);
         return { status: 500, body: userError("serverError.secret.notKeptSafely") };
