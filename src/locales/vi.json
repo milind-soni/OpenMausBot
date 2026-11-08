@@ -1620,6 +1620,7 @@
   "chat.rescue.connect": "Kết nối gói đăng ký của bạn",
   "chat.rescue.connectHint": "Đăng nhập bằng gói AI bạn đã trả phí",
   "chat.error.signedOut": "{name} chưa đăng nhập. Hãy đăng nhập bên dưới, sau đó gửi lại tin nhắn của bạn.",
+  "chat.error.pastUsageLimit": "Thông báo giới hạn cũ (đã qua giờ đặt lại; hãy kiểm tra mức sử dụng hiện tại)",
   "chat.error.details": "Chi tiết",
   "chat.error.requestTooLarge": "Tin nhắn này quá lớn đối với {model}. Hãy bắt đầu một cuộc trò chuyện mới hoặc chọn mô hình nhận được nhiều hơn.",
   "chat.error.dismiss": "Bỏ qua",

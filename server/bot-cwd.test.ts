@@ -101,11 +101,11 @@ describe("inMyFolderCwd", () => {
     expect(inMyFolderCwd(false, true, project, data)).toEqual({});
   });
 
-  it("stays silent when left out, and refuses an explicit true, where there is nothing to share", () => {
+  it("hands off without a folder where there is nothing to share, even when asked for one", () => {
     expect(inMyFolderCwd(undefined, false, project, data)).toEqual({});
     expect(inMyFolderCwd(undefined, true, privateFolder, data)).toEqual({});
-    expect(inMyFolderCwd(true, false, project, data)).toEqual({ error: expect.stringMatching(/room/) });
-    expect(inMyFolderCwd(true, true, privateFolder, data)).toEqual({ error: expect.stringMatching(/no project folder/) });
+    expect(inMyFolderCwd(true, false, project, data)).toEqual({});
+    expect(inMyFolderCwd(true, true, privateFolder, data)).toEqual({});
   });
 });
 

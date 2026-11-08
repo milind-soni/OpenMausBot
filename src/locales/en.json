@@ -2485,6 +2485,7 @@
   "chat.error.signedOut": "{name} isn't signed in yet. Sign in below, then send your message again.",
   "chat.notice.signIn": "Sign in",
   "chat.notice.signInHint": "Open AI settings to sign in again",
+  "chat.error.pastUsageLimit": "Past usage-limit notice (reset time passed; check current usage)",
   "chat.error.details": "Details",
   "chat.error.partial": "Partly done. The reply came back, but a step didn't work, so check that step before relying on it.",
   "chat.error.partialPreview": "Partly done: a step didn't work",

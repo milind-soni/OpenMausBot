@@ -2484,6 +2484,7 @@
   "chat.error.signedOut": "{name} 尚未登入。請在下方登入，然後重新傳送你的訊息。",
   "chat.notice.signIn": "登入",
   "chat.notice.signInHint": "開啟 AI 設定以重新登入",
+  "chat.error.pastUsageLimit": "先前的用量限制通知（重設時間已過；請確認目前用量）",
   "chat.error.details": "詳細資訊",
   "chat.error.partial": "部分完成。已收到回覆，但有一個步驟沒有成功，請先檢查該步驟再依賴這個結果。",
   "chat.error.partialPreview": "部分完成：有一個步驟沒有成功",

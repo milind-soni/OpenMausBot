@@ -208,8 +208,30 @@ function recallWhen(at: unknown, dateOnly: boolean): string {
   return dateOnly ? day : `${day} ${pad(said.getHours())}:${pad(said.getMinutes())}`;
 }
 
+/** The top-level arguments a model may fill with `""` (or spaces) when it means to leave them out, per tool. Only these:
+ * elsewhere a blank can be the value itself, such as a cleared room bulletin or a bot's private folder. */
+const BLANK_MEANS_LEFT_OUT: Readonly<Record<string, readonly string[]>> = {
+  coordinate_bots: ["group_id", "reason", "thread", "title", "reply", "done_when", "answers"],
+  session_search: ["thread_id", "message_id", "query", "since", "until", "scope"],
+  show_html: ["html", "jsx", "path"],
+  // A blank text or old_text is a mistake the schema names, not "not given".
+  memory_update: ["until"],
+};
+
+function dropBlankArguments(name: string, input: Json): Json {
+  const keys = Object.hasOwn(BLANK_MEANS_LEFT_OUT, name) ? BLANK_MEANS_LEFT_OUT[name] : undefined;
+  if (!keys || !input || typeof input !== "object" || Array.isArray(input)) return input;
+  const out: Json = { ...input };
+  for (const key of keys) {
+    const value = out[key];
+    if (typeof value === "string" && !value.trim()) delete out[key];
+  }
+  return out;
+}
+
 export async function callTool(called: string, input: Json, context: ToolCallContext): Promise<ToolCallResult> {
-  const { name, arguments: args } = resolveAgentsCall(called, input);
+  const { name, arguments: given } = resolveAgentsCall(called, input);
+  const args = dropBlankArguments(name, given);
   const refused = outOfBounds(name, fullInputSchema(name), args);
   if (refused) return { text: refused, isError: true };
   const member = agentsCallMember(name, args);
