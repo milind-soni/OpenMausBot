@@ -211,6 +211,22 @@ describe("a bot's page in the chat", () => {
 
     act(() => setWebPanels(Array.from({ length: MAX_WEB_PANELS }, (_, i) => ({ id: `p${i}`, name: `P${i}`, url: `https://p${i}.example/` }))));
     expect(button("Pin to sidebar", card()).disabled).toBe(true);
+    expect(card().querySelector("[data-page-pin-full]")?.textContent).toContain(`maximum of ${MAX_WEB_PANELS} pages`);
+    act(() => { setWebPanels([]); setAdvancedMode(false); });
+  });
+
+  it("keeps a page another window pinned a moment ago when this one pins", async () => {
+    setWebPanels([]);
+    setAdvancedMode(true);
+    await render(row(payload()));
+    // Another window's write whose storage event hasn't arrived yet.
+    localStorage.setItem("omb-web-panels", JSON.stringify([{ id: "panel-9", name: "Other", url: "https://other.example/" }]));
+    await click("Pin to sidebar", card());
+    expect(JSON.parse(localStorage.getItem("omb-web-panels")!).map((panel: { name: string }) => panel.name)).toEqual(["Other", "Pricing"]);
+    // The other window unpins everything; Unpin here must not pin the page again.
+    localStorage.setItem("omb-web-panels", "[]");
+    await click("Unpin", card());
+    expect(localStorage.getItem("omb-web-panels")).toBe("[]");
     act(() => { setWebPanels([]); setAdvancedMode(false); });
   });
 
