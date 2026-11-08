@@ -15,7 +15,7 @@ differences with OpenCode 2.x.
 | Fireworks AI | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
 | DeepSeek | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
 | Cline | Yes | Yes | No | No |
-| Your own OpenAI-compatible address | Yes, in OpenCode's config file | Yes | No | Not yet |
+| Your own OpenAI-compatible address | Yes, in OpenCode's config file | Yes | No | Direct API endpoint, if it supports Responses |
 | Your own Anthropic-compatible address | Not tested | No | Custom endpoint, or Claude Code's own settings | No |
 
 "Chat engine" is OpenMausBot's built-in engine for OpenAI-compatible services.
@@ -161,14 +161,17 @@ To run Claude bots on DeepSeek, GLM or another host that speaks Claude
 Code's API, add a **custom endpoint** in Settings → Engines, in the Claude
 card:
 
-- **Add endpoint** takes a name, the endpoint's base URL, its token and the
-  model id the endpoint serves. Model mappings for Opus, Sonnet and Haiku
-  are optional.
+- **Add endpoint** takes a name, base URL and API key. The URL starts with
+  Anthropic's official API and can be edited for another gateway. Choose a
+  model separately in each bot's configuration. Official providers use the
+  standard catalog; custom gateways supply their models through `/v1/models`.
 - Each endpoint is its own engine with its own directory, so a bot chooses
   it like any other AI. It never reads or writes this computer's
   `~/.claude`, and the Claude Code on this computer keeps its own sign-in.
-- Its bots run the model the endpoint serves. A bot that still has a Claude
-  model selected runs the endpoint's main model instead.
+- Each bot can choose a different model from the endpoint's catalog.
+- Another gateway must support streaming Messages (`POST /v1/messages`) with
+  tool use. Enter its root URL without `/v1/messages`, such as
+  `https://gateway.example.com`.
 - The token is saved in OpenMausBot's own `config.json` and sent only to the
   base URL you enter. Removing an endpoint removes only that entry.
 
@@ -197,7 +200,43 @@ DeepSeek, and your Claude bots follow it:
 
 ### Codex
 
-Not yet. Codex bots use your ChatGPT sign-in, or your organisation's models.
+Codex bots can also run on an API key instead of a ChatGPT sign-in:
+
+1. Open **Settings → Engines** and expand the Codex/ChatGPT card.
+2. Under **Codex direct API**, choose **Add endpoint**.
+3. The base URL starts as `https://api.openai.com/v1`. Keep it for OpenAI, or
+   replace it with another gateway's URL, such as
+   `https://gateway.example.com/v1`.
+4. Enter a name and API key, then save.
+5. Choose the new engine and a model in a bot's settings.
+
+- Usage is billed by the provider behind the URL. Saving an endpoint doesn't
+  start a sign-in or replace an existing account.
+- Each endpoint has its own Codex home in OpenMausBot's data directory. The
+  key is saved in `config.json` and is never shown in the app or passed in
+  command arguments. Changing the URL asks for the key again.
+- A gateway must support streaming Responses (`POST /v1/responses`) with tool
+  calls. A gateway that only offers Chat Completions works with the chat
+  engine instead.
+- Each bot chooses its model. OpenAI uses the standard catalog; another
+  gateway must list its models at `/models` under its base URL.
+- Remove an endpoint after moving its bots and the default model off it.
+
+### When an endpoint won't save
+
+Saving a custom gateway reads its model list and says whether the network,
+the API key, the HTTP response or an empty model list failed. Saving the
+official Anthropic or OpenAI URL doesn't check the key; a wrong key shows up
+on the bot's first turn. **Refresh models** reads a gateway's list again.
+Check that:
+
+- The URL is reachable from the computer or container running OpenMausBot,
+  not just from the one showing the app. Inside a container, `localhost`
+  means the container itself.
+- Codex endpoints use HTTPS. Plain HTTP is accepted only on `localhost` or
+  `127.0.0.1`.
+- The gateway serves the right protocol for the agent and lists models for
+  your key.
 
 ## Ollama's context window
 

@@ -22,21 +22,20 @@ spawn record to `<dataDir>/fake-claude-dump.json`; caller-supplied
 Open `previewUrl` from the launch evidence, then Settings → Engines. Expand the
 Claude card.
 
-1. **Add endpoint** opens a form inside the card: name, base URL, token, model,
-   and an optional **Model mappings** disclosure for Opus, Sonnet and Haiku.
-   Save stays disabled until name, URL, model and (for a new endpoint) token
-   are filled. A rejected save shows an alert in the form and leaves the
-   fields editable.
-2. Save a name, `https://api.deepseek.com/anthropic`, a fake token and
-   `deepseek-chat`. A row appears with the address and models and its own
-   **Edit** and **Remove** actions. The token is not shown anywhere.
-3. **Edit** shows the saved address and models, with the token field empty and
-   labelled to keep the saved token. Change the model to `deepseek-reasoner`
-   and save: the row and
-   the bot's picker show only the new model. Leave the token empty; the saved
-   token still runs the bot.
-4. Create a bot on the endpoint. Its model picker offers the endpoint's models
-   only (here `deepseek-reasoner`), with the first as the default.
+1. **Add endpoint** opens a form inside the card: name, base URL
+   and API key. The URL starts as `https://api.anthropic.com` and is editable.
+   There is no provider selector or model field. Save stays disabled
+   until name, URL and (for a new endpoint) token are filled. A rejected save
+   shows an alert and leaves the fields editable.
+2. Enter a synthetic gateway URL with an authenticated `/v1/models` catalog
+   offering `deepseek-chat` and `deepseek-reasoner`. Save its name, base URL
+   and fake token. A row appears with its address and **Edit** and **Remove**
+   actions. The token is not shown anywhere.
+3. **Edit** shows the saved address with the token field empty. Rename it,
+   leave the token empty and save; both models remain available.
+4. Create two bots on the endpoint. Choose `deepseek-chat` for one and
+   `deepseek-reasoner` for the other in their agent settings. Each keeps its
+   own model selection. Official Anthropic uses the standard model catalog.
 5. Try **Remove** while a bot still uses the endpoint: the button is disabled
    and its tooltip says how many bots use it. Move the bot to another model,
    then remove it: only the row disappears, and Claude's own sign-in stays.

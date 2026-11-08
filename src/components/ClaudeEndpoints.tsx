@@ -7,38 +7,27 @@ import { cn } from "@/lib/cn";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { KEY_FIELD } from "./keys/KeyRow";
 
+type Engine = "claude" | "codex";
+const OFFICIAL = { claude: { name: "Anthropic", url: "https://api.anthropic.com" }, codex: { name: "OpenAI", url: "https://api.openai.com/v1" } };
 const INPUT = cn(KEY_FIELD, "font-sans");
-const MAPPINGS = [
-  ["opusModel", "claudeEndpoints.opus"],
-  ["sonnetModel", "claudeEndpoints.sonnet"],
-  ["haikuModel", "claudeEndpoints.haiku"],
-] as const;
-
 interface Draft {
   name: string;
   url: string;
   token: string;
-  model: string;
-  opusModel: string;
-  sonnetModel: string;
-  haikuModel: string;
 }
 
-const EMPTY: Draft = { name: "", url: "", token: "", model: "", opusModel: "", sonnetModel: "", haikuModel: "" };
+const EMPTY: Draft = { name: "", url: "", token: "" };
 
 const draftOf = (instance: InstanceInfo): Draft => ({
   name: instance.displayName,
-  url: instance.claudeEndpoint?.baseUrl ?? "",
+  url: (instance.claudeEndpoint ?? instance.codexEndpoint)?.baseUrl ?? "",
   token: "",
-  model: instance.claudeEndpoint?.models[0] ?? "",
-  opusModel: instance.claudeEndpoint?.opusModel ?? "",
-  sonnetModel: instance.claudeEndpoint?.sonnetModel ?? "",
-  haikuModel: instance.claudeEndpoint?.haikuModel ?? "",
 });
 
-function EndpointForm({ instance, onDone }: { instance?: InstanceInfo; onDone: () => void }) {
+function EndpointForm({ instance, engine, onDone }: { instance?: InstanceInfo; engine: Engine; onDone: () => void }) {
   const { dispatch } = useStore();
-  const [draft, setDraft] = useState<Draft>(instance ? draftOf(instance) : EMPTY);
+  const official = OFFICIAL[engine];
+  const [draft, setDraft] = useState<Draft>(instance ? draftOf(instance) : { ...EMPTY, name: official.name, url: official.url });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const field = (key: keyof Draft) => ({
@@ -47,7 +36,7 @@ function EndpointForm({ instance, onDone }: { instance?: InstanceInfo; onDone: (
     spellCheck: false,
     disabled: saving,
   });
-  const ready = Boolean(draft.name.trim() && draft.url.trim() && draft.model.trim() && (instance || draft.token.trim()));
+  const ready = Boolean(draft.name.trim() && draft.url.trim() && (instance || draft.token.trim()));
 
   const save = async () => {
     if (saving || !ready) return;
@@ -56,16 +45,12 @@ function EndpointForm({ instance, onDone }: { instance?: InstanceInfo; onDone: (
     const body = {
       displayName: draft.name.trim(),
       baseUrl: draft.url.trim(),
-      model: draft.model.trim(),
-      opusModel: draft.opusModel.trim(),
-      sonnetModel: draft.sonnetModel.trim(),
-      haikuModel: draft.haikuModel.trim(),
       ...(draft.token.trim() ? { token: draft.token.trim() } : {}),
     };
     try {
       const result = instance
-        ? await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/claude-endpoint`, { method: "PATCH", body: JSON.stringify(body) })
-        : await api("/api/instances/claude-endpoint", { method: "POST", body: JSON.stringify(body) });
+        ? await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/${engine}-endpoint`, { method: "PATCH", body: JSON.stringify(body) })
+        : await api(`/api/instances/${engine}-endpoint`, { method: "POST", body: JSON.stringify(body) });
       if (Array.isArray(result.instances)) dispatch({ type: "instances", instances: result.instances });
       onDone();
     } catch (cause) {
@@ -76,35 +61,23 @@ function EndpointForm({ instance, onDone }: { instance?: InstanceInfo; onDone: (
   };
 
   return (
-    <form data-claude-endpoint-form={instance?.instanceId ?? "new"} className="flex flex-col gap-2 rounded-xl border border-hairline/50 bg-inset p-3"
+    <form data-claude-endpoint-form={engine === "claude" ? instance?.instanceId ?? "new" : undefined} data-codex-endpoint-form={engine === "codex" ? instance?.instanceId ?? "new" : undefined} className="flex flex-col gap-2 rounded-xl border border-hairline/50 bg-inset p-3"
       onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      <p className="text-[12px] leading-4 text-ink-secondary">{t(engine === "codex" ? "agentEndpoints.responses" : "agentEndpoints.messages")}</p>
       <label className="flex flex-col gap-1 text-[12px] font-medium text-ink">
         {t("claudeEndpoints.name")}
         <input {...field("name")} maxLength={80} autoFocus aria-label={t("claudeEndpoints.name")} className={INPUT} />
       </label>
       <label className="flex flex-col gap-1 text-[12px] font-medium text-ink">
         {t("claudeEndpoints.baseUrl")}
-        <input {...field("url")} type="url" maxLength={2048} placeholder="https://api.example.com/anthropic" aria-label={t("claudeEndpoints.baseUrl")} className={cn(INPUT, "font-mono")} />
+        <input {...field("url")} type="url" maxLength={2048} placeholder={official.url} aria-label={t("claudeEndpoints.baseUrl")} className={cn(INPUT, "font-mono")} />
       </label>
       <label className="flex flex-col gap-1 text-[12px] font-medium text-ink">
         {t("claudeEndpoints.token")}
         <input {...field("token")} type="password" maxLength={4096} autoComplete="off" aria-label={t("claudeEndpoints.token")} className={cn(INPUT, "font-mono")}
           placeholder={instance ? t("claudeEndpoints.tokenKeep") : ""} />
       </label>
-      <label className="flex flex-col gap-1 text-[12px] font-medium text-ink">
-        {t("claudeEndpoints.model")}
-        <input {...field("model")} maxLength={160} placeholder="deepseek-chat" aria-label={t("claudeEndpoints.model")} className={cn(INPUT, "font-mono")} />
-      </label>
       <p className="text-[12px] leading-4 text-ink-secondary">{t("claudeEndpoints.modelHint")}</p>
-      <details className="text-[12px] text-ink-secondary">
-        <summary className="cursor-pointer select-none hover:text-ink">{t("claudeEndpoints.mappings")}</summary>
-        <div className="mt-2 flex flex-col gap-1.5">
-          {MAPPINGS.map(([key, label]) => (
-            <input key={key} {...field(key)} maxLength={160} aria-label={t(label)} placeholder={t(label)} className={cn(INPUT, "font-mono")} />
-          ))}
-          <p className="leading-relaxed">{t("claudeEndpoints.mappingsHint")}</p>
-        </div>
-      </details>
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onDone} disabled={saving} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-control disabled:opacity-50">{t("common.cancel")}</button>
@@ -124,7 +97,7 @@ function EndpointRow({ instance, onEdit }: { instance: InstanceInfo; onEdit: () 
   const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId
     || bot.fallback?.some((candidate) => candidate.instanceId === instance.instanceId)
     || bot.tasks?.some((task) => task.modelSelection?.instanceId === instance.instanceId)).length;
-  const endpoint = instance.claudeEndpoint;
+  const endpoint = instance.claudeEndpoint ?? instance.codexEndpoint;
   const remove = async () => {
     setConfirming(false);
     setRemoving(true);
@@ -139,12 +112,11 @@ function EndpointRow({ instance, onEdit }: { instance: InstanceInfo; onEdit: () 
     }
   };
   return (
-    <li data-claude-endpoint={instance.instanceId} className="px-3 py-2.5">
+    <li data-claude-endpoint={instance.claudeEndpoint ? instance.instanceId : undefined} data-codex-endpoint={instance.codexEndpoint ? instance.instanceId : undefined} className="px-3 py-2.5">
       <div className="flex min-h-9 items-center gap-3">
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium text-ink" title={instance.displayName}>{instance.displayName}</div>
           <div className="truncate font-mono text-[11px] text-ink-secondary" title={endpoint?.baseUrl}>{endpoint?.baseUrl}</div>
-          <div className="truncate text-[12px] text-ink-secondary">{endpoint?.models.join(" · ")}</div>
         </div>
         <button type="button" onClick={onEdit} disabled={removing} className="shrink-0 rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50">
           {t("claudeEndpoints.edit")}
@@ -164,27 +136,28 @@ function EndpointRow({ instance, onEdit }: { instance: InstanceInfo; onEdit: () 
   );
 }
 
-/** Custom Claude endpoints: their own engines, so this computer's Claude Code and its sign-in stay as they are. */
-export function ClaudeEndpoints() {
+function AgentEndpoints({ engine }: { engine: Engine }) {
   const { state } = useStore();
-  const endpoints = state.instances.filter((instance) => instance.claudeEndpoint);
+  const endpoints = state.instances.filter((instance) => engine === "claude" ? instance.claudeEndpoint : instance.codexEndpoint);
   const [open, setOpen] = useState<string | null>(null);
   return (
-    <div data-claude-endpoints className="mt-3 space-y-2">
-      <div className="text-[13px] leading-[18px] text-ink">{t("claudeEndpoints.title")}</div>
-      <p className="text-[12px] leading-4 text-ink-secondary">{t("claudeEndpoints.hint")}</p>
+    <div data-claude-endpoints={engine === "claude" ? "" : undefined} data-codex-endpoints={engine === "codex" ? "" : undefined} className="mt-3 space-y-2">
+      <div className="text-[13px] leading-[18px] text-ink">{t(engine === "claude" ? "claudeEndpoints.title" : "agentEndpoints.codexTitle")}</div>
+      <p className="text-[12px] leading-4 text-ink-secondary">{t(engine === "claude" ? "claudeEndpoints.hint" : "agentEndpoints.codexHint")}</p>
       {endpoints.length === 0
         ? <p className="text-[12px] leading-4 text-ink-secondary">{t("claudeEndpoints.empty")}</p>
         : <ul className="divide-y divide-hairline/40 rounded-xl border border-hairline/50 bg-panel/40">
           {endpoints.map((instance) => open === instance.instanceId
-            ? <li key={instance.instanceId} className="p-3"><EndpointForm instance={instance} onDone={() => setOpen(null)} /></li>
+            ? <li key={instance.instanceId} className="p-3"><EndpointForm engine={engine} instance={instance} onDone={() => setOpen(null)} /></li>
             : <EndpointRow key={instance.instanceId} instance={instance} onEdit={() => setOpen(instance.instanceId)} />)}
         </ul>}
       {open === "new"
-        ? <EndpointForm onDone={() => setOpen(null)} />
+        ? <EndpointForm engine={engine} onDone={() => setOpen(null)} />
         : <button type="button" onClick={() => setOpen("new")} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
           <Plus size={14} />{t("claudeEndpoints.add")}
         </button>}
     </div>
   );
 }
+export function ClaudeEndpoints() { return <AgentEndpoints engine="claude" />; }
+export function CodexEndpoints() { return <AgentEndpoints engine="codex" />; }
