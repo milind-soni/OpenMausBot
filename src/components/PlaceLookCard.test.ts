@@ -92,7 +92,7 @@ it("this computer takes a colour and a picture, both shown at once; None and Rem
 it("a solo Cloud's owner changes both its colour (on the Admin) and its picture", async () => {
   const { workspaces } = await page(look({ name: "My Cloud", color: null, swatch: null }));
   expect(host.textContent).toContain("My Cloud shows in this color at the top of the sidebar and on its icon on the left of the app.");
-  expect(host.textContent).toContain("Everyone here sees it.");
+  expect(host.textContent).toContain("Everyone who uses these bots sees it.");
   expect([swatch("rose").disabled, button("Use an image")?.disabled]).toEqual([false, false]);
   await click(swatch("rose"));
   expect(workspaces.color).toHaveBeenCalledWith("rose");
@@ -148,7 +148,7 @@ it("a browser or an older app: no colour and no tint, only the place's picture",
   expect(host.querySelector("[data-swatch]")).toBeNull();
   expect(host.querySelector("[data-place-tint]")).toBeNull();
   expect(host.querySelector("[data-place-picture]")).toBeTruthy();
-  expect(host.textContent).toContain("Your own image, faded into the top of the sidebar. Everyone here sees it.");
+  expect(host.textContent).toContain("An image faded into the top of the sidebar. Everyone who uses these bots sees it.");
   await act(async () => root?.unmount());
   vi.resetModules();
   vi.doMock("@/state/store", () => ({ useStore: () => ({ state: { config: {} } }) }));

@@ -54,6 +54,7 @@ function RowLines({ label, children }: { label: ReactNode; children?: ReactNode 
 function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: MenuModelRow; onPick: SimpleMenuActions["onPick"] }) {
   const { option } = row;
   const reason = row.blocked ? t("model.orgBlocked") : undefined;
+  const blurb = modelBlurb(option);
   return (
     <button
       type="button"
@@ -62,7 +63,7 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
       disabled={row.blocked}
       aria-pressed={row.current}
       aria-label={[modelOptionLabel(option), option.provider, reason].filter(Boolean).join(" · ")}
-      title={[modelOptionLabel(option), option.provider, reason ?? modelBlurb(option)].filter(Boolean).join(" · ")}
+      title={[modelOptionLabel(option), option.provider, reason ?? blurb].filter(Boolean).join(" · ")}
       tabIndex={-1}
       onClick={() => onPick(instance, row.model ?? option.id, row.variant)}
       className={SIMPLE_MENU_ROW}
@@ -71,6 +72,7 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
       <RowLines label={row.label}>
         {row.route && <span data-simple-route className={SIMPLE_MENU_META}>{row.route}</span>}
         {reason && <span data-simple-org-blocked className={SIMPLE_MENU_META}>{reason}</span>}
+        {!row.route && !reason && blurb && <span data-simple-blurb className={SIMPLE_MENU_META}>{blurb}</span>}
       </RowLines>
       {row.current && <Check size={14} className="shrink-0 text-ink" aria-hidden="true" />}
     </button>

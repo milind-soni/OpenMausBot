@@ -1588,8 +1588,13 @@ body {
   initial-value: 0px;
 }
 @keyframes settings-fade {
-  0%, 94% { --settings-fade: 36px; }
+  0%, 94% { --settings-fade: 20px; }
   100% { --settings-fade: 0px; }
+}
+/* A thin thumb that stays visible, so a long Settings page shows it goes on. */
+.settings-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
 }
 @supports (animation-timeline: scroll()) {
   .settings-scroll {

@@ -67,13 +67,11 @@ export function DetailsTab({ bot, derived, onOpen }: {
       {derived.botRoutines.length === 0 ? (
         <section data-panel-empty="routines">
           <CardLabel>{t("botSettings.simple.routines")}</CardLabel>
-          <p className="mx-3.5 text-[13px] leading-[18px] text-ink-tertiary">
-            {t("botPanel.routines.emptyHint")}{" "}
-            <button type="button" data-panel-automations onClick={() => dispatch({ type: "showRoutines", view: "list" })}
-              className="inline-flex items-center gap-0.5 rounded-[4px] font-medium text-ink-secondary hover:text-ink">
-              {t("botPanel.routines.seeAll")}<ChevronRight size={13} aria-hidden="true" className="rtl:-scale-x-100" />
-            </button>
-          </p>
+          <p className="mx-3.5 text-[13px] leading-[18px] text-ink-tertiary">{t("botPanel.routines.emptyHint")}</p>
+          <button type="button" data-panel-automations onClick={() => dispatch({ type: "showRoutines", view: "list" })}
+            className="mx-3.5 mt-1.5 inline-flex items-center gap-0.5 rounded-[4px] text-[13px] font-medium text-ink-secondary hover:text-ink">
+            {t("botPanel.routines.seeAll")}<ChevronRight size={14} aria-hidden="true" className="rtl:-scale-x-100" />
+          </button>
           <button
             type="button"
             data-panel-page="routines"

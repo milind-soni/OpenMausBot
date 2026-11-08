@@ -237,10 +237,10 @@ describe("the model picker in Simple mode", () => {
     expect(renderToStaticMarkup(chip)).toContain(">Claude Sonnet 5</span>");
   });
 
-  it("names models without a second line; a blurb is only the row's tooltip", () => {
+  it("puts a model's one-line blurb under its name, and in its tooltip", () => {
     const html = menu(open(bot()).html);
     const blurb = "Fast and smart. Good for most work.";
-    expect(html).not.toContain(`>${blurb}<`);
+    expect(html).toContain(`data-simple-blurb="true" class="min-w-0 max-w-full truncate text-[12px] leading-4 text-ink-tertiary">${blurb}<`);
     expect(html).toContain(`title="Sonnet 5.5 · ${blurb}"`);
   });
 
