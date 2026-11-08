@@ -12,6 +12,7 @@ describe("shellTimeoutHint", () => {
     expect(hint).toContain("`timeout`");
     expect(hint).toContain("600000");
     expect(hint).toContain("nohup");
+    expect(hint).toContain("confirm the log or a job marker actually exists");
     expect(hint).not.toContain("mdfind");
   });
 
