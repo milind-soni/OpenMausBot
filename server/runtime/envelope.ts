@@ -9,8 +9,6 @@ import type { Assignment, EnvelopeNames, Level, OriginSource, TurnEvidence } fro
 export const ENVELOPE_MARK = "[From";
 
 const QUOTE_MAX = 400;
-// Headroom over the runtime's 12 000-character answer: redaction markers can lengthen it, and the next turn works from all of it.
-const ANSWER_QUOTE_MAX = 16_000;
 const NAME_MAX = 80;
 const DETAIL_MAX = 200;
 const FILES_SHOWN = 8;
@@ -113,7 +111,7 @@ function replyLine(a: Assignment, requester: string, parent?: Assignment): strin
 function answerLine(a: Assignment, names: EnvelopeNames): string {
   const question = quote(a.question, QUOTE_MAX);
   const asked = question ? `Your question was: "${question}". ` : "";
-  const answer = quote(a.answer, ANSWER_QUOTE_MAX);
+  const answer = quote(a.answer, Number.POSITIVE_INFINITY);
   if (a.answeredBy?.kind === "default") {
     return `${asked}Nobody was asked, at this level: ${answer ? `go on with your default, "${answer}"` : "pick the sensible default yourself"}, and say in one plain line what you chose.`;
   }

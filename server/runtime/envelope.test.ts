@@ -485,6 +485,13 @@ describe("composeEnvelope at Full access: nothing a bot can settle waits on the 
     expect(composeResume(long, chief, [])).toContain(line);
   });
 
+  it("keeps the end of an answer that redaction made more than twice as long", () => {
+    const answer = `${"--token=x ".repeat(1000)}END`;
+    const envelope = composeEnvelope(assignment({ question: "Done?", answer, answeredBy: { kind: "bot", botId: "chief" } }), { ...names, answerer: "Chief" });
+    expect(envelope.length).toBeGreaterThan(answer.length * 2);
+    expect(envelope).toContain(`END".`);
+  });
+
   it("keeps the end of a 12 000-character answer that redaction made longer", () => {
     const removeScrubber = addHeldSecretScrubber((text) => text.replaceAll("code 42", `code ${HELD_SECRET_MASK}`));
     try {
@@ -493,6 +500,8 @@ describe("composeEnvelope at Full access: nothing a bot can settle waits on the 
       expect(answer.length).toBe(12_000);
       const envelope = composeEnvelope(assignment({ question: "Done?", answer, answeredBy: { kind: "bot", botId: "chief" } }), { ...names, answerer: "Chief" });
       expect(envelope).toContain(`End.".`);
+      expect(envelope).toContain(`code ${HELD_SECRET_MASK}`);
+      expect(envelope).not.toContain("code 42");
     } finally {
       removeScrubber();
     }
