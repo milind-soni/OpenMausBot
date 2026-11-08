@@ -79,7 +79,7 @@ const sparklerRays = union(...around(12, (a, i) => {
   return polyStroke([[x0, y0, 5.5], [x1, y1, 2]])
 }, TAU / 24))
 const sparklerTwinkles = union(twinkle(28, 34, 12), twinkle(214, 58, 10), twinkle(36, 170, 9))
-const sparklerWire = polyStroke([[120, 160, 4.5], [120, 250, 4]])
+const sparklerWire = polyStroke([[120, 160, 4.5], [120, 246, 4]])
 
 const bomb = circle(120, 148, 86)
 const bombCollar = grow(polygon([[134, 44], [166, 60], [156, 80], [124, 64]]), 4)

@@ -57,16 +57,13 @@ describe("carved catalog", () => {
     }
   });
 
-  it("keeps every drawing inside its 240-unit square, with room for the viewBox margin", () => {
+  it("keeps every point inside the viewBox, curve handles included, as the phones' path bounds check", () => {
     for (const id of CARVED_BODY_IDS) {
-      for (const part of CARVED_BODIES[id].parts) {
-        for (const line of flatten(part.d)) {
-          for (const [x, y] of line) {
-            expect(x, id).toBeGreaterThan(-14);
-            expect(x, id).toBeLessThan(254);
-            expect(y, id).toBeGreaterThan(-14);
-            expect(y, id).toBeLessThan(254);
-          }
+      const body = CARVED_BODIES[id];
+      for (const d of [body.clip, ...body.parts.map((part) => part.d)]) {
+        for (const n of d.match(/-?\d+(?:\.\d+)?/g).map(Number)) {
+          expect(n, id).toBeGreaterThanOrEqual(-14);
+          expect(n, id).toBeLessThanOrEqual(254);
         }
       }
     }
