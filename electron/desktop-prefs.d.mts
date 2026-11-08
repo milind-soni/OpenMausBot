@@ -29,6 +29,11 @@ export interface DesktopLanguageBridge {
   onChange(listener: (language: string) => void): () => void;
   /** The language this page shows, so menus, tray and dialogs never read in another one beside it. Older desktop apps lack it. */
   shown?(language: string): void;
+  /** The language the window beside this page shows, null before it has said: the rail follows it while nothing is
+   * picked. Older desktop apps lack it. */
+  windowShows?(): string | null;
+  /** The window beside this page now shows another language. */
+  onWindowShows?(listener: (language: string | null) => void): () => void;
 }
 export interface DesktopPrefs {
   seen(): string[];
@@ -97,6 +102,8 @@ export declare function registerDesktopPrefs(options: {
   onLanguage?(language: string): void;
   /** A page of the window shows `language`: with nothing picked, main draws its own words in that one too. */
   onShown?(language: string, sender: unknown): void;
+  /** The language main follows from the window's page now, null before it has said. */
+  windowLanguage?(): string | null;
   /** The window's frame: `made()`, the frame the window was made with (null before it is); `restarts`, a change waits for
    * the app to start again; `changed()`, the pages hear it. */
   frame?: { made(): boolean | null; restarts: boolean; changed(): void } | null;

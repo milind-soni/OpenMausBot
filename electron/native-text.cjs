@@ -80,6 +80,8 @@ function createNativeText({ dir = LOCALES_DIR, saved = null, system = () => "", 
       chosen = resolveLanguage(code, available());
       return language() !== before;
     },
+    /** The language the window's page last said it shows, null before it has: the rail beside it follows it too. */
+    followed: () => shown,
     /** The window's page shows `code`: main's words follow it while nothing is picked. True when they change. */
     follow(code) {
       const before = language();

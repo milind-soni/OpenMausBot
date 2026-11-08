@@ -215,11 +215,18 @@ test("a page of the window says which language it shows, and main hears it only 
   const shown = [];
   const listeners = new Map();
   registerDesktopPrefs({ ipcMain: { handle: () => {}, on: (channel, listener) => listeners.set(channel, listener) }, read: () => null, write: () => {},
-    page: event => event.page, cloudOffered: async () => true, onShown: (language, sender) => shown.push([language, sender]) });
+    page: event => event.page, cloudOffered: async () => true, onShown: (language, sender) => shown.push([language, sender]), windowLanguage: () => null });
+  const windowSays = new Map();
+  registerDesktopPrefs({ ipcMain: { handle: () => {}, on: (channel, listener) => windowSays.set(channel, listener) }, read: () => null, write: () => {},
+    page: event => event.page, cloudOffered: async () => true, windowLanguage: () => "pt-br" });
+  const read = page => { const event = { page }; windowSays.get("desktop-language:window")(event); return event.returnValue; };
+  assert.deepEqual([read("local"), read("server"), read(null)], ["pt-br", "pt-br", null], "the window's language, only to this desktop's pages");
   const say = (page, language) => listeners.get("desktop-language:shown")({ page, sender: `${page}-page` }, language);
   say("server", "pt-br"); say("local", "en"); say(null, "de");
   for (const bad of ["", "../../etc", "x".repeat(40), 42, null, { toString: () => "en" }]) say("local", bad);
   assert.deepEqual(shown, [["pt-br", "server-page"], ["en", "local-page"]]);
+  const asked = page => { const event = { page }; listeners.get("desktop-language:window")(event); return event.returnValue; };
+  assert.deepEqual([asked("local"), asked(null)], [null, null], "nothing before main is told");
   const broken = new Map();
   registerDesktopPrefs({ ipcMain: { handle: () => {}, on: (channel, listener) => broken.set(channel, listener) }, read: () => null, write: () => {},
     page: () => { throw new Error("Object has been destroyed"); }, cloudOffered: async () => true, onShown: () => { throw new Error("never"); } });
@@ -275,7 +282,7 @@ test("the preload gives every page of the window the notices and the switch's st
 test("the preload gives every page of the window the app language this computer keeps", async () => {
   for (const origin of [LOCAL, CLOUD, VPS]) {
     const page = preload(origin, { language: "de" });
-    assert.deepEqual(Object.keys(page.bridge.desktopLanguage), ["choice", "set", "onChange", "shown"], origin);
+    assert.deepEqual(Object.keys(page.bridge.desktopLanguage), ["choice", "set", "onChange", "shown", "windowShows", "onWindowShows"], origin);
     const asked = () => page.synced.filter(channel => channel.startsWith("desktop-"));
     assert.deepEqual(asked(), [], "nothing is asked until the language is");
     assert.equal(page.bridge.desktopLanguage.choice(), "de", origin);
@@ -294,6 +301,10 @@ test("the preload gives every page of the window the app language this computer 
     page.tell("desktop-language:changed", "fr");
     assert.deepEqual(heard, ["ja"]);
     assert.equal(page.bridge.desktopLanguage.choice(), "fr");
+    assert.equal(page.bridge.desktopLanguage.windowShows(), null, "nothing until main says");
+    page.tell("desktop-language:window", "pt-br");
+    page.tell("desktop-language:window", 42);
+    assert.equal(page.bridge.desktopLanguage.windowShows(), "pt-br");
     page.bridge.desktopLanguage.shown("pt-br");
     assert.deepEqual(page.sent.filter(([channel]) => channel.startsWith("desktop-language")), [["desktop-language:shown", "pt-br"]], "the language it shows, for main's own words");
     assert.equal(page.bridge.desktopLanguage.choice(), "fr", "showing a language is not a pick");
@@ -319,7 +330,7 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   let switched = async id => { calls.push(["switch", id]); }, loads = true, broadcasts = 0;
   const context = vm.createContext({
     registerDesktopPrefs: value => { options = value; }, jsonFile: file => ({ read: () => file, write: () => {} }), ipcMain: {}, updatesConsent: null, cloudAccount: "the client",
-    nativeText: { prefs: { kept: true }, set: code => { calls.push(["language", code]); return code === "pt-br"; }, follow: code => { calls.push(["shown", code]); return code === "de"; } }, applyNativeLanguage: () => calls.push("relabel"), talk: { relabel: () => calls.push("talk relabel") },
+    nativeText: { prefs: { kept: true }, set: code => { calls.push(["language", code]); return code === "pt-br"; }, follow: code => { calls.push(["shown", code]); return code === "de"; }, followed: () => "de" }, applyNativeLanguage: () => calls.push("relabel"), talk: { relabel: () => calls.push("talk relabel") },
     path: { join: (...parts) => parts.join("/") }, app: { getPath: () => "/user-data" }, desktopDataDir: () => "/home/.openmausbot",
     navigateMainWindow: async url => { calls.push(["navigate", url]); return loads; },
     senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed,
@@ -354,6 +365,8 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   assert.deepEqual(calls.slice(2), [["language", "pt-br"], "relabel", "talk relabel", ["language", "en"]], "main draws its native surfaces again only when the words change");
   options.onShown("de", {}); options.onShown("de", contents); options.onShown("en", contents);
   assert.deepEqual(calls.slice(6), [["shown", "de"], "relabel", "talk relabel", ["shown", "en"]], "only the window's own page leads main's words, and only a change redraws them");
+  assert.deepEqual(sent.slice(2), [["rail", "desktop-language:window", "de"], ["rail", "desktop-language:window", "de"]], "the rail hears the window's language each time the window says it");
+  assert.equal(options.windowLanguage(), "de");
   const navigate = main.slice(main.indexOf("function navigateMainWindow(url, keepingRecovery = false) {"), main.indexOf("\n}\n", main.indexOf("function navigateMainWindow(url, keepingRecovery = false) {")) + 3);
   const load = vm.runInNewContext(`${navigate}; navigateMainWindow`, { homeWindow: { cancel: () => {} }, mainWindow: { isDestroyed: () => false, loadURL: async url => { if (url.endsWith("fail")) throw new Error("ERR_CONNECTION_REFUSED"); } } });
   assert.equal(await load(`${LOCAL}/ok`), true); assert.equal(await load(`${LOCAL}/fail`), false, "a failed load answers false, never throws");

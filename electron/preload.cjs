@@ -93,8 +93,16 @@ let analyticsChoice;
 function savedLanguageChoice() {
   try { const saved = ipcRenderer.sendSync("desktop-language:read"); return typeof saved === "string" ? saved : null; } catch { return null; }
 }
-let languageChoice;
-const languageListeners = new Set();
+let languageChoice, windowLanguage;
+const languageListeners = new Set(), windowLanguageListeners = new Set();
+function savedWindowLanguage() {
+  try { const shown = ipcRenderer.sendSync("desktop-language:window"); return typeof shown === "string" ? shown : null; } catch { return null; }
+}
+ipcRenderer.on("desktop-language:window", (_event, language) => {
+  if (typeof language !== "string" && language !== null) return;
+  windowLanguage = language;
+  for (const listener of windowLanguageListeners) listener(language);
+});
 ipcRenderer.on("desktop-language:changed", (_event, language) => {
   if (typeof language !== "string") return;
   languageChoice = language;
@@ -708,6 +716,14 @@ const bridge = {
       return () => { languageListeners.delete(listener); };
     },
     shown: language => { ipcRenderer.send("desktop-language:shown", String(language)); },
+    windowShows: () => {
+      if (windowLanguage === undefined) windowLanguage = savedWindowLanguage();
+      return windowLanguage;
+    },
+    onWindowShows: listener => {
+      windowLanguageListeners.add(listener);
+      return () => { windowLanguageListeners.delete(listener); };
+    },
   },
 };
 

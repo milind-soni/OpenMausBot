@@ -2966,7 +2966,7 @@ app.whenReady().then(async () => {
       for (const win of appWindows()) if (!win.isDestroyed() && win.webContents !== sender) win.webContents.send("desktop-language:changed", language);
       chromeRail.send("desktop-language:changed", language);
     },
-    onLanguage: language => { if (nativeText.set(language)) { applyNativeLanguage(); talk.relabel(); } }, onShown: (language, sender) => { if (sender === mainWindow?.webContents && nativeText.follow(language)) { applyNativeLanguage(); talk.relabel(); } },
+    onLanguage: language => { if (nativeText.set(language)) { applyNativeLanguage(); talk.relabel(); } }, onShown: (language, sender) => { if (sender !== mainWindow?.webContents) return; if (nativeText.follow(language)) { applyNativeLanguage(); talk.relabel(); } chromeRail.send("desktop-language:window", nativeText.followed()); }, windowLanguage: () => nativeText.followed(),
     page: event => senderIsLocal(event) ? "local" : cloudPageAsking(event) ?? (workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin()) ? "server" : null) });
   talk.start({ globalShortcut, screen, prefs: desktopPrefs, remote: () => Boolean(desktopRemoteAccess), away: () => homeWindow.current().kind !== "computer", starting: () => !serverReady, localRequest: localServerRequest, dataDir: () => runningDataDir });
   // Before the window, so the harness has the CUA descriptor on first render.
