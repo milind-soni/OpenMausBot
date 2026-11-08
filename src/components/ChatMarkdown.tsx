@@ -29,7 +29,7 @@ import { CodeBlock, CodePlate, codeHash } from "./CodeBlock";
 export { CodeBlock, HIGHLIGHT_CACHE_MAX, HIGHLIGHT_CACHE_MAX_CHARS, HIGHLIGHT_MAX_CHARS, type CodeBlockProps } from "./CodeBlock";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
-import { useRevealOriginalMenu } from "./RevealOriginalMenu";
+import { openLinkedFolder, useRevealOriginalMenu } from "./RevealOriginalMenu";
 
 const mermaidCache = new Map<string, string>();
 const MERMAID_CACHE_MAX = 50;
@@ -345,7 +345,7 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
         : <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />}
       <button
         type="button"
-        onClick={preview.html ? preview.show : () => void save.save()}
+        onClick={preview.html ? preview.show : () => void openLinkedFolder(filePath).then((opened) => { if (!opened) return save.save(); })}
         disabled={!preview.html && save.state === "saving"}
         title={preview.html ? t("html.preview", { name: name ?? fileName(filePath) }) : t("chat.file.saveCopy")}
         className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"

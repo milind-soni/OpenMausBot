@@ -18,6 +18,24 @@ function revealBridge(): Reveal | undefined {
   return ogb?.remoteClient?.active ? undefined : ogb?.revealInFolder;
 }
 
+type OpenFolder = NonNullable<NonNullable<Window["ogb"]>["openFolder"]>;
+
+/** Desktop app on the computer that holds the path: a folder a chat links to opens in Finder or Explorer. True only when
+ * it opened; a file, a missing path, a phone, the web or a connected window answer false and keep their own handling. */
+export async function openLinkedFolder(folderPath: string, open: OpenFolder | undefined = openFolderBridge()): Promise<boolean> {
+  if (!open || !REVEALABLE_PATH.test(folderPath)) return false;
+  try {
+    return await open(folderPath) === "opened";
+  } catch {
+    return false;
+  }
+}
+
+function openFolderBridge(): OpenFolder | undefined {
+  const ogb = typeof window === "undefined" ? undefined : window.ogb;
+  return ogb?.remoteClient?.active ? undefined : ogb?.openFolder;
+}
+
 export function canRevealOriginal(source: string | undefined, reveal: Reveal | undefined = revealBridge()): source is string {
   return Boolean(reveal) && typeof source === "string" && REVEALABLE_PATH.test(source);
 }

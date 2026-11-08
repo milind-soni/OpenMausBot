@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { collisionFreeDownloadPath, defaultSaveName, htmlCopyName, openHtmlCopy, openLogsFolder, resolveSavablePath, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
+import { collisionFreeDownloadPath, defaultSaveName, htmlCopyName, openFolder, openHtmlCopy, openLogsFolder, resolveSavablePath, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
 
 // Creating a symlink on Windows needs elevation or developer mode.
 const canSymlink = (() => {
@@ -264,6 +264,70 @@ describe("Show in folder for a file outside the workspace", () => {
     const rawPath = "C:\\Users\\Maus\\_draft\\..\\_draft\\ollama-gen.js";
     assert.equal(await revealInFolder(rawPath, { reveal, fsp, pathApi: path.win32 }), "shown");
     assert.deepEqual(shown, ["C:\\Users\\Maus\\_draft\\ollama-gen.js"]);
+  });
+});
+
+describe("openFolder for a folder a chat links to", () => {
+  const shell = (answer = "") => {
+    const opened = [];
+    return { opened, open: async (target) => { opened.push(target); return answer; } };
+  };
+
+  it("opens an existing folder by its normalised absolute path", async () => {
+    const { opened, open } = shell();
+    assert.equal(await openFolder(path.join(botHome, "..", path.basename(botHome)), { open }), "opened");
+    assert.deepEqual(opened, [fs.realpathSync(botHome)]);
+  });
+
+  it("never opens a file (that would run it): the page keeps its save-a-copy", async () => {
+    const { opened, open } = shell();
+    assert.equal(await openFolder(path.join(home, "secret.txt"), { open }), "not-folder");
+    assert.deepEqual(opened, []);
+  });
+
+  it("never opens a Mac app or other program folder, or a link to one", async () => {
+    const { opened, open } = shell();
+    const app = path.join(home, "Calculator.app");
+    const bundle = path.join(home, "NoExtension");
+    fs.mkdirSync(path.join(app, "Contents"), { recursive: true });
+    fs.mkdirSync(path.join(bundle, "Contents"), { recursive: true });
+    fs.writeFileSync(path.join(bundle, "Contents", "Info.plist"), "");
+    const link = path.join(home, "innocent-looking");
+    fs.symlinkSync(app, link, process.platform === "win32" ? "junction" : "dir");
+    for (const target of [app, bundle, link]) assert.equal(await openFolder(target, { open }), "not-folder", target);
+    assert.deepEqual(opened, []);
+  });
+
+  it("says a missing folder is missing, and reports a failed open", async () => {
+    const { opened, open } = shell();
+    assert.equal(await openFolder(path.join(home, "gone"), { open }), "missing");
+    assert.deepEqual(opened, []);
+    assert.equal(await openFolder(botHome, { open: shell("no file manager").open }), "failed");
+  });
+
+  it("refuses relative paths, URLs and network shares without touching the disk", async () => {
+    const { opened, open } = shell();
+    const fsp = { stat: () => assert.fail("an invalid path must not be looked up") };
+    for (const rawPath of ["notes", "../notes", "https://example.com/x", "//server/share/x", "", "\0", null, 42]) {
+      assert.equal(await openFolder(rawPath, { open, fsp }), "invalid", String(rawPath));
+    }
+    for (const rawPath of ["\\\\server\\share\\x", "C:relative", "file:///C:/x"]) {
+      assert.equal(await openFolder(rawPath, { open, fsp, pathApi: path.win32 }), "invalid", rawPath);
+    }
+    assert.deepEqual(opened, []);
+  });
+
+  it("opens a Windows folder path", async () => {
+    const { opened, open } = shell();
+    const fsp = {
+      realpath: async (target) => target,
+      stat: async (target) => {
+        if (target.endsWith("Info.plist")) throw Object.assign(new Error("gone"), { code: "ENOENT" });
+        return { isFile: () => false, isDirectory: () => true };
+      },
+    };
+    assert.equal(await openFolder("C:\\Users\\Maus\\Reports\\..\\Reports", { open, fsp, pathApi: path.win32 }), "opened");
+    assert.deepEqual(opened, ["C:\\Users\\Maus\\Reports"]);
   });
 });
 

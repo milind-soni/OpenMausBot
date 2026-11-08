@@ -114,13 +114,18 @@ export async function withSavableFile(
 
 // Untrusted path: nothing here opens, reads or runs it. Network shares are refused, since merely looking one up can hand
 // this computer's sign-in to whoever runs that server.
-export async function revealInFolder(rawPath, { reveal, fsp = fs.promises, pathApi = path }) {
+function localTarget(rawPath, pathApi) {
   const local = (value) => !/^[\\/]{2}/.test(value) && pathApi.isAbsolute(value);
   if (typeof rawPath !== "string" || rawPath.includes("\0") || /^[a-z][a-z\d+.-]+:/i.test(rawPath) || !local(rawPath)) {
-    return "invalid";
+    return null;
   }
   const target = pathApi.normalize(rawPath);
-  if (!local(target)) return "invalid";
+  return local(target) ? target : null;
+}
+
+export async function revealInFolder(rawPath, { reveal, fsp = fs.promises, pathApi = path }) {
+  const target = localTarget(rawPath, pathApi);
+  if (!target) return "invalid";
   let stats;
   try {
     stats = await fsp.stat(target);
@@ -130,6 +135,30 @@ export async function revealInFolder(rawPath, { reveal, fsp = fs.promises, pathA
   if (!stats.isFile() && !stats.isDirectory()) return "invalid";
   reveal(target);
   return "shown";
+}
+
+// A folder a chat links to, opened in Explorer or Finder. Same untrusted-path rules as revealInFolder, and only a plain
+// folder is ever handed to `open` (shell.openPath), since opening anything else runs it: never a file, and never a
+// folder that is really a program, as a Mac app (Name.app, or any folder with Contents/Info.plist) or a link to one is.
+// Links are resolved first and any folder name with an extension is left alone. Anything refused answers "not-folder"
+// so the page keeps today's save-a-copy. `open` answers "" or why it failed.
+export async function openFolder(rawPath, { open, fsp = fs.promises, pathApi = path }) {
+  const target = localTarget(rawPath, pathApi);
+  if (!target) return "invalid";
+  let real;
+  let stats;
+  try {
+    real = await fsp.realpath(target);
+    stats = await fsp.stat(real);
+  } catch {
+    return "missing";
+  }
+  if (!stats.isDirectory() || /.\.[^.]+$/.test(pathApi.basename(real))) return "not-folder";
+  const bundle = await fsp.stat(pathApi.join(real, "Contents", "Info.plist")).then(() => true, () => false);
+  if (bundle) return "not-folder";
+  let error = "";
+  try { error = await open(real); } catch (failure) { error = failure?.message ?? String(failure); }
+  return error ? "failed" : "opened";
 }
 
 /** This app's own logs folder in Explorer or Finder, made first if nothing has been logged yet. The folder is main's
