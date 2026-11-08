@@ -36,6 +36,12 @@ export function isLoopbackUrl(url: string): boolean {
   } catch { return false; }
 }
 
+/** Security: a lent computer reaches a URL server only on a port of its own, 1024 or higher; one left to its default is a
+ * system service's. */
+function onItsOwnPort(url: string): boolean {
+  try { return Number(new URL(url).port) >= 1024; } catch { return false; }
+}
+
 export interface HereChecks {
   exists(path: string): boolean;
   /** A program by its bare name is on this server's PATH. */
@@ -93,13 +99,14 @@ export function elsewhereServers(cfg: Pick<AppConfig, "mcpServers">, bot: Bot): 
 
 export type LentState =
   | { kind: "ready"; computerId: string }
-  | { kind: "offline" | "stopped" | "never" | "outdated" | "no-terminal"; computer: string; device: "Mac" | "PC" | "computer" };
+  | { kind: "offline" | "stopped" | "never" | "outdated" | "no-terminal" | "port"; computer: string; device: "Mac" | "PC" | "computer" };
 
 export function lentState(computers: Pick<SharedComputers, "runsOn">, principal: string | null, server: ElsewhereServer): LentState {
   const { online, known } = computers.runsOn(principal, server.runsOn);
   const at = (platform: LentPlatform | null | undefined, name: string) => ({ computer: name, device: deviceWord(platform) });
   if (online) {
     if (!online.mcpServers) return { kind: "outdated", ...at(online.platform, online.name) };
+    if (isRemoteMcpServer(server) && !onItsOwnPort(server.url)) return { kind: "port", ...at(online.platform, online.name) };
     if (!isRemoteMcpServer(server) && !online.terminal) return { kind: "no-terminal", ...at(online.platform, online.name) };
     return { kind: "ready", computerId: online.id };
   }
@@ -116,6 +123,7 @@ export function lentLine(name: string, state: Exclude<LentState, { kind: "ready"
     case "stopped": return `${name} runs on ${theirs}, which no longer lends itself to ${place}: OpenMausBot on it is paused or signed out.`;
     case "never": return `${name} runs on ${theirs}, which isn't lent to ${place}: it works once OpenMausBot is open on that computer and signed in to ${place}.`;
     case "outdated": return `${name} runs on ${theirs}, whose OpenMausBot is too old to run it for ${place}: update OpenMausBot on that ${device}.`;
+    case "port": return `${name} runs on ${theirs}, which reaches only an MCP server on its own port, 1024 or higher, at that ${device}'s address: save ${name} with the port its server listens on.`;
     case "no-terminal": return `${name} starts a program on ${theirs}, which doesn't let ${place} run programs right now: turn on "Let Clouds run commands on this ${device}" from the OpenMausBot icon on that ${device}.`;
   }
 }
@@ -284,6 +292,7 @@ export function createLentMcp(deps: LentMcpDeps) {
         const remote = isRemoteMcpServer(server);
         return { ok: false, error: `${remote ? "That address is" : "This command runs"} on the person's own computer, and no computer is lent to ${deps.place} now. Ask them to lend their Mac or PC${remote ? "" : " with its terminal"}, then add it again.` };
       }
+      if (isRemoteMcpServer(server) && !onItsOwnPort(server.url)) return { ok: false, error: "This server runs on the person's own computer, which reaches only an MCP server on its own port, 1024 or higher: add it again with the port its server listens on in its address." };
       const asked = who.computer?.trim().toLowerCase();
       const named = asked ? lenders.find((lender) => lender.name.toLowerCase() === asked) : undefined;
       const names = lenders.map((lender) => lender.name).join(", ");
