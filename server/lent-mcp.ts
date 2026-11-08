@@ -279,6 +279,8 @@ export function createLentMcp(deps: LentMcpDeps) {
       const lenders = deps.computers.mcpLenders(who.principal);
       if (!(await needsTheirComputer(server, here))) return { ok: true, server };
       if (!lenders.length) {
+        // Only My Cloud has no computer of its own: elsewhere the server runs on one, so a missing program is just missing.
+        if (!deps.personal) return { ok: true, server };
         const remote = isRemoteMcpServer(server);
         return { ok: false, error: `${remote ? "That address is" : "This command runs"} on the person's own computer, and no computer is lent to ${deps.place} now. Ask them to lend their Mac or PC${remote ? "" : " with its terminal"}, then add it again.` };
       }

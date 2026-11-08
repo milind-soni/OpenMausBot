@@ -13,7 +13,7 @@ const notes = { command: "/Users/ada/bin/notes-mcp", args: [], env: { NOTES_TOKE
 const here = (over: Partial<HereChecks> = {}): HereChecks => ({ exists: () => false, program: () => true, answers: async () => false, ...over });
 
 type Online = NonNullable<ReturnType<SharedComputers["runsOn"]>["online"]>;
-function fixture(options: { online?: Partial<Online> | null; known?: { lent: boolean } | null; principal?: string | null; servers?: Record<string, unknown>; mcpServers?: string[]; toolScope?: unknown; answer?: (operation: Record<string, unknown>) => unknown; lenders?: ReturnType<SharedComputers["mcpLenders"]>; here?: HereChecks } = {}) {
+function fixture(options: { online?: Partial<Online> | null; known?: { lent: boolean } | null; principal?: string | null; servers?: Record<string, unknown>; mcpServers?: string[]; toolScope?: unknown; answer?: (operation: Record<string, unknown>) => unknown; lenders?: ReturnType<SharedComputers["mcpLenders"]>; here?: HereChecks; personal?: boolean; place?: string } = {}) {
   const requests: Array<{ operation: Record<string, unknown>; principal: string | null }> = [];
   const online = options.online === null ? null : { id: "mac-1", name: "Ada's Mac", platform: "darwin" as const, terminal: false, mcpServers: true, ...options.online };
   const computers: LentMcpDeps["computers"] = {
@@ -38,8 +38,8 @@ function fixture(options: { online?: Partial<Online> | null; known?: { lent: boo
     mint: () => { minted.push("token"); return "turn-bearer"; },
     active: () => true,
     origin: "http://127.0.0.1:4242",
-    personal: true,
-    place: "My Cloud",
+    personal: options.personal ?? true,
+    place: options.place ?? "My Cloud",
     here: options.here ?? here(),
   });
   return { lent, requests, minted };
@@ -210,6 +210,8 @@ describe("Test, and adding a server that needs the person's computer", () => {
     expect(await missing.lent.place(command, { principal: "cloud-home" })).toEqual({ ok: false, error: "This command runs on the person's own computer, and no computer is lent to My Cloud now. Ask them to lend their Mac or PC with its terminal, then add it again." });
     const answered = fixture({ here: here({ answers: async () => true }) });
     expect(await answered.lent.place(address, { principal: "cloud-home" })).toEqual({ ok: true, server: address });
+    const server = fixture({ personal: false, place: "this server" });
+    expect(await server.lent.place(address, { principal: "cloud-home" }), "a desktop or self-hosted server runs on a computer of its own").toEqual({ ok: true, server: address });
   });
 
   it("with several lent: the one named, else the one the adder is on, else the newest for the person, else the bot asks", async () => {
