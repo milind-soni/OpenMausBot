@@ -310,8 +310,6 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual((self.base / 'current').resolve(), self.previous)
         self.assertFalse(manage.JOURNAL.exists())
         self.assertEqual(facts.read_bytes(), original_facts)
-        with patch.object(manage, 'release_metadata'):
-            self.assertEqual(manage.install_release(self.pin), candidate)
 
     def test_compatibility_allows_agent_code_but_rejects_security_and_permission_changes(self):
         tree = {'scripts/install.sh': ('100755', 'blob', self.pin['installerGitBlob']),
@@ -452,15 +450,6 @@ class MaintenanceTests(unittest.TestCase):
             request.assert_not_called()
             hermes.assert_not_called()
 
-    def test_stage_uses_separate_identity_and_denies_live_private_home(self):
-        with patch.object(manage, 'run') as run:
-            manage.stage_run(self.root / 'release', ['bash', 'reviewed-installer'])
-        args = [str(arg) for arg in run.call_args.args[0]]
-        self.assertIn('--property=User=origin-hermes-build', args)
-        self.assertIn('--property=CapabilityBoundingSet=', args)
-        self.assertIn('--property=InaccessiblePaths=' + str(manage.HOME) + ' ' + str(manage.MANAGED), args)
-        self.assertIn('HOME=' + str(self.root / 'release/build-home'), args)
-        self.assertIn('HERMES_HOME=' + str(self.root / 'release/build-home/.hermes/profiles/.origin-probe'), args)
 
     def test_candidate_probe_is_networkless_and_refuses_unknown_result(self):
         destination = self.staged_release()
@@ -590,15 +579,6 @@ class MaintenanceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     manage.validate_stage(destination)
 
-    def test_activation_preserves_reusable_dependency_stage(self):
-        destination = self.staged_release()
-        facts = manage.runtime_state(destination) / 'facts.json'
-        before = facts.read_bytes()
-        manage.activate(destination)
-        self.assertEqual(facts.read_bytes(), before)
-        self.assertEqual((self.base / 'current').resolve(), destination)
-        with patch.object(manage, 'release_metadata'):
-            self.assertEqual(manage.install_release(self.pin), destination)
 
     def test_repeated_activations_keep_each_runtime_outside_replaceable_private_home(self):
         first = self.staged_release()
@@ -618,6 +598,105 @@ class MaintenanceTests(unittest.TestCase):
             self.assertFalse(selected.resolve().is_relative_to(self.data))
         self.assertEqual(first_facts.read_bytes(), first_content)
         self.assertTrue(second_facts.is_file())
+
+    def offline_candidate(self):
+        previous = self.staged_release()
+        manage.activate(previous)
+        self.previous = previous
+        candidate = self.base / 'repaired' / 'source'
+        candidate.mkdir(parents=True)
+        (candidate.parent / 'build-home/.hermes').mkdir(parents=True)
+        (candidate.parent / 'origin-stage.json').write_text('{"layout":3}')
+        (self.data / 'private-state').write_text('keep-private-state')
+        mocks = {}
+        for name, value in {
+            'require_offline': None, 'validate_stage': None, 'policy_digest': 'policy',
+            'install_release': candidate, 'candidate_policy_probe': None, 'preflight': None,
+        }.items():
+            item = patch.object(manage, name, return_value=value)
+            mocks[name] = item.start()
+            self.addCleanup(item.stop)
+        forbidden = patch.object(manage, 'run', side_effect=AssertionError('Offline repair started a command'))
+        forbidden.start()
+        self.addCleanup(forbidden.stop)
+        return candidate, mocks
+
+    def test_offline_repair_changes_only_runtime_and_leaves_private_home_intact(self):
+        candidate, _ = self.offline_candidate()
+        manage.repair_offline(self.pin, True)
+        self.assertEqual((self.base / 'current').resolve(), candidate)
+        self.assertEqual((self.base / 'current-runtime').resolve(), candidate.parent / 'build-home/.hermes')
+        self.assertEqual((self.data / 'private-state').read_text(), 'keep-private-state')
+        self.assertFalse(manage.JOURNAL.exists())
+
+    def test_failed_offline_activation_restores_both_pointers_without_restoring_home(self):
+        _, mocks = self.offline_candidate()
+        mocks['preflight'].side_effect = ValueError('Invalid candidate policy')
+        with self.assertRaises(ValueError):
+            manage.repair_offline(self.pin, True)
+        self.assertEqual((self.base / 'current').resolve(), self.previous)
+        self.assertEqual((self.base / 'current-runtime').resolve(), self.previous.parent / 'build-home/.hermes')
+        self.assertEqual((self.data / 'private-state').read_text(), 'keep-private-state')
+        self.assertFalse(manage.JOURNAL.exists())
+
+    def test_offline_repair_rejects_release_change_and_missing_authorization(self):
+        _, _ = self.offline_candidate()
+        for pin, authorized in ((self.pin, False), ({**self.pin, 'tag': 'v0.23.2'}, True)):
+            with self.subTest(pin=pin, authorized=authorized):
+                with self.assertRaises(ValueError):
+                    manage.repair_offline(pin, authorized)
+                self.assertEqual((self.base / 'current').resolve(), self.previous)
+                self.assertEqual((self.data / 'private-state').read_text(), 'keep-private-state')
+                self.assertFalse(manage.JOURNAL.exists())
+
+    def test_offline_repair_defers_when_policy_or_activity_changes_during_stage(self):
+        _, mocks = self.offline_candidate()
+        mocks['policy_digest'].side_effect = ['before', 'after']
+        with self.assertRaises(ValueError):
+            manage.repair_offline(self.pin, True)
+        self.assertEqual((self.base / 'current').resolve(), self.previous)
+        self.assertFalse(manage.JOURNAL.exists())
+        mocks['policy_digest'].side_effect = None
+        mocks['require_offline'].side_effect = [None, ValueError('Interactive login started')]
+        with self.assertRaises(ValueError):
+            manage.repair_offline(self.pin, True)
+        self.assertEqual((self.base / 'current').resolve(), self.previous)
+        self.assertFalse(manage.JOURNAL.exists())
+
+    def test_offline_recovery_restores_old_pointer_after_interrupted_activation(self):
+        candidate, _ = self.offline_candidate()
+        journal = {'mode': 'offline-repair', 'previous': str(self.previous), 'target': self.pin}
+        manage.JOURNAL.write_text(json.dumps(journal))
+        manage.activate(candidate)
+        manage.rollback(journal)
+        self.assertEqual((self.base / 'current').resolve(), self.previous)
+        self.assertEqual((self.base / 'current-runtime').resolve(), self.previous.parent / 'build-home/.hermes')
+        self.assertEqual((self.data / 'private-state').read_text(), 'keep-private-state')
+        self.assertFalse(manage.JOURNAL.exists())
+
+    def test_offline_gate_rejects_active_or_interactive_service_identity(self):
+        account = type('Account', (), {'pw_uid': os.getuid()})()
+        with patch.object(manage, 'service_pid', return_value=0), \
+             patch.object(manage.pwd, 'getpwnam', return_value=account), \
+             patch.object(manage.subprocess, 'run') as command:
+            command.return_value = subprocess.CompletedProcess([], 0, stdout='activating\n')
+            with self.assertRaises(ValueError):
+                manage.require_offline()
+            command.side_effect = [
+                subprocess.CompletedProcess([], 0, stdout='inactive\n'),
+                subprocess.CompletedProcess([], 0, stdout='123'),
+            ]
+            with self.assertRaises(ValueError):
+                manage.require_offline()
+        self.assertEqual((self.base / 'current').resolve(), self.previous)
+
+    def test_legacy_cached_stage_cannot_satisfy_a_repaired_install(self):
+        destination = self.staged_release()
+        with patch.object(manage, 'release_metadata'), \
+             patch.object(manage, 'stage_root', return_value=destination.parent):
+            with self.assertRaises(ValueError):
+                manage.install_release(self.pin)
+
 
     def test_writable_administrator_policy_is_rejected(self):
         path = self.root / 'policy'

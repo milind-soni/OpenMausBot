@@ -41,6 +41,15 @@ stay private. Prefer a dedicated number if that risk is unacceptable.
 https://hermes-agent.nousresearch.com/docs/user-guide/messaging/whatsapp
 https://hermes-agent.nousresearch.com/docs/integrations/providers
 
+Deploy runtime_repair.py alongside this supervisor. The reviewed WhatsApp repair
+is hash-guarded and applied only to a newly built immutable stage, never live
+node_modules. For an unpaired deployment whose gateway is already stopped:
+  sudo python3 /opt/origin-hermes-admin/manage.py repair-offline --release /opt/origin-hermes-admin/release.json --maintenance
+This requires the SAME upstream pin and no service-user processes. It probes
+the candidate before activation, retains the previous runtime, never changes
+private HOME, and leaves the gateway stopped. Interrupted activation uses
+`recover --maintenance`; offline recovery also leaves HOME and gateway untouched.
+
 The daily timer checks only by default. Administrator opt-in:
   sudo python3 /opt/origin-hermes-admin/manage.py enable-auto-updates
   sudo python3 /opt/origin-hermes-admin/manage.py disable-auto-updates
@@ -99,6 +108,8 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+
+from runtime_repair import apply_repair, repair_id, validate_repair
 
 ASSETS = Path(__file__).resolve().parent
 ADMIN = Path('/opt/origin-hermes-admin')
@@ -247,7 +258,8 @@ def compatible(pin, baseline):
 
 def policy_digest():
     digest = hashlib.sha256()
-    for path in (MANAGED / 'config.yaml', MANAGED / '.env', ADMIN / 'managed-config.json'):
+    for path in (MANAGED / 'config.yaml', MANAGED / '.env', ADMIN / 'managed-config.json',
+                 ADMIN / 'manage.py', ADMIN / 'runtime_repair.py'):
         trusted(path)
         digest.update(str(path).encode() + b'\0' + path.read_bytes() + b'\0')
     return digest.hexdigest()
@@ -315,14 +327,21 @@ def stage_run(release_root, args, network=True, **kwargs):
                 'HERMES_MANAGED_DIR=' + str(build_home / 'managed'), *args], **kwargs)
 
 
+def stage_root(pin):
+    return BASE / 'releases' / (pin['commit'] + '-supervised-3-' + repair_id())
+
+
 def install_release(pin):
     release_metadata(pin)
-    release_root = BASE / 'releases' / (pin['commit'] + '-supervised-2')
+    release_root = stage_root(pin)
     destination = release_root / 'source'
     if release_root.exists():
         validate_stage(destination)
         if manifest(destination / 'origin-release.json') != pin:
             raise ValueError('Existing stage does not match the requested immutable release')
+        receipt = json.loads((release_root / 'origin-stage.json').read_text())
+        if receipt.get('repair', {}).get('id') != repair_id():
+            raise ValueError('Cached stage does not contain the reviewed runtime repair')
         return destination
     release_root.mkdir(mode=0o755)
     release_root.chmod(0o755)
@@ -364,9 +383,11 @@ def install_release(pin):
         raise ValueError('Builder activity remains; refusing privileged staging operations')
     freeze_stage(release_root)
     stage_directory(destination, release_root)
+    repair = apply_repair(destination)
     save(destination / 'origin-release.json', pin, mode=0o644)
     prepare_runtime(destination)
-    save(release_root / 'origin-stage.json', {'layout': 2, 'commit': pin['commit']}, mode=0o644)
+    save(release_root / 'origin-stage.json',
+         {'layout': 3, 'commit': pin['commit'], 'repair': repair}, mode=0o644)
     validate_stage(destination)
     return destination
 
@@ -414,8 +435,9 @@ if get_default_hermes_root().resolve() != expected_root.resolve():
 for executable_root in (selected_venv(Path(sys.argv[1])), store_root(Path(sys.argv[1])), Path(sys.executable)):
     if not executable_root.resolve().is_relative_to(root.resolve()):
         raise SystemExit(1)
-from hermes_cli.config import load_config, reload_env
-reload_env()
+from hermes_cli.env_loader import load_hermes_dotenv
+load_hermes_dotenv(load_external_secrets=False)
+from hermes_cli.config import load_config
 managed = Path(os.environ['HERMES_MANAGED_DIR'])
 expected = json.loads(re.sub(r'\\$\\{([A-Z0-9_]+)\\}', lambda m: os.environ[m[1]],
                              (managed / 'config.yaml').read_text()))
@@ -429,6 +451,24 @@ if not matches(expected, actual):
 for line in (managed / '.env').read_text().splitlines():
     key, sep, value = line.partition('=')
     if sep and os.environ.get(key) != value:
+        raise SystemExit(1)
+from gateway.platforms.whatsapp_common import resolve_whatsapp_bridge_dir
+if resolve_whatsapp_bridge_dir().resolve() != (Path(sys.argv[1]) / 'scripts/whatsapp-bridge').resolve():
+    raise SystemExit(1)
+from hermes_cli.main_platform_setup import _whatsapp_has_identity
+import tempfile
+with tempfile.TemporaryDirectory() as temporary:
+    session = Path(temporary)
+    credentials = session / 'creds.json'
+    for value in ({}, {'registered': True}, {'me': {}}, {'me': {'id': ' '}}):
+        credentials.write_text(json.dumps(value))
+        if _whatsapp_has_identity(session):
+            raise SystemExit(1)
+    credentials.write_text('not valid json')
+    if _whatsapp_has_identity(session):
+        raise SystemExit(1)
+    credentials.write_text(json.dumps({'registered': False, 'me': {'id': 'synthetic@s.whatsapp.net'}}))
+    if not _whatsapp_has_identity(session):
         raise SystemExit(1)
 print('origin-effective-policy-ok')
 """
@@ -567,7 +607,15 @@ def validate_stage(destination):
     if not probe.is_symlink() or os.readlink(probe) != str(root / 'probe-data'):
         raise ValueError('Probe profile escaped its isolated data directory')
     receipt = json.loads((root / 'origin-stage.json').read_text())
-    if receipt != {'layout': 2, 'commit': manifest(destination / 'origin-release.json')['commit']}:
+    commit = manifest(destination / 'origin-release.json')['commit']
+    if receipt.get('layout') == 2:
+        if receipt != {'layout': 2, 'commit': commit}:
+            raise ValueError('Incomplete legacy stage')
+    elif receipt.get('layout') == 3:
+        if set(receipt) != {'layout', 'commit', 'repair'} or receipt['commit'] != commit:
+            raise ValueError('Incomplete repaired stage')
+        validate_repair(destination, receipt['repair'])
+    else:
         raise ValueError('Incomplete or unsupported cached stage')
     bridge = destination / 'scripts/whatsapp-bridge'
     stage_directory(bridge / 'node_modules', root)
@@ -693,7 +741,7 @@ def install():
         directory.mkdir(mode=0o755, parents=True, exist_ok=True)
         directory.chmod(0o755)
     BACKUPS.mkdir(mode=0o700, parents=True, exist_ok=True)
-    for name in ('manage.py', 'release.json', 'managed-config.json'):
+    for name in ('manage.py', 'runtime_repair.py', 'release.json', 'managed-config.json'):
         shutil.copyfile(ASSETS / name, ADMIN / name)
         (ADMIN / name).chmod(0o644)
     save(MANAGED / 'config.yaml', json.loads((ASSETS / 'managed-config.json').read_text()), mode=0o644)
@@ -835,6 +883,49 @@ def drain():
         raise
 
 
+def require_offline():
+    # Offline repair must not stop an active gateway or an interactive login.
+    active = subprocess.run(
+        ['systemctl', 'show', SERVICE, '--property=ActiveState', '--value'],
+        capture_output=True, text=True, check=True).stdout.strip()
+    if active not in ('inactive', 'failed') or service_pid() != 0:
+        raise ValueError('Offline repair requires an already stopped gateway')
+    result = subprocess.run(['pgrep', '-u', str(pwd.getpwnam(USER).pw_uid)], capture_output=True)
+    if result.returncode != 1:
+        raise ValueError('Service-user activity must stop before offline repair')
+
+
+def repair_offline(pin, maintenance):
+    if not maintenance:
+        raise ValueError('Explicit --maintenance authorization is required')
+    if JOURNAL.exists():
+        raise ValueError('Interrupted maintenance exists; use recover --maintenance first')
+    require_offline()
+    previous = (BASE / 'current').resolve(strict=True)
+    validate_stage(previous)
+    if manifest(previous / 'origin-release.json') != pin:
+        raise ValueError('Offline repair cannot change the upstream release')
+    policy_before = policy_digest()
+    destination = install_release(pin)
+    candidate_policy_probe(destination)
+    require_offline()
+    if policy_digest() != policy_before:
+        raise ValueError('Policy changed during offline staging')
+    journal = {'previous': str(previous), 'target': pin, 'automatic': False, 'mode': 'offline-repair'}
+    save(JOURNAL, journal)
+    try:
+        activate(destination)
+        preflight()
+        require_offline()
+        if policy_digest() != policy_before:
+            raise ValueError('Policy changed during offline activation')
+        JOURNAL.unlink()
+        print('Reviewed runtime repair activated; gateway remains stopped; previous release retained.')
+    except BaseException:
+        rollback(journal)
+        raise
+
+
 def stopped():
     run(['systemctl', 'stop', SERVICE])
     if service_pid() != 0:
@@ -862,6 +953,15 @@ def backup():
 
 
 def rollback(journal):
+    if journal.get('mode') == 'offline-repair':
+        # This path never changes HOME or starts an unauthenticated gateway.
+        require_offline()
+        previous = Path(journal['previous'])
+        validate_stage(previous)
+        activate(previous)
+        JOURNAL.unlink()
+        print('Previous immutable runtime restored; gateway remains stopped; private HOME untouched.')
+        return
     try:
         stopped()
         if 'archive' in journal:
@@ -1083,7 +1183,7 @@ def preflight():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('command', choices=['install', 'configure', 'login', 'pair-whatsapp', 'gateway', 'preflight', 'health', 'check-updates', 'daily-updates', 'enable-auto-updates', 'disable-auto-updates', 'update', 'recover', 'chat-policy'])
+    parser.add_argument('command', choices=['install', 'configure', 'login', 'pair-whatsapp', 'gateway', 'preflight', 'health', 'check-updates', 'daily-updates', 'enable-auto-updates', 'disable-auto-updates', 'update', 'repair-offline', 'recover', 'chat-policy'])
     parser.add_argument('--release', type=Path)
     parser.add_argument('--file', type=Path)
     parser.add_argument('--maintenance', action='store_true')
@@ -1128,6 +1228,10 @@ def main():
             if not args.release:
                 raise ValueError('--release reviewed stable manifest is required')
             update(manifest(args.release), args.maintenance)
+        elif args.command == 'repair-offline':
+            if not args.release:
+                raise ValueError('--release is required')
+            repair_offline(manifest(args.release), args.maintenance)
         elif args.command == 'recover':
             if not args.maintenance:
                 raise ValueError('--maintenance is required')
