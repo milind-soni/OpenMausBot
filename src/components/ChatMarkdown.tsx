@@ -17,6 +17,7 @@ import { markdownImageName, markdownImageOpenUrl } from "../lib/markdown-image";
 import { repairMarkdownTables } from "../lib/markdown-tables";
 import { TRANSCRIPT_WINDOW_SIZE } from "../lib/transcript-window";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
+import { linkPlainPaths } from "../../shared/markdown-plain-paths";
 import { GITHUB_REF_CLASS, isUseMyComputerUrl, LINK_CLASS, UseMyComputerLink, usePageOpener, withPageOpen } from "./ChatLinks";
 import { githubRefFromProps, remarkGithubRefs } from "@/lib/github-refs";
 import { GITHUB_REF_ICONS, LinkHoverCard } from "@/components/LinkHoverCard";
@@ -70,7 +71,7 @@ export function chatUrlTransform(value: string, key = "href"): string {
   if (looksLikeThreadRefUrl(value) || isUseMyComputerUrl(value)) return value;
   // Markdown-to-HTML percent-encodes a destination's backslashes (C:%5CUsers…); restore them and leave other escapes
   // for the server's single decode.
-  const url = /^[a-zA-Z]:%5C/i.test(value) ? value.replace(/%5C/gi, "\\") : value;
+  const url = /^(?:[a-zA-Z]:%5C|%5C%5C)/i.test(value) ? value.replace(/%5C/gi, "\\") : value;
   if (/^file:\/\//i.test(url) || WINDOWS_PATH.test(url) || url.startsWith("\\\\")) {
     return localFilePath(url) ? url : "";
   }
@@ -82,6 +83,12 @@ export function chatUrlTransform(value: string, key = "href"): string {
 function remarkWindowsPathDestinations(this: { data(): object }) {
   const data = this.data() as { fromMarkdownExtensions?: unknown[] };
   (data.fromMarkdownExtensions ??= []).push(windowsPathDestinations);
+}
+
+function remarkPlainPaths() {
+  return (tree: object, file: { value?: unknown }) => {
+    if (typeof file.value === "string") linkPlainPaths(tree, file.value);
+  };
 }
 
 const gfmParseData: {
@@ -738,7 +745,7 @@ const NO_THREAD_REFS: ThreadRefsValue = { threads: [] };
 
 // One plugin list for everything every message shares; a message adds mentions only when it has an "@" and thread
 // links only when it may name one, so most messages render the same way whatever the bot list holds.
-const BASE_REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [[remarkGfm, GFM_OPTIONS], remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkSoftBreaks, remarkGithubRefs];
+const BASE_REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [[remarkGfm, GFM_OPTIONS], remarkMath, remarkWindowsPathDestinations, remarkPlainPaths, unwrapLinkedImages, remarkSoftBreaks, remarkGithubRefs];
 const NO_REHYPE_PLUGINS: NonNullable<MarkdownOptions["rehypePlugins"]> = [];
 let katexPlugins: { plugin: KatexPlugin; list: NonNullable<MarkdownOptions["rehypePlugins"]> } | null = null;
 const rehypePluginsFor = (math: KatexPlugin | null) => {

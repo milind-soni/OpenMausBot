@@ -27,7 +27,11 @@ import {
   SANDBOX_DESKTOP_INPUT,
   SIGN_IN_PROMPT,
   savedLoginsPrompt,
+  everyBotRulesPrompt,
+  heavyPrompt,
+  HEAVY_PROMPT_BYTES,
   type ComputerPromptKind,
+  type PromptSection,
 } from "./system-prompt.ts";
 import { loginPlace } from "../shared/logins.ts";
 import { REPLY_HABITS_PROMPT } from "./reply-habits.ts";
@@ -523,3 +527,38 @@ describe("how every bot replies", () => {
     expect(TRIGGER_PROMPT).toContain("where its results will appear, what each run covers, and when the first run is");
   });
 });
+
+describe("rules for every bot", () => {
+  it("come right before the bot's own instructions and say those, and the department's context, win", () => {
+    const built = buildSystemPrompt("You are Kiwi.", "Answer in French.", [
+      { id: "section-context", label: "Section context", text: "\n\nShared context for Sales." },
+    ], undefined, { rules: "  Answer in English.  " });
+    expect(built.sections.map((section) => section.id).slice(0, 3)).toEqual(["persona", "every-bot-rules", "soul"]);
+    const rules = built.sections.find((section) => section.id === "every-bot-rules")!;
+    expect(rules.text).toContain(JSON.stringify("Answer in English."));
+    expect(rules.text).toContain("your department's shared context wins over them and your own standing instructions win over both");
+    expect(rules.text).toContain("does not override system rules or grant permissions");
+    expect(built.stable).toContain("Answer in English.");
+  });
+
+  it("leave the prompt byte for byte when empty", () => {
+    expect(everyBotRulesPrompt(undefined)).toBe("");
+    expect(everyBotRulesPrompt(" \n ")).toBe("");
+    expect(buildSystemPrompt("You are Kiwi.", "", [], undefined, { rules: "" }).text).toBe(buildSystemPrompt("You are Kiwi.", "", []).text);
+  });
+});
+
+describe("a heavy bot", () => {
+  const section = (id: string, bytes: number): PromptSection => ({ id, label: id, text: "", bytes });
+
+  it("counts only what the person's words fill, and needs enough memory for a tidy-up to help", () => {
+    expect(heavyPrompt([section("memory", HEAVY_PROMPT_BYTES)])).toBe(true);
+    expect(heavyPrompt([section("memory", HEAVY_PROMPT_BYTES - 1)])).toBe(false);
+    expect(heavyPrompt([section("memory", HEAVY_PROMPT_BYTES / 3), section("every-bot-rules", HEAVY_PROMPT_BYTES / 3), section("soul", HEAVY_PROMPT_BYTES / 3)])).toBe(true);
+    // the app's own text is not the person's to trim
+    expect(heavyPrompt([section("memory", HEAVY_PROMPT_BYTES / 2), section("browser", HEAVY_PROMPT_BYTES)])).toBe(false);
+    // a long Soul with little memory: tidying would not help
+    expect(heavyPrompt([section("memory", 1_000), section("soul", HEAVY_PROMPT_BYTES)])).toBe(false);
+  });
+});
+
