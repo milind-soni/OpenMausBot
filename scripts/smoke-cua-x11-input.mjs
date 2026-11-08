@@ -42,10 +42,12 @@ windowManager.once("error", (error) => {
   process.exit(1);
 });
 {
-  const deadline = Date.now() + 10_000;
+  // openbox claims the screen before it loads its theme and fonts, and a window mapped in between can go unmanaged;
+  // _OB_THEME is set once that startup is done. A fresh runner can spend many seconds building the font cache.
+  const deadline = Date.now() + 30_000;
   for (;;) {
-    const { stdout } = await execFileAsync("xprop", ["-root", "_NET_SUPPORTING_WM_CHECK"]).catch(() => ({ stdout: "" }));
-    if (/window id #/.test(stdout)) break;
+    const { stdout } = await execFileAsync("xprop", ["-root", "_NET_SUPPORTING_WM_CHECK", "_OB_THEME"]).catch(() => ({ stdout: "" }));
+    if (/window id #/.test(stdout) && /_OB_THEME\(UTF8_STRING\) =/.test(stdout)) break;
     if (windowManager.exitCode !== null || Date.now() > deadline) {
       throw new Error("the window manager did not start on this display");
     }
@@ -116,11 +118,7 @@ async function until(probe, description, timeout = 10_000) {
     await delay(25);
   }
   const x11 = async (command, args) => (await execFileAsync(command, args).catch((error) => ({ stdout: String(error) }))).stdout;
-  const pid = windowManager.pid;
-  const proc = async (file) => (await import("node:fs/promises")).readFile(`/proc/${pid}/${file}`, "utf8").catch((error) => String(error));
-  const state = `${await x11("ps", ["-o", "pid,stat,wchan:32,pcpu,etime,args", "-p", String(pid)])}\nwchan ${await proc("wchan")}\n` +
-    `syscall ${await proc("syscall")}\n${(await proc("status")).split("\n").filter((line) => /^(State|Threads|SigBlk|SigPnd)/.test(line)).join("\n")}`;
-  throw new Error(`timed out waiting for ${description}\n${driverError}\n${xevOutput}\nopenbox:\n${windowManagerOutput}\n${state}\n` +
+  throw new Error(`timed out waiting for ${description}\n${driverError}\n${xevOutput}\nopenbox:\n${windowManagerOutput}\n` +
     `${await x11("xprop", ["-root"])}\n${await x11("xwininfo", ["-root", "-tree"])}`);
 }
 
@@ -213,7 +211,7 @@ async function stop(child) {
 }
 
 try {
-  let remapped = false;
+  let remappedAt = Date.now();
   const windowId = await until(async () => {
     if (xev.exitCode !== null || xev.signalCode !== null) {
       throw new Error(`xev exited before its test window appeared:\n${xevOutput}`);
@@ -226,9 +224,8 @@ try {
     if (!id) return null;
     const { stdout: info } = await execFileAsync("xwininfo", ["-id", id]);
     if (/Map State:\s+IsViewable/.test(info)) return id;
-    // openbox 3.6 on a loaded runner can drop the map request of a window opened while it finishes starting; ask again once.
-    if (!remapped) {
-      remapped = true;
+    if (Date.now() - remappedAt >= 2_000) {
+      remappedAt = Date.now();
       await execFileAsync("xdotool", ["windowmap", id]);
     }
     return null;
