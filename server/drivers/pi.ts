@@ -730,11 +730,11 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           case "auto_compaction_end": {
             if (agentEndTimer) clearTimeout(agentEndTimer);
             agentEndTimer = null;
-            // pi compaction (manual or automatic) can absorb the turn that carried the standing prompt.
-            if (sessionReady && sessionFile) {
+            if (sessionReady && sessionFile) { // pi compaction (manual or automatic) can absorb the turn that carried the standing prompt
               compactionObserved = true;
               deletePromptSplitReceipt("pi", JSON.stringify([threadId, sessionFile]));
             }
+            if (evt.type.endsWith("compaction_end") && (evt as { aborted?: boolean }).aborted !== true) emit({ ...base(threadId, turnId), type: "context.compacted" });
             return;
           }
           case "message_end":

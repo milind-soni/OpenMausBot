@@ -2580,6 +2580,8 @@
   "chat.digestChipNoFiles": "Did {tools} tool calls",
   "chat.digestTitle": "What this turn did",
   "chat.compactionTitle": "Earlier context summarized",
+  "chat.engineCompactionTitle": "Chat condensed into a summary",
+  "chat.engineCompactionHint": "The AI summarized earlier messages to make room. Your full conversation is still here, but the agent may not recall older details exactly.",
   "chat.compactionHint": "Your full conversation is still here. The agent uses this summary and recent messages when continuing.",
   "chat.compactionExcerptTitle": "Earlier context shortened to recent excerpts",
   "chat.compactionExcerptHint": "A written summary wasn't available, so the agent continues from these excerpts and recent messages. Older details may be missing from its context. Your full conversation is still here.",
