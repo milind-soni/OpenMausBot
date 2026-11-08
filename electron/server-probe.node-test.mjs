@@ -37,6 +37,20 @@ test("failures are sorted into what the person can fix", async () => {
   assert.deepEqual(await probeServer({ address: "ABCD-EFGH-JKLM", fetch: fakeFetch({}).fetch }), { outcome: "problem", problem: "codeOnly", code: "ABCD-EFGH-JKLM" });
 });
 
+test("on a Mac, a local address that never answers names the Local Network permission; elsewhere it stays unreachable", async () => {
+  const blocked = () => new Error("net::ERR_ADDRESS_UNREACHABLE");
+  const silent = () => Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+  const lan = (error) => fakeFetch({ "http://192.168.1.50:8799": error, "https://192.168.1.50:8799": error }).fetch;
+  for (const error of [blocked(), silent()]) {
+    assert.deepEqual(await probeServer({ address: "http://192.168.1.50:8799", fetch: lan(error), platform: "darwin" }), { outcome: "problem", problem: "localNetwork", host: "192.168.1.50:8799" });
+    assert.equal((await probeServer({ address: "http://192.168.1.50:8799", fetch: lan(error), platform: "linux" })).problem, "unreachable");
+  }
+  // Refused means the network let the request through: nothing listens on that port.
+  assert.equal((await probeServer({ address: "http://192.168.1.50:8799", fetch: fakeFetch({}).fetch, platform: "darwin" })).problem, "unreachable");
+  // An https address is not a local-network one.
+  assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": blocked() }).fetch, platform: "darwin" })).problem, "unreachable");
+});
+
 test("a link to this computer is caught: nothing there, or this app's own workspace", async () => {
   assert.deepEqual(await probeServer({ address: "http://127.0.0.1:8799/pair#code=ABCD-EFGH-JKLM", fetch: fakeFetch({}).fetch }), { outcome: "problem", problem: "loopback", host: "127.0.0.1:8799" });
   const own = fakeFetch({ "http://127.0.0.1:18799": () => descriptor("mine") });

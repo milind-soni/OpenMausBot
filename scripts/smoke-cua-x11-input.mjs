@@ -29,16 +29,25 @@ chmodSync(home, 0o700);
 
 // A real Xorg desktop always runs a window manager, and Cua Driver 0.41 sends foreground input only to the window the
 // manager reports active (_NET_ACTIVE_WINDOW). A bare Xvfb has none, so start a small EWMH one first.
-const windowManager = spawn("openbox", ["--sm-disable"], { env: process.env, stdio: "ignore" });
+const windowManager = spawn("openbox", ["--sm-disable"], { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+let windowManagerOutput = "";
+for (const stream of [windowManager.stdout, windowManager.stderr]) {
+  stream.setEncoding("utf8");
+  stream.on("data", (chunk) => {
+    windowManagerOutput += chunk;
+  });
+}
 windowManager.once("error", (error) => {
   console.error(`[smoke-cua-x11-input] openbox could not start (install it): ${error.message}`);
   process.exit(1);
 });
 {
-  const deadline = Date.now() + 10_000;
+  // openbox claims the screen before it loads its theme and fonts, and a window mapped in between can go unmanaged;
+  // _OB_THEME is set once that startup is done. A fresh runner can spend many seconds building the font cache.
+  const deadline = Date.now() + 30_000;
   for (;;) {
-    const { stdout } = await execFileAsync("xprop", ["-root", "_NET_SUPPORTING_WM_CHECK"]).catch(() => ({ stdout: "" }));
-    if (/window id #/.test(stdout)) break;
+    const { stdout } = await execFileAsync("xprop", ["-root", "_NET_SUPPORTING_WM_CHECK", "_OB_THEME"]).catch(() => ({ stdout: "" }));
+    if (/window id #/.test(stdout) && /_OB_THEME\(UTF8_STRING\) =/.test(stdout)) break;
     if (windowManager.exitCode !== null || Date.now() > deadline) {
       throw new Error("the window manager did not start on this display");
     }
@@ -108,7 +117,9 @@ async function until(probe, description, timeout = 10_000) {
     }
     await delay(25);
   }
-  throw new Error(`timed out waiting for ${description}\n${driverError}\n${xevOutput}`);
+  const x11 = async (command, args) => (await execFileAsync(command, args).catch((error) => ({ stdout: String(error) }))).stdout;
+  throw new Error(`timed out waiting for ${description}\n${driverError}\n${xevOutput}\nopenbox:\n${windowManagerOutput}\n` +
+    `${await x11("xprop", ["-root"])}\n${await x11("xwininfo", ["-root", "-tree"])}`);
 }
 
 function driverRequest(method) {
@@ -200,18 +211,25 @@ async function stop(child) {
 }
 
 try {
+  let remappedAt = Date.now();
   const windowId = await until(async () => {
     if (xev.exitCode !== null || xev.signalCode !== null) {
       throw new Error(`xev exited before its test window appeared:\n${xevOutput}`);
     }
-    const { stdout } = await execFileAsync("xdotool", [
-      "search",
-      "--onlyvisible",
-      "--name",
-      `^${title}$`,
-    ]);
-    return stdout.trim().split(/\s+/)[0] || null;
-  }, "the unrelated X11 test window");
+    if (windowManager.exitCode !== null || windowManager.signalCode !== null) {
+      throw new Error(`openbox exited before the test window appeared: ${windowManager.exitCode ?? windowManager.signalCode}`);
+    }
+    const { stdout } = await execFileAsync("xdotool", ["search", "--name", `^${title}$`]);
+    const id = stdout.trim().split(/\s+/)[0];
+    if (!id) return null;
+    const { stdout: info } = await execFileAsync("xwininfo", ["-id", id]);
+    if (/Map State:\s+IsViewable/.test(info)) return id;
+    if (Date.now() - remappedAt >= 2_000) {
+      remappedAt = Date.now();
+      await execFileAsync("xdotool", ["windowmap", id]);
+    }
+    return null;
+  }, "the unrelated X11 test window", 20_000);
   if (!windowId) throw new Error("xev test window did not appear");
 
   const metadata = await until(

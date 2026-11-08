@@ -21,7 +21,7 @@ export type SectionNaming = { value: string; label: string; onCommit: (name: str
 
 type Naming = { kind: "new"; botIds: string[]; name: string } | { kind: "rename"; section: string };
 
-type Arranged = { enabled: boolean; lists: Map<string, string[]>; bots: Bot[]; taken: string[] };
+type Arranged = { enabled: boolean; lists: Map<string, string[]>; bots: Bot[]; taken: string[]; withinList: boolean };
 
 const carries = (event: DragEvent<HTMLElement>) => event.dataTransfer.types.includes(BOT_ROW_DRAG_TYPE);
 const failure = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
@@ -36,7 +36,9 @@ export function BotDropLine({ place }: { place: BotDropPlace | null | undefined 
 }
 
 /** Dragging bots between the rows outside any department and each department's, onto a bot to start a department,
- * Alt+Up/Down, and the name field a new or renamed department shows in its heading. */
+ * Alt+Up/Down, and the name field a new or renamed department shows in its heading. With `withinList` a drop may only
+ * reorder the bot inside the list it already belongs to: the icons-only rail draws no department heading, so it shows
+ * neither the department a bot would join nor the field that names a new one. */
 export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onError, onCancelled }: {
   dispatch: Dispatch<Action>;
   announce: (text: string) => void;
@@ -49,7 +51,7 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
   const [drop, setDrop] = useState<BotDrop | null>(null);
   const [naming, setNaming] = useState<Naming | null>(null);
   const mayMove = useMayMoveBots();
-  const latest = useRef<Arranged>({ enabled: false, lists: new Map(), bots: [], taken: [] });
+  const latest = useRef<Arranged>({ enabled: false, lists: new Map(), bots: [], taken: [], withinList: false });
   const moving = useRef<{ botId: string | null; drop: BotDrop | null }>({ botId: null, drop: null });
   const controller = useRef<BotRowDrag | null>(null);
   const actions = useRef({ dispatch, announce });
@@ -76,15 +78,26 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
     actions.current.announce(t("sidebar.section.moved", { name, position: move.order.indexOf(botId) + 1, count: move.order.length }));
     requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-sidebar-bot-row="${CSS.escape(botId)}"]`)?.focus());
   };
+  const allowed = (botId: string, move: BotMove | null): BotMove | null => {
+    if (!move) return null;
+    if (!latest.current.withinList) return move;
+    const from = botListOf(latest.current.lists, botId);
+    if (move.kind !== "move" || move.section !== from) return null;
+    return move;
+  };
   const finish = (target: BotDrop | null) => {
     const botId = moving.current.botId;
     end();
     const move = botId && target && latest.current.enabled ? planBotDrop(latest.current.lists, botId, target) : null;
-    if (botId && move) apply(botId, move, false);
+    if (botId && move) {
+      const next = allowed(botId, move);
+      if (next) apply(botId, next, false);
+    }
   };
   const rowDrop = (event: DragEvent<HTMLElement>, botId: string): BotDrop => {
     const box = event.currentTarget.getBoundingClientRect();
-    return { kind: "row", botId, place: botDropPlace(event.clientY - box.top, box.height, botListOf(latest.current.lists, botId) === "") };
+    const canGroup = !latest.current.withinList && botListOf(latest.current.lists, botId) === "";
+    return { kind: "row", botId, place: botDropPlace(event.clientY - box.top, box.height, canGroup) };
   };
 
   controller.current ??= {
@@ -101,6 +114,8 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
       onDragEnd: end,
       onDragOver: (event) => {
         if (!carries(event) || !moving.current.botId) return;
+        // Within one list only (the collapsed rail): another list's row shows no drop line, since the drop is refused.
+        if (latest.current.withinList && botListOf(latest.current.lists, botId) !== botListOf(latest.current.lists, moving.current.botId)) return show(null);
         event.preventDefault();
         event.stopPropagation();
         event.dataTransfer.dropEffect = "move";
@@ -136,13 +151,13 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
     preview: <T extends Bot>(bots: T[]): T[] => naming?.kind === "new" ? bots.map((bot) => (naming.botIds.includes(bot.id) ? { ...bot, section: NEW_DEPARTMENT } : bot)) : bots,
     startNew: (botIds: string[]) => startNew(botIds),
     startRename: (section: string) => setNaming({ kind: "rename", section }),
-    arrange({ enabled, main, sectioned, departments, bots, taken }: {
-      enabled: boolean; main: Bot[]; sectioned: Bot[]; departments: string[]; bots: Bot[]; taken: string[];
+    arrange({ enabled, withinList = false, main, sectioned, departments, bots, taken }: {
+      enabled: boolean; withinList?: boolean; main: Bot[]; sectioned: Bot[]; departments: string[]; bots: Bot[]; taken: string[];
     }) {
       const movable = enabled && mayMove;
       const lists = new Map<string, string[]>([["", main.map((bot) => bot.id)]]);
       for (const name of departments) if (name !== NEW_DEPARTMENT) lists.set(name, sectioned.filter((bot) => bot.section === name).map((bot) => bot.id));
-      latest.current = { enabled: movable, lists, bots, taken };
+      latest.current = { enabled: movable, lists, bots, taken, withinList };
       const active = movable && dragging !== null && botListOf(lists, dragging) !== undefined ? dragging : null;
       const shown = active ? drop : null;
       const mainIds = lists.get("")!.filter((id) => id !== active);
@@ -168,7 +183,9 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
           onDragOver: (event) => {
             if (!carries(event)) return fallback.onDragOver(event);
             const list = listFor(sectionId);
-            if (!moving.current.botId || list === null || !lists.has(list)) return show(null);
+            const dragged = moving.current.botId;
+            if (!dragged || list === null || !lists.has(list)) return show(null);
+            if (withinList && list !== botListOf(lists, dragged)) return show(null);
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
             const target = zoneDrop(event, list);

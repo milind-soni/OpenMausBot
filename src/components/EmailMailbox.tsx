@@ -7,7 +7,7 @@ import { t } from "@/lib/i18n";
 import { reserveConnectionPage } from "@/lib/connector-oauth";
 import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { Select } from "./Select";
-import type { EmailAccountView, EmailOutgoingAnswer, EmailOutgoingFields, EmailSignInHint, EmailTestAnswer } from "../../shared/email";
+import { outgoingFieldsOf, type EmailAccountView, type EmailOutgoingAnswer, type EmailOutgoingFields, type EmailSignInHint, type EmailTestAnswer } from "../../shared/email";
 
 export const EMAIL_PILL = "inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors hover:bg-raised-hover disabled:opacity-40";
 export const EMAIL_FIELD = "h-8 w-full min-w-0 rounded-lg bg-inset px-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent/50";
@@ -64,12 +64,6 @@ export function OutgoingServerInputs<T extends EmailOutgoingFields>({ value, onC
   );
 }
 
-/** What the outgoing form starts with: the server a mailbox sends through, or the one the reason is about; never a password. */
-export const outgoingOf = (account: EmailAccountView): EmailOutgoingFields => {
-  const server = account.smtpHost ? { smtpHost: account.smtpHost, smtpPort: account.smtpPort, smtpSecurity: account.smtpSecurity } : account.smtpTried ?? {};
-  return Object.fromEntries(Object.entries({ ...server, smtpUsername: account.smtpUsername }).filter(([, value]) => value !== undefined)) as EmailOutgoingFields;
-};
-
 const message = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
 /** Gmail, Outlook and the providers that want an app password: one line, and their own way in. */
@@ -122,7 +116,7 @@ export function EmailMailbox({ account, onChanged, compact = false, fieldClassNa
 }) {
   const failing = Boolean(account.sendingProblem);
   const [editing, setEditing] = useState(failing);
-  const [fields, setFields] = useState<EmailOutgoingFields>(() => outgoingOf(account));
+  const [fields, setFields] = useState<EmailOutgoingFields>(() => outgoingFieldsOf(account));
   const [busy, setBusy] = useState<"check" | "test" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -137,7 +131,7 @@ export function EmailMailbox({ account, onChanged, compact = false, fieldClassNa
       const answer = await api(`${at}/outgoing`, { method: "POST", body: JSON.stringify(fields) }) as EmailOutgoingAnswer;
       if (answer.ok) {
         setEditing(false);
-        setFields(outgoingOf(answer.account));
+        setFields(outgoingFieldsOf(answer.account));
         await onChanged(answer.account);
       } else {
         setError(answer.error);
@@ -181,7 +175,7 @@ export function EmailMailbox({ account, onChanged, compact = false, fieldClassNa
           <OutgoingServerInputs value={fields} onChange={setFields} className={fieldClassName} disabled={busy !== null} />
           <div className="flex items-center gap-2">
             <button type="submit" disabled={busy !== null} className={EMAIL_PILL}>{busy === "check" ? <Loader2 size={14} className="animate-spin" /> : t("common.tryAgain")}</button>
-            {!failing && <button type="button" disabled={busy !== null} onClick={() => { setEditing(false); setFields(outgoingOf(account)); setError(null); }} className={EMAIL_LINK}>{t("common.cancel")}</button>}
+            {!failing && <button type="button" disabled={busy !== null} onClick={() => { setEditing(false); setFields(outgoingFieldsOf(account)); setError(null); }} className={EMAIL_LINK}>{t("common.cancel")}</button>}
           </div>
         </form>
       )}

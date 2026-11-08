@@ -29,7 +29,7 @@ const STALL_PERCENT = 20;
 const MINUTE_MS = 60_000, DAY_MINUTES = 24 * 60;
 /** Engines that run each thread's turns in processes of their own. */
 export const ENGINE_PROCESS_KINDS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "opencodeGo", "grokAgent", "geminiAgent", "kimiAgent",
-  "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "copilotAgent", "commandCodeAgent", "customAcp", "piAgent", "antigravityAgent"]);
+  "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "copilotAgent", "commandCodeAgent", "kiroAgent", "customAcp", "piAgent", "antigravityAgent"]);
 
 export interface HostMemory { totalBytes: number; availableBytes: number; swapFreeBytes: number; oomKills: number | null; fullStall10: number | null }
 
@@ -189,6 +189,8 @@ export class EngineMemory {
   private timer: ReturnType<typeof setInterval> | null = null;
   private browsers: EngineBrowsers | null = null;
   private personsOwn: (threadId: string) => boolean = () => false;
+  private generation = 0;
+  private ordered: { at: number; generation: number; list: Waiter[] } | null = null;
   private waits: EngineWaits | null = null;
   private cap: EngineCap | null = null;
 
@@ -300,6 +302,7 @@ export class EngineMemory {
     if (joining !== undefined) this.engines.get(joining)?.threads.add(threadId);
     const waiter: Waiter = { wake: () => {}, threadId, since: this.now() };
     this.queue.push(waiter);
+    this.generation++;
     let announced: number | null = null;
     try {
       for (;;) {
@@ -337,6 +340,7 @@ export class EngineMemory {
       }
     } finally {
       this.queue.splice(this.queue.indexOf(waiter), 1);
+      this.generation++;
       const since = this.waitingSince.get(waiter);
       if (since !== undefined) {
         this.waitingSince.delete(waiter);
@@ -487,14 +491,20 @@ export class EngineMemory {
     }
   }
 
+  /** Every waiter orders the queue each time it wakes, so the order is worked out once per wake and moment. */
   private order(): Waiter[] {
     const at = this.now();
+    if (this.ordered?.at === at && this.ordered.generation === this.generation) return this.ordered.list;
     const first: Waiter[] = [], rest: Waiter[] = [];
     for (const waiter of this.queue) (this.personsOwn(waiter.threadId) || at - waiter.since >= BOT_TURN_GIVES_WAY_MS ? first : rest).push(waiter);
-    return [...first, ...rest];
+    this.ordered = { at, generation: this.generation, list: [...first, ...rest] };
+    return this.ordered.list;
   }
 
-  private wake(): void { for (const waiter of this.queue) waiter.wake(); }
+  private wake(): void {
+    this.generation++;
+    for (const waiter of this.queue) waiter.wake();
+  }
 
   private arm(): void {
     if (this.timer || !this.enabled) return;
