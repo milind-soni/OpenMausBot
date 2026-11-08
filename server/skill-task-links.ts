@@ -6,7 +6,55 @@ import type { HarnessSkillLinks } from "./lending-memory.ts";
 import { orgSkillStorage, ownSkillLinks, syncSkillLinks } from "./skills.ts";
 import { taskSkillMayReferTo } from "./skill-task-references.ts";
 import { nativeSkillLinksMayReferTo } from "./skill-native-reference.ts";
+import type { BotRecord, Store } from "./store.ts";
 import { ensureTaskWorkspace, workspaceDir } from "./workspace.ts";
+
+export class SkillLinkSafetyError extends Error {}
+const turnWorkspaceOwners = new WeakMap<object, ReadonlySet<string>>();
+
+const comparable = (path: string) => {
+  const normalized = resolve(path).replace(/^\\\\\?\\/, "");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+};
+const inside = (parent: string, child: string) => {
+  const rest = relative(comparable(parent), comparable(child));
+  return rest === "" || (!isAbsolute(rest) && rest !== ".." && !rest.startsWith(`..${sep}`));
+};
+
+export function workspaceMayContain(botId: string, cwd: string | null | undefined): boolean {
+  if (!cwd) return false;
+  const workspace = workspaceDir(botId);
+  if (inside(workspace, cwd)) return true;
+  try { return inside(realpathSync(workspace), realpathSync(cwd)); } catch { return true; }
+}
+
+export function noteSkillWorkspaceUse(turn: object, cwd: string | undefined, botIds: readonly string[]): void {
+  if (!cwd) { turnWorkspaceOwners.set(turn, new Set()); return; }
+  let actual: string | undefined;
+  try { actual = realpathSync(cwd); } catch {}
+  // A mutable or unresolved alias can change after a provider takes its working folder.
+  const alias = !actual || comparable(actual) !== comparable(cwd);
+  turnWorkspaceOwners.set(turn, new Set(alias ? botIds : botIds.filter((owner) => workspaceMayContain(owner, cwd))));
+}
+
+export function skillWorkspaceMayBeInUse(botId: string, direct: Iterable<[string, BotRecord]>, rooms: Iterable<string>, store: Store, turns: ReadonlyMap<string, object>): boolean {
+  const noted = (threadId: string) => { const turn = turns.get(threadId); return turn && turnWorkspaceOwners.get(turn)?.has(botId); };
+  for (const [threadId, bot] of direct) {
+    if (noted(threadId)) return true;
+    const cwd = store.taskByThread(bot.id, threadId)?.cwd;
+    if (workspaceMayContain(botId, cwd === undefined ? bot.cwd : cwd)) return true;
+  }
+  for (const threadId of rooms) {
+    if (noted(threadId)) return true;
+    const group = store.groupByThread(threadId);
+    if (!group) continue;
+    const task = store.groupTaskByThread(group.id, threadId);
+    const pinned = task ? task.pinnedCwd : group.pinnedCwd;
+    const cwd = pinned === undefined ? group.cwd : pinned;
+    if (workspaceMayContain(botId, cwd)) return true;
+  }
+  return false;
+}
 
 /** Every link this file's two syncs may put in a bot's folders. */
 export function harnessSkillLinks(botId: string): HarnessSkillLinks {
@@ -30,25 +78,22 @@ function taskHasStaleOrganizationLink(botId: string, threadId: string): boolean 
   });
 }
 
-/** A legacy turn using the bot's own workspace must not discover a retained old revision. */
-export function assertWorkspaceSkillLinksCurrent(botId: string, cwd: string | undefined): void {
-  const workspace = workspaceDir(botId);
+/** A turn must not discover a retained revision through any bot's workspace. */
+export function assertWorkspaceSkillLinksCurrent(botId: string, cwd: string | undefined, otherBotIds: readonly string[] = []): void {
   if (!cwd) return;
-  const comparable = (path: string) => process.platform === "win32" ? resolve(path).toLowerCase() : resolve(path);
-  const inside = (parent: string, child: string) => {
-    const rest = relative(comparable(parent), comparable(child));
-    return rest === "" || (!isAbsolute(rest) && rest !== ".." && !rest.startsWith(`..${sep}`));
-  };
-  let inWorkspace = inside(workspace, cwd);
-  if (!inWorkspace) {
-    try { inWorkspace = inside(realpathSync(workspace), realpathSync(cwd)); } catch {}
-  }
-  if (!inWorkspace) return;
-  const root = join(workspace, "skills");
-  for (const [name, entry] of Object.entries(orgSkillStorage.readManifest(botId))) {
-    const pending = [...(entry.pendingRetirements ?? []), ...(entry.pendingRemoval ? [entry.pendingRemoval] : [])];
-    if (pending.some((item) => nativeSkillLinksMayReferTo(botId, name, item.revision ? join(root, ".revisions", item.revision) : join(root, name)))) {
-      throw new Error("Skill links could not be synchronized safely; retry after the previous skill links are cleared.");
+  for (const owner of new Set([botId, ...otherBotIds])) {
+    const workspace = workspaceDir(owner);
+    if (!workspaceMayContain(owner, cwd)) continue;
+    let workspaceAvailable = true;
+    try { realpathSync(workspace); } catch { workspaceAvailable = false; }
+    const root = join(workspace, "skills");
+    const manifest = orgSkillStorage.readProtectedManifest(owner);
+    if (!manifest) throw new SkillLinkSafetyError("Skill links could not be synchronized safely; retry after the previous skill links are cleared.");
+    for (const [name, entry] of Object.entries(manifest)) {
+      const pending = [...(entry.pendingRetirements ?? []), ...(entry.pendingRemoval ? [entry.pendingRemoval] : [])];
+      if (pending.length && (!workspaceAvailable || pending.some((item) => nativeSkillLinksMayReferTo(owner, name, item.revision ? join(root, ".revisions", item.revision) : join(root, name))))) {
+        throw new SkillLinkSafetyError("Skill links could not be synchronized safely; retry after the previous skill links are cleared.");
+      }
     }
   }
 }
@@ -71,7 +116,7 @@ export function ensureTaskWorkspaceWithSkills(botId: string, threadId: string, i
     console.warn(`[skills] linking skills into the task folder failed: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (taskHasStaleOrganizationLink(botId, threadId)) {
-    throw new Error("Skill links could not be synchronized safely; retry after the task's previous skill links are cleared.");
+    throw new SkillLinkSafetyError("Skill links could not be synchronized safely; retry after the task's previous skill links are cleared.");
   }
   linkImported();
   return folder;

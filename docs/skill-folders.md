@@ -13,6 +13,17 @@ organization copy needs manual recovery before update or removal. Welcome
 imports from this computer cannot reliably infer executable intent and still
 refuse a skill that declares executable files.
 
+There is no automatic in-place recovery for an older Windows organization
+skill whose executable intent is unknown. Switch it off and keep a private
+backup of both `<data>/workspaces/<bot-id>/skills/` and
+`<data>/skill-state/<bot-id>/` before trying to recover it. To continue using
+the skill, import a fresh copy into another bot from a trusted GitHub source
+that records file modes, review it, and enable it there. Compare the backup for
+local edits when preparing a reviewed source; editing an installed folder does
+not make those edits reviewed. This workaround preserves the old entry and does
+not remove it from the original bot. Do not invent mode metadata or edit its
+protected state to force removal.
+
 The bot's own `skill_manage` authoring flow has a narrower reviewed format:
 `SKILL.md` and up to eight `references/<topic>.md` files. Sharing a learned
 skill into the library currently refuses supporting files. These restrictions

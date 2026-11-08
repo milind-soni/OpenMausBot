@@ -382,7 +382,7 @@ import {
   undoSkillWrite,
 } from "./skills.ts";
 import { fetchSkillFromSource } from "./skill-fetch.ts";
-import { assertWorkspaceSkillLinksCurrent, ensureTaskWorkspaceWithSkills, harnessSkillLinks } from "./skill-task-links.ts"; import { changedWords, createLendingLifts, handedInSince } from "./host/lending-lifts.ts"; import { deviceWord } from "./lent-computers.ts";
+import { assertWorkspaceSkillLinksCurrent, ensureTaskWorkspaceWithSkills, harnessSkillLinks, noteSkillWorkspaceUse, skillWorkspaceMayBeInUse, SkillLinkSafetyError } from "./skill-task-links.ts"; import { changedWords, createLendingLifts, handedInSince } from "./host/lending-lifts.ts"; import { deviceWord } from "./lent-computers.ts";
 import { parseSkillManageReferences, previousSkillVersion, skillCardCopy, skillRequestReferences } from "./skill-request-card.ts";
 import { skillReferencesSha256 } from "./skill-storage.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
@@ -7957,7 +7957,8 @@ async function beginTurn(
           ? store.pinTaskCwd(bot.id, threadId, privateWorkspace, { privateOnly: cloudGuestOpened(threadId) || botApiThread(threadId) })
           : null;
       const cwd = pinnedCwd ?? undefined;
-      assertWorkspaceSkillLinksCurrent(bot.id, cwd ?? (worksInWorkspace ? workspaceDir(bot.id) : undefined));
+      noteSkillWorkspaceUse(resourceOwner, cwd ?? (worksInWorkspace ? workspaceDir(bot.id) : undefined), store.bots.map((owner) => owner.id));
+      assertWorkspaceSkillLinksCurrent(bot.id, cwd ?? (worksInWorkspace ? workspaceDir(bot.id) : undefined), store.bots.map((owner) => owner.id));
       const checkpointCwd = cwd && cwd !== privateWorkspace ? cwd : undefined;
       const dwebUrl = process.env.DWEB_URL?.trim();
       if (dwebUrl) integrations.dweb = { url: dwebUrl };
@@ -8921,7 +8922,8 @@ if (CLOUD_HOME && CLOUD_OWNER_KEY && cloudRoutineAuthors) {
 routines.clearFrozenResultsThreads(); proactive.ensureWatch(); startFirstHour({ hooks: firstHourHooks, fresh: firstHourFresh, store, bus, cfg, dataDir: DATA_DIR, proactive, briefOn: () => proactive.briefOn(), ensureBrief: () => { proactive.ensureWatch(); }, composio, sessions, phones: () => phones.paired(), routines: () => routines, mainThread: botMainThread, threadBusy, startTurn, notify, wrote: markTaskContextExternallyUpdated, stale: shouldIgnoreProviderEvent, welcomeDone: () => { adminActorScope.exit(() => saveConfig(welcomeDonePatch(cfg.onboarding))); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } });
 setSkillUseGuard((botId) => botHasActiveTurn(botId) || Boolean(routines?.activeRunForBot(botId)) ||
   [...directTurnBots.values()].some((bot) => bot.id === botId) ||
-  [...groupTurnOperations.values()].some((operations) => [...operations].some((operation) => operation.botIds.has(botId))));
+  [...groupTurnOperations.values()].some((operations) => [...operations].some((operation) => operation.botIds.has(botId))) ||
+  skillWorkspaceMayBeInUse(botId, directTurnBots, groupSpeakers.keys(), store, turnResourceOwners));
 orgLibrary = new OrgLibrary({
   dataDir: DATA_DIR,
   store,
@@ -10181,7 +10183,8 @@ async function runClaimedGroupMemberTurn(
   const cwd = workspace && cloudGuestOpened(threadId)
     ? ensureTaskWorkspaceWithSkills(bot.id, threadId, skillsHost.turnImports(bot, threadId, instance))
     : groupTurnCwd(workspace, () => store.pinGroupCwd(readyGroup.id, threadId));
-  assertWorkspaceSkillLinksCurrent(bot.id, cwd);
+  noteSkillWorkspaceUse(resourceOwner, cwd, store.bots.map((owner) => owner.id));
+  assertWorkspaceSkillLinksCurrent(bot.id, cwd, store.bots.map((owner) => owner.id));
   assertRoomFolder(cwd); if (workspace && bot.memoryEnabled !== false) beginMemoryTurn(teamHost.layer(bot.id, threadId), threadId); if (workspace) botBox.lend(bot.id, threadId, teamHost.layerDirs(bot.id, threadId));
   {
     const drift = checkSoulDrift(bot.id, bot.soul ?? "", bot.soulHash ?? "");
@@ -10605,6 +10608,7 @@ async function runClaimedGroupMemberTurn(
     const isSpendCap = typeof error === "object" && error !== null && (error as { code?: string }).code === "spend_cap";
     const isVariantError = typeof error === "object" && error !== null && (error as { code?: string }).code === "unsupported_model_variant";
     const isToolScopeError = typeof error === "object" && error !== null && (error as { code?: string }).code === "tool_scope";
+    const isSkillLinkError = error instanceof SkillLinkSafetyError;
     if (error instanceof ComputerWaitParked) {
       if (orchestration) {
         orchestration.result.outcome = "parked";
@@ -10622,9 +10626,9 @@ async function runClaimedGroupMemberTurn(
     reportDispatchError(message);
     if (orchestration) {
       orchestration.result.outcome = isSpendCap ? "spend_capped" : "dispatch_failed";
-      if (isSpendCap) orchestration.result.stopReason = message;
+      if (isSpendCap || isSkillLinkError) orchestration.result.stopReason = message;
     }
-    return isToolScopeError;
+    return isToolScopeError || isSkillLinkError;
   } finally {
     // Covers every early return that never produces a provider terminal event.
     unregisterSetupStall();

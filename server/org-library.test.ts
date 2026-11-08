@@ -1043,7 +1043,11 @@ describe("a newer release of an added team", () => {
     if (change !== "unchanged") writeFileSync(file, "local work\n");
     const result = app.skills.removeSkill(lead.id, name);
     if (change === "unchanged") { expect(result).toEqual({ removed: true }); expect(existsSync(directory)).toBe(false); }
-    else { expect(result).toHaveProperty("error", expect.stringContaining("folder changed")); expect(readFileSync(file, "utf8")).toBe("local work\n"); }
+    else {
+      expect(result).toHaveProperty("error", expect.stringContaining("folder changed"));
+      expect(readFileSync(file, "utf8")).toBe("local work\n");
+      expect(app.skills.orgSkillStorage.readManifest(lead.id)[name]).toMatchObject({ enabled: true });
+    }
   });
 
   it("retries a pending removal after a task link clears without another catalog", async () => {
@@ -1253,10 +1257,47 @@ describe("a newer release of an added team", () => {
       symlinkSync(workspace, alias);
       expect(() => assertWorkspaceSkillLinksCurrent(lead.id, alias)).toThrow("could not be synchronized safely");
     }
+    mkdirSync(join(app.DATA_DIR, "elsewhere"));
     expect(() => assertWorkspaceSkillLinksCurrent(lead.id, join(app.DATA_DIR, "elsewhere"))).not.toThrow();
     interrupted.mockRestore();
     expect(app.recoverOrganizationSkillLinks(lead.id)).toEqual({ ok: true });
     expect(() => assertWorkspaceSkillLinksCurrent(lead.id, join(app.DATA_DIR, "workspaces", lead.id))).not.toThrow();
+  });
+
+  it("blocks unresolved workspace aliases and shared workspaces with a pending native link", async () => {
+    const { app, botOf, update } = await addedTeam();
+    const lead = botOf("lead"), other = botOf("scout");
+    const { assertWorkspaceSkillLinksCurrent } = await import("./skill-task-links.ts");
+    await update();
+    const interrupted = vi.spyOn(app.skills.orgSkillStorage, "syncSkillLinks").mockReturnValue(false);
+    await update(release("full-team.v2.json", (doc) => {
+      NEXT(doc); doc.package.release = "1.5.0";
+      doc.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").instructions += "\nNew reviewed revision.";
+    }));
+    const workspace = join(app.DATA_DIR, "workspaces", lead.id), alias = join(app.DATA_DIR, "missing-alias");
+    expect(() => assertWorkspaceSkillLinksCurrent(lead.id, alias)).toThrow("could not be synchronized safely");
+    expect(() => assertWorkspaceSkillLinksCurrent(other.id, workspace, [lead.id])).toThrow("could not be synchronized safely");
+    if (process.platform !== "win32") {
+      symlinkSync(workspace, alias);
+      expect(() => assertWorkspaceSkillLinksCurrent(other.id, alias, [lead.id])).toThrow("could not be synchronized safely");
+      unlinkSync(alias);
+    }
+    expect(() => assertWorkspaceSkillLinksCurrent(other.id, undefined, [lead.id])).not.toThrow();
+    const protectedFile = join(app.DATA_DIR, "skill-state", lead.id, "skills.json");
+    const protectedState = readFileSync(protectedFile, "utf8");
+    writeFileSync(protectedFile, "{");
+    expect(() => assertWorkspaceSkillLinksCurrent(other.id, workspace, [lead.id])).toThrow("could not be synchronized safely");
+    writeFileSync(protectedFile, protectedState);
+    interrupted.mockRestore();
+    expect(app.recoverOrganizationSkillLinks(lead.id)).toEqual({ ok: true });
+    expect(() => assertWorkspaceSkillLinksCurrent(lead.id, alias)).not.toThrow();
+    const legacy = "legacy-other", legacyRoot = join(app.DATA_DIR, "workspaces", legacy);
+    mkdirSync(join(legacyRoot, "skills"), { recursive: true });
+    const legacyFile = join(legacyRoot, "skills", "skills.json");
+    writeFileSync(legacyFile, protectedState);
+    expect(() => assertWorkspaceSkillLinksCurrent(legacy, legacyRoot)).not.toThrow();
+    expect(existsSync(join(app.DATA_DIR, "skill-state", legacy, "skills.json"))).toBe(false);
+    expect(readFileSync(legacyFile, "utf8")).toBe(protectedState);
   });
 
   it("recovers an interrupted link switch after restart without a new catalog", async () => {

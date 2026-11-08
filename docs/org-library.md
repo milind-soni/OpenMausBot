@@ -84,8 +84,10 @@ skill's stamp move to the new release. If a part can't be written, the parts
 written so far keep their new stamps, the install stays on its release, and
 the next catalog finishes it. An updated skill is staged as a complete folder
 before its manifest changes, so a failed write leaves the previous files in
-place. An update waits for the bot's active turns to finish. If switching its
-native skill links fails, the previous revision stays and the app retries,
+place. An update waits for the bot's active turns to finish, including turns
+by another bot in its workspace. A turn using a folder alias or an unresolved
+folder can also delay other bots' skill updates until that turn ends. If
+switching its native skill links fails, the previous revision stays and the app retries,
 including after restart. A task's link can keep an older revision available;
 the task gets the new link before its next turn, after which the old revision
 can be cleaned up. Up to 32 old revisions per skill can be retained this way;
@@ -95,8 +97,10 @@ to be on the same filesystem; an update across filesystems is refused. A change
 to a file's path, bytes or executable bit is an update; an edited, missing or extra local
 file blocks replacement of that skill. On Windows, protected metadata carries
 reviewed executable intent through updates and cleanup; an older copy without
-that metadata needs manual recovery rather than guessing. Cleanup deletes an old
-folder only while its contents are unchanged; a changed folder is kept for you to move.
+that metadata needs manual recovery rather than guessing. Cleanup checks that
+an old folder is unchanged before deleting it and keeps a changed folder for
+recovery. A process with a file already open can still write after that check;
+such a late edit can be lost during cleanup.
 If deletion stops partway, the remaining folder and its recovery record stay
 in protected skill state and cleanup reports that they need attention.
 If an organization's active skill folder has changed, removal is refused and

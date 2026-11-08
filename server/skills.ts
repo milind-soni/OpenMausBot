@@ -209,6 +209,10 @@ function manifestFromFile(path: string): SkillManifest | null {
     return null;
   }
 }
+function readProtectedManifest(botId: string): SkillManifest | null {
+  try { lstatSync(manifestPath(botId)); } catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT" ? {} : null; }
+  return manifestFromFile(manifestPath(botId));
+}
 
 function readManifest(botId: string): SkillManifest {
   const securePath = manifestPath(botId);
@@ -1373,4 +1377,4 @@ export function removeManifestEntry(botId: string, name: string, expectSha256: s
   syncSkillLinks(botId);
   return { removed: true };
 }
-export const orgSkillStorage = { readManifest, writeManifest, ensureSkillsRoot, skillDirectory, skillContentMatches, syncSkillLinks, skillStateDir, removeSkill };
+export const orgSkillStorage = { readManifest, readProtectedManifest, writeManifest, ensureSkillsRoot, skillDirectory, skillContentMatches, syncSkillLinks, skillStateDir, removeSkill };
