@@ -1,3 +1,5 @@
+const { PLUGIN_REQUIRED_MESSAGE, isHyprlandSession } = require("./cua-hyprland.cjs");
+
 const DESKTOP_PLATFORMS = new Set(["darwin", "linux", "win32"]);
 const UNAVAILABLE_LOCAL_STATUSES = new Set(["disabled", "checking", "starting", "error", "stopped", "unavailable"]);
 
@@ -24,7 +26,8 @@ function linuxSession(platform, env) {
   return "headless";
 }
 
-function linuxLocalControlSupport(platform, env) {
+/** `hyprlandPlugin` is what `probeCuaHyprlandPlugin` found: "active" or anything else. */
+function linuxLocalControlSupport(platform, env, { hyprlandPlugin } = {}) {
   if (platform !== "linux") {
     return Object.freeze({
       available: false,
@@ -35,6 +38,18 @@ function linuxLocalControlSupport(platform, env) {
   }
   const session = linuxSession(platform, env);
   if (session === "x11") return Object.freeze({ available: true, session });
+  // Hyprland with Cua's plugin is the one Wayland desktop allowed: the plugin gives the bot seats of its own inside the
+  // compositor. Every other Wayland desktop keeps the seat-safety block.
+  if (session === "wayland" && isHyprlandSession(env)) {
+    if (hyprlandPlugin === "active") return Object.freeze({ available: true, session, compositor: "hyprland" });
+    return Object.freeze({
+      available: false,
+      session,
+      compositor: "hyprland",
+      reasonCode: "linux-hyprland-plugin-required",
+      message: PLUGIN_REQUIRED_MESSAGE,
+    });
+  }
   if (session === "wayland") {
     return Object.freeze({
       available: false,
@@ -84,6 +99,9 @@ function localComputerReady(platform, connection) {
   }
   if (connection.mode === "linux-x11-supervised") {
     return connection.session === "x11";
+  }
+  if (connection.mode === "linux-wayland-hyprland-supervised") {
+    return connection.session === "wayland" && connection.compositor === "hyprland";
   }
   return false;
 }

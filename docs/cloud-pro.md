@@ -587,8 +587,12 @@ Cloud and each other Cloud the verified session lists as theirs
 never a server that only signed in with their account. A server of the person's
 own that they made their bots' home (**Make <server> my home**, docs/self-hosting.md)
 is lent the same way, last, once the move is done and while that server says it
-is theirs alone. Other users (desktop only, self-hosted, hosted team workspaces)
-keep computer sharing exactly as before: off unless a maintainer sets
+is theirs alone. A self-hosted server this desktop paired with as its owner
+(admin scope, no team or Cloud) is asked about once, in a popup, and lent only
+after the person's Allow (`lendOwn`, `electron/server-lending.mjs`); the server
+takes a computer from its admin pairings alone unless `features.sharedComputers`
+is `false` (off) or `true` (every paired session, as before). Other servers and
+hosted team workspaces keep computer sharing off unless a maintainer sets
 `features.sharedComputers` by hand.
 
 ### What each Cloud gets

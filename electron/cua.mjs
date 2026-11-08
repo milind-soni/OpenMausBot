@@ -29,6 +29,7 @@ const {
   stageAppImageCuaBundle,
 } = require("./cua-linux-bundle.cjs");
 const { driverBlocked, linuxLocalControlSupport } = require("./capabilities.cjs");
+const { probeCuaHyprlandPlugin } = require("./cua-hyprland.cjs");
 
 const INSTALLED_DRIVER = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver";
 const STANDALONE_SOCKET = path.join(
@@ -54,6 +55,9 @@ let retryTimer = null;
 let lifecycleGeneration = 0;
 let macRetry = null;
 let linuxRuntime = null;
+let linuxRuntimeLoading = null;
+// Omarchy without Cua's Hyprland plugin: the person can turn the plugin on, so Enable and Try again look again.
+let linuxRuntimeAwaitsPlugin = false;
 let linuxBundleStage = null;
 let stateListener = () => {};
 const connectionStore = createCuaConnectionStore({
@@ -64,46 +68,56 @@ const localComputerGrant = createLocalComputerGrant({
   log: (line) => console.error(`[cua] ${line}`),
 });
 
-function ensureLinuxRuntime() {
-  if (!linuxRuntime) {
-    const support = linuxLocalControlSupport(process.platform, process.env);
-    if (!support.available) {
-      linuxRuntime = createUnavailableLinuxRuntime({
-        connectionStore,
-        preferenceStore: createLinuxCuaPreferenceStore({
-          getUserData: () => app.getPath("userData"),
-        }),
-        clearPreference: true,
-        reasonCode: support.reasonCode,
-        message: support.message,
-        onChange: (connection) => notifyState(connection),
-      });
-      return linuxRuntime;
-    }
-    try {
-      let bundledDriverPath;
-      if (app.isPackaged && !process.env.CUA_DRIVER_PATH) {
-        bundledDriverPath = path.join(process.resourcesPath, "cua-linux-x64", "cua-driver");
-        // AppImage builders may normalize the resource tree to 0755/0775: copy the pinned binaries to a fresh 0700 dir and re-verify.
-        if (process.env.APPIMAGE) {
-          reapStaleAppImageCuaBundles();
-          linuxBundleStage ??= stageAppImageCuaBundle({ resourcesPath: process.resourcesPath });
-          bundledDriverPath = linuxBundleStage.driverPath;
-        }
-      }
-      linuxRuntime = createLinuxCuaRuntime({
+function ensureLinuxRuntime({ recheck = false } = {}) {
+  if (linuxRuntime && !(recheck && linuxRuntimeAwaitsPlugin)) return Promise.resolve(linuxRuntime);
+  linuxRuntimeLoading ??= loadLinuxRuntime().finally(() => {
+    linuxRuntimeLoading = null;
+  });
+  return linuxRuntimeLoading;
+}
+
+async function loadLinuxRuntime() {
+  const hyprlandPlugin = await probeCuaHyprlandPlugin({ env: process.env });
+  const support = linuxLocalControlSupport(process.platform, process.env, { hyprlandPlugin });
+  linuxRuntimeAwaitsPlugin = support.reasonCode === "linux-hyprland-plugin-required";
+  if (!support.available) {
+    linuxRuntime = createUnavailableLinuxRuntime({
+      connectionStore,
+      preferenceStore: createLinuxCuaPreferenceStore({
         getUserData: () => app.getPath("userData"),
-        connectionStore,
-        bundledDriverPath,
-        onChange: (connection) => notifyState(connection),
-      });
-    } catch (error) {
-      console.error("[cua] Bundled Linux driver failed integrity validation:", error);
-      linuxRuntime = createUnavailableLinuxRuntime({
-        connectionStore,
-        onChange: (connection) => notifyState(connection),
-      });
+      }),
+      // A blocked Wayland desktop drops an old opt-in; a missing plugin keeps it for when the plugin is on.
+      clearPreference: !linuxRuntimeAwaitsPlugin,
+      reasonCode: support.reasonCode,
+      message: support.message,
+      compositor: support.compositor,
+      onChange: (connection) => notifyState(connection),
+    });
+    return linuxRuntime;
+  }
+  try {
+    let bundledDriverPath;
+    if (app.isPackaged && !process.env.CUA_DRIVER_PATH) {
+      bundledDriverPath = path.join(process.resourcesPath, "cua-linux-x64", "cua-driver");
+      // AppImage builders may normalize the resource tree to 0755/0775: copy the pinned binaries to a fresh 0700 dir and re-verify.
+      if (process.env.APPIMAGE) {
+        reapStaleAppImageCuaBundles();
+        linuxBundleStage ??= stageAppImageCuaBundle({ resourcesPath: process.resourcesPath });
+        bundledDriverPath = linuxBundleStage.driverPath;
+      }
     }
+    linuxRuntime = createLinuxCuaRuntime({
+      getUserData: () => app.getPath("userData"),
+      connectionStore,
+      bundledDriverPath,
+      onChange: (connection) => notifyState(connection),
+    });
+  } catch (error) {
+    console.error("[cua] Bundled Linux driver failed integrity validation:", error);
+    linuxRuntime = createUnavailableLinuxRuntime({
+      connectionStore,
+      onChange: (connection) => notifyState(connection),
+    });
   }
   return linuxRuntime;
 }
@@ -265,7 +279,7 @@ async function startEmbedded(binary, signal) {
 }
 
 export async function startCua({ attempt = 0 } = {}) {
-  if (process.platform === "linux") return ensureLinuxRuntime().initialize();
+  if (process.platform === "linux") return (await ensureLinuxRuntime()).initialize();
   clearTimeout(retryTimer);
   retryTimer = null;
   lifecycleGeneration++;
@@ -412,19 +426,19 @@ export async function requestComputerUse() {
   if (process.platform === "darwin" || process.platform === "win32") return restartCua();
   if (process.platform !== "linux") return null;
   try {
-    await ensureLinuxRuntime().enable();
+    await (await ensureLinuxRuntime({ recheck: true })).enable();
   } catch (error) {
     console.error("[cua] Linux enable failed:", error);
   }
-  return ensureLinuxRuntime().getStatus();
+  return (await ensureLinuxRuntime()).getStatus();
 }
 
 export function registerCuaIpc() {
   ipcMain.handle("cua:connection", localOnly("cua:connection", () => connectionStore.get()));
   ipcMain.handle("cua:permissions", localOnly("cua:permissions", () => cuaPermissionsStatus()));
-  ipcMain.handle("cua:linux-status", localOnly("cua:linux-status", () =>
+  ipcMain.handle("cua:linux-status", localOnly("cua:linux-status", async () =>
     process.platform === "linux"
-      ? ensureLinuxRuntime().getStatus()
+      ? (await ensureLinuxRuntime()).getStatus()
       : { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" },
   ));
   ipcMain.handle("cua:linux-enable", localOnly("cua:linux-enable", async () => {
@@ -432,22 +446,22 @@ export function registerCuaIpc() {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };
     }
     try {
-      await ensureLinuxRuntime().enable();
+      await (await ensureLinuxRuntime({ recheck: true })).enable();
     } catch (error) {
       console.error("[cua] Linux enable failed:", error);
     }
-    return ensureLinuxRuntime().getStatus();
+    return (await ensureLinuxRuntime()).getStatus();
   }));
   ipcMain.handle("cua:linux-disable", localOnly("cua:linux-disable", async () => {
     if (process.platform !== "linux") {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };
     }
     try {
-      await ensureLinuxRuntime().disable();
+      await (await ensureLinuxRuntime()).disable();
     } catch (error) {
       console.error("[cua] Linux disable failed:", error);
     }
-    return ensureLinuxRuntime().getStatus();
+    return (await ensureLinuxRuntime()).getStatus();
   }));
   ipcMain.handle("cua:linux-retry", localOnly("cua:linux-retry", async () => {
     if (process.platform === "darwin" || process.platform === "win32") return restartCua();
@@ -455,10 +469,10 @@ export function registerCuaIpc() {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };
     }
     try {
-      await ensureLinuxRuntime().retry();
+      await (await ensureLinuxRuntime({ recheck: true })).retry();
     } catch (error) {
       console.error("[cua] Linux retry failed:", error);
     }
-    return ensureLinuxRuntime().getStatus();
+    return (await ensureLinuxRuntime()).getStatus();
   }));
 }
