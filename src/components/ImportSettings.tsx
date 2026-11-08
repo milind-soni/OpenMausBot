@@ -16,7 +16,7 @@ import { ClaudeMark, CodexMark, CursorMark, PresetProviderMark } from "./Provide
 function SourceMarks({ sources }: { sources: readonly SetupSource[] }) {
   const marks = [...new Set(sources.map((source) => (source === "claudeDesktop" ? "claudeCode" : source)))];
   return (
-    <span className="mr-1.5 inline-flex items-center gap-1 align-[-1px]" aria-hidden="true">
+    <span className="me-1.5 inline-flex items-center gap-1 align-[-1px]" aria-hidden="true">
       {marks.map((source) => {
         switch (source) {
           case "codex": return <CodexMark key={source} size={12} />;
@@ -52,7 +52,7 @@ export function ImportRow({ icon, label, summary, hint, sources, checked, disabl
       <span className="flex min-w-0 flex-1 flex-col">
         {/* One run of text, so a narrow card wraps the summary under the label, marks included. */}
         <span className="text-[13px] leading-5 text-ink-secondary">
-          <span className="mr-2 text-[14px] font-medium text-ink">{label}</span>
+          <span className="me-2 text-[14px] font-medium text-ink">{label}</span>
           <SourceMarks sources={sources} />
           {summary}
         </span>

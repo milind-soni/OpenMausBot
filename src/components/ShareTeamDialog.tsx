@@ -54,7 +54,7 @@ export function ShareTeamContents({ preview, includeMemory, localSkips }: {
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
             <dt className="text-ink-secondary">{label}</dt>
-            <dd className="max-w-[260px] truncate text-right text-ink" title={value}>{value}</dd>
+            <dd className="max-w-[260px] truncate text-end text-ink" title={value}>{value}</dd>
           </div>
         ))}
       </dl>
@@ -76,7 +76,7 @@ export function ShareTeamContents({ preview, includeMemory, localSkips }: {
       {preview.redacted.length > 0 && (
         <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamShare.redacted")}</div>
-          <ul className="mt-1 list-disc pl-5">
+          <ul className="mt-1 list-disc ps-5">
             {preview.redacted.map((part) => <li key={part}>{describePart(part, preview.document)}</li>)}
           </ul>
         </div>
@@ -84,7 +84,7 @@ export function ShareTeamContents({ preview, includeMemory, localSkips }: {
       {skipped.length > 0 && (
         <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamShare.skipped")}</div>
-          <ul className="mt-1 list-disc pl-5">
+          <ul className="mt-1 list-disc ps-5">
             {skipped.map((line, index) => <li key={`${line}-${index}`}>{line}</li>)}
           </ul>
         </div>
@@ -279,13 +279,13 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
                 <input type="checkbox" className="size-4 accent-accent" checked={includeMemory} onChange={(event) => setIncludeMemory(event.target.checked)} />
                 {t("teamShare.includeNotes")}
               </label>
-              <p className="pl-6 text-[12px] leading-relaxed text-ink-secondary">{notesLine(includeMemory)}</p>
+              <p className="ps-6 text-[12px] leading-relaxed text-ink-secondary">{notesLine(includeMemory)}</p>
               <ShareSkillChoices available={available ?? []} ticked={ticked} counted={available !== null} onToggle={toggleSkill} />
               <label className="flex items-center gap-2 pt-1">
                 <input type="checkbox" className="size-4 accent-accent" checked={includePreset} onChange={(event) => setIncludePreset(event.target.checked)} />
                 {t("teamShare.includePreset")}
               </label>
-              {includePreset && <p className="pl-6 text-[12px] leading-relaxed text-ink-secondary">{t("teamShare.presetHint")}</p>}
+              {includePreset && <p className="ps-6 text-[12px] leading-relaxed text-ink-secondary">{t("teamShare.presetHint")}</p>}
             </fieldset>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2">

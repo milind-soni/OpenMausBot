@@ -95,7 +95,7 @@ export function TraceDialog({ id, at, onClose }: { id: string; at?: number; onCl
             type="button"
             onClick={onClose}
             aria-label={t("trace.close")}
-            className="-mr-1.5 flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
+            className="-me-1.5 flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
           >
             <X size={16} />
           </button>

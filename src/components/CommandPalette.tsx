@@ -140,7 +140,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
       // mousemove, not mouseenter: rows shifting under a resting pointer must not steal the keyboard selection.
       onMouseMove={() => setCursor(index)}
       className={cn(
-        "flex min-h-10 w-full items-center gap-3 rounded-lg px-3 py-2 text-left",
+        "flex min-h-10 w-full items-center gap-3 rounded-lg px-3 py-2 text-start",
         twoLine && "flex-col items-stretch gap-0.5",
         index === selected ? "bg-menu-active" : "hover:bg-menu-hover",
       )}

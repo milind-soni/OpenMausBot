@@ -9,13 +9,13 @@ const VARIANTS = {
   quiet: "rounded-md bg-ink/[0.05] text-ink outline-none hover:bg-ink/[0.08] focus-visible:ring-[1.5px] focus-visible:ring-focus",
 } as const;
 
-const GHOST = { select: "pl-2.5 pr-[18px] text-[13px]", chevron: "right-1" };
+const GHOST = { select: "ps-2.5 pe-[18px] text-[13px]", chevron: "end-1" };
 
 // The 14px chevron draws its stroke ~3.5px inside its box, so the box sits that much nearer the edge than the text's padding.
 const SIZES = {
-  lg: { select: "py-2.5 pl-3 pr-9 text-[15px]", chevron: "right-2" },
-  md: { select: "py-2 pl-3 pr-9 text-[13px]", chevron: "right-2" },
-  sm: { select: "py-1.5 pl-2.5 pr-8 text-[13px]", chevron: "right-1.5" },
+  lg: { select: "py-2.5 ps-3 pe-9 text-[15px]", chevron: "end-2" },
+  md: { select: "py-2 ps-3 pe-9 text-[13px]", chevron: "end-2" },
+  sm: { select: "py-1.5 ps-2.5 pe-8 text-[13px]", chevron: "end-1.5" },
 } as const;
 
 export function Select({

@@ -94,7 +94,7 @@ export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: 
             <span className="h-2 overflow-hidden rounded-full bg-raised">
               <span className="block h-full rounded-full bg-accent/70" style={{ width: `${Math.max(2, (headlineTokens(group) / max) * 100)}%` }} />
             </span>
-            <span className="min-w-[4.5rem] text-right tabular-nums text-ink-secondary">
+            <span className="min-w-[4.5rem] text-end tabular-nums text-ink-secondary">
               {formatTokens(headlineTokens(group))}
               {hasFiniteCost(group.costUsd) && group.costUsd > 0 && ` · ${formatCost(group.costUsd)}`}
             </span>
@@ -148,7 +148,7 @@ export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () =>
   const title = root.title || t(`trace.source.${root.source}`, { bot: root.bots[0]?.name ?? "" });
   return (
     <li>
-      <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-raised/50" data-testid="usage-run">
+      <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2.5 text-start hover:bg-raised/50" data-testid="usage-run">
         <span className="flex w-[38px] shrink-0 -space-x-1.5 sm:w-[74px]">
           {root.bots.slice(0, 4).map((entry, index) => {
             const bot = state.bots.find((item) => item.id === entry.id);
@@ -164,9 +164,9 @@ export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () =>
         <span className="flex items-center gap-3 text-[13px] tabular-nums text-ink-secondary">
           {root.running && <LiveBadge />}
           {root.errors > 0 && <span className="rounded-md bg-danger/12 px-1.5 py-0.5 text-[12px] font-medium text-danger">{t("trace.groupErrors", { count: String(root.errors) })}</span>}
-          {root.timed ? <span className="hidden min-w-[3.5rem] text-right sm:inline">{formatDuration(root.durationMs)}</span>
+          {root.timed ? <span className="hidden min-w-[3.5rem] text-end sm:inline">{formatDuration(root.durationMs)}</span>
             : <span className="hidden rounded bg-raised px-1.5 text-[11px] sm:inline">{t("trace.notTimed")}</span>}
-          <span className="min-w-[3.5rem] text-right text-ink">{formatCost(root.costUsd)}</span>
+          <span className="min-w-[3.5rem] text-end text-ink">{formatCost(root.costUsd)}</span>
           <ChevronRight size={14} className="text-ink-tertiary" />
         </span>
       </button>

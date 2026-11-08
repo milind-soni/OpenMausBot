@@ -82,7 +82,7 @@ export function NotificationBell({ bar }: { bar?: string }) {
     >
       <Bell size={bar ? 15 : 17} strokeWidth={bar ? 1.75 : undefined} aria-hidden="true" />
       {unread > 0 && (
-        <span className={cn("absolute flex items-center justify-center rounded-full bg-accent font-semibold text-accent-ink", bar ? "-right-1 -top-0.5 h-[13px] min-w-[13px] px-0.5 text-[9px]" : "-right-0.5 -top-0.5 h-[15px] min-w-[15px] px-1 text-[10px]")}>
+        <span className={cn("absolute flex items-center justify-center rounded-full bg-accent font-semibold text-accent-ink", bar ? "-end-1 -top-0.5 h-[13px] min-w-[13px] px-0.5 text-[9px]" : "-end-0.5 -top-0.5 h-[15px] min-w-[15px] px-1 text-[10px]")}>
           {unread > 99 ? "99+" : unread}
         </span>
       )}
@@ -95,7 +95,7 @@ export function NotificationRail() {
   const { state } = useStore();
   if (state.notificationsOpen) return null;
   return (
-    <aside aria-label={t("notifications.title")} className="absolute right-0 top-1/2 z-20 -translate-y-1/2 rounded-l-lg border border-r-0 border-hairline/40 bg-panel p-1 shadow-sm">
+    <aside aria-label={t("notifications.title")} className="absolute end-0 top-1/2 z-20 -translate-y-1/2 rounded-s-lg border border-e-0 border-hairline/40 bg-panel p-1 shadow-sm">
       <NotificationBell />
     </aside>
   );
@@ -154,12 +154,12 @@ export function NotificationsPanel() {
   return (
     <aside
       aria-label={t("notifications.title")}
-      className="animate-panel-in flex h-full w-[300px] max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30"
+      className="animate-panel-in flex h-full w-[300px] max-w-full shrink-0 flex-col border-s border-hairline/40 bg-panel max-md:absolute max-md:inset-y-0 max-md:end-0 max-md:z-30"
     >
       <div className="flex items-center gap-1.5 border-b border-hairline/40 px-3.5 py-2.5">
         <span className="flex-1 text-[13px] font-medium text-ink">
           {t("notifications.title")}
-          {unreadCount > 0 && <span className="ml-1.5 text-[12px] font-normal text-accent">· {t("notifications.unread", { count: unreadCount })}</span>}
+          {unreadCount > 0 && <span className="ms-1.5 text-[12px] font-normal text-accent">· {t("notifications.unread", { count: unreadCount })}</span>}
         </span>
         <button type="button" onClick={markAllRead} className="shrink-0 whitespace-nowrap text-[12px] text-accent hover:underline">
           {t("notifications.markAllRead")}
@@ -222,7 +222,7 @@ function NotificationRow({ entry, title, now, bot, threadName, onOpen }: { entry
       onClick={onOpen}
       title={title}
       className={cn(
-        "flex w-full gap-2.5 border-b border-hairline/20 px-3.5 py-2.5 text-left hover:bg-raised/60",
+        "flex w-full gap-2.5 border-b border-hairline/20 px-3.5 py-2.5 text-start hover:bg-raised/60",
         !entry.read && "bg-accent/5",
       )}
     >

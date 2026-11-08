@@ -28,7 +28,7 @@ function OtherWay({ instance, open, onToggle }: { instance: InstanceInfo; open: 
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-ink/[0.04] focus-visible:outline-offset-[-2px]"
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-start transition-colors hover:bg-ink/[0.04] focus-visible:outline-offset-[-2px]"
       >
         <span className="flex size-[18px] shrink-0 items-center justify-center">
           <InstanceProviderMark instance={instance} size={18} />
@@ -94,7 +94,7 @@ export function ConnectAi({ hosted = false, tested }: { hosted?: boolean; tested
       ) : (
         <>
           {tested?.state === "failed" && (
-            <div role="alert" data-ai-silent className="animate-rise mb-3 w-full rounded-2xl bg-warning/10 px-4 py-3 text-left text-[13px] leading-relaxed text-ink">
+            <div role="alert" data-ai-silent className="animate-rise mb-3 w-full rounded-2xl bg-warning/10 px-4 py-3 text-start text-[13px] leading-relaxed text-ink">
               {/* The check's own plain reason (signed out, a used-up limit…) when it gave one. */}
               <p data-ai-reason>{tested.error ?? t("onboarding.engines.noAnswer", { name: engineDisplayName(tested.instance) })}</p>
               {tested.error && <p className="mt-1 text-ink-secondary">{t("onboarding.engines.orAnother")}</p>}
@@ -114,7 +114,7 @@ export function ConnectAi({ hosted = false, tested }: { hosted?: boolean; tested
             </p>
           )}
           {recommended ? (
-            <div data-ai-recommended={recommended.instanceId} className="animate-rise w-full rounded-2xl bg-card p-4 text-left">
+            <div data-ai-recommended={recommended.instanceId} className="animate-rise w-full rounded-2xl bg-card p-4 text-start">
               <EngineSetup instance={recommended} {...setupFor(recommended)} className="border-0 bg-transparent p-0" />
             </div>
           ) : !tested && !backup && !failed ? (
@@ -125,7 +125,7 @@ export function ConnectAi({ hosted = false, tested }: { hosted?: boolean; tested
       {failed && <p role="alert" className="mt-2 text-[13px] text-danger">{t("onboarding.engines.error")}</p>}
 
       {(organisation || others.length > 0) && (
-        <div className="mt-3 w-full divide-y divide-hairline/40 overflow-hidden rounded-2xl bg-card text-left">
+        <div className="mt-3 w-full divide-y divide-hairline/40 overflow-hidden rounded-2xl bg-card text-start">
           {organisation && (
             <OrganisationRow
               bridge={organisation}
@@ -141,7 +141,7 @@ export function ConnectAi({ hosted = false, tested }: { hosted?: boolean; tested
             type="button"
             onClick={() => void refresh()}
             disabled={checking}
-            className="flex w-full items-center gap-1.5 px-4 py-2.5 text-left text-[12px] text-ink-secondary transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-offset-[-2px] disabled:opacity-50"
+            className="flex w-full items-center gap-1.5 px-4 py-2.5 text-start text-[12px] text-ink-secondary transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-offset-[-2px] disabled:opacity-50"
           >
             <RefreshCw size={12} className={checking ? "animate-spin" : ""} />
             {checking ? t("common.checking") : t("common.checkAgain")}
@@ -170,9 +170,9 @@ export function ConnectAiDialog({ hosted = false, tested, onClose }: { hosted?: 
           event.stopPropagation();
           onClose();
         }}
-        className="ui-modal animate-pop-in flex max-h-[min(640px,calc(100vh-32px))] w-[440px] max-w-full flex-col overflow-hidden text-left"
+        className="ui-modal animate-pop-in flex max-h-[min(640px,calc(100vh-32px))] w-[440px] max-w-full flex-col overflow-hidden text-start"
       >
-        <div className="flex h-[52px] shrink-0 items-center justify-between pl-4 pr-3">
+        <div className="flex h-[52px] shrink-0 items-center justify-between ps-4 pe-3">
           <h2 id="connect-ai-title" className="text-[14px] font-semibold leading-[22px] text-ink">{t("onboarding.meet.connectAi")}</h2>
           <button type="button" autoFocus onClick={onClose} aria-label={t("common.close")} title={t("common.close")}
             className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink">

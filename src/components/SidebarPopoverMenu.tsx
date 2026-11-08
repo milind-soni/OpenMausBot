@@ -358,7 +358,7 @@ export function SidebarPopoverMenu({
       className={cn(
         sheetClass,
         anchored ? "z-[60] overflow-y-auto" : "absolute z-40",
-        placement === "below" && "top-full right-0 mt-1 w-72 max-w-[calc(100vw-2rem)]",
+        placement === "below" && "top-full end-0 mt-1 w-72 max-w-[calc(100vw-2rem)]",
         motion.className,
       )}
     >

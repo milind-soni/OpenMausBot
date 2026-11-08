@@ -93,7 +93,7 @@ export function ConnectedWorkspacesSettings() {
             <Laptop size={18} className="shrink-0 text-ink-secondary" />
             <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-medium text-ink">{entry.name}</div>
               <div className="break-all text-[12px] text-ink-secondary">{entry.dataDir}
-                {entry.missing && <span className="ml-2 rounded-md bg-inset px-1.5 py-0.5 text-[11px]">{t("connectedWorkspaces.missing")}</span>}</div></div>
+                {entry.missing && <span className="ms-2 rounded-md bg-inset px-1.5 py-0.5 text-[11px]">{t("connectedWorkspaces.missing")}</span>}</div></div>
             {active ? <span className="flex shrink-0 items-center gap-1 text-[12px] text-ink-secondary"><Check size={13} />{t("connectedWorkspaces.current")}</span> :
               <button type="button" disabled={busy} aria-label={t("connectedWorkspaces.switchTo", { name: entry.name })}
                 onClick={() => void perform(async () => {

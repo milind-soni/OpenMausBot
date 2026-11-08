@@ -57,7 +57,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
       reorder.onKeyDown?.(event);
     }
   };
-  const dot = (testId: string, tone: string) => <span data-testid={testId} aria-hidden="true" className={cn("absolute -right-0.5 -top-0.5 size-3 rounded-full", tone, RING)} />;
+  const dot = (testId: string, tone: string) => <span data-testid={testId} aria-hidden="true" className={cn("absolute -end-0.5 -top-0.5 size-3 rounded-full", tone, RING)} />;
   return (
     <div
       role={renaming ? undefined : "button"}
@@ -90,16 +90,16 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
           animated={working || noticing || (mascotMotion?.kind ?? "none") !== "none"}
         />
         {primary && bot.chiefOfStaff && (
-          <span data-testid="chief-badge" className={cn("absolute -bottom-px -right-px flex size-4 items-center justify-center rounded-full bg-[#E8993A] text-white", RING)}>
+          <span data-testid="chief-badge" className={cn("absolute -bottom-px -end-px flex size-4 items-center justify-center rounded-full bg-[#E8993A] text-white", RING)}>
             <Crown size={10} strokeWidth={1.5} fill="currentColor" aria-hidden="true" />
           </span>
         )}
         {onLiveCall ? (
-          <span data-testid="live-call-badge" className={cn("absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-success", RING)}>
+          <span data-testid="live-call-badge" className={cn("absolute -end-1 -top-1 flex size-4 items-center justify-center rounded-full bg-success", RING)}>
             <Phone size={9} strokeWidth={2.5} aria-hidden="true" />
           </span>
         ) : waiting ? (
-          <span data-testid="waiting-dot" aria-hidden="true" className={cn("absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-warning text-[11px] font-black leading-none text-panel", RING)}>!</span>
+          <span data-testid="waiting-dot" aria-hidden="true" className={cn("absolute -end-1 -top-1 flex size-4 items-center justify-center rounded-full bg-warning text-[11px] font-black leading-none text-panel", RING)}>!</span>
         ) : working ? dot("working-dot", "bg-success")
           : teammateWait ? dot("teammate-wait-dot", "bg-accent")
           : queued ? dot("queued-dot", "bg-ink-tertiary")

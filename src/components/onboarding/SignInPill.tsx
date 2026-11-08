@@ -157,7 +157,7 @@ type PillState = ReturnType<typeof useSignInPill>;
 function CodeSlot({ code }: { code: string }) {
   const { state, copy } = useCopyFeedback(code);
   return (
-    <div data-sign-in="code" className="flex h-9 w-[288px] max-w-full items-center justify-between rounded-[18px] border-[0.5px] border-ink/10 bg-composer pl-4 pr-1">
+    <div data-sign-in="code" className="flex h-9 w-[288px] max-w-full items-center justify-between rounded-[18px] border-[0.5px] border-ink/10 bg-composer ps-4 pe-1">
       <span className="font-mono text-[15px] tracking-[0.08em] text-ink">{code}</span>
       <button type="button" onClick={copy} aria-label={t("engineSetup.copy")} title={t("engineSetup.copy")}
         className="flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
@@ -173,9 +173,9 @@ function PasteSlot({ name, onSubmit }: { name: string; onSubmit: (code: string) 
     <form data-sign-in="paste" className="relative w-[288px] max-w-full" onSubmit={(event) => { event.preventDefault(); onSubmit(code); }}>
       <input autoFocus value={code} onChange={(event) => setCode(event.target.value)} aria-label={t("onboarding.meet.paste", { name })}
         placeholder={t("onboarding.meet.paste", { name })}
-        className="h-9 w-full rounded-[18px] border-[0.5px] border-ink/10 bg-composer pl-4 pr-10 text-[14px] leading-5 text-ink placeholder:text-ink-tertiary" />
+        className="h-9 w-full rounded-[18px] border-[0.5px] border-ink/10 bg-composer ps-4 pe-10 text-[14px] leading-5 text-ink placeholder:text-ink-tertiary" />
       <button type="submit" disabled={!code.trim()} aria-label={t("onboarding.meet.pasteSubmit")} title={t("onboarding.meet.pasteSubmit")}
-        className="absolute right-1 top-1 flex size-7 items-center justify-center rounded-full bg-ink text-app disabled:opacity-40">
+        className="absolute end-1 top-1 flex size-7 items-center justify-center rounded-full bg-ink text-app disabled:opacity-40">
         <ArrowUp size={14} strokeWidth={2} />
       </button>
     </form>

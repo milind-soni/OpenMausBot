@@ -235,9 +235,9 @@ export function OpenAiCompatUrl() {
           placeholder="https://api.groq.com/openai/v1"
           aria-label={t("keys.openaiCompat.url")}
           spellCheck={false}
-          className={cn(KEY_FIELD, "pr-8")}
+          className={cn(KEY_FIELD, "pe-8")}
         />
-        {saving && <Loader2 size={13} aria-hidden="true" className="absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin text-ink-secondary" />}
+        {saving && <Loader2 size={13} aria-hidden="true" className="absolute end-2.5 top-1/2 -translate-y-1/2 animate-spin text-ink-secondary" />}
       </div>
       <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.openaiCompat.urlHint")}</p>
       {error && <div role="alert" className="text-[12px] leading-4 text-danger">{error}</div>}

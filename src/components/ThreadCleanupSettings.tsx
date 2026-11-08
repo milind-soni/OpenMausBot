@@ -176,7 +176,7 @@ export function ThreadCleanupSettings() {
               }}
               className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[14px] tabular-nums text-ink focus:outline-none"
             />
-            <span className="pr-3 text-[13px] text-ink-secondary">{t("settings.threadCleanup.retention.unit")}</span>
+            <span className="pe-3 text-[13px] text-ink-secondary">{t("settings.threadCleanup.retention.unit")}</span>
           </div>
         </div>
         <p id="thread-log-retention-help" className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.threadCleanup.retention.help")}</p>
@@ -215,7 +215,7 @@ export function ThreadCleanupSettings() {
               }}
               className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[14px] tabular-nums text-ink focus:outline-none"
             />
-            <span className="pr-3 text-[13px] text-ink-secondary">{t("settings.threadCleanup.cap.unit")}</span>
+            <span className="pe-3 text-[13px] text-ink-secondary">{t("settings.threadCleanup.cap.unit")}</span>
           </div>
         </div>
         <p id="thread-log-cap-help" className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.threadCleanup.cap.help")}</p>

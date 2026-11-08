@@ -565,7 +565,7 @@ const Bubble = memo(function Bubble({
         <span
           className={cn(
             "self-end pb-1 text-[11px] tabular-nums text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100",
-            user ? "order-first mr-2" : "ml-2",
+            user ? "order-first me-2" : "ms-2",
           )}
         >
           {formatTime(message.at)}
@@ -573,7 +573,7 @@ const Bubble = memo(function Bubble({
       </div>
       <ReactionChips threadId={threadId} message={message} bots={bots} align={user ? "end" : "start"} canReact={canReact} />
       {forks.length > 1 && (
-        <div className="mt-1 flex items-center gap-0.5 pr-1 text-[12px] text-ink-secondary">
+        <div className="mt-1 flex items-center gap-0.5 pe-1 text-[12px] text-ink-secondary">
           <button
             onClick={() => switchTo(forks[versionIndex - 1])}
             disabled={versionIndex <= 0 || busy}
@@ -612,7 +612,7 @@ function PeerLabel({ peer }: { peer: PeerLine }) {
           ? t("chat.peer.requested")
           : t("chat.peer.asked");
   return (
-    <div className="mb-1 flex items-center gap-1.5 pl-0.5" data-testid="peer-label">
+    <div className="mb-1 flex items-center gap-1.5 ps-0.5" data-testid="peer-label">
       <BotAvatar
         bot={author ?? { name: peer.name, color: "blue" }}
         state={normalizeState(author?.mascotExpression) ?? "happy"}
@@ -807,7 +807,7 @@ const MessagesList = memo(function MessagesList({
   );
 });
 
-const CHATHEAD_PILL = `flex min-w-0 items-center gap-2 rounded-full py-0.5 pl-1.5 text-ink ${ELEVATED_FLOAT}`;
+const CHATHEAD_PILL = `flex min-w-0 items-center gap-2 rounded-full py-0.5 ps-1.5 text-ink ${ELEVATED_FLOAT}`;
 
 export function ChatView({ bot: profile }: { bot: Bot }) {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
@@ -1011,7 +1011,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         className={cn(
           // A container query never matches the container itself, so the row that wraps is the child below.
           "@container/chathead",
-          simpleHead ? "px-5 pt-2.5 pb-2.5 max-md:pl-14 max-md:pr-3" : "px-5 py-3 pl-11 md:pl-5 max-md:pl-14 max-md:pr-3",
+          simpleHead ? "px-5 pt-2.5 pb-2.5 max-md:ps-14 max-md:pe-3" : "px-5 py-3 ps-11 md:ps-5 max-md:ps-14 max-md:pe-3",
         )}
       >
         <div data-chathead-row className={cn("flex items-center justify-between", phone ? "gap-2" : "@max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:gap-y-1 @min-[30rem]/chathead:grid @min-[30rem]/chathead:grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(max-content,1fr)]")}>
@@ -1024,7 +1024,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               onToggle={() => dispatch({ type: "toggleSettings", open: !state.settingsOpen })}
             />
           ) : advanced ? (
-            <div data-chathead-pill className={cn(CHATHEAD_PILL, "pr-1")}>
+            <div data-chathead-pill className={cn(CHATHEAD_PILL, "pe-1")}>
               <button
                 type="button"
                 onClick={() => dispatch({ type: "toggleSettings", open: true })}
@@ -1067,13 +1067,13 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               onClick={() => dispatch({ type: "toggleSettings", open: true })}
               title={t("chat.openProfile")}
               aria-label={t("chat.openProfileAria", { name: bot.name })}
-              className={cn("group flex h-9 min-w-0 items-center gap-2.5 rounded-full py-0.5 pl-2 pr-3.5 text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
+              className={cn("group flex h-9 min-w-0 items-center gap-2.5 rounded-full py-0.5 ps-2 pe-3.5 text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
             >
               <BotAvatar bot={bot} state={stateForBot({ ...bot, messages })} size={24}
                 motion={mascotMotion?.kind ?? "none"} motionKey={mascotMotion?.nonce ?? 0} animated={headerAnimated} />
               <span className="min-w-0 truncate text-[14px] font-medium text-ink">{bot.name}</span>
               {chiefOfStaffBadge(bot)}
-              <ChevronRight size={14} aria-hidden="true" className="-ml-2.5 w-0 shrink-0 text-ink-secondary opacity-0 transition-[width,margin,opacity] duration-150 group-hover:ml-0 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:ml-0 group-focus-visible:w-3.5 group-focus-visible:opacity-100" />
+              <ChevronRight size={14} aria-hidden="true" className="-ms-2.5 w-0 shrink-0 text-ink-secondary opacity-0 transition-[width,margin,opacity] duration-150 group-hover:ms-0 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:ms-0 group-focus-visible:w-3.5 group-focus-visible:opacity-100" />
             </button>
           )}
           {!phone && !simpleHead && <ChatHeadRole bot={bot} />}<span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>{!simpleHead && privateChat && <TeamPrivateHeader />}{!simpleHead && ownHelper && <TeamOwnHelperHeader />}{!simpleHead && sharedChat && team && <TeamSharedHeader team={team} onlyPeopleAdded={bot.onlyPeopleAdded} />}
@@ -1091,7 +1091,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         </div>
         <div
           data-chathead-controls
-          className={cn("flex shrink-0 items-center gap-2", !phone && "@max-[30rem]/chathead:ml-auto @max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:justify-end @min-[30rem]/chathead:col-start-3 @min-[30rem]/chathead:justify-self-end")}
+          className={cn("flex shrink-0 items-center gap-2", !phone && "@max-[30rem]/chathead:ms-auto @max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:justify-end @min-[30rem]/chathead:col-start-3 @min-[30rem]/chathead:justify-self-end")}
         >
           {!simpleHead && (bot.busy || bot.waitingForTeammates) && (
             <button
@@ -1121,7 +1121,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             )}
             title={t("chat.computer")} aria-label={busy && place === "browser" ? `${t("chat.computer")}, ${t("place.live")}` : t("chat.computer")}
           >
-            <Monitor size={16} />{busy && place === "browser" && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 animate-pulse rounded-full bg-success" data-testid="computer-button-live" />}
+            <Monitor size={16} />{busy && place === "browser" && <span aria-hidden="true" className="absolute end-1 top-1 size-1.5 animate-pulse rounded-full bg-success" data-testid="computer-button-live" />}
           </button>}
           {phoneMenu ? <ChatMoreMenu bot={bot} phoneHeader /> : (advanced || remoteClient) && <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} />}
         </div>

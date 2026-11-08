@@ -1182,7 +1182,7 @@ export function ComputerPanel({
     <>
     <aside
       className={cn(
-        "animate-panel-in relative flex h-full shrink-0 flex-col border-l border-hairline/40 bg-panel",
+        "animate-panel-in relative flex h-full shrink-0 flex-col border-s border-hairline/40 bg-panel",
         "max-md:absolute max-md:inset-0 max-md:z-40 max-md:w-full!",
       )}
       ref={panelRef}
@@ -1203,10 +1203,10 @@ export function ComputerPanel({
         onPointerMove={onResizeMove}
         onPointerUp={onResizeEnd}
         onPointerCancel={onResizeEnd}
-        className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-accent/40 focus-visible:bg-accent/60 max-md:hidden"
+        className="absolute inset-y-0 start-0 z-10 w-1.5 cursor-col-resize hover:bg-accent/40 focus-visible:bg-accent/60 max-md:hidden"
       />
       {/* ml-1.5 keeps the drag region clear of the resize handle: a later drag region in the DOM wins. */}
-      <div {...dragProps} className="@container/paneltabs ml-1.5 py-3 pl-2.5 pr-4">
+      <div {...dragProps} className="@container/paneltabs ms-1.5 py-3 ps-2.5 pe-4">
         <div className="relative flex min-h-7 items-center justify-center">
           {advanced && (
             <button
@@ -1215,7 +1215,7 @@ export function ComputerPanel({
                 dispatch({ type: "toggleComputer", open: false });
                 dispatch({ type: "toggleSettings", open: true, section: "access" });
               }}
-              className="absolute left-0 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
+              className="absolute start-0 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
               title={t("computer.botSettings")}
             >
               <Settings size={18} />
@@ -1241,7 +1241,7 @@ export function ComputerPanel({
               releaseComputerPanelFocus(panelRef.current, bot.id);
               dispatch({ type: "toggleComputer", open: false });
             }}
-            className="absolute right-0 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
+            className="absolute end-0 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
             aria-label={t("computer.close")}
             title={t("computer.close")}
           >
@@ -1352,7 +1352,7 @@ export function ComputerPanel({
                 alt={t("computer.screenOf", { name: bot.name })}
                 className="h-full w-full object-contain transition group-hover:brightness-75 group-focus-visible:brightness-75"
               />
-              <span className="pointer-events-none absolute right-2 top-2 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-[11px] font-medium text-white opacity-80 shadow-sm transition group-hover:opacity-100 group-focus-visible:opacity-100">
+              <span className="pointer-events-none absolute end-2 top-2 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-[11px] font-medium text-white opacity-80 shadow-sm transition group-hover:opacity-100 group-focus-visible:opacity-100">
                 {pending === "join" ? <Loader2 size={12} className="animate-spin" /> : <Maximize2 size={12} />}
                 {t("computer.open")}
               </span>
@@ -1445,7 +1445,7 @@ export function ComputerPanel({
                     className="mt-1 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-50"
                   >
                     {(pending === "vm-create" || pending === "vm-recreate") && (
-                      <Loader2 size={13} className="mr-1.5 inline animate-spin" />
+                      <Loader2 size={13} className="me-1.5 inline animate-spin" />
                     )}
                     {vmStatus.container === "missing"
                       ? t("computer.createVm", { name: bot.name })
@@ -1487,7 +1487,7 @@ export function ComputerPanel({
                   disabled={pending === "provision"}
                   className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 >
-                  {pending === "provision" && <Loader2 size={13} className="mr-1.5 inline animate-spin" />}
+                  {pending === "provision" && <Loader2 size={13} className="me-1.5 inline animate-spin" />}
                   {phase === "vps-stopped" ? t("computer.startVps") : t("computer.prepareVps")}
                 </button>
               )}
@@ -1498,7 +1498,7 @@ export function ComputerPanel({
                   disabled={pending === "vps-replace"}
                   className="mt-1 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-50"
                 >
-                  {pending === "vps-replace" && <Loader2 size={13} className="mr-1.5 inline animate-spin" />}
+                  {pending === "vps-replace" && <Loader2 size={13} className="me-1.5 inline animate-spin" />}
                   {t("computer.replaceVps")}
                 </button>
               )}
@@ -1690,10 +1690,10 @@ export function ComputerPanel({
           )}
         </div>
 
-        <button type="button" onClick={() => selectPanelView("routines")} className="mt-4 flex w-full items-start gap-3 rounded-xl bg-card p-4 text-left hover:bg-raised">
+        <button type="button" onClick={() => selectPanelView("routines")} className="mt-4 flex w-full items-start gap-3 rounded-xl bg-card p-4 text-start hover:bg-raised">
           <CalendarClock size={17} className="mt-0.5 shrink-0 text-accent" />
           <span className="min-w-0 flex-1">
-            <span className="block text-[14px] font-medium text-ink">{t("computer.tab.routines")} <span className="ml-1 text-[11px] text-ink-secondary">{botRoutines.length}</span></span>
+            <span className="block text-[14px] font-medium text-ink">{t("computer.tab.routines")} <span className="ms-1 text-[11px] text-ink-secondary">{botRoutines.length}</span></span>
             <span className={cn("mt-1 block truncate text-[12px]", activeRoutineRun ? routineRunTone(activeRoutineRun) : "text-ink-secondary")}>{activeRoutineRun ? `${activeRoutineRun.routineName} · ${routineRunLabel(activeRoutineRun)}` : t("computer.routines.openTitle")}</span>
           </span>
           <ChevronRight size={14} className="shrink-0 text-ink-secondary rtl:-scale-x-100" aria-hidden="true" />

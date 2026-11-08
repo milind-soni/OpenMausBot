@@ -46,7 +46,7 @@ export function TeamSettingsRows({ rows }: { rows: ReadonlyArray<TeamPlanRow | T
         return (
           <li key={row.bot.id} className="flex items-start justify-between gap-3 rounded-lg bg-inset px-3 py-1.5 text-[13px]">
             <span className="min-w-0 truncate text-ink">{row.bot.name}</span>
-            <span className={cn("max-w-[65%] text-right text-[12px]", tone)}>{label}</span>
+            <span className={cn("max-w-[65%] text-end text-[12px]", tone)}>{label}</span>
           </li>
         );
       })}
@@ -224,7 +224,7 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
               </div>
             )}
             <div className="mt-4 flex items-center justify-end gap-2">
-              {running && <span role="status" className="mr-auto text-[12px] text-ink-secondary">{t("teamSettings.progress", { done: progress, count: plan.length })}</span>}
+              {running && <span role="status" className="me-auto text-[12px] text-ink-secondary">{t("teamSettings.progress", { done: progress, count: plan.length })}</span>}
               <button type="button" disabled={running} onClick={close} className="rounded-lg px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised">{t("common.cancel")}</button>
               <button type="button" disabled={running || !applying} onClick={apply}
                 className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white disabled:opacity-40">

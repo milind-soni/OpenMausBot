@@ -77,7 +77,7 @@ export function SimpleModePrompt({ onClose }: { onClose: () => void }) {
           aria-describedby="simple-mode-switch-hint"
           data-simple-mode-switch=""
           onClick={flip}
-          className="mt-5 flex min-h-14 w-full items-center gap-4 rounded-[12px] bg-ink/[0.04] px-4 py-3 text-left transition-colors hover:bg-ink/[0.07] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none"
+          className="mt-5 flex min-h-14 w-full items-center gap-4 rounded-[12px] bg-ink/[0.04] px-4 py-3 text-start transition-colors hover:bg-ink/[0.07] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none"
         >
           <span className="min-w-0 flex-1">
             <span id="simple-mode-switch-label" className="block text-[15px] font-medium leading-5">{t("simpleModePrompt.switch")}</span>
@@ -86,7 +86,7 @@ export function SimpleModePrompt({ onClose }: { onClose: () => void }) {
           <span aria-hidden="true" className={cn("relative h-7 w-12 shrink-0 rounded-full transition-colors motion-reduce:transition-none",
             simple ? "bg-accent" : "bg-ink/[0.14] ring-1 ring-inset ring-ink/40")}>
             <span className={cn("absolute top-0.5 size-6 rounded-full bg-white shadow-sm transition-[left] motion-reduce:transition-none",
-              simple ? "left-[22px]" : "left-0.5")} />
+              simple ? "start-[22px]" : "start-0.5")} />
           </span>
         </button>
         <p className="mt-3 text-[13px] leading-[18px] text-ink-tertiary">{t("simpleModePrompt.where")}</p>

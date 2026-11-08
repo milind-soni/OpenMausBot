@@ -841,7 +841,7 @@ function ValuePoints() {
   return (
     <div className="mt-5 grid w-full gap-2 sm:grid-cols-3">
       {points.map(({ Icon, title, detail }) => (
-        <div key={title} className="rounded-xl bg-inset px-3 py-3 text-left">
+        <div key={title} className="rounded-xl bg-inset px-3 py-3 text-start">
           <Icon size={16} className="text-accent" />
           <div className="mt-2 text-[13px] font-medium text-ink">{title}</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{detail}</div>
@@ -1070,7 +1070,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
         <p className="mt-3 text-[12px] text-ink-secondary">{codeUntil(c.state.pairing.expiresAt)}</p>
       )}
       {!c.pairingExpired && c.localFallback && c.state?.publicNetwork && (
-        <p role="note" className="mt-3 w-full max-w-[390px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-left text-[12px] leading-relaxed text-warning">
+        <p role="note" className="mt-3 w-full max-w-[390px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-start text-[12px] leading-relaxed text-warning">
           {t("phone.code.publicNetwork", { network: c.state.publicNetwork })}
         </p>
       )}
@@ -1080,7 +1080,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
         </button>
       )}
       {!c.pairingExpired && c.state?.pairing && (
-        <details className="mt-4 w-full max-w-[390px] rounded-lg border border-hairline/40 px-3 py-2 text-left">
+        <details className="mt-4 w-full max-w-[390px] rounded-lg border border-hairline/40 px-3 py-2 text-start">
           <summary className="cursor-pointer text-[12px] text-ink-secondary">{t("phone.code.trouble")}</summary>
           <div className="mt-3 text-[12px] text-ink-secondary">
             {t("phone.code.pairingCode")}

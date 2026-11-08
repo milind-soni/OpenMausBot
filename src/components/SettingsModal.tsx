@@ -515,7 +515,7 @@ export function SettingsModal() {
                   onClick={() => goTo(page.sections[0]!)}
                   aria-current={current ? "page" : undefined}
                   className={cn(
-                    "flex h-8 shrink-0 cursor-pointer items-center gap-[9px] rounded-lg px-[9px] text-left text-[13px] text-ink transition-colors motion-reduce:transition-none",
+                    "flex h-8 shrink-0 cursor-pointer items-center gap-[9px] rounded-lg px-[9px] text-start text-[13px] text-ink transition-colors motion-reduce:transition-none",
                     current ? "bg-ink/[0.08]" : "hover:bg-ink/[0.06]",
                   )}
                 >
@@ -530,16 +530,16 @@ export function SettingsModal() {
                 type="button"
                 data-settings-advanced-only={key}
                 onClick={() => { setQuery(""); goTo("general"); setReveal("advanced-mode"); }}
-                className="flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-left text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none"
+                className="flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-start text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none"
               >
                 <span>{t(key)} <span className="text-ink-secondary">· {t("settings.simple.advanced")}</span></span>
               </button>
             ))}
-            {keyResultButtons("flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-left text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none")}
+            {keyResultButtons("flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-start text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none")}
           </nav>
 
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-            <header className="flex shrink-0 items-center gap-3 py-3 pl-4 pr-14 sm:pb-1.5 sm:pl-12 sm:pt-8">
+            <header className="flex shrink-0 items-center gap-3 py-3 ps-4 pe-14 sm:pb-1.5 sm:ps-12 sm:pt-8">
               <Select className="min-w-0 sm:hidden"
                 aria-label={t("settings.title")}
                 value={currentPage?.id ?? ""}
@@ -562,7 +562,7 @@ export function SettingsModal() {
               onClick={close}
               aria-label={t("settings.close")}
               title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
-              className="absolute right-5 top-[18px] flex size-8 cursor-pointer items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink motion-reduce:transition-none"
+              className="absolute end-5 top-[18px] flex size-8 cursor-pointer items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink motion-reduce:transition-none"
             >
               <X size={16} aria-hidden="true" />
             </button>
@@ -604,7 +604,7 @@ export function SettingsModal() {
         className="glass-surface glass-popup animate-pop-in relative flex overflow-hidden rounded-2xl outline-none"
       >
         <span id="app-settings-title" className="sr-only">{t("settings.title")}</span>
-        <nav className="glass-rail hidden min-h-0 w-[200px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-hairline/30 p-3 sm:flex">
+        <nav className="glass-rail hidden min-h-0 w-[200px] shrink-0 flex-col gap-1 overflow-y-auto border-e border-hairline/30 p-3 sm:flex">
           <div className="shrink-0 px-2 py-3 text-[15px] font-semibold text-ink">
             {t("settings.title")}
           </div>
@@ -632,7 +632,7 @@ export function SettingsModal() {
                     onClick={() => openSection(id)}
                     aria-current={section === id ? "page" : undefined}
                     className={cn(
-                      "flex h-8 shrink-0 cursor-pointer items-center gap-[9px] rounded-lg px-[9px] text-left text-[13px] text-ink transition-colors motion-reduce:transition-none",
+                      "flex h-8 shrink-0 cursor-pointer items-center gap-[9px] rounded-lg px-[9px] text-start text-[13px] text-ink transition-colors motion-reduce:transition-none",
                       section === id ? "bg-ink/[0.08]" : "hover:bg-ink/[0.06]",
                     )}
                   >
@@ -643,11 +643,11 @@ export function SettingsModal() {
               </div>
             );
           })}
-          {keyResultButtons("cursor-pointer flex min-h-9 items-center rounded-lg px-2.5 py-2 text-left text-[13px] text-ink transition-colors hover:bg-control/50 motion-reduce:transition-none")}
+          {keyResultButtons("cursor-pointer flex min-h-9 items-center rounded-lg px-2.5 py-2 text-start text-[13px] text-ink transition-colors hover:bg-control/50 motion-reduce:transition-none")}
         </nav>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:pl-9">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:ps-9">
             <Select className="min-w-0 sm:hidden"
               aria-label={t("settings.title")}
               value={section}

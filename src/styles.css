@@ -1523,7 +1523,7 @@ body {
     min-height: 30px;
     padding: 0.375rem 0.5rem;
     border-radius: 0.375rem;
-    text-align: left;
+    text-align: start;
     font-size: 14px;
     font-weight: 400;
     line-height: 18px;
@@ -1703,7 +1703,7 @@ body {
 }
 :root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-rail {
   background: transparent;
-  border-right: 0.5px solid var(--settings-edge);
+  border-inline-end: 0.5px solid var(--settings-edge);
 }
 :root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface .bg-card {
   background-color: var(--color-menu);

@@ -27,7 +27,7 @@ export function CloudTrialIntroCard({ offer, onStart, onHowTo, onSignIn, onNotNo
       <button type="button" className="ui-button" onClick={onHowTo}>{t("cloudIntro.howTo")}</button>
     </div>
     <div className="mt-1 flex items-center justify-between gap-3">
-      {onSignIn ? <button type="button" className={cn(LINK, "py-2 text-left text-[12px]")} onClick={onSignIn}>{t("cloudAccount.signIn")}</button> : <span />}
+      {onSignIn ? <button type="button" className={cn(LINK, "py-2 text-start text-[12px]")} onClick={onSignIn}>{t("cloudAccount.signIn")}</button> : <span />}
       <NotNowButton onClick={onNotNow} />
     </div>
   </NoticeCard>;

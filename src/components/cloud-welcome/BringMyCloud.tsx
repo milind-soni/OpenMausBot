@@ -51,7 +51,7 @@ export function BringMyCloud() {
       {bots.map((bot) => <li key={bot.id} data-bring-bot={bot.id} className="flex min-w-0 items-center gap-3">
         <span dir="auto" className={cn("min-w-0 truncate text-[14px] text-ink", bot.stays ? "max-w-[50%] shrink-0" : "flex-1")}>{bot.name}</span>
         {bot.stays
-          ? <span className="min-w-0 flex-1 text-right text-[12px] text-ink-tertiary">{t(WHY_IT_STAYS[bot.stays])}</span>
+          ? <span className="min-w-0 flex-1 text-end text-[12px] text-ink-tertiary">{t(WHY_IT_STAYS[bot.stays])}</span>
           : <button type="button" data-bring-move={bot.id} className={SECONDARY} disabled={asking !== null || moving} onClick={() => ask(bot)}>{t("cloudWelcome.bring.move")}</button>}
       </li>)}
     </ul>

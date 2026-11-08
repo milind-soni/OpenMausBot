@@ -20,6 +20,7 @@ const packLoaders = {
   ru: () => import("./ru.json"),
   it: () => import("./it.json"),
   ko: () => import("./ko.json"),
+  ar: () => import("./ar.json"),
 } satisfies Record<string, () => Promise<{ default: LocalePack }>>;
 
 export type PackName = "en" | keyof typeof packLoaders;
@@ -46,6 +47,7 @@ export const localePacks: Readonly<Record<string, PackName>> = {
   ru: "ru",
   it: "it",
   ko: "ko",
+  ar: "ar",
 };
 
 /** The packs this page has loaded, under every tag that shows them: English, and each one loadLocalePack fetched. */
@@ -76,4 +78,5 @@ export const localeChoices: ReadonlyArray<{ code: string; label: string }> = [
   { code: "ru", label: "Русский" },
   { code: "it", label: "Italiano" },
   { code: "ko", label: "한국어" },
+  { code: "ar", label: "العربية" },
 ];

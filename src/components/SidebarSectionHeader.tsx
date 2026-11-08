@@ -104,7 +104,7 @@ export function SidebarSectionHeader({
             aria-expanded={!collapsed}
             aria-keyshortcuts={reorderable ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
             title={toggleTitle}
-            className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-start focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
           >
             <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-ink-secondary">{name}</span>
             {collapsed && <SectionAttention attention={attention} label={attentionLabel} alert={alert} />}
@@ -145,7 +145,7 @@ export function SidebarSectionHeader({
           aria-expanded={!collapsed}
           aria-keyshortcuts={reorderable ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
           title={toggleTitle}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-raised/50"
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-start hover:bg-raised/50"
         >
           <span className="truncate text-[12px] font-semibold text-ink-secondary">
             {name}

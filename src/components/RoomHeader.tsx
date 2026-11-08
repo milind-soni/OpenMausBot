@@ -94,7 +94,7 @@ function memberMauses(group: Group, members: Bot[]) {
         </span>
         {held && !busy && (
           <span
-            className="absolute -right-1 -top-1 flex size-3.5 items-center justify-center rounded-full border border-app bg-raised text-ink-secondary"
+            className="absolute -end-1 -top-1 flex size-3.5 items-center justify-center rounded-full border border-app bg-raised text-ink-secondary"
             role="img"
             aria-label={t("room.holds.avatarHeld", { name: b.name })}
           >
@@ -105,14 +105,14 @@ function memberMauses(group: Group, members: Bot[]) {
         {busy && (
           showPlace ? (
             <span
-              className="absolute -right-1 -top-1 flex size-3.5 items-center justify-center rounded-full border border-app bg-accent text-white"
+              className="absolute -end-1 -top-1 flex size-3.5 items-center justify-center rounded-full border border-app bg-accent text-white"
               role="img"
               aria-label={t("place.chipAria", { place: t(placeLabelKey(effective)) })}
             >
               <PlaceIcon place={effective} size={9} strokeWidth={2.5} aria-hidden="true" />
             </span>
           ) : (
-            <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-app bg-accent" />
+            <span className="absolute -end-0.5 -top-0.5 size-2 rounded-full border border-app bg-accent" />
           )
         )}
       </span>
@@ -153,7 +153,7 @@ export function RoomHeader({
   if (simple) {
     const more = members.length - SIMPLE_FACES;
     return (
-      <div {...headerDragProps} className="@container/roomhead px-5 py-3 pl-11 md:pl-5">
+      <div {...headerDragProps} className="@container/roomhead px-5 py-3 ps-11 md:ps-5">
         <div data-roomhead-row className="flex items-center justify-between gap-3">
           <div data-roomhead-identity className="flex min-w-0 flex-col items-start" style={headerNoDragStyle}>
             <button
@@ -167,7 +167,7 @@ export function RoomHeader({
               className="group -mx-2 flex min-w-0 max-w-[calc(100%+1rem)] items-center gap-1 rounded-lg px-2 py-0.5 hover:bg-raised/60 focus-visible:bg-raised/60"
             >
               <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
-              <ChevronRight size={14} aria-hidden="true" className="-ml-1 w-0 shrink-0 text-ink-secondary opacity-0 transition-[width,margin,opacity] duration-150 group-hover:ml-0 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:ml-0 group-focus-visible:w-3.5 group-focus-visible:opacity-100" />
+              <ChevronRight size={14} aria-hidden="true" className="-ms-1 w-0 shrink-0 text-ink-secondary opacity-0 transition-[width,margin,opacity] duration-150 group-hover:ms-0 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:ms-0 group-focus-visible:w-3.5 group-focus-visible:opacity-100" />
             </button>
             {group.description && <p className="max-w-full truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
           </div>
@@ -180,7 +180,7 @@ export function RoomHeader({
               title={t("room.members.manage")}
               aria-label={membersLabel}
               style={headerNoDragStyle}
-              className="flex items-center rounded-full py-0.5 pl-1 pr-1.5 hover:bg-raised/60"
+              className="flex items-center rounded-full py-0.5 ps-1 pe-1.5 hover:bg-raised/60"
             >
               <span className="flex items-center -space-x-1.5">
                 {faces.slice(0, SIMPLE_FACES)}
@@ -202,7 +202,7 @@ export function RoomHeader({
         className={cn(
           // A container query never matches the container itself, so the row that wraps is the child below.
           "@container/roomhead px-5 py-3",
-          "pl-11 md:pl-5",
+          "ps-11 md:ps-5",
         )}
       >
         <div data-roomhead-row className="flex items-center justify-between @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:gap-y-1">
@@ -217,7 +217,7 @@ export function RoomHeader({
         </div>
         <div
           data-roomhead-controls
-          className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
+          className="flex items-center gap-1.5 @max-3xl/roomhead:ms-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
         >
           <button
             type="button"
@@ -251,7 +251,7 @@ export function RoomHeader({
               onClick={onOpenMembers}
               title={t("room.members.manage")}
               aria-label={membersLabel}
-              className="flex items-center gap-1.5 rounded-full py-0.5 pl-1 pr-1.5 hover:bg-raised/60"
+              className="flex items-center gap-1.5 rounded-full py-0.5 ps-1 pe-1.5 hover:bg-raised/60"
             >
               {faces}
               <span className="flex size-[18px] items-center justify-center rounded-full border border-dashed border-hairline/70 text-ink-secondary">

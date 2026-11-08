@@ -260,7 +260,7 @@ export function SkillsSection() {
               {visible.map((skill) => (
                 <div key={skill.name} className="px-3 py-2.5">
                   <div className="flex items-center gap-2">
-                    <button type="button" onClick={() => void view(skill)} className="min-w-0 flex-1 text-left" aria-label={t("skills.library.view", { skill: skill.name })}>
+                    <button type="button" onClick={() => void view(skill)} className="min-w-0 flex-1 text-start" aria-label={t("skills.library.view", { skill: skill.name })}>
                       <div className="truncate font-mono text-[13px] text-ink">{skill.name}</div>
                       <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{skill.description}</div>
                     </button>

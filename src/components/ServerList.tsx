@@ -48,7 +48,7 @@ function CopyAddress({ origin, name }: { origin: string; name: string }) {
 /** One row's status line, with at most one button. */
 function StatusLine({ status, onTryNow, onPairAgain, onEdit }: { status: ServerStatus | undefined; onTryNow: () => void; onPairAgain: () => void; onEdit: () => void }) {
   if (!status || status.state === "connected") return null;
-  const action = (label: string, run: () => void) => <button type="button" onClick={run} className="ml-2 font-medium text-accent-text hover:underline">{label}</button>;
+  const action = (label: string, run: () => void) => <button type="button" onClick={run} className="ms-2 font-medium text-accent-text hover:underline">{label}</button>;
   const text = status.state === "checking" ? t("servers.state.checking")
     : status.state === "reconnecting" ? t("servers.state.reconnecting")
     : status.state === "cantReach" ? t("servers.state.cantReach", { time: clock(status.since) })

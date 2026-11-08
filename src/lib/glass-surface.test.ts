@@ -100,6 +100,6 @@ describe("glass surface", () => {
     expect(section).toContain("grid grid-cols-1 items-start gap-x-6 gap-y-1 @xl:grid-cols-2");
     const mcp = readFileSync(join(src, "components", "McpServersPanel.tsx"), "utf8");
     expect(mcp).toContain('data-mcp-row className="flex flex-wrap items-center gap-3"');
-    expect(mcp).toContain('data-mcp-row-actions className="ml-auto flex flex-wrap items-center justify-end gap-1"');
+    expect(mcp).toContain('data-mcp-row-actions className="ms-auto flex flex-wrap items-center justify-end gap-1"');
   });
 });

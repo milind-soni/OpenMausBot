@@ -65,7 +65,7 @@ export function FollowBotModelRow({ name, model, follows, onPick }: { name: stri
       data-menu-row
       aria-pressed={follows}
       onClick={onPick}
-      className="flex h-9 w-full shrink-0 items-center justify-between gap-2 border-b-[0.5px] border-ink/10 px-3.5 text-left text-[13px] leading-[18px] text-ink hover:bg-ink/[0.06] focus:bg-ink/[0.06]"
+      className="flex h-9 w-full shrink-0 items-center justify-between gap-2 border-b-[0.5px] border-ink/10 px-3.5 text-start text-[13px] leading-[18px] text-ink hover:bg-ink/[0.06] focus:bg-ink/[0.06]"
     >
       <span className="flex min-w-0 items-baseline gap-2">
         <span className="shrink-0 font-medium">{t("model.useBotModel", { name })}</span>
@@ -154,16 +154,16 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
       >
         <InstanceProviderMark instance={target} size={18} subtle={!selected} />
         {target.access === "api" && (
-          <span data-rail-key-badge className="absolute bottom-0 left-0 flex size-3.5 items-center justify-center rounded-full bg-menu text-ink-secondary">
+          <span data-rail-key-badge className="absolute bottom-0 start-0 flex size-3.5 items-center justify-center rounded-full bg-menu text-ink-secondary">
             <KeyRound size={9} aria-hidden="true" />
           </span>
         )}
-        {attention && <span className="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-warning ring-2 ring-menu" />}
+        {attention && <span className="absolute bottom-0.5 end-0.5 size-1.5 rounded-full bg-warning ring-2 ring-menu" />}
       </button>
     );
   };
   return (
-    <div className="flex w-14 shrink-0 flex-col gap-1 overflow-y-auto border-r-[0.5px] border-ink/10 p-2">
+    <div className="flex w-14 shrink-0 flex-col gap-1 overflow-y-auto border-e-[0.5px] border-ink/10 p-2">
       {subscription.length > 0 && <div className={cn(RAIL_LABEL, "pt-0.5")}>{t("model.rail.cloud")}</div>}
       {subscription.map(railButton)}
       {(api.length > 0 || onAddApiKeys) && <div className={cn(RAIL_LABEL, subscription.length > 0 ? "pt-2" : "pt-0.5")}>{t("model.rail.apiKeys")}</div>}

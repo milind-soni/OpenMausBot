@@ -27,7 +27,7 @@ export function PromptPreview({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 text-left"
+        className="flex w-full items-center justify-between gap-3 text-start"
       >
         <span className="text-[15px] font-medium text-ink">
           {data

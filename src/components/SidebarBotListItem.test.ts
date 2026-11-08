@@ -363,7 +363,7 @@ describe("BotListItem", () => {
     expect(markup).toContain('aria-label="Actions for Atlas"');
     expect(markup).toContain("group-focus-within:opacity-100");
     expect(markup).toContain("group-hover:pointer-events-auto");
-    expect(markup).not.toContain("pr-[92px]");
+    expect(markup).not.toContain("pe-[92px]");
   });
 });
 

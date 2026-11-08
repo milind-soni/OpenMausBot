@@ -13,7 +13,7 @@ export function showDefaultBot(dispatch: (action: Action) => void, bot: Pick<Bot
   if (!shown) dispatch({ type: "notice", notice: { kind: "note", botName: null, text: t("defaultBot.hidden", { name: bot.name }) } });
 }
 
-export function HideDefaultBotItem({ bot, onDone, className = "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]" }: { bot: Bot; onDone: () => void; className?: string }) {
+export function HideDefaultBotItem({ bot, onDone, className = "flex w-full items-center gap-3 px-3.5 py-2 text-start text-[14px]" }: { bot: Bot; onDone: () => void; className?: string }) {
   const { dispatch } = useStore();
   return (
     <button

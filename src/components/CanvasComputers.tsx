@@ -190,7 +190,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
   const settings = () => { onClose(); dispatch({ type: "toggleAppSettings", open: true, section: "computer" }); };
 
   return <>
-    {open && <aside ref={shelf} aria-label={t("canvasComputers.title")} onKeyDown={(event) => { if (event.key === "Escape" && !assignment) { event.stopPropagation(); if (pointer.current) clearDrag(); else onClose(); } }} className="flex w-[300px] max-w-[90vw] shrink-0 flex-col border-l border-hairline/50 bg-panel max-sm:absolute max-sm:inset-y-0 max-sm:right-0 max-sm:z-30 max-sm:shadow-xl">
+    {open && <aside ref={shelf} aria-label={t("canvasComputers.title")} onKeyDown={(event) => { if (event.key === "Escape" && !assignment) { event.stopPropagation(); if (pointer.current) clearDrag(); else onClose(); } }} className="flex w-[300px] max-w-[90vw] shrink-0 flex-col border-s border-hairline/50 bg-panel max-sm:absolute max-sm:inset-y-0 max-sm:end-0 max-sm:z-30 max-sm:shadow-xl">
       <header className="flex items-center gap-2 border-b border-hairline/40 px-4 py-3">
         <Monitor size={16} className="text-ink-secondary" /><h2 className="flex-1 text-[13px] font-semibold">{t("canvasComputers.title")}</h2>
         <button aria-label={t("canvasComputers.refresh")} className={control} disabled={loading || busy !== null} onClick={() => { setError(""); void refresh(); }}><RefreshCw size={14} className={loading ? "animate-spin" : ""} /></button>
@@ -268,7 +268,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
           {viewer?.id === computer.id && <a href={viewer.url} target="_blank" rel="noopener noreferrer" className="mt-2 block rounded-lg px-3 py-2 text-[12px] text-accent hover:bg-control">{t("canvasComputers.openSecure")} <ArrowUpRight size={14} aria-hidden="true" className="inline align-[-2px]" /></a>}
         </article>; })}
       </div>
-      <footer className="border-t border-hairline/40 p-3"><button className={`${control} w-full text-left`} onClick={settings}>{t("canvasComputers.moreSettings")}</button></footer>
+      <footer className="border-t border-hairline/40 p-3"><button className={`${control} w-full text-start`} onClick={settings}>{t("canvasComputers.moreSettings")}</button></footer>
     </aside>}
     {dragging && createPortal(<div role="status" className="pointer-events-none fixed z-[70] rounded-xl border border-accent/40 bg-card px-4 py-3 text-[12px] text-ink shadow-xl" style={{ left: dragging.x + 14, top: dragging.y + 14 }}>
       <span className="flex items-center gap-2"><Box size={15} />{dragging.name}</span>

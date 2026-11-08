@@ -39,7 +39,7 @@ export function LiveKeySetup({ onSaved, compact = false }: { onSaved: () => void
   return (
     <form
       className={cn(
-        "flex flex-col gap-2.5 rounded-xl border border-hairline bg-panel p-4 text-left",
+        "flex flex-col gap-2.5 rounded-xl border border-hairline bg-panel p-4 text-start",
         compact ? "w-full" : "w-[420px] max-w-[90vw]",
       )}
       onSubmit={(event) => {

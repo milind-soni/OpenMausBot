@@ -58,7 +58,7 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
       aria-label={conversation ? `${label}, ${conversation}` : label}
       aria-expanded={open}
       aria-controls={open ? BOT_PANEL_ID : undefined}
-      className={cn("group flex min-w-0 max-w-full items-center gap-2 rounded-full py-[7.5px] pl-[7.5px] pr-[13.5px] text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
+      className={cn("group flex min-w-0 max-w-full items-center gap-2 rounded-full py-[7.5px] ps-[7.5px] pe-[13.5px] text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
     >
       <BotAvatar bot={bot} size={24} {...avatar} />
       <span dir="auto" className="min-w-0 truncate text-[14px] font-medium leading-5">{bot.name}</span>
@@ -78,7 +78,7 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
         <span role="img" data-chathead-elsewhere aria-label={t("task.otherActivity", { count: elsewhere })} className="size-1.5 shrink-0 rounded-full bg-accent" />
       )}
       {!open && !conversation && (
-        <span aria-hidden="true" data-chathead-chevron className="-ml-0.5 flex shrink-0">
+        <span aria-hidden="true" data-chathead-chevron className="-ms-0.5 flex shrink-0">
           <ChevronRight size={12} className={cn("shrink-0 text-ink-tertiary transition-transform group-hover:translate-x-0.5 group-focus-visible:translate-x-0.5", CHEVRON_MOTION)} />
         </span>
       )}

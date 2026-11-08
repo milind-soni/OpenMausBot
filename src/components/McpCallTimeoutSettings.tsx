@@ -80,7 +80,7 @@ export function McpCallTimeoutSettings() {
           }}
           className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[14px] tabular-nums text-ink focus:outline-none"
         />
-        <span className="pr-3 text-[13px] text-ink-secondary">{t("settings.mcpCalls.minutes")}</span>
+        <span className="pe-3 text-[13px] text-ink-secondary">{t("settings.mcpCalls.minutes")}</span>
       </div>
       <p id="mcp-call-timeout-help" className="text-[12px] leading-relaxed text-ink-secondary">
         {t("settings.mcpCalls.help")}

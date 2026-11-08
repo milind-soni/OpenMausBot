@@ -107,7 +107,7 @@ export function MapComposer({ bots, teams, onTagged, onSent }: {
             {index < shownNames.length - 1 ? "," : ""}
           </span>)}
           {!sent.expanded && summary.more > 0 && <button className="text-ink underline-offset-2 hover:underline" onClick={() => setSent({ ...sent, expanded: true })}>{t("mapComposer.andMore", { count: summary.more })}</button>}
-          <button aria-label={t("common.close")} className="ml-auto rounded p-0.5 hover:bg-control" onClick={() => setSent(null)}><X size={12} /></button>
+          <button aria-label={t("common.close")} className="ms-auto rounded p-0.5 hover:bg-control" onClick={() => setSent(null)}><X size={12} /></button>
         </p>}
         <div className="relative flex items-end gap-2 rounded-2xl bg-composer px-3 py-2 shadow-lg ring-1 ring-composer-ring">
           <MentionMenu listRef={listRef} motion={motion} choices={choices} highlight={highlight} everyoneCount={visible.length}

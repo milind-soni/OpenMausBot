@@ -59,7 +59,7 @@ export function SharePresetContents({ preview, localSkips }: { preview: PresetSh
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
             <dt className="text-ink-secondary">{label}</dt>
-            <dd className="max-w-[300px] truncate text-right text-ink" title={value}>{value}</dd>
+            <dd className="max-w-[300px] truncate text-end text-ink" title={value}>{value}</dd>
           </div>
         ))}
       </dl>
@@ -70,7 +70,7 @@ export function SharePresetContents({ preview, localSkips }: { preview: PresetSh
       {preview.redacted.length > 0 && (
         <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamShare.redacted")}</div>
-          <ul className="mt-1 list-disc pl-5">
+          <ul className="mt-1 list-disc ps-5">
             {preview.redacted.map((part) => <li key={part}>{describePart(part, preview.document)}</li>)}
           </ul>
         </div>
@@ -78,7 +78,7 @@ export function SharePresetContents({ preview, localSkips }: { preview: PresetSh
       {skipped.length > 0 && (
         <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamShare.skipped")}</div>
-          <ul className="mt-1 list-disc pl-5">
+          <ul className="mt-1 list-disc ps-5">
             {skipped.map((line, index) => <li key={`${line}-${index}`}>{line}</li>)}
           </ul>
         </div>

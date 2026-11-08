@@ -217,12 +217,12 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
                 </span>
               </span>
               {device.id === current ? null : (
-                <button type="button" onClick={() => void signOut(device.id)} className="ui-button ml-auto shrink-0">{t("remote.serverPairing.signOut")}</button>
+                <button type="button" onClick={() => void signOut(device.id)} className="ui-button ms-auto shrink-0">{t("remote.serverPairing.signOut")}</button>
               )}
             </div>
           ))}
         </div>
-        {error ? <p className="pl-4 text-[12px] leading-4 text-danger">{error}</p> : null}
+        {error ? <p className="ps-4 text-[12px] leading-4 text-danger">{error}</p> : null}
       </div>
     );
   }

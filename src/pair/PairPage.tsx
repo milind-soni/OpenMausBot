@@ -146,7 +146,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-app px-6 text-ink">
-      <div className="absolute left-3 top-12 max-w-[280px]"><DesktopWorkspaceSwitcher /></div>
+      <div className="absolute start-3 top-12 max-w-[280px]"><DesktopWorkspaceSwitcher /></div>
       <div className="w-full max-w-[420px]">
         {where && unencryptedPublic(where) ? <p role="alert" className="mb-4 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-[13px] text-warning">{t("pair.notEncrypted")}</p> : null}
         {opening ? (

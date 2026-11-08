@@ -17,7 +17,7 @@ export function PhoneAppsCard({ bot, patch }: { bot: Bot; patch: (patch: BotPatc
       {rows.map(({ cap, grant, onPhone }) => {
         const label = t(`botAccess.phone.cap.${cap}` as LocaleKey);
         return <div key={cap} className={cn("flex flex-wrap items-center justify-between gap-3 px-3 py-1.5", !onPhone && "opacity-50")}>
-          <span className="min-w-0 text-[13px] text-ink">{label}{!onPhone && <span className="ml-2 text-[11px] text-ink-secondary">{t("botAccess.phone.notOnPhone")}</span>}</span>
+          <span className="min-w-0 text-[13px] text-ink">{label}{!onPhone && <span className="ms-2 text-[11px] text-ink-secondary">{t("botAccess.phone.notOnPhone")}</span>}</span>
           <div className="flex shrink-0 gap-0.5 rounded-md bg-card p-0.5" role="group" aria-label={label}>
             {([[null, t("botAccess.scopes.off")], ["read", t("botAccess.scopes.read")], ["write", t("botAccess.scopes.readWrite")]] as const).map(([value, text]) =>
               <button key={text} type="button" disabled={!onPhone} aria-pressed={grant === value} onClick={() => patch({ phoneApps: nextPhoneApps(bot, cap, value) })}

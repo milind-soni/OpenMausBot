@@ -81,7 +81,7 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
   switch (body.kind) {
     case "policy":
       return (
-        <div data-simple-policy className="flex flex-col gap-0.5 py-1 pl-8 pr-2">
+        <div data-simple-policy className="flex flex-col gap-0.5 py-1 ps-8 pe-2">
           <p className="text-[13px] leading-[18px] text-ink-secondary">{t("policy.managedBy", { organization: body.organization })}</p>
           <p className="text-[12px] leading-4 text-ink-tertiary">{t(body.team ? "policy.teamModelBlocked" : "policy.modelBlocked", { organization: body.organization })}</p>
         </div>
@@ -104,7 +104,7 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
         </div>
       ) : (
         <>
-          <p className={cn(MENU_NOTE, "pl-8")}>{t("model.simple.noModels")}</p>
+          <p className={cn(MENU_NOTE, "ps-8")}>{t("model.simple.noModels")}</p>
           <button type="button" data-menu-row data-simple-refresh tabIndex={-1} disabled={props.menu.busy} onClick={() => props.onCheckAgain(instance)} className={MENU_ROW}>
             <Gutter>
               {props.menu.busy
@@ -120,7 +120,7 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
         <>
           {body.rows.map((row, index) => (
             <div key={row.option.id} className="contents">
-              {index === body.localFrom && <div className={cn(MENU_LABEL, "pl-8 font-normal")}>{t("model.localModels")}</div>}
+              {index === body.localFrom && <div className={cn(MENU_LABEL, "ps-8 font-normal")}>{t("model.localModels")}</div>}
               <MenuModel instance={instance} row={row} onPick={props.onPick} />
             </div>
           ))}
@@ -212,7 +212,7 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
   return (
     <div data-simple-model-menu className="flex min-h-0 flex-1 flex-col">
       {menu.search && (
-        <div data-simple-model-search className="group/search flex h-9 shrink-0 items-center gap-2 border-b-[0.5px] border-ink/10 pl-3.5 pr-2">
+        <div data-simple-model-search className="group/search flex h-9 shrink-0 items-center gap-2 border-b-[0.5px] border-ink/10 ps-3.5 pe-2">
           <Search size={16} strokeWidth={MENU_STROKE} className="shrink-0 text-ink-tertiary group-focus-within/search:text-ink-secondary" aria-hidden="true" />
           <input
             data-menu-search
@@ -282,7 +282,7 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
                   <Gutter><InstanceProviderMark instance={group.instance} size={14} subtle /></Gutter>
                   <span className="min-w-0 truncate">{group.label}</span>
                 </div>
-                {group.note && <p className={cn(MENU_NOTE, "pl-8 pt-0")}>{group.note}</p>}
+                {group.note && <p className={cn(MENU_NOTE, "ps-8 pt-0")}>{group.note}</p>}
                 <GroupBody group={group} props={props} />
               </div>
             );

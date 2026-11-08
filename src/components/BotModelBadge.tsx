@@ -33,7 +33,7 @@ export function BotModelBadge({ bot, instances, avatarSize }: {
   const description = t("sidebar.bot.modelBadge", { model: model.label, engine: engineDisplayName(model.instance) });
   return (
     <span data-testid="model-badge" role="img" aria-label={description} title={model.label}
-      className="absolute -bottom-0.5 -left-0.5 flex items-center justify-center rounded-full border-2 border-panel bg-panel"
+      className="absolute -bottom-0.5 -start-0.5 flex items-center justify-center rounded-full border-2 border-panel bg-panel"
       style={{ width: size, height: size }}>
       <InstanceProviderMark instance={model.instance} size={size - 4} subtle />
     </span>

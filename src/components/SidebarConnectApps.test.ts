@@ -24,7 +24,7 @@ describe("the Connect apps faces", () => {
 
   it("draws a 36px pill with a 14px medium label and three overlapping 16px logos whose outer two fan out on hover", () => {
     const html = renderToStaticMarkup(createElement(SidebarConnectApps));
-    expect(html).toMatch(/class="group\/apps flex h-9 min-w-0 flex-1 items-center justify-center gap-1\.5 rounded-full pl-4 pr-3 text-\[14px\] font-medium leading-5 text-ink /);
+    expect(html).toMatch(/class="group\/apps flex h-9 min-w-0 flex-1 items-center justify-center gap-1\.5 rounded-full ps-4 pe-3 text-\[14px\] font-medium leading-5 text-ink /);
     const faces = [...html.matchAll(/data-app-face="[^"]+" class="([^"]*)"/g)].map(([, classes]) => classes!);
     expect(faces).toHaveLength(3);
     for (const face of faces) expect(face).toContain("size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md p-px");

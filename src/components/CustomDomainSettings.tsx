@@ -74,7 +74,7 @@ export function CustomDomainGuide({ status }: { status: CustomDomainStatus }) {
   return (
     <details className="rounded-lg border border-hairline/50 bg-inset px-3 py-2.5 text-[12px] text-ink-secondary">
       <summary className="cursor-pointer font-medium text-ink">{t("settings.domain.guide")}</summary>
-      <ol className="mt-3 list-decimal space-y-3 pl-4 leading-relaxed">
+      <ol className="mt-3 list-decimal space-y-3 ps-4 leading-relaxed">
         <li>{t("settings.domain.dns")}</li>
         <li>
           {t("settings.domain.proxy")}

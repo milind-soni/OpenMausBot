@@ -161,7 +161,7 @@ export function ComputerTab({ bot, derived, onOpen }: { bot: Bot; derived: Deriv
         )}
         <span
           aria-hidden="true"
-          className="absolute bottom-2.5 right-2.5 flex h-7 items-center gap-1.5 rounded-full border border-ink/10 bg-panel/80 px-2.5 text-[12px] text-ink opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-100"
+          className="absolute bottom-2.5 end-2.5 flex h-7 items-center gap-1.5 rounded-full border border-ink/10 bg-panel/80 px-2.5 text-[12px] text-ink opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-100"
         >
           <Monitor size={13} aria-hidden="true" />
           {t("place.action.watch")}

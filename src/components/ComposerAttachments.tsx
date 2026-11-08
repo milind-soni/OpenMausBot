@@ -188,7 +188,7 @@ export function ComposerAttachments({
                     className="max-h-[76px] max-w-full object-contain"
                   />
                   {a.uploading && (
-                    <span className="absolute bottom-1.5 right-1.5 flex size-6 items-center justify-center rounded-full bg-black/65 text-white shadow-sm">
+                    <span className="absolute bottom-1.5 end-1.5 flex size-6 items-center justify-center rounded-full bg-black/65 text-white shadow-sm">
                       <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />
                     </span>
                   )}
@@ -249,7 +249,7 @@ function Chip({
       <button
         onClick={onRemove}
         aria-label={t(label === "PASTED" ? "composer.chip.removePasted" : "composer.chip.removeFile")}
-        className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border border-hairline/60 bg-panel text-ink-secondary opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 touch:opacity-100"
+        className="absolute -end-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border border-hairline/60 bg-panel text-ink-secondary opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 touch:opacity-100"
       >
         <X size={11} />
       </button>

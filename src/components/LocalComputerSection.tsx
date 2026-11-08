@@ -744,7 +744,7 @@ export function LocalVmIdleTimeoutSetting({
             }}
             className="min-w-0 flex-1 bg-transparent px-2.5 py-1.5 text-[13px] tabular-nums text-ink focus:outline-none disabled:opacity-50"
           />
-          <span className="pr-2.5 text-[13px] text-ink-secondary">{t("vm.idle.minutes")}</span>
+          <span className="pe-2.5 text-[13px] text-ink-secondary">{t("vm.idle.minutes")}</span>
         </div>
       </div>
       {error ? (
@@ -1276,7 +1276,7 @@ export function LocalComputerSection() {
               onClick={() => void savePolicy(mode, status?.max_instances ?? 2)}
               className={cn(
                 "flex-1 px-3 py-2 text-[13px] disabled:opacity-50",
-                index > 0 && "border-l border-hairline/40",
+                index > 0 && "border-s border-hairline/40",
                 status?.mode === mode ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
               )}
             >

@@ -161,13 +161,13 @@ describe("Simple-mode sidebar layout", () => {
   it("draws the same faint edge in both modes, with the Simple footer in Simple mode and Advanced's footer in Advanced", () => {
     const footer = (tree: ReactElement<Props>[]) => (tree.find((node) => node.type === SidebarFooter)!.props as Parameters<typeof SidebarFooter>[0]).simple;
     const simple = render();
-    expect(simple.root.props.className).toContain("border-r-[0.5px] border-edge");
+    expect(simple.root.props.className).toContain("border-e-[0.5px] border-edge");
     expect(simple.root.props.className).not.toContain("border-hairline");
     expect(footer(simple.tree)).toBe(true);
     fixture.values = [];
     fixture.advanced = true;
     const advanced = render();
-    expect(advanced.root.props.className).toContain("border-r-[0.5px] border-edge");
+    expect(advanced.root.props.className).toContain("border-e-[0.5px] border-edge");
     expect(footer(advanced.tree)).toBe(false);
   });
 
@@ -315,7 +315,7 @@ describe("Simple-mode sidebar layout", () => {
     expect(plus().props.className).toEqual(expect.stringContaining("size-9"));
     (plus().props.onClick as () => void)();
     const menu = nodes(top().props.children).find((node) => /\bmin-w-\[200px\]/.test(node.props.className ?? ""))!;
-    expect(menu.props.className).toEqual(expect.stringContaining("left-full top-0"));
+    expect(menu.props.className).toEqual(expect.stringContaining("start-full top-0"));
     expect(menu.props.className).toEqual(expect.stringContaining("rounded-[var(--radius-menu)]"));
     const item = (label: string) => nodes(top().props.children).find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
     expect(item("Create department"), "Simple makes a department from its bots, by dragging one onto another or from a bot's menu").toBeUndefined();

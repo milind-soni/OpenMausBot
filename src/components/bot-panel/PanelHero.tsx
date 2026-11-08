@@ -91,7 +91,7 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
           <Pencil size={20} />
         </span>
         {bot.chiefOfStaff && (
-          <span data-panel-chief title={t("chat.chiefOfStaff")} className="absolute -bottom-0.5 -right-0.5 flex size-[22px] items-center justify-center rounded-full bg-accent text-accent-ink ring-[3px] ring-app">
+          <span data-panel-chief title={t("chat.chiefOfStaff")} className="absolute -bottom-0.5 -end-0.5 flex size-[22px] items-center justify-center rounded-full bg-accent text-accent-ink ring-[3px] ring-app">
             <Crown size={12} aria-hidden="true" />
             <span className="sr-only">{t("chat.chiefOfStaff")}</span>
           </span>
@@ -128,7 +128,7 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
               className="group/name relative inline-flex max-w-full items-center rounded-[8px] px-1.5 text-[17px] font-medium leading-6 text-ink hover:bg-ink/[0.04]"
             >
               <span className="min-w-0 truncate">{bot.name}</span>
-              <Pencil size={13} aria-hidden="true" className="absolute -right-4 shrink-0 text-ink-tertiary opacity-0 transition-opacity group-hover/name:opacity-100 group-focus-visible/name:opacity-100 group-focus-within/name:opacity-100 touch:opacity-100" />
+              <Pencil size={13} aria-hidden="true" className="absolute -end-4 shrink-0 text-ink-tertiary opacity-0 transition-opacity group-hover/name:opacity-100 group-focus-visible/name:opacity-100 group-focus-within/name:opacity-100 touch:opacity-100" />
             </button>
           )}
         </h2>

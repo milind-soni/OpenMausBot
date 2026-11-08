@@ -51,7 +51,7 @@ export function ThreadContextWarning({ bot, messages }: { bot: Bot; messages: re
 
 export function RoomContextBadge({ percent }: { percent: number }) {
   return (
-    <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border border-app bg-warning"
+    <span className="absolute -bottom-0.5 -end-0.5 size-2.5 rounded-full border border-app bg-warning"
       role="img" aria-label={t("contextWarning.short", { percent })} />
   );
 }

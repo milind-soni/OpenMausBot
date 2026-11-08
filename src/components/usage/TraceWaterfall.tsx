@@ -32,7 +32,7 @@ export function StatStrip({ items }: { items: Array<{ label: string; value: stri
       {items.map((item, index) => (
         <div
           key={item.label}
-          className={cn("min-w-0 px-4 py-3.5 sm:px-5", index % 3 !== 0 && "border-l border-hairline/40", index >= 3 && "border-t border-hairline/40 sm:border-t-0", index === 3 && "sm:border-l")}
+          className={cn("min-w-0 px-4 py-3.5 sm:px-5", index % 3 !== 0 && "border-s border-hairline/40", index >= 3 && "border-t border-hairline/40 sm:border-t-0", index === 3 && "sm:border-s")}
           title={item.hint}
         >
           <dt className="truncate text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">{item.label}</dt>
@@ -129,7 +129,7 @@ function barClass(row: TraceRow): string {
 function Badge({ kind }: { kind: "slowest" | "costliest" }) {
   return (
     <span className={cn(
-      "ml-2 rounded-md px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em]",
+      "ms-2 rounded-md px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em]",
       kind === "slowest" ? "bg-warning/15 text-warning" : "bg-accent/12 text-accent",
     )}>{t(kind === "slowest" ? "trace.slowest" : "trace.costliest")}</span>
   );
@@ -245,7 +245,7 @@ export function TraceWaterfall({ detail, now, actions }: { detail: TraceDetail; 
                 title={tokens ?? undefined}
                 data-kind={row.node.kind}
               >
-                <div className="flex h-9 min-w-0 items-center gap-2 pr-3" style={{ paddingLeft: 12 + row.depth * 18 }}>
+                <div className="flex h-9 min-w-0 items-center gap-2 pe-3" style={{ paddingInlineStart: 12 + row.depth * 18 }}>
                   {row.expandable ? (
                     <button
                       type="button"

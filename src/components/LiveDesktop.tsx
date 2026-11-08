@@ -95,7 +95,7 @@ export function LiveDesktop({ target, threadId, name, poster, expanded, onExpand
           {pill}
           <form
             style={noDragStyle}
-            className="ml-auto flex min-w-0 items-center gap-1"
+            className="ms-auto flex min-w-0 items-center gap-1"
             onSubmit={(event) => {
               event.preventDefault();
               if (!rfb.current || connection !== "connected" || !text) return;

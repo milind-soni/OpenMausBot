@@ -99,7 +99,7 @@ function InstructionsRow({ group }: { group: Group }) {
       data-panel-edit="instructions"
       aria-label={`${t("botSettings.simple.edit")}: ${t("room.panel.instructions")}`}
       onClick={bulletin.start}
-      className={cn(rowCls, "w-full text-left hover:bg-ink/[0.03]")}
+      className={cn(rowCls, "w-full text-start hover:bg-ink/[0.03]")}
     >
       <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-ink/[0.05] text-ink-secondary max-md:size-8 max-md:rounded-full" aria-hidden="true">
         <FileText size={15} />

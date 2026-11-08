@@ -182,7 +182,7 @@ export function PricesCard() {
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button type="button" onClick={() => setRows((current) => [...current, { key: "", input: "", output: "", cached: "" }])} disabled={saving} className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"><Plus size={13} />{t("usage.prices.add")}</button>
-        <button type="button" onClick={() => void save()} disabled={saving} className="ml-auto flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+        <button type="button" onClick={() => void save()} disabled={saving} className="ms-auto flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
           {saving && <Loader2 size={13} className="animate-spin" />}{t("common.save")}
         </button>
       </div>

@@ -20,7 +20,7 @@ export function SlashCommandMenu({ listRef, motion, commands, highlight, onPick,
       ref={listRef}
       role="listbox"
       aria-label={t("composer.commands.aria")}
-      className={cn("absolute bottom-full left-2 z-20 mb-2 max-h-80 w-80 max-w-[calc(100%-1rem)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg", motion.className)} {...motion.exitProps}
+      className={cn("absolute bottom-full start-2 z-20 mb-2 max-h-80 w-80 max-w-[calc(100%-1rem)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg", motion.className)} {...motion.exitProps}
     >
       <div className="border-b border-hairline/20 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">
         {t("composer.commands.title")}
@@ -36,7 +36,7 @@ export function SlashCommandMenu({ listRef, motion, commands, highlight, onPick,
           onClick={() => onPick(command)}
           onMouseEnter={() => onHighlight(index)}
           className={cn(
-            "flex w-full items-center gap-3 px-3 py-2.5 text-left",
+            "flex w-full items-center gap-3 px-3 py-2.5 text-start",
             index === highlight ? "bg-raised-hover" : "",
           )}
         >

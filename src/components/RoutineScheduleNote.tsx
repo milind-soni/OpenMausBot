@@ -22,7 +22,7 @@ export function RoutineScheduleNote() {
   const local = localDesktopPage() && window.ogb?.remoteClient?.active !== true;
   const place = schedulePlace({ cloudHome: state.config?.cloudHome === true, local, plan: plan?.view ?? null,
     ready: plan?.account?.machine?.status === "ready", offersAllowed: brandStatus().source !== "file" });
-  const link = "text-left underline underline-offset-2 hover:text-ink";
+  const link = "text-start underline underline-offset-2 hover:text-ink";
   const openCloud = () => { if (window.confirm(t("routines.scheduleNote.leave"))) void window.ogb?.cloudAccount?.connectHome().catch(() => {}); };
   return <p data-routine-schedule-note={place.kind === "local" ? place.next ?? "local" : place.kind} className="text-[11px] leading-relaxed text-ink-secondary">
     {place.kind === "cloud" ? t("routines.scheduleNote.cloud") : place.kind === "server" ? t("routines.scheduleNote.server") : <>

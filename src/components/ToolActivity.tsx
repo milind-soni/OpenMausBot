@@ -36,7 +36,7 @@ export function ToolActivity({ tool, place = null, live = false, source }: { too
         {place && <PlaceIcon place={place} size={13} className="shrink-0 opacity-70" role="img" aria-label={t(placeLabelKey(place))} data-testid="tool-place" />}
         <span className={cn("min-w-0 max-w-[30rem] truncate leading-5", advanced && !notice ? "font-mono" : "font-medium")}>{label}</span>
         {advanced && tool.summary && tool.summary !== tool.name && !nameIsCommand(tool.name) && <span className="min-w-0 flex-1 truncate font-mono" title={summary}>{summary}</span>}
-        <ChevronRight size={13} className="ml-auto shrink-0 group-open/tool:rotate-90" aria-hidden="true" />
+        <ChevronRight size={13} className="ms-auto shrink-0 group-open/tool:rotate-90" aria-hidden="true" />
       </summary>
       <div className="space-y-3 border-t border-hairline/40 p-3 text-ink-secondary">
         <div className={cn("text-[11px] font-medium", failed && "text-danger")}>{status}</div>

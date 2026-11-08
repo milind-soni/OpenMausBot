@@ -216,7 +216,7 @@ describe("Computer panel tabs", () => {
         .some((child) => isValidElement(child) && (child as Node).props["data-testid"] === "computer-tabs"))!;
       expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining(["relative", "flex", "justify-center"]));
       const close = rendered.nodes.find((node) => node.props["aria-label"] === "Close the Screen panel")!;
-      expect(String(close.props.className).split(" ")).toEqual(expect.arrayContaining(["absolute", "right-0"]));
+      expect(String(close.props.className).split(" ")).toEqual(expect.arrayContaining(["absolute", "end-0"]));
     }
   });
 

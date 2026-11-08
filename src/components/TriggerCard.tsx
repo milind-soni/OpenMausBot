@@ -71,11 +71,11 @@ export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId
     <section data-trigger-card={automation.id} data-automation-status={status.state} aria-label={sentence} className="w-full max-w-[640px] rounded-xl border border-hairline/45 bg-card px-3.5 py-2.5 text-[13px]">
       <div className="flex items-start gap-2">
         <Zap size={14} className={cn("mt-0.5 shrink-0", status.state === "needs-you" ? "text-warning" : automation.enabled ? "text-accent" : "text-ink-tertiary")} />
-        <button type="button" onClick={() => dispatch({ type: "showRoutines", view: "list", routineId: automation.id })} className="min-w-0 text-left font-medium leading-snug text-ink hover:text-accent-text">
+        <button type="button" onClick={() => dispatch({ type: "showRoutines", view: "list", routineId: automation.id })} className="min-w-0 text-start font-medium leading-snug text-ink hover:text-accent-text">
           {t("automations.card.setUp", { sentence })}
         </button>
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-[22px] text-[12px]">
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 ps-[22px] text-[12px]">
         <span className={cn("min-w-0 flex-1 basis-48 truncate", status.state === "needs-you" ? "text-warning" : "text-ink-secondary")} title={line}>{line}</span>
         <span className="flex shrink-0 items-center gap-0.5 text-ink-secondary">
           {status.state !== "done" && <><button type="button" disabled={Boolean(actions.busy)} onClick={() => void actions.toggle(automation)} className={ACTION}>{automation.enabled ? t("automations.pause") : t("automations.resume")}</button><span aria-hidden="true">·</span></>}
@@ -84,7 +84,7 @@ export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId
           {threadId && card.requestId && <><span aria-hidden="true">·</span><button type="button" onClick={undo} disabled={undoing} className={cn(ACTION, "text-accent")}>{undoing ? t("automations.card.undoing") : t("automations.card.undo")}</button></>}
         </span>
       </div>
-      {(error || actions.error) && <div role="alert" className="mt-1 pl-[22px] text-[12px] text-warning">{error ?? actions.error}</div>}
+      {(error || actions.error) && <div role="alert" className="mt-1 ps-[22px] text-[12px] text-warning">{error ?? actions.error}</div>}
       {/* On the page, not in the transcript: the transcript's scroller would clip it and the composer would cover Save. */}
       {editing && createPortal(
         <Suspense fallback={null}>

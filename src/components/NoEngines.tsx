@@ -82,7 +82,7 @@ export function NoEngines() {
                     type="button"
                     data-no-engines-api-keys
                     onClick={() => dispatch(openKeySettings())}
-                    className="flex items-center gap-3 rounded-xl border border-hairline/40 bg-card p-3.5 text-left hover:bg-control/40"
+                    className="flex items-center gap-3 rounded-xl border border-hairline/40 bg-card p-3.5 text-start hover:bg-control/40"
                   >
                     <KeyRound size={16} className="shrink-0 text-ink-secondary" />
                     <span className="min-w-0 flex-1">

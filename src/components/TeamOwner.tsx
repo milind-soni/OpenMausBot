@@ -91,7 +91,7 @@ export function OwnerPicker({ target, onClose }: { target: OwnerPickerTarget | n
         {team.people.map((person) => (
           <button key={person.email} type="button" role="menuitemradio" aria-checked={person.email === shown.current} disabled={busy}
             onClick={() => void pick(person)}
-            className={cn("flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink", person.email === shown.current ? "bg-menu-active" : "hover:bg-menu-hover")}>
+            className={cn("flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-start text-[14px] leading-[18px] text-ink", person.email === shown.current ? "bg-menu-active" : "hover:bg-menu-hover")}>
             <PersonFace person={person} size={20} />
             <span className="min-w-0 flex-1">
               <span className="block truncate">{person.you ? t("owner.you", { name: person.name }) : person.name}</span>
@@ -151,7 +151,7 @@ export function NeedsYouLine({ item, onOpened }: { item: NeedsYouItem; onOpened?
       openThread(dispatch, { botId, threadId: item.threadId }, state, showThreads);
       if (item.kind === "message") readConversation(state.groups, botId, item.threadId);
     }}
-    className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left hover:bg-menu-hover">
+    className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-start hover:bg-menu-hover">
     <NeedsYouTitle item={item} title={title} />
     {text && <span className="w-full truncate text-[12px] text-ink-secondary">{text}</span>}
   </button>;
@@ -174,13 +174,13 @@ export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
   return (
     <div data-needs-you className={cn("relative", compact ? "px-1" : "px-2 pb-1")}>
       <button type="button" aria-expanded={open} aria-haspopup="menu" aria-label={label} title={label} onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] font-medium text-warning hover:bg-raised/60">
+        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-start text-[13px] font-medium text-warning hover:bg-raised/60">
         <Bell size={15} aria-hidden="true" className="shrink-0" />
         {!compact && <span className="min-w-0 flex-1 truncate">{t("needsYou.title")}</span>}
         <span className="rounded-full bg-warning px-1.5 text-[11px] font-semibold tabular-nums text-panel">{items.length}</span>
       </button>
       {open && (
-        <div role="menu" aria-label={t("needsYou.title")} className={cn("absolute left-2 right-2 top-full z-40 mt-1 max-h-[340px] overflow-y-auto", MENU_SHEET)}>
+        <div role="menu" aria-label={t("needsYou.title")} className={cn("absolute start-2 end-2 top-full z-40 mt-1 max-h-[340px] overflow-y-auto", MENU_SHEET)}>
           {items.map((item) => <NeedsYouLine key={`${item.kind}:${item.id}`} item={item} onOpened={() => setOpen(false)} />)}
         </div>
       )}

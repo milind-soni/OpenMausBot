@@ -41,7 +41,7 @@ export function CloudScreenPreview({ src, name, error, starting, opening, disabl
             className={`h-full w-full object-contain transition group-hover:brightness-75 ${visible ? "" : "invisible"}`}
           />
           {visible && (
-            <span className="absolute right-2 top-2 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-[11px] font-medium text-white">
+            <span className="absolute end-2 top-2 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-[11px] font-medium text-white">
               {opening ? <Loader2 size={12} className="animate-spin" /> : <Maximize2 size={12} />}
               {opening ? t("computer.preview.connecting") : t("computer.open")}
             </span>
@@ -55,7 +55,7 @@ export function CloudScreenPreview({ src, name, error, starting, opening, disabl
         </div>
       )}
       {visible && refreshing && !problem && (
-        <div role="status" className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-[11px] text-white">
+        <div role="status" className="absolute bottom-2 start-2 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-[11px] text-white">
           <Loader2 size={12} className="animate-spin" />
           {t("computer.preview.connectingScreen")}
         </div>

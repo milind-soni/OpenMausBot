@@ -105,8 +105,8 @@ export function PeopleTable({ people, busy, onRole, onRemove, onLink, readOnly =
       <div className={cn(columns, "border-b border-hairline/40 pb-2 text-[12px] font-medium uppercase tracking-wide text-ink-secondary")}>
         <span>{t("people.colPerson")}</span>
         <span>{t("people.colRole")}</span>
-        <span className="text-right">{t("people.colLastSeen")}</span>
-        <span className="text-right">{t("people.colMonth")}</span>
+        <span className="text-end">{t("people.colLastSeen")}</span>
+        <span className="text-end">{t("people.colMonth")}</span>
         <span />
       </div>
       {people.map((person) => (
@@ -118,8 +118,8 @@ export function PeopleTable({ people, busy, onRole, onRemove, onLink, readOnly =
           <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", person.role === "admin" ? "bg-accent/15 text-accent" : "bg-control text-ink-secondary")}>
             {person.role === "admin" ? t("people.roleAdmin") : t("people.roleMember")}
           </span>
-          <span className="text-right tabular-nums text-ink-secondary">{person.isDomain ? "—" : lastSeenLabel(person.lastSeenAt)}</span>
-          <span className="text-right tabular-nums text-ink" title={t("people.turns", { turns: String(person.turns) })}>
+          <span className="text-end tabular-nums text-ink-secondary">{person.isDomain ? "—" : lastSeenLabel(person.lastSeenAt)}</span>
+          <span className="text-end tabular-nums text-ink" title={t("people.turns", { turns: String(person.turns) })}>
             {hasFiniteCost(person.costUsd) ? `${person.estimated ? "~" : ""}${formatUsd(person.costUsd)}` : "—"}
           </span>
           {readOnly ? <span /> : <span className="flex items-center justify-end gap-2 text-[12px]">

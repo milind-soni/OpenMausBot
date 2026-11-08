@@ -58,7 +58,7 @@ export function WorksOnGrid({ options, onSelect }: { options: readonly WorksOnOp
           type="button"
           aria-pressed={selected}
           className={cn(
-            "min-w-0 rounded-lg border px-2.5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-card",
+            "min-w-0 rounded-lg border px-2.5 py-3 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-card",
             selected
               ? "border-accent/60 bg-accent/10 text-ink"
               : "border-hairline/50 bg-panel/30 text-ink-secondary",

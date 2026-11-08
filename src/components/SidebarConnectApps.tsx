@@ -79,7 +79,7 @@ export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
       aria-label={circle ? label : undefined}
       title={circle ? label : undefined}
       onClick={() => dispatch({ type: "togglePlugins", open: true })}
-      className={circle ? SIMPLE_TOP_BUTTON : cn("group/apps flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full pl-4 pr-3 text-[14px] font-medium leading-5 text-ink", ELEVATED_CONTROL, ELEVATED_HOVER)}
+      className={circle ? SIMPLE_TOP_BUTTON : cn("group/apps flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full ps-4 pe-3 text-[14px] font-medium leading-5 text-ink", ELEVATED_CONTROL, ELEVATED_HOVER)}
     >
       {circle ? <Puzzle size={18} strokeWidth={1.5} aria-hidden="true" /> : <>
         <span className="min-w-0 truncate">{label}</span>

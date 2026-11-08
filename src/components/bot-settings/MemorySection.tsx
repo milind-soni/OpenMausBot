@@ -633,7 +633,7 @@ export function MemoryFileRows({
                 selected === file.path ? "bg-control/60" : "hover:bg-control/40",
               )}
             >
-              <button type="button" onClick={() => onOpen(file)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+              <button type="button" onClick={() => onOpen(file)} className="flex min-w-0 flex-1 items-center gap-2 text-start">
                 <FileText size={14} className="shrink-0 text-ink-secondary" />
                 <span className="truncate font-mono text-[13px] text-ink">{file.name}</span>
                 <span className="shrink-0 text-[12px] text-ink-secondary">

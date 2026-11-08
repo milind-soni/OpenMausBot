@@ -60,7 +60,7 @@ function Fixture() {
     <h1 className="text-xl font-semibold">Isolated bot settings verification</h1>
     <p className="my-3">Alt+1–9 switches bots; Alt+D toggles delayed reads, including while settings is open. All data is disposable.</p>
     <label><input type="checkbox" checked={delayReads} onChange={toggleDelay} /> Delay profile reads</label>
-    <label className="ml-3">Read delay (ms) <input type="number" defaultValue={1500} min={0} className="w-24 bg-control" onChange={(event) => { readDelayMs = Number(event.target.value); }} /></label>
+    <label className="ms-3">Read delay (ms) <input type="number" defaultValue={1500} min={0} className="w-24 bg-control" onChange={(event) => { readDelayMs = Number(event.target.value); }} /></label>
     <div className="my-4 flex flex-wrap gap-3">
       {state.bots.map((candidate, index) => <button key={candidate.id} className="rounded bg-control px-3 py-2" onClick={() => dispatch({ type: "select", id: candidate.id })}>
         {index + 1}: {candidate.name}

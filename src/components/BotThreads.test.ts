@@ -38,7 +38,7 @@ describe("sidebar bot threads", () => {
     expect(markup).toContain(`Long research · ${formatUpdatedAt(2)} · Working`);
     expect(markup).toContain(`Needs approval · ${formatUpdatedAt(3)} · Waiting · Unread`);
     expect(markup).not.toContain("New thread");
-    expect(markup).not.toContain("border-l");
+    expect(markup).not.toContain("border-s");
     expect(markup).not.toContain("disabled");
     expect(markup).not.toContain("test");
   });

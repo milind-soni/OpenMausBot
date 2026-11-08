@@ -109,10 +109,10 @@ export function DesktopViewer() {
   return (
     <div className="relative flex h-dvh overflow-hidden bg-app text-sm text-ink" style={{ paddingLeft: "env(safe-area-inset-left)", paddingRight: "env(safe-area-inset-right)" }}>
       <aside aria-label={t("desktopViewer.controls")} aria-hidden={!expanded} inert={!expanded} className={cn("z-10 flex shrink-0 items-center justify-center py-3", slide, expanded ? "w-[72px]" : "w-0")}>
-        <div className={cn("flex max-h-full w-14 shrink-0 flex-col items-center gap-1 overflow-y-auto rounded-2xl border border-hairline bg-panel p-1 shadow-xl", slide, expanded ? "translate-x-0 opacity-100" : "-translate-x-12 opacity-0")}>
+        <div className={cn("flex max-h-full w-14 shrink-0 flex-col items-center gap-1 overflow-y-auto rounded-2xl border border-hairline bg-panel p-1 shadow-xl", slide, expanded ? "translate-x-0 opacity-100" : "-translate-x-12 opacity-0 rtl:translate-x-12")}>
           <div className="relative flex h-11 w-11 shrink-0 items-center justify-center text-ink-secondary" title={status}>
             <Monitor size={20} aria-hidden="true" />
-            <span className={cn("absolute right-2 bottom-2 size-2 rounded-full ring-2 ring-panel", connected ? "bg-success" : "bg-warning")} />
+            <span className={cn("absolute end-2 bottom-2 size-2 rounded-full ring-2 ring-panel", connected ? "bg-success" : "bg-warning")} />
           </div>
           <div className="my-1 h-px w-7 shrink-0 bg-hairline" />
           <ViewerTool id="keyboard" label={t("desktopViewer.keyboard")} icon={Keyboard} disabled={!connected} active={panel === "keyboard"} expanded={panel === "keyboard"} onClick={() => togglePanel("keyboard")} />
@@ -120,14 +120,14 @@ export function DesktopViewer() {
           {document.fullscreenEnabled && <ViewerTool id="fullscreen" label={t(fullscreen ? "desktopViewer.exitFullscreen" : "desktopViewer.fullscreen")} icon={fullscreen ? Minimize : Maximize} onClick={() => { void toggleFullscreen(); }} />}
           <div className="my-1 h-px w-7 shrink-0 bg-hairline" />
           <ViewerTool id="retry" label={t("desktopViewer.reconnect")} icon={RefreshCw} onClick={() => { setClipboard(""); setAttempt(value => value + 1); }} />
-          <ViewerTool id="hide-controls" label={t("desktopViewer.hideControls")} icon={ChevronLeft} onClick={() => { setExpanded(false); setPanel(null); focusSoon("show-controls"); }} />
+          <ViewerTool id="hide-controls" label={t("desktopViewer.hideControls")} icon={ChevronLeft} iconClassName="rtl:-scale-x-100" onClick={() => { setExpanded(false); setPanel(null); focusSoon("show-controls"); }} />
         </div>
       </aside>
-      {handleMotion.shown && <div {...handleMotion.exitProps} className={cn("absolute left-0 top-1/2 z-10 -translate-y-1/2 rounded-r-2xl border border-l-0 border-hairline bg-panel p-1 shadow-xl", handleMotion.className)}>
-        <ViewerTool id="show-controls" label={t("desktopViewer.showControls")} icon={ChevronRight} onClick={() => { setExpanded(true); focusSoon("hide-controls"); }} />
+      {handleMotion.shown && <div {...handleMotion.exitProps} className={cn("absolute start-0 top-1/2 z-10 -translate-y-1/2 rounded-e-2xl border border-s-0 border-hairline bg-panel p-1 shadow-xl", handleMotion.className)}>
+        <ViewerTool id="show-controls" label={t("desktopViewer.showControls")} icon={ChevronRight} iconClassName="rtl:-scale-x-100" onClick={() => { setExpanded(true); focusSoon("hide-controls"); }} />
       </div>}
 
-      <main className={cn("relative flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-inset", !fullscreen && "my-2 mr-2 rounded-2xl border border-hairline", !fullscreen && !expanded && "ml-2")}>
+      <main className={cn("relative flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-inset", !fullscreen && "my-2 me-2 rounded-2xl border border-hairline", !fullscreen && !expanded && "ms-2")}>
         <div id="screen" ref={screen} role="application" aria-label={t("desktopViewer.title")} className={cn("overflow-hidden", fullscreen ? "h-full w-full" : "h-[95%] w-[95%]")} />
         <div className={connected ? "sr-only" : "pointer-events-none absolute inset-x-3 top-3 flex justify-center"}>
           <span id="status" role="status" className="max-w-full rounded-full border border-hairline bg-panel/95 px-3 py-1.5 text-center text-xs text-ink-secondary shadow-sm">{status}</span>
@@ -135,11 +135,11 @@ export function DesktopViewer() {
         {controlError && <p role="alert" className="absolute inset-x-3 bottom-3 rounded-xl border border-hairline bg-panel p-3 text-ink">{controlError}</p>}
       </main>
 
-      <a id="viewer-notice" href="/novnc-NOTICE.txt" target="_blank" rel="license noopener noreferrer" title={t("desktopViewer.notice")} aria-label={t("desktopViewer.notice")} className="absolute bottom-2 right-2 z-10 flex min-h-6 w-11 items-center justify-center rounded-lg bg-app/80 text-[10px] text-ink-secondary hover:text-ink hover:underline" style={{ marginRight: "env(safe-area-inset-right)", marginBottom: "env(safe-area-inset-bottom)" }}>noVNC</a>
+      <a id="viewer-notice" href="/novnc-NOTICE.txt" target="_blank" rel="license noopener noreferrer" title={t("desktopViewer.notice")} aria-label={t("desktopViewer.notice")} className="absolute bottom-2 end-2 z-10 flex min-h-6 w-11 items-center justify-center rounded-lg bg-app/80 text-[10px] text-ink-secondary hover:text-ink hover:underline me-[env(safe-area-inset-right)] rtl:me-[env(safe-area-inset-left)]" style={{ marginBottom: "env(safe-area-inset-bottom)" }}>noVNC</a>
 
       {panelMotion.shown && <section {...panelMotion.exitProps} aria-label={t(keyboardPanel ? "desktopViewer.keyboard" : "desktopViewer.clipboard")} onKeyDown={event => {
         if (event.key === "Escape") { event.stopPropagation(); closePanel(); }
-      }} className={cn("absolute left-[72px] top-1/2 z-20 max-h-[calc(100dvh-24px)] w-[min(320px,calc(100%-84px))] -translate-y-1/2 overflow-y-auto rounded-2xl border border-hairline bg-panel p-4 shadow-2xl", panelMotion.className)} style={{ marginLeft: "env(safe-area-inset-left)" }}>
+      }} className={cn("absolute start-[72px] top-1/2 z-20 max-h-[calc(100dvh-24px)] w-[min(320px,calc(100%-84px))] -translate-y-1/2 overflow-y-auto rounded-2xl border border-hairline bg-panel p-4 shadow-2xl", "ms-[env(safe-area-inset-left)] rtl:ms-[env(safe-area-inset-right)]", panelMotion.className)}>
         <div className="mb-3 flex items-center justify-between gap-2">
           <h1 className="font-medium">{t(keyboardPanel ? "desktopViewer.keyboard" : "desktopViewer.clipboard")}</h1>
           <button type="button" title={t("desktopViewer.closePanel")} aria-label={t("desktopViewer.closePanel")} onClick={closePanel} className="ui-icon-button shrink-0">
@@ -175,11 +175,11 @@ export function DesktopViewer() {
   );
 }
 
-function ViewerTool({ id, label, icon: Icon, disabled, active, expanded, onClick }: {
-  id?: string; label: string; icon: LucideIcon; disabled?: boolean; active?: boolean; expanded?: boolean; onClick: () => void;
+function ViewerTool({ id, label, icon: Icon, iconClassName, disabled, active, expanded, onClick }: {
+  id?: string; label: string; icon: LucideIcon; iconClassName?: string; disabled?: boolean; active?: boolean; expanded?: boolean; onClick: () => void;
 }) {
   return <button id={id} type="button" title={label} aria-label={label} aria-pressed={active} aria-expanded={expanded} disabled={disabled} onClick={onClick} className={cn(
     "ui-icon-button size-11 min-h-11 shrink-0 rounded-xl focus-visible:outline-2 focus-visible:outline-focus",
     active ? "bg-accent/15 text-accent-text hover:bg-accent/25" : "text-ink-secondary hover:bg-raised-hover hover:text-ink",
-  )}><Icon size={19} strokeWidth={1.75} aria-hidden="true" /></button>;
+  )}><Icon size={19} strokeWidth={1.75} aria-hidden="true" className={iconClassName} /></button>;
 }

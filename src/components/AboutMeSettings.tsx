@@ -38,7 +38,7 @@ export function AboutMeSettings() {
             className="flex size-6 cursor-pointer list-none items-center justify-center rounded-md text-ink-secondary hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 [&::-webkit-details-marker]:hidden">
             <CircleHelp size={14} aria-hidden="true" />
           </summary>
-          <p className="absolute left-0 z-30 mt-1 w-56 rounded-xl border border-hairline bg-panel p-3 text-[12px] text-ink-secondary shadow-xl">
+          <p className="absolute start-0 z-30 mt-1 w-56 rounded-xl border border-hairline bg-panel p-3 text-[12px] text-ink-secondary shadow-xl">
             {t("settings.profile.aboutMeHelp")}
           </p>
         </details>

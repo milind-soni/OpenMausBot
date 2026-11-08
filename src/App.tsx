@@ -332,7 +332,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         aria-label={t("app.openBotList")}
         aria-expanded={drawerOpen}
         onClick={() => setDrawerOpen(true)}
-        className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink max-md:flex max-md:size-9 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-hairline max-md:bg-card max-md:p-0 max-md:text-ink md:hidden"
+        className="absolute start-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink max-md:flex max-md:size-9 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-hairline max-md:bg-card max-md:p-0 max-md:text-ink md:hidden"
       >
         <Menu size={18} className="max-md:hidden" />
         <ChevronLeft size={20} aria-hidden="true" className="hidden max-md:block" />
@@ -448,7 +448,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         aria-hidden
         data-drawer-button-no-drag
         style={captionChrome.noDragStyle}
-        className="pointer-events-none absolute left-3 top-3 size-[30px] md:hidden"
+        className="pointer-events-none absolute start-3 top-3 size-[30px] md:hidden"
       />}
       </div>
       {/* Last child on purpose: Blink resolves -webkit-app-region in DOM order, so no-drag buttons must follow every drag region. */}

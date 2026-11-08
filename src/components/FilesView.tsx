@@ -60,7 +60,7 @@ export function FilesView() {
   const { dragProps } = useCaptionChrome();
   const bridge = cloudFilesBridge();
   return <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-app text-ink">
-    <header {...dragProps} className="flex shrink-0 items-center gap-2.5 border-b border-hairline/40 px-6 py-4 max-md:pl-12">
+    <header {...dragProps} className="flex shrink-0 items-center gap-2.5 border-b border-hairline/40 px-6 py-4 max-md:ps-12">
       <FolderOpen size={18} className="text-ink-secondary" />
       <h1 className="text-[17px] font-semibold">{t("files.title")}</h1>
     </header>
@@ -208,11 +208,11 @@ function FolderMenu({ name, busy, onOpen, onStop }: { name: string; busy: boolea
     return () => { window.removeEventListener("keydown", onKey, true); window.removeEventListener("pointerdown", onDown); };
   }, [open]);
   const item = (label: string, action: () => void, danger = false) => <button type="button" role="menuitem" disabled={busy}
-    className={cn("ui-menu-row w-full text-left", danger ? "text-danger" : "text-ink")} onClick={() => { setOpen(false); action(); }}>{label}</button>;
+    className={cn("ui-menu-row w-full text-start", danger ? "text-danger" : "text-ink")} onClick={() => { setOpen(false); action(); }}>{label}</button>;
   return <div ref={ref} className="relative shrink-0">
     <button type="button" aria-haspopup="menu" aria-expanded={open} aria-label={t("files.more", { name })}
       className="ui-icon-button hover:bg-control hover:text-ink" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} /></button>
-    {open && <div role="menu" className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden text-[13px]", MENU_SHEET)}>
+    {open && <div role="menu" className={cn("absolute end-0 top-full z-40 mt-1 w-[220px] overflow-hidden text-[13px]", MENU_SHEET)}>
       {item(t("files.openHere"), onOpen)}
       {item(t("files.stop"), onStop, true)}
     </div>}

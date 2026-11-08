@@ -301,11 +301,11 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
           </button>
         )}
         {(preview || loading || error) && (
-          <button type="button" aria-label={t("attach.closeVideo")} onClick={close} className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-full bg-panel/90 text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
+          <button type="button" aria-label={t("attach.closeVideo")} onClick={close} className="absolute end-2 top-2 flex size-7 items-center justify-center rounded-full bg-panel/90 text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
             <X size={14} />
           </button>
         )}
-        {!preview && !loading && <Film size={13} className="pointer-events-none absolute left-2 top-2 text-ink-secondary/50" />}
+        {!preview && !loading && <Film size={13} className="pointer-events-none absolute start-2 top-2 text-ink-secondary/50" />}
       </div>
       {error && <p role="alert" className="px-3 py-2 text-[11px] text-danger">{error}</p>}
       <AttachedFileChip file={file} linked={file.linked} message={message} className="max-w-none rounded-none border-0 border-t border-hairline/30 bg-transparent" />
@@ -388,7 +388,7 @@ function AudioAttachment({ file, message }: { file: GalleryFile; message: Messag
   };
 
   return (
-    <div className="inline-flex w-72 max-w-full flex-col gap-1.5 rounded-2xl border border-hairline/30 bg-inset/60 px-3 py-2.5 text-left">
+    <div className="inline-flex w-72 max-w-full flex-col gap-1.5 rounded-2xl border border-hairline/30 bg-inset/60 px-3 py-2.5 text-start">
       <div className="flex items-center gap-2">
         {src ? <Music size={14} className="shrink-0 text-accent" aria-hidden="true" />
           : (
@@ -501,7 +501,7 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
   }
 
   return (
-    <section aria-label={label} className={cn("mb-1.5 w-[min(34rem,70vw)] max-w-full space-y-1.5 text-left whitespace-normal", className)}>
+    <section aria-label={label} className={cn("mb-1.5 w-[min(34rem,70vw)] max-w-full space-y-1.5 text-start whitespace-normal", className)}>
       {media.length > 0 && (
         <div className={cn("grid gap-2", media.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
           {media.map((item) => item.kind === "image" ? (

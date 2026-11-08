@@ -67,7 +67,7 @@ function Phone({ state }: { state: string }) {
       <Card state={state} />
       <div className="flex items-center gap-2 not-first:mt-2">
         <span className="flex size-11 items-center justify-center rounded-full border border-hairline bg-card text-ink"><LayoutGrid size={19} aria-hidden="true" /></span>
-        <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-hairline bg-card pl-3.5 pr-1.5 text-ink-secondary"><Search size={17} aria-hidden="true" />Search</div>
+        <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-hairline bg-card ps-3.5 pe-1.5 text-ink-secondary"><Search size={17} aria-hidden="true" />Search</div>
       </div>
     </div>
   </div>;

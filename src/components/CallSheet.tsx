@@ -155,7 +155,7 @@ export function CallSheet({ message, transcript, botName, threadId, busy, partia
 function SheetBlock({ block, busy, threadId }: { block: Block; busy: boolean; threadId?: string }): ReactNode {
   if (block.kind === "lines") {
     return (
-      <ul className="flex flex-col gap-0.5 pl-1 text-[13px] text-ink-secondary">
+      <ul className="flex flex-col gap-0.5 ps-1 text-[13px] text-ink-secondary">
         {block.lines.map((line) => <CallLineItem key={line.id} line={line} busy={busy} />)}
       </ul>
     );

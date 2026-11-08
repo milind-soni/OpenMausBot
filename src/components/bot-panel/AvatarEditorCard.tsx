@@ -101,7 +101,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
       aria-label={t("botPanel.avatar.edit")}
       data-panel-avatar-editor
       onKeyDown={onKeyDown}
-      className="popover-surface absolute inset-x-[-5px] top-[80px] z-30 overflow-hidden rounded-2xl border border-ink/[0.08] bg-menu text-left shadow-2xl shadow-black/50"
+      className="popover-surface absolute inset-x-[-5px] top-[80px] z-30 overflow-hidden rounded-2xl border border-ink/[0.08] bg-menu text-start shadow-2xl shadow-black/50"
     >
       <div ref={tabsRef} className="flex items-center gap-0.5 border-b border-ink/[0.06] p-2">
         {TABS.map(([id, label]) => (
@@ -125,7 +125,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
           data-avatar-reset
           disabled={busy}
           onClick={() => onPatch(RESET_MASCOT_PATCH)}
-          className="ml-auto rounded-lg px-[11px] py-[5px] text-[13px] text-ink-secondary hover:text-ink disabled:opacity-50"
+          className="ms-auto rounded-lg px-[11px] py-[5px] text-[13px] text-ink-secondary hover:text-ink disabled:opacity-50"
         >
           {t("botPanel.avatar.reset")}
         </button>
@@ -182,7 +182,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
                   </div>
                 ))}
                 <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2.5" role="group" aria-label={t("botPanel.avatar.face")}>
-                  <span className="mr-0.5 text-[12px] text-ink-tertiary">{t("botPanel.avatar.face")}</span>
+                  <span className="me-0.5 text-[12px] text-ink-tertiary">{t("botPanel.avatar.face")}</span>
                   {PICKABLE_STATES.map((expression) => (
                     <button
                       key={expression}

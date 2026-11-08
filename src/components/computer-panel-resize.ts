@@ -15,11 +15,15 @@ function readPanelWidth(): number {
   return PANEL_DEFAULT_WIDTH;
 }
 
+function rightwardGrowth(element: Element): number {
+  return getComputedStyle(element).direction === "rtl" ? 1 : -1;
+}
+
 /** The computer panel's drag edge: a pointer drag or the arrow keys resize the
  * panel, and the width is remembered across opens. */
 export function useComputerPanelResize() {
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
-  const resizeFrom = useRef<{ x: number; width: number } | null>(null);
+  const resizeFrom = useRef<{ x: number; width: number; growth: number } | null>(null);
   const persistPanelWidth = (width: number) => {
     try {
       localStorage.setItem(PANEL_WIDTH_KEY, String(width));
@@ -27,12 +31,12 @@ export function useComputerPanelResize() {
     }
   };
   const onResizeStart = (event: PointerEvent<HTMLDivElement>) => {
-    resizeFrom.current = { x: event.clientX, width: panelWidth };
+    resizeFrom.current = { x: event.clientX, width: panelWidth, growth: rightwardGrowth(event.currentTarget) };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const onResizeMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!resizeFrom.current) return;
-    const next = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, resizeFrom.current.width + (resizeFrom.current.x - event.clientX)));
+    const next = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, resizeFrom.current.width + (event.clientX - resizeFrom.current.x) * resizeFrom.current.growth));
     setPanelWidth(next);
   };
   const onResizeEnd = (event: PointerEvent<HTMLDivElement>) => {
@@ -61,10 +65,10 @@ export function useComputerPanelResize() {
   }, []);
   const onSeparatorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
-    const widen = event.key === "ArrowLeft" ? PANEL_RESIZE_STEP : event.key === "ArrowRight" ? -PANEL_RESIZE_STEP : null;
-    if (widen === null || separatorWidth === null) return;
+    const step = event.key === "ArrowRight" ? PANEL_RESIZE_STEP : event.key === "ArrowLeft" ? -PANEL_RESIZE_STEP : null;
+    if (step === null || separatorWidth === null) return;
     event.preventDefault();
-    onResizeBy(widen);
+    onResizeBy(step * rightwardGrowth(event.currentTarget));
   };
   return { panelWidth, separatorRef, separatorWidth, onSeparatorKeyDown, onResizeStart, onResizeMove, onResizeEnd };
 }

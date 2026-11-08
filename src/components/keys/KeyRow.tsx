@@ -304,14 +304,14 @@ export function KeyRow({
           aria-label={label}
           autoComplete="off"
           spellCheck={false}
-          className={cn(KEY_FIELD, "pr-9")}
+          className={cn(KEY_FIELD, "pe-9")}
         />
         <button
           type="button"
           onClick={() => setShown((current) => !current)}
           aria-label={shown ? t("keys.row.hide") : t("keys.row.show")}
           aria-pressed={shown}
-          className="absolute right-0.5 top-1/2 flex size-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-ink-tertiary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
+          className="absolute end-0.5 top-1/2 flex size-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-ink-tertiary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
         >
           {shown ? <EyeOff size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
         </button>
@@ -348,7 +348,7 @@ export function KeyRow({
       className={cn(KEY_ROW, className)}
     >
       {bare ? status && <KeyStatusChip status={status} /> : <RowHeading entry={row} status={status} titleId={titleId} />}
-      <div className={cn("flex flex-col gap-2", !bare && "pl-8")}>
+      <div className={cn("flex flex-col gap-2", !bare && "ps-8")}>
         {fieldShown ? field : saved.configured ? masked : (
           <div>
             <button type="button" data-key-own className="ui-button" onClick={() => { setOwnKey(true); focusAfter.current = "input"; }}>{t("keys.row.useOwn")}</button>

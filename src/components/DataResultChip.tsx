@@ -19,7 +19,7 @@ export function DataResultChip({ message }: { message: Message }) {
       <div className="flex items-center gap-3 px-3 py-2">
         <Icon size={16} className="shrink-0 text-ink-tertiary" aria-hidden="true" />
         {result.sql ? <button type="button" aria-expanded={expanded} aria-controls={queryId}
-          onClick={() => setExpanded(!expanded)} className="flex min-w-0 items-center gap-1.5 rounded text-left text-ink hover:text-accent focus-visible:outline-accent">
+          onClick={() => setExpanded(!expanded)} className="flex min-w-0 items-center gap-1.5 rounded text-start text-ink hover:text-accent focus-visible:outline-accent">
           <span className="truncate" title={result.title}>{result.title}</span>
           <ChevronRight size={13} className={`shrink-0 text-ink-tertiary ${expanded ? "rotate-90" : ""}`} aria-hidden="true" />
         </button> : <span className="min-w-0 truncate text-ink" title={result.title}>{result.title}</span>}
@@ -28,7 +28,7 @@ export function DataResultChip({ message }: { message: Message }) {
           disabled={!available}
           title={companion ? t("data.openInWorkspace") : undefined}
           onClick={() => dispatch({ type: "openDataResult", botId: result.botId, cardId: result.cardId })}
-          className={`ml-auto flex shrink-0 items-center gap-1 text-xs hover:underline disabled:opacity-40 ${chart ? "text-ink-tertiary hover:text-accent" : "text-accent"}`}
+          className={`ms-auto flex shrink-0 items-center gap-1 text-xs hover:underline disabled:opacity-40 ${chart ? "text-ink-tertiary hover:text-accent" : "text-accent"}`}
         >
           {t("data.openResult")}<ArrowUpRight size={13} aria-hidden="true" />
         </button>

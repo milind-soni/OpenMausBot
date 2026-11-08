@@ -61,7 +61,7 @@ export function PinnedCircleThreadPanel(props: BotRowProps) {
   return (
     <div id={pinnedCircleThreadPanelId(bot.id)} data-sidebar-pinned-circle-thread-list={bot.id} className="mt-1">
       <BotThreadList {...props} activityLabel={liveActivityLabel(sidebarMessage(last))} query={threadListQuery(bot, query)} />
-      <div className="flex items-center gap-1 pl-6">
+      <div className="flex items-center gap-1 ps-6">
         <button type="button" aria-label={t("task.newShort")} title={t("task.newShort")} onClick={() => dispatch({ type: "newTask", botId: bot.id })}
           className="inline-flex h-7 items-center gap-1 rounded px-1 text-[13px] font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent/60">
           <Plus aria-hidden="true" size={13} />{t("task.newShort")}
@@ -232,12 +232,12 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
             />
           </span>
           {unread && (
-            <span className="absolute top-0.5 right-0.5 size-2.5 rounded-full border-2 border-panel bg-accent" aria-label={t("task.unreadMany")} />
+            <span className="absolute top-0.5 end-0.5 size-2.5 rounded-full border-2 border-panel bg-accent" aria-label={t("task.unreadMany")} />
           )}
           {working && (
             <span
               data-testid="working-dot"
-              className="absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2 border-panel bg-success"
+              className="absolute -end-0.5 -bottom-0.5 size-3 rounded-full border-2 border-panel bg-success"
             />
           )}
           {waiting && (
@@ -246,7 +246,7 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
               role="status"
               aria-label={t("sidebar.preview.waiting")}
               title={t("sidebar.preview.waiting")}
-              className="absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2 border-panel bg-warning"
+              className="absolute -end-0.5 -bottom-0.5 size-3 rounded-full border-2 border-panel bg-warning"
             />
           )}
         </span>

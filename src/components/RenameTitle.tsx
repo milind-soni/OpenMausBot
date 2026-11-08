@@ -100,7 +100,7 @@ export function RenameTitle({
             type="button"
             onClick={onActivate}
             aria-label={t("chat.openProfileAria", { name: value })}
-            className={cn("min-w-0 truncate text-left", className)}
+            className={cn("min-w-0 truncate text-start", className)}
             title={t("chat.openProfile")}
           >
             {value}

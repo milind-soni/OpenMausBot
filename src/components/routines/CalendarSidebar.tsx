@@ -32,7 +32,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
   return (
     <aside
       aria-label={t("routines.sidebar.label")}
-      className="flex h-full w-[320px] shrink-0 flex-col overflow-hidden border-r border-hairline/40 bg-panel"
+      className="flex h-full w-[320px] shrink-0 flex-col overflow-hidden border-e border-hairline/40 bg-panel"
     >
       <MiniMonth anchor={anchor} onSelect={onSelectDate} />
 
@@ -53,7 +53,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
           <span className="sr-only">{t("routines.sidebar.searchBots")}</span>
           <Search
             size={13}
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
+            className="pointer-events-none absolute start-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
             aria-hidden="true"
           />
           <input
@@ -61,11 +61,11 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
             onChange={(event) => setQuery(event.target.value)}
             type="search"
             placeholder={t("routines.sidebar.searchBots")}
-            className="h-8 w-full rounded-lg border border-hairline/45 bg-control/55 pl-8 pr-2.5 text-[12px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/60 focus:bg-control"
+            className="h-8 w-full rounded-lg border border-hairline/45 bg-control/55 ps-8 pe-2.5 text-[12px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/60 focus:bg-control"
           />
         </label>
 
-        <div role="list" aria-label={t("routines.sidebar.availableBots")} className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-0.5">
+        <div role="list" aria-label={t("routines.sidebar.availableBots")} className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pe-0.5">
           {filteredBots.map((bot) => (
             <div
               key={bot.id}

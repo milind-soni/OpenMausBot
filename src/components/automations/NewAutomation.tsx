@@ -45,7 +45,7 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
   };
   const choice = (value: SetUpKind, label: string, Icon: typeof CalendarClock) => (
     <button type="button" role="radio" aria-checked={kind === value} onClick={() => setKind(value)}
-      className={cn("flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left text-[14px]", kind === value ? "border-accent/70 bg-accent/10 text-ink" : "border-hairline/50 text-ink-secondary hover:bg-raised")}>
+      className={cn("flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-start text-[14px]", kind === value ? "border-accent/70 bg-accent/10 text-ink" : "border-hairline/50 text-ink-secondary hover:bg-raised")}>
       <Icon size={16} className="shrink-0 text-accent" />{label}
     </button>
   );
