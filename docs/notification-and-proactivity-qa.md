@@ -39,7 +39,7 @@ alone cannot provide closed-app delivery.
 | Contract | Test |
 |---|---|
 | Per-agent off means quiet; empty completions stay quiet; summaries are bounded | `server/notify.test.ts` |
-| A bot-opened thread stays quiet until the person asks in it | `server/notify.test.ts`, `server/notification-routing.e2e.test.ts`, `server/direct-coordination.e2e.test.ts` |
+| A bot-opened thread stays quiet until the person asks in it | `server/notify.test.ts`, `server/notification-routing.e2e.test.ts` |
 | Browser click returns the exact bot/task target | `src/lib/notify.test.ts` |
 | Store navigation selects the bot and switches the task | `src/state/store.test.ts` |
 | Opening a conversation reads only its own feed entries, live in every open app | `server/notification-read.e2e.test.ts` |
