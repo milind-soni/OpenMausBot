@@ -85,6 +85,15 @@ describe("composer dictation through Fish Audio", () => {
     expect(dictation.speechError).toBe(t("call.live.micBlocked"));
   });
 
+  it("says the recording stopped early when the end was cut off", () => {
+    toggle();
+    flushSync(() => fish.listeners.line!({ partial: false, text: "hello" }));
+    flushSync(() => fish.listeners.end!({ code: 0, reason: "interrupted" }));
+    expect(typed).toEqual(["hello"]);
+    expect(dictation.recording).toBe(false);
+    expect(dictation.speechError).toBe(t("composer.dictation.cutOff"));
+  });
+
   it("is not ready without a saved Fish Audio key", () => {
     expect(dictation.ready).toBe(true);
     fixture.config = null;

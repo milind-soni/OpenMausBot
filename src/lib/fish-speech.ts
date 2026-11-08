@@ -2,6 +2,7 @@
 // the harness sends each clip to Fish Audio. It speaks the same five-method contract as window.ogb's speech bridge.
 import { api, ApiError } from "@/state/api";
 import { t } from "./i18n";
+import { createScreenWake } from "./screen-wake";
 
 export type SpeechBridge = Required<
   Pick<NonNullable<Window["ogb"]>, "speechStart" | "speechStop" | "speechFinish" | "onSpeechTranscript" | "onSpeechEnd">
@@ -110,6 +111,19 @@ const endListeners = new Set<(info: End) => void>();
 // Every start, stop and finish bumps this, so a late mic grant or upload can never speak for the next session.
 let generation = 0;
 let session: Session = { phase: "idle" };
+const screenWake = createScreenWake();
+let stopWatchingHidden: (() => void) | null = null;
+
+// A lock or app switch hides the page mid-capture: keep what was heard instead of losing the clip.
+function watchHidden() {
+  stopWatchingHidden?.();
+  if (typeof document === "undefined") return;
+  const onHidden = () => {
+    if (document.visibilityState === "hidden") finishCapture(generation, true);
+  };
+  document.addEventListener("visibilitychange", onHidden);
+  stopWatchingHidden = () => document.removeEventListener("visibilitychange", onHidden);
+}
 
 const emitTranscript = (line: Line) => Array.from(transcriptListeners).forEach((fn) => fn(line));
 const emitEnd = (info: End) => Array.from(endListeners).forEach((fn) => fn(info));
@@ -128,6 +142,9 @@ function teardown() {
   if (session.phase === "listening") release(session.mic);
   if (session.phase === "transcribing") session.abort.abort();
   session = { phase: "idle" };
+  stopWatchingHidden?.();
+  stopWatchingHidden = null;
+  screenWake.release();
 }
 
 function micFailure(error: unknown): End {
@@ -137,7 +154,7 @@ function micFailure(error: unknown): End {
   return { code: 1, reason: "microphone-failed" };
 }
 
-async function upload(gen: number, frames: Float32Array[], abort: AbortController) {
+async function upload(gen: number, frames: Float32Array[], abort: AbortController, end: End) {
   try {
     const { text } = await api<{ text?: string }>("/api/tts/transcribe", {
       method: "POST",
@@ -148,27 +165,32 @@ async function upload(gen: number, frames: Float32Array[], abort: AbortControlle
     });
     if (gen !== generation) return;
     session = { phase: "idle" };
+    screenWake.release();
     // An empty final would make a call listen twice: once for it, once for the end.
     if (text?.trim()) emitTranscript({ partial: false, text });
-    emitEnd(completed());
+    emitEnd(end);
   } catch (error) {
     if (gen !== generation) return;
     session = { phase: "idle" };
+    screenWake.release();
     emitEnd({ code: 1, reason: "transcribe-failed", ...(error instanceof ApiError ? { message: error.message } : {}) });
   }
 }
 
-function finishCapture(gen: number) {
+function finishCapture(gen: number, interrupted = false) {
   if (gen !== generation || session.phase !== "listening") return;
   const { mic, clip } = session;
+  stopWatchingHidden?.();
+  stopWatchingHidden = null;
   release(mic);
   if (!clip.spoke) {
     session = { phase: "idle" };
+    screenWake.release();
     return emitEnd(completed());
   }
   const abort = new AbortController();
   session = { phase: "transcribing", abort };
-  void upload(gen, clip.frames(), abort);
+  void upload(gen, clip.frames(), abort, interrupted ? { code: 0, reason: "interrupted" } : completed());
 }
 
 export const fishSpeech: SpeechBridge = {
@@ -211,6 +233,8 @@ export const fishSpeech: SpeechBridge = {
     mic.processor.connect(mic.context.destination);
     void mic.context.resume().catch(() => {});
     session = { phase: "listening", mic, clip };
+    screenWake.acquire();
+    watchHidden();
   },
   async speechStop() {
     teardown();

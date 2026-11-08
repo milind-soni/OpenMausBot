@@ -90,6 +90,11 @@ describe("Fish Audio listener", () => {
   let tracksStopped: number;
   let contextsClosed: number;
   let getUserMedia: ReturnType<typeof vi.fn>;
+  let wakeRequest: ReturnType<typeof vi.fn>;
+  let wakeRelease: ReturnType<typeof vi.fn>;
+  let wakeReleaseHandlers: Array<() => void>;
+  let visibilityState: string;
+  let visibilityHandlers: Array<() => void>;
   const lines: unknown[] = [];
   const ends: unknown[] = [];
   const offs: Array<() => void> = [];
@@ -122,7 +127,25 @@ describe("Fish Audio listener", () => {
     sent.api.mockReset();
     sent.api.mockResolvedValue({ text: "hello bot" });
     getUserMedia = vi.fn(async () => stream());
-    vi.stubGlobal("navigator", { mediaDevices: { getUserMedia } });
+    wakeReleaseHandlers = [];
+    wakeRelease = vi.fn(async () => {
+      wakeReleaseHandlers.forEach((fn) => fn());
+    });
+    wakeRequest = vi.fn(async () => {
+      if (visibilityState === "hidden") throw new DOMException("The page is hidden.", "NotAllowedError");
+      return { release: wakeRelease, addEventListener: (_type: string, fn: () => void) => { wakeReleaseHandlers.push(fn); } };
+    });
+    visibilityState = "visible";
+    visibilityHandlers = [];
+    const document = {
+      get visibilityState() { return visibilityState; },
+      addEventListener: (type: string, fn: () => void) => { if (type === "visibilitychange") visibilityHandlers.push(fn); },
+      removeEventListener: (type: string, fn: () => void) => {
+        if (type === "visibilitychange") visibilityHandlers = visibilityHandlers.filter((handler) => handler !== fn);
+      },
+    };
+    vi.stubGlobal("navigator", { mediaDevices: { getUserMedia }, wakeLock: { request: wakeRequest } });
+    vi.stubGlobal("document", document);
     vi.stubGlobal("AudioContext", FakeContext);
     offs.push(fishSpeech.onSpeechTranscript((line) => lines.push(line)), fishSpeech.onSpeechEnd((info) => ends.push(info)));
   });
@@ -135,6 +158,14 @@ describe("Fish Audio listener", () => {
 
   const feed = (frame: () => Float32Array, count: number) => { for (let i = 0; i < count; i += 1) process!(frame()); };
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const hidePage = () => {
+    visibilityState = "hidden";
+    [...visibilityHandlers].forEach((fn) => fn());
+  };
+  const showPage = () => {
+    visibilityState = "visible";
+    [...visibilityHandlers].forEach((fn) => fn());
+  };
 
   it("hears a call turn: one 'hearing you' line, the clip uploaded as WAV, then the text and a completed end", async () => {
     await fishSpeech.speechStart({ endpointMs: 850 });
@@ -260,5 +291,77 @@ describe("Fish Audio listener", () => {
     await fishSpeech.speechFinish();
     await settle();
     expect(ends).toEqual([{ code: 1, reason: "transcribe-failed", message: "Fish Audio rejected that API key." }]);
+  });
+
+  it("holds a wake lock while listening and releases it when the turn ends", async () => {
+    await fishSpeech.speechStart();
+    await vi.waitFor(() => expect(wakeRequest).toHaveBeenCalledWith("screen"));
+    feed(loud, 5);
+    await fishSpeech.speechFinish();
+    await settle();
+    expect(wakeRelease).toHaveBeenCalledOnce();
+    expect(ends).toEqual([{ code: 0, reason: "completed" }]);
+  });
+
+  it("releases the wake lock when stopped", async () => {
+    await fishSpeech.speechStart();
+    await vi.waitFor(() => expect(wakeRequest).toHaveBeenCalledOnce());
+    await fishSpeech.speechStop();
+    expect(wakeRelease).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the wake lock out of a session that never reaches the microphone", async () => {
+    getUserMedia.mockRejectedValueOnce(Object.assign(new Error("NotAllowedError"), { name: "NotAllowedError" }));
+    await fishSpeech.speechStart();
+    expect(wakeRequest).not.toHaveBeenCalled();
+  });
+
+  it("finishes the capture when the page is hidden mid-recording, keeping what was captured", async () => {
+    await fishSpeech.speechStart();
+    feed(loud, 5);
+    feed(quiet, 5);
+    hidePage();
+    await settle();
+    const [path, init] = sent.api.mock.calls[0]!;
+    expect(path).toBe("/api/tts/transcribe");
+    expect(new TextDecoder().decode(init.body.slice(0, 4))).toBe("RIFF");
+    expect(lines).toEqual([{ partial: false, text: "hello bot" }]);
+    expect(ends).toEqual([{ code: 0, reason: "interrupted" }]);
+    expect(wakeRelease).toHaveBeenCalledOnce();
+  });
+
+  it("does not finish the capture twice when the page hides again during the upload", async () => {
+    let releaseUpload!: (value: { text: string }) => void;
+    sent.api.mockImplementationOnce(() => new Promise((resolve) => { releaseUpload = resolve; }));
+    await fishSpeech.speechStart();
+    feed(loud, 5);
+    hidePage();
+    hidePage();
+    releaseUpload({ text: "hello bot" });
+    await settle();
+    expect(sent.api).toHaveBeenCalledOnce();
+    expect(ends).toEqual([{ code: 0, reason: "interrupted" }]);
+  });
+
+  it("ends quietly with no upload when hidden before any speech", async () => {
+    await fishSpeech.speechStart();
+    feed(quiet, 20);
+    hidePage();
+    await settle();
+    expect(sent.api).not.toHaveBeenCalled();
+    expect(ends).toEqual([{ code: 0, reason: "completed" }]);
+  });
+
+  it("re-acquires the wake lock when the page returns while still listening", async () => {
+    let grant!: (value: ReturnType<typeof stream>) => void;
+    getUserMedia.mockImplementationOnce(() => new Promise((resolve) => { grant = resolve; }));
+    const started = fishSpeech.speechStart();
+    hidePage();
+    grant(stream());
+    await started;
+    expect(wakeRequest).toHaveBeenCalledOnce();
+    showPage();
+    await vi.waitFor(() => expect(wakeRequest).toHaveBeenCalledTimes(2));
+    expect(ends).toEqual([]);
   });
 });

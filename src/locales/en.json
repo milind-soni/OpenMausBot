@@ -2812,6 +2812,7 @@
   "composer.dictation.permission": "Dictation needs Microphone and Speech Recognition access. Turn both on in System Settings → Privacy & Security.",
   "composer.dictation.disabled": "Turn on Dictation in System Settings → Keyboard, then try again.",
   "composer.dictation.failed": "Dictation couldn't start. Try again.",
+  "composer.dictation.cutOff": "The recording stopped early. What was captured is in your draft.",
   "composer.dictation.unavailable": "Dictation isn't available in this build.",
   "composer.dictation.start": "Start dictation",
   "composer.dictation.stop": "Stop dictation",
