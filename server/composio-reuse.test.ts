@@ -76,6 +76,13 @@ describe("a fresh installation connecting a project an earlier installation used
     expect(accountQueries.every((query) => !query.has("user_ids"))).toBe(true);
   });
 
+  it("reads only a few pages, and starts a new user when the project is too big to tell", async () => {
+    accounts = Array.from({ length: 30 }, (_, n) => account("openmausbot_earlier", `app${n}`));
+    const prepared = await prepareProjectSession("ak_reuse");
+    expect(prepared.userId).toMatch(NEW_USER);
+    expect(accountQueries.length).toBe(4);
+  });
+
   it("starts a new user when the project has no earlier installation's live connections", async () => {
     accounts = [account("someone_elses_app", "notion"), account("openmausbot_gone", "gmail", "EXPIRED")];
     const prepared = await prepareProjectSession("ak_reuse");

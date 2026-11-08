@@ -157,18 +157,24 @@ async function createProjectSession(apiKey: string, userId: string, authConfigs:
   return session.session_id;
 }
 
+/** Pages of connected accounts read when looking for an earlier installation's user, which bounds how long setup waits. */
+const EARLIER_USER_PAGES = 4;
+
 /** The one OpenMausBot Composio user in this project, when it still has a live connection, so a fresh installation (a
  * reinstall, another computer) gets that installation's apps back; null when there is none, more than one (even with
  * only expired connections, since it can't tell whose is whose), or Composio can't say. */
 async function earlierInstallationUser(apiKey: string): Promise<string | null> {
   const users = new Set<string>();
-  const sawSeveralUsers = (page: ConnectedAccountResponse[]) => {
+  let pages = 0;
+  const enough = (page: ConnectedAccountResponse[]) => {
     for (const { user_id } of page) if (user_id?.startsWith("openmausbot_")) users.add(user_id);
-    return users.size > 1;
+    pages += 1;
+    return users.size > 1 || pages >= EARLIER_USER_PAGES;
   };
   try {
-    const accounts = await listConnectedAccounts(apiKey, null, [], sawSeveralUsers);
-    if (users.size !== 1) return null;
+    const accounts = await listConnectedAccounts(apiKey, null, [], enough);
+    // A project too big to read in a few pages can't say there's only one: setup goes on as before, with a new user.
+    if (users.size !== 1 || pages >= EARLIER_USER_PAGES) return null;
     return accounts.find((account) => account.status === "ACTIVE" && users.has(account.user_id ?? ""))?.user_id ?? null;
   } catch (error) {
     console.warn(`[composio] Could not read the project's earlier connections: ${error instanceof Error ? error.message : String(error)}`);
