@@ -413,7 +413,7 @@ import {
   ROUTINE_EXECUTION_PROMPT, READ_ONLY_ROUTINE_EXECUTION_PROMPT,
   WEBHOOK_PROMPT, BOT_API_PROMPT, AUTOMATION_REPLY_PROMPT,
   resolveComputerPromptKind,
-  savedLoginsPrompt,
+  savedLoginsPrompt, heavyPrompt,
   teamAvailabilityPart,
 } from "./system-prompt.ts";
 import { shellTimeoutHookResult } from "./shell-timeout-hint.ts";
@@ -470,7 +470,7 @@ import { ModelRequestService } from "./model-requests.ts";
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { profileRevision, profileSnapshot } from "./profile-revision.ts";
-import { flushAllProfileHistory, flushProfileHistory, readHistory, recordProfileChange } from "./profile-versions.ts";
+import { flushAllProfileHistory, flushProfileHistory, readHistory, recordProfileChange, soulChanges } from "./profile-versions.ts";
 import { TeamMemory, TEAM_MEMORY_KINDS, type TeamMemoryKind } from "./team-memory.ts";
 import { describeTool } from "./activity.ts";
 import { OutboundRequestService } from "./outbound-requests.ts";
@@ -2996,12 +2996,12 @@ function previewSystemPrompt(bot: BotRecord) {
     teamAvailabilityPart(agentsMounted && coordination ? peers : []),
     { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace), enabled: bot.memoryEnabled !== false }) },
     { id: "skills", label: "Skills index", text: privateWorkspace ? skillsHost.skillsIndex(bot, undefined, instance) : "" },
-  ], agentsMounted ? { env: agentsToolBridgeEnv(cfg, bot, instance && turnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), bot.cwd ?? undefined)) } : undefined, { replyStyle: bot.replyStyle });
+  ], agentsMounted ? { env: agentsToolBridgeEnv(cfg, bot, instance && turnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), bot.cwd ?? undefined)) } : undefined, { replyStyle: bot.replyStyle, rules: cfg.everyBotRules });
   const totalBytes = built.sections.reduce((n, s) => n + s.bytes, 0);
   return {
     sections: built.sections,
     totalBytes,
-    approxTokens: Math.ceil(totalBytes / 4),
+    approxTokens: Math.ceil(totalBytes / 4), heavy: heavyPrompt(built.sections),
     note:
       "Preview from current bot settings, not the exact prompt of a running task. Task folders, notes, recall, selected skills and available connections can change the dispatched prompt. Token count is an estimate.",
   };
@@ -7844,7 +7844,7 @@ async function beginTurn(
       const unseen = handed && handedStateUsable(handed, cursor, contextOrder) ? unseenMessages(replayable, contextOrder, handed) : undefined;
       const externalUpdate = Boolean(opts?.coordination?.resumed || unseen?.some((m) => m.keep));
       // What a resumed session keeps from its launch; Codex reasserts model and provider on resume, but an in-flight turn and an omitted effort keep the prior selection.
-      const persistentConfig = [bot.name, bot.title, bot.description, sectionContextSystemPrompt(bot.section),
+      const persistentConfig = [bot.name, bot.title, bot.description, sectionContextSystemPrompt(bot.section), ...(cfg.everyBotRules?.trim() ? [cfg.everyBotRules.trim()] : []),
         ...(instance.driverKind === "codex" ? [model, effort ?? null] : [])];
       const sessionConfig = (soul: string | undefined) =>
         createHash("sha256").update(JSON.stringify([...persistentConfig, soul])).digest("hex").slice(0, 16);
@@ -8419,7 +8419,7 @@ async function beginTurn(
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : opts?.automationSource === "api" ? BOT_API_PROMPT : "" },
         { id: "automation-reply", label: "Automation reply", text: opts?.automationSource && automationReports.reportsElsewhere(threadId) ? AUTOMATION_REPLY_PROMPT : "" },
         { id: "mentions", label: "Mentions", text: (tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : "") + placesElsewhere.mentioned(providerText, store.bots) },
-      ].filter((part) => (apiFenced ? BOT_API_PARTS.has(part.id) : !confined || READ_AND_DRAFT_PARTS.has(part.id))), integrations.agents, { replyStyle: liveBot?.replyStyle ?? bot.replyStyle });
+      ].filter((part) => (apiFenced ? BOT_API_PARTS.has(part.id) : !confined || READ_AND_DRAFT_PARTS.has(part.id))), integrations.agents, { replyStyle: liveBot?.replyStyle ?? bot.replyStyle, rules: cfg.everyBotRules });
       turnPromptBytes.set(threadId, { stable: Buffer.byteLength(prompt.stable), volatile: Buffer.byteLength(prompt.volatile) });
       // Recall rides in front of this turn's message, never the system prompt, whose volatile half is re-sent whole on any change.
       const recalled = autoRecallPrompt(bot, threadId, resolvedImages.text, {
@@ -10217,7 +10217,7 @@ async function runClaimedGroupMemberTurn(
     { id: "skills", label: "Skills index", text: workspace ? skillsHost.skillsIndex(bot, threadId, instance) : "" },
     { id: "skill-instructions", label: "Skill instructions", text: renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) },
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
-  ], integrations.agents);
+  ], integrations.agents, { rules: cfg.everyBotRules });
 
   // Claim /learn only after setup succeeded, so a failed first responder does not consume it.
   if (skillAuthoring) skillAuthoringClaim.claimed = true;
@@ -11779,7 +11779,7 @@ function configStatus() {
     profile: CLOUD_TEAM ? NOBODY_PROFILE : { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "", aboutMe: cfg.profile?.aboutMe ?? "", ...(cfg.profile?.avatarUrl ? { avatarUrl: cfg.profile.avatarUrl } : {}) },
     managedPolicy: managedPolicy.summary(),
     ...(CLOUD_HOME ? { cloudHome: true } : {}), ...(CLOUD_TEAM ? { team: { id: CLOUD_TEAM.id, name: CLOUD_TEAM.name, ...(CLOUD_HOME ? { cloudPage: `${CLOUD_HOME.adminOrigin}/cloud` } : {}) } } : {}),
-    language: appLanguage() ?? "", computerName: cfg.computerName ?? "",
+    language: appLanguage() ?? "", computerName: cfg.computerName ?? "", everyBotRules: cfg.everyBotRules ?? "",
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
     mcp: { callTimeoutMinutes: mcpCallTimeoutMinutes(cfg) },
     automaticRecovery: cfg.automaticRecovery ?? { enabled: false },
@@ -11835,7 +11835,7 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
   return {
     ...withoutKeyHints(status),
     edition: { edition: status.edition.edition, features: status.edition.features },
-    signIn: { admins: [], members: [] }, live: liveSettingsForClient(status.live),
+    signIn: { admins: [], members: [] }, live: liveSettingsForClient(status.live), everyBotRules: undefined,
     vps: { configured: status.vps.configured, sshAlias: "" },
     opencodeGo: { configured: status.opencodeGo.configured, providerKeys: [] },
     profile: CLOUD_TEAM ? profile : { name: profile.name, email: "", ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}) },
@@ -14990,7 +14990,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       await flushProfileHistory(m[1]);
       const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 100));
       const full = url.searchParams.get("full") === "1";
-      const rows = readHistory(m[1], limit).map((row) => {
+      const rows = url.searchParams.get("view") === "changes" ? soulChanges(m[1], readHistory(m[1], limit)) : readHistory(m[1], limit).map((row) => {
         if (full || row.field !== "soul") return row;
         const rest: typeof row = { ...row };
         delete rest.before;

@@ -79,6 +79,14 @@ describe("configuration boundaries", () => {
     expect(reloaded({ profile })).toEqual([]);
     expect(() => parseConfigPatch({ profile: { aboutMe: "x".repeat(24_001) } })).toThrow();
   });
+  it("accepts rules for every bot next to About me, including clearing, without reloading providers", () => {
+    const everyBotRules = "Answer in British English.\nNever book anything without asking.";
+    expect(parseConfigPatch({ everyBotRules })).toEqual({ everyBotRules });
+    expect(parseStoredConfig({ everyBotRules })).toEqual({ everyBotRules });
+    expect(parseConfigPatch({ everyBotRules: "" })).toEqual({ everyBotRules: "" });
+    expect(reloaded({ everyBotRules })).toEqual([]);
+    expect(() => parseConfigPatch({ everyBotRules: "x".repeat(24_001) })).toThrow();
+  });
   it("keeps the profile photo to a stored attachment picture, never an outside address or SVG", () => {
     const avatarUrl = "/api/attachments/5f0c2b1e-8a43-4c1d-9e7a-2b6f1d3c4e5a.webp";
     expect(parseConfigPatch({ profile: { avatarUrl } })).toEqual({ profile: { avatarUrl } });

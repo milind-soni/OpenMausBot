@@ -3143,5 +3143,11 @@
   "remote.client.endsDec7": "यह कनेक्शन तरीका 7 दिसंबर को खत्म होगा। उसके बाद दूसरे कंप्यूटर के फ़ोन और डिवाइस से इस कंप्यूटर को फिर से जोड़ें।",
   "phone.code.pairingCode": "पेयरिंग कोड",
   "phone.code.typeIntro": "{app} ऐप खोलें और यह पेयरिंग कोड डालें।",
-  "phone.signIn.emailCode": "आपके ईमेल का साइन-इन कोड"
+  "phone.signIn.emailCode": "आपके ईमेल का साइन-इन कोड",
+  "settings.profile.everyBotRules": "हर बॉट के लिए नियम",
+  "settings.profile.everyBotRulesPlaceholder": "हर बॉट इन्हें मानता है। जहाँ ये अलग हों, वहाँ बॉट के अपने निर्देश लागू होते हैं।",
+  "botPanel.heavy": "यह बॉट हर बार बहुत कुछ लोड करता है।",
+  "botPanel.tidyMemory": "मेमोरी व्यवस्थित करें",
+  "memory.journal.instructions": "निर्देश",
+  "memory.journal.actor.teamSetup": "टीम सेटअप"
 }

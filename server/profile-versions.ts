@@ -5,7 +5,8 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync } from 
 import { join } from "node:path";
 
 import { PROFILE_REQUEST_FIELDS, type ProfileRequestChanges } from "../shared/profile-request.ts";
-import { botFolder } from "./bot-folder.ts";
+import { botFolder, SOUL_FILE } from "./bot-folder.ts";
+import { unifiedDiff } from "./memory-journal.ts";
 import { redactSecrets } from "./redact.ts";
 
 export type HistoryActor = "user" | "bot" | "file" | "import" | "system";
@@ -155,4 +156,18 @@ export function readHistory(botId: string, limit = 100): HistoryRow[] {
     }
   }
   return rows;
+}
+
+const CHANGE_ACTOR = { user: "person", bot: "bot", file: "person", import: "import", system: "import" } as const;
+
+export function soulChanges(botId: string, rows: readonly HistoryRow[]) {
+  return rows.filter((row) => row.field === "soul").map((row) => {
+    const diff = unifiedDiff(row.before ?? "", row.after ?? "", SOUL_FILE);
+    return {
+      id: row.id, at: row.at, botId, path: SOUL_FILE, actor: CHANGE_ACTOR[row.actor] ?? "person",
+      via: row.actor === "file" ? "disk" : row.via === "rollback" || row.via.startsWith("undo:") ? "revert" : row.via,
+      kind: "edited" as const, beforeHash: null, afterHash: null, diff: diff.text, added: diff.added, removed: diff.removed,
+      canRevert: row.canRestore === true, ...(row.restoreUnavailableReason ? { revertUnavailableReason: row.restoreUnavailableReason } : {}),
+    };
+  });
 }

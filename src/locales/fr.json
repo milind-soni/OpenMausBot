@@ -3291,5 +3291,11 @@
   "remote.client.endsDec7": "Ce type de connexion prend fin le 7 décembre. Ensuite, appairez à nouveau cet ordinateur depuis Téléphone et appareils sur l'autre ordinateur.",
   "phone.code.pairingCode": "Code d'appairage",
   "phone.code.typeIntro": "Ouvrez l'app {app} et saisissez ce code d'appairage.",
-  "phone.signIn.emailCode": "Code de connexion reçu par e-mail"
+  "phone.signIn.emailCode": "Code de connexion reçu par e-mail",
+  "settings.profile.everyBotRules": "Règles pour tous les bots",
+  "settings.profile.everyBotRulesPlaceholder": "Tous les bots les suivent. En cas de désaccord, les instructions propres à un bot l'emportent.",
+  "botPanel.heavy": "Ce bot charge beaucoup à chaque tour.",
+  "botPanel.tidyMemory": "Ranger la mémoire",
+  "memory.journal.instructions": "les instructions",
+  "memory.journal.actor.teamSetup": "La configuration de l'équipe"
 }

@@ -1275,6 +1275,8 @@
   "settings.profile.name": "Tu nombre",
   "settings.profile.aboutMe": "Sobre mí",
   "settings.profile.aboutMeHelp": "Se comparte con todos los bots en chats privados y de grupo. Se guarda automáticamente.",
+  "settings.profile.everyBotRules": "Reglas para todos los bots",
+  "settings.profile.everyBotRulesPlaceholder": "Todos los bots las siguen. Si no coinciden, mandan las instrucciones propias de cada bot.",
   "settings.profile.saving": "Guardando…",
   "settings.profile.saved": "Guardado",
   "settings.profile.saveError": "No se pudo guardar. Tus cambios siguen aquí.",
@@ -6074,5 +6076,9 @@
   "remote.client.endsDec7": "Este tipo de conexión termina el 7 de diciembre. Después, vuelve a emparejar esta computadora desde Teléfono y dispositivos en la otra.",
   "phone.code.pairingCode": "Código de emparejamiento",
   "phone.code.typeIntro": "Abre la app de {app} y escribe este código de emparejamiento.",
-  "phone.signIn.emailCode": "Código de inicio de sesión de tu correo"
+  "phone.signIn.emailCode": "Código de inicio de sesión de tu correo",
+  "botPanel.heavy": "Este bot carga mucho en cada turno.",
+  "botPanel.tidyMemory": "Ordenar la memoria",
+  "memory.journal.instructions": "las instrucciones",
+  "memory.journal.actor.teamSetup": "La configuración del equipo"
 }

@@ -5,6 +5,7 @@ import { soulDiffLines } from "../shared/line-diff.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
 import { profileSnapshot } from "./profile-revision.ts";
+import { recordProfileChange, type HistoryActor } from "./profile-versions.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { harnessCapabilityLines, type DriverCapabilities } from "./harness-capabilities.ts";
@@ -310,6 +311,19 @@ export class TeamSetupRequestService {
     return { requestId: request.requestId, messageId: message.id, title, summary: title, detail };
   }
 
+  private applySetup(request: TeamSetupRequest, actor: HistoryActor, via: string): TeamSetupResult {
+    const before = request.operations.flatMap((operation) => {
+      const bot = operation.action === "update" ? this.options.store.bot(operation.botId) : undefined;
+      return bot ? [{ id: bot.id, profile: profileSnapshot(bot) }] : [];
+    });
+    const result = this.options.store.applyTeamSetup(request);
+    for (const { id, profile } of before) {
+      const bot = this.options.store.bot(id);
+      if (bot) recordProfileChange(id, actor, via, profile, profileSnapshot(bot));
+    }
+    return result;
+  }
+
   private async apply(request: TeamSetupRequest, immediate = false, canCommit?: () => boolean): Promise<TeamSetupResult> {
     const receipt = this.options.store.bot(request.botId)?.lastTeamSetupReceipt;
     if (receipt?.requestId === request.requestId) return receipt.result;
@@ -320,7 +334,7 @@ export class TeamSetupRequestService {
         this.validate(request, true, immediate);
       };
       revalidate();
-      if (!request.deletion) return this.options.store.applyTeamSetup(request);
+      if (!request.deletion) return this.applySetup(request, "bot", "team-setup");
       await this.options.deleteBot(request.deletion.botId, revalidate, request);
       return { state: "applied", bots: [{ id: request.deletion.botId, name: request.deletion.name, action: "deleted" }], newTeams: [] };
     } catch (error) {
@@ -403,9 +417,9 @@ export class TeamSetupRequestService {
       for (const id of created) await this.options.deleteBot(id, () => { if (changed([id])) throw new TeamSetupError(UNDO_STALE, 409); });
       const restore = before.filter((entry) => Object.keys(entry.fields).length);
       if (restore.length) {
-        this.options.store.applyTeamSetup({ version: 1, requestId: newId(), botId: request.botId, threadId: request.threadId, reason: request.reason,
+        this.applySetup({ version: 1, requestId: newId(), botId: request.botId, threadId: request.threadId, reason: request.reason,
           createdAt: Date.now(), requesterRevision: request.requesterRevision, newTeams: [],
-          operations: restore.map((entry) => ({ action: "update", botId: entry.botId, fields: entry.fields })) });
+          operations: restore.map((entry) => ({ action: "update", botId: entry.botId, fields: entry.fields })) }, "user", "revert");
       }
       for (const entry of before) if (entry.managedSections !== undefined) this.options.store.patchBot(entry.botId, { managedSections: entry.managedSections ?? undefined });
     } catch (error) {

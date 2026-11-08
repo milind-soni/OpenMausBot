@@ -3584,5 +3584,11 @@
   "remote.client.endsDec7": "Цей тип з'єднання припиняє роботу 7 грудня. Після цього знову прив'яжіть цей комп'ютер у розділі «Телефон і пристрої» на іншому комп'ютері.",
   "phone.code.pairingCode": "Код прив'язки",
   "phone.code.typeIntro": "Відкрийте застосунок {app} і введіть цей код прив'язки.",
-  "phone.signIn.emailCode": "Код входу з листа"
+  "phone.signIn.emailCode": "Код входу з листа",
+  "settings.profile.everyBotRules": "Правила для всіх ботів",
+  "settings.profile.everyBotRulesPlaceholder": "Їх дотримується кожен бот. Якщо вони розходяться, перемагають власні інструкції бота.",
+  "botPanel.heavy": "Цей бот завантажує багато на кожному ході.",
+  "botPanel.tidyMemory": "Упорядкувати пам'ять",
+  "memory.journal.instructions": "інструкції",
+  "memory.journal.actor.teamSetup": "Налаштування команди"
 }
