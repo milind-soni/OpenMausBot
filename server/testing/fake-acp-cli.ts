@@ -25,7 +25,7 @@
 //       grok 1.0.25's initialize, or FAKE_ACP_MCP_HANDSHAKE; FAKE_ACP_MCP_SCHEMA_BYTES=1 adds each schema's length)
 //     | lend-question (list_shared_computers around a question)
 //     | list-peers (list_bots through the agents MCP; keeps the first agents server it is offered, like Hermes)
-//   FAKE_ACP_GROK_NATIVE_MCP  _x.ai/mcp/list also reports these comma-separated native servers, as from Grok's own config
+//   FAKE_ACP_GROK_NATIVE_MCP  _x.ai/mcp/list reports these comma-separated native servers after the session's accepted ones
 //   FAKE_ACP_MCP_TRANSPORTS  remote MCP transports advertised in initialize, e.g. "http,sse"
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
 //   FAKE_ACP_DUMP  path for {argv, env}; with FAKE_ACP_MODES or FAKE_ACP_MODELS also <dump>.prompts.jsonl
@@ -730,7 +730,8 @@ function handle(msg: any) {
       result(msg.id, {});
       break;
     case "_x.ai/mcp/list":
-      result(msg.id, { result: { servers: (process.env.FAKE_ACP_GROK_NATIVE_MCP ?? "").split(",").filter(Boolean)
+      // Like Grok: the servers this session accepted, then any native ones from its own config.
+      result(msg.id, { result: { servers: [...sessionMcp.map((entry) => entry.name), ...(process.env.FAKE_ACP_GROK_NATIVE_MCP ?? "").split(",").filter(Boolean)]
         .map((name) => ({ name, session: { enabled: true, status: "ready" } })), sessionMcpResolved: true } });
       break;
     case "session/new": {
