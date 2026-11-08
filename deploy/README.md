@@ -191,7 +191,11 @@ The running supervisor checks daily while idle. It applies only compatible stabl
 
 `origin-runner update --check` checks signed runner releases without applying them. `origin-runner update --tools --check` checks native tools. Use `update --automatic --disable --approve` to disable automatic application without modifying personal CLI installations.
 
-The dedicated Hetzner controller setup is in `deploy/origin-controller/`. The pinned, nonroot Hermes operator commands are documented at the top of `deploy/hermes/manage.py`. Hermes receives scoped Origin MCP controls, not provider cloud keys, a Docker socket or root access. Its model/login is separate from coding CLI subscriptions.
+The dedicated Hetzner controller setup is in `deploy/origin-controller/`. Configure `ORIGIN_EXECUTION_TEAM_ID` on the Origin server and `ORIGIN_EXECUTION_CONTROLLER_TOKEN_HASH` as the SHA-256 hex digest of a separately generated, high-entropy 32–200 character bearer. Keep the raw bearer in the controller's owner-only `service-token` file, supplied through systemd `LoadCredential`; never reuse an owner MCP or worker token. The server stores only its digest and accepts controller ticks only for that workspace.
+
+After local enrollment, map each Origin host ID to its stable Tailscale peer ID and full DNS name in `/etc/origin-controller/config.json`. An empty mapping reports no presence evidence: it cannot establish that local machines are offline or authorize cloud fallback. Run `systemctl start origin-controller.service` successfully before enabling `origin-controller.timer`.
+
+The pinned, nonroot Hermes operator commands are documented at the top of `deploy/hermes/manage.py`. Hermes receives scoped Origin MCP controls, not provider cloud keys, a Docker socket or root access. Its model/login is separate from coding CLI subscriptions.
 
 Personal WhatsApp pairing requires the owner's risk acknowledgement and QR scan. Hermes uses its documented Baileys path, not an official Meta bot API; account restrictions and protocol changes remain possible. Allowlist senders. The dedicated service stays disabled until native model login, scoped Origin MCP authorization and pairing are complete.
 
