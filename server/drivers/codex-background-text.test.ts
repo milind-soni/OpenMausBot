@@ -210,7 +210,7 @@ describe("Codex generateMemoryText (fake CLI)", () => {
     return { onRefused, fallback: { ...(model ? { model } : {}), refused: new Set(refused), onRefused } satisfies SmallModelFallback };
   };
 
-  const create = async (environment: Record<string, string> = {}, managed = false) => {
+  const create = async (environment: Record<string, string> = {}, managed = false, endpoint = false) => {
     instance = await CodexDriver.create({
       instanceId: `codex-background-${Math.random().toString(36).slice(2)}`,
       displayName: "Codex",
@@ -219,12 +219,14 @@ describe("Codex generateMemoryText (fake CLI)", () => {
         CODEX_HOME: join(scratch, ".codex"),
         FAKE_CODEX_TEXT_LOG: log,
         ...(managed ? { OPENMAUSBOT_COMPANY_API_KEY: "synthetic-company-fixture" } : {}),
+        ...(endpoint ? { OPENMAUSBOT_CODEX_API_KEY: "synthetic-endpoint-key" } : {}),
         ...environment,
       },
       enabled: true,
       config: {
         cli: FAKE_CLI,
         fullAuto: false,
+        ...(endpoint ? { endpoint: { url: "https://gateway.example/v1", models: ["gateway-model"] } } : {}),
         ...(managed ? { managed: { url: "https://company.example/v1", models: ["company-large", "gpt-6-luna"] } } : {}),
       },
     });
@@ -283,6 +285,20 @@ describe("Codex generateMemoryText (fake CLI)", () => {
     await codex.generateMemoryText!("hello");
     const [call] = calls();
     expect(call!.argv[call!.argv.indexOf("--model") + 1]).toBe(codex.models.default);
+  });
+
+  it("uses only the direct endpoint for background calls and refuses a missing key", async () => {
+    const codex = await create({}, false, true);
+    await codex.generateMemoryText!("hello");
+    const [call] = calls();
+    expect(call!.argv).toContain('model_provider="openmaus_endpoint"');
+    expect(call!.argv).toContain('model_providers.openmaus_endpoint.base_url="https://gateway.example/v1"');
+    expect(modelsRun()).toEqual(["gateway-model"]);
+    expect(call!.env.OPENMAUSBOT_CODEX_API_KEY).toBe("synthetic-endpoint-key");
+    expect(JSON.stringify(call!.argv)).not.toContain("synthetic-endpoint-key");
+    await codex.dispose();
+    const keyless = await create({ OPENMAUSBOT_CODEX_API_KEY: "" }, false, true);
+    await expect(keyless.generateMemoryText!("hello")).rejects.toThrow(/Direct API key/);
   });
 
   it("keeps a Company's routing and approved models, and refuses without its key", async () => {

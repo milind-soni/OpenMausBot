@@ -28,6 +28,7 @@ const EXPECTED: Record<string, EngineCapabilities> = {
   clineAgent: { resume: true, nativeReviewer: false, full: true, edits: false, subagents: false },
   copilotAgent: bare,
   commandCodeAgent: bare,
+  kiroAgent: bare,
   customAcp: bare,
   "openai-compat": chat,
   grok: chat,

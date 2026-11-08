@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { botLimitShown, botRoom, closeBotLimit, isBotLimitRefusal, showBotLimit, stoppedAtBotLimit } from "./bot-limit";
+import { awakeCandidates, botLimitReason, botLimitShown, botRoom, closeBotLimit, isBotLimitRefusal, isBotPausedRefusal, planRefusal, showBotLimit, stoppedAtBotLimit } from "./bot-limit";
 
 afterEach(closeBotLimit);
 const state = (botLimit: number | undefined, bots: Array<{ defaultBot?: object; hidden?: boolean; movedTo?: unknown }>) => ({ config: { botLimit }, bots });
@@ -43,5 +43,34 @@ describe("a refused request", () => {
     showBotLimit();
     closeBotLimit();
     expect(botLimitShown()).toBe(false);
+  });
+});
+
+describe("the popup's other plan limits", () => {
+  it("says which limit it is about, making bots when nothing says", () => {
+    showBotLimit();
+    expect(botLimitReason()).toBe("bots");
+    showBotLimit("tasks");
+    expect(botLimitReason()).toBe("tasks");
+    closeBotLimit();
+    expect(botLimitReason()).toBeNull();
+  });
+
+  it("opens once for each refusal a config frame reports, never for one from before the page opened", () => {
+    expect(planRefusal(null, { refusedAt: 10, refused: "tasks" })).toEqual({ seen: 10, show: null });
+    expect(planRefusal(10, { refusedAt: 10, refused: "tasks" })).toEqual({ seen: 10, show: null });
+    expect(planRefusal(10, { refusedAt: 20, refused: "paused" })).toEqual({ seen: 20, show: "paused" });
+    expect(planRefusal(undefined, { refusedAt: 5 })).toEqual({ seen: 5, show: "tasks" });
+    expect(planRefusal(20, undefined)).toEqual({ seen: 20, show: null });
+  });
+
+  it("knows a paused bot's refusal by its code", () => {
+    expect(isBotPausedRefusal({ body: { code: "bot_paused" } })).toBe(true);
+    expect(isBotPausedRefusal({ body: { code: "bot_limit" } })).toBe(false);
+  });
+
+  it("counts for the awake limit the bots the bot limit counts, the chief of staff aside", () => {
+    const bots = [{ id: "a" }, { id: "maus", defaultBot: {} }, { id: "chief", chiefOfStaff: true }, { id: "old", hidden: true }, { id: "b" }];
+    expect(awakeCandidates(bots).map((bot) => bot.id)).toEqual(["a", "b"]);
   });
 });

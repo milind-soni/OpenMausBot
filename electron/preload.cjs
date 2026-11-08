@@ -635,6 +635,10 @@ const bridge = {
     save: (id, grant) => ipcRenderer.invoke("sharing:save", id, grant),
     revoke: id => ipcRenderer.invoke("sharing:revoke", id),
     activity: id => ipcRenderer.invoke("sharing:activity", id),
+    servers: () => ipcRenderer.invoke("sharing:servers"),
+    allow: id => ipcRenderer.invoke("sharing:allow", id),
+    pause: () => ipcRenderer.invoke("sharing:pause"),
+    resume: () => ipcRenderer.invoke("sharing:resume"),
   },
   confirm: message => ipcRenderer.invoke("dialog:confirm", message),
   /** The window onto My Cloud once it is the person's home: this computer's screen while My Cloud can't be opened, and

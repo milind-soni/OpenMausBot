@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { localComputerCallQuery, localComputerRelay, localComputerResultLine, OWN_PROFILE_UNAVAILABLE } from "./local-computer-guidance.ts";
+import { localComputerCallQuery, localComputerRelay, localComputerResultLine, OWN_PROFILE_UNAVAILABLE, WEB_PAGES_USE_BROWSER } from "./local-computer-guidance.ts";
 import type { ChildCalls } from "./mcp-bridge.ts";
 import { CLICK_SENT_UNCONFIRMED } from "./unconfirmed-click.ts";
 
@@ -22,6 +22,30 @@ const EXISTING_PROFILE_REFUSAL = JSON.stringify({
 });
 
 describe("localComputerResultLine", () => {
+  // cua-driver 0.41.3 on Hyprland, background input to a Chromium window (platform-linux isolated_hyprland_result).
+  const UNBOUND = (reason: string) => JSON.stringify({
+    jsonrpc: "2.0",
+    id: 7,
+    result: {
+      isError: true,
+      content: [{ type: "text", text: `background_unavailable: ${reason}` }],
+      structuredContent: { code: "background_unavailable", reason, effect: "refused", hint: "Use an element_token action." },
+    },
+  });
+
+  it("sends web pages to the bot's own browser when Hyprland refuses a window that never bound the agent seat", () => {
+    const original = JSON.parse(UNBOUND("client_not_bound"));
+    const rewritten = JSON.parse(localComputerResultLine(UNBOUND("client_not_bound")));
+    expect(rewritten.result.content).toEqual([...original.result.content, { type: "text", text: WEB_PAGES_USE_BROWSER }]);
+    expect(rewritten.result.structuredContent).toEqual(original.result.structuredContent);
+    expect(WEB_PAGES_USE_BROWSER).toMatch(/select_computer offers browser/);
+    for (const reason of ["client_xwayland", "client_drops_background_keys"]) {
+      expect(localComputerResultLine(UNBOUND(reason))).toBe(UNBOUND(reason));
+    }
+    const mentioned = JSON.stringify({ jsonrpc: "2.0", id: 8, result: { content: [{ type: "text", text: "client_not_bound in a page" }] } });
+    expect(localComputerResultLine(mentioned)).toBe(mentioned);
+  });
+
   it("tells the bot what to do instead when the driver refuses to attach to the person's signed-in profile", () => {
     const original = JSON.parse(EXISTING_PROFILE_REFUSAL);
     const rewritten = JSON.parse(localComputerResultLine(EXISTING_PROFILE_REFUSAL));
