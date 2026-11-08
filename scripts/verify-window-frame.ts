@@ -23,7 +23,7 @@ const argument = (name: string) => { const at = process.argv.indexOf(name); retu
 const shots = argument("--shots") === null ? null : resolve(argument("--shots")!);
 const only = argument("--only") === null ? null : new Set(argument("--only")!.split(",").filter(Boolean));
 const WIDTH = 1280, HEIGHT = 800;
-const ALL_SKINS = ["daylight", "midnight", "atelier", "foundry", "lagoon", "graphite", "linen", "dusk", "meadow", "pop", "halloween", "aurora"];
+const ALL_SKINS = ["daylight", "midnight", "atelier", "foundry", "lagoon", "graphite", "linen", "dusk", "meadow", "pop", "halloween", "diwali", "aurora"];
 const SKINS = argument("--skins") === "all" ? ALL_SKINS : ["daylight", "midnight"];
 const LOOK: Record<string, string> = { daylight: "light", midnight: "dark" };
 const BAR = "[data-window-frame-bar]";
