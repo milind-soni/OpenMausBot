@@ -101,7 +101,7 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     expect(threads).toMatchObject({ label: "All threads", value: "3" });
     expect(threads.submenu!.map((item) => [item.label, Boolean(item.active)])).toEqual([
       ["Trip plan", true],
-      ["New thread", false],
+      ["New conversation", false],
       ["Our chat", false],
     ]);
     threads.submenu![2].onSelect();
