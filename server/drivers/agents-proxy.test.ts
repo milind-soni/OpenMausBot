@@ -2003,6 +2003,31 @@ describe("agents-proxy MCP surface", () => {
     expect(res.error.code).toBe(-32602);
   });
 
+  it("finds the enabled skills that fit a task, with where to read each, and never a disabled one", async () => {
+    const before = skillsResponse;
+    const invoiceFile = "/data/imported-skills/invoice-reminders/SKILL.md";
+    skillsResponse = {
+      skills: [
+        ...(before as { skills: unknown[] }).skills,
+        { name: "invoice-reminders", description: "Chases unpaid invoices.", enabled: true, listed: false, editable: false, file: invoiceFile, origin: "imported" },
+        { name: "expense-audit", description: "UNREVIEWED expense audit.", enabled: false, editable: false, origin: "imported" },
+      ],
+      staged: [],
+    };
+    try {
+      const listed = await callTool("skills_list", {});
+      expect(listed.result.content[0].text).toContain("invoice-reminders (enabled, imported, not in your prompt: search to read it)");
+      const found = (await callTool("skills_list", { query: "chase unpaid invoices and expenses" })).result.content[0].text as string;
+      expect(found).toContain(`- invoice-reminders: Chases unpaid invoices. Read ${JSON.stringify(invoiceFile)}.`);
+      expect(found).toContain("- learned-expense: PRIVATE LEARNED INSTRUCTIONS");
+      expect(found).not.toContain("UNREVIEWED");
+      expect(found).not.toContain("file-expense");
+      expect((await callTool("skills_list", { query: "deploy a preview" })).result.content[0].text).toContain("No enabled skill matches");
+    } finally {
+      skillsResponse = before;
+    }
+  });
+
   it("lists, views, and stages skills without enabling them", async () => {
     const list = await rpc("tools/list");
     const manage = list.result.tools.find((t: { name: string }) => t.name === "skill_manage");

@@ -1,13 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import {
-  IMPORTED_CHANGED_WARNING, IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, importedSkillsPrompt,
-  nativeSkillFolders, readImportedSkillFile, setImportedSkillEnabled, storeImportedSkills, syncImportedSkillLinks, type ImportedSkillInput,
+  FIT_MAX_SKILLS, IMPORTED_CHANGED_WARNING, IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, importedSkillsPrompt,
+  listedImportedSkills, nativeSkillFolders, readImportedSkillFile, setImportedSkillEnabled, storeImportedSkills, syncImportedSkillLinks, type ImportedSkillInput,
 } from "./imported-skills.ts";
 import { skillCommandTurnText } from "../shared/skill-command.ts";
 import { ensureTaskWorkspaceWithSkills } from "./skill-task-links.ts";
@@ -18,6 +19,7 @@ import { ensureTaskWorkspace } from "./workspace.ts";
 
 // HOME and the data folder are this test file's own temporary ones (server/testing/setup.ts).
 afterEach(() => {
+  if (!DATA_DIR.startsWith(join(tmpdir(), "omb-test-home-"))) throw new Error(`refusing to clean ${DATA_DIR}: not this test's home`);
   rmSync(IMPORTED_SKILLS_DIR, { recursive: true, force: true });
   rmSync(join(DATA_DIR, "skill-state", "imported-skills.json"), { force: true });
 });
@@ -26,7 +28,7 @@ const HOME = join(DATA_DIR, "..");
 const skillMd = (name: string, body = "Follow the steps.") => `---\nname: ${name}\ndescription: Works with ${name}.\n---\n\n${body}\n`;
 const newBot = () => `bot-${randomUUID().slice(0, 8)}`;
 
-function input(name: string, options: { source?: "claudeCode" | "codex"; root?: string; files?: ImportedSkillInput["files"]; warnings?: string[] } = {}): ImportedSkillInput {
+function input(name: string, options: { source?: "claudeCode" | "codex"; root?: string; files?: ImportedSkillInput["files"]; warnings?: string[]; description?: string } = {}): ImportedSkillInput {
   const source = options.source ?? "claudeCode";
   const root = options.root ?? join(HOME, source === "codex" ? ".codex" : ".claude", "skills");
   return {
@@ -34,7 +36,7 @@ function input(name: string, options: { source?: "claudeCode" | "codex"; root?: 
     skillMd: skillMd(name),
     files: options.files ?? [{ path: "scripts/run.sh", content: "echo run\n", executable: true }],
     entry: {
-      description: `Works with ${name}.`, source, root, origin: join(root, name), label: `~/${source}/${name}`,
+      description: options.description ?? `Works with ${name}.`, source, root, origin: join(root, name), label: `~/${source}/${name}`,
       sha256: "0".repeat(64), warnings: options.warnings ?? [],
     },
   };
@@ -196,5 +198,63 @@ describe("skills brought in from this computer", () => {
     expect(both).toContain(JSON.stringify(join(IMPORTED_SKILLS_DIR, "skill-03", "SKILL.md")));
     expect(both).toContain(JSON.stringify(join("workspaces", bot, "skills", "zeta-own", "SKILL.md")).slice(1, -1));
     expect(both.endsWith(`Request: ${typed}`)).toBe(true);
+  });
+
+  it("past a short list, a bot's prompt and task folder hold only the skills that fit it, and it finds the rest by search", () => {
+    const filler = Array.from({ length: 40 }, (_, i) => input(`tool-${String(i).padStart(2, "0")}`, { files: [] }));
+    store([...filler,
+      input("sales-pipeline", { files: [], description: "Moves deals through the sales pipeline." }),
+      input("lead-qualify", { files: [], description: "Scores new leads before a call." }),
+      input("invoice-reminders", { files: [], description: "Chases unpaid invoices politely." }),
+      input("deploy-preview", { files: [], description: "Deploys a preview build." })]);
+    const sales = { id: newBot(), name: "Sales", description: "", soul: "Run our sales pipeline: qualify leads and chase invoicing." } as BotRecord;
+    const quiet = { id: newBot(), name: "Helper", description: "" } as BotRecord;
+    const records = new Map([sales, quiet].map((bot) => [bot.id, bot]));
+    const host = createSkillsLibraryHost({
+      store: { bot: (id: string) => records.get(id), messagesFor: () => [], taskByThread: () => undefined } as unknown as Store,
+      cfg: {} as AppConfig,
+      appendSkillRequestCard: () => ({ requestId: "", summary: "" }),
+    });
+    const index = host.skillsIndex(sales, undefined);
+    for (const name of ["sales-pipeline", "lead-qualify", "invoice-reminders"]) expect(index).toContain(`- ${name}: `);
+    expect(index).not.toContain("- deploy-preview:");
+    expect(index).not.toContain("- tool-00:");
+    expect(index).toContain("41 more skills from this computer are not listed here. When a task might need one, call skills_list");
+    expect(names(host.turnImports(sales, "thread-fit"))).toEqual(["invoice-reminders", "lead-qualify", "sales-pipeline"]);
+    // Still this bot's: run by /name, and found by a search with the path to read.
+    expect(host.expandSkillCommand(sales, "thread-fit", "/deploy-preview now", undefined, [], true)).toContain(JSON.stringify(join(IMPORTED_SKILLS_DIR, "deploy-preview", "SKILL.md")));
+    const listings = host.listBotSkills(sales) as Array<{ name: string; enabled: boolean; listed?: boolean; file?: string }>;
+    expect(listings.slice(0, 3).map((skill) => [skill.name, skill.listed])).toEqual([["invoice-reminders", true], ["lead-qualify", true], ["sales-pipeline", true]]);
+    expect(listings.find((skill) => skill.name === "deploy-preview")).toMatchObject({ enabled: true, listed: false, file: join(IMPORTED_SKILLS_DIR, "deploy-preview", "SKILL.md") });
+    // Nothing in common: nothing listed, every one of them still on for it.
+    expect(host.skillsIndex(quiet, undefined)).toContain("44 more skills from this computer are not listed here.");
+    expect(host.turnImports(quiet, "thread-fit")).toEqual([]);
+    expect(importedSkillsFor(quiet.id, new Set())).toHaveLength(44);
+    // A short list is every skill, whatever the bot is for.
+    const few = importedSkillsFor(quiet.id, new Set()).slice(0, FIT_MAX_SKILLS);
+    expect(listedImportedSkills(quiet.id, few, "")).toEqual(few);
+  });
+
+  it("a bot's switch puts a skill in its list or keeps it out, and choices saved before keep every skill listed", () => {
+    store([...Array.from({ length: 20 }, (_, i) => input(`tool-${String(i).padStart(2, "0")}`, { files: [] })),
+      input("sales-pipeline", { files: [], description: "Moves deals through the sales pipeline." })]);
+    const bot = newBot();
+    const listed = () => names(listedImportedSkills(bot, importedSkillsFor(bot, new Set()), "sales"));
+    expect(listed()).toEqual(["sales-pipeline"]);
+    expect(setImportedSkillEnabled(bot, "tool-07", true)).toMatchObject({ enabled: true });
+    expect(listed()).toEqual(["sales-pipeline", "tool-07"]);
+    // Off is off: out of its list and its search, and the bot still lists only what fits it.
+    setImportedSkillEnabled(bot, "sales-pipeline", false);
+    expect(listed()).toEqual(["tool-07"]);
+    expect(names(importedSkillsFor(bot, new Set()))).not.toContain("sales-pipeline");
+    setImportedSkillEnabled(bot, "tool-07", false);
+    expect(listed()).toEqual([]);
+    // Saved before bots listed what fits them: every skill that is on, as before.
+    const older = newBot();
+    mkdirSync(join(DATA_DIR, "skill-state", older), { recursive: true });
+    writeFileSync(join(DATA_DIR, "skill-state", older, "imported-skills.json"), JSON.stringify({ off: ["tool-01"], on: {} }));
+    expect(listedImportedSkills(older, importedSkillsFor(older, new Set()), "sales")).toHaveLength(20);
+    setImportedSkillEnabled(older, "tool-02", false);
+    expect(listedImportedSkills(older, importedSkillsFor(older, new Set()), "sales")).toHaveLength(19);
   });
 });
