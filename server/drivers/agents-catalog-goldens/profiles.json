@@ -429,7 +429,7 @@
   },
   "non-chief": {
     "bytes": 50551,
-    "sha256": "887988da88b0936067719aa829e21397158a00ab12c088537d98405e72f131c9",
+    "sha256": "229641ef800e515a044e21b6f9a042fe8c20735b7a4a8d4565ec9d93fc06f670",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -473,7 +473,7 @@
   },
   "voice+non-chief": {
     "bytes": 51332,
-    "sha256": "3f4e9d8a5793f451cf271b71dbb2f232c03600111b5db26895f9b4250d621a95",
+    "sha256": "5e70466c7aa6fc7c855257d8d896fdaa58cddc9783f6c99dc9afe33f5776226e",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -518,7 +518,7 @@
   },
   "shared+non-chief": {
     "bytes": 52816,
-    "sha256": "2a839a380601bb7c6a0958dce572806f0ebcbf62da4b0402b2d2ad5af4434bd2",
+    "sha256": "0a89b53cfd66a840f58bb83808748c58fb6271955ac6e5ac237beff3577c9225",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -564,7 +564,7 @@
   },
   "shared+voice+non-chief": {
     "bytes": 53597,
-    "sha256": "c50347d301c3c725191e9528656cbf45b5ca45eababbadf280d784e97d94eb52",
+    "sha256": "2f6e9d7e16aa14caf08ccf6d70c705d3045ed63c7ac072b8069d2adc1f5bbd36",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -611,7 +611,7 @@
   },
   "skills+non-chief": {
     "bytes": 53627,
-    "sha256": "d01bbf71e160df9d831fdfb8cc895e23ffd450abcda860b229123b4c879c04ed",
+    "sha256": "627b5f7ad434d7d27be8dcffe607745659b916447a459bc8f454e68f20e4779f",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -657,7 +657,7 @@
   },
   "skills+voice+non-chief": {
     "bytes": 54408,
-    "sha256": "2fd3de4a7a30bc49a75352bab2e65a4a6573edc66c3b6343237a7b62a6087222",
+    "sha256": "dfcbd56062f8d219f88bd4ac988c3bd5ad9c3f74b1b1b405c977987c888db00b",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -704,7 +704,7 @@
   },
   "skills+shared+non-chief": {
     "bytes": 55892,
-    "sha256": "6742406ff4816bf241d69fe40009c2b3bfc79ce86181b61316628e4ff79f7f96",
+    "sha256": "51173cb875db701a743c733fde7602215b36b428c072cb76c3bc1718977ca0e0",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -752,7 +752,7 @@
   },
   "skills+shared+voice+non-chief": {
     "bytes": 56673,
-    "sha256": "cccb89a47ba0b2416aed9318eac7d13b9c9f28657674a42697d888ce3103e987",
+    "sha256": "75f8774cae7a3f8febdcd5f62cdd69a42c734209cc961b422384c7b885b92912",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -801,7 +801,7 @@
   },
   "skills+shared+voice+cloud-home": {
     "bytes": 65655,
-    "sha256": "d6fc3ddd122067841110cddba5b0a97f091e90f32221187580888055b3c00abd",
+    "sha256": "2d84c40217212a6db271cb5042eeb671a47e0676c5356502fba5e1062a93b392",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -857,7 +857,7 @@
   },
   "skills+shared+voice+non-chief+cloud-home": {
     "bytes": 56439,
-    "sha256": "69e8e67096a525e1263b5342a673503228fd08a0e7e3e7233d136aec75a2e10a",
+    "sha256": "a42325f15326972d006b70188399fb7bd601553c789f1310d3092aa2e7fadd85",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1198,7 +1198,7 @@
   },
   "default+mausbot": {
     "bytes": 60418,
-    "sha256": "0678fd1ae34e3fb657597d7ab5d1c184cab5b691ef9878260a15cbef9e6a18f4",
+    "sha256": "3d223b9a978237141a61ae3bbba6595de07055fc1cb5ee7cca94ec85f50c4cf4",
     "tools": [
       "tool_result_read",
       "list_room_targets",
@@ -1251,7 +1251,7 @@
   },
   "skills+shared+voice+mausbot": {
     "bytes": 66540,
-    "sha256": "7bceadf0db2c942a948fce4ab5cde49de206e76e17466c1c08ea8e95b967e775",
+    "sha256": "7e15c860c06a932703954a8dc726bc9892a3e06a6aac70701c1d855e12159480",
     "tools": [
       "tool_result_read",
       "list_shared_computers",
@@ -1406,7 +1406,7 @@
   },
   "non-chief+room": {
     "bytes": 47695,
-    "sha256": "52e5cb6ffeb60b87c36c941b8cc273d9588f7f1d45efe7dae975c9b495a54a68",
+    "sha256": "38e25589b83cd6260b231e19e81a91dc37c7cad147866fee07ab18e9e42d949a",
     "tools": [
       "tool_result_read",
       "list_room_targets",
