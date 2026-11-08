@@ -155,6 +155,9 @@ it("this computer then works for Garage server by itself, and never for the serv
     expect(sharing.cloudState(garage.place)).toMatchObject({ enabled: true, terminal: false });
     expect(sharing.state(family.place.id).enabled).toBe(false);
     expect((await family.as("GET", "/api/shared-computers")).status, "nothing is lent where others sign in").not.toBe(200);
+    expect(await sharing.ownServer(family.place), "a server others sign in to is never offered as the person's own").toBeNull();
+    await expect(sharing.lendOwn(family.place, { computer: true })).rejects.toThrow();
+    expect((await family.as("GET", "/api/auth/session")).body, "nor told what it would take").not.toHaveProperty("lending");
     // Pause: Garage server stops using this computer, until Resume.
     sharing.pause();
     await expect.poll(async () => ((await garage.as("GET", "/api/shared-computers")).body?.computers ?? []).filter((computer: { online?: boolean; connected?: boolean }) => computer.online !== false && computer.connected !== false).length,

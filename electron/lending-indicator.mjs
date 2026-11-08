@@ -43,15 +43,15 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
       ...fix ? [{ label: fix, click: () => onStartScreen() }] : [],
       { type: "separator" },
       view.paused ? { label: t("native.lendTray.resume"), click: () => onResume() } : { label: t("native.lendTray.pause"), click: () => onPause() },
-      ...view.paused ? [] : [{ label: t("native.lendTray.terminal", { device: device === "computer" ? t("native.lendTray.computer") : device }), type: "checkbox", checked: view.terminal,
+      ...view.paused || !view.terminalSwitch ? [] : [{ label: t("native.lendTray.terminal", { device: device === "computer" ? t("native.lendTray.computer") : device }), type: "checkbox", checked: view.terminal,
         // Electron 43 ticks a checkbox on click by itself: the menu keeps the saved choice until the person confirms one.
         click: () => { draw(view); onTerminal(!view.terminal); } }],
       { label: t("native.lendTray.activity"), click: () => onActivity() },
     ]));
   };
   return {
-    update({ clouds = [], using = [], paused = false, terminal = false, screen = null, waiting = [] }) {
-      const next = { clouds: [...clouds], using: paused ? [] : [...using], waiting: paused ? [] : [...waiting], paused: paused === true, terminal: terminal === true,
+    update({ clouds = [], using = [], paused = false, terminal = false, terminalSwitch = true, screen = null, waiting = [] }) {
+      const next = { clouds: [...clouds], using: paused ? [] : [...using], waiting: paused ? [] : [...waiting], paused: paused === true, terminal: terminal === true, terminalSwitch: terminalSwitch !== false,
         screen: screen ? { ready: screen.ready === true, reason: screen.reason ?? null, fix: screen.fix ?? null, ...(screen.message ? { message: screen.message } : {}) } : null };
       if (shown && JSON.stringify(next) === JSON.stringify(shown)) return;
       shown = next;
