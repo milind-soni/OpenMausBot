@@ -60,6 +60,7 @@ h2{margin:0;height:40px;font-size:18px;line-height:24px}
 <div class="row">Monday: design review</div><div class="row">Tuesday: ship the beta</div>
 <div class="row">Wednesday: customer calls</div><div class="row">Thursday: retro</div></body></html>`;
 const FLOWING_HEIGHT = 16 + 40 + 4 * 56 + 16;
+const PREVIEW_HEIGHT = 220;
 
 const PAGES = [
   { key: "map-layer", input: { title: "Ferry map", html: MAP_LAYER } },
@@ -77,7 +78,7 @@ afterAll(async () => {
   if (ownsEvidenceDir) await removeTempDir(evidenceDir);
 });
 
-(enabled ? it : it.skip)("keeps a window-filling page at a page's height and a flowing page at its content's", async () => {
+(enabled ? it : it.skip)("shows every page in a fixed preview card, the page inside at its own height", async () => {
   mkdirSync(evidenceDir, { recursive: true });
   const calls = join(evidenceDir, "tool-calls.json");
   child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], {
@@ -128,9 +129,9 @@ afterAll(async () => {
   writeFileSync(join(evidenceDir, "heights.json"), `${JSON.stringify(measured, null, 2)}\n`);
 
   expect(measured).toEqual({
-    "map-layer": { box: 520, frame: 520 },
-    "map-layer-400": { box: 400, frame: 400 },
-    "map-percent": { box: 520, frame: 520 },
-    flowing: { box: FLOWING_HEIGHT, frame: FLOWING_HEIGHT },
+    "map-layer": { box: PREVIEW_HEIGHT, frame: 520 },
+    "map-layer-400": { box: PREVIEW_HEIGHT, frame: 400 },
+    "map-percent": { box: PREVIEW_HEIGHT, frame: 520 },
+    flowing: { box: PREVIEW_HEIGHT, frame: FLOWING_HEIGHT },
   });
 }, LAUNCH_TIMEOUT_MS + 240_000);
