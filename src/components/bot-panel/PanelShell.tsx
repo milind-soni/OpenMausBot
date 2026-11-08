@@ -137,8 +137,9 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
             <div
               role="tablist"
               aria-label={t("botSettings.simple.tabs")}
-              className="sticky top-0 z-[1] -mx-4 mt-[15px] flex justify-center gap-0.5 bg-app px-4 pb-2.5 pt-1 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-linear-to-b after:from-app after:to-transparent"
+              className="sticky top-0 z-[1] -mx-4 mt-[15px] flex justify-center bg-app px-4 pb-2.5 pt-1 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-linear-to-b after:from-app after:to-transparent"
             >
+              <div className="flex min-w-0 gap-0.5 rounded-full bg-ink/[0.05] p-[3px]">
               {PANEL_TABS.map((id) => (
                 <button
                   key={id}
@@ -148,13 +149,14 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
                   data-panel-tab={id}
                   onClick={() => openTab(id)}
                   className={cn(
-                    "h-[26px] min-w-0 shrink truncate rounded-full px-2 text-[13px] leading-[18px] transition-colors",
-                    tab === id ? "bg-ink/[0.07] text-ink" : "text-ink-secondary hover:text-ink",
+                    "h-[26px] min-w-0 shrink truncate rounded-full px-3 text-[13px] leading-[18px] transition-colors",
+                    tab === id ? "bg-ink/[0.1] font-medium text-ink" : "text-ink-secondary hover:text-ink",
                   )}
                 >
                   {t(TAB_LABEL[id])}
                 </button>
               ))}
+              </div>
             </div>
             <div role="tabpanel">
               {tab === "details" && <DetailsTab bot={bot} derived={derived} onOpen={openPage} />}

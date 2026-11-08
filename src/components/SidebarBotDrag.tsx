@@ -27,7 +27,7 @@ const carries = (event: DragEvent<HTMLElement>) => event.dataTransfer.types.incl
 const failure = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
 export function botRowDropClass(drop: BotDropPlace | null | undefined, dragging: boolean | undefined): string {
-  return cn(dragging && "opacity-40", drop === "group" && "rounded-[10px] bg-accent/10 outline outline-2 -outline-offset-2 outline-accent/70");
+  return cn(dragging && "opacity-40", drop === "group" && "rounded-[8px] bg-accent/10 outline outline-2 -outline-offset-2 outline-accent/70");
 }
 
 export function BotDropLine({ place }: { place: BotDropPlace | null | undefined }) {
@@ -199,7 +199,7 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
           },
         }),
         slot: active !== null && mainIds.length === 0 && botListOf(lists, active) !== ""
-          ? <div data-bot-drop-slot="" className={cn("mx-2 flex h-10 items-center justify-center rounded-[10px] border border-dashed text-[13px] leading-[18px]",
+          ? <div data-bot-drop-slot="" className={cn("mx-2 flex h-10 items-center justify-center rounded-[8px] border border-dashed text-[13px] leading-[18px]",
             shown?.kind === "end" && shown.list === "" ? "border-accent bg-accent/10 text-ink" : "border-ink/20 text-ink-secondary")}>{t("sidebar.section.removeFromDepartment")}</div>
           : null,
         naming: (name: string | null): SectionNaming | undefined => {

@@ -181,8 +181,9 @@ describe("the panel's tabs", () => {
       .toEqual([["details", "Details"], ["library", "Library"], ["computer", "Computer"]]);
     expect(tab()).toBe("details");
     const strip = host.querySelector('[role="tablist"]')!.className.split(" ");
-    expect(strip).toEqual(expect.arrayContaining(["sticky", "top-0", "bg-app", "gap-0.5"]));
-    expect(host.querySelector('[role="tab"]')!.className.split(" ")).toEqual(expect.arrayContaining(["h-[26px]", "text-[13px]", "bg-ink/[0.07]"]));
+    expect(strip).toEqual(expect.arrayContaining(["sticky", "top-0", "bg-app"]));
+    expect(host.querySelector('[role="tab"]')!.parentElement!.className.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-ink/[0.05]"]));
+    expect(host.querySelector('[role="tab"]')!.className.split(" ")).toEqual(expect.arrayContaining(["h-[26px]", "text-[13px]", "bg-ink/[0.1]", "font-medium"]));
     for (const id of ["library", "computer", "details"]) {
       click(host.querySelector(`[data-panel-tab="${id}"]`));
       expect(tab()).toBe(id);
@@ -294,7 +295,7 @@ describe("the chat header's pill", () => {
     }
     const untitled = pill({ bot: { ...withTasks, mainThreadId: "other", tasks: [{ ...withTasks.tasks![0]!, title: "New thread" }, withTasks.tasks![1]!] } });
     try {
-      expect(untitled.header.querySelector("[data-chathead-conversation]")!.textContent).toBe("New conversation");
+      expect(untitled.header.querySelector("[data-chathead-conversation]")!.textContent).toBe("Untitled chat");
     } finally {
       untitled.done();
     }
