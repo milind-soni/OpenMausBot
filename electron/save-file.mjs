@@ -137,11 +137,8 @@ export async function revealInFolder(rawPath, { reveal, fsp = fs.promises, pathA
   return "shown";
 }
 
-// A folder a chat links to, opened in Explorer or Finder. Same untrusted-path rules as revealInFolder, and only a plain
-// folder is ever handed to `open` (shell.openPath), since opening anything else runs it: never a file, and never a
-// folder that is really a program, as a Mac app (Name.app, or any folder with Contents/Info.plist) or a link to one is.
-// Links are resolved first and any folder name with an extension is left alone. Anything refused answers "not-folder"
-// so the page keeps today's save-a-copy. `open` answers "" or why it failed.
+// shell.openPath runs whatever it is given, so only a plain folder may reach it: never a file, a Mac app bundle
+// (Name.app, or a folder with Contents/Info.plist), or a link to either.
 export async function openFolder(rawPath, { open, fsp = fs.promises, pathApi = path }) {
   const target = localTarget(rawPath, pathApi);
   if (!target) return "invalid";

@@ -20,8 +20,7 @@ function revealBridge(): Reveal | undefined {
 
 type OpenFolder = NonNullable<NonNullable<Window["ogb"]>["openFolder"]>;
 
-/** Desktop app on the computer that holds the path: a folder a chat links to opens in Finder or Explorer. True only when
- * it opened; a file, a missing path, a phone, the web or a connected window answer false and keep their own handling. */
+/** Opens a linked folder in Finder or Explorer on the desktop app that holds it; false lets the caller fall back. */
 export async function openLinkedFolder(folderPath: string, open: OpenFolder | undefined = openFolderBridge()): Promise<boolean> {
   if (!open || !REVEALABLE_PATH.test(folderPath)) return false;
   try {

@@ -326,6 +326,7 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
   const save = useLocalFileSave(filePath, name, message);
   const preview = useHtmlPreview(filePath, name ?? fileName(filePath), message);
   const revealMenu = useRevealOriginalMenu();
+  const [opening, setOpening] = useState(false);
   if (!message) {
     return <span title={t("chat.file.legacy")} className="break-words text-ink-secondary">{children}</span>;
   }
@@ -345,8 +346,11 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
         : <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />}
       <button
         type="button"
-        onClick={preview.html ? preview.show : () => void openLinkedFolder(filePath).then((opened) => { if (!opened) return save.save(); })}
-        disabled={!preview.html && save.state === "saving"}
+        onClick={preview.html ? preview.show : () => {
+          setOpening(true);
+          void openLinkedFolder(filePath).then((opened) => opened ? undefined : save.save()).finally(() => setOpening(false));
+        }}
+        disabled={!preview.html && (opening || save.state === "saving")}
         title={preview.html ? t("html.preview", { name: name ?? fileName(filePath) }) : t("chat.file.saveCopy")}
         className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
       >
