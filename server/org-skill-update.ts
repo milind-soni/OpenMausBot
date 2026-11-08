@@ -204,9 +204,11 @@ export function replaceOrganizationSkill(
     if (identity(state) !== stateId || identity(staging) !== stagingId) cleanupError = "the protected staging path changed";
     else {
       try { rmSync(prepared, { recursive: true, force: true }); } catch { cleanupError = "the staged folder could not be cleared"; }
-      if (moved) {
-        const targetIdentity = identity(target) === preparedId ? skillRootIdentity(target) : null;
-        if (!targetIdentity) cleanupError = "the uncommitted revision could not be checked safely";
+      if (moved || directoryEntryState(target) !== "missing") {
+        const protectedManifest = orgSkillStorage.readProtectedManifest(botId);
+        const mayBeActive = !protectedManifest || Object.values(protectedManifest).some((entry) => entry.storageRevision === revision);
+        const targetIdentity = !mayBeActive && identity(target) === preparedId ? skillRootIdentity(target) : null;
+        if (!targetIdentity) cleanupError = "the revision may be active or could not be checked safely";
         else {
           const retired = retireUnchangedSkillRoot(target, { identity: targetIdentity, hash: partHash(skillReleaseValue(skill)), executableFiles }, state);
           if ("error" in retired) cleanupError = retired.error;

@@ -1200,6 +1200,43 @@ describe("a newer release of an added team", () => {
     } finally { if (fd >= 0) closeSync(fd); }
   });
 
+  it.skipIf(process.platform === "win32")("retains a moved revision when the move reports failure after taking effect", async () => {
+    const { app, botOf } = await addedTeam(), lead = botOf("lead"), name = "pricing-policy";
+    const before = app.skills.skillPackageStamps(lead.id).find((item) => item.name === name)!.stamp;
+    const instructions = app.skills.readSkillFile(lead.id, name)! + "\nNext release.\n";
+    const value = app.parts.skillReleaseValue({ instructions }), stamp = { ...before, release: "1.4.0", ...app.parts.pair(value, value) };
+    let fd = -1;
+    try {
+      const result = app.replaceOrganizationSkill(lead.id, "org:fixture", { instructions }, stamp, before, { moveRevision: (from, to) => {
+        fd = openSync(join(String(from), "SKILL.md"), "a"); renameSync(from, to); throw new Error("indeterminate move");
+      } });
+      expect(result).toHaveProperty("error", expect.stringContaining("indeterminate move"));
+      const recovery = join(app.DATA_DIR, "skill-state", lead.id, "retired-roots");
+      const held = readdirSync(recovery).find((item) => hex.test(item))!;
+      writeSync(fd, "Write after reported move failure.\n");
+      expect(readFileSync(join(recovery, held, "SKILL.md"), "utf8")).toContain("Write after reported move failure.");
+      expect(app.skills.skillPackageStamps(lead.id).find((item) => item.name === name)!.stamp).toEqual(before);
+    } finally { if (fd >= 0) closeSync(fd); }
+  });
+
+  it("does not retire a revision whose manifest write took effect before reporting failure", async () => {
+    const { app, botOf } = await addedTeam(), lead = botOf("lead"), name = "pricing-policy";
+    const { skillUpdateGuardPath } = await import("./skill-recovery-capacity.ts");
+    const before = app.skills.skillPackageStamps(lead.id).find((item) => item.name === name)!.stamp;
+    const instructions = app.skills.readSkillFile(lead.id, name)! + "\nNext release.\n";
+    const value = app.parts.skillReleaseValue({ instructions }), stamp = { ...before, release: "1.4.0", ...app.parts.pair(value, value) };
+    const result = app.replaceOrganizationSkill(lead.id, "org:fixture", { instructions }, stamp, before, { writeManifest: (bot, manifest) => {
+      app.skills.orgSkillStorage.writeManifest(bot, manifest); throw new Error("indeterminate manifest write");
+    } });
+    const entry = app.skills.orgSkillStorage.readManifest(lead.id)[name]!, guard = skillUpdateGuardPath(join(app.DATA_DIR, "skill-state", lead.id), name);
+    const target = join(app.DATA_DIR, "workspaces", lead.id, "skills", ".revisions", entry.storageRevision!);
+    expect(result).toHaveProperty("error", expect.stringContaining("may be active"));
+    expect(readFileSync(join(target, "SKILL.md"), "utf8")).toBe(instructions);
+    expect(existsSync(guard)).toBe(true);
+    expect(app.skills.removeSkill(lead.id, name)).toHaveProperty("error");
+    expect(readFileSync(join(target, "SKILL.md"), "utf8")).toBe(instructions);
+  });
+
   it("waits for an active task before updating and retries without another catalog", async () => {
     const { app, library, botOf, update, installId } = await addedTeam();
     const lead = botOf("lead");
