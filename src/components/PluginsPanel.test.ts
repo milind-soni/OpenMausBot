@@ -339,10 +339,15 @@ describe("connected apps setup notice", () => {
 
 describe("unreadable credential store notice", () => {
   it("says This PC only for a Windows or Linux desktop's own store", () => {
-    expect(staleNoticeKey("darwin", false)).toBe("connectors.stale");
-    expect(staleNoticeKey("win32", false)).toBe("connectors.stalePc");
-    expect(staleNoticeKey("linux", false)).toBe("connectors.stalePc");
-    expect(staleNoticeKey(undefined, false)).toBe("connectors.stale");
-    expect(staleNoticeKey("win32", true)).toBe("connectors.stale");
+    const own = { active: false };
+    expect(staleNoticeKey({ platform: "darwin", remoteClient: own })).toBe("connectors.stale");
+    expect(staleNoticeKey({ platform: "win32", remoteClient: own })).toBe("connectors.stalePc");
+    expect(staleNoticeKey({ platform: "linux", remoteClient: own })).toBe("connectors.stalePc");
+    expect(staleNoticeKey({ remoteClient: own })).toBe("connectors.stale");
+    expect(staleNoticeKey(undefined)).toBe("connectors.stale");
+    // A remote client shows the server's store, which may not be this PC.
+    expect(staleNoticeKey({ platform: "win32", remoteClient: { active: true } })).toBe("connectors.stale");
+    // A remote server's page in this desktop gets no remoteClient bridge: its store is the server's too.
+    expect(staleNoticeKey({ platform: "win32" })).toBe("connectors.stale");
   });
 });

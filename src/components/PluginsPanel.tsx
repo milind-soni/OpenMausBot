@@ -77,9 +77,12 @@ export function hasUsableConnectedApps(configured: boolean, phase: ConnectorInve
 }
 
 /** The unreadable-store notice says This PC on a Windows or Linux desktop's own store. A Mac, a remote server's store
- * and an unknown platform keep the Mac wording they always had. */
-export const staleNoticeKey = (platform: string | undefined, remoteClient: boolean): LocaleKey =>
-  !remoteClient && (platform === "win32" || platform === "linux") ? "connectors.stalePc" : "connectors.stale";
+ * and an unknown platform keep the Mac wording they always had. A remote server's page gets no remoteClient bridge
+ * (the preload keeps it to this app's own page), and an active remote client shows the server's store. */
+export const staleNoticeKey = (bridge: { platform?: string; remoteClient?: { active?: boolean } } | undefined): LocaleKey =>
+  bridge?.remoteClient && bridge.remoteClient.active !== true && (bridge.platform === "win32" || bridge.platform === "linux")
+    ? "connectors.stalePc"
+    : "connectors.stale";
 
 /** Whether a hosted app's card shows: it matches the search, and the filter is All, or Connected and it isn't known to be
  * disconnected (unknown while its servers load). */
@@ -592,7 +595,7 @@ export function PluginsPanel() {
             <div className="mb-3 flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-[13px] text-warning">
               <TriangleAlert size={14} className="mt-px shrink-0" />
               <span>
-                {t(staleNoticeKey(window.ogb?.platform, remoteClient))}
+                {t(staleNoticeKey(window.ogb))}
               </span>
             </div>
           )}
