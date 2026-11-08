@@ -5748,6 +5748,8 @@
   "backup.restartDesktop": "O backup está pronto. Reinicie o app {app} para concluir a restauração. Fechar esta janela não reinicia o servidor.",
   "backup.restartAction": "Reiniciar e restaurar",
   "backup.restartFailed": "Não foi possível reiniciar o app {app}. Encerre o app completamente e abra novamente para concluir a restauração.",
+  "backup.serverRestarting": "O backup está pronto para ser restaurado. O {app} está reiniciando para concluir. Esta página continua sozinha em um ou dois minutos.",
+  "backup.serverRestartSlow": "Isso está demorando mais do que o normal. Se esta página não continuar em mais alguns minutos, recarregue-a.",
   "backup.recovering": "Restaurando os rascunhos e preferências salvos neste navegador…",
   "backup.skipDrafts": "Continuar sem restaurar rascunhos",
   "backup.skipDraftsHint": "Mantém os rascunhos e preferências atuais deste navegador. Isso não desfaz a restauração da instalação.",
