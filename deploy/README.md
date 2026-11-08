@@ -150,6 +150,8 @@ A worktree isolates Git state, not operating-system access. Native coding tools 
 
 `origin-runner status --refresh` inspects native sign-in, model and usage metadata without sending a model prompt. `pause` prevents new claims; `resume` clears the local pause/stop request; `stop` requests cancellation and a durable stopped receipt. A stop request or lost connection is not proof that execution has stopped.
 
+Runner `1.2.1` fixes macOS service startup on busy desktops: launchd now inherits the system's per-user process limit instead of imposing `NumberOfProcesses=256`, which can prevent every native child from starting even when this runner is idle. Existing service files are not rewritten by a runner update. For an existing affected Mac, wait for confirmed idle, back up its Origin plist, unload only `com.origin.runner`, remove `SoftResourceLimits.NumberOfProcesses` with `plutil`, validate the plist, then bootstrap that same service. Do not terminate unrelated user processes to make room under the old cap. Linux retains its runner-scoped cgroup task limit.
+
 The private configuration defaults to `~/.config/origin-runner/config.json` (owner-only, mode 0600). State defaults to `~/.local/share/origin-runner`: bare repository caches under `repositories/`, per-run worktrees under `worktrees/`, sessions and durable receipts beside them. The runner pushes verified task/checkpoint branches, never the protected base branch. It does not reset personal repositories or silently reuse an old worktree.
 
 ### Herdr and Rex task consoles and desktop connections
