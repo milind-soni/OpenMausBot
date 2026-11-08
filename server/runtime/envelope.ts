@@ -107,22 +107,13 @@ function replyLine(a: Assignment, requester: string, parent?: Assignment): strin
   return `Ownership is yours: results, failures and questions stay in this thread; ${requester} is not waiting and will not be resumed.${answerBack}`;
 }
 
-/** runtime.ts stores an answer clipped at 12 000 characters (BRIEF_MAX). */
-const STORED_ANSWER_MAX = 12_000;
-
-/** A stored answer cut at the limit may end mid-secret, which redaction can no longer match: drop that last partial word. */
-function dropClippedTail(text: string | undefined): string | undefined {
-  if (!text || text.length < STORED_ANSWER_MAX) return text;
-  return `${text.replace(/\S+$/, "").trimEnd()} …`;
-}
-
 /** Harness-quoted, so the person's "yes" never travels as pasted text, and a bot's answer never passes for theirs. */
 function answerLine(a: Assignment, names: EnvelopeNames): string {
   const question = quote(a.question, QUOTE_MAX);
   const asked = question ? `Your question was: "${question}". ` : "";
   // Only a bot's or the person's answer travels whole; a default pick keeps the short quote it always had.
   const isDefault = a.answeredBy?.kind === "default";
-  const answer = isDefault ? quote(a.answer, QUOTE_MAX) : quote(dropClippedTail(a.answer), Number.POSITIVE_INFINITY);
+  const answer = isDefault ? quote(a.answer, QUOTE_MAX) : quote(a.answer, Number.POSITIVE_INFINITY);
   if (isDefault) {
     return `${asked}Nobody was asked, at this level: ${answer ? `go on with your default, "${answer}"` : "pick the sensible default yourself"}, and say in one plain line what you chose.`;
   }

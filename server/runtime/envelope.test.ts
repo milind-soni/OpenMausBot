@@ -514,21 +514,6 @@ describe("composeEnvelope at Full access: nothing a bot can settle waits on the 
       removeScrubber();
     }
   });
-  it("drops a held secret cut in half where the stored answer was clipped", () => {
-    const secret = "Zq8-held-PASSWORD-value";
-    const removeScrubber = addHeldSecretScrubber((text) => text.replaceAll(secret, HELD_SECRET_MASK));
-    try {
-      const lead = `Done. ${"word ".repeat(2_398)}`;
-      const answer = `${lead}${secret}`.slice(0, 12_000);
-      expect(answer.length).toBe(12_000);
-      expect(answer.endsWith(secret)).toBe(false);
-      const envelope = composeEnvelope(assignment({ question: "Done?", answer, answeredBy: { kind: "bot", botId: "chief" } }), { ...names, answerer: "Chief" });
-      expect(envelope).not.toContain("Zq8");
-      expect(envelope).toContain(`word …".`);
-    } finally {
-      removeScrubber();
-    }
-  });
 });
 
 describe("composeResume", () => {
