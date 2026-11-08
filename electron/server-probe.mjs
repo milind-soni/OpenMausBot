@@ -36,11 +36,32 @@ function failureKind(error) {
   return "unreachable";
 }
 
+const REFUSAL_MAX_BYTES = 4_096;
+
+/** The body as text, or null once it passes REFUSAL_MAX_BYTES, whatever Content-Length said. */
+async function readSmallBody(response) {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > REFUSAL_MAX_BYTES) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 /** A desktop app's companion refusal is a small JSON body; anything larger or not shaped like it isn't one. */
 async function isDesktopAppRefusal(response) {
-  if (Number(response.headers?.get?.("content-length")) > 4_096) return false;
-  const text = await response.text().catch(() => "");
-  if (text.length > 4_096) return false;
+  if (Number(response.headers?.get?.("content-length")) > REFUSAL_MAX_BYTES) return false;
+  const text = await readSmallBody(response).catch(() => null);
+  if (text === null) return false;
   let error;
   try { error = JSON.parse(text)?.error; } catch { return false; }
   return typeof error === "string" && DESKTOP_APP_REFUSAL.test(error);
