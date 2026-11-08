@@ -100,9 +100,9 @@ in protected skill state and cleanup reports that they need attention.
 If an organization's active skill folder has changed, removal is refused and
 the folder is kept for recovery, including before its first update. A partial
 removal remains disabled and records the recovery folder until cleanup finishes.
-A task whose old link cannot be synchronized cannot start its next turn until
-that link is cleared. An edited retained revision is kept for recovery without
-blocking updates to other skills.
+A task or legacy workspace whose old link cannot be synchronized cannot start
+its next turn until that link is cleared. An edited retained revision is kept
+for recovery without blocking updates to other skills.
 
 ## Withdrawn releases
 

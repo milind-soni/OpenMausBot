@@ -1190,6 +1190,31 @@ describe("a newer release of an added team", () => {
     expect(readFileSync(join(folder, ".claude", "skills", "pricing-policy", "SKILL.md"), "utf8")).toContain("New reviewed revision.");
   });
 
+  it("blocks a legacy workspace turn while its native link targets the previous revision", async () => {
+    const { app, botOf, update } = await addedTeam();
+    const lead = botOf("lead"), { assertWorkspaceSkillLinksCurrent } = await import("./skill-task-links.ts");
+    await update();
+    const old = app.skills.listMigratableSkills(lead.id, "pricing-policy")[0]!.directory!;
+    const interrupted = vi.spyOn(app.skills.orgSkillStorage, "syncSkillLinks").mockReturnValue(false);
+    await update(release("full-team.v2.json", (doc) => {
+      NEXT(doc); doc.package.release = "1.5.0";
+      doc.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").instructions += "\nNew reviewed revision.";
+    }));
+    expect(readFileSync(join(app.DATA_DIR, "workspaces", lead.id, ".claude", "skills", "pricing-policy", "SKILL.md"), "utf8")).toContain("Seats are 59");
+    expect(existsSync(old)).toBe(true);
+    const workspace = join(app.DATA_DIR, "workspaces", lead.id), alias = join(app.DATA_DIR, "workspace-alias");
+    expect(() => assertWorkspaceSkillLinksCurrent(lead.id, workspace)).toThrow("could not be synchronized safely");
+    expect(() => assertWorkspaceSkillLinksCurrent(lead.id, join(workspace, "subfolder"))).toThrow("could not be synchronized safely");
+    if (process.platform !== "win32") {
+      symlinkSync(workspace, alias);
+      expect(() => assertWorkspaceSkillLinksCurrent(lead.id, alias)).toThrow("could not be synchronized safely");
+    }
+    expect(() => assertWorkspaceSkillLinksCurrent(lead.id, join(app.DATA_DIR, "elsewhere"))).not.toThrow();
+    interrupted.mockRestore();
+    expect(app.recoverOrganizationSkillLinks(lead.id)).toEqual({ ok: true });
+    expect(() => assertWorkspaceSkillLinksCurrent(lead.id, join(app.DATA_DIR, "workspaces", lead.id))).not.toThrow();
+  });
+
   it("recovers an interrupted link switch after restart without a new catalog", async () => {
     const { app, library, botOf, update } = await addedTeam();
     const lead = botOf("lead");
