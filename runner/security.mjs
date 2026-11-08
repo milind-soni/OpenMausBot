@@ -3,7 +3,7 @@ import { mkdir, open, rename, readFile, chmod } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 export const sleep = (ms, signal) => new Promise((resolve, reject) => {
   if (signal?.aborted) return reject(signal.reason);
   const done = () => { signal?.removeEventListener('abort', abort); resolve(); };

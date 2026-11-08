@@ -73,6 +73,7 @@ function ExecutionMachines({ data, scope, busy, act }: { data: ExecutionSnapshot
   const [enrollment, setEnrollment] = useState<ExecutionEnrollment | null>(null);
   return <section className="settings-group"><h4>Machines</h4>
     <p className="execution-help">NixOS is preferred for portable jobs. Mac runs only Apple workloads or explicit machine requests. Busy, paused or uncertain presence does not authorize cloud execution.</p>
+    <p className="execution-help">Herdr shows Origin task consoles without replacing the selected coding CLI. Enable locally with <code>origin-runner herdr enable</code>; add <code>--cloud</code> to connect active Boxd/Boat tasks using your native provider login. Expired cloud connections are removed automatically. Hermes controls authorized Origin runs only, never personal terminals.</p>
     {!data.hosts.length && <p className="settings-empty">No machines enrolled.</p>}
     {data.hosts.map(host => <article className="execution-card" key={host.id}>
       <div className="execution-card-head"><strong>{host.name}</strong><span className="execution-badge">{host.status}</span></div>
@@ -80,6 +81,7 @@ function ExecutionMachines({ data, scope, busy, act }: { data: ExecutionSnapshot
       <p className="execution-help">Heartbeat: {executionTime(host.lastSeenAt)} · Independent presence: {host.online === null ? "Unknown" : host.online ? "Online" : "Offline"}{host.presenceObservedAt ? ` (${executionTime(host.presenceObservedAt)})` : ""}</p>
       <p className="execution-help">CLIs: {host.capabilities.join(", ") || "None reported"}. Accounts: {host.accountIds.map(id => data.accounts.find(account => account.id === id)?.label ?? "Other authorized account").join(", ") || "No authenticated account reported"}.</p>
       <p className="execution-help">Project scope: {host.projectIds.map(id => projects?.find(project => project._id === id)?.name ?? id).join(", ") || "No projects"}{host.platform === "darwin" ? " · Apple-only unless explicitly selected" : ""}</p>
+      {host.herdr && <p className="execution-help">Herdr: {host.herdr.enabled ? host.herdr.status ?? "Not reported" : "Disabled"}{host.herdr.version ? ` · core ${host.herdr.version}` : ""} · Cloud connections {host.herdr.cloudConnections ? "enabled" : "disabled"} · Reported {executionTime(host.herdr.updatedAt)}{host.herdr.message ? ` · ${host.herdr.message}` : ""}</p>}
       {data.permissions.admin && !host.revoked && <div className="execution-actions">
         <button type="button" className="ghost-button compact" disabled={busy} onClick={() => { void act(host.paused ? "resumeHost" : "pauseHost", { hostId: host.id }).catch(() => {}); }}>{host.paused ? "Resume new work" : "Pause new work"}</button>
         <ConfirmButton label={`Revoke ${host.name}`} text="Revoke" confirmLabel="Confirm revoke" className="ghost-button compact danger" disabled={busy} onConfirm={() => { void act("revokeHost", { hostId: host.id }).catch(() => {}); }} />

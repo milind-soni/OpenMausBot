@@ -59,7 +59,7 @@ export function quotaBlocksSelection(account: ExecutionAccount, selection: Execu
 export type ExecutionRouting = { host?: ExecutionHost; selection?: ExecutionSelection; reason: string; needsCloud: boolean };
 export function routeExecution(input: {
   policy: ExecutionPolicy; projectId: string; ownerId: string; hosts: ExecutionHost[]; accounts: ExecutionAccount[];
-  attempted?: string[]; now?: number;
+  attempted?: string[]; now?: number; verificationOnly?: boolean;
 }): ExecutionRouting {
   const { policy, projectId, ownerId } = input;
   const now = input.now ?? Date.now();
@@ -72,6 +72,16 @@ export function routeExecution(input: {
   const tried = new Set(input.attempted || []);
   const choices = policy.fallbackMode === "disabled" ? policy.fallback.slice(0, 1) : policy.fallback;
   const choose = (candidates: ExecutionHost[]): ExecutionRouting | null => {
+    if (input.verificationOnly) {
+      // Older runners ignore this mode and would restart coding. Only the versioned
+      // verification implementation may receive it; no LLM account is required.
+      const host = candidates.find(host => {
+        const version = /^(\d+)\.(\d+)\.(\d+)$/.exec(host.version);
+        return host.online === true && !host.paused && host.activeRunIds.length < host.capacity && now - host.lastSeenAt <= 45000
+          && version && (Number(version[1]) > 1 || Number(version[1]) === 1 && Number(version[2]) >= 1);
+      });
+      return host ? { host, reason: "Ready to align and re-verify the checkpoint without model work", needsCloud: false } : null;
+    }
     for (const selection of choices) {
       if (tried.has(executionSelectionKey(selection))) continue;
       if (!policy.allowCrossHarness && selection.harness !== policy.fallback[0]?.harness) continue;
@@ -88,15 +98,16 @@ export function routeExecution(input: {
     }
     return null;
   };
-  if (!choices.length) return waiting("Choose an account, harness and model in the execution policy");
-  if (pinned && ["nixos", "mac"].includes(pinned.kind)) return choose([pinned]) || waiting("The pinned local machine or selected account is unavailable; its destination will not change");
+  if (!input.verificationOnly && !choices.length) return waiting("Choose an account, harness and model in the execution policy");
+  const verificationWait = "Waiting for an authorized idle runner 1.1.0+ to align and re-verify the checkpoint; no model will run";
+  if (pinned && ["nixos", "mac"].includes(pinned.kind)) return choose([pinned]) || waiting(input.verificationOnly ? verificationWait : "The pinned local machine or selected account is unavailable; its destination will not change");
   if (!eligibleLocal.length) return waiting("Enroll an eligible local machine before enabling offline-only cloud fallback");
   const allLocalOffline = eligibleLocal.every(host => host.online === false && Boolean(host.presenceObservedAt && now - host.presenceObservedAt <= 120000) && now - host.lastSeenAt > 45000);
   if (!pinned) {
     const local = choose(eligibleLocal);
     if (local) return local;
   }
-  if (!allLocalOffline) return waiting("Waiting for the local machine or account; busy, paused, stale or unknown is not permission to use cloud");
+  if (!allLocalOffline) return waiting(input.verificationOnly ? verificationWait : "Waiting for the local machine or account; busy, paused, stale or unknown is not permission to use cloud");
   if (policy.platform === "apple") return waiting("Waiting for the Mac; cloud Linux cannot replace Apple tooling");
   if (!policy.cloudEnabled) return waiting("Local machine is offline; cloud fallback is disabled");
   const cloud = hosts.filter(host => host.kind === policy.cloudProvider && (!pinned || host.id === pinned.id));

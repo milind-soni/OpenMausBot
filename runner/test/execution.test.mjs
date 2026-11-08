@@ -8,6 +8,7 @@ import { ManagedProcess, command } from '../process.mjs';
 import { Workspace, temporaryEnvironment } from '../git.mjs';
 import { Redactor, RunError, sleep, baseEnvironment, readJson } from '../security.mjs';
 import { Runner } from '../worker.mjs';
+import { RunLedger, EventJournal } from '../protocol.mjs';
 
 async function fixture(t, name) {
   const root = await mkdtemp(join(tmpdir(), `origin-${name}-`));
@@ -84,6 +85,70 @@ test('worktrees isolate personal checkout, checkpoint and push the exact verifie
   await second.prepare(); assert.notEqual(second.path, workspace.path); assert.equal(await readFile(join(second.path, 'app.txt'), 'utf8'), 'base\n');
 });
 
+test('concurrent checkpoints align advanced main in a fresh worktree and re-verify without overwriting either checkout', async t => {
+  const root = await fixture(t, 'align'); const repo = await repository(root), runnerRoot = join(root, 'runner');
+  const run = { id: 'second', attempt: 1, repositoryUrl: repo.source, baseBranch: 'main', branch: 'origin/second', environmentVariables: {}, verificationCommands: ['test -f second.txt'], smokeCommand: 'test -s app.txt', timeoutSeconds: 30 };
+  const temporary = await temporaryEnvironment(runnerRoot, run); t.after(() => temporary.dispose());
+  const redactor = new Redactor([]);
+  const first = new Workspace(runnerRoot, { ...run, id: 'first', branch: 'origin/first' }, temporary, { allowLocal: true });
+  const second = new Workspace(runnerRoot, run, temporary, { allowLocal: true });
+  await first.prepare(); await second.prepare();
+  await writeFile(join(first.path, 'first.txt'), 'first task\n');
+  await writeFile(join(second.path, 'second.txt'), 'second task\n');
+  const firstCheckpoint = await first.checkpoint('first task', redactor);
+  const secondCheckpoint = await second.checkpoint('second task', redactor);
+  assert.deepEqual((await second.verify(redactor)).map(check => check.exitCode), [0, 0]);
+  await repo.git(['merge', '--ff-only', firstCheckpoint.sha]);
+  const resumed = new Workspace(runnerRoot, { ...run, attempt: 2, verificationOnly: true, resume: { checkpointSha: secondCheckpoint.sha }, verificationCommands: ['test -f first.txt && test -f second.txt'] }, temporary, { allowLocal: true });
+  await resumed.prepare(); await resumed.alignBase();
+  assert.equal(resumed.baseSha, firstCheckpoint.sha);
+  assert.notEqual(resumed.path, second.path);
+  assert.equal((await second.git(['rev-parse', 'HEAD'])).stdout.trim(), secondCheckpoint.sha);
+  assert.deepEqual((await resumed.verify(redactor)).map(check => check.exitCode), [0, 0]);
+  const aligned = await resumed.checkpoint('aligned and verified', redactor);
+  await resumed.git(['merge-base', '--is-ancestor', firstCheckpoint.sha, aligned.sha]);
+  await resumed.git(['merge-base', '--is-ancestor', secondCheckpoint.sha, aligned.sha]);
+  assert.equal((await repo.git(['rev-parse', run.branch])).stdout.trim(), aligned.sha);
+  assert.equal((await repo.git(['rev-parse', 'main'])).stdout.trim(), firstCheckpoint.sha);
+  assert.equal(await readFile(join(repo.source, 'app.txt'), 'utf8'), 'base\n');
+});
+
+test('a real main conflict aborts only automatic alignment and preserves the pushed checkpoint', async t => {
+  const root = await fixture(t, 'align-conflict'); const repo = await repository(root), runnerRoot = join(root, 'runner');
+  const run = { id: 'conflict', attempt: 1, repositoryUrl: repo.source, baseBranch: 'main', branch: 'origin/conflict', environmentVariables: {} };
+  const temporary = await temporaryEnvironment(runnerRoot, run); t.after(() => temporary.dispose());
+  const redactor = new Redactor([]), workspace = new Workspace(runnerRoot, run, temporary, { allowLocal: true });
+  await workspace.prepare(); await writeFile(join(workspace.path, 'app.txt'), 'task change\n');
+  const checkpoint = await workspace.checkpoint('task', redactor);
+  await writeFile(join(repo.source, 'app.txt'), 'other change\n'); await repo.git(['add', '.']); await repo.git(['commit', '-m', 'other task']);
+  const resumed = new Workspace(runnerRoot, { ...run, attempt: 2, resume: { checkpointSha: checkpoint.sha } }, temporary, { allowLocal: true });
+  await resumed.prepare();
+  await assert.rejects(resumed.alignBase(), error => error.result === 'needs_approval' && /conflict/.test(error.message));
+  assert.equal((await resumed.git(['rev-parse', 'HEAD'])).stdout.trim(), checkpoint.sha);
+  assert.equal((await resumed.git(['status', '--porcelain'])).stdout, '');
+  assert.equal((await repo.git(['rev-parse', run.branch])).stdout.trim(), checkpoint.sha);
+  assert.equal(await readFile(join(workspace.path, 'app.txt'), 'utf8'), 'task change\n');
+  // An interrupted/failed merge abort must not turn conflict markers into a checkpoint.
+  const conflict = await resumed.git(['merge', '--no-edit', resumed.baseSha], resumed.path, { allowFailure: true });
+  assert.equal(conflict.code, 1);
+  await assert.rejects(resumed.checkpoint('interrupted alignment', redactor), /Unresolved merge conflicts/);
+  assert.equal((await repo.git(['rev-parse', run.branch])).stdout.trim(), checkpoint.sha);
+});
+
+test('attempt ledger preserves native stop proof and refuses replacement until it is acknowledged', async t => {
+  const root = await fixture(t, 'attempt-ledger'), ledger = new RunLedger(root);
+  const first = await ledger.claim({ id: 'task', attempt: 1, leaseToken: 'first' });
+  const journal = new EventJournal(ledger, first, { request: async () => ({ accepted: true }) }, new Redactor([]));
+  await assert.rejects(ledger.claim({ id: 'task', attempt: 2, leaseToken: 'second' }), /stop receipt/);
+  await journal.event({ type: 'finished', result: 'succeeded', processStopped: true });
+  await assert.rejects(ledger.claim({ id: 'task', attempt: 2, leaseToken: 'second' }), /stop receipt/);
+  await journal.flush();
+  await ledger.claim({ id: 'task', attempt: 2, leaseToken: 'second' });
+  await assert.rejects(ledger.claim({ id: 'task', attempt: 2, leaseToken: 'second' }), /Duplicate/);
+  assert.equal((await readJson(ledger.path('task', 1))).finished.processStopped, true);
+  assert.equal((await ledger.records()).length, 2);
+});
+
 test('secret-containing git objects never push, even if harness committed them earlier', async t => {
   const root = await fixture(t, 'secret-object'); const repo = await repository(root);
   const run = { id: 'secret', repositoryUrl: repo.source, baseBranch: 'main', branch: 'origin/secret', environmentVariables: {} };
@@ -102,11 +167,41 @@ function testRun(overrides = {}) {
 function fakeWorkspace(root, run) {
   this.path = join(root, 'isolated'); this.run = run;
   this.prepare = () => mkdir(this.path, { recursive: true });
+  this.baseSha = 'b'.repeat(40);
+  this.alignBase = async () => this.baseSha;
   this.checkpoint = async () => ({ sha: 'a'.repeat(40), branch: run.branch, summary: 'checkpoint' });
   this.verify = async () => [{ kind: 'test', command: 'test', exitCode: 0 }, { kind: 'smoke', command: 'smoke', exitCode: 0 }];
   this.git = async args => ({ stdout: args[0] === 'status' ? '' : 'a'.repeat(40) });
 }
 const account = { binding: { id: 'local', harness: 'codex' }, report: { id: 'local', identityHash: 'account-fingerprint', provider: 'openai', authenticated: true, authKind: 'subscription', models: [{ id: 'exact' }], quota: { status: 'unknown', observedAt: 0, windows: [] } } };
+
+test('verification-only attempts rerun checks without account discovery or coding and retain both stop receipts', async t => {
+  const root = await fixture(t, 'verify-only'), events = [];
+  let models = 0, discovery = 0, verifications = 0;
+  function CountingWorkspace(root, run) {
+    fakeWorkspace.call(this, root, run);
+    const verify = this.verify; this.verify = async (...args) => { verifications++; return verify(...args); };
+  }
+  const runner = new Runner({ dataDirectory: root, hostToken: 'private', hostId: 'host' }, {
+    client: { request: async (op, input) => {
+      if (op === 'control') return { leaseValid: true, messages: [], approvals: [] };
+      if (op === 'event') { events.push(input.event); return { accepted: true }; }
+      return {};
+    } },
+    discover: async () => { discovery++; return [account]; }, Workspace: CountingWorkspace,
+    startHarness: async () => { models++; return { done: Promise.resolve({ summary: 'Implemented' }), stop: async () => {}, message: async () => {} }; },
+  });
+  runner.accounts = [account];
+  await runner.execute(testRun({ attempt: 1 }));
+  await runner.execute(testRun({ attempt: 2, leaseToken: 'next-lease', verificationOnly: true, resume: { checkpointSha: 'a'.repeat(40), summary: 'Implemented' } }));
+  assert.equal(models, 1); assert.equal(discovery, 1); assert.equal(verifications, 2);
+  const finished = events.filter(event => event.type === 'finished');
+  assert.equal(finished.length, 2); assert.equal(finished[1].result, 'succeeded');
+  assert.equal(finished[1].activityStarted, false);
+  assert.equal(finished[1].baseSha, 'b'.repeat(40));
+  assert.equal(finished.every(event => event.processStopped), true);
+  assert.equal((await runner.ledger.records()).every(record => record.state === 'acknowledged'), true);
+});
 
 test('lease rejection stops actual child before finished and never re-executes duplicate run', async t => {
   const root = await fixture(t, 'lease'); let child; let models = 0; const events = [];
@@ -267,4 +362,102 @@ test('unproven auxiliary-process stop fences the daemon without another claim or
     assert.equal(claims, 1, phase); assert.equal(events.some(event => event.type === 'finished'), false, phase);
     assert.deepEqual(await readdir(join(root, 'temporary')), []);
   }
+});
+
+test('opted-in run console follows real native output and cancellation still waits for native stop proof', { timeout: 15000 }, async t => {
+  const root = await fixture(t, 'console-native'), displayed = [], events = [];
+  let input, child, closed = false;
+  const runner = new Runner({ dataDirectory: root, hostToken: 'private', hostId: 'host', herdr: { enabled: true } }, {
+    client: { request: async (op, value) => {
+      if (op === 'control') return { leaseValid: true };
+      if (op === 'event') {
+        if (value.event.type === 'finished') assert.equal(await processAlive(child.pid), false);
+        events.push(value.event);
+      }
+      return { accepted: true };
+    } },
+    discover: async () => [account], Workspace: fakeWorkspace,
+    startConsole: async options => {
+      input = options.input;
+      return { metadata: { type: 'terminal', backend: 'herdr', coreId: 'fixture', terminalId: 't1', name: 'origin-test', session: 'fixture' }, publish: event => displayed.push(event), close: async () => { closed = true; } };
+    },
+    startHarness: async context => {
+      child = new ManagedProcess(process.execPath, ['-e', 'process.stdin.setEncoding("utf8"); process.stdin.on("data", text => console.log("native follow-up: " + text.trim())); setInterval(()=>{},1000)'], { signal: context.signal });
+      child.child.stdout.on('data', text => context.output('stdout', text.toString()));
+      return { stop: () => child.stop(20), message: text => child.send(`${text}\n`), done: child.exit.then(() => { throw context.signal.reason ?? new Error('unexpected exit'); }) };
+    },
+  });
+  runner.accounts = [account];
+  const execution = runner.execute(testRun());
+  while (!runner.active?.handle) await sleep(1);
+  await input({ id: 'followup', action: 'followup', text: 'check exact task' });
+  while (!displayed.some(event => event.type === 'log' && event.text.includes('native follow-up'))) await sleep(1);
+  await input({ id: 'cancel', action: 'cancel' });
+  await execution;
+  assert.equal(closed, true);
+  assert.equal(events.find(event => event.type === 'finished').result, 'cancelled');
+  assert.equal(events.find(event => event.type === 'finished').processStopped, true);
+  assert.equal(displayed.filter(event => event.type === 'terminal').length, 1);
+  assert.equal((await readJson(runner.ledger.path('run'))).consoleInputs.length, 2);
+});
+
+test('verification-only console displays check progress without model discovery or a harness UI', async t => {
+  const root = await fixture(t, 'console-verification'), displayed = [];
+  let input, closed = false;
+  function VerificationWorkspace(root, run, temporary, options) {
+    fakeWorkspace.call(this, root, run);
+    const verify = this.verify;
+    this.verify = async () => {
+      await assert.rejects(input({ id: 'no-model', action: 'followup', text: 'Start coding' }), /not accepting/);
+      options.onOutput('stdout', 'actual verification progress\n');
+      return verify();
+    };
+  }
+  const runner = new Runner({ dataDirectory: root, hostToken: 'private', hostId: 'host', herdr: { enabled: true } }, {
+    client: { request: async op => op === 'control' ? { leaseValid: true } : { accepted: true } },
+    Workspace: VerificationWorkspace,
+    discover: async () => { throw Error('Verification must not discover a model account'); },
+    startHarness: async () => { throw Error('Verification must not start a model'); },
+    startConsole: async options => {
+      assert.equal(options.run.verificationOnly, true); input = options.input;
+      return { metadata: { type: 'terminal', backend: 'herdr', coreId: 'fixture', terminalId: 't1', name: 'origin-verify', session: 'fixture' }, publish: event => displayed.push(event), close: async () => { closed = true; } };
+    },
+  });
+  await runner.execute(testRun({ verificationOnly: true, resume: { checkpointSha: 'a'.repeat(40) } }));
+  assert.equal(closed, true);
+  assert.ok(displayed.some(event => event.type === 'status' && event.status === 'verifying'));
+  assert.ok(displayed.some(event => event.type === 'log' && event.text.includes('actual verification progress')));
+  const finished = displayed.find(event => event.type === 'finished');
+  assert.equal(finished.result, 'succeeded'); assert.equal(finished.activityStarted, false);
+});
+
+test('disabled worker does not even invoke injected console startup during execution', async t => {
+  const root = await fixture(t, 'console-disabled');
+  let opened = false;
+  const runner = new Runner({ dataDirectory: root, hostToken: 'private', hostId: 'host' }, {
+    client: { request: async op => op === 'control' ? { leaseValid: true } : { accepted: true } },
+    Workspace: fakeWorkspace,
+    startConsole: async () => { opened = true; throw Error('Disabled console touched native Herdr'); },
+  });
+  await runner.execute(testRun({ verificationOnly: true, resume: { checkpointSha: 'a'.repeat(40) } }));
+  assert.equal(opened, false);
+});
+
+test('console follow-ups cannot overtake the queued Origin messages while a native harness becomes ready', { timeout: 10000 }, async t => {
+  const root = await fixture(t, 'console-order'), messages = [];
+  let releaseFirst, finish;
+  const first = new Promise(resolve => { releaseFirst = resolve; });
+  const done = new Promise(resolve => { finish = resolve; });
+  const runner = new Runner({ dataDirectory: root, hostToken: 'private', hostId: 'host' }, {
+    client: { request: async op => op === 'control' ? { leaseValid: true, messages: [{ id: 'one', text: 'first' }, { id: 'two', text: 'second' }] } : { accepted: true } },
+    discover: async () => [account], Workspace: fakeWorkspace,
+    startHarness: async () => ({ done, stop: async () => {}, message: async text => { messages.push(text); if (text === 'first') await first; } }),
+  });
+  runner.accounts = [account];
+  const execution = runner.execute(testRun());
+  while (messages.length < 1) await sleep(1);
+  const input = runner.consoleInput(runner.active, { id: 'third', action: 'followup', text: 'third' });
+  releaseFirst(); await input;
+  assert.deepEqual(messages, ['first', 'second', 'third']);
+  finish({ summary: 'Completed in order' }); await execution;
 });

@@ -10,9 +10,11 @@ import { Runner } from './worker.mjs';
 import { install, update, rollback, requireIdle, withMaintenanceLock, pinRunnerUpdates } from './service.mjs';
 import { maintainTools, rollbackManagedTool, initializeManagedAccount, managedInstallation, TOOL_PACKAGES } from './tool-updates.mjs';
 import { automaticUpdatePolicy, runnerUpdatePlan } from './maintenance.mjs';
+import { HerdrConnections } from './herdr-connections.mjs';
 
 const help = `Origin runner ${VERSION} (Node24; Linux/macOS; capacity one)\n\nnode runner/cli.mjs <enroll|run|status|pause|resume|stop|install|update> [options]\n\n--config PATH          Private configuration (default ~/.config/origin-runner/config.json)\nEnrollment: --controller HTTPS_URL --name NAME --kind nixos|mac|boxd|boat\n            --tailnet-name NAME --token-file PATH (otherwise token from stdin)\nStatus:     --refresh (native account/model discovery; never sends a model prompt)\nUpdate:     --version X.Y.Z --approve, or --rollback --approve\nInstall writes user service assets only; prints explicit activation command.\nPause stops new claims; stop cancels work and leaves a durable stopped receipt.\nAccounts are bound locally via config.accounts: id,harness,executable,directory,\nprofile,provider,identity:{email,orgId},models:[{id,efforts}]. Never put raw model\nOAuth tokens in config. Model/account selections must be exact.\n`;
 const toolHelp = '\nNative tool updates: update --tools --check [--tool codex|claude-code|omp|pi]\nInitialize: update --tools --tool HARNESS --initialize --account LOCAL_ID --approve\nCreates only a private dataDirectory/tools prefix; selects that executable for the\nchosen local account without changing its auth directory/profile or copying OAuth.\nApply: update --tools --approve [--tool HARNESS]\nRollback: update --tools --tool HARNESS --rollback --approve\nAutomatic: update --automatic --enable --tool codex,pi [--runner] --approve\n           [--interval-hours 24] (daily default; choose tools and/or --runner)\nDisable: update --automatic --disable --approve\nRunner check: update --check (actual latest metadata; never installs)\nSigned runner updates require owner-configured updates.baseUrl/latest.json containing\n{manifest,signature} and updates.publicKeyFile (trusted local release key).\nOnly explicitly selected, initialized Origin prefixes and signed compatible stable\nrunner releases can auto-apply, idle only. Major (0.x minor) changes require local\nexplicit approval. Failed/interrupted versions are quarantined, not retried.\nPersonal/Nix/Homebrew/global installs receive manual ownership actions only.\nStop the service before local initialization, policy changes, apply or rollback.\nRestart through the existing supervisor; no service or remote installation is started.\n';
+const herdrHelp = '\nHerdr: herdr enable (Origin run consoles only), herdr enable --cloud (also renewable cloud connections)\n       herdr disable, herdr status. Disabled by default. Stop the worker before changing config;\n       restart the existing supervisor explicitly. Native desktop provider login is required.\n       Personal Herdr terminals/profiles and native authentication are never changed.\n';
 async function configAt(path) {
   const info = await stat(path);
   if (!info.isFile() || (info.mode & 0o077) !== 0 || (process.getuid && info.uid !== process.getuid())) throw new Error('Runner configuration must be an owner-only regular file (chmod 600)');
@@ -49,10 +51,10 @@ async function stdinToken() {
 }
 async function main() {
   if (Number(process.versions.node.split('.')[0]) !== 24) throw new Error('Origin runner requires Node.js 24');
-  const { values, positionals } = parseArgs({ allowPositionals: true, options: { config: { type: 'string' }, controller: { type: 'string' }, url: { type: 'string' }, name: { type: 'string' }, kind: { type: 'string' }, 'tailnet-name': { type: 'string' }, 'token-file': { type: 'string' }, 'files-only': { type: 'boolean' }, refresh: { type: 'boolean' }, approve: { type: 'boolean' }, rollback: { type: 'boolean' }, version: { type: 'string' }, tools: { type: 'boolean' }, tool: { type: 'string' }, check: { type: 'boolean' }, initialize: { type: 'boolean' }, account: { type: 'string' }, automatic: { type: 'boolean' }, enable: { type: 'boolean' }, disable: { type: 'boolean' }, runner: { type: 'boolean' }, 'interval-hours': { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
+  const { values, positionals } = parseArgs({ allowPositionals: true, options: { config: { type: 'string' }, controller: { type: 'string' }, url: { type: 'string' }, name: { type: 'string' }, kind: { type: 'string' }, 'tailnet-name': { type: 'string' }, 'token-file': { type: 'string' }, 'files-only': { type: 'boolean' }, refresh: { type: 'boolean' }, approve: { type: 'boolean' }, rollback: { type: 'boolean' }, version: { type: 'string' }, tools: { type: 'boolean' }, tool: { type: 'string' }, check: { type: 'boolean' }, initialize: { type: 'boolean' }, account: { type: 'string' }, automatic: { type: 'boolean' }, enable: { type: 'boolean' }, disable: { type: 'boolean' }, runner: { type: 'boolean' }, cloud: { type: 'boolean' }, 'interval-hours': { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
   const command = positionals[0];
-  if (values.help || !command) { console.log(help + toolHelp + '\nInstall: --files-only writes versioned code and an alias, without a user service.\n'); return; }
-  if (positionals.length !== 1) throw new Error('Unexpected positional arguments');
+  if (values.help || !command) { console.log(help + toolHelp + herdrHelp + '\nInstall: --files-only writes versioned code and an alias, without a user service.\n'); return; }
+  if (positionals.length !== (command === 'herdr' ? 2 : 1)) throw new Error('Unexpected positional arguments');
   const configPath = resolve(values.config ?? defaultConfig());
   if (command === 'enroll') {
     if (values.url && values.controller && values.url !== values.controller) throw new Error('Choose one controller URL');
@@ -78,6 +80,22 @@ async function main() {
     console.log(JSON.stringify(await install(config, configPath, { filesOnly: values['files-only'] }), null, 2)); return;
   }
   const config = await configAt(configPath);
+  if (command === 'herdr') {
+    const action = positionals[1];
+    if (!['enable', 'disable', 'status'].includes(action) || values.cloud && action !== 'enable') throw new Error('Use herdr enable [--cloud], herdr disable or herdr status');
+    if (action !== 'status') {
+      await requireIdle(config);
+      await withMaintenanceLock(config, async () => {
+        const current = await configAt(configPath);
+        if (current.dataDirectory !== config.dataDirectory) throw new Error('Runner data directory changed; retry with the current configuration');
+        current.herdr = { ...current.herdr, enabled: action === 'enable', cloudConnections: action === 'enable' && values.cloud === true };
+        await atomicJson(configPath, { ...await readJson(configPath), herdr: current.herdr });
+        config.herdr = current.herdr;
+        if (action === 'disable' || !values.cloud) await new HerdrConnections(config).stop();
+      });
+    }
+    console.log(JSON.stringify({ herdr: new HerdrConnections(config).report(), note: 'Local configuration only. Start the existing supervisor explicitly; personal terminals and provider authentication are unchanged.' }, null, 2)); return;
+  }
   if (command === 'run') { await new Runner(config).run(); return; }
   if (command === 'status') {
     const status = await readJson(join(config.dataDirectory, 'status.json'), { state: 'not_started' });

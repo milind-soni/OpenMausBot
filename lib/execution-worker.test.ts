@@ -13,12 +13,14 @@ import { executionWorkerRequest } from "./execution-worker";
 import { atomicExecution, cloudAllocations, executionAccounts, executionDb, executionDeploymentRuns, executionEvents, executionSetting, readExecutionHost, readExecutionRun, saveExecutionHost, saveExecutionRun, saveCloudAllocation, setExecutionSetting, type ExecutionPrincipal } from "./execution-store";
 import { integrationBridge } from "./integration-bridge";
 import { prepareRunRepository } from "./github-execution";
+import { cloudHerdrConnectionPlan, type CloudHerdrConnectionPlan } from "./execution-cloud-runtime";
 import type { ExecutionAccountReport, ExecutionRun, ExecutionUpdate, ExecutionVerification, ExecutionWorkerRun } from "./execution-types";
 
 // Only cross-service seams are replaced; authorization runs against the real Convex functions.
 vi.mock("./integration-bridge", () => ({ integrationBridge: vi.fn(), originUrl: () => "http://127.0.0.1:1" }));
 vi.mock("./github-execution", () => ({ prepareRunRepository: vi.fn() }));
 vi.mock("./execution-cloud", () => ({ cloudAccountUsage: vi.fn(() => { throw new Error("Unexpected cloud request"); }) }));
+vi.mock("./execution-cloud-runtime", () => ({ cloudHerdrConnectionPlan: vi.fn() }));
 const modules = import.meta.glob(["../convex/**/*.ts", "!../convex/**/*.test.ts"]);
 const now = Date.UTC(2026, 10, 8, 12);
 const sha = "a".repeat(40);
@@ -35,6 +37,7 @@ beforeEach(() => {
   for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'execution_%'").all() as { name: string }[]) db.exec(`DELETE FROM "${name}"`);
   vi.mocked(integrationBridge).mockReset();
   vi.mocked(prepareRunRepository).mockReset();
+  vi.mocked(cloudHerdrConnectionPlan).mockReset();
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 afterAll(() => { executionDb().close(); rmSync(directory, { recursive: true, force: true }); vi.unstubAllEnvs(); });
@@ -122,6 +125,88 @@ async function cloudFixture(enabled: boolean) {
   const queued = await f.start(f.principal, { cloudEnabled: true });
   return { ...f, queued };
 }
+
+async function desktopFixture() {
+  const f = await cloudFixture(true), run = (await f.claim())!;
+  const desktop = await f.enroll("Opted-in desktop");
+  const plan: CloudHerdrConnectionPlan = { schemaVersion: 1, allocationId: "allocation", hostId: f.host.hostId, provider: "boxd", desktop: "nixos", machineId: "private-machine", machineName: "private-machine", name: "origin-boxd-fixture", issuedAt: now, expiresAt: now + 60000, core: { version: "0.1.18", session: "origin-cloud", user: "origin-runner" }, remotePrefix: "fixture" };
+  vi.mocked(cloudHerdrConnectionPlan).mockImplementation(async (_id, _provider, _desktop, authorize) => { await authorize(); await authorize(); return plan; });
+  const beat = (patch: Record<string, unknown> = {}) => worker<{ herdrPlans: CloudHerdrConnectionPlan[] }>(desktop, { op: "heartbeat", version: "1.1.0", platform: "linux", capabilities: ["codex"], capacity: 1, paused: false, accounts: [], activeRunIds: [], herdr: { enabled: true, cloudConnections: true, status: "ready", version: "0.1.18" }, ...patch });
+  return { ...f, run, desktop, plan, beat };
+}
+
+test("explicit desktop heartbeats renew only active owned allocations using current project authorization", async () => {
+  const f = await desktopFixture();
+  const before = cloudAllocations(f.teamId)[0]!.lastActiveAt;
+  expect((await f.beat()).herdrPlans).toEqual([f.plan]);
+  expect((await f.beat()).herdrPlans).toEqual([f.plan]);
+  expect(vi.mocked(integrationBridge).mock.calls).toContainEqual(["executionContext", { userId: f.owner.id, teamId: f.teamId, projectId: f.projectId }]);
+  expect(cloudAllocations(f.teamId)[0]!.lastActiveAt).toBe(before);
+  expect(readExecutionHost(f.desktop.hostId)?.herdr).toEqual({ enabled: true, cloudConnections: true, status: "ready", version: "0.1.18", updatedAt: now });
+  expect(JSON.stringify(readExecutionHost(f.desktop.hostId)?.herdr)).not.toContain("private-machine");
+});
+
+test.each(["absent", "disabled", "console-only", "old-worker", "foreign-allocation", "outside-host-scope", "stale-cloud", "revoked-cloud", "stopped-run", "expired-run", "foreign-run"] as const)("desktop grant is absent for %s", async reason => {
+  const f = await desktopFixture(), patch: Record<string, unknown> = {};
+  if (reason === "absent") patch.herdr = undefined;
+  if (reason === "disabled") patch.herdr = { enabled: false, cloudConnections: true };
+  if (reason === "console-only") patch.herdr = { enabled: true, cloudConnections: false };
+  if (reason === "old-worker") patch.version = "1.0.0";
+  if (reason === "foreign-allocation") saveCloudAllocation({ ...cloudAllocations(f.teamId)[0]!, ownerId: "someone-else" });
+  if (reason === "outside-host-scope") saveExecutionHost({ ...readExecutionHost(f.desktop.hostId)!, projectIds: [] });
+  if (reason === "stale-cloud") saveExecutionHost({ ...readExecutionHost(f.host.hostId)!, lastSeenAt: now - 45001 });
+  if (reason === "revoked-cloud") saveExecutionHost({ ...readExecutionHost(f.host.hostId)!, revoked: true });
+  const record = readExecutionRun(f.run.id)!;
+  if (reason === "stopped-run") record.run.processStopped = true;
+  if (reason === "expired-run") record.leaseExpiresAt = now;
+  if (reason === "foreign-run") record.run.requestedBy = "someone-else";
+  saveExecutionRun(record);
+  expect((await f.beat(patch)).herdrPlans).toEqual([]);
+});
+
+test("revoked desktop authentication and workspace membership cannot renew grants", async () => {
+  const f = await desktopFixture();
+  saveExecutionHost({ ...readExecutionHost(f.desktop.hostId)!, revoked: true });
+  await expect(f.beat()).rejects.toThrow(/authentication/i);
+  saveExecutionHost({ ...readExecutionHost(f.desktop.hostId)!, revoked: false });
+  await f.t.run(async ctx => {
+    const member = await ctx.db.query("teamMembers").withIndex("by_user", q => q.eq("userId", f.owner.id)).first();
+    await ctx.db.delete(member!._id);
+  });
+  await expect(f.beat()).rejects.toThrow(/revoked/i);
+  expect(cloudHerdrConnectionPlan).not.toHaveBeenCalled();
+});
+
+test("project revalidation and mid-flight desktop revocation fail closed without leaking allocation errors", async () => {
+  const f = await desktopFixture();
+  const bridge = vi.mocked(integrationBridge).getMockImplementation()!;
+  vi.mocked(integrationBridge).mockImplementation(async (operation, args) => {
+    if (args && typeof args === "object" && "projectId" in args) throw new Error("private-provider-secret");
+    return bridge(operation, args);
+  });
+  expect(await f.beat()).toMatchObject({ herdrPlans: [] });
+  vi.mocked(integrationBridge).mockImplementation(async (operation, args) => {
+    const result = await bridge(operation, args);
+    if (args && typeof args === "object" && "projectId" in args) saveExecutionHost({ ...readExecutionHost(f.desktop.hostId)!, revoked: true });
+    return result;
+  });
+  expect((await f.beat()).herdrPlans).toEqual([]);
+});
+
+test("terminal metadata is exact, bounded, display-only and bound to the current attempt lease", async () => {
+  const f = await fixture(); await f.start(); const run = (await f.claim())!;
+  const terminal = { type: "terminal", backend: "herdr", coreId: "core", terminalId: "terminal", name: "Origin run console", session: "origin-cloud" };
+  const send = f.events(run);
+  await send(terminal);
+  expect(readExecutionRun(run.id)?.run.herdr).toEqual({ backend: "herdr", coreId: "core", terminalId: "terminal", name: "Origin run console", session: "origin-cloud", updatedAt: now });
+  expect(readExecutionRun(run.id)?.run.status).toBe("preparing");
+  await expect(send({ ...terminal, shell: "sh" })).rejects.toThrow();
+  await expect(send({ ...terminal, coreId: "x".repeat(129) })).rejects.toThrow();
+  await expect(send({ ...terminal, session: "unsafe\nsession" })).rejects.toThrow();
+  const record = readExecutionRun(run.id)!; record.leaseExpiresAt = now; saveExecutionRun(record);
+  await expect(send(terminal)).rejects.toThrow(/lease expired/i);
+  expect(readExecutionRun(run.id)?.run.herdr?.coreId).toBe("core");
+});
 
 test("claim selects the authorized subscription profile rather than an earlier paid sibling", async () => {
   const f = await fixture();
@@ -268,7 +353,7 @@ test("a failed checkpoint from another branch cannot change the resumable state"
   expect(readExecutionRun(run.id)?.sequence).toBe(0);
 });
 
-test.each(["missing", "substituted", "failed", "wrong-kind", "extra", "no-head", "exact"])("success receipt %s cannot bypass configured merge gates", async variant => {
+test.each(["missing", "substituted", "failed", "wrong-kind", "extra", "no-head", "no-base", "different-checkpoint", "exact"])("success receipt %s cannot bypass configured merge gates", async variant => {
   const f = await fixture(); await f.start(); const run = (await f.claim())!;
   let verification = f.verification;
   if (variant === "missing") verification = verification.slice(0, 2);
@@ -276,11 +361,65 @@ test.each(["missing", "substituted", "failed", "wrong-kind", "extra", "no-head",
   if (variant === "failed") verification = verification.map((check, i) => i === 0 ? { ...check, exitCode: 1 } : check);
   if (variant === "wrong-kind") verification = verification.map(check => ({ ...check, kind: "test" }));
   if (variant === "extra") verification = [...verification, verification[0]!];
-  await f.events(run)({ type: "finished", result: "succeeded", summary: "Done", processStopped: true, ...(variant === "no-head" ? {} : { headSha: sha }), verification });
+  await f.events(run)({ type: "finished", result: "succeeded", summary: "Done", processStopped: true, ...(variant === "no-head" ? {} : { headSha: sha }), ...(variant === "no-base" ? {} : { baseSha: "b".repeat(40) }), ...(variant === "different-checkpoint" ? { checkpointSha: "d".repeat(40) } : {}), verification });
   const result = executionRunDetail(f.principal, run.id).run;
   expect(result.status).toBe(variant === "exact" ? "awaiting_checks" : "failed");
   expect(result.merge).toBeUndefined();
   expect(result.deployment.status).toBe("unknown");
+});
+
+test("ordinary human assignment does not implicitly launch coding; the explicit startRun action does", async () => {
+  const f = await fixture();
+  expect(await f.claim()).toBeNull();
+  await f.start();
+  expect((await f.claim())?.attempt).toBe(1);
+});
+
+async function verificationRetryFixture() {
+  const f = await fixture(); await f.start(); const original = (await f.claim())!;
+  await f.events(original)({ type: "finished", result: "succeeded", summary: "Implemented once", processStopped: true, headSha: sha, baseSha: "b".repeat(40), verification: f.verification });
+  const record = readExecutionRun(original.id)!;
+  record.run.status = "queued"; record.run.verificationOnly = true;
+  saveExecutionRun(record);
+  return { ...f, original };
+}
+
+test("automatic checkpoint re-verification requires a compatible runner but no LLM account or authentication", async () => {
+  const f = await verificationRetryFixture();
+  expect(await f.claim()).toBeNull(); // 1.0.0 would treat verification-only as coding.
+  await f.heartbeat(f.host, []);
+  saveExecutionHost({ ...readExecutionHost(f.host.hostId)!, version: "1.1.0", capabilities: [], accountIds: [] });
+  const retry = (await f.claim())!;
+  expect(retry).toMatchObject({ id: f.original.id, attempt: 2, verificationOnly: true, resume: { checkpointSha: sha } });
+  expect(retry.leaseToken).not.toBe(f.original.leaseToken);
+  expect(readExecutionRun(retry.id)?.run).toMatchObject({ processStopped: false, checkpoint: { sha } });
+  expect(readExecutionRun(retry.id)?.run.verifiedBaseSha).toBeUndefined();
+  await expect(f.events(f.original)({ type: "finished", result: "succeeded", summary: "Old attempt", processStopped: true })).rejects.toThrow(/lease/i);
+  const newHead = "c".repeat(40), newBase = "d".repeat(40);
+  await f.events(retry)({ type: "finished", result: "succeeded", summary: "Re-verified", activityStarted: false, processStopped: true, headSha: newHead, baseSha: newBase, checkpointSha: newHead, verification: f.verification });
+  expect(readExecutionRun(retry.id)?.run).toMatchObject({ status: "awaiting_checks", processStopped: true, checkpoint: { sha: newHead }, verifiedBaseSha: newBase });
+});
+
+test.each(["quota", "unexpected model activity", "failed check"])("verification-only %s never triggers a coding fallback", async failure => {
+  const f = await verificationRetryFixture();
+  saveExecutionHost({ ...readExecutionHost(f.host.hostId)!, version: "1.1.0" });
+  const retry = (await f.claim())!;
+  await f.events(retry)({ type: "finished", result: failure === "quota" ? "quota" : "succeeded", summary: "Verification blocked",
+    activityStarted: failure === "unexpected model activity", processStopped: true, headSha: sha, baseSha: "b".repeat(40), checkpointSha: sha,
+    verification: failure === "failed check" ? f.verification.map(check => ({ ...check, exitCode: 1 })) : f.verification });
+  expect(readExecutionRun(retry.id)?.run).toMatchObject({ status: failure === "unexpected model activity" ? "blocked" : "failed", processStopped: true, checkpoint: { sha } });
+  expect(await f.claim()).toBeNull();
+});
+
+test("only an explicit requester start clears verification-only mode on a blocked stopped run", async () => {
+  const f = await verificationRetryFixture(), record = readExecutionRun(f.original.id)!;
+  record.run.status = "blocked"; saveExecutionRun(record);
+  const resumed = await f.start();
+  expect(resumed.id).toBe(f.original.id);
+  expect(resumed.status).toBe("queued");
+  expect(resumed.verificationOnly).toBeUndefined();
+  expect(resumed.verifiedBaseSha).toBeUndefined();
+  expect(resumed.checkpoint?.sha).toBe(sha);
 });
 
 test("environment values reach only explicitly authorized hosts and never browser snapshots or event text", async () => {

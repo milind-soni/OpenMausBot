@@ -89,12 +89,15 @@ function RunDetails({ initial, scope, canWrite, busy, act }: { initial: Executio
     {error && <p className="notice danger" role="alert">{error}</p>}
     <p className="execution-help">Run {run.id} · attempt {run.attempt} · {run.selection ? `${run.selection.harness} / ${run.selection.model}${run.selection.effort ? ` / ${run.selection.effort}` : ""} · account ${run.selection.accountId}` : "Selection pending"}</p>
     <p className="execution-help">Machine: {run.hostId ?? "Not assigned"} · branch {run.branch || "Pending"} → {run.baseBranch} · environment {run.environment || "No injected secrets"}</p>
+    {run.herdr && <section className="execution-receipt"><h4>Herdr · Origin task console</h4><p className="execution-help">Last reported console: <code>{run.herdr.name}</code> on the assigned machine · terminal <code>{run.herdr.terminalId}</code> · core <code>{run.herdr.coreId}</code> · session <code>{run.herdr.session}</code> · {executionTime(run.herdr.updatedAt)}. It may have closed since this report.</p><p className="execution-help">Shows task progress and accepts follow-ups or <code>/cancel</code>; this is not the coding CLI’s native interactive screen. Closing the console detaches it without stopping the task. Tool approvals remain in Origin; Hermes cannot access personal terminals.</p></section>}
     {run.reason && <p className="notice" role="status">{run.reason}</p>}{run.summary && <p className="execution-summary">{run.summary}</p>}
     <dl className="execution-statistics"><div><dt>Input tokens</dt><dd>{run.usage.inputTokens.toLocaleString()}</dd></div><div><dt>Output tokens</dt><dd>{run.usage.outputTokens.toLocaleString()}</dd></div><div><dt>Estimated API cost</dt><dd>{run.usage.estimatedApiUsd === null ? "Not reported" : `$${run.usage.estimatedApiUsd.toFixed(4)}`}</dd></div></dl>
     <p className="execution-help">Token counts are task telemetry, not subscription plan capacity. API estimates are not an invoice or a hard spend cap.</p>
     {run.checkpoint && <p className="execution-help">Checkpoint: <code>{run.checkpoint.sha}</code>{run.checkpoint.summary ? ` · ${run.checkpoint.summary}` : ""}</p>}
     <section className="execution-receipt"><h4>Verification & GitHub merge</h4>
       {!run.verification.length && <p className="execution-help">No verification result reported.</p>}
+      {run.verificationOnly && <p className="execution-help">Revalidating this worktree against updated {run.baseBranch}; no additional model turn is requested.</p>}
+      {run.verifiedBaseSha && <p className="execution-help">Verified base: <code>{run.verifiedBaseSha}</code></p>}
       {run.verification.map((check, index) => <div key={index}><code>{check.command}</code><span className="execution-badge">{check.kind} · exit {check.exitCode}</span>{check.summary && <p className="execution-help">{check.summary}</p>}</div>)}
       <p className="execution-help">Merge: {run.merge ? run.merge.state.replaceAll("_", " ") : "Not reported"}{run.merge?.reason ? ` · ${run.merge.reason}` : ""}</p>
       {run.merge?.url && <a href={run.merge.url} target="_blank" rel="noreferrer">View pull request{run.merge.number ? ` #${run.merge.number}` : ""}</a>}

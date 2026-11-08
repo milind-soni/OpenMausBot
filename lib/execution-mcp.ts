@@ -16,7 +16,7 @@ async function answer(action: () => Promise<unknown>) {
 
 export function registerExecutionTools(server: McpServer, token: string, canWrite: boolean) {
   server.registerTool("list_execution_hosts", {
-    title: "Execution machines", description: "Authorized machines, live worker status and capabilities. Unknown, busy or paused does not mean offline. NixOS is preferred; Macs are reserved for Apple work unless explicitly selected.",
+    title: "Execution machines", description: "Authorized machines, worker capabilities and reported Herdr integration status. Unknown, busy or paused does not mean offline. NixOS is preferred; Macs are reserved for Apple work unless explicitly selected. This does not enumerate or grant access to personal terminals.",
     inputSchema: z.object({ projectId: executionId.optional() }), annotations: read,
   }, a => answer(async () => executionSnapshot(await mcpExecutionPrincipal(token, a.projectId)).hosts));
   server.registerTool("get_execution_usage", {
@@ -33,7 +33,7 @@ export function registerExecutionTools(server: McpServer, token: string, canWrit
     inputSchema: z.object(scope), annotations: read,
   }, a => answer(async () => executionSnapshot(await mcpExecutionPrincipal(token, a.projectId, a.taskId)).runs));
   server.registerTool("get_execution_run", {
-    title: "Execution run details", description: "Read status, redacted output, checkpoints, approvals and merge evidence. Supply the previous nextCursor to read subsequent events.",
+    title: "Execution run details", description: "Read status, redacted output, checkpoints, approvals, merge evidence and the last reported Herdr console identity for this authorized Origin run. Console metadata is not access authority or proof it is still open. Supply the previous nextCursor to read subsequent events.",
     inputSchema: z.object({ runId: executionId, cursor: z.number().int().min(0).optional() }), annotations: read,
   }, a => answer(async () => executionRunDetail(await mcpExecutionPrincipal(token), a.runId, a.cursor)));
   if (!canWrite) return;
@@ -42,7 +42,7 @@ export function registerExecutionTools(server: McpServer, token: string, canWrit
     inputSchema: z.object({ projectId: executionId, taskId: executionId, overrides: agentPolicy.optional() }), annotations: change,
   }, a => answer(async () => executionAction(await mcpExecutionPrincipal(token, a.projectId, a.taskId, true), { action: "startRun", overrides: a.overrides }, "mcp")));
   server.registerTool("cancel_execution_run", {
-    title: "Cancel execution", description: "Request cancellation. Cancellation is not process-stop proof; no replacement starts until the old process is known stopped.",
+    title: "Cancel execution", description: "Cancel only this authorized Origin coding run, including its managed process. Never targets personal Herdr terminals. Cancellation is not process-stop proof; no replacement starts until the old process is known stopped.",
     inputSchema: z.object({ runId: executionId }), annotations: { ...change, idempotentHint: true },
   }, a => answer(async () => {
     const visible = requireExecutionRun(await mcpExecutionPrincipal(token), a.runId);
@@ -50,7 +50,7 @@ export function registerExecutionTools(server: McpServer, token: string, canWrit
     return executionAction(principal, { action: "cancelRun", runId: a.runId }, "mcp");
   }));
   server.registerTool("message_execution_run", {
-    title: "Message execution", description: "Send a follow-up to an active coding run. This is not tool approval; pending approvals require the owner's Origin interface.",
+    title: "Message execution", description: "Send a follow-up to this authorized active Origin coding run, whether or not its Herdr console is open. Does not send arbitrary terminal keystrokes or access personal sessions. This is not tool approval; pending approvals require the owner's Origin interface.",
     inputSchema: z.object({ runId: executionId, message: z.string().min(1).max(12000), messageId: z.string().min(1).max(120).optional().describe("Stable idempotency key for this follow-up") }), annotations: change,
   }, a => answer(async () => {
     const visible = requireExecutionRun(await mcpExecutionPrincipal(token), a.runId);

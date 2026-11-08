@@ -113,6 +113,11 @@ export function createBoxd(input: CloudCreateInput) {
 export function getBoxd(input: CloudMachineInput) {
   return withBoxd(input.apiKey, "get", input.id, async client => parseBoxdMachine(await client.machines.get(input.id)));
 }
+// Desktop access is opt-in and bounded by the Origin allocation journal.
+// Disabling SSH also closes existing sessions and does not wake a stopped VM.
+export function setBoxdHerdrSsh(input: CloudMachineInput, enabled: boolean) {
+  return withBoxd(input.apiKey, "exec", input.id, client => client.machines.setSsh(input.id, enabled));
+}
 export function executeBoxd(input: CloudExecInput) {
   return withBoxd(input.apiKey, "exec", input.id, async client => {
     // Disable automatic idle hibernation before sending credentials. This does

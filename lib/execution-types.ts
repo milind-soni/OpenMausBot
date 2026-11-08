@@ -66,10 +66,11 @@ export type ExecutionHost = {
   tailnetName?: string;
   presenceObservedAt?: number;
   tailnetOnline?: boolean | null;
+  herdr?: { enabled: boolean; cloudConnections: boolean; version?: string; status?: "ready" | "unavailable" | "needs_auth"; message?: string; updatedAt: number };
 };
 export type ExecutionVerification = { command: string; exitCode: number; kind: "test" | "smoke"; summary?: string };
 export type ExecutionApproval = { id: string; tool: string; input: unknown; createdAt: number; decision?: "allow" | "deny"; decidedAt?: number };
-export type ExecutionMerge = { state: "awaiting_checks" | "merged" | "blocked"; url?: string; number?: number; mergeSha?: string; reason?: string };
+export type ExecutionMerge = { state: "awaiting_checks" | "merged" | "blocked"; url?: string; number?: number; mergeSha?: string; reason?: string; needsAlignment?: boolean };
 export type ExecutionDeployment = { status: "unknown" | "not_configured" | "pending" | "succeeded" | "failed"; url?: string; observedAt?: number; evidenceAt?: number; environment?: string; mergeSha?: string; message?: string };
 export type ExecutionRunStatus = "queued" | "preparing" | "running" | "verifying" | "blocked" | "awaiting_checks" | "succeeded" | "merged" | "failed" | "cancelled";
 export type ExecutionRun = {
@@ -93,11 +94,14 @@ export type ExecutionRun = {
   reason?: string;
   checkpoint?: { sha: string; summary?: string };
   verification: ExecutionVerification[];
+  verifiedBaseSha?: string;
+  verificationOnly?: boolean;
   merge?: ExecutionMerge;
   deployment: ExecutionDeployment;
   approvals: ExecutionApproval[];
   usage: { inputTokens: number; outputTokens: number; estimatedApiUsd: number | null };
   processStopped: boolean;
+  herdr?: { backend: "herdr"; coreId: string; terminalId: string; name: string; session: string; updatedAt: number };
 };
 export type ExecutionEvent = { id: number; runId: string; createdAt: number; type: string; stream?: "stdout" | "stderr" | "system"; text?: string; data?: Record<string, unknown> };
 export type ExecutionEnvironment = { id: string; projectId: string; name: string; keys: string[]; hostIds: string[]; automationEnabled: boolean; updatedAt: number };
@@ -126,6 +130,8 @@ export type ExecutionRunDetail = { run: ExecutionRun; events: ExecutionEvent[]; 
 export type ExecutionEnrollment = { enrollmentToken: string; expiresAt: number; command: string };
 export type ExecutionWorkerRun = {
   id: string;
+  attempt: number;
+  verificationOnly?: boolean;
   taskId: string;
   projectId: string;
   leaseToken: string;

@@ -6,7 +6,7 @@ import { GitHubHttpError, githubRequest } from "./github-workspace";
 import { openPR } from "./github-prs";
 
 type RunIdentity = { projectId: string; taskId: string };
-type RunResult = RunIdentity & { branch: string; baseBranch: string; headSha: string; title: string; verification: ExecutionVerification[]; smokePassed: boolean; authorize: () => Promise<void> };
+type RunResult = RunIdentity & { branch: string; baseBranch: string; headSha: string; baseSha?: string; title: string; verification: ExecutionVerification[]; smokePassed: boolean; authorize: () => Promise<void> };
 type PullRequest = {
   number: number; node_id: string; html_url: string; body: string | null; state: string; draft: boolean; merged: boolean; merged_at: string | null; merge_commit_sha: string | null;
   mergeable: boolean | null; mergeable_state: string;
@@ -15,8 +15,8 @@ type PullRequest = {
 type Check = { name: string; status: string; conclusion: string | null; app: { id: number } | null };
 type Status = { context: string; state: string };
 type RequiredCheck = { context: string; app_id?: number | null; integration_id?: number | null };
-type Protection = { required_status_checks?: { contexts: string[]; checks?: RequiredCheck[] }; required_pull_request_reviews?: { required_approving_review_count: number; require_code_owner_reviews?: boolean; require_last_push_approval?: boolean }; required_conversation_resolution?: { enabled: boolean } };
-type Rule = { type: string; parameters?: { required_status_checks?: RequiredCheck[]; required_approving_review_count?: number; require_code_owner_review?: boolean; require_last_push_approval?: boolean } };
+type Protection = { enforce_admins?: { enabled: boolean }; required_status_checks?: { strict?: boolean; contexts: string[]; checks?: RequiredCheck[] }; required_pull_request_reviews?: { required_approving_review_count: number; require_code_owner_reviews?: boolean; require_last_push_approval?: boolean }; required_conversation_resolution?: { enabled: boolean } };
+type Rule = { type: string; ruleset_id?: number; parameters?: { strict_required_status_checks_policy?: boolean; required_status_checks?: RequiredCheck[]; required_approving_review_count?: number; require_code_owner_review?: boolean; require_last_push_approval?: boolean } };
 type Review = { data?: { node?: { reviewDecision: string | null; mergeStateStatus: string; baseRef?: { branchProtectionRule: { id: string } | null } | null } | null }; errors?: unknown[] };
 const mergePermissions = { statuses: "read", administration: "read" };
 
@@ -72,7 +72,7 @@ export function checkMergeGates(input: { checks: Check[]; statuses: Status[]; re
   return null;
 }
 
-async function gates(path: string, baseBranch: string, pr: PullRequest, token: string) {
+async function gates(path: string, baseBranch: string, pr: PullRequest, token: string): Promise<Pick<ExecutionMerge, "state" | "reason"> | "fast_forward" | "squash"> {
   const checks: Check[] = [], statuses: Status[] = [];
   for (let page = 1; ; page++) {
     const response = await githubRequest<{ total_count: number; check_runs: Check[] }>(`${path}/commits/${pr.head.sha}/check-runs?filter=latest&per_page=100&page=${page}`, token);
@@ -92,15 +92,33 @@ async function gates(path: string, baseBranch: string, pr: PullRequest, token: s
   }) });
   if (review.errors?.length || !review.data?.node) throw new Error("Cannot verify GitHub review and protection requirements");
   let protection: Protection = {};
+  let legacyUnprotected = false;
   try { protection = await githubRequest<Protection>(`${path}/branches/${encodeURIComponent(baseBranch)}/protection`, token); }
-  catch (error) { if (!(error instanceof GitHubHttpError) || error.status !== 404 || review.data.node.baseRef?.branchProtectionRule !== null) throw error; }
+  catch (error) {
+    if (!(error instanceof GitHubHttpError) || error.status !== 404 || review.data.node.baseRef?.branchProtectionRule !== null) throw error;
+    legacyUnprotected = true;
+  }
   // Active repository/organization rulesets apply even when there is no legacy branch protection rule.
   const rules = await githubRequest<Rule[]>(`${path}/rules/branches/${encodeURIComponent(baseBranch)}`, token);
   const required: RequiredCheck[] = [...(protection.required_status_checks?.checks || []), ...(protection.required_status_checks?.contexts || []).map(context => ({ context }))];
   for (const rule of rules) if (rule.type === "required_status_checks") required.push(...(rule.parameters?.required_status_checks || []));
   const reviewRequired = Boolean(protection.required_pull_request_reviews && (protection.required_pull_request_reviews.required_approving_review_count > 0 || protection.required_pull_request_reviews.require_code_owner_reviews || protection.required_pull_request_reviews.require_last_push_approval)
     || rules.some(rule => rule.type === "pull_request" && ((rule.parameters?.required_approving_review_count || 0) > 0 || rule.parameters?.require_code_owner_review || rule.parameters?.require_last_push_approval)));
-  return checkMergeGates({ checks, statuses, required, reviewRequired, reviewDecision: review.data.node.reviewDecision, mergeStateStatus: review.data.node.mergeStateStatus, mergeable: pr.mergeable, draft: pr.draft });
+  const gate = checkMergeGates({ checks, statuses, required, reviewRequired, reviewDecision: review.data.node.reviewDecision, mergeStateStatus: review.data.node.mergeStateStatus, mergeable: pr.mergeable, draft: pr.draft });
+  if (gate) return gate;
+  // An unprotected branch can advance atomically to the exact verified head without
+  // synthesizing an untested merge tree. Never use this path around any protection.
+  if (legacyUnprotected && !rules.length) return "fast_forward";
+  for (const id of new Set(rules.map(rule => rule.ruleset_id))) {
+    if (!Number.isSafeInteger(id)) return { state: "blocked", reason: "Cannot confirm the applicable GitHub ruleset; no direct-ref merge is allowed" };
+    const ruleset = await githubRequest<{ enforcement: string; bypass_actors?: { actor_type: string }[] }>(`${path}/rulesets/${id}?includes_parents=true`, token);
+    if (ruleset.enforcement !== "active" || !Array.isArray(ruleset.bypass_actors) || ruleset.bypass_actors.some(actor => actor.actor_type === "Integration")) return { state: "blocked", reason: "Cannot guarantee GitHub ruleset enforcement without an app bypass; merge blocked" };
+  }
+  // The PR merge API has an expected head, but no expected base. Strict GitHub
+  // checks must fence the last-read/merge race; a local lock alone cannot do that.
+  if (protection.enforce_admins?.enabled && protection.required_status_checks?.strict && (protection.required_status_checks.contexts.length || protection.required_status_checks.checks?.length)) return "squash";
+  if (rules.some(rule => rule.type === "required_status_checks" && rule.parameters?.strict_required_status_checks_policy && rule.parameters.required_status_checks?.length)) return "squash";
+  return { state: "blocked", reason: "Protected automatic merging requires enforced strict/up-to-date required checks without an app bypass; no protection was changed" };
 }
 
 /** Merge is not deployment: returns only a verified GitHub merge receipt. No bypass, auto-approval or protection edits. */
@@ -108,6 +126,7 @@ export async function finalizeRunPullRequest(input: RunResult): Promise<Executio
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(input.headSha) || !input.branch || !input.baseBranch || input.branch === input.baseBranch) return { state: "blocked", reason: "A distinct pushed task branch and exact verified head SHA are required" };
   if (!input.smokePassed || !input.verification.length || input.verification.some(result => !result.command.trim() || result.exitCode !== 0) || !input.verification.some(result => result.kind === "test") || !input.verification.some(result => result.kind === "smoke")) return { state: "blocked", reason: "Configured tests and smoke verification must pass on this head before merging" };
   let credential: string | undefined;
+  const alignment = (receipt?: { url: string; number: number }): ExecutionMerge => ({ ...receipt, state: "awaiting_checks", needsAlignment: true, reason: `Current ${input.baseBranch} must be aligned into the preserved checkpoint and re-verified; no model work will be repeated` });
   let receipt: { url: string; number: number } | undefined;
   try {
     const run = await authorizedRun(input, false);
@@ -131,22 +150,43 @@ export async function finalizeRunPullRequest(input: RunResult): Promise<Executio
     let merged = pr;
     if (!pr.merged) {
       if (pr.state !== "open") return { ...receipt, state: "blocked", reason: "Pull request was closed without merging" };
-      const gate = await gates(run.path, input.baseBranch, pr, credential);
-      if (gate) return { ...receipt, ...gate };
+      if (!input.baseSha || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(input.baseSha)) return alignment(receipt);
+      const base = await githubRequest<{ object: { sha: string } }>(`${run.path}/git/ref/heads/${encodeURIComponent(input.baseBranch)}`, credential);
+      if (base.object.sha === input.headSha) return { ...receipt, state: "awaiting_checks", reason: "The exact verified head is on the base branch; waiting for GitHub's pull request merge receipt" };
+      if (base.object.sha !== input.baseSha || pr.base.sha !== input.baseSha) return alignment(receipt);
+      const ancestry = await githubRequest<{ merge_base_commit: { sha: string } }>(`${run.path}/compare/${input.baseSha}...${input.headSha}`, credential);
+      if (ancestry.merge_base_commit.sha !== input.baseSha) return alignment(receipt);
+      const method = await gates(run.path, input.baseBranch, pr, credential);
+      if (typeof method !== "string") return { ...receipt, ...method };
       const current = await read();
-      if (!matches(current) || current.base.sha !== pr.base.sha || current.draft || current.state !== "open") return { ...receipt, state: "blocked", reason: "Pull request changed while checking merge gates; retry after verifying its current head" };
+      if (!matches(current) || current.draft || current.state !== "open") return { ...receipt, state: "blocked", reason: "Pull request changed while checking merge gates; retry after verifying its current head" };
+      if (current.base.sha !== input.baseSha) return alignment(receipt);
       const context = await contextWithToken(input.projectId, input.taskId, "read");
       if (!context.token || !context.project.githubWorkspaceAccess || !context.task || context.task.githubIssueNumber !== run.issueNumber || repositoryPath(context.project.repoUrl || "").toLowerCase() !== run.path.toLowerCase()) throw new Error("Repository authorization or issue linkage changed before merge");
       await input.authorize();
       try {
-        const response = await githubRequest<{ merged: boolean; sha: string }>(`${run.path}/pulls/${pr.number}/merge`, credential, { method: "PUT", body: JSON.stringify({ sha: input.headSha, merge_method: "squash" }) });
-        if (!response.merged) return { ...receipt, state: "blocked", reason: "GitHub declined the exact-head merge; no protection was bypassed" };
+        let mergeSha: string;
+        if (method === "fast_forward") {
+          const response = await githubRequest<{ object: { sha: string } }>(`${run.path}/git/refs/heads/${encodeURIComponent(input.baseBranch)}`, credential, { method: "PATCH", body: JSON.stringify({ sha: input.headSha, force: false }) });
+          if (response.object.sha !== input.headSha) throw new Error("Exact-head fast-forward receipt could not be verified");
+          mergeSha = input.headSha;
+        } else {
+          const response = await githubRequest<{ merged: boolean; sha: string }>(`${run.path}/pulls/${pr.number}/merge`, credential, { method: "PUT", body: JSON.stringify({ sha: input.headSha, merge_method: "squash" }) });
+          if (!response.merged) return { ...receipt, state: "blocked", reason: "GitHub declined the exact-head merge; no protection was bypassed" };
+          mergeSha = response.sha;
+        }
         merged = await read();
-        if (merged.merge_commit_sha !== response.sha) throw new Error("GitHub merge receipt could not be verified");
+        if (!merged.merged) return { ...receipt, state: "awaiting_checks", reason: "Waiting for GitHub's exact-head pull request merge receipt" };
+        if (merged.merge_commit_sha !== mergeSha) throw new Error("GitHub merge receipt could not be verified");
       } catch (error) {
-        // PUT may have succeeded before the transport failed. Re-read, never equate a timeout with failure.
+        // The write may have succeeded before transport failed. Re-read the PR, never infer a merge.
         const observed = await read().catch(() => null);
         if (observed?.merged && matches(observed)) merged = observed;
+        else if (error instanceof GitHubHttpError && [405, 409, 422].includes(error.status)) {
+          const base = await githubRequest<{ object: { sha: string } }>(`${run.path}/git/ref/heads/${encodeURIComponent(input.baseBranch)}`, credential);
+          if (base.object.sha !== input.baseSha) return alignment(receipt);
+          throw error;
+        }
         else if (!(error instanceof GitHubHttpError) || error.status >= 500) return { ...receipt, state: "awaiting_checks", reason: "Merge outcome is uncertain; waiting for an exact-head GitHub receipt" };
         else throw error;
       }

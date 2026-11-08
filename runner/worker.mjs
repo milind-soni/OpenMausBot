@@ -1,6 +1,6 @@
 import { mkdir, rm, open } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { hostname } from 'node:os';
 import { VERSION, atomicJson, readJson, Redactor, RunError, classifyFailure, sleep } from './security.mjs';
 import { discoverAccounts, freshReport, selectAccount, confirmedExhausted } from './accounts.mjs';
@@ -10,6 +10,8 @@ import { startHarness } from './harnesses.mjs';
 import { runnerUpdatePlan, automaticUpdatePolicy, automaticUpdateDue } from './maintenance.mjs';
 import { maintainTools, recoverManagedToolUpdates } from './tool-updates.mjs';
 import { assertIdleState, withMaintenanceLock, applyRunnerRelease, beginRunnerUpdate, confirmRunnerUpdate, recoverRunnerUpdate, boundedUpdateReports } from './service.mjs';
+import { HerdrConsole, validateConsoleInput } from './herdr-console.mjs';
+import { HerdrConnections } from './herdr-connections.mjs';
 
 export class Runner {
   constructor(config, dependencies = {}) {
@@ -18,6 +20,8 @@ export class Runner {
     this.discover = dependencies.discover ?? discoverAccounts;
     this.startHarness = dependencies.startHarness ?? startHarness;
     this.Workspace = dependencies.Workspace ?? Workspace;
+    this.startConsole = dependencies.startConsole ?? (options => HerdrConsole.start(options));
+    this.herdr = config.herdr?.enabled === true ? (dependencies.herdrConnections ?? new HerdrConnections(config)) : null;
     this.ledger = new RunLedger(this.root); this.accounts = []; this.active = null; this.paused = false; this.stopping = false;
     this.localPaused = false; this.serverPaused = false;
     this.abort = new AbortController(); this.heartbeatSeconds = config.heartbeatSeconds ?? 15;
@@ -37,7 +41,11 @@ export class Runner {
   async heartbeat() {
     await this.localControls();
     this.updateReports = boundedUpdateReports(this.updateReports, [this.config.hostToken]);
-    const response = await this.client.request('heartbeat', { version: VERSION, platform: process.platform, capabilities: [...new Set(this.accounts.map(value => value.binding.harness))], activeRunIds: this.active ? [this.active.run.id] : [], accounts: this.accounts.map(value => freshReport(value.report)), capacity: 1, paused: this.localPaused, ...(this.updateReports.length ? { updateReports: this.updateReports } : {}) });
+    let response;
+    try {
+      response = await this.client.request('heartbeat', { version: VERSION, platform: process.platform, capabilities: [...new Set(this.accounts.map(value => value.binding.harness))], activeRunIds: this.active ? [this.active.run.id] : [], accounts: this.accounts.map(value => freshReport(value.report)), capacity: 1, paused: this.localPaused, herdr: this.herdr?.report() ?? { enabled: false, cloudConnections: false }, ...(this.updateReports.length ? { updateReports: this.updateReports } : {}) });
+    } catch (error) { this.herdr?.schedule([]); throw error; }
+    this.herdr?.schedule(response.herdrPlans ?? []);
     if (response.cancelRunIds?.includes(this.active?.run.id)) this.active.abort.abort(new RunError('cancelled', 'Cancelled by Origin'));
     if (response.refreshUsage) this.refreshUsage = true;
     if (response.paused !== undefined) this.serverPaused = response.paused;
@@ -103,6 +111,7 @@ export class Runner {
       if (!this.abort.signal.aborted || error !== this.abort.signal.reason || error.processStopUnproven || error.maintenanceUncertain) throw error;
     } finally {
       this.stopping = true; this.abort.abort(); await heartbeatLoop;
+      await this.herdr?.stop();
       process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop);
       try { await this.status({ stopped: true }); }
       finally { await lock.close(); await rm(lockPath, { force: true }); }
@@ -183,7 +192,9 @@ export class Runner {
     const redactor = new Redactor([this.config.hostToken, run.leaseToken, run.gitCredential?.token, ...Object.values(run.environmentVariables ?? {})]);
     const sourceRedactor = new Redactor([this.config.hostToken, run.leaseToken, run.gitCredential?.token, ...Object.entries(run.environmentVariables ?? {}).filter(([key]) => /TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE|CREDENTIAL|AUTH|(?:DATABASE|DB|REDIS|MONGO).*URL|(?:API|ACCESS).*KEY/i.test(key)).map(([, value]) => value)]);
     const journal = new EventJournal(this.ledger, record, this.client, redactor);
-    const active = { run, abort, journal, lease, sourceRedactor, messages: [], approvals: new Map(), handle: null, leaseLost: false };
+    const active = { run, abort, journal, lease, sourceRedactor, messages: [], approvals: new Map(), handle: null, messageReady: false, leaseLost: false, finishing: Boolean(run.verificationOnly) };
+    const persistEvent = journal.event.bind(journal);
+    journal.event = async event => { await persistEvent(event); active.console?.publish(event); };
     this.active = active;
     const emit = event => journal.event(event).catch(error => { abort.abort(error); });
     const stdout = redactor.stream(text => { void emit({ type: 'log', stream: 'stdout', text }); });
@@ -208,6 +219,16 @@ export class Runner {
     try {
       lease.assert();
       if (abort.signal.aborted) throw abort.signal.reason;
+      if (this.config.herdr?.enabled === true) {
+        try {
+          active.console = await this.startConsole({ config: this.config, run, redactor, signal: abort.signal, input: request => this.consoleInput(active, request) });
+          if (active.console) await journal.event(active.console.metadata);
+        } catch (error) {
+          if (error.processStopUnproven || abort.signal.aborted) throw error;
+          await journal.event({ type: 'log', stream: 'system', text: 'Herdr run console unavailable. Native execution and Origin owner controls remain authoritative.' });
+        }
+      }
+      if (run.verificationOnly && !run.resume?.checkpointSha) throw new RunError('failed', 'Verification-only work requires an exact preserved checkpoint');
       await journal.event({ type: 'status', status: 'preparing' });
       if (run.gitCredential?.expiresAt && run.gitCredential.expiresAt - Date.now() < 60000) await this.refreshGitCredential(active);
       temporary = await temporaryEnvironment(this.root, run);
@@ -215,37 +236,53 @@ export class Runner {
       workspace = new this.Workspace(this.root, run, temporary, { signal: abort.signal, onOutput: output });
       await workspace.prepare();
       await journal.mutate(value => { value.worktree = workspace.path; value.state = 'preparing'; });
-      if (run.selection.harness === 't3') throw new RunError('needs_approval', `T3 automation is not enrolled with a stable, lease-fenced server. Manually add this isolated folder as a T3 project: ${workspace.path}. Select the requested account, model and effort explicitly; no T3 model was started.`);
-      const previousAccount = selectAccount(this.accounts, run.selection, run.billingKind);
-      const refreshed = await this.discover({ ...this.config, accounts: [previousAccount.binding] });
-      const account = selectAccount(refreshed, run.selection, run.billingKind);
-      if (account.report.identityHash !== previousAccount.report.identityHash) throw new RunError('needs_auth', 'The selected local profile now belongs to another provider account');
-      this.accounts = this.accounts.map(value => value === previousAccount ? account : value);
-      active.account = account;
-      const sessionDirectory = join(this.root, 'sessions', run.id.replace(/[^A-Za-z0-9_-]/g, '_'));
-      await mkdir(sessionDirectory, { recursive: true, mode: 0o700 });
-      lease.assert();
-      await journal.event({ type: 'status', status: 'running' });
-      await journal.mutate(value => { value.state = 'running'; });
-      lease.assert();
-      if (abort.signal.aborted) throw abort.signal.reason;
-      const prompt = `Origin execution contract: Work only in this isolated worktree. Do not read or change personal checkouts or authentication. Do not push or merge; Origin verifies and pushes the exact head after you stop. Do not start detached daemons. Use the explicitly selected model and account only.\nProject application variables (including API keys) are intentionally NOT in your native CLI environment. To run an application/test command with its scoped variables, use: "$ORIGIN_PROJECT_NODE" "$ORIGIN_PROJECT_ENV_RUNNER" --file "$ORIGIN_PROJECT_ENV_FILE" -- npm test (replace npm test with the actual command/arguments). The protected JSON file is outside the checkout; never print, copy, commit, or interpolate its secret values into command arguments. Origin's configured verification/smoke commands already receive the project variables directly.\n\nTask:\n${run.prompt}${run.resume?.summary ? `\nPrevious checkpoint summary:\n${run.resume.summary}` : ''}`;
-      active.activityStarted = true;
-      active.handle = await this.startHarness({ run, account, cwd: workspace.path, sessionDirectory, projectEnvironmentFile: temporary.environmentFile, prompt, signal: abort.signal, output,
-        addSecret: value => { redactor.add(value); sourceRedactor.add(value); },
-        approve: (tool, input) => this.approve(active, redactor, tool, input),
-        usage: usage => {
-          if (usage.quota) account.report.quota = usage.quota;
-          const tokens = { ...usage }; delete tokens.quota;
-          void emit({ type: 'usage', ...tokens, account: account.report });
-        },
-      });
-      for (const message of active.messages.splice(0)) await active.handle.message(message.text);
-      const result = await active.handle.done;
-      active.finishing = true;
-      await active.handle.stop(); active.handle = null;
+      let summary = run.resume?.summary || 'Re-verified preserved task checkpoint against current base';
+      if (!run.verificationOnly) {
+        if (run.resume?.checkpointSha) await workspace.alignBase();
+        if (run.selection.harness === 't3') throw new RunError('needs_approval', `T3 automation is not enrolled with a stable, lease-fenced server. Manually add this isolated folder as a T3 project: ${workspace.path}. Select the requested account, model and effort explicitly; no T3 model was started.`);
+        const previousAccount = selectAccount(this.accounts, run.selection, run.billingKind);
+        const refreshed = await this.discover({ ...this.config, accounts: [previousAccount.binding] });
+        const account = selectAccount(refreshed, run.selection, run.billingKind);
+        if (account.report.identityHash !== previousAccount.report.identityHash) throw new RunError('needs_auth', 'The selected local profile now belongs to another provider account');
+        this.accounts = this.accounts.map(value => value === previousAccount ? account : value);
+        active.account = account;
+        const sessionDirectory = join(this.root, 'sessions', `${run.id.replace(/[^A-Za-z0-9_-]/g, '_')}-${run.attempt ?? 1}`);
+        await mkdir(sessionDirectory, { recursive: true, mode: 0o700 });
+        lease.assert();
+        await journal.event({ type: 'status', status: 'running' });
+        await journal.mutate(value => { value.state = 'running'; });
+        lease.assert();
+        if (abort.signal.aborted) throw abort.signal.reason;
+        const prompt = `Origin execution contract: Work only in this isolated worktree. Do not read or change personal checkouts or authentication. Do not push or merge; Origin verifies and pushes the exact head after you stop. Do not start detached daemons. Use the explicitly selected model and account only.\nProject application variables (including API keys) are intentionally NOT in your native CLI environment. To run an application/test command with its scoped variables, use: "$ORIGIN_PROJECT_NODE" "$ORIGIN_PROJECT_ENV_RUNNER" --file "$ORIGIN_PROJECT_ENV_FILE" -- npm test (replace npm test with the actual command/arguments). The protected JSON file is outside the checkout; never print, copy, commit, or interpolate its secret values into command arguments. Origin's configured verification/smoke commands already receive the project variables directly.\n\nTask:\n${run.prompt}${run.resume?.summary ? `\nPrevious checkpoint summary:\n${run.resume.summary}` : ''}`;
+        active.activityStarted = true;
+        active.handle = await this.startHarness({ run, account, cwd: workspace.path, sessionDirectory, projectEnvironmentFile: temporary.environmentFile, prompt, signal: abort.signal, output,
+          addSecret: value => { redactor.add(value); sourceRedactor.add(value); },
+          approve: (tool, input) => this.approve(active, redactor, tool, input),
+          usage: usage => {
+            if (usage.quota) account.report.quota = usage.quota;
+            const tokens = { ...usage }; delete tokens.quota;
+            void emit({ type: 'usage', ...tokens, account: account.report });
+          },
+        });
+        const drain = (active.controlPending ?? Promise.resolve()).catch(() => {}).then(async () => {
+          for (const message of active.messages.splice(0)) {
+            lease.assert(); abort.signal.throwIfAborted();
+            await active.handle.message(message.text);
+          }
+          active.messageReady = true;
+        });
+        active.controlPending = drain;
+        await drain;
+        const result = await active.handle.done;
+        summary = result.summary;
+        active.finishing = true;
+        await active.handle.stop(); active.handle = null;
+      }
       if (abort.signal.aborted) throw abort.signal.reason;
       checkpoint = await workspace.checkpoint('Origin execution checkpoint', sourceRedactor, { push: false });
+      lease.assert(); await this.refreshGitCredential(active, temporary);
+      await workspace.alignBase();
+      checkpoint = await workspace.checkpoint('Origin aligned execution checkpoint', sourceRedactor, { push: false });
       await journal.event({ type: 'status', status: 'verifying' });
       verification = await workspace.verify(redactor);
       if (verification.some(value => value.exitCode !== 0) || verification.length !== run.verificationCommands.length + 1) throw new RunError('failed', 'Configured verification or smoke command failed');
@@ -256,7 +293,7 @@ export class Runner {
       checkpoint = await workspace.checkpoint('Origin verified checkpoint', sourceRedactor);
       checkpointPushed = true;
       await journal.event({ type: 'checkpoint', ...checkpoint });
-      final = { type: 'finished', result: 'succeeded', activityStarted: true, summary: redactor.text(result.summary).slice(0, 4000), headSha: checkpoint.sha, branch: checkpoint.branch, checkpointSha: checkpoint.sha, verification, processStopped: true };
+      final = { type: 'finished', result: 'succeeded', activityStarted: Boolean(active.activityStarted), summary: redactor.text(summary).slice(0, 4000), headSha: checkpoint.sha, baseSha: workspace.baseSha, branch: checkpoint.branch, checkpointSha: checkpoint.sha, verification, processStopped: true };
     } catch (error) {
       if (error.cleanupIncomplete || error.processStopUnproven) throw error;
       if (abort.signal.aborted) error = abort.signal.reason;
@@ -295,16 +332,63 @@ export class Runner {
       }
       final = { type: 'finished', result: classifyFailure(error), activityStarted: Boolean(active.activityStarted), summary: redactor.text(error.message ?? String(error)).slice(0, 4000), ...(checkpoint && checkpointPushed ? { checkpointSha: checkpoint.sha, branch: checkpoint.branch } : {}), ...(verification ? { verification } : {}), processStopped: true };
     } finally {
+      active.closing = true;
       clearTimeout(timer); clearInterval(leaseTimer); clearInterval(flushTimer); controlDone = true;
       abort.abort(new RunError('cancelled', 'Execution finished'));
       await controls;
+      await active.controlPending?.catch(() => {});
       stdout.end(); stderr.end();
-      await temporary?.dispose();
-      if (final) await journal.event(final);
-      try { await journal.flush(active.leaseLost); } catch { /* Stopped receipt stays durable for reconnect. */ }
-      this.active = null;
-      await this.status();
+      try {
+        await temporary?.dispose();
+        if (final) await journal.event(final);
+        try { await journal.flush(active.leaseLost); } catch { /* Stopped receipt stays durable for reconnect. */ }
+      } finally {
+        await active.console?.close(final ? 'Native execution stopped. See Origin for the audited result.' : 'Native stop is unproven. Origin has fenced this execution; operator recovery is required.');
+        this.active = null;
+        await this.status();
+      }
     }
+  }
+  async consoleInput(active, value) {
+    const request = validateConsoleInput(value);
+    const operation = (active.controlPending ?? Promise.resolve()).catch(() => {}).then(async () => {
+      if (this.active !== active || active.closing) throw new Error('Run console is closed');
+      // Local-owner IPC is not a lease or authorization bypass. Serialize with normal
+      // controls, refresh membership/lease and apply pending Origin controls first.
+      try { await this.performControl(active); }
+      catch (error) {
+        if ([401, 403, 409, 410].includes(error.status) || (error instanceof RunError && error.result === 'cancelled')) {
+          active.leaseLost = true; active.abort.abort(new RunError('cancelled', 'Controller rejected console authorization'));
+        } else if (error instanceof RunError && error.result === 'needs_auth') active.abort.abort(error);
+        throw error;
+      }
+      active.lease.assert();
+      if (active.abort.signal.aborted || active.closing || this.active !== active) throw new Error('Run is no longer accepting input');
+      const fingerprint = createHash('sha256').update(JSON.stringify([request.action, request.text ?? ''])).digest('hex');
+      const previous = active.journal.record.consoleInputs?.find(entry => entry.id === request.id);
+      if (previous) {
+        if (previous.fingerprint !== fingerprint) throw new Error('Request ID was already used for different input');
+        return { state: previous.state, duplicate: true };
+      }
+      if ((active.journal.record.consoleInputs?.length ?? 0) >= 1000) throw new Error('Run console input limit reached');
+      if (request.action === 'followup' && (active.finishing || !active.messageReady || !active.handle)) throw new Error('Native model is not accepting follow-ups; use an Origin continuation');
+      // Admission is durable BEFORE native delivery. A lost acknowledgement or
+      // uncertain send must never replay the same model input, even after a crash.
+      await active.journal.mutate(record => { (record.consoleInputs ??= []).push({ id: request.id, fingerprint, action: request.action, state: 'admitted' }); });
+      try {
+        active.lease.assert();
+        if (active.abort.signal.aborted || active.closing) throw new Error('Run closed after input admission');
+        if (request.action === 'cancel') active.abort.abort(new RunError('cancelled', 'Cancelled by local owner in Origin run console'));
+        else await active.handle.message(request.text);
+        await active.journal.mutate(record => { record.consoleInputs.find(entry => entry.id === request.id).state = 'delivered'; });
+        return { state: 'delivered' };
+      } catch (error) {
+        await active.journal.mutate(record => { record.consoleInputs.find(entry => entry.id === request.id).state = 'uncertain'; });
+        throw error;
+      }
+    });
+    active.controlPending = operation;
+    return operation;
   }
   async control(active, refreshGitCredential = false) {
     const request = (active.controlPending ?? Promise.resolve()).catch(() => {}).then(() => this.performControl(active, refreshGitCredential));
@@ -342,7 +426,7 @@ export class Runner {
       }
       // Durable admission before delivering: reconnect must not issue the same prompt twice.
       await active.journal.mutate(record => { record.messages.push(message.id); });
-      if (active.handle) await active.handle.message(message.text); else active.messages.push(message);
+      if (active.messageReady && active.handle) await active.handle.message(message.text); else active.messages.push(message);
     }
     return response;
   }

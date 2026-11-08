@@ -4,7 +4,7 @@ import { reconcileExecution } from "./execution-controller";
 import { integrationBridge } from "./integration-bridge";
 import { finalizeRunPullRequest, readRunDeployment, reconcileMergedRunPullRequest } from "./github-execution";
 import { effectiveExecutionPolicy } from "./execution-policy";
-import { executionDeploymentRuns, executionRuns, readExecutionRun, saveExecutionRun, type ExecutionPrincipal, type PrivateRun } from "./execution-store";
+import { acquireExecutionLock, executionDeploymentRuns, executionRuns, readExecutionRun, releaseExecutionLock, saveExecutionRun, type ExecutionPrincipal, type PrivateRun } from "./execution-store";
 
 vi.mock("./integration-bridge", () => ({ integrationBridge: vi.fn() }));
 vi.mock("./github-execution", () => ({ finalizeRunPullRequest: vi.fn(), readRunDeployment: vi.fn(), reconcileMergedRunPullRequest: vi.fn() }));
@@ -28,6 +28,7 @@ beforeEach(() => {
     run: { id: "run", teamId: "team", projectId: "project", taskId: "task", requestedBy: "owner", title: "Verified change", status: "awaiting_checks",
       createdAt: now - 120000, updatedAt: now - 120000, attempt: 1, repositoryUrl: repoUrl, baseBranch: "release", branch: "origin/run", environment: "default",
       checkpoint: { sha: headSha }, verification: [{ command: "npm test", kind: "test", exitCode: 0 }, { command: "npm run smoke", kind: "smoke", exitCode: 0 }],
+      verifiedBaseSha: "b".repeat(40),
       deployment: { status: "unknown" }, approvals: [], usage: { inputTokens: 0, outputTokens: 0, estimatedApiUsd: null }, processStopped: true },
     policy: effectiveExecutionPolicy({ autoMerge: true, baseBranch: "release", verificationCommands: ["npm test"], smokeCommand: "npm run smoke" }),
     prompt: "Implement", grantId: "grant", attempted: [], leaseHash: null, leaseExpiresAt: 0, sequence: 0, cancelRequested: false, logBytes: 0,
@@ -124,4 +125,65 @@ test("deployment read unavailability persists freshness and advances polling fai
   expect(record.controllerCheckedAt).toBe(now);
   await reconcileExecution("team");
   expect(readRunDeployment).toHaveBeenCalledTimes(1);
+});
+
+test("eligible explicit agent work merges automatically under a repository lock, independently of deployment", async () => {
+  principal.task!.done = false;
+  vi.mocked(finalizeRunPullRequest).mockImplementationOnce(async input => {
+    await input.authorize();
+    return { state: "merged", number: 9, mergeSha };
+  });
+  await reconcileExecution("team");
+  expect(finalizeRunPullRequest).toHaveBeenCalledWith(expect.objectContaining({ headSha, baseSha: "b".repeat(40) }));
+  expect(acquireExecutionLock).toHaveBeenCalledWith(`merge:${repoUrl}:release`, 15 * 60000);
+  expect(releaseExecutionLock).toHaveBeenCalledWith(`merge:${repoUrl}:release`, "lock");
+  expect(record.run).toMatchObject({ status: "merged", processStopped: true, deployment: { status: "unknown" } });
+});
+
+test("advanced main queues a durable verification-only attempt while preserving checkpoint and stop proof", async () => {
+  principal.task!.done = false;
+  vi.mocked(finalizeRunPullRequest).mockResolvedValueOnce({ state: "awaiting_checks", needsAlignment: true, reason: "Align current main and re-verify" });
+  await reconcileExecution("team");
+  expect(record.run).toMatchObject({ status: "queued", verificationOnly: true, attempt: 1, checkpoint: { sha: headSha }, processStopped: true });
+  expect(record.cancelRequested).toBe(false);
+  // Queuing is not a fabricated new stop proof or a second native process.
+  expect(record.leaseHash).toBeNull(); expect(record.leaseExpiresAt).toBe(0);
+});
+
+test("required GitHub review remains visibly blocked and never becomes coding work", async () => {
+  principal.task!.done = false;
+  vi.mocked(finalizeRunPullRequest).mockResolvedValueOnce({ state: "blocked", reason: "Required pull request approvals are outstanding" });
+  await reconcileExecution("team");
+  expect(record.run).toMatchObject({ status: "awaiting_checks", merge: { state: "blocked" }, reason: expect.stringContaining("approvals"), processStopped: true });
+  expect(record.run.verificationOnly).toBeUndefined();
+});
+
+test("another repository merge owner prevents this controller from merging concurrently", async () => {
+  principal.task!.done = false;
+  vi.mocked(acquireExecutionLock).mockReturnValueOnce("00000000-0000-4000-8000-000000000001").mockReturnValueOnce(null);
+  await reconcileExecution("team");
+  expect(finalizeRunPullRequest).not.toHaveBeenCalled();
+  expect(record.run.status).toBe("awaiting_checks");
+});
+
+test("two completed worktrees merge the first and queue only re-verification for the stale second", async () => {
+  const first = structuredClone(record), second = structuredClone(record);
+  second.run.id = "second"; second.run.taskId = "second-task"; second.run.branch = "origin/second";
+  second.run.checkpoint = { sha: "d".repeat(40) };
+  const runs = new Map([[first.run.id, first], [second.run.id, second]]);
+  vi.mocked(executionRuns).mockImplementation(() => [...runs.values()].map(value => structuredClone(value)));
+  vi.mocked(executionDeploymentRuns).mockReturnValue([]);
+  vi.mocked(readExecutionRun).mockImplementation(id => structuredClone(runs.get(id)!));
+  vi.mocked(saveExecutionRun).mockImplementation(value => { runs.set(value.run.id, structuredClone(value)); });
+  vi.mocked(integrationBridge).mockImplementation(async (_operation, args) => {
+    if (!args || typeof args !== "object" || !("taskId" in args) || typeof args.taskId !== "string") throw new Error("Expected scoped task context");
+    return { ...structuredClone(principal), task: { ...principal.task!, id: args.taskId, done: false } };
+  });
+  vi.mocked(finalizeRunPullRequest).mockImplementation(async input => {
+    await input.authorize();
+    return input.taskId === first.run.taskId ? { state: "merged", mergeSha } : { state: "awaiting_checks", needsAlignment: true, reason: "Main advanced" };
+  });
+  await reconcileExecution("team");
+  expect(runs.get(first.run.id)?.run.status).toBe("merged");
+  expect(runs.get(second.run.id)?.run).toMatchObject({ status: "queued", verificationOnly: true, checkpoint: second.run.checkpoint, processStopped: true });
 });

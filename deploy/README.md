@@ -135,7 +135,7 @@ Do not replace or import production data merely to publish code.
 
 ## 8. Supervised coding execution
 
-Origin owns issue state, execution policy, approvals and receipts. A runner is a Node.js 24 service on each coding machine, not a Claude skill. It starts the explicitly selected native CLI in an isolated worktree. It does not open a desktop terminal automatically: follow the run's redacted logs and approvals in Origin, or inspect the local service journal. Personal checkouts and existing CLI installations are not replaced.
+Origin owns issue state, execution policy, approvals and receipts. A runner is a Node.js 24 service on each coding machine, not a Claude skill. It starts the explicitly selected native CLI in an isolated worktree. Origin always exposes redacted logs and approvals; optional Herdr consoles provide another task view without opening or focusing the desktop application. Personal checkouts and existing CLI installations are not replaced. Assigning a human issue owner does not dispatch coding: use **Develop** or the authorized `start_execution_run` tool.
 
 A worktree isolates Git state, not operating-system access. Native coding tools run with the runner user's filesystem privileges, subject to their supported approval controls. Use a separate OS account or disposable cloud worker for code that must not share your personal user's access.
 
@@ -150,6 +150,18 @@ A worktree isolates Git state, not operating-system access. Native coding tools 
 
 The private configuration defaults to `~/.config/origin-runner/config.json` (owner-only, mode 0600). State defaults to `~/.local/share/origin-runner`: bare repository caches under `repositories/`, per-run worktrees under `worktrees/`, sessions and durable receipts beside them. The runner pushes verified task/checkpoint branches, never the protected base branch. It does not reset personal repositories or silently reuse an old worktree.
 
+### Herdr task consoles and desktop connections
+
+Install the native `hc`/Herdr core (the new desktop core, not the older `herdr` TUI). Keep the desktop core available in the selected session. With the worker cleanly stopped, run `origin-runner herdr enable`, then start its existing supervisor. This creates a background **Origin task console**, not a duplicate of the coding harness's native interactive UI. The chosen OMP/Claude/Codex/Pi process keeps its structured protocol, process guardian and resource controls.
+
+The console shows bounded, redacted progress. Enter task text for a follow-up, `/cancel` to request cancellation, or `/quit` to detach without stopping execution. A private per-run socket authenticates the local owner; each control refreshes Origin authorization and the lease, and durable input IDs prevent replay. Tool approvals remain in the owner's Origin UI. Hermes uses the existing scoped get/message/cancel tools: no personal-terminal enumeration, arbitrary keystrokes, administrative shell or raw Herdr access.
+
+`origin-runner herdr enable --cloud` additionally opts this desktop into active Boxd/Boat task connections; `herdr disable` removes this integration's owned aliases. Both changes require the worker to be stopped and explicitly restarted. `herdr status` reports local configuration; **Settings > Machines** shows the latest worker observation. Run details contain the last reported terminal identity, not a guarantee that it remains open after a run, core restart or host reboot.
+
+Both cloud bootstraps pin verified core `0.1.18` in the dedicated `origin-runner` account and `origin-cloud` session. Current owner/project authorization, a live allocation and fresh worker readiness are required before Origin grants a short-lived desktop connection. Grants renew only while eligible, do not extend the VM's idle deadline, and expired/revoked aliases are removed. Desktop native Boxd/Boat login is separate from Origin's write-only provider key; no provider key is copied to a desktop.
+
+Discovery does not start or resume a VM. The transport checks native provider state before reconnecting; Boat refreshes its rotating SSH endpoint/host-key information through its native CLI. Never disable SSH host-key verification. Boxd SSH can itself wake a hibernated machine, so its native API cannot eliminate the external-hibernation race between checking state and connecting; connection grants and controller-managed stops remain bounded. Real provider lifecycle/billing validation is required before enabling cloud use.
+
 ### Accounts, policies and secrets
 
 - Sign in locally using the native CLI. Metadata is deduplicated by owner/provider/account identity; OAuth credentials remain on that machine. Do not copy NixOS OAuth caches into cloud images.
@@ -162,7 +174,11 @@ The private configuration defaults to `~/.config/origin-runner/config.json` (own
 
 ### Merge and deployment receipts
 
-Configure both verification commands and a runnable smoke check before starting. Origin verifies the exact pushed head, checks GitHub protections/reviews/checks, and merges to the configured base (`main` by default). A lost merge response is recovered by a read-only exact-head PR lookup, including when GitHub already closed the issue. Closed issues never authorize another merge.
+Configure both verification commands and a runnable smoke check before starting. Automatic merge is enabled by default. Origin verifies the exact pushed head and configured base (`main` by default). With no applicable GitHub protections or rules, it advances the base using a non-forced fast-forward to that exact verified commit and confirms the merged PR receipt. Protected branches retain enforced up-to-date checks and required reviews; unknown rules or bypass privileges never silently weaken those gates.
+
+If another task advances the base, Origin queues a **verification-only** attempt (runner `1.1.0` or later): it preserves the prior checkpoint and stop receipt, creates a new attempt-specific worktree, merges the current base without force, and reruns tests and smoke. It does not spend another model turn or require a fresh coding account. Conflicts or failing checks block the merge; an explicit continuation may start coding to resolve them. Successful independent tasks need no manual merge. Repository merge locks and Git ancestry checks protect concurrent completions.
+
+A lost merge response is recovered by a read-only exact-head PR lookup, including when GitHub already closed the issue. Closed issues never authorize another merge.
 
 Deployment is separate. Origin reads GitHub deployment/status evidence for the exact confirmed merge SHA, shows its environment, event timestamp and last-check timestamp, and continues observing later status changes. Missing or inaccessible evidence remains unknown. A successful check, merge or push to `main` does not itself deploy an application; configure the application's release pipeline separately.
 

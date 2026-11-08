@@ -80,6 +80,32 @@ const cloud = () => host("cloud", { kind: "boxd" });
   });
 });
 
+describe("checkpoint verification routing", () => {
+  test("verification selects a real host without any LLM authentication, quota or account", () => {
+    const result = routeExecution({ policy: effectiveExecutionPolicy(), projectId: "project", ownerId: "owner", now, verificationOnly: true,
+      hosts: [host("local", { version: "1.1.0", capabilities: [], accountIds: [] })], accounts: [], attempted: [executionSelectionKey(first)] });
+    expect(result.host?.id).toBe("local");
+    expect(result.selection).toBeUndefined();
+    expect(result.needsCloud).toBe(false);
+  });
+  test.each(["1.0.0", "1.0.99", "", "unknown", "1.1.0-preview"])("runner %s cannot receive a mode it might execute as coding", version => {
+    const result = routeExecution({ policy: effectiveExecutionPolicy(), projectId: "project", ownerId: "owner", now, verificationOnly: true, hosts: [host("local", { version })], accounts: [] });
+    expect(result.host).toBeUndefined();
+    expect(result.reason).toContain("1.1.0+");
+  });
+  test.each<Partial<ExecutionHost>>([{ revoked: true }, { paused: true }, { ownerId: "other" }, { projectIds: [] }, { activeRunIds: ["coding"] }, { lastSeenAt: now - 60000 }])("verification preserves host authorization and availability: %j", patch => {
+    const result = routeExecution({ policy: effectiveExecutionPolicy(), projectId: "project", ownerId: "owner", now, verificationOnly: true,
+      hosts: [host("local", { version: "1.1.0", ...patch })], accounts: [] });
+    expect(result.host).toBeUndefined();
+    expect(result.needsCloud).toBe(false);
+  });
+  test("Apple verification cannot fall back to Linux even with an available updated runner", () => {
+    const result = routeExecution({ policy: effectiveExecutionPolicy({ platform: "apple", cloudEnabled: true }), projectId: "project", ownerId: "owner", now, verificationOnly: true,
+      hosts: [host("local", { version: "1.1.0" }), host("mac", { kind: "mac", platform: "darwin", version: "1.1.0", ...offline }), host("cloud", { kind: "boxd", version: "1.1.0" })], accounts: [] });
+    expect(result.host).toBeUndefined(); expect(result.needsCloud).toBe(false);
+  });
+});
+
 describe("quota telemetry and exact selection priority", () => {
   const exhausted: ExecutionQuotaWindow = { id: "shared", label: "Shared subscription", scope: "account", usedPercent: 100, resetsAt: now + 60000 };
   test.each<[string, ExecutionQuotaWindow, boolean]>([

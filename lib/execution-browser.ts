@@ -75,6 +75,7 @@ function startRun(principal: ExecutionPrincipal, body: Record<string, unknown>, 
   if (existing) {
     existing.policy = policy; existing.attempted = []; existing.run.status = "queued"; existing.run.reason = undefined; existing.run.updatedAt = Date.now(); existing.cancelRequested = false;
     existing.grantId = principal.grantId; existing.run.baseBranch = policy.baseBranch; existing.run.environment = policy.environment;
+    existing.run.verificationOnly = undefined; existing.run.verifiedBaseSha = undefined;
     saveExecutionRun(existing); appendExecutionEvent(existing.run.id, { type: "status", text: "Requester resumed the stopped run with the current policy" });
     return { run: existing.run };
   }

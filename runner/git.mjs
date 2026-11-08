@@ -27,7 +27,8 @@ export class Workspace {
     this.run = run; this.temporary = temporary; this.signal = options.signal; this.onOutput = options.onOutput;
     this.allowLocal = options.allowLocal === true;
     this.repository = resolve(root, 'repositories', hash(run.repositoryUrl));
-    this.path = resolve(root, 'worktrees', hash(run.id).slice(0, 24));
+    this.attemptKey = hash(`${run.id}:${run.attempt ?? 1}`).slice(0, 24);
+    this.path = resolve(root, 'worktrees', this.attemptKey);
     this.checkpointBranch = `origin-checkpoints/${hash(run.id).slice(0, 24)}`;
   }
   git(args, cwd = this.path, extra = {}) {
@@ -46,20 +47,40 @@ export class Workspace {
     await mkdir(resolve(this.path, '..'), { recursive: true, mode: 0o700 });
     try { await access(join(this.repository, 'HEAD')); }
     catch { await this.git(['init', '--bare', this.repository], this.repository); }
-    await this.git(['fetch', '--no-tags', '--', this.run.repositoryUrl, `+refs/heads/${this.run.baseBranch}:refs/origin/base`], this.repository);
-    this.baseSha = (await this.git(['rev-parse', 'refs/origin/base'], this.repository)).stdout.trim();
+    this.baseRef = `refs/origin/bases/${this.attemptKey}`;
+    await this.fetchBase();
     let start = this.baseSha;
     if (this.run.resume?.checkpointSha) {
-      if (!/^[a-f0-9]{40,64}$/.test(this.run.resume.checkpointSha)) throw new Error('Invalid checkpoint SHA');
+      if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(this.run.resume.checkpointSha)) throw new Error('Invalid checkpoint SHA');
       await this.git(['fetch', '--no-tags', '--', this.run.repositoryUrl, this.run.resume.checkpointSha], this.repository);
-      await this.git(['merge-base', '--is-ancestor', this.baseSha, this.run.resume.checkpointSha], this.repository);
       start = this.run.resume.checkpointSha;
     }
     // No reset, force, or reuse: a duplicate claim can never overwrite an existing checkout.
-    await this.git(['worktree', 'add', '-b', this.run.branch, this.path, start], this.repository);
+    await this.git(['worktree', 'add', '--detach', this.path, start], this.repository);
     this.gitDirectory = (await this.git(['rev-parse', '--absolute-git-dir'])).stdout.trim();
     if (!this.gitDirectory.startsWith(`${this.repository}/worktrees/`)) throw new Error('Git worktree metadata escaped the isolated repository');
     return this.path;
+  }
+  async fetchBase() {
+    await this.git(['fetch', '--no-tags', '--', this.run.repositoryUrl, `+refs/heads/${this.run.baseBranch}:${this.baseRef}`], this.repository);
+    this.baseSha = (await this.git(['rev-parse', this.baseRef], this.repository)).stdout.trim();
+  }
+  async alignBase() {
+    if ((await this.git(['status', '--porcelain'])).stdout) throw new RunError('needs_approval', 'Cannot align a dirty worktree; checkpoint retained');
+    const previousBase = this.baseSha;
+    await this.fetchBase();
+    const target = this.baseSha;
+    this.baseSha = previousBase;
+    const merge = await this.git(['merge', '--no-edit', target], this.path, { allowFailure: true });
+    if (merge.code !== 0) {
+      // Only undo our own automatic merge, never the task checkpoint or another checkout.
+      const pending = await this.git(['rev-parse', '--verify', 'MERGE_HEAD'], this.path, { allowFailure: true });
+      if (pending.code === 0) await this.git(['merge', '--abort']);
+      throw new RunError('needs_approval', `Cannot cleanly align the task checkpoint with current ${this.run.baseBranch}; resolve the merge conflict or Git permission failure before continuing`);
+    }
+    await this.git(['merge-base', '--is-ancestor', target, 'HEAD']);
+    this.baseSha = target;
+    return target;
   }
   async assertNoSecrets(redactor, revision) {
     const objects = (await this.git(['rev-list', '--objects', `${this.baseSha}..${revision}`])).stdout.trim().split('\n').filter(Boolean);
@@ -74,6 +95,7 @@ export class Workspace {
     }
   }
   async checkpoint(summary, redactor, { push = true } = {}) {
+    if ((await this.git(['diff', '--name-only', '--diff-filter=U'])).stdout.trim()) throw new RunError('needs_approval', 'Unresolved merge conflicts remain; preserving the previous checkpoint without committing conflict markers');
     await this.git(['add', '--all', '--', '.']);
     const dirty = await this.git(['diff', '--cached', '--quiet'], this.path, { allowFailure: true });
     if (dirty.code === 1) await this.git(['commit', '-m', summary]);

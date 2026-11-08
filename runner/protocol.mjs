@@ -15,14 +15,19 @@ export class WorkerClient {
 }
 export class RunLedger {
   constructor(root) { this.directory = join(root, 'runs'); }
-  path(id) { return join(this.directory, `${hash(id)}.json`); }
+  path(id, attempt = 1) { return join(this.directory, `${hash(attempt === 1 ? id : JSON.stringify([id, attempt]))}.json`); }
   async claim(run) {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
+    const attempt = run.attempt ?? 1;
+    if (!Number.isSafeInteger(attempt) || attempt < 1) throw new RunError('failed', 'Invalid execution attempt');
+    const previous = (await this.records()).filter(record => record.id === run.id);
+    if (previous.some(record => (record.attempt ?? 1) >= attempt || record.leaseToken === run.leaseToken)) throw new RunError('failed', 'Duplicate execution attempt refused; prior receipts retained');
+    if (previous.some(record => record.state !== 'acknowledged')) throw new RunError('failed', 'Prior attempt lacks an acknowledged native stop receipt; replacement refused');
     let file;
-    try { file = await open(this.path(run.id), 'wx', 0o600); }
+    try { file = await open(this.path(run.id, attempt), 'wx', 0o600); }
     catch (error) { if (error.code === 'EEXIST') throw new RunError('failed', 'Duplicate execution refused: run already has a durable local receipt'); throw error; }
     // Do not persist prompt, environment values, git tokens, or account auth.
-    const record = { id: run.id, leaseToken: run.leaseToken, state: 'claimed', sequence: 0, outbox: [], messages: [], startedAt: Date.now() };
+    const record = { id: run.id, attempt, leaseToken: run.leaseToken, state: 'claimed', sequence: 0, outbox: [], messages: [], startedAt: Date.now() };
     try { await file.writeFile(JSON.stringify(record)); await file.sync(); } finally { await file.close(); }
     return record;
   }
@@ -38,7 +43,7 @@ export class EventJournal {
     this.record.outboxBytes ??= Buffer.byteLength(JSON.stringify(record.outbox));
   }
   mutate(fn) {
-    const operation = this.writes.then(async () => { fn(this.record); await atomicJson(this.ledger.path(this.record.id), this.record); });
+    const operation = this.writes.then(async () => { fn(this.record); await atomicJson(this.ledger.path(this.record.id, this.record.attempt), this.record); });
     this.writes = operation.catch(() => {});
     return operation;
   }

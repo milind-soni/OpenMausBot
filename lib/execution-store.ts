@@ -30,6 +30,9 @@ export type CloudAllocation = {
   runnerStoppedAt?: number;
   stopProof?: { kind: "provider-cold-stop" | "guest-supervisor-stop"; observedAt: number; machineId: string; environmentClean: boolean };
   runDeadline?: { runId: string; attempt: number; deadline: number };
+  herdr?: { version: string; session: string; user: "origin-runner"; verifiedAt: number };
+  herdrConnectionUntil?: number;
+  herdrSshEnabled?: boolean;
 };
 let database: DatabaseSync | undefined;
 export function executionDb() {

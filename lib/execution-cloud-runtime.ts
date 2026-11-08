@@ -5,6 +5,9 @@ import { routeExecution } from "./execution-policy";
 import { acquireExecutionLock, atomicExecution, cloudAllocations, executionAccounts, executionHosts, executionRuns, executionSetting, executionUnstoppedHostRuns, executionHostHasAttempt, readExecutionHost, readExecutionRun, releaseExecutionLock, saveCloudAllocation, patchCloudAllocation, saveExecutionRun, setExecutionSetting, type CloudAllocation, type ExecutionPrincipal, type PrivateRun } from "./execution-store";
 import { openIntegration, sealIntegration } from "./githubConnection";
 import { originUrl } from "./integration-bridge";
+import { CLOUD_HERDR_BIN, CLOUD_HERDR_ENV, CLOUD_HERDR_SESSION, CLOUD_HERDR_UNIT, CLOUD_HERDR_VERSION, cloudHerdrService, installCloudHerdr } from "./execution-cloud/herdr";
+import { setBoxdHerdrSsh } from "./execution-cloud/boxd";
+import { VERSION as RUNNER_VERSION } from "../runner/security.mjs";
 
 // Journal fields are intentionally persisted with the allocation, not process-local promises.
 // A crash after admission of a create never authorizes a second create.
@@ -41,7 +44,7 @@ function safeFailure(error: unknown) {
   return error instanceof CloudProviderError ? `${error.provider} ${error.operation}: ${error.category}; outcome ${error.outcome}. No provider switch was made.` : "Cloud operation unavailable; inspect the private worker and controller configuration. No credentials or provider response are exposed.";
 }
 function route(record: PrivateRun) {
-  return routeExecution({ policy: record.policy, projectId: record.run.projectId, ownerId: record.run.requestedBy, hosts: executionHosts(record.run.teamId).map(host => observedExecutionHost(host)), accounts: executionAccounts(record.run.teamId, record.run.requestedBy), attempted: record.attempted });
+  return routeExecution({ policy: record.policy, projectId: record.run.projectId, ownerId: record.run.requestedBy, hosts: executionHosts(record.run.teamId).map(host => observedExecutionHost(host)), accounts: executionAccounts(record.run.teamId, record.run.requestedBy), attempted: record.attempted, verificationOnly: record.run.verificationOnly });
 }
 function unchangedQueued(previous: PrivateRun) {
   const current = readExecutionRun(previous.run.id);
@@ -93,7 +96,7 @@ function credentials(allocation: Pick<Allocation, "teamId" | "provider">, requir
 }
 async function command(allocation: Allocation, apiKey: string, script: string, env?: Record<string, string>, timeoutSeconds = 120) {
   const result = await executeCloudCommand({ provider: allocation.provider, apiKey, id: allocation.machineId!, command: script, env, timeoutSeconds });
-  if (result.exitCode !== 0) throw new CloudRuntimePrerequisiteError("Private worker setup/lifecycle command failed. Required: systemd Linux, root or passwordless sudo, runuser, git, public HTTPS access to Origin/nodejs.org/npm, and a compatible x64/arm64 runtime. Inspect the private origin-runner service journal; no authentication is assumed.");
+  if (result.exitCode !== 0) throw new CloudRuntimePrerequisiteError("Private worker setup/lifecycle command failed. Required: systemd Linux, root or passwordless sudo, runuser, git, public HTTPS access to Origin/nodejs.org/npm/releases.herdr.dev, and a compatible x64/arm64 runtime. Inspect the private origin-runner service journal; no authentication is assumed.");
   return result.stdout.trim();
 }
 const asRoot = (script: string) => `if [ "$(id -u)" -eq 0 ]; then bash -c ${q(script)}; else sudo -n bash -c ${q(script)}; fi`;
@@ -108,6 +111,7 @@ command -v git >/dev/null
 test -d /run/systemd/system
 id origin-runner >/dev/null 2>&1 || useradd --create-home --home-dir ${ROOT} --shell /bin/bash origin-runner
 test "$(getent passwd origin-runner | cut -d: -f6)" = ${ROOT}
+test "$(id -u origin-runner)" -ne 0
 install -d -m 700 -o origin-runner -g origin-runner ${ROOT} ${ROOT}/.config ${ROOT}/.config/origin-runner ${DATA}
 if ! test -x ${NODE} || ! test -x /opt/origin-node/bin/npm || ! ${NODE} -e 'process.exit(Number(process.versions.node.split(".")[0]) === 24 ? 0 : 1)'; then
   existing=$(command -v node || true)
@@ -141,7 +145,10 @@ const pinnedTools = [
   { harness: "omp", package: "@oh-my-pi/pi-coding-agent", version: "18.18.0", cli: "omp", integrity: "sha512-OJlxyXCX/hz2cjS1vqd7+UEjnm8Jh/JHE8xnUL/DisqVLxCB6hJCCc7xa3d7lm80AUYhwDClazWk/FgZxE998g==" },
 ];
 const installHarnesses = asWorker(`set -eu
-export npm_config_userconfig=/dev/null npm_config_globalconfig=/dev/null npm_config_registry=https://registry.npmjs.org npm_config_audit=false npm_config_fund=false npm_config_update_notifier=false
+export npm_config_userconfig=${DATA}/.npmrc npm_config_globalconfig=${DATA}/.npm-globalrc npm_config_registry=https://registry.npmjs.org npm_config_audit=false npm_config_fund=false npm_config_update_notifier=false
+umask 077
+: > "$npm_config_userconfig"
+: > "$npm_config_globalconfig"
 ${NODE} --input-type=module -e ${q(`import {readFile,writeFile,mkdir,rename,symlink,realpath,lstat,stat,access,rm} from 'node:fs/promises';import {execFileSync} from 'node:child_process';import {randomUUID} from 'node:crypto';
 const root=${JSON.stringify(TOOLS)},configPath=${JSON.stringify(CONFIG)},bun=${JSON.stringify(BUN)},pins=${JSON.stringify(pinnedTools)};
 const json=async p=>JSON.parse(await readFile(p,'utf8'));
@@ -188,7 +195,7 @@ config.managedTools={schemaVersion:1,root};const temporary=configPath+'.'+random
 type Bundle = { version: string; sha256: string; files: { path: string; content: string; sha256: string }[] };
 function validateBundle(value: unknown): Bundle {
   const bundle = value as Bundle;
-  if (!bundle || bundle.version !== "1.0.0" || !Array.isArray(bundle.files) || !bundle.files.length || bundle.files.length > 100) throw new Error("Unsupported runner bundle");
+  if (!bundle || bundle.version !== RUNNER_VERSION || !Array.isArray(bundle.files) || !bundle.files.length || bundle.files.length > 100) throw new Error("Unsupported runner bundle");
   const paths = new Set<string>();
   let bytes = 0;
   for (const file of bundle.files) {
@@ -227,7 +234,7 @@ const stage=${JSON.stringify(`${ROOT}/runner-stage-`)}+b.sha256;await rm(stage,{
 for(const f of b.files){const p=stage+'/'+f.path;await mkdir(p.slice(0,p.lastIndexOf('/')),{recursive:true,mode:448});await writeFile(p,f.content,{mode:384});}
 await rm(${JSON.stringify(`${ROOT}/runner`)},{force:true,recursive:true});await rename(stage,${JSON.stringify(`${ROOT}/runner`)});`)}`);
 }
-const service = `[Unit]\nDescription=Origin private cloud worker\nAfter=network-online.target\nWants=network-online.target\n[Service]\nType=simple\nUser=origin-runner\nGroup=origin-runner\nEnvironment=HOME=${ROOT}\nEnvironment=PATH=${WORKER_PATH}\nWorkingDirectory=${ROOT}\nExecStart=${NODE} ${DATA}/installation/launcher.mjs run --config ${CONFIG}\nRestart=on-failure\nRestartSec=15\nKillMode=control-group\nTimeoutStopSec=90\nUMask=0077\nNoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nReadWritePaths=${ROOT}\nPrivateTmp=yes\n[Install]\nWantedBy=multi-user.target\n`;
+const service = `[Unit]\nDescription=Origin private cloud worker\nAfter=network-online.target\nWants=network-online.target\n[Service]\nType=simple\nUser=origin-runner\nGroup=origin-runner\nEnvironment=HOME=${ROOT}\nEnvironment=HC_SESSION=${CLOUD_HERDR_SESSION}\nEnvironment=PATH=${WORKER_PATH}\nWorkingDirectory=${ROOT}\nExecStart=${NODE} ${DATA}/installation/launcher.mjs run --config ${CONFIG}\nRestart=on-failure\nRestartSec=15\nKillMode=control-group\nTimeoutStopSec=90\nUMask=0077\nNoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nReadWritePaths=${ROOT}\nPrivateTmp=yes\n[Install]\nWantedBy=multi-user.target\n`;
 async function bootstrap(allocation: Allocation, apiKey: string, authorize: () => Promise<ExecutionPrincipal>) {
   const execute = async (script: string, env?: Record<string, string>, timeoutSeconds?: number) => {
     await authorize();
@@ -241,6 +248,15 @@ async function bootstrap(allocation: Allocation, apiKey: string, authorize: () =
   await authorize();
   persist(allocation, { status: "bootstrapping" });
   await execute(prepareMachine, undefined, 240);
+  if (allocation.herdr?.version !== CLOUD_HERDR_VERSION) {
+    await execute(asRoot(installCloudHerdr), undefined, 240);
+    await execute(asRoot(`set -eu; printf '%s' ${q(cloudHerdrService(WORKER_PATH))} > /etc/systemd/system/${CLOUD_HERDR_UNIT}; chmod 644 /etc/systemd/system/${CLOUD_HERDR_UNIT}; systemctl daemon-reload; systemctl start ${CLOUD_HERDR_UNIT}; systemctl is-active --quiet ${CLOUD_HERDR_UNIT}`));
+    const version = await execute(asWorker(`${CLOUD_HERDR_BIN} --version`));
+    if (version !== `hc ${CLOUD_HERDR_VERSION}`) throw new CloudRuntimePrerequisiteError("The private Herdr core version could not be verified.");
+    persist(allocation, { herdr: { version: CLOUD_HERDR_VERSION, session: CLOUD_HERDR_SESSION, user: "origin-runner", verifiedAt: Date.now() } });
+  } else {
+    await execute(asRoot(`systemctl start ${CLOUD_HERDR_UNIT}; systemctl is-active --quiet ${CLOUD_HERDR_UNIT}`));
+  }
   // A previously enrolled service must not be overwritten while it could still be running.
   const running = await execute(asRoot(`if systemctl is-active --quiet ${UNIT}; then printf active; else printf inactive; fi`));
   if (running === "active") {
@@ -272,6 +288,7 @@ async function bootstrap(allocation: Allocation, apiKey: string, authorize: () =
     const token = openIntegration(allocation.enrollment!.sealedToken, `cloud-enrollment:${allocation.id}`);
     await execute(`printf '%s' "$ORIGIN_ENROLLMENT_TOKEN" | ${asWorker(`${NODE} ${CLI} enroll --url ${q(release.origin)} --name ${q(allocation.name)} --kind ${allocation.provider} --config ${CONFIG}`)}`, { ORIGIN_ENROLLMENT_TOKEN: token });
   }
+  await execute(asWorker(`${NODE} --input-type=module -e ${q(`import {readFile,writeFile,rename} from 'node:fs/promises';import {randomUUID} from 'node:crypto';const path=${JSON.stringify(CONFIG)};const config=JSON.parse(await readFile(path,'utf8'));config.herdr={...config.herdr,enabled:true,cloudConnections:false};const stage=path+'.'+randomUUID();await writeFile(stage,JSON.stringify(config),{mode:384,flag:'wx'});await rename(stage,path);`)}`));
   await execute(asWorker(`if ! test -L ${DATA}/installation/current; then ${NODE} ${CLI} install --files-only --config ${CONFIG}; fi`));
   await execute(asWorker(`${NODE} ${CLI} resume --config ${CONFIG}`));
   await execute(asRoot(`set -eu; printf '%s' ${q(service)} > /etc/systemd/system/${UNIT}; chmod 644 /etc/systemd/system/${UNIT}; systemctl daemon-reload; systemctl start ${UNIT}; systemctl is-active --quiet ${UNIT}`));
@@ -346,8 +363,8 @@ async function provision(record: PrivateRun) {
       reason(record, `Starting the existing private ${allocation.provider} worker; native CLI login is preserved on its disk`); return;
     }
     if (machine.state === "starting") { reason(record, `${allocation.provider} private machine is starting`); return; }
-    if (allocation.status !== "ready") {
-      reason(record, `Bootstrapping the existing private ${allocation.provider} worker: verified runner release, Node 24, pinned coding CLIs and scoped enrollment. This does not authenticate a model account.`);
+    if (allocation.status !== "ready" || allocation.herdr?.version !== CLOUD_HERDR_VERSION) {
+      reason(record, `Bootstrapping the existing private ${allocation.provider} worker: verified runner and nonroot Herdr core, Node 24, pinned coding CLIs and scoped enrollment. This does not authenticate a model account.`);
       await bootstrap(allocation, keys.apiKey, authorize);
     }
     if (blockIdleSetup(record, allocation)) return;
@@ -367,6 +384,7 @@ function blockIdleSetup(record: PrivateRun, allocation: Allocation) {
   if (!current || !route(current).needsCloud) return false;
   const host = allocation.hostId ? readExecutionHost(allocation.hostId) : undefined;
   if (host && Date.now() - host.lastSeenAt <= 45_000 && !host.activeRunIds.length && !host.paused && !host.revoked) {
+    if (current.run.verificationOnly) return false;
     const accounts = executionAccounts(current.run.teamId, current.run.requestedBy);
     const bound = current.policy.fallback.some(selection => host.capabilities.includes(selection.harness) && accounts.some(account => account.id === selection.accountId && account.authenticated && account.hostIds.includes(host.id)));
     reason(current, bound
@@ -401,6 +419,16 @@ async function maintainAllocation(allocation: Allocation) {
     const observed = cloudAllocations(allocation.teamId).find(row => row.id === allocation.id);
     if (!observed || observed.machineId !== input.id || observed.provider !== input.provider) return;
     allocation = observed as Allocation;
+    if (allocation.provider === "boxd" && allocation.herdrSshEnabled && (!allocation.herdrConnectionUntil || Date.now() > allocation.herdrConnectionUntil)) {
+      try {
+        await setBoxdHerdrSsh(input, false);
+        persist(allocation, { herdrSshEnabled: false });
+      } catch {
+        // Local grants still expire. Failure to revoke an optional viewer must
+        // never prevent the hard deadline or idle billing stop below.
+        persist(allocation, { error: "Desktop SSH revocation is unconfirmed; provider stop remains mandatory when due." });
+      }
+    }
     if (machine.state === "stopped") {
       const stopProof: CloudAllocation["stopProof"] = allocation.provider === "boxd"
         ? { kind: "provider-cold-stop", observedAt: Date.now(), machineId: allocation.machineId!, environmentClean: Boolean(allocation.runnerStoppedAt) }
@@ -425,7 +453,13 @@ async function maintainAllocation(allocation: Allocation) {
       const deadline = allocation.runDeadline!.deadline;
       if (Date.now() >= deadline) {
         persist(allocation, { status: "stopping", error: "Run deadline elapsed; awaiting verified process-stop evidence. Execution and environment cleanup are not yet confirmed." });
-        await stopCloudMachine(input);
+        // Viewer grants never delay the immutable hard run deadline.
+        try {
+          if (allocation.provider === "boxd" && allocation.herdrSshEnabled) {
+            await setBoxdHerdrSsh(input, false);
+            persist(allocation, { herdrSshEnabled: false, herdrConnectionUntil: undefined });
+          }
+        } finally { await stopCloudMachine(input); }
         return;
       }
       if (allocation.provider === "boat" && record.leaseHash && record.leaseExpiresAt > Date.now() && (!allocation.ttlRefreshedAt || Date.now() - allocation.ttlRefreshedAt > 60_000)) {
@@ -449,6 +483,10 @@ async function maintainAllocation(allocation: Allocation) {
     // Claim checks this durable fence inside its own transaction before granting a lease.
     persist(allocation, { status: "stopping", stopRequestedAt: allocation.stopRequestedAt ?? Date.now() });
     if (allocation.hostId && executionUnstoppedHostRuns(allocation.hostId).length) return;
+    // Stop is fenced before any desktop grant can be renewed. Native desktop
+    // helpers remove their owned alias and kill the transport at this deadline.
+    // A disconnected laptop cannot hold paid capacity beyond the bounded grant.
+    if (allocation.herdrConnectionUntil && Date.now() <= allocation.herdrConnectionUntil + 5_000) return;
     if (!allocation.hostId || !allocation.bootstrapVerified || allocation.recoveryRequired && !executionHostHasAttempt(allocation.hostId)) {
       // The claim fence and absence of any attempted run prove no run environment was delivered.
       await stopCloudMachine(input); return;
@@ -465,6 +503,7 @@ async function maintainAllocation(allocation: Allocation) {
     const inactive = await command(allocation, keys.apiKey, asRoot(`if systemctl is-active --quiet ${UNIT}; then printf active; else printf inactive; fi`));
     if (!status.stopped || status.activeRunId || typeof status.updatedAt !== "number" || status.updatedAt < allocation.lastActiveAt || inactive !== "inactive") return;
     persist(allocation, { runnerStoppedAt: Math.min(requestedAt, status.updatedAt) });
+    if (allocation.herdr) await command(allocation, keys.apiKey, asRoot(`systemctl stop ${CLOUD_HERDR_UNIT}`));
     await stopCloudMachine(input);
     // A subsequent provider observation records the separate Boxd or verified guest receipt.
   } catch (error) { persist(allocation, { error: safeFailure(error) }); }
@@ -489,4 +528,52 @@ export function cloudExecutionStopProof(teamId: string, hostId: string) {
   const allocation = matches[0], proof = allocation.stopProof;
   if (!proof || proof.machineId !== allocation.machineId || !["stopped", "failed"].includes(allocation.status)) return undefined;
   return { ...proof, ...(allocation.runDeadline ? { runId: allocation.runDeadline.runId, attempt: allocation.runDeadline.attempt } : {}) };
+}
+
+export type CloudHerdrConnectionPlan = {
+  schemaVersion: 1; allocationId: string; hostId: string; provider: "boxd" | "boat"; desktop: "nixos" | "macos";
+  machineId: string; machineName: string; name: string; issuedAt: number; expiresAt: number;
+  core: { version: string; session: string; user: "origin-runner" };
+  remotePrefix: string;
+};
+
+// Explicit user action, never discovery. authorize must revalidate Origin
+// authorization, not return a cached or browser-supplied principal.
+export async function cloudHerdrConnectionPlan(
+  allocationId: string, provider: "boxd" | "boat", desktop: "nixos" | "macos", authorize: () => Promise<ExecutionPrincipal>,
+): Promise<CloudHerdrConnectionPlan> {
+  const principal = await authorize();
+  const permitted = (value: ExecutionPrincipal, row: Allocation) => value.admin && value.write && value.teamId === row.teamId && value.userId === row.ownerId && value.projectIds.includes(row.projectId);
+  const row = (cloudAllocations(principal.teamId) as Allocation[]).find(value => value.id === allocationId);
+  if (!row || row.provider !== provider || !permitted(principal, row) || !["nixos", "macos"].includes(desktop)) throw new CloudRuntimePrerequisiteError("The selected private allocation is not authorized.");
+  const lockName = allocationLock(row), owner = acquireExecutionLock(lockName, LOCK_MS);
+  if (!owner) throw new CloudRuntimePrerequisiteError("The private allocation is changing; try again after its lifecycle operation.");
+  try {
+    const current = () => {
+      const allocation = (cloudAllocations(row.teamId) as Allocation[]).find(value => value.id === row.id);
+      const host = allocation?.hostId ? readExecutionHost(allocation.hostId) : undefined;
+      if (!allocation || allocation.provider !== provider || allocation.machineId !== row.machineId || allocation.status !== "ready" || allocation.recoveryRequired || allocation.stopRequestedAt || allocation.stopProof || allocation.herdr?.version !== CLOUD_HERDR_VERSION || !executionSetting<StoredCloudProvider>(row.teamId, "cloud", provider)?.enabled || !host || host.revoked || host.paused || host.teamId !== row.teamId || host.ownerId !== row.ownerId || !host.projectIds.includes(row.projectId) || Date.now() < host.lastSeenAt || Date.now() - host.lastSeenAt > 45_000) throw new CloudRuntimePrerequisiteError("Herdr access requires a verified, running, unpaused private allocation. Discovery never starts or wakes it.");
+      return allocation;
+    };
+    let allocation = current();
+    const keys = credentials(allocation, true);
+    if (!keys || !allocation.machineId) throw new CloudRuntimePrerequisiteError("The selected provider is disabled or unavailable.");
+    const machine = await getCloudMachine({ provider, apiKey: keys.apiKey, id: allocation.machineId });
+    if (machine.id !== allocation.machineId || machine.provider !== provider || machine.state !== "running" || !machine.name || !/^[a-zA-Z0-9_-]+$/.test(machine.name)) throw new CloudRuntimePrerequisiteError("The selected provider has not confirmed a running machine. No start or wake was requested.");
+    if (!permitted(await authorize(), allocation)) throw new CloudRuntimePrerequisiteError("Private allocation access was revoked.");
+    allocation = current();
+    const issuedAt = Date.now(), expiresAt = Math.min(issuedAt + 60_000, allocation.runDeadline?.deadline ?? Infinity);
+    if (expiresAt <= issuedAt) throw new CloudRuntimePrerequisiteError("The private allocation's run deadline has elapsed.");
+    // Journal BEFORE enabling a transport; a lost response still expires.
+    persist(allocation, { herdrConnectionUntil: expiresAt, ...(provider === "boxd" ? { herdrSshEnabled: true } : {}) });
+    if (provider === "boxd") await setBoxdHerdrSsh({ provider, apiKey: keys.apiKey, id: allocation.machineId! }, true);
+    if (!permitted(await authorize(), allocation)) throw new CloudRuntimePrerequisiteError("Private allocation access was revoked.");
+    current();
+    return {
+      schemaVersion: 1, allocationId, hostId: allocation.hostId!, provider, desktop, machineId: machine.id, machineName: machine.name,
+      name: `origin-${provider}-${hash(JSON.stringify([allocationId, desktop])).slice(0, 20)}`, issuedAt, expiresAt,
+      core: { version: CLOUD_HERDR_VERSION, session: CLOUD_HERDR_SESSION, user: "origin-runner" },
+      remotePrefix: `sudo -n -u origin-runner env -i ${CLOUD_HERDR_ENV} PATH=${WORKER_PATH} bash -c`,
+    };
+  } finally { releaseExecutionLock(lockName, owner); }
 }

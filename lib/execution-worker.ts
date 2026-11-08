@@ -3,6 +3,7 @@ import { z } from "zod";
 import { openIntegration, sealIntegration } from "./githubConnection";
 import { integrationBridge, originUrl } from "./integration-bridge";
 import { executionRunnerPublicKey } from "./execution-bundle";
+import { cloudHerdrConnectionPlan, type CloudHerdrConnectionPlan } from "./execution-cloud-runtime";
 import { prepareRunRepository } from "./github-execution";
 import { executionSelectionKey, routeExecution, verificationMatchesPolicy } from "./execution-policy";
 import {
@@ -29,6 +30,12 @@ const hostDescription = z.object({ name: z.string().trim().min(1).max(100), plat
 const verificationSchema = z.array(z.object({ command: z.string().max(2000), exitCode: z.number().int(), kind: z.enum(["test", "smoke"]), summary: z.string().max(3000).optional() })).max(20);
 const shaSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i);
 const updateReportsSchema = z.array(z.object({ component: z.string().min(1).max(100), currentVersion: z.string().max(120).optional(), availableVersion: z.string().max(120).optional(), status: z.enum(["unknown", "current", "available", "pending", "updating", "failed"]), message: z.string().max(1000).optional(), checkedAt: z.number().finite().nonnegative().optional() })).max(20);
+const herdrReportSchema = z.object({
+  enabled: z.boolean(), cloudConnections: z.boolean(), version: z.string().max(120).optional(),
+  status: z.enum(["ready", "unavailable", "needs_auth"]).optional(), message: z.string().max(500).optional(),
+}).strict();
+const terminalText = z.string().min(1).max(128).regex(/^[^\x00-\x1f\x7f-\x9f]+$/);
+const terminalSchema = z.object({ type: z.literal("terminal"), backend: z.literal("herdr"), coreId: terminalText, terminalId: terminalText, name: terminalText, session: terminalText }).strict();
 
 function storeUpdateReports(host: ExecutionHost, reports: ExecutionUpdate[]) {
   const updates = new Map((executionSetting<ExecutionUpdate[]>(host.teamId, "updates", host.id) ?? []).map(update => [update.component, update]));
@@ -46,7 +53,7 @@ function storeUpdateReports(host: ExecutionHost, reports: ExecutionUpdate[]) {
 
 async function hostPrincipal(host: ExecutionHost) {
   const principal = await integrationBridge<ExecutionPrincipal>("executionContext", { userId: host.ownerId, teamId: host.teamId });
-  if (!principal.write) throw new ExecutionError("Machine owner's workspace access has been revoked", 403);
+  if (!principal.write || principal.userId !== host.ownerId || principal.teamId !== host.teamId) throw new ExecutionError("Machine owner's workspace access has been revoked", 403);
   return principal;
 }
 function leaseMatches(record: PrivateRun, host: ExecutionHost, token: string) {
@@ -80,9 +87,36 @@ async function enroll(token: string, body: Record<string, unknown>) {
   });
   return { hostId: enrollment.host.id, hostToken, protocolVersion: 1, heartbeatSeconds: HEARTBEAT_SECONDS, leaseDurationSeconds: LEASE_SECONDS, runnerUpdates };
 }
+async function desktopHerdrPlans(host: ExecutionHost): Promise<CloudHerdrConnectionPlan[]> {
+  const version = /^(\d+)\.(\d+)\.(\d+)$/.exec(host.version);
+  if (!version || !(Number(version[1]) > 1 || Number(version[1]) === 1 && Number(version[2]) >= 1) || !host.herdr?.enabled || !host.herdr.cloudConnections || !["nixos", "mac"].includes(host.kind)) return [];
+  const plans: CloudHerdrConnectionPlan[] = [];
+  for (const allocation of cloudAllocations(host.teamId)) {
+    if (plans.length >= 32) break;
+    if (allocation.teamId !== host.teamId || allocation.ownerId !== host.ownerId || !host.projectIds.includes(allocation.projectId) || allocation.status !== "ready" || !allocation.hostId) continue;
+    const assertCurrent = () => {
+      const current = readExecutionHost(host.id);
+      if (!current || current.revoked || current.ownerId !== host.ownerId || current.teamId !== host.teamId || current.kind !== host.kind || !current.herdr?.enabled || !current.herdr.cloudConnections || !current.projectIds.includes(allocation.projectId) || current.lastSeenAt > Date.now() || Date.now() - current.lastSeenAt > 45_000) throw new ExecutionError("Desktop connection authorization expired", 403);
+      const cloudHost = readExecutionHost(allocation.hostId!);
+      if (!cloudHost || cloudHost.revoked || cloudHost.paused || cloudHost.teamId !== host.teamId || cloudHost.ownerId !== host.ownerId || cloudHost.kind !== allocation.provider || !cloudHost.projectIds.includes(allocation.projectId) || cloudHost.lastSeenAt > Date.now() || Date.now() - cloudHost.lastSeenAt > 45_000) throw new ExecutionError("Cloud worker authorization expired", 403);
+      const active = executionUnstoppedHostRuns(allocation.hostId!).some(record => record.run.teamId === host.teamId && record.run.requestedBy === host.ownerId && record.run.projectId === allocation.projectId && !record.run.processStopped && !record.cancelRequested && record.leaseExpiresAt > Date.now());
+      if (!active) throw new ExecutionError("No active authorized cloud task", 403);
+    };
+    const authorize = async () => {
+      assertCurrent();
+      const principal = await integrationBridge<ExecutionPrincipal>("executionContext", { userId: host.ownerId, teamId: host.teamId, projectId: allocation.projectId });
+      if (principal.userId !== host.ownerId || principal.teamId !== host.teamId || !principal.write || !principal.admin || !principal.projectIds.includes(allocation.projectId)) throw new ExecutionError("Cloud project access revoked", 403);
+      assertCurrent();
+      return principal;
+    };
+    try { plans.push(await cloudHerdrConnectionPlan(allocation.id, allocation.provider, host.kind === "mac" ? "macos" : "nixos", authorize)); }
+    catch { /* No private allocation details or provider failures cross the host boundary. */ }
+  }
+  return plans;
+}
 async function heartbeat(host: ExecutionHost, body: Record<string, unknown>) {
   const principal = await hostPrincipal(host);
-  const input = z.object({ version: z.string().max(120), platform: z.enum(["linux", "darwin"]), capabilities: z.array(executionHarness).max(5), activeRunIds: z.array(executionId).max(10), accounts: z.array(accountSchema).max(30), capacity: z.literal(1), paused: z.boolean(), updateReports: updateReportsSchema.optional() }).parse(body);
+  const input = z.object({ version: z.string().max(120), platform: z.enum(["linux", "darwin"]), capabilities: z.array(executionHarness).max(5), activeRunIds: z.array(executionId).max(10), accounts: z.array(accountSchema).max(30), capacity: z.literal(1), paused: z.boolean(), updateReports: updateReportsSchema.optional(), herdr: herdrReportSchema.optional() }).parse(body);
   if (input.platform !== host.platform) throw new ExecutionError("Machine platform changed; enroll it again");
   const accounts: ExecutionAccountReport[] = input.accounts.map(account => ({ ...account, quota: { ...account.quota, observedAt: Math.min(account.quota.observedAt, Date.now()), ...(account.quota.error ? { error: redactExecutionText(account.quota.error) } : {}) } }));
   let refreshUsage = false;
@@ -92,6 +126,7 @@ async function heartbeat(host: ExecutionHost, body: Record<string, unknown>) {
     current.lastSeenAt = Date.now(); current.version = input.version; current.capabilities = input.capabilities; current.capacity = 1;
     current.online = true; current.status = "online"; current.projectIds = current.projectIds.filter(id => principal.projectIds.includes(id));
     current.locallyPaused = input.paused; current.paused = Boolean(current.pauseRequested || current.locallyPaused);
+    current.herdr = input.herdr ? { ...input.herdr, ...(input.herdr.version ? { version: redactExecutionText(input.herdr.version).slice(0, 120) } : {}), ...(input.herdr.message ? { message: redactExecutionText(input.herdr.message).slice(0, 500) } : {}), updatedAt: Date.now() } : undefined;
     current.accountIds = [...new Set(accounts.map(account => accountIdentity(current.ownerId, account)))];
     replaceExecutionAccounts(current, accounts); saveExecutionHost(current); updateHostActivity(current);
     if (input.updateReports) storeUpdateReports(current, input.updateReports);
@@ -107,15 +142,16 @@ async function heartbeat(host: ExecutionHost, body: Record<string, unknown>) {
   const current = readExecutionHost(host.id)!;
   const known = new Set(activeHostRuns(host.id));
   const cancelRunIds = input.activeRunIds.filter(id => !known.has(id) || readExecutionRun(id)?.cancelRequested);
-  return { cancelRunIds, refreshUsage, maintenance, paused: Boolean(current.pauseRequested), serverTime: Date.now(), leaseDurationSeconds: LEASE_SECONDS };
+  const herdrPlans = await desktopHerdrPlans(current);
+  return { cancelRunIds, refreshUsage, maintenance, herdrPlans, paused: Boolean(current.pauseRequested), serverTime: Date.now(), leaseDurationSeconds: LEASE_SECONDS };
 }
 async function claim(host: ExecutionHost) {
   await hostPrincipal(host);
   if (host.paused || activeHostRuns(host.id).length >= host.capacity) return { run: null, reason: "Machine paused or busy" };
   if ((host.kind === "boxd" || host.kind === "boat") && executionSetting<StoredCloudProvider>(host.teamId, "cloud", host.kind)?.enabled !== true) return { run: null, reason: "Cloud provider is disabled" };
   for (const candidate of executionRuns(host.teamId, true).filter(record => record.run.status === "queued" && record.run.requestedBy === host.ownerId && host.projectIds.includes(record.run.projectId)).sort((a, b) => a.run.createdAt - b.run.createdAt)) {
-    const route = routeExecution({ policy: candidate.policy, projectId: candidate.run.projectId, ownerId: candidate.run.requestedBy, hosts: executionHosts(host.teamId).map(host => observedExecutionHost(host)), accounts: executionAccounts(host.teamId, host.ownerId), attempted: candidate.attempted });
-    if (route.host?.id !== host.id || !route.selection) continue;
+    const route = routeExecution({ policy: candidate.policy, projectId: candidate.run.projectId, ownerId: candidate.run.requestedBy, hosts: executionHosts(host.teamId).map(host => observedExecutionHost(host)), accounts: candidate.run.verificationOnly ? [] : executionAccounts(host.teamId, host.ownerId), attempted: candidate.attempted, verificationOnly: candidate.run.verificationOnly });
+    if (route.host?.id !== host.id || !candidate.run.verificationOnly && !route.selection) continue;
     await revalidateExecutionPrincipal(candidate);
     const repository = await prepareRunRepository({ projectId: candidate.run.projectId, taskId: candidate.run.taskId, baseBranch: candidate.policy.baseBranch });
     await revalidateExecutionPrincipal(candidate);
@@ -123,32 +159,37 @@ async function claim(host: ExecutionHost) {
     const leaseToken = randomBytes(32).toString("base64url");
     const accepted = atomicExecution(() => {
       const record = readExecutionRun(candidate.run.id), currentHost = readExecutionHost(host.id);
-      if (!record || record.run.status !== "queued" || record.cancelRequested || !currentHost || currentHost.paused || currentHost.revoked || activeHostRuns(host.id).length >= currentHost.capacity) return null;
+      if (!record || record.run.status !== "queued" || !record.run.processStopped || record.cancelRequested || !currentHost || currentHost.paused || currentHost.revoked || activeHostRuns(host.id).length >= currentHost.capacity) return null;
       const cloud = currentHost.kind === "boxd" || currentHost.kind === "boat";
       const allocation = cloud ? cloudAllocations(host.teamId).find(allocation => allocation.hostId === host.id) : undefined;
       if (cloud && (executionSetting<StoredCloudProvider>(host.teamId, "cloud", currentHost.kind)?.enabled !== true || allocation?.status !== "ready")) return null;
       if (executionSetting(host.teamId, "maintenance", host.id)) return null;
-      const currentRoute = routeExecution({ policy: record.policy, projectId: record.run.projectId, ownerId: host.ownerId, hosts: executionHosts(host.teamId).map(host => observedExecutionHost(host)), accounts: executionAccounts(host.teamId, host.ownerId), attempted: record.attempted });
-      if (currentRoute.host?.id !== host.id || !currentRoute.selection) return null;
-      const binding = executionAccountBinding(currentRoute.selection, host.id, record.policy.allowPaidApi);
-      if (!binding || binding.authKind === "unknown") return null;
+      const currentRoute = routeExecution({ policy: record.policy, projectId: record.run.projectId, ownerId: host.ownerId, hosts: executionHosts(host.teamId).map(host => observedExecutionHost(host)), accounts: record.run.verificationOnly ? [] : executionAccounts(host.teamId, host.ownerId), attempted: record.attempted, verificationOnly: record.run.verificationOnly });
+      if (currentRoute.host?.id !== host.id) return null;
+      const selection = record.run.verificationOnly ? record.run.selection : currentRoute.selection;
+      if (!selection || record.run.verificationOnly && !record.run.checkpoint) return null;
+      const binding = record.run.verificationOnly ? undefined : executionAccountBinding(selection, host.id, record.policy.allowPaidApi);
+      const billingKind = record.run.verificationOnly ? record.billingKind : binding?.authKind;
+      if (!billingKind || billingKind === "unknown") return null;
       const environment = executionSetting<StoredEnvironment>(host.teamId, "environment", `${record.run.projectId}:${record.policy.environment}`);
       if (environment && (!environment.automationEnabled || !environment.hostIds.includes(host.id))) {
         record.run.reason = "This environment is not authorized for the selected machine"; record.run.updatedAt = Date.now(); saveExecutionRun(record); return null;
       }
       const variables = environment ? JSON.parse(openIntegration(environment.sealed, `execution-environment:${host.teamId}:${environment.id}`)) as Record<string, string> : {};
-      record.attemptStartedAt = Date.now(); record.attemptUsage = { inputTokens: 0, outputTokens: 0, estimatedApiUsd: 0 }; record.billingKind = binding.authKind;
+      record.attemptStartedAt = Date.now(); record.attemptUsage = { inputTokens: 0, outputTokens: 0, estimatedApiUsd: 0 }; record.billingKind = billingKind;
       record.environmentRevision = environment?.updatedAt ?? 0;
-      record.run.status = "preparing"; record.run.hostId = host.id; record.run.selection = currentRoute.selection; record.run.attempt += 1;
+      record.run.status = "preparing"; record.run.hostId = host.id; record.run.selection = selection; record.run.attempt += 1;
       record.run.updatedAt = Date.now(); record.run.reason = undefined; record.run.processStopped = false; record.run.verification = [];
+      record.run.verifiedBaseSha = undefined;
+      record.run.herdr = undefined;
       record.leaseHash = executionTokenHash(leaseToken); record.leaseExpiresAt = Date.now() + LEASE_SECONDS * 1000; record.sequence = 0;
       record.sealedEnvironment = sealRunEnvironment(record.run.id, variables);
       if (repository.gitCredential) { record.sealedGitCredential = sealIntegration(JSON.stringify(repository.gitCredential), `execution-git:${record.run.id}`); record.gitCredentialExpiresAt = repository.gitCredential.expiresAt; }
       if (allocation) patchCloudAllocation(allocation.id, { runDeadline: { runId: record.run.id, attempt: record.run.attempt, deadline: record.attemptStartedAt + record.policy.timeoutSeconds * 1000 + 300000 }, runnerStoppedAt: undefined, stopProof: undefined });
-      saveExecutionRun(record); appendExecutionEvent(record.run.id, { type: "status", text: `Claimed by ${host.name} using ${currentRoute.selection.harness} / ${currentRoute.selection.model}` }); updateHostActivity(currentHost);
-      const run: ExecutionWorkerRun = { id: record.run.id, taskId: record.run.taskId, projectId: record.run.projectId, leaseToken, leaseDurationSeconds: LEASE_SECONDS,
+      saveExecutionRun(record); appendExecutionEvent(record.run.id, { type: "status", text: record.run.verificationOnly ? `Claimed by ${host.name} to align and re-verify the checkpoint; no model will run` : `Claimed by ${host.name} using ${selection.harness} / ${selection.model}` }); updateHostActivity(currentHost);
+      const run: ExecutionWorkerRun = { id: record.run.id, attempt: record.run.attempt, verificationOnly: record.run.verificationOnly, taskId: record.run.taskId, projectId: record.run.projectId, leaseToken, leaseDurationSeconds: LEASE_SECONDS,
         repositoryUrl: record.run.repositoryUrl, baseBranch: record.policy.baseBranch, branch: record.run.branch, environment: record.policy.environment, prompt: record.prompt,
-        selection: { ...currentRoute.selection, accountId: binding.id, logicalAccountId: currentRoute.selection.accountId }, billingKind: binding.authKind, verificationCommands: record.policy.verificationCommands, smokeCommand: record.policy.smokeCommand,
+        selection: { ...selection, accountId: binding?.id ?? selection.accountId, logicalAccountId: selection.accountId }, billingKind, verificationCommands: record.policy.verificationCommands, smokeCommand: record.policy.smokeCommand,
         environmentVariables: variables, ...(repository.gitCredential ? { gitCredential: repository.gitCredential } : {}),
         ...(record.run.checkpoint ? { resume: { checkpointSha: record.run.checkpoint.sha, summary: record.run.checkpoint.summary } } : {}),
         timeoutSeconds: record.policy.timeoutSeconds, permissionMode: "ask", cloud: host.kind === "boxd" || host.kind === "boat" };
@@ -193,21 +234,23 @@ async function control(host: ExecutionHost, body: Record<string, unknown>) {
   });
 }
 function finished(record: PrivateRun, event: Record<string, unknown>, expired: boolean) {
-  const input = z.object({ result: z.enum(["succeeded", "failed", "cancelled", "quota", "provider_unavailable", "needs_auth", "needs_approval"]), summary: z.string().max(12000), headSha: shaSchema.optional(), branch: z.string().max(250).optional(), verification: verificationSchema.optional(), processStopped: z.literal(true), checkpointSha: shaSchema.optional(), activityStarted: z.boolean().optional() }).parse(event);
+  const input = z.object({ result: z.enum(["succeeded", "failed", "cancelled", "quota", "provider_unavailable", "needs_auth", "needs_approval"]), summary: z.string().max(12000), headSha: shaSchema.optional(), baseSha: shaSchema.optional(), branch: z.string().max(250).optional(), verification: verificationSchema.optional(), processStopped: z.literal(true), checkpointSha: shaSchema.optional(), activityStarted: z.boolean().optional() }).parse(event);
   record.run.processStopped = true; record.leaseExpiresAt = 0; record.run.summary = redactExecutionText(input.summary, record).slice(0, 12000);
   if (input.branch && input.branch !== record.run.branch) throw new ExecutionError("Worker reported a different task branch");
   if (input.checkpointSha) record.run.checkpoint = { sha: input.checkpointSha, summary: record.run.summary };
   record.run.verification = (input.verification || []).map(result => ({ ...result, ...(result.summary ? { summary: redactExecutionText(result.summary, record) } : {}) })) as ExecutionVerification[];
   if (record.cancelRequested || input.result === "cancelled") { record.run.status = "cancelled"; record.run.reason = "Worker confirmed its processes stopped"; return; }
   if (expired) { record.run.status = "blocked"; record.run.reason = "The worker stopped after its lease expired. Review the checkpoint before resuming"; return; }
+  if (record.run.verificationOnly && input.activityStarted !== false) { record.run.status = "blocked"; record.run.reason = "Verification-only attempt did not prove that no model work was started"; return; }
   if (input.result === "succeeded") {
-    if (!input.headSha || !verificationMatchesPolicy(record.policy, record.run.verification)) { record.run.status = "failed"; record.run.reason = "Missing exact-head evidence or configured test/smoke verification"; return; }
+    if (!input.headSha || !input.baseSha || input.checkpointSha && input.checkpointSha !== input.headSha || !verificationMatchesPolicy(record.policy, record.run.verification)) { record.run.status = "failed"; record.run.reason = "Missing exact-head/base evidence or configured test/smoke verification"; return; }
     record.run.checkpoint = { sha: input.headSha, summary: record.run.summary };
+    record.run.verifiedBaseSha = input.baseSha;
     record.run.status = record.policy.autoMerge ? "awaiting_checks" : "succeeded";
     record.run.reason = record.policy.autoMerge ? "Code verified; waiting for GitHub checks and merge authorization" : "Verified branch pushed; automatic merging is disabled";
     return;
   }
-  const fallback = input.result === "quota" && record.policy.fallbackMode !== "disabled" || input.result === "provider_unavailable" && record.policy.fallbackMode === "quota-and-outage";
+  const fallback = !record.run.verificationOnly && (input.result === "quota" && record.policy.fallbackMode !== "disabled" || input.result === "provider_unavailable" && record.policy.fallbackMode === "quota-and-outage");
   if (fallback && record.run.selection) {
     const key = executionSelectionKey(record.run.selection);
     if (!record.attempted.includes(key)) record.attempted.push(key);
@@ -234,6 +277,11 @@ function acceptEvent(host: ExecutionHost, body: Record<string, unknown>) {
       throw new ExecutionError("This run attempt is already stopped", 409);
     }
     switch (event.type) {
+      case "terminal": {
+        const terminal = terminalSchema.parse(event);
+        record.run.herdr = { backend: terminal.backend, coreId: redactExecutionText(terminal.coreId, record).slice(0, 128), terminalId: redactExecutionText(terminal.terminalId, record).slice(0, 128), name: redactExecutionText(terminal.name, record).slice(0, 128), session: redactExecutionText(terminal.session, record).slice(0, 128), updatedAt: Date.now() };
+        break;
+      }
       case "log": {
         const log = z.object({ stream: z.enum(["stdout", "stderr", "system"]), text: z.string().max(32000) }).parse(event);
         if (record.logBytes < 20 * 1024 * 1024) { const text = redactExecutionText(log.text, record); record.logBytes += Buffer.byteLength(text); appendExecutionEvent(record.run.id, { type: "log", stream: log.stream, text }); }

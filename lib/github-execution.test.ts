@@ -2,7 +2,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 import { finalizeRunPullRequest, prepareRunRepository, readRunDeployment, reconcileMergedRunPullRequest } from "./github-execution";
 import { contextWithToken, createGitHubTask } from "./github-sync";
-import { githubRequest } from "./github-workspace";
+import { GitHubHttpError, githubRequest } from "./github-workspace";
 import { integrationBridge } from "./integration-bridge";
 import { projectInstallationToken, revokeInstallationToken } from "./github-app";
 import { openPR } from "./github-prs";
@@ -13,25 +13,27 @@ vi.mock("./github-app", () => ({ projectInstallationToken: vi.fn(), revokeInstal
 vi.mock("./github-prs", () => ({ openPR: vi.fn() }));
 const headSha = "a".repeat(40), baseSha = "b".repeat(40), mergeSha = "c".repeat(40), repoUrl = "https://github.com/fixture/execution";
 const authorize = vi.fn(async () => {});
-const input = { projectId: "project", taskId: "task", branch: "origin/run-1", baseBranch: "main", headSha, title: "Verified change", verification: [{ command: "npm test", exitCode: 0, kind: "test" as const }, { command: "npm run smoke", exitCode: 0, kind: "smoke" as const }], smokePassed: true, authorize };
-let check: { status: string; conclusion: string | null }, review: string, changedHead: boolean, merged: boolean, ambiguous: boolean;
+const input = { projectId: "project", taskId: "task", branch: "origin/run-1", baseBranch: "main", headSha, baseSha, title: "Verified change", verification: [{ command: "npm test", exitCode: 0, kind: "test" as const }, { command: "npm run smoke", exitCode: 0, kind: "smoke" as const }], smokePassed: true, authorize };
+let check: { status: string; conclusion: string | null }, review: string, changedHead: boolean, merged: boolean, ambiguous: boolean, currentBase: string;
 beforeEach(() => {
   vi.resetAllMocks();
   authorize.mockResolvedValue(undefined);
   check = { status: "completed", conclusion: "success" }; review = "APPROVED"; changedHead = false; merged = false; ambiguous = false;
+  currentBase = baseSha;
   vi.mocked(contextWithToken).mockResolvedValue({ project: { _id: "project", name: "Fixture", status: "active", repoUrl, githubRepoId: 1, githubWorkspaceAccess: true }, task: { _id: "task", title: "Issue", done: false, githubIssueNumber: 7, githubIssueUrl: `${repoUrl}/issues/7`, githubIssueNodeId: "issue-7", githubIssueRepoId: 1 }, repo: { owner: "fixture", repo: "execution" }, token: "fixture-read", expiresAt: undefined, credentialAllowed: true, legacyOwner: false, connection: null });
   vi.mocked(projectInstallationToken).mockResolvedValue({ token: "fixture-scoped", expiresAt: new Date(Date.now() + 3600000).toISOString() });
   vi.mocked(openPR).mockResolvedValue({ number: 9, url: `${repoUrl}/pull/9`, branch: input.branch, headSha, baseSha, state: "open", checks: "success", review: "approved", mergeable: true, githubUpdatedAt: 1 });
   vi.mocked(githubRequest).mockImplementation(async (path, _token, options) => {
     if (path === "/repos/fixture/execution") return { id: 1, full_name: "fixture/execution" };
     if (path.endsWith("/issues/7")) return { number: 7, node_id: "issue-7" };
-    if (path.includes("/git/ref/heads/")) return { ref: `refs/heads/${decodeURIComponent(path.split("/git/ref/heads/")[1])}`, object: { sha: path.endsWith("main") ? baseSha : headSha } };
+    if (path.includes("/git/ref/heads/")) return { ref: `refs/heads/${decodeURIComponent(path.split("/git/ref/heads/")[1])}`, object: { sha: path.endsWith("main") ? currentBase : headSha } };
+    if (path.includes("/compare/")) return { merge_base_commit: { sha: path.split("/compare/")[1].split("...")[0] } };
     if (path.includes("/pulls?")) return [];
-    if (path.endsWith("/pulls/9")) return { number: 9, node_id: "pr-9", html_url: `${repoUrl}/pull/9`, body: "<!-- origin-task:task -->", state: merged ? "closed" : "open", draft: false, merged, merged_at: merged ? "2026-11-01T12:00:00Z" : null, merge_commit_sha: merged ? mergeSha : null, mergeable: true, mergeable_state: "clean", head: { sha: changedHead ? "d".repeat(40) : headSha, ref: input.branch, repo: { id: 1 } }, base: { ref: "main", sha: baseSha, repo: { id: 1 } } };
+    if (path.endsWith("/pulls/9")) return { number: 9, node_id: "pr-9", html_url: `${repoUrl}/pull/9`, body: "<!-- origin-task:task -->", state: merged ? "closed" : "open", draft: false, merged, merged_at: merged ? "2026-11-01T12:00:00Z" : null, merge_commit_sha: merged ? mergeSha : null, mergeable: true, mergeable_state: "clean", head: { sha: changedHead ? "d".repeat(40) : headSha, ref: input.branch, repo: { id: 1 } }, base: { ref: "main", sha: currentBase, repo: { id: 1 } } };
     if (path.includes("/check-runs?")) return { total_count: 1, check_runs: [{ name: "ci", app: { id: 100 }, ...check }] };
     if (path.includes("/statuses?")) return [];
     if (path === "/graphql") return { data: { node: { reviewDecision: review, mergeStateStatus: "CLEAN", baseRef: { branchProtectionRule: { id: "protection" } } } } };
-    if (path.endsWith("/protection")) return { required_status_checks: { contexts: ["ci"], checks: [{ context: "ci", app_id: 100 }] }, required_pull_request_reviews: { required_approving_review_count: 1 } };
+    if (path.endsWith("/protection")) return { enforce_admins: { enabled: true }, required_status_checks: { strict: true, contexts: ["ci"], checks: [{ context: "ci", app_id: 100 }] }, required_pull_request_reviews: { required_approving_review_count: 1 } };
     if (path.includes("/rules/branches/")) return [];
     if (path.endsWith("/merge")) {
       expect(options?.method).toBe("PUT");
@@ -78,6 +80,114 @@ test.each([false, true])("an exact-head merge has a verified receipt, never a de
   expect(result).not.toHaveProperty("deployment");
   expect(integrationBridge).toHaveBeenCalledWith("completeMergedIssue", expect.objectContaining({ issueNumber: 7, pullRequest: expect.objectContaining({ headSha, mergeSha }) }));
   expect(revokeInstallationToken).toHaveBeenCalledWith("fixture-scoped");
+});
+
+test.each(["before gates", "during gates", "final write"])("an advanced main queues checkpoint alignment, never merges stale verification (%s)", async when => {
+  const request = vi.mocked(githubRequest).getMockImplementation()!;
+  if (when === "before gates") currentBase = mergeSha;
+  vi.mocked(githubRequest).mockImplementation(async (...args) => {
+    if (when === "final write" && args[0].endsWith("/merge")) {
+      currentBase = mergeSha;
+      throw new GitHubHttpError(405, "Required branch must be up to date");
+    }
+    const result = await request(...args);
+    if (when === "during gates" && args[0].includes("/rules/branches/")) currentBase = mergeSha;
+    return result;
+  });
+  expect(await finalizeRunPullRequest(input)).toMatchObject({ state: "awaiting_checks", needsAlignment: true });
+  expect(merged).toBe(false);
+  expect(integrationBridge).not.toHaveBeenCalledWith("completeMergedIssue", expect.anything());
+});
+
+test("a head that does not include its claimed verified base requires re-verification", async () => {
+  const request = vi.mocked(githubRequest).getMockImplementation()!;
+  vi.mocked(githubRequest).mockImplementation(async (...args) => args[0].includes("/compare/") ? { merge_base_commit: { sha: "d".repeat(40) } } : request(...args));
+  expect(await finalizeRunPullRequest(input)).toMatchObject({ needsAlignment: true });
+  expect(merged).toBe(false);
+});
+
+test("non-strict protection cannot silently permit a stale-base PR merge or direct ref update", async () => {
+  const request = vi.mocked(githubRequest).getMockImplementation()!;
+  vi.mocked(githubRequest).mockImplementation(async (...args) => args[0].endsWith("/protection")
+    ? { enforce_admins: { enabled: true }, required_status_checks: { strict: false, contexts: ["ci"] } } : request(...args));
+  expect(await finalizeRunPullRequest(input)).toMatchObject({ state: "blocked", reason: expect.stringContaining("strict") });
+  expect(vi.mocked(githubRequest).mock.calls.some(([, , options]) => ["PUT", "PATCH"].includes(options?.method || ""))).toBe(false);
+});
+
+function unprotectedFixture({ race = false, receiptPending = false, lostResponse = false, applicableRule = false } = {}) {
+  const request = vi.mocked(githubRequest).getMockImplementation()!;
+  vi.mocked(githubRequest).mockImplementation(async (...args) => {
+    const [path, , options] = args;
+    if (path === "/graphql") return { data: { node: { reviewDecision: review, mergeStateStatus: "CLEAN", baseRef: { branchProtectionRule: null } } } };
+    if (path.endsWith("/protection")) throw new GitHubHttpError(404, "No branch protection");
+    if (applicableRule && path.includes("/rules/branches/")) return [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }];
+    if (path.includes("/git/refs/heads/")) {
+      expect(options?.method).toBe("PATCH");
+      expect(JSON.parse(options!.body as string)).toEqual({ sha: headSha, force: false });
+      if (race) { currentBase = mergeSha; throw new GitHubHttpError(422, "Not a fast-forward"); }
+      currentBase = headSha; merged = !receiptPending;
+      if (lostResponse) throw new TypeError("Lost ref response");
+      return { object: { sha: headSha } };
+    }
+    const result = await request(...args);
+    return path.endsWith("/pulls/9") && merged ? { ...(result as object), merge_commit_sha: headSha } : result;
+  });
+}
+
+test.each([false, true])("positively unprotected main fast-forwards only to verified head and observes the real PR receipt (lost response: %s)", async lostResponse => {
+  unprotectedFixture({ lostResponse });
+  expect(await finalizeRunPullRequest(input)).toMatchObject({ state: "merged", mergeSha: headSha });
+  expect(vi.mocked(githubRequest).mock.calls.some(([path]) => path.endsWith("/merge"))).toBe(false);
+  expect(integrationBridge).toHaveBeenCalledWith("completeMergedIssue", expect.objectContaining({ pullRequest: expect.objectContaining({ headSha, mergeSha: headSha }) }));
+});
+
+test("a concurrent unrelated main update rejects the non-force fast-forward and queues alignment", async () => {
+  unprotectedFixture({ race: true });
+  expect(await finalizeRunPullRequest(input)).toMatchObject({ state: "awaiting_checks", needsAlignment: true });
+  expect(merged).toBe(false);
+});
+
+test("ref update success alone is never reported as a merged PR, and replay does not repeat the write", async () => {
+  unprotectedFixture({ receiptPending: true });
+  expect(await finalizeRunPullRequest(input)).toMatchObject({ state: "awaiting_checks" });
+  expect(await finalizeRunPullRequest(input)).toMatchObject({ state: "awaiting_checks" });
+  expect(vi.mocked(githubRequest).mock.calls.filter(([, , options]) => options?.method === "PATCH")).toHaveLength(1);
+  expect(integrationBridge).not.toHaveBeenCalledWith("completeMergedIssue", expect.anything());
+});
+
+test("an applicable ruleset forbids the direct-ref path even without classic branch protection", async () => {
+  unprotectedFixture({ applicableRule: true });
+  expect(await finalizeRunPullRequest(input)).toMatchObject({ state: "blocked" });
+  expect(vi.mocked(githubRequest).mock.calls.some(([, , options]) => options?.method === "PATCH")).toBe(false);
+});
+
+test.each(["failed check", "review required", "unreadable protection"])("the fast-forward path never circumvents %s", async blocked => {
+  unprotectedFixture();
+  if (blocked === "failed check") check = { status: "completed", conclusion: "failure" };
+  if (blocked === "review required") review = "REVIEW_REQUIRED";
+  if (blocked === "unreadable protection") {
+    const request = vi.mocked(githubRequest).getMockImplementation()!;
+    vi.mocked(githubRequest).mockImplementation(async (...args) => {
+      if (args[0].endsWith("/protection")) throw new GitHubHttpError(403, "Insufficient protection read permission");
+      return request(...args);
+    });
+  }
+  expect(await finalizeRunPullRequest(input)).toMatchObject({ state: "blocked" });
+  expect(vi.mocked(githubRequest).mock.calls.some(([, , options]) => ["PATCH", "PUT"].includes(options?.method || ""))).toBe(false);
+});
+
+test.each([false, true])("strict ruleset PR merges require no integration bypass (bypass: %s)", async bypass => {
+  const request = vi.mocked(githubRequest).getMockImplementation()!;
+  vi.mocked(githubRequest).mockImplementation(async (...args) => {
+    if (args[0] === "/graphql") return { data: { node: { reviewDecision: review, mergeStateStatus: "CLEAN", baseRef: { branchProtectionRule: null } } } };
+    if (args[0].endsWith("/protection")) throw new GitHubHttpError(404, "No classic protection");
+    if (args[0].includes("/rules/branches/")) return [{ type: "required_status_checks", ruleset_id: 73, parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: "ci", integration_id: 100 }] } }];
+    if (args[0].includes("/rulesets/73?")) return { enforcement: "active", bypass_actors: bypass ? [{ actor_type: "Integration" }] : [] };
+    return request(...args);
+  });
+  expect(await finalizeRunPullRequest(input)).toMatchObject({ state: bypass ? "blocked" : "merged" });
+  expect(merged).toBe(!bypass);
+  expect(vi.mocked(githubRequest).mock.calls.some(([, , options]) => options?.method === "PATCH")).toBe(false);
 });
 
 test("changed repository identity blocks before any pull request or merge mutation", async () => {

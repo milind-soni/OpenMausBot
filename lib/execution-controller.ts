@@ -5,6 +5,7 @@ import { finalizeRunPullRequest, readRunDeployment, reconcileMergedRunPullReques
 import { cloudExecutionStopProof, maintainCloudExecution } from "./execution-cloud-runtime";
 import { ExecutionError, executionId, observedExecutionHost, revalidateExecutionPrincipal } from "./execution-common";
 import { routeExecution, verificationMatchesPolicy } from "./execution-policy";
+import type { ExecutionMerge } from "./execution-types";
 import {
   acquireExecutionLock, appendExecutionEvent, atomicExecution, executionAccounts, executionDeploymentRuns, executionHosts, executionRuns,
   executionTokenHash, readExecutionHost, readExecutionRun, releaseExecutionLock, saveExecutionHost, saveExecutionRun,
@@ -113,7 +114,7 @@ export async function reconcileExecution(teamId: string) {
         continue;
       }
       if (record.run.status === "queued") {
-        const route = routeExecution({ policy: record.policy, projectId: record.run.projectId, ownerId: record.run.requestedBy, hosts: executionHosts(teamId).map(host => observedExecutionHost(host)), accounts: executionAccounts(teamId, record.run.requestedBy), attempted: record.attempted });
+        const route = routeExecution({ policy: record.policy, projectId: record.run.projectId, ownerId: record.run.requestedBy, hosts: executionHosts(teamId).map(host => observedExecutionHost(host)), accounts: record.run.verificationOnly ? [] : executionAccounts(teamId, record.run.requestedBy), attempted: record.attempted, verificationOnly: record.run.verificationOnly });
         atomicExecution(() => {
           const latest = readExecutionRun(record.run.id);
           if (latest?.run.status === "queued" && !latest.cancelRequested && latest.run.reason !== route.reason) { latest.run.reason = route.reason; latest.run.updatedAt = Date.now(); saveExecutionRun(latest); }
@@ -127,18 +128,32 @@ export async function reconcileExecution(teamId: string) {
           });
           continue;
         }
-        const merge = await finalizeRunPullRequest({ projectId: record.run.projectId, taskId: record.run.taskId, branch: record.run.branch, baseBranch: record.policy.baseBranch,
-          headSha: record.run.checkpoint.sha, title: record.run.title, verification: record.run.verification, smokePassed: true,
-          authorize: async () => {
-            const latest = readExecutionRun(record.run.id);
-            if (!latest || latest.cancelRequested || latest.run.status !== "awaiting_checks" || latest.run.checkpoint?.sha !== record.run.checkpoint!.sha) throw new ExecutionError("Run authorization changed before merge", 403);
-            await revalidateExecutionPrincipal(latest);
-          } });
+        const mergeLockName = `merge:${record.run.repositoryUrl.toLowerCase()}:${record.policy.baseBranch}`;
+        const mergeLock = acquireExecutionLock(mergeLockName, 15 * 60000);
+        if (!mergeLock) continue;
+        const mergeDeadline = Date.now() + 14 * 60000;
+        let merge: ExecutionMerge;
+        try {
+          merge = await finalizeRunPullRequest({ projectId: record.run.projectId, taskId: record.run.taskId, branch: record.run.branch, baseBranch: record.policy.baseBranch,
+            headSha: record.run.checkpoint.sha, baseSha: record.run.verifiedBaseSha, title: record.run.title, verification: record.run.verification, smokePassed: true,
+            authorize: async () => {
+              const latest = readExecutionRun(record.run.id);
+              if (Date.now() >= mergeDeadline || !latest || latest.cancelRequested || latest.run.attempt !== record.run.attempt || !latest.run.processStopped
+                || latest.run.status !== "awaiting_checks" || latest.run.checkpoint?.sha !== record.run.checkpoint!.sha
+                || latest.run.verifiedBaseSha !== record.run.verifiedBaseSha || !verificationMatchesPolicy(latest.policy, latest.run.verification)) throw new ExecutionError("Run authorization changed before merge", 403);
+              await revalidateExecutionPrincipal(latest);
+            } });
+        } finally { releaseExecutionLock(mergeLockName, mergeLock); }
         atomicExecution(() => {
           const latest = readExecutionRun(record.run.id);
           if (!latest || latest.run.attempt !== record.run.attempt || latest.run.checkpoint?.sha !== record.run.checkpoint!.sha) return;
           if (merge.state !== "merged" && (latest.cancelRequested || latest.run.status !== "awaiting_checks")) return;
           latest.run.merge = merge; latest.run.status = merge.state === "merged" ? "merged" : "awaiting_checks";
+          if (merge.needsAlignment) {
+            latest.run.status = "queued"; latest.run.verificationOnly = true;
+            // Keep the pushed checkpoint and old stopped proof until a new lease is claimed.
+            // A new attempt must produce its own base/head evidence and native stop receipt.
+          }
           latest.run.reason = merge.state === "merged" ? "Exact-head GitHub merge confirmed; deployment is reported separately" : merge.reason;
           latest.run.updatedAt = Date.now(); saveExecutionRun(latest);
           appendExecutionEvent(latest.run.id, { type: "merge", text: latest.run.reason || merge.state });
