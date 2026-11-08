@@ -84,7 +84,7 @@ export class ChatToolCalls {
       }
       const call = this.calls.get(Number(index)) ?? { id: "", type: "function", function: { name: "", arguments: "" } };
       if (!omitted(delta.type) && delta.type !== "function") throw new ChatProtocolError("unsupported tool-call type");
-      if (!omitted(delta.id)) {
+      if (!omitted(delta.id) && !(streaming && delta.id === "")) {
         if (typeof delta.id !== "string" || !delta.id || delta.id.length > 256 || (call.id && call.id !== delta.id)) {
           throw new ChatProtocolError("provider changed or omitted a tool-call ID");
         }
