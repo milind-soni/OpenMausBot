@@ -12,11 +12,11 @@ import {
 } from "node:fs";
 import { link, open, unlink } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
+import { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
 import { DATA_DIR } from "./config.ts";
 import { boxUploadsDir } from "./bot-box/plan.ts";
 
-export { FILE_MAX_BYTES } from "../shared/upload-limits.ts";
+export { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
 export const ATTACHMENTS_DIR = join(DATA_DIR, "attachments");
 
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
@@ -644,8 +644,9 @@ export function saveAudio(bytes: Buffer, mime: string): SavedAttachment {
     throw Object.assign(new Error("unsupported audio type"), { status: 400 });
   }
   if (bytes.byteLength === 0) throw Object.assign(new Error("empty audio"), { status: 400 });
-  if (bytes.byteLength > FILE_MAX_BYTES) {
-    throw Object.assign(new Error(`audio exceeds ${FILE_MAX_BYTES} bytes`), { status: 413 });
+  // Saved from memory and served whole by readAttachment, so held to the preview size, not the streamed store limit.
+  if (bytes.byteLength > PREVIEW_MAX_BYTES) {
+    throw Object.assign(new Error(`audio exceeds ${PREVIEW_MAX_BYTES} bytes`), { status: 413 });
   }
   ensureAttachmentsDir();
   const reservation = new AttachmentReservation();

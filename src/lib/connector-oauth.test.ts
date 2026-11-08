@@ -59,4 +59,18 @@ describe("OAuth tab reservation", () => {
     expect(await launch.open("https://auth.example.test/flow")).toBe(true);
     expect(openExternal).toHaveBeenCalledWith("https://auth.example.test/flow");
   });
+
+  it("opens straight to the page from a remote server's page in the desktop app, which has no openExternal", async () => {
+    const open = vi.fn(() => null);
+    vi.stubGlobal("window", { ogb: { platform: "darwin" }, open });
+    const launch = reserveConnectionPage();
+    expect(open).not.toHaveBeenCalled();
+    expect(await launch.open("https://auth.example.test/flow")).toBe(true);
+    expect(open).toHaveBeenCalledWith("https://auth.example.test/flow", "_blank", "noopener,noreferrer");
+  });
+
+  it("says the page did not open when the desktop app refuses it", async () => {
+    vi.stubGlobal("window", { ogb: { openExternal: vi.fn(async () => { throw new Error("only available while using the local server"); }) }, open: vi.fn() });
+    expect(await reserveConnectionPage().open("https://auth.example.test/flow")).toBe(false);
+  });
 });

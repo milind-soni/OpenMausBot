@@ -59,9 +59,9 @@ const __APP_VERSION__: string;
       message?: string;
       driverPath?: string;
       driverVersion?: string;
-      driverSource?: "bundled" | "environment" | "user-local" | "path";
+      driverSource?: "bundled" | "environment" | "user-local" | "path" | "system-package";
       session?: "x11" | "wayland" | "headless" | "unknown";
-      compositor?: "gnome-mutter";
+      compositor?: "gnome-mutter" | "hyprland";
     };
   };
 
@@ -276,6 +276,13 @@ const __APP_VERSION__: string;
         revoke(id: string): Promise<DesktopComputerSharing>;
         /** This computer's own record of what that server's bots did here, newest first. */
         activity(id: string): Promise<DesktopLendingActivity[]>;
+        /** Each saved server of the person's own (this desktop is its admin) and how lending to it is. */
+        servers?(): Promise<Array<{ id: string; enabled: boolean; connected: boolean; paused: boolean }>>;
+        /** Asks in main's own popup, then lends that server of the person's own the apps on the screen; null on Not now. */
+        allow?(id: string): Promise<DesktopComputerSharing | null>;
+        /** Every Cloud and server of the person's own stops using this computer until resume(), as the icon's menu does. */
+        pause?(): Promise<void>;
+        resume?(): Promise<void>;
       };
       confirm(message: string): Promise<boolean>;
       getCapabilities(): Promise<DesktopCapabilities>;
@@ -467,9 +474,9 @@ export interface LinuxLocalControlStatus {
   message?: string;
   driverPath?: string;
   driverVersion?: string;
-  driverSource?: "bundled" | "environment" | "user-local" | "path";
+  driverSource?: "bundled" | "environment" | "user-local" | "path" | "system-package";
   session?: "x11" | "wayland" | "headless" | "unknown";
-  compositor?: "gnome-mutter";
+  compositor?: "gnome-mutter" | "hyprland";
   warnings?: Array<{ label: string; status: string; message: string; detail?: string }>;
 }
 

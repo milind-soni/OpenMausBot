@@ -3,7 +3,7 @@ import { Bug, ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
-import { formatTime, toRows, type InspectorEntry, type InspectorPage, type InspectorRow } from "@/lib/inspector";
+import { formatTime, toRows, type InspectorPage, type InspectorRow } from "@/lib/inspector";
 import { listenLiveFrames } from "@/lib/live-events";
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import { RunLog } from "./RunLog";
@@ -11,11 +11,16 @@ import { timelineEvents } from "@/lib/taskTimeline";
 import { activeLocale, t } from "@/lib/i18n";
 import { capital } from "@/lib/automations";
 import type { LocaleKey } from "@/locales";
+import { appendInspectorRuntime, mergeInspectorSnapshot, INSPECTOR_WINDOW_LIMIT } from "@/lib/inspector-window";
 
 const tabLabel = (key: LocaleKey) => (activeLocale() === "en" ? t(key) : capital(t(key)));
 
 type Lens = "run" | "events" | "raw";
 
+/**
+ * Disk persistence can lag behind live delivery, even for equal-time events.
+ * Native expansion resets on a loaded snapshot: its positional keys are not identities.
+ */
 export function InspectorPanel({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const { dragProps } = useCaptionChrome();
@@ -35,12 +40,13 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     const controller = new AbortController();
     loadAbort.current = controller;
     try {
-      const res = await fetch(`/api/threads/${threadId}/events?limit=400`, { signal: controller.signal });
+      const res = await fetch(`/api/threads/${threadId}/events?limit=${INSPECTOR_WINDOW_LIMIT}`, { signal: controller.signal });
       if (!res.ok) throw new Error(`${res.status}`);
       // SAFETY: the same-version harness's typed inspector endpoint; malformed transport data is handled by catch.
       const next = (await res.json()) as InspectorPage;
       if (controller.signal.aborted) return;
-      setPage(next);
+      setPage((previous) => mergeInspectorSnapshot(previous, next));
+      setExpanded((previous) => new Set([...previous].filter((key) => key.startsWith("runtime:"))));
       setError(null);
     } catch (e) {
       if (controller.signal.aborted) return;
@@ -54,7 +60,6 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     setPage(null);
     setExpanded(new Set());
     stickToBottom.current = true;
-    void load();
     return () => loadAbort.current?.abort();
   }, [load]);
 
@@ -64,21 +69,20 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     let refreshGeneration = 0;
     let refreshing = false;
     const pendingRuntime: RuntimeEvent[] = [];
+    let batch: RuntimeEvent[] = [];
+    let batchTimer: ReturnType<typeof setTimeout> | null = null;
 
+    const flushBatch = () => {
+      if (batchTimer) clearTimeout(batchTimer);
+      batchTimer = null;
+      const events = batch;
+      batch = [];
+      if (events.length) setPage((prev) => appendInspectorRuntime(prev, events));
+    };
     const appendRuntime = (runtime: RuntimeEvent) => {
-      setPage((prev) => {
-        // eventId is canonical, so a replayed entry already in the snapshot is a no-op.
-        if (
-          prev?.entries.some(
-            (entry) => entry.kind === "runtime" && entry.data.eventId === runtime.eventId,
-          )
-        ) {
-          return prev;
-        }
-        const entry: InspectorEntry = { kind: "runtime", at: runtime.createdAt, data: runtime };
-        if (!prev) return { entries: [entry], total: { runtime: 1, native: 0 } };
-        return { entries: [...prev.entries, entry], total: { ...prev.total, runtime: prev.total.runtime + 1 } };
-      });
+      batch.push(runtime);
+      if (batch.length >= INSPECTOR_WINDOW_LIMIT) flushBatch();
+      else batchTimer ??= setTimeout(flushBatch, 16);
     };
 
     const flushPendingRuntime = () => {
@@ -86,6 +90,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     };
 
     const refresh = async () => {
+      flushBatch();
       const generation = ++refreshGeneration;
       refreshing = true;
       await load();
@@ -111,11 +116,14 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
         }
       },
     });
+    requestRefresh();
     return () => {
       alive = false;
       if (managedRefresh.current === requestRefresh) managedRefresh.current = () => {};
       stopLive();
       if (settle) clearTimeout(settle);
+      if (batchTimer) clearTimeout(batchTimer);
+      batch = [];
     };
   }, [threadId, load]);
 
@@ -126,9 +134,18 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const rows = useMemo(() => toRows(entries), [entries]);
 
   useEffect(() => {
+    const retained = new Set(["runtime", "native"].flatMap((kind) =>
+      toRows(page?.entries.filter((entry) => entry.kind === kind) ?? []).map((row) => `${row.kind}:${row.key}`)));
+    setExpanded((previous) => {
+      const next = new Set([...previous].filter((key) => retained.has(key)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [page]);
+
+  useEffect(() => {
     const el = listRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [page?.entries.length, rows.length, lens]);
+  }, [page, rows.length, lens]);
   const onScroll = () => {
     const el = listRef.current;
     if (!el) return;
@@ -211,7 +228,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
           </div>
         )}
         {rows.map((row) => (
-          <Row key={row.key} row={row} open={expanded.has(row.key)} onToggle={() => toggle(row.key)} />
+          <Row key={row.key} row={row} open={expanded.has(`${row.kind}:${row.key}`)} onToggle={() => toggle(`${row.kind}:${row.key}`)} />
         ))}
       </div>}
       </div>

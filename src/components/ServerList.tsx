@@ -9,11 +9,14 @@ import { cloudColor } from "@/lib/cloud-look";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { OwnServerLink, RailSheet } from "./PlaceAddSheet";
+import { Switch } from "./SettingsPrimitives";
 import { CloudTile } from "./cloud-buy/parts";
 
 type Saved = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
 type Entry = Saved["environments"][number];
 type Sheet = { address: string; locked: boolean; title: string } | null;
+/** A saved server of the person's own (this desktop is its admin), and how lending this computer to it is. */
+export type OwnServerSharing = { id: string; enabled: boolean; connected: boolean; paused: boolean };
 
 const TRANSPORT = { https: "servers.transport.https", tailscale: "servers.transport.tailscale", "private-http": "servers.transport.privateHttp", loopback: "servers.transport.loopback" } as const;
 const byHand = (entry: Entry) => entry.kind !== "local" && Boolean(entry.origin) && !entry.home && !entry.cloud && !("team" in entry && entry.team);
@@ -59,9 +62,22 @@ function StatusLine({ status, onTryNow, onPairAgain, onEdit }: { status: ServerS
   </div>;
 }
 
-export function ServerList({ saved, busy, sharingOffered, appVersion, onSwitch, onForget, onComputerAccess }: {
-  saved: Saved; busy: boolean; sharingOffered: boolean; appVersion: string | null;
-  onSwitch: (id: string) => void; onForget: (id: string) => void; onComputerAccess: (id: string) => void;
+/** "Share this computer" for a server of the person's own: the same switch and words wherever lending is shown. */
+function ShareRow({ name, share, busy, onShare, onOpen }: { name: string; share: OwnServerSharing; busy: boolean; onShare: (on: boolean) => void; onOpen: () => void }) {
+  const line = !share.enabled ? "servers.share.off" : share.paused ? "servers.share.paused" : "servers.share.on";
+  return <div data-server-share={share.id} className="mt-2 flex items-center gap-3 rounded-lg bg-inset px-3 py-2">
+    <div className="min-w-0 flex-1">
+      <div className="text-[12px] font-medium text-ink">{t("servers.share.title")}</div>
+      <div className="text-[12px] text-ink-secondary">{t(line, { name })}</div>
+    </div>
+    {share.enabled && <button type="button" disabled={busy} onClick={onOpen} className="shrink-0 text-[12px] font-medium text-accent-text hover:underline disabled:opacity-50">{t("servers.share.choose")}</button>}
+    <Switch checked={share.enabled} disabled={busy} aria-label={t("servers.share.for", { name })} onClick={() => onShare(!share.enabled)} />
+  </div>;
+}
+
+export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVersion, onSwitch, onForget, onComputerAccess, onShare = () => {} }: {
+  saved: Saved; busy: boolean; sharingOffered: boolean; ownServers?: OwnServerSharing[]; appVersion: string | null;
+  onSwitch: (id: string) => void; onForget: (id: string) => void; onComputerAccess: (id: string) => void; onShare?: (id: string, on: boolean) => void;
 }) {
   const bridge = window.ogb?.environments;
   const [statuses, setStatuses] = useState<ServerStatus[]>([]);
@@ -88,6 +104,7 @@ export function ServerList({ saved, busy, sharingOffered, appVersion, onSwitch, 
         const where = entry.id === "local" ? t("servers.localHint")
           : !byHand(entry) ? (entry.home ? t("servers.managed") : new URL(entry.origin!).host)
           : `${new URL(entry.origin!).host} · ${t(TRANSPORT[serverTransport(entry.origin!)])}`;
+        const share = ownServers.find((own) => own.id === entry.id);
         const showUpdate = status?.behind === true && appVersion !== null && !hidden.includes(`${entry.id}:${status.version}`);
         return <li key={entry.id} data-server-row={entry.id} className="py-3">
           <div className="flex items-center gap-3">
@@ -102,11 +119,12 @@ export function ServerList({ saved, busy, sharingOffered, appVersion, onSwitch, 
                 className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-50">{t("servers.switch")}</button>}
             {byHand(entry) && status?.state !== "signedOut" && <button type="button" disabled={busy} onClick={() => pairAgain(entry)}
               className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-50">{t("servers.pairAgain")}</button>}
-            {entry.id !== "local" && !entry.home && !entry.cloud && sharingOffered && <button type="button" disabled={busy} aria-label={t("servers.computerAccessFor", { name: entry.name })} onClick={() => onComputerAccess(entry.id)} className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control">{t("servers.computerAccess")}</button>}
+            {entry.id !== "local" && !entry.home && !entry.cloud && !share && sharingOffered && <button type="button" disabled={busy} aria-label={t("servers.computerAccessFor", { name: entry.name })} onClick={() => onComputerAccess(entry.id)} className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control">{t("servers.computerAccess")}</button>}
             {byHand(entry) && <CopyAddress origin={entry.origin!} name={entry.name} />}
             {entry.id !== "local" && !entry.home && <button type="button" disabled={busy} aria-label={t("servers.removeName", { name: entry.name })} title={t("servers.removeName", { name: entry.name })}
               onClick={() => onForget(entry.id)} className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"><Trash2 size={14} /></button>}
           </div>
+          {share && <ShareRow name={entry.name} share={share} busy={busy} onShare={(on) => onShare(entry.id, on)} onOpen={() => onComputerAccess(entry.id)} />}
           {showUpdate && <UpdateNote name={entry.name} status={status!} appVersion={appVersion!} onHide={() => setHidden((list) => [...list, `${entry.id}:${status!.version}`])} />}
         </li>;
       })}

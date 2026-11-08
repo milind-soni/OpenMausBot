@@ -173,6 +173,8 @@ export const USER_ERROR = {
   "serverError.inbox.answerRequired": "This waits on your answer: answer it, or close it, where it asks.",
   "serverError.instance.settingsInvalid": "Supply a valid CLI path, account name, configuration directory, boolean tools setting or a reply wait of 1 to 60 minutes.",
   "serverError.instance.replyWaitUnsupported": "The reply wait is available for OpenAI-compatible servers only.",
+  "serverError.instance.modelsUnsupported": "Model IDs can be changed for added OpenAI-compatible servers only.",
+  "serverError.instance.defaultModelRemoved": "{model} is the default model. Choose another default model before removing it from this server.",
   "serverError.mcp.personalHeadersShared": "Personal MCP header values cannot be saved in shared configuration. Save your key in your personal connection.",
   "serverError.mcp.testSignInFirst": "Sign in to the team to test your own connection.",
   "serverError.postiz.adminOnly": "Only the owner or an admin can manage the Postiz connection.",

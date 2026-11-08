@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { isRoutineProblemRun } from "@/lib/routines";
 import { saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-credentials";
+import { botInDepartment, filterableDepartments, GENERAL_DEPARTMENT } from "@/lib/department-filter";
 import { useStore } from "@/state/store";
 import { useAppTriggers } from "@/lib/app-triggers";
 import { AppEventEditor } from "./automations/AppEventEditor";
@@ -35,6 +36,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const view = focus?.view === "calendar" ? "calendar" : "list";
   const [openId, setOpenId] = useState<string | null>(focus?.section !== "logs" ? focus?.routineId ?? null : null);
   const [botFilter, setBotFilter] = useState(focus?.botId ?? "all");
+  const [department, setDepartment] = useState("all");
   const [newText, setNewText] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ kind: SetUpKind; id?: string; botId?: string } | null>(null);
   const routinesOnly = window.ogb?.remoteClient?.active === true;
@@ -50,8 +52,18 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
 
   const all = useMemo(() => automationsFrom({ routines: state.routines, webhooks: routinesOnly ? [] : state.webhooks, appTriggers: appTriggers.triggers, runs: state.routineRuns, bots: state.bots }),
     [state.routines, state.webhooks, appTriggers.triggers, state.routineRuns, state.bots, routinesOnly]);
+  const departments = filterableDepartments(state.bots, [...new Set([...(state.sections ?? []), ...state.bots.flatMap((bot) => bot.section ? [bot.section] : [])])]);
+  const showDepartments = departments.names.length + (departments.hasGeneral ? 1 : 0) > 1;
+  const activeDepartment = department === "all" || (department === GENERAL_DEPARTMENT ? departments.hasGeneral : departments.names.includes(department)) ? department : "all";
+  useEffect(() => {
+    if (activeDepartment === department) return;
+    setDepartment("all");
+    setBotFilter("all");
+  }, [activeDepartment, department]);
+  const inDepartment = (botId: string) => botInDepartment(state.bots.find((bot) => bot.id === botId), activeDepartment);
+  const departmentBots = visibleBots.filter((bot) => botInDepartment(bot, activeDepartment));
   const showFilter = all.length >= FILTER_FROM && new Set(all.map((automation) => automation.botId)).size > 1;
-  const listed = orderAutomations(all.filter((automation) => !showFilter || botFilter === "all" || automation.botId === botFilter));
+  const listed = orderAutomations(all.filter((automation) => inDepartment(automation.botId) && (!showFilter || botFilter === "all" || automation.botId === botFilter)));
   const open = all.find((automation) => automation.id === openId) ?? null;
   const sentenceOf = (automation: Automation) => automationSentence(automation, botName(automation.botId));
 
@@ -74,10 +86,17 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
           <button type="button" ref={backButtonRef} onClick={onBack} aria-label={t("automations.back")} title={t("automations.back")} className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink" style={windowNoDragStyle}><ArrowLeft size={18} /></button>
           <h1 data-tour="automations-page" className="me-1 text-[18px] font-semibold tracking-tight text-ink">{t("automations.title")}</h1>
           <div className="ms-auto flex items-center gap-3" style={windowNoDragStyle}>
+            {showDepartments && (
+              <Select size="sm" aria-label={t("automations.allDepartments")} value={activeDepartment} onChange={(event) => { setDepartment(event.target.value); setBotFilter("all"); }} className="max-w-[180px]">
+                <option value="all">{t("automations.allDepartments")}</option>
+                {departments.names.map((name) => <option key={name} value={name}>{name}</option>)}
+                {departments.hasGeneral && <option value={GENERAL_DEPARTMENT}>{t("automations.generalDepartment")}</option>}
+              </Select>
+            )}
             {showFilter && view === "list" && (
               <Select size="sm" aria-label={t("automations.allBots")} value={botFilter} onChange={(event) => setBotFilter(event.target.value)} className="max-w-[180px]">
                 <option value="all">{t("automations.allBots")}</option>
-                {visibleBots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
+                {departmentBots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
               </Select>
             )}
             <div role="group" aria-label={t("automations.view")} className="flex items-center rounded-lg border border-hairline/50 bg-panel p-0.5">
@@ -94,7 +113,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
       </header>
 
       <div className="relative flex min-h-0 flex-1">
-        {view === "calendar" ? <AutomationsCalendar botFilter={botFilter} selectedAutomationId={openId} onOpenAutomation={setOpenId} onOpenRoom={onOpenRoom} /> : (
+        {view === "calendar" ? <AutomationsCalendar botFilter={botFilter} department={activeDepartment} selectedAutomationId={openId} onOpenAutomation={setOpenId} onOpenRoom={onOpenRoom} /> : (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
               <LimitWarnings botFilter={showFilter ? botFilter : "all"} />

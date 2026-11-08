@@ -34,6 +34,13 @@ function problemText(problem: ServerProbeProblem, host?: string): string {
   return t(CONNECT_PROBLEM_KEYS[problem] as LocaleKey, { host: host ?? "", example: EXAMPLE_ADDRESS });
 }
 
+/** The host the person typed, for a line about a check that failed before it could name one. */
+function hostOf(address: string, code: string): string | undefined {
+  const parsed = parseServerInput(address, code);
+  if (parsed.ok && parsed.candidates[0]) return new URL(parsed.candidates[0]).host;
+  try { return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(address.trim()) ? address.trim() : `http://${address.trim()}`).host || undefined; } catch { return undefined; }
+}
+
 const TRANSPORT_KEY = { https: "connect.found.https", tailscale: "connect.found.tailscale", "private-http": "connect.found.privateHttp", loopback: "connect.found.loopback" } as const;
 
 /** Connect to a server: a link, or an address with the pairing code typed apart (a code pasted alone is moved to its
@@ -45,6 +52,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
   const [code, setCode] = useState("");
   const [movedCode, setMovedCode] = useState(false);
   const [probe, setProbe] = useState<ServerProbe | null>(null);
+  const [probing, setProbing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const codeField = useRef<HTMLInputElement>(null);
@@ -54,10 +62,14 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
   const linkHasCode = parsed.ok && !code.trim() && (parsed.code !== null || parsed.credential !== null);
   const showCode = movedCode || (address.trim() !== "" && !linkHasCode && !(parsed.ok === false && parsed.problem === "codeOnly"));
   useEffect(() => {
-    if (!canProbe || !address.trim()) { setProbe(null); return; }
+    if (!canProbe || !address.trim()) { setProbe(null); setProbing(false); return; }
     let current = true;
+    setProbing(true);
     const timer = window.setTimeout(() => {
-      void workspaces!.probe!(address, code).then((found) => { if (current) setProbe(found); }).catch(() => { if (current) setProbe(null); });
+      void workspaces!.probe!(address, code)
+        .then((found) => { if (current) setProbe(found); })
+        .catch(() => { if (current) setProbe({ outcome: "problem", problem: "unreachable", host: hostOf(address, code) }); })
+        .finally(() => { if (current) setProbing(false); });
     }, 400);
     return () => { current = false; window.clearTimeout(timer); };
   }, [address, code, canProbe, workspaces]);
@@ -113,6 +125,9 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
       <span className="flex flex-col gap-1 text-[12px] font-normal text-ink-secondary">{t("connect.noCode")}<CommandLine command={PAIR_COMMAND} /></span>
     </label>}
     {shownProblem && <p role="alert" data-connect-problem className="text-[13px] text-danger">{shownProblem}</p>}
+    {canProbe && probing && !found && !shownProblem && <p data-connect-checking className="inline-flex items-center gap-1.5 text-[13px] text-ink-secondary">
+      <Loader2 size={13} className="animate-spin" aria-hidden="true" />{t("connect.checking")}
+    </p>}
     <div><button type="submit" data-own-server-connect disabled={busy || !address.trim() || (canProbe && !found)} className="ui-button ui-button-primary inline-flex items-center gap-2">
       {busy && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}{found ? t("connect.to", { name: found.label }) : t("rail.connect")}
     </button></div>

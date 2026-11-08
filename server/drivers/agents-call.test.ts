@@ -375,3 +375,136 @@ describe("page tools", () => {
       { path: "/api/internal/pages/unpublish", body: { page_id: "abcdefghijklmnopqrstuvwxyz" } }]);
   });
 });
+describe("coordinate_bots", () => {
+  const BASE = { bot_ids: ["bot-scout"], message: "Review the draft." };
+
+  async function coordinate(args: Record<string, unknown>) {
+    const calls: Array<{ path: string; body: any }> = [];
+    const result = await callTool("coordinate_bots", args, context({
+      client: {
+        api: async (path, init) => {
+          calls.push({ path, body: JSON.parse(String(init?.body)) });
+          return { id: "a1" };
+        },
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    return { result, calls };
+  }
+
+  it("drops an empty-string group_id instead of posting it", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: "" });
+    expect(result.isError).toBeFalsy();
+    expect(calls).toEqual([{ path: "/api/internal/coordinate-bots", body: { botIds: ["bot-scout"], message: "Review the draft." } }]);
+  });
+
+  it("drops a whitespace-only group_id", async () => {
+    const { calls } = await coordinate({ ...BASE, group_id: "   " });
+    expect(calls[0].body).not.toHaveProperty("groupId");
+  });
+
+  it("trims a real group_id", async () => {
+    const { calls } = await coordinate({ ...BASE, group_id: "  room-9  " });
+    expect(calls[0].body.groupId).toBe("room-9");
+  });
+
+  it("drops an empty camelCase groupId too", async () => {
+    const { calls } = await coordinate({ ...BASE, groupId: "" });
+    expect(calls[0].body).not.toHaveProperty("groupId");
+  });
+
+it("rejects a non-string group_id instead of delegating to the current room", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: 42 });
+    expect(result.isError).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects a non-string camelCase groupId", async () => {
+    const { result, calls } = await coordinate({ ...BASE, groupId: 7 });
+    expect(result.isError).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it("still drops a null group_id", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: null });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0].body).not.toHaveProperty("groupId");
+  });
+
+it("falls back to a nonblank camelCase groupId when group_id is blank", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: "", groupId: "room-9" });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0].body.groupId).toBe("room-9");
+  });
+
+  it("falls back to a nonblank camelCase groupId when group_id is null", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: null, groupId: "room-9" });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0].body.groupId).toBe("room-9");
+  });
+
+  it("keeps the documented group_id when both spellings name different rooms, or groupId is not text", async () => {
+    const differ = await coordinate({ ...BASE, group_id: "room-1", groupId: "room-9" });
+    expect(differ.result.isError).toBeFalsy();
+    expect(differ.calls[0].body.groupId).toBe("room-1");
+    const odd = await coordinate({ ...BASE, group_id: "room-1", groupId: 42 });
+    expect(odd.result.isError).toBeFalsy();
+    expect(odd.calls[0].body.groupId).toBe("room-1");
+  });
+
+  it("accepts the same destination in both spellings", async () => {
+    const { result, calls } = await coordinate({ ...BASE, group_id: "room-9", groupId: "room-9" });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0].body.groupId).toBe("room-9");
+  });
+});
+
+describe("blank optional arguments", () => {
+  it("drops blank session_search ids, so a blank-filled search stays a search", async () => {
+    const paths: string[] = [];
+    const result = await callTool("session_search", { query: "launch post", thread_id: "", message_id: "  " }, context({
+      client: {
+        api: async (path) => {
+          paths.push(path);
+          return { hits: [] };
+        },
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    expect(result.isError).toBeFalsy();
+    expect(result.text).toContain('Nothing of yours matches "launch post"');
+    expect(paths).toEqual(["/api/internal/session-search?fromBotId=bot-voice&fromThreadId=thread-voice&q=launch+post"]);
+  });
+
+  it("drops a blank jsx from show_html, so the html page is shown", async () => {
+    const calls: Array<{ path: string; body: unknown }> = [];
+    const result = await callTool("show_html", { html: "<p>hi</p>", jsx: "", title: "Hi" }, context({
+      client: {
+        api: async () => ({}),
+        apiResponse: async (path, init) => {
+          calls.push({ path, body: JSON.parse(String(init?.body)) });
+          return { ok: true, status: 201, body: { messageId: "m9" } };
+        },
+      },
+    }));
+    expect(result).toEqual({ text: "Shown as app m9. To change it, call show_html again with app_id \"m9\"." });
+    expect(calls).toEqual([{ path: "/api/internal/options-card", body: { tool: "show_html", html: "<p>hi</p>", title: "Hi" } }]);
+  });
+
+  it("keeps a blank manage_room bulletin, which clears the bulletin", async () => {
+    const calls: Array<{ path: string; body: any }> = [];
+    const result = await callTool("manage_room", { action: "set_bulletin", room_id: "room-1", bulletin: "" }, context({
+      client: {
+        api: async (path, init) => {
+          calls.push({ path, body: JSON.parse(String(init?.body)) });
+          return { message: "Cleared the bulletin." };
+        },
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    expect(result).toEqual({ text: "Cleared the bulletin." });
+    expect(calls).toEqual([
+      { path: "/api/internal/manage-room", body: { fromBotId: "bot-voice", fromThreadId: "thread-voice", roomId: "room-1", action: "set_bulletin", bulletin: "" } },
+    ]);
+  });
+});

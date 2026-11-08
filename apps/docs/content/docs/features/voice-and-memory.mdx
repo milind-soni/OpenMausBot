@@ -25,13 +25,13 @@ Fish Audio and ElevenLabs keys are stored separately, so switching engines does 
 
 ### Chatterbox (local)
 
-OpenMausBot speaks through any OpenAI-compatible server that runs [Chatterbox](https://github.com/resemble-ai/chatterbox) behind `POST /v1/audio/speech` — for example LocalAI with a Chatterbox model installed, or a small wrapper service around `pip install chatterbox-tts`.
+MausBot speaks through any OpenAI-compatible server that runs [Chatterbox](https://github.com/resemble-ai/chatterbox) behind `POST /v1/audio/speech` — for example LocalAI with a Chatterbox model installed, or a small wrapper service around `pip install chatterbox-tts`.
 
 1. Start your Chatterbox server locally and note its address, for example `http://127.0.0.1:4123`.
 2. In App Settings, pick **Chatterbox (local)** as the voice engine, paste the server address, and set the model id your server expects (the default is `chatterbox-turbo`).
 3. Pick a voice. Voice ids come from the server's `/v1/models` listing when it has one, or `/v1/audio/voices` when it doesn't; otherwise a **Default** entry uses the server's built-in voice.
 
-There is no API key. OpenMausBot sends the text to the configured server address, so synthesis stays on your machine only when that server is local. Per-agent voice overrides work the same as with the other engines, and a dead or unreachable server is reported as a clear error instead of a hang.
+There is no API key. MausBot sends the text to the configured server address, so synthesis stays on your machine only when that server is local. Per-agent voice overrides work the same as with the other engines, and a dead or unreachable server is reported as a clear error instead of a hang.
 
 ## Voice notes
 
@@ -62,7 +62,7 @@ The voice speaks as the bot, in the first person, but the bot does the work: eac
 
 When a call that connected ends, the chat keeps one record of it: a small row with the call's length and what the bot did for the requests you spoke, its steps by name and the permission requests it raised, such as running a command, with how each was decided. The record reads "Call with" and the bot's name. With generated thread titles turned on (`"features": { "llmThreadTitles": true }` in `~/.openmausbot/config.json`), the bot's own engine, which already saw those requests, gives it a short title from what you asked on the call; the call sends nothing more to OpenAI. The requests you spoke and the bot's answers stay in the chat as before. The record holds no speech: the voice's own words are still not saved. A call that never connected leaves no record, and a phone app that does not know the record yet shows it as one short line, such as "Call with Ada · 1:42".
 
-A permission request, such as running a command, can be answered with a clear spoken yes or no, decided by OpenMausBot, not by the voice model; the card stays on screen too, and a card decided on the call is marked "by voice" there and in the decision log. On a Live call the microphone stays open while the voice speaks, so "okay", "sure" or "fine" on their own do not count as a yes, and words heard while the voice itself was talking are left out; say "yes" or "no". A bot's changes to itself, such as a new skill or a routine, apply without a card and can be undone on screen; proposals that change another bot or the team, such as a team setup, are decided on screen only, and when the bot waits for you to connect an app or enter a credential, the voice tells you to do it in the chat (never to say a credential aloud).
+A permission request, such as running a command, can be answered with a clear spoken yes or no, decided by MausBot, not by the voice model; the card stays on screen too, and a card decided on the call is marked "by voice" there and in the decision log. On a Live call the microphone stays open while the voice speaks, so "okay", "sure" or "fine" on their own do not count as a yes, and words heard while the voice itself was talking are left out; say "yes" or "no". A bot's changes to itself, such as a new skill or a routine, apply without a card and can be undone on screen; proposals that change another bot or the team, such as a team setup, are decided on screen only, and when the bot waits for you to connect an app or enter a credential, the voice tells you to do it in the chat (never to say a credential aloud).
 
 A message typed during a call is answered by the bot, and the voice reads that answer once. With **Read replies to typed messages** off (under the gear), messages you type during a call and the bot's answers to them are not sent to OpenAI, with two exceptions. The voice still hears what the bot asks of you while it works on a typed message: an approval or a question (you can answer those on the call), a proposal, and a request to connect an app or enter a credential. And an answer that also covers something you said aloud is read out: lines that waited in the queue together get one answer.
 
@@ -82,4 +82,4 @@ On macOS, the composer microphone uses Apple's local speech recognition. On Wind
 
 ## Memory
 
-Each bot can keep plain-text memory that you can inspect, correct, or delete. Memory is not a hidden remote profile; it lives with the local OpenMausBot data.
+Each bot can keep plain-text memory that you can inspect, correct, or delete. Memory is not a hidden remote profile; it lives with the local MausBot data.

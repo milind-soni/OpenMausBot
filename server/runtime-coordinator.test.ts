@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
-import type { BeginTurnRequest, ComposedTurn, CoordinatorHost, HandoffOpener, HandoffOptions, HandoffView, HostTurnResult } from "./coordinator.ts";
+import type { BeginTurnRequest, ComposedTurn, CoordinatorHost, HandoffLimit, HandoffOpener, HandoffOptions, HandoffView, HostTurnResult } from "./coordinator.ts";
 import type { RoomAddress } from "./coordinator.ts";
 import { needsInputQuestion, RuntimeCoordinator, view } from "./runtime-coordinator.ts";
 import { ENVELOPE_MARK } from "./runtime/envelope.ts";
@@ -70,10 +70,10 @@ function fakeHost(script: Script = () => undefined): Host {
 }
 
 interface World { host: Host; coordinator: RuntimeCoordinator; logs: string[] }
-function world(script?: Script, runtimeLimits: Partial<Limits> = {}, dataDir = ":memory:"): World {
+function world(script?: Script, runtimeLimits: Partial<Limits> = {}, dataDir = ":memory:", handoffLimit?: HandoffLimit): World {
   const host = fakeHost(script);
   const logs: string[] = [];
-  const coordinator = new RuntimeCoordinator({ dataDir, host, runtimeLimits, log: line => logs.push(line) });
+  const coordinator = new RuntimeCoordinator({ dataDir, host, runtimeLimits, log: line => logs.push(line), ...(handoffLimit ? { handoffLimit } : {}) });
   return { host, coordinator, logs };
 }
 
@@ -256,6 +256,50 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     w.coordinator.tick(); await flush();
     expect(w.coordinator.all()).toHaveLength(2);
     expect(w.coordinator.active()).toEqual([]);
+  });
+
+  it("refuses a hand-off a plan's limit refuses, counting the hand-offs still open, and hands out nothing", () => {
+    const counted: number[] = [];
+    const w = world(hold, {}, ":memory:", { refusal: (botId, open) => { counted.push(open()); return botId === "tester" || open() >= 2 ? `no room for ${botId}` : null; } });
+    send(w, chief, "gen-1", undefined, builder, "Build it");
+    expect(() => send(w, chief, "gen-1", undefined, tester, "Test it")).toThrow("no room for tester");
+    send(w, chief, "gen-1", undefined, inRoom("helper", "g1", "helper-work"), "Help");
+    expect(() => send(w, chief, "gen-1", undefined, { botId: "writer", threadId: "writer-work" }, "Write it")).toThrow("no room for writer");
+    expect(counted.slice(-1)).toEqual([2]);
+    expect(w.coordinator.active().filter(n => n.parentId).map(n => n.botId)).toEqual(["builder", "helper"]);
+  });
+
+  it("runningIn() is active()'s running nodes in that thread", async () => {
+    const w = world(hold);
+    const same = () => { for (const threadId of ["chief-chat", node.threadId, "nobody"]) expect(w.coordinator.runningIn(threadId)).toEqual(w.coordinator.active().filter(n => n.threadId === threadId && n.status === "running")); };
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    same();
+    w.coordinator.tick(); await flush();
+    same(); expect(w.coordinator.runningIn(node.threadId).map(n => n.id)).toContain(node.id);
+    ended(w, "gen-1"); w.coordinator.tick(); await flush();
+    same();
+    w.coordinator.tick(); await flush();
+    same();
+  });
+
+  it("runningIn() and outstandingFor() read only the thread's own rows, however many other assignments are open", () => {
+    const w = world(hold);
+    for (let at = 0; at < 25; at++) send(w, chief, `gen-${at}`, undefined, builder, `Job ${at}`);
+    const store = (w.coordinator as unknown as { store: Record<"all" | "get" | "children", (...args: unknown[]) => unknown> }).store;
+    let read = 0;
+    for (const name of ["all", "get", "children"] as const) {
+      const real = store[name]!.bind(store);
+      store[name] = (...args: unknown[]) => { const rows = real(...args); read += Array.isArray(rows) ? rows.length : rows ? 1 : 0; return rows; };
+    }
+    const reads = (ask: () => unknown) => { read = 0; ask(); return read; };
+    expect(reads(() => w.coordinator.active()), "the whole tree, for comparison").toBeGreaterThanOrEqual(50);
+    expect(reads(() => w.coordinator.runningIn("tester-work"))).toBe(0);
+    expect(reads(() => w.coordinator.outstandingFor("tester-work"))).toBe(0);
+    expect(reads(() => w.coordinator.runningIn("builder-work"))).toBeLessThanOrEqual(50);
+    const live = w.coordinator.active();
+    const mine = new Set(live.filter(n => n.threadId === "chief-chat").map(n => n.id));
+    expect(w.coordinator.outstandingFor("chief-chat").map(n => n.id))
+      .toEqual(live.filter(n => n.parentId !== undefined && mine.has(n.parentId)).map(n => n.id));
   });
 
   it("active() never reads an ended row: one that no longer parses stops all(), not active() (#2765)", async () => {

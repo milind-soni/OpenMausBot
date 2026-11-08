@@ -90,7 +90,7 @@ import environmentsModule from "./environments.cjs";
 import { pairingPageUrl } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
-import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs"; import { ownEnvironmentIds } from "./lent-mcp.mjs";
+import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs"; import { installServerLending } from "./server-lending.mjs"; import { ownEnvironmentIds } from "./lent-mcp.mjs";
 import { createHostScreenLease } from "./host-screen-lease.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { reviveAfterFailedSwitch, switchLocalEnvironment } from "./environment-switch.mjs";
@@ -1419,7 +1419,6 @@ ipcMain.on("desktop:unread-count", (event, value) => {
 const { LOCAL_ID, activeEnvironment, activeRemote, allowedOrigins, bootEnvironmentDir, otherPlaces, savedPlace, startupEnvironmentDir, withActive, withEnvironment, withEnvironmentLook, withLocalEnvironment, withMicrophone, withPlaceColor, withoutEnvironment, withOwnCloud, withTeam, placesMenuOptions, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
 let environmentsState = { environments: [], activeId: LOCAL_ID };
 let computerSharing;
-const sharingPrompts = new Set();
 
 let sharedComputersAllowed = false;
 
@@ -1431,11 +1430,6 @@ async function refreshSharedComputersAllowed() {
   return sharedComputersAllowed;
 }
 
-async function requireSharedComputers() {
-  if (await refreshSharedComputersAllowed()) return;
-  throw new Error("Computer sharing is turned off on this server.");
-}
-
 function sharingController() {
   computerSharing ??= createComputerSharing({
     file: path.join(app.getPath("userData"), "computer-sharing.json"),
@@ -1443,7 +1437,7 @@ function sharingController() {
     protectedPaths: [desktopDataDir(), cleanWorkspaceDir(desktopDataDir()), profilesDir(desktopDataDir())],
     fetch: (...args) => session.defaultSession.fetch(...args),
     environments: () => environmentsState.environments, localEnvironments: () => ownEnvironmentIds([desktopDataDir(), runningDataDir]),
-    enabled: refreshSharedComputersAllowed, t: nativeT,
+    enabled: refreshSharedComputersAllowed, t: nativeT, serverPorts: () => [SERVER_PORT],
     cloud: lendingTarget.cloud, myCloud: lendingTarget.environment, ownClouds: lendingTarget.places, screen: screenControl.now, askForScreen, power: cloudPower, cloudPower: origin => cloudAccount?.powerOf?.(origin) ?? null, reconnect: reconnectCloud,
     prompt: createAskPrompt({ t: nativeT, dialog, window: () => mainWindow, idleSeconds: () => powerMonitor.getSystemIdleState(1) === "unknown" ? null : powerMonitor.getSystemIdleTime() }), startScreen: screenControl.start, confirmTerminal: () => lendingDialogs.lendTerminal(true, () => sharingController().lendTerminal(true)), log: slog,
     linkHeaders: async env => ({ cookie: (await session.defaultSession.cookies.get({ url: env.origin })).map(cookie => `${cookie.name}=${cookie.value}`).join("; ") }),
@@ -1489,7 +1483,7 @@ async function openCloudSettings() {
 
 const lendingActivity = createActivityWindow({ BrowserWindow, icon: APP_ICON, background: () => windowBackground(nativeTheme.shouldUseDarkColors),
   entries: () => sharingController().activity(undefined, 200),
-  locale: () => { try { return jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")).read()?.language || app.getLocale(); } catch { return app.getLocale(); } } });
+  locale: nativeText.intlTag });
 let lendingTray = null;
 function lendingIndicator() {
   lendingTray ??= createLendingIndicator({
@@ -1500,25 +1494,8 @@ function lendingIndicator() {
   return lendingTray;
 }
 
-async function offerComputerSharing(win) {
-  const env = activeEnvironment(environmentsState);
-  if (!env || sharingPrompts.has(env.id) || win.isDestroyed()) return;
-  if (env.origin === cloudAccount?.homeTarget()?.origin || cloudAccount?.isOwnCloud(env.origin) || env.origin === ownHome?.home()?.origin) return;
-  if (!(await refreshSharedComputersAllowed()) || win.isDestroyed()) return;
-  sharingPrompts.add(env.id);
-  try {
-    const info = await sharingController().observe(env);
-    if (!info || win.isDestroyed() || activeEnvironment(environmentsState)?.id !== env.id || new URL(win.webContents.getURL()).origin !== env.origin) return;
-    const choice = await dialog.showMessageBox(win, {
-      type: "question", message: nativeT("native.dialog.share.title", { name: env.name }),
-      detail: nativeT("native.dialog.share.detail"),
-      buttons: [nativeT("native.dialog.share.choose"), nativeT("native.dialog.share.notNow")], defaultId: 1, cancelId: 1,
-    });
-    sharingController().decline(env, info);
-    if (choice.response === 0) openWorkspaceSettings(env.id);
-  } catch {}
-  finally { sharingPrompts.delete(env.id); }
-}
+/** A server saved by hand that no Cloud rule lends: never My Cloud, another Cloud of the person's own, a team's Cloud or the server their bots moved to. */
+const lendableServer = env => Boolean(env?.origin) && env.kind !== "local" && !env.home && !env.cloud && !env.team && env.origin !== cloudAccount?.homeTarget()?.origin && !cloudAccount?.isOwnCloud(env.origin) && env.origin !== ownHome?.home()?.origin;
 
 function environmentsFile() {
   return path.join(app.getPath("userData"), cloudTarget(process.env).environments);
@@ -2099,7 +2076,7 @@ function createWindow({ deferNavigation = false } = {}) {
     deliverPackageInstall(win);
     deliverChatLink(win); desktopNotifications.arrived();
   });
-  win.webContents.on("did-finish-load", () => void offerComputerSharing(win));
+  win.webContents.on("did-finish-load", () => void serverLending.offer(win));
 
   // Electron has no default context menu.
   win.webContents.on("context-menu", (_event, params) => {
@@ -2678,33 +2655,10 @@ const announceAddedCloud = createAddedCloudNotice({ t: nativeT, Notification, fo
 installPlaceLook({ ipcMain, guard: workspaceOnly, place: () => savedPlace(environmentsState), session: () => ({ clouds: desktopRemoteAccess ? null : cloudAccount?.state().clouds ?? null, homeOrigin: myCloud() }),
   setColor: (id, swatch) => ensureCloudAccount().setCloudColor(id, swatch), save: (id, color) => persistEnvironments(withPlaceColor(environmentsState, id, color)),
   rail: { owns: event => chromeRail.owns(event), places: railList, saved: id => savedPlace(environmentsState, id) }, t: nativeT });
-ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_event, id) => {
-  await requireSharedComputers();
-  return sharingController().state(savedWorkspace(id).id);
-}));
 const lendingDialogs = createLendingDialogs({ dialog, window: () => mainWindow, validate: validateSharedFolders, isHome: isHomeFolder, t: nativeT });
-ipcMain.handle("sharing:folder", localWorkspaceOnly("sharing:folder", async () => {
-  await requireSharedComputers();
-  return lendingDialogs.chooseFolder(nativeT("native.picker.shareFolder"));
-}));
-ipcMain.handle("sharing:revoke", localWorkspaceOnly("sharing:revoke", async (_event, id) => {
-  await requireSharedComputers();
-  return sharingController().revoke(savedWorkspace(id));
-}));
-// What that server's bots did here: the local log, never a server's claim.
-ipcMain.handle("sharing:activity", localWorkspaceOnly("sharing:activity", async (_event, id) => {
-  await requireSharedComputers();
-  return sharingController().activity(savedWorkspace(id).id, 50);
-}));
-ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event, id, input) => {
-  await requireSharedComputers();
-  const env = savedWorkspace(id);
-  const info = await sharingController().identity(env);
-  const grant = { folders: await validateSharedFolders(input?.folders), terminal: input?.terminal === true, computer: input?.computer === true };
-  if (!(await lendingDialogs.confirmServerAccess(env, grant))) return null;
-  savedWorkspace(id);
-  return sharingController().save(env, grant, info);
-}));
+// Settings → Servers' computer access, and the popup after pairing a server of the person's own (server-lending.mjs).
+const serverLending = installServerLending({ ipcMain, guard: localWorkspaceOnly, sharing: sharingController, dialogs: lendingDialogs, validate: validateSharedFolders, dialog, window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
+  saved: savedWorkspace, candidate: lendableServer, flag: refreshSharedComputersAllowed, environments: () => environmentsState.environments, active: () => activeEnvironment(environmentsState), openSettings: openWorkspaceSettings, t: nativeT, log: slog });
 
 const cloudSync = installCloudFiles({ t: nativeT,
   app, ipcMain, dialog, shell, powerMonitor, localWorkspaceOnly, localDataDir: desktopDataDir(),

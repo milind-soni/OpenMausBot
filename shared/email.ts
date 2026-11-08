@@ -55,6 +55,13 @@ export interface EmailAccountView {
   sendingProblem?: string;
 }
 
+/** What an outgoing form starts with: the server a mailbox sends through, or the one its sending problem is about; never a
+ * password. */
+export function outgoingFieldsOf(account: EmailAccountView): EmailOutgoingFields {
+  const server = account.smtpHost ? { smtpHost: account.smtpHost, smtpPort: account.smtpPort, smtpSecurity: account.smtpSecurity } : account.smtpTried ?? {};
+  return Object.fromEntries(Object.entries({ ...server, smtpUsername: account.smtpUsername }).filter(([, value]) => value !== undefined)) as EmailOutgoingFields;
+}
+
 /** What POST /api/email/accounts/:address/outgoing answers: it checked sending again, at the server typed there (an
  * EmailOutgoingFields body) or the ones found for the address, without signing in to read again. */
 export type EmailOutgoingAnswer = { ok: true; account: EmailAccountView } | { ok: false; error: string; account?: EmailAccountView };

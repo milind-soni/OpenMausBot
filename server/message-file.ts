@@ -8,10 +8,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { windowsPathDestinations } from "../shared/markdown-windows-paths.ts";
+import { PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
 import { inSecretFolder, SECRET_FILE_REFUSAL } from "./secret-folder.ts";
 import { userErrorThrown } from "./user-errors.ts";
 
-export const MESSAGE_FILE_MAX_BYTES = 25 * 1024 * 1024;
+export const MESSAGE_FILE_MAX_BYTES = PREVIEW_MAX_BYTES;
 /** Saving a linked file streams it to the person, so it may be larger than anything read into memory or previewed. */
 export const MESSAGE_FILE_DOWNLOAD_MAX_BYTES = 500 * 1024 * 1024;
 
@@ -444,6 +445,7 @@ const SAVED_SINCE_SLACK_MS = 2_000;
 export async function openFileSavedSince(
   href: string,
   options: { since: number; refuse: readonly string[] },
+  maxBytes = MESSAGE_FILE_MAX_BYTES,
 ): Promise<OpenedMessageFile> {
   const requested = referencedPath(href, false, false);
   if (!isAbsolute(requested) || requested.startsWith("\\\\") || requested.startsWith("//")) throw outsideWorkspace();
@@ -459,7 +461,7 @@ export async function openFileSavedSince(
   if (hidden || refused.some((root) => containedBy(root, canonical))) {
     throw statusError(403, "files in hidden folders or in the app's own data can't be attached", "outside_workspace");
   }
-  const file = await openMessageFile(canonical, [dirname(canonical)]);
+  const file = await openMessageFile(canonical, [dirname(canonical)], maxBytes);
   const opened = await file.handle.stat().catch(async (error: unknown) => {
     await file.handle.close().catch(() => undefined);
     throw error;

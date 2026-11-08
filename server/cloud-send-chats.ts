@@ -3,7 +3,9 @@
 // /api/cloud-send/chats/rows); My Cloud adds them as Bring newer chats adds a copy's (cloud-chat-merge.ts): only what it
 // lacks, never replacing or deleting anything. A conversation's history therefore goes once, and then only what is new.
 // Admin scope (request-auth's default) on both sides.
-import { lstat, open, readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { lstat, open } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -390,7 +392,8 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
       const stat = await lstat(file).catch(() => null);
       if (!stat?.isFile() || stat.size > FILE_MAX_BYTES) { json(res, 404, { error: "no such attachment" }); return true; }
       res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(stat.size) });
-      res.end(await readFile(file));
+      // Streamed, never read whole: a stored file may be as large as FILE_MAX_BYTES.
+      await pipeline(createReadStream(file, { start: 0, end: Math.max(0, stat.size - 1) }), res).catch(() => res.destroy());
       return true;
     }
     // My Cloud's side: an attachment a sent row names, kept under its own name; one already here is the same upload.

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { glassPopupTopInset } from "./glass-popup";
+import { SKIN_IDS } from "./skins";
 
 const src = join(dirname(fileURLToPath(import.meta.url)), "..");
 const css = readFileSync(join(src, "styles.css"), "utf8");
@@ -57,7 +58,7 @@ describe("glass surface", () => {
 
   it("lives outside every skin block, and every skin still defines the tokens it reads", () => {
     const blocks = skinBlocks();
-    expect(blocks).toHaveLength(11);
+    expect(blocks).toHaveLength(SKIN_IDS.length);
     for (const block of blocks) {
       expect(block).not.toContain("glass");
       for (const token of ["--color-menu", "--color-card", "--color-ink"]) expect(block).toContain(`${token}:`);

@@ -6,7 +6,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { allowedServerOrigin } from "./server-address.mjs";
 import { createSharedCua, executeSharedOperation, personalSecretPaths, sharedComputerError, validCommandSeconds } from "./shared-computer-access.mjs";
-import { createLentMcp, LENT_MCP_ACTIONS, validLentMcpServer } from "./lent-mcp.mjs";
+import { createLentMcp, LENT_MCP_ACTIONS, ownPorts, validLentMcpServer } from "./lent-mcp.mjs";
 import { sharedCuaConnection } from "./shared-cua-connection.mjs";
 export { sharedCuaConnection };
 import { createLendingActivity, describeSharedOperation } from "./lending-activity.mjs";
@@ -138,6 +138,14 @@ export function cloudLendingVerdict(binding, current, env) {
   return { allow: true };
 }
 
+/** A server of the person's own, by this desktop's sign-in there: its admin (owner) pairing on a server nobody else signs
+ * in to, as the server says (`own`, server/own-home.ts), and no Cloud, team or hosted server. Lent only once the person
+ * allows it here (lendOwn), without the maintainer flag. Security: never a non-admin pairing, a server others sign in to,
+ * a team's server or a Cloud (a Cloud is lent as one, by its own rules). */
+export function ownServerSession(auth) {
+  return auth?.kind === "session" && auth.own === true && Array.isArray(auth.scopes) && auth.scopes.includes("admin") && auth.cloudHome !== true && !auth.team && auth.hosted !== true;
+}
+
 /** What a Cloud that keeps MCP servers for this computer hears: it runs them, and which installs here it is. */
 const lendsMcp = environments => {
   const ids = Array.isArray(environments) ? environments.filter(uuid).slice(0, 8) : [];
@@ -189,6 +197,7 @@ export function lendsAsWanted(record, wanted) {
 }
 
 class Paused extends Error {}
+const UPDATE_SERVER = "Update this server to enable computer sharing";
 
 const LENT_PLATFORMS = new Set(["darwin", "win32", "linux"]);
 const RECONNECT_EVERY_MS = 15 * 60_000;
@@ -214,7 +223,7 @@ const BROWSE_NOTE_MS = 10 * 60_000;
  * own prompt, `startScreen()` starts computer control again (its state after), and `confirmTerminal()` turns on
  * running commands once the person confirms it here. */
 export function createComputerSharing({ file, fetch: fetchImpl, environments, localEnvironments = () => [], cuaConnection, hostControl, screenLocked = () => false, idleSeconds = () => null, protectedPaths = [], enabled = async () => false, home = os.homedir(), activityFile, cloud = () => null, onChange = () => {}, reconnect = null, now = Date.now, power = createCloudPowerGate(),
-  linkHeaders = () => ({}), WebSocket: linkSocket = globalThis.WebSocket, egress = {}, chrome = {}, myCloud = () => null, ownClouds = () => [], screen = () => false, askForScreen = () => {}, cloudPower = () => null,
+  linkHeaders = () => ({}), WebSocket: linkSocket = globalThis.WebSocket, egress = {}, chrome = {}, serverPorts = () => [], myCloud = () => null, ownClouds = () => [], screen = () => false, askForScreen = () => {}, cloudPower = () => null,
   prompt = async () => null, startScreen = async () => null, confirmTerminal = async () => false, log = () => {}, t = nativeText.englishText.t }) {
   const protectedRoots = [path.dirname(file), ...protectedPaths.filter(entry => typeof entry === "string" && entry), ...personalSecretPaths(home)];
   const activity = createLendingActivity(activityFile ?? path.join(path.dirname(file), "lending-activity.jsonl"));
@@ -246,17 +255,19 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   const changed = () => { if (!closed) try { onChange(summary()); } catch {} };
   const summary = () => {
     const browsing = [...inUse.keys()].find(id => linked.has(id));
-    const lent = paused ? [] : environments().filter(env => records[env.id]?.cloud && records[env.id]?.enabled === true);
+    const lent = paused ? [] : environments().filter(env => (records[env.id]?.cloud || records[env.id]?.own) && records[env.id]?.enabled === true);
     const using = lent.filter(env => executing?.env === env.id || (inUse.has(env.id) && linked.has(env.id)));
     return {
       lending: lent.map(env => env.id),
-      clouds: (paused ? ownClouds() : lent).map(env => env.name),
+      clouds: (paused ? [...ownClouds(), ...environments().filter(env => records[env.id]?.own && records[env.id].enabled === true)] : lent).map(env => env.name),
       // Lent, but the Cloud hasn't accepted this computer yet (or lost it): the menu must not say it can use it. A
       // sleeping My Cloud still can; it wakes when a bot needs this computer.
       waiting: lent.filter(env => !status.get(env.id)?.connected && status.get(env.id)?.problem !== "asleep").map(env => env.name),
       using: using.map(env => env.name),
       paused,
       terminal: terminalAccount !== null && terminalAccount === signedInAccount(),
+      // The menu's terminal switch is the Clouds' one; a server of the person's own lends the terminal from Settings.
+      terminalSwitch: ownClouds().length > 0,
       busy: executing ?? (browsing ? { env: browsing, action: "internet" } : null),
       screen: screenNow,
     };
@@ -294,7 +305,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     if (allowed && !closed && !maintainerOff) return;
     maintainerOff = true;
     for (const env of environments()) {
-      if (records[env.id]?.cloud || !running.has(env.id)) continue;
+      if (records[env.id]?.cloud || records[env.id]?.own || !running.has(env.id)) continue;
       if (status.get(env.id)?.connected) disconnect(env, records[env.id]); else stop(env.id);
     }
     throw new Error("Computer sharing is turned off on this computer. Restart the desktop after enabling it.");
@@ -306,6 +317,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     changed();
   };
   const requireGrant = async (env, grant) => {
+    // A server of the person's own was allowed here: no maintainer flag, but Pause and quitting hold it as they hold Clouds.
+    if (grant.own === true) { if (closed || paused) throw new Paused("Lending is paused."); return; }
     if (!grant.cloud) return requireEnabled();
     // Quitting only pauses: a check in flight at close must never switch lending off for the next launch.
     if (closed) throw new Paused("This app is closing.");
@@ -354,12 +367,14 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     if (!response.ok) throw Object.assign(new Error(response.status === 401 || response.status === 403 ? "Pair this desktop again before sharing computer access." : `Server request failed (${response.status}). Update the server if needed.`), { status: response.status });
     return json;
   };
-  const describe = async env => {
+  const describe = async (env, required = true) => {
     const [auth, descriptor] = await Promise.all([request(env, "/api/auth/session"), request(env, "/.well-known/openmausbot/environment")])
       .catch(error => { throw error.status === 401 || error.status === 403 ? Object.assign(error, { problem: "connect-first" }) : error; });
     if (auth.kind !== "session" || !uuid(auth.id) || !uuid(descriptor.environmentId)) throw Object.assign(new Error("Complete server pairing or sign-in first"), { problem: "connect-first" });
-    if (descriptor.capabilities?.sharedComputers !== true) throw new Error("Update this server to enable computer sharing");
-    return { auth, info: { sessionId: auth.id, environmentId: descriptor.environmentId }, details: descriptor.capabilities?.lendingDetails === true, link: descriptor.capabilities?.deviceLink === true, chrome: descriptor.capabilities?.myChromeLink === true, timeouts: descriptor.capabilities?.commandTimeouts === true, long: descriptor.capabilities?.longCommands === true, edits: descriptor.capabilities?.fileEdits === true, asks: descriptor.capabilities?.computerAsks === true, mcp: descriptor.capabilities?.lentMcp === true };
+    // A server of the person's own says what it takes from them in their own sign-in's answer (`lending`), never before pairing.
+    const offered = { ...descriptor.capabilities, ...(ownServerSession(auth) && auth.lending && typeof auth.lending === "object" ? auth.lending : {}) };
+    if (required && offered.sharedComputers !== true) throw new Error(UPDATE_SERVER);
+    return { supported: offered.sharedComputers === true, auth, info: { sessionId: auth.id, environmentId: descriptor.environmentId }, details: offered.lendingDetails === true, link: offered.deviceLink === true, chrome: offered.myChromeLink === true, timeouts: offered.commandTimeouts === true, long: offered.longCommands === true, edits: offered.fileEdits === true, asks: offered.computerAsks === true, mcp: offered.lentMcp === true };
   };
   const identity = async env => {
     await requireEnabled();
@@ -371,19 +386,27 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   /** A server of the person's own their bots moved to: lent as their Clouds are, to its one owner's sign-in alone, at the
    * server the move chose (lending-target.mjs `own:<environment id>`). */
   const ownHomeId = env => { const current = cloud(env); return current?.origin === env.origin && current.accountId?.startsWith("own:") ? current.accountId.slice(4) : null; };
+  /** What the server says it takes, remembered for its connect; a server of the person's own never gets the device link. */
+  const takes = (env, { details, link, chrome: takesChrome, timeouts, long, edits, mcp }) => {
+    for (const [set, on] of [[supportsDetails, details], [supportsLink, link], [supportsChrome, takesChrome], [supportsTimeouts, timeouts], [supportsLong, long], [supportsEdits, edits], [supportsMcp, mcp]]) {
+      if (on) set.add(env.id); else set.delete(env.id);
+    }
+  };
   const cloudIdentity = async env => {
-    const { auth, info, details, link, chrome: takesChrome, timeouts, long, edits, mcp } = await describe(env);
+    const described = await describe(env), { auth, info } = described;
     const own = ownHomeId(env);
     if (own !== null && (auth.own !== true || info.environmentId !== own)) throw Object.assign(new Error(t("native.lend.homeChanged")), { problem: "not-cloud" });
     if ((own === null && auth.cloudHome !== true) || !Array.isArray(auth.scopes) || !auth.scopes.includes("admin")) throw Object.assign(new Error("This server is not My Cloud"), { problem: "not-cloud" });
-    if (details) supportsDetails.add(env.id); else supportsDetails.delete(env.id);
-    if (link) supportsLink.add(env.id); else supportsLink.delete(env.id);
-    if (takesChrome) supportsChrome.add(env.id); else supportsChrome.delete(env.id);
-    if (timeouts) supportsTimeouts.add(env.id); else supportsTimeouts.delete(env.id);
-    if (long) supportsLong.add(env.id); else supportsLong.delete(env.id);
-    if (edits) supportsEdits.add(env.id); else supportsEdits.delete(env.id);
-    if (mcp) supportsMcp.add(env.id); else supportsMcp.delete(env.id);
+    takes(env, described);
     return info;
+  };
+  /** This desktop's sign-in on a server of the person's own, checked now (ownServerSession). */
+  const ownIdentity = async env => {
+    const described = await describe(env, false);
+    if (!ownServerSession(described.auth)) throw Object.assign(new Error(t("native.lend.notOwnServer")), { problem: "not-own" });
+    if (!described.supported) throw new Error(UPDATE_SERVER);
+    takes(env, { ...described, link: false, chrome: false });
+    return described.info;
   };
   /** The Clouds that keep MCP servers for this computer to run. */
   const supportsMcp = new Set();
@@ -425,7 +448,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   };
   const run = (env, grant) => {
     stop(env.id);
-    if (closed || !grant.enabled || (grant.cloud ? paused : maintainerOff)) return;
+    if (closed || !grant.enabled || (grant.cloud || grant.own ? paused : maintainerOff)) return;
     const live = { abort: new AbortController(), cua: null, mcp: null };
     running.set(env.id, live);
     const signal = live.abort.signal;
@@ -446,6 +469,15 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
               grant = { ...grant, ...info };
               if (records[env.id]?.id === grant.id) store({ ...records, [env.id]: grant });
             }
+          } else if (grant.own) {
+            // Pairing this desktop again keeps lending, as an admin of that same server only; any other answer ends it.
+            const info = await ownIdentity(env);
+            if (signal.aborted || running.get(env.id) !== live) break;
+            if (info.environmentId !== grant.environmentId) { endCloud(env, "machine-changed"); break; }
+            if (info.sessionId !== grant.sessionId) {
+              grant = { ...grant, sessionId: info.sessionId };
+              if (records[env.id]?.id === grant.id) store({ ...records, [env.id]: grant });
+            }
           } else if (!matches(grant, await identity(env))) throw new Error("Server sign-in changed. Review computer access again in Settings.");
           // A folder deleted since is left out, so the rest (the internet connection too) keeps working; any other refusal
           // still stops lending.
@@ -464,7 +496,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
             ...(supportsTimeouts.has(env.id) ? { commandTimeouts: true } : {}),
             ...(supportsLong.has(env.id) ? { longCommands: true } : {}),
             ...(supportsEdits.has(env.id) ? { fileEdits: true } : {}),
-            ...(grant.cloud && supportsMcp.has(env.id) ? lendsMcp(localEnvironments()) : {}),
+            ...((grant.cloud || grant.own) && supportsMcp.has(env.id) ? lendsMcp(localEnvironments()) : {}),
           }, signal, grant.secret);
           if (signal.aborted) break;
           status.set(env.id, { connected: true });
@@ -517,11 +549,11 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
                   const connection = await cuaConnection();
                   jobSignal.throwIfAborted();
                   const mcp = sharedCuaConnection(connection);
-                  if (!mcp) { if (grant.cloud) try { askForScreen(connection); } catch {} throw new Error(cuaUnavailable(connection?.reason, process.platform, t)); }
+                  if (!mcp) { if (grant.cloud || grant.own) try { askForScreen(connection); } catch {} throw new Error(cuaUnavailable(connection?.reason, process.platform, t)); }
                   live.cua = createSharedCua(mcp, { t });
                 }
                 return live.cua;
-              }, () => (live.mcp ??= createLentMcp()));
+              }, () => (live.mcp ??= createLentMcp({ ports: () => ownPorts({ serverPorts: serverPorts() }) })));
             } catch (error) { result = sharedComputerError(error); live.cua?.close(); live.cua = null; }
             finally {
               clearInterval(heartbeat); ended = true;
@@ -538,6 +570,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
             await call("result", { jobId: job.id, result });
           }
         } catch (error) {
+          if (error?.problem === "not-own" && grant.own) { endCloud(env, "not-own"); break; }
           if (error instanceof Paused) {
             if (running.get(env.id) === live) disconnect(env, grant, true);
             status.set(env.id, { connected: false, problem: "paused" });
@@ -574,7 +607,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     : { chrome: lent?.cloud ? lent.enabled === true && lent.chrome === true : false };
   const state = id => {
     const grant = records[id];
-    return { enabled: grant?.enabled === true, folders: Array.isArray(grant?.folders) ? grant.folders : [], terminal: grant?.terminal === true, computer: grant?.computer === true, ...status.get(id) };
+    return { enabled: grant?.enabled === true, folders: Array.isArray(grant?.folders) ? grant.folders : [], terminal: grant?.terminal === true, computer: grant?.computer === true,
+      ...(grant?.own ? { own: true, ...(paused ? { paused: true } : {}) } : {}), ...status.get(id) };
   };
   // `resumes`: lending waits (for the Cloud sign-in, say) and resumes by itself, so the server keeps it as lent, not stopped.
   /** Disconnects still waiting for their Cloud's answer. */
@@ -676,7 +710,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     const automatic = lentAutomatically();
     for (const env of environments()) {
       const grant = records[env.id];
-      if (grant?.cloud && !automatic.has(env.id) && validRecord(grant) && !running.has(env.id) && cloudLendingVerdict(grant.cloud, cloud(env), env).allow) run(env, grant);
+      if (!validRecord(grant) || running.has(env.id)) continue;
+      if (grant.own || (grant.cloud && !automatic.has(env.id) && cloudLendingVerdict(grant.cloud, cloud(env), env).allow)) run(env, grant);
     }
     changed();
     wakeAsking();
@@ -772,6 +807,33 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       disconnect(env, records[env.id]);
       store({ ...records, [env.id]: grant }); run(env, grant); changed(); return state(env.id);
     },
+    /** Whether `env` is a server of the person's own, checked now: its identity, or null (not paired as its admin, a team
+     * or Cloud, too old to take a lent computer, or not answering). */
+    ownServer: env => ownIdentity(env).catch(() => null),
+    /** A server of the person's own whose pairing here was never asked about: its identity, for the popup; null once the
+     * person answered for this pairing (a grant they allowed carries over to a new pairing of that same server); false
+     * when it is not a server of their own. */
+    async ownOffer(env) {
+      const info = await ownIdentity(env).catch(() => null), kept = records[env.id];
+      if (!info) return false;
+      if (kept && kept.environmentId === info.environmentId && (kept.sessionId === info.sessionId || (kept.own && kept.enabled === true))) return null;
+      return info;
+    },
+    /** The person allowed a server of their own to use this computer: what `input` lends, checked as every grant is, the
+     * home folder read only. Security: only while this desktop is that server's admin now; no folder unless chosen. */
+    async lendOwn(env, input) {
+      const version = changeGrant(env.id);
+      if (closed) throw new Error("Lending is unavailable while the app is closing.");
+      const info = await ownIdentity(env);
+      const folders = await validateSharedFolders(input?.folders ?? []);
+      const grant = { ...info, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, own: true, folders, terminal: input?.terminal === true, computer: input?.computer === true };
+      if (!folders.length && !grant.terminal && !grant.computer) throw new Error("Choose at least one folder or capability to share");
+      if (grantVersions.get(env.id) !== version) return state(env.id);
+      disconnect(env, records[env.id]);
+      store({ ...records, [env.id]: grant }); run(env, grant); changed(); return state(env.id);
+    },
+    /** Not now: nothing is lent, and this pairing is not asked again. */
+    declineOwn(env, info) { changeGrant(env.id); disconnect(env, records[env.id]); store({ ...records, [env.id]: { ...info, enabled: false, own: true, folders: [], terminal: false, computer: false } }); changed(); },
     cloudState,
     /** What Files copies to My Cloud (electron/lent-folders.mjs): the folders lent to it, with this grant's id and the
      * places no grant reaches, and `paused` while lending is; `{ off: true }` while nothing is lent to it. */
@@ -805,7 +867,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       paused = true;
       try { store(records); } catch {}
       for (const env of environments()) {
-        if (!records[env.id]?.cloud) continue;
+        if (!records[env.id]?.cloud && !records[env.id]?.own) continue;
         if (running.has(env.id)) disconnect(env, records[env.id]);
         status.set(env.id, { connected: false, problem: "paused" });
       }
@@ -843,7 +905,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
         const grant = records[env.id];
         if (!validRecord(grant)) continue;
         if (grant.cloud) { if (!automatic.has(env.id) && cloudLendingVerdict(grant.cloud, cloud(env), env).allow) run(env, grant); }
-        else if (maintainer && !maintainerOff) run(env, grant);
+        else if (grant.own || (maintainer && !maintainerOff)) run(env, grant);
       }
       changed();
       void lendAutomatically();

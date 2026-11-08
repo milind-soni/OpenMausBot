@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Laptop, Loader2, Trash2 } from "lucide-react";
 import { Card } from "./SettingsPrimitives";
 import { ComputerSharingSettings } from "./ComputerSharingSettings";
-import { ServerList } from "./ServerList";
+import { ServerList, type OwnServerSharing } from "./ServerList";
 import { useStore } from "@/state/store";
 import { sharedComputersEnabled } from "@/lib/feature-flags";
 
@@ -15,6 +15,9 @@ export function ConnectedWorkspacesSettings() {
   // Security: the desktop bridge alone is not enough; never offer access the server refuses.
   const { state } = useStore();
   const sharingOffered = sharedComputersEnabled(state.config) && Boolean(window.ogb?.computerSharing);
+  // A server of the person's own takes this computer without that flag, once they allow it in main's popup.
+  const sharing = window.ogb?.computerSharing;
+  const [ownServers, setOwnServers] = useState<OwnServerSharing[]>([]);
   const [saved, setSaved] = useState<SavedWorkspaces | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -32,6 +35,18 @@ export function ConnectedWorkspacesSettings() {
       .catch(() => { if (generation.current === current) setError(t("servers.loadFailed")); });
     return () => { generation.current++; };
   }, [bridge]);
+  useEffect(() => {
+    if (!sharing?.servers || !saved) return;
+    let current = true;
+    const read = () => void sharing.servers!().then((next) => { if (current) setOwnServers(next); }).catch(() => {});
+    read();
+    const timer = setInterval(read, 5000);
+    return () => { current = false; clearInterval(timer); };
+  }, [sharing, saved]);
+  const share = (id: string, on: boolean) => void perform(async () => {
+    if (on) { if (await sharing?.allow?.(id)) setComputerId(id); } else await sharing?.revoke(id);
+    if (sharing?.servers) setOwnServers(await sharing.servers());
+  });
   useEffect(() => {
     const consume = (id?: string | null) => {
       if (id) setComputerId(id);
@@ -64,6 +79,7 @@ export function ConnectedWorkspacesSettings() {
   const confirmAction = (message: string) => window.ogb?.confirm ? window.ogb.confirm(message) : window.confirm(message);
   const connected = saved?.environments.find(entry => entry.id === computerId);
   const computerWorkspace = connected?.origin && !connected.home ? { id: connected.id, name: connected.name, origin: connected.origin } : undefined;
+  const ownComputer = Boolean(computerWorkspace && ownServers.some((own) => own.id === computerWorkspace.id));
   const locals = saved?.environments.filter(entry => entry.kind === "local") ?? [];
   const forgetEntry = locals.find(entry => entry.id === envForget);
   return <>
@@ -138,10 +154,10 @@ export function ConnectedWorkspacesSettings() {
     </Card>}
     <Card title={t("servers.yours.title")} subtitle={t("servers.yours.subtitle")}>
       {!saved ? <p role="status" className="text-[13px] text-ink-secondary">{t(error ? "servers.yours.loadFailed" : "servers.yours.loading")}</p> :
-        <ServerList saved={saved} busy={busy} sharingOffered={sharingOffered} appVersion={window.ogb?.app?.version ?? null}
+        <ServerList saved={saved} busy={busy} sharingOffered={sharingOffered} ownServers={ownServers} appVersion={window.ogb?.app?.version ?? null} onShare={share}
           onSwitch={(id) => void perform(async () => { await bridge.switch(id); return true; })} onForget={(id) => void perform(() => bridge.forget(id))} onComputerAccess={setComputerId} />}
       {saved && error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
     </Card>
-    {sharingOffered && computerWorkspace && <ComputerSharingSettings key={computerWorkspace.id} workspace={computerWorkspace} onClose={() => setComputerId(null)} />}
+    {(sharingOffered || ownComputer) && computerWorkspace && <ComputerSharingSettings key={computerWorkspace.id} workspace={computerWorkspace} own={ownComputer} onClose={() => setComputerId(null)} />}
   </>;
 }

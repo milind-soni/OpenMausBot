@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { DATA_DIR, persistableInstanceConfigs, type AppConfig } from "./config.ts";
 import type { InstanceConfig, InstanceConfigMap } from "./contracts.ts";
+import { addEndpointSchema } from "./openai-compat-endpoints.ts";
 import { CLAUDE_ACCOUNT_ENV_KEYS, resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { resolveCli } from "./procs.ts";
 
@@ -20,6 +21,8 @@ export const instanceSettingsSchema = z.object({
   hidden: z.boolean().optional(),
   /** null goes back to the server's default wait. */
   replyWaitMinutes: z.number().int().min(1).max(60).nullable().optional(),
+  /** An added OpenAI-compatible server's model IDs; [] goes back to its /models list. */
+  models: addEndpointSchema.shape.models,
 }).strict().refine((value) => Object.keys(value).length > 0, "No settings supplied");
 
 function rawConfig(entry: InstanceConfig): Record<string, unknown> {

@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FILE_MAX_BYTES } from "@/lib/composer-attachments";
+import { PREVIEW_MAX_BYTES } from "@/lib/composer-attachments";
 import { AttachmentGallery, collectMessageFiles, isAudioAttachment, isVideoAttachment, loadMessageAudio, loadMessageVideo, MessageAttachmentGallery, splitMessageAttachments } from "./AttachmentGallery";
 
 const message = { threadId: "thread/one", messageId: "message two" };
@@ -88,10 +88,10 @@ describe("audio attachments", () => {
 
   it("enforces the size limit with and without Content-Length", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("audio", {
-      headers: { "content-type": "audio/mpeg", "content-length": String(FILE_MAX_BYTES + 1) },
+      headers: { "content-type": "audio/mpeg", "content-length": String(PREVIEW_MAX_BYTES + 1) },
     })));
     await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("25 MB");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(FILE_MAX_BYTES + 1), { headers: { "content-type": "audio/mpeg" } })));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(PREVIEW_MAX_BYTES + 1), { headers: { "content-type": "audio/mpeg" } })));
     await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("25 MB");
   });
 });
@@ -211,13 +211,13 @@ describe("explicit local video preview", () => {
 
   it("enforces the video size limit with and without Content-Length", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("video", {
-      headers: { "content-type": "video/mp4", "content-length": String(FILE_MAX_BYTES + 1) },
+      headers: { "content-type": "video/mp4", "content-length": String(PREVIEW_MAX_BYTES + 1) },
     })));
     await expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toMatchObject({
       code: "file_too_large",
       message: "This file is 25.1 MB, over the 25 MB preview limit. You can still download it below.",
     });
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(FILE_MAX_BYTES + 1), { headers: { "content-type": "video/mp4" } })));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(PREVIEW_MAX_BYTES + 1), { headers: { "content-type": "video/mp4" } })));
     await expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toMatchObject({
       code: "file_too_large",
       message: "Preview is limited to 25 MB.",

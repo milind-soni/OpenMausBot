@@ -1,13 +1,13 @@
 // Grok Build: the official `grok` CLI over ACP stdio (`grok … agent stdio`) on the grok.com
 // subscription login (~/.grok/auth.json), not the xAI API key. Verified against grok 1.0.0.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome, splitCliString } from "../../env-path.ts";
-import type { DeviceSignIn } from "../device-auth.ts";
+import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import type { AcpQuestionRequest } from "./question-requests.ts";
@@ -35,6 +35,17 @@ export function grokSignedIn(env: Record<string, string | undefined>): boolean {
   return existsSync(join(grokHome(env), "auth.json"));
 }
 
+/** The sign-out probe: an auth.json that cannot be read is `unknown`, so sign-out refuses instead of reporting a
+ * removal that never happened. `grokSignedIn` keeps its boolean contract for turn gating. */
+export function grokSignInState(env: Record<string, string | undefined>): DeviceSignInState {
+  try {
+    statSync(join(grokHome(env), "auth.json"));
+    return "signed-in";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "signed-out" : "unknown";
+  }
+}
+
 function grokLoginFailure(output: string): string {
   if (/(unexpected argument|unrecognized (argument|option)|unknown option).*device-(auth|code)/i.test(output)) {
     return "This server's Grok is too old to sign in with a code. Update Grok on the server, then try again.";
@@ -47,8 +58,8 @@ function grokLoginFailure(output: string): string {
   return "Grok sign-in did not finish. Check the server's connection, then try again.";
 }
 
-/** `grok login --device-auth` on the grok.com subscription (grok 1.0.25 and 1.0.41). Grok has no
- * status command, so nothing is checked first. */
+/** `grok login --device-auth` / `grok logout` on the grok.com subscription (grok 1.0.25 and 1.0.41). Grok has no
+ * status command, so the stored auth.json is the sign-in check. */
 export const GROK_DEVICE_SIGN_IN: DeviceSignIn = {
   provider: "grok",
   product: "Grok",
@@ -56,9 +67,11 @@ export const GROK_DEVICE_SIGN_IN: DeviceSignIn = {
   homeEnv: "GROK_HOME",
   homeDir: ".grok",
   loginArgs: ["login", "--device-auth"],
+  logoutArgs: ["logout"],
   install: "Install it with xAI's installer (https://x.ai/cli), then try again.",
   failure: grokLoginFailure,
   signedIn: grokSignedIn,
+  signInState: grokSignInState,
 };
 
 function unquote(raw: string): string {
@@ -438,7 +451,8 @@ const support: AcpSupport = {
         if (!Array.isArray(catalog?.servers)) throw new Error("Grok could not confirm its MCP catalog. No prompt was sent.");
         for (const server of catalog.servers) {
           if (server?.session?.enabled === false) continue;
-          if (!available.has(server?.name)) throw new Error("Grok has an MCP connection outside the bot's selection. Disable native MCP connections before using tool selection. No prompt was sent.");
+          if (!available.has(server?.name)) throw new Error("Grok has an MCP connection outside the bot's selection. Remove the MCP servers from Grok's own settings, "
+            + "or set Tool selection back to all tools in this bot's settings (Access). No prompt was sent.");
           if (Array.isArray(server?.session?.tools) && server.session.tools.some((tool: { name?: unknown }) => typeof tool.name !== "string" || !allowsTool(turn.toolScope, { kind: "mcp", server: server.name, name: tool.name }))) {
             throw new Error("Grok could not enforce the selected MCP catalog. No prompt was sent.");
           }

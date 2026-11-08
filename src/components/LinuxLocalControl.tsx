@@ -15,6 +15,9 @@ import { useDesktopCapabilities } from "./DesktopCapabilities";
 
 const LINUX_GUIDE_URL =
   "https://github.com/milind-soni/OpenMausBot/blob/main/docs/linux-desktop.md#enable-local-control";
+const OMARCHY_DOCS_URL =
+  "https://github.com/milind-soni/OpenMausBot/blob/main/docs/linux-desktop.md#omarchy-hyprland-experimental";
+const CUA_OMARCHY_GUIDE_URL = "https://cua.ai/docs/cua-sdk/guides/omarchy";
 
 export function LinuxLocalControl() {
   const { capabilities } = useDesktopCapabilities();
@@ -26,6 +29,8 @@ export function LinuxLocalControl() {
   const busy = pending !== null || local.status === "checking" || local.status === "starting";
   const ready = local.available;
   const waylandSafetyBlocked = local.reasonCode === "linux-wayland-seat-safety-blocked";
+  const pluginRequired = local.reasonCode === "linux-hyprland-plugin-required";
+  const hyprland = local.compositor === "hyprland";
   const wayland = capabilities.host.session === "wayland";
   const bundledDriver = local.driverSource === "bundled";
 
@@ -58,7 +63,9 @@ export function LinuxLocalControl() {
             {t("computer.linux.title")}
           </div>
           <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
-            {t("computer.linux.meta", { session: wayland ? "Wayland" : "Xorg" })}
+            {hyprland
+              ? t("computer.linux.metaOmarchy")
+              : t("computer.linux.meta", { session: wayland ? "Wayland" : "Xorg" })}
           </div>
         </div>
         <span
@@ -68,7 +75,9 @@ export function LinuxLocalControl() {
               ? "bg-success/10 text-success"
               : waylandSafetyBlocked
                 ? "bg-danger/10 text-danger"
-                : local.enabled
+                : pluginRequired
+                  ? "bg-warning/10 text-warning"
+                  : local.enabled
                   ? "bg-warning/10 text-warning"
                   : "bg-raised text-ink-secondary",
           )}
@@ -77,7 +86,9 @@ export function LinuxLocalControl() {
             ? t("computer.linux.ready")
             : waylandSafetyBlocked
               ? t("computer.linux.waylandBadge")
-              : local.enabled
+              : pluginRequired
+                ? t("computer.linux.pluginBadge")
+                : local.enabled
                 ? t("vm.state.attention")
                 : t("vm.dest.off")}
         </span>
@@ -94,6 +105,20 @@ export function LinuxLocalControl() {
             </span>
           </div>
         </div>
+      ) : pluginRequired ? (
+        <div className="mt-3 rounded-lg border border-warning/20 bg-warning/5 p-3" data-linux-hyprland-plugin-required>
+          <div className="flex gap-2 text-[12px] leading-relaxed text-ink-secondary">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" />
+            <span>{t("computer.linux.hyprlandPlugin")}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => window.open(CUA_OMARCHY_GUIDE_URL, "_blank", "noopener,noreferrer")}
+            className="mt-2 flex items-center gap-1.5 text-[12px] font-medium text-accent hover:underline"
+          >
+            {t("computer.linux.omarchyGuide")} <ExternalLink size={11} />
+          </button>
+        </div>
       ) : !local.enabled ? (
         <div className="mt-3 rounded-lg border border-warning/20 bg-warning/5 p-3">
           <div className="flex gap-2 text-[12px] leading-relaxed text-ink-secondary">
@@ -102,7 +127,7 @@ export function LinuxLocalControl() {
               {t("computer.linux.enableBefore")}{" "}
               <strong className="font-medium text-ink">{t("vm.dest.local")}</strong>{" "}
               {t("computer.linux.enableAfter")}
-              {wayland && ` ${t("computer.linux.waylandInput")}`}
+              {wayland && !hyprland && ` ${t("computer.linux.waylandInput")}`}
             </span>
           </div>
         </div>
@@ -118,7 +143,7 @@ export function LinuxLocalControl() {
             )}
             <span aria-live="polite">
               {ready
-                ? t("computer.linux.readyMsg")
+                ? t(hyprland ? "computer.linux.hyprlandReady" : "computer.linux.readyMsg")
                 : local.message ?? t("computer.linux.checking")}
             </span>
           </div>
@@ -134,7 +159,17 @@ export function LinuxLocalControl() {
       {error && <div className="mt-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</div>}
 
       {!waylandSafetyBlocked && <div className="mt-3 flex gap-2">
-        {!local.enabled ? (
+        {pluginRequired ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void run("enable")}
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+          >
+            {pending === "enable" ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+            {t("computer.linux.tryAgain")}
+          </button>
+        ) : !local.enabled ? (
           <button
             type="button"
             disabled={busy}
@@ -172,7 +207,7 @@ export function LinuxLocalControl() {
 
       <button
         type="button"
-        onClick={() => window.open(LINUX_GUIDE_URL, "_blank", "noopener,noreferrer")}
+        onClick={() => window.open(hyprland ? OMARCHY_DOCS_URL : LINUX_GUIDE_URL, "_blank", "noopener,noreferrer")}
         className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink"
       >
         {capabilities.host.packaged ? t("computer.linux.guide") : t("computer.linux.driverSetup")}{" "}

@@ -34,6 +34,7 @@ const instances: InstanceInfo[] = [
   ["deepseek", "deepseekAgent", "DeepSeek Harness", false, ""],
   ["githubCopilot", "copilotAgent", "GitHub Copilot", true, "1.0.103"],
   ["commandCode", "commandCodeAgent", "Command Code", true, "1.88.4"],
+  ["kiro", "kiroAgent", "Kiro", true, "3.1.0"],
 ].map(([id, driver, name, ready, version]) => ({
   instanceId: String(id), driverKind: String(driver), displayName: String(name),
   cliDefault: String(id),

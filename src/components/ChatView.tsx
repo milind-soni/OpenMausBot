@@ -80,7 +80,7 @@ import { RichMessageRow, UserLineNote, richRowKind } from "./RichMessageRow"; im
 import { Composer } from "./Composer";
 import { ChatErrorBanner, ChatNotice } from "./ChatErrorBanner";
 import { ThreadContextWarning } from "./ContextWarning";
-import { UsageAlert, useLimitResetContinue } from "./EngineUsage";
+import { UsageAlert, useLimitResetContinue, usePastLimitNotice } from "./EngineUsage";
 import { ChatFindBar } from "./ChatFindBar";
 import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
@@ -273,19 +273,15 @@ function TrialCreditFailedRow({ kind, onRetry }: { kind: TrialCreditRefusal; onR
   return <ErrorRow message={t(TRIAL_CREDIT_LINE[kind])} action={{ label: t("chat.error.connectOwnAi"), onClick: () => dispatch({ type: "toggleAppSettings", open: true, section: "engines" }) }} />;
 }
 
-export function FailedTurnRow({ tool, engine, onRetry, botId, threadId }: {
-  tool: NonNullable<Message["tool"]>;
-  engine: InstanceInfo | undefined;
-  onRetry?: () => void;
-  botId?: string;
-  threadId?: string;
-}) {
+export function FailedTurnRow({ tool, engine, onRetry, botId, threadId, messageAt }: { tool: NonNullable<Message["tool"]>; engine: InstanceInfo | undefined; onRetry?: () => void; botId?: string; threadId?: string; messageAt?: number }) {
   const resume = useLimitResetContinue(botId, threadId, tool.limitResetsAt);
+  const past = usePastLimitNotice(tool, messageAt);
   if (tool.place && botId) return <PlaceFailedRow place={tool.place} botId={botId} threadId={threadId} onRetry={onRetry} />;
   const credit = trialCreditKind(failedTurnCause(tool.name) ?? "");
   if (credit) return <TrialCreditFailedRow kind={credit} onRetry={onRetry} />;
   const { cause, notice } = failedTurnNotice(tool);
   if (tool.partial) return <PartlyDoneRow cause={notice ?? cause} onRetry={onRetry} />;
+  if (past) return past;
   const signedOut = signedOutEngine(tool, engine);
   return (
     <ErrorRow
@@ -753,7 +749,7 @@ const MessagesList = memo(function MessagesList({
               if (m.tool && failedTurnCause(m.tool.name) !== null) {
                 return (
                   <FailedTurnRow
-                    tool={m.tool}
+                    tool={m.tool} messageAt={m.at}
                     engine={engine}
                     botId={botId}
                     threadId={threadId}
