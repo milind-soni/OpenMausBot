@@ -9,7 +9,7 @@ import { AppDocumentError, fetchAppDocument, type AppFetchFailure } from "./app-
 import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
 import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE } from "./AppChrome";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
-import { PAGE_HEIGHT, PageFullScreen, PageNotes, PageToolbar, usePagePoint, usePageShare, usePageVersion } from "./PageTools";
+import { PAGE_HEIGHT, PageFullScreen, PageNotes, PageToolbar, usePagePin, usePagePoint, usePageShare, usePageVersion } from "./PageTools";
 
 const WIDTH = "max-w-[760px]";
 const DOC_REUSE_MS = 60_000;
@@ -154,7 +154,8 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
     threadId, appId: message.id, rev, title: payload.title, picked: () => setFullScreen(false),
   });
   const share = usePageShare(threadId, message.id, message.publishedPage);
-  const tools = { version, point, share, room, ready: Boolean(current), fullScreen: { open: fullScreen, toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
+  const pin = usePagePin({ botId, threadId, messageId: message.id }, payload.title);
+  const tools = { version, point, share, room, pin, ready: Boolean(current), fullScreen: { open: fullScreen, toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
 
   const reloadNow = () => {
     setProblem(null);
