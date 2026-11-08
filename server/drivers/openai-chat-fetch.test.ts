@@ -4,12 +4,18 @@ import { fetchPastLimit } from "./openai-chat-fetch.ts";
 
 const servers: Server[] = [];
 
+/** Creates a gate that tests can release when a network event occurs, without sleeps. */
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => { resolve = done; });
   return { promise, resolve };
 }
 
+/**
+ * Starts a loopback HTTP fixture on an available port and registers it for cleanup.
+ * @param handle Receives fixture requests and controls their responses.
+ * @returns The fixture origin, including its assigned port.
+ */
 async function serve(handle: RequestListener): Promise<string> {
   const server = createServer(handle);
   servers.push(server);
@@ -88,17 +94,23 @@ it("cancels a model stream after the first output arrives", async () => {
   await expect(pending).rejects.toThrow(/abort/i);
 });
 
-it("does not forward bearer credentials or cookies to a different origin", async () => {
+it("does not forward credentials or cookies to a different origin", async () => {
   let forwardedAuthorization: string | undefined;
   let forwardedCookie: string | undefined;
+  let forwardedProxyAuthorization: string | undefined;
   let originalAuthorization: string | undefined;
+  let originalCookie: string | undefined;
+  let originalProxyAuthorization: string | undefined;
   const target = await serve((req, res) => {
     forwardedAuthorization = req.headers.authorization;
     forwardedCookie = req.headers.cookie;
+    forwardedProxyAuthorization = req.headers["proxy-authorization"];
     res.end("redirected");
   });
   const source = await serve((req, res) => {
     originalAuthorization = req.headers.authorization;
+    originalCookie = req.headers.cookie;
+    originalProxyAuthorization = req.headers["proxy-authorization"];
     res.writeHead(302, { location: target });
     res.end();
   });
@@ -106,12 +118,48 @@ it("does not forward bearer credentials or cookies to a different origin", async
     headers: [
       ["authorization", "Bearer fixture-only-token"],
       ["cookie", "fixture=session"],
+      ["proxy-authorization", "Basic fixture-only-proxy-token"],
     ],
   });
   expect(await response.text()).toBe("redirected");
   expect(originalAuthorization).toBe("Bearer fixture-only-token");
+  expect(originalCookie).toBe("fixture=session");
+  expect(originalProxyAuthorization).toBe("Basic fixture-only-proxy-token");
   expect(forwardedAuthorization).toBeUndefined();
   expect(forwardedCookie).toBeUndefined();
+  expect(forwardedProxyAuthorization).toBeUndefined();
+});
+
+it("preserves credentials and cookies when redirecting within the same origin", async () => {
+  const requests: { path: string | undefined; authorization: string | undefined; cookie: string | undefined; proxyAuthorization: string | undefined }[] = [];
+  const origin = await serve((req, res) => {
+    requests.push({
+      path: req.url,
+      authorization: req.headers.authorization,
+      cookie: req.headers.cookie,
+      proxyAuthorization: req.headers["proxy-authorization"],
+    });
+    if (req.url === "/source") {
+      res.writeHead(302, { location: "/target" });
+      res.end();
+    } else {
+      res.end("redirected within origin");
+    }
+  });
+  const response = await fetchPastLimit(`${origin}/source`, {
+    headers: [
+      ["authorization", "Bearer fixture-only-token"],
+      ["cookie", "fixture=session"],
+      ["proxy-authorization", "Basic fixture-only-proxy-token"],
+    ],
+  });
+  expect(await response.text()).toBe("redirected within origin");
+  expect(requests).toEqual(["/source", "/target"].map((path) => ({
+    path,
+    authorization: "Bearer fixture-only-token",
+    cookie: "fixture=session",
+    proxyAuthorization: "Basic fixture-only-proxy-token",
+  })));
 });
 
 it("preserves provider HTTP errors for the model runtime to handle", async () => {
