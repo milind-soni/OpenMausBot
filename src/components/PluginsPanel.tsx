@@ -38,7 +38,6 @@ import { mergeCompleteConnectorStatus, mergeCurrentConnectorStatus, onlyLatestCo
 import { openBotSettings } from "./bot-panel/panel-link";
 import { openKeySettings } from "./keys/key-focus";
 import { lacksAdminScope } from "@/lib/admin-scope";
-import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ServiceIcon, type ToolkitCard } from "./ServiceIcon"; import { AppsSection } from "./AppsSection";
 export { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
@@ -77,9 +76,10 @@ export function hasUsableConnectedApps(configured: boolean, phase: ConnectorInve
   return configured && phase === "ready" && !stale && Object.values(status).some((service) => service.connected);
 }
 
-/** The unreadable-store notice names the computer as the app does elsewhere: This Mac on a Mac, This PC everywhere else. */
-export const staleNoticeKey = (platform: string | undefined): LocaleKey =>
-  platform === "darwin" ? "connectors.stale" : "connectors.stalePc";
+/** The unreadable-store notice says This PC on a Windows or Linux desktop's own store. A Mac, a remote server's store
+ * and an unknown platform keep the Mac wording they always had. */
+export const staleNoticeKey = (platform: string | undefined, remoteClient: boolean): LocaleKey =>
+  !remoteClient && (platform === "win32" || platform === "linux") ? "connectors.stalePc" : "connectors.stale";
 
 /** Whether a hosted app's card shows: it matches the search, and the filter is All, or Connected and it isn't known to be
  * disconnected (unknown while its servers load). */
@@ -126,7 +126,6 @@ export function botsUsingService(bots: Bot[], instances: InstanceInfo[], slug: s
 }
 
 export function PluginsPanel() {
-  const { capabilities } = useDesktopCapabilities();
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -593,7 +592,7 @@ export function PluginsPanel() {
             <div className="mb-3 flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-[13px] text-warning">
               <TriangleAlert size={14} className="mt-px shrink-0" />
               <span>
-                {t(staleNoticeKey(capabilities.host.platform))}
+                {t(staleNoticeKey(window.ogb?.platform, remoteClient))}
               </span>
             </div>
           )}

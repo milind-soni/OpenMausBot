@@ -338,9 +338,11 @@ describe("connected apps setup notice", () => {
 });
 
 describe("unreadable credential store notice", () => {
-  it("calls the computer a Mac only on a Mac", () => {
-    expect(staleNoticeKey("darwin")).toBe("connectors.stale");
-    expect(staleNoticeKey("win32")).toBe("connectors.stalePc");
-    expect(staleNoticeKey("linux")).toBe("connectors.stalePc");
+  it("says This PC only for a Windows or Linux desktop's own store", () => {
+    expect(staleNoticeKey("darwin", false)).toBe("connectors.stale");
+    expect(staleNoticeKey("win32", false)).toBe("connectors.stalePc");
+    expect(staleNoticeKey("linux", false)).toBe("connectors.stalePc");
+    expect(staleNoticeKey(undefined, false)).toBe("connectors.stale");
+    expect(staleNoticeKey("win32", true)).toBe("connectors.stale");
   });
 });
