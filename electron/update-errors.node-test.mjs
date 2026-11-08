@@ -43,6 +43,10 @@ test("a server error wrapped with the release feed is a network failure, whateve
   );
   assert.equal(updateErrorNeedsPerson(error), false);
   assert.match(updateErrorMessage(error), /connection and try again/);
+  // the server's own error page may mention a signature too
+  const page = Object.assign(new Error(`Cannot parse releases feed: Error: Unable to find latest version on GitHub: HttpError: 502 Bad Gateway\n"<html>upstream signature check timed out</html>"\nXML:\n${feed}`), { code: "ERR_UPDATER_INVALID_RELEASE_FEED" });
+  assert.equal(updateErrorNeedsPerson(page), false);
+  assert.match(updateErrorMessage(page), /connection and try again/);
   const brokenFeed = Object.assign(new Error(`Cannot parse releases feed: TypeError: Cannot read properties of null,\nXML:\n${feed}`), { code: "ERR_UPDATER_INVALID_RELEASE_FEED" });
   assert.equal(updateErrorNeedsPerson(brokenFeed), false);
   assert.match(updateErrorMessage(brokenFeed), /missing or invalid/);
