@@ -333,7 +333,8 @@ export function dnsLabel(text: string, fallback = "OpenMausBot"): string {
     .replace(/[\u0000-\u001f\u007f]/g, "")
     .replace(/\./g, " ")
     .trim();
-  while (Buffer.byteLength(label, "utf8") > 63) label = label.slice(0, -1).trimEnd();
+  // Whole code points: slicing UTF-16 units could leave half an emoji, encoded as U+FFFD.
+  label = clampBytes(label, 63).trimEnd();
   return label || fallback;
 }
 
