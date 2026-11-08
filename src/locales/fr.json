@@ -3297,5 +3297,9 @@
   "botPanel.heavy": "Ce bot charge beaucoup à chaque tour.",
   "botPanel.tidyMemory": "Ranger la mémoire",
   "memory.journal.instructions": "les instructions",
-  "memory.journal.actor.teamSetup": "La configuration de l'équipe"
+  "memory.journal.actor.teamSetup": "La configuration de l'équipe",
+  "settings.simple.more.title": "Plus de paramètres",
+  "settings.simple.more.subtitle": "Sauvegardes, limites et paramètres que vous modifiez rarement.",
+  "settings.simple.more.limits": "Limites",
+  "settings.simple.more.open": "Ouvrir"
 }

@@ -11,7 +11,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   api: vi.fn(async () => ({})),
   useStore: () => ({
-    state: { appSettingsSection: "general", instances: [], bots: [], config: { features: {}, composio: { mode: "self" } }, appSettingsCloudLink: 0, appSettingsPhonePairing: 0 },
+    state: { appSettingsSection: "general", instances: [], bots: [], config: { features: {}, composio: { mode: "self" }, rooms: { turnTimeoutMinutes: 5 } }, appSettingsCloudLink: 0, appSettingsPhonePairing: 0 },
     dispatch: fixture.dispatch,
     refreshInstances: vi.fn(),
   }),
@@ -77,5 +77,40 @@ describe("Settings search in Simple mode", () => {
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "general" });
     expect(scrolled.map((element) => element.getAttribute("data-settings-block"))).toContain("advanced-mode");
     expect(search().value).toBe("");
+  });
+
+  it("opens More settings from the bottom of General: the hidden pages, then Limits, and Back returns to its row", () => {
+    const heading = () => host.querySelector("h2")!.textContent;
+    flushSync(() => host.querySelector<HTMLButtonElement>("[data-settings-more]")!.click());
+    expect(heading()).toBe("More settings");
+    expect([...host.querySelectorAll("[data-settings-more-section]")].map((row) => row.getAttribute("data-settings-more-section")))
+      .toEqual(["decisionModel", "imageGeneration", "backups", "experimental"]);
+    const limits = host.querySelector('[data-settings-block="limits"]')!;
+    expect(limits.querySelector("h3")!.textContent).toBe("Limits");
+    for (const title of ["Group turns", "Tool time limit", "Parallel threads", "Event log cleanup"]) expect(limits.textContent, title).toContain(title);
+    flushSync(() => host.querySelector<HTMLButtonElement>('[data-settings-more-section="backups"]')!.click());
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleAppSettings", open: true, section: "backups" });
+    expect(heading()).toBe("General");
+    flushSync(() => host.querySelector<HTMLButtonElement>("[data-settings-more]")!.click());
+    flushSync(() => [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Back")!.click());
+    expect(heading()).toBe("General");
+    expect(scrolled.map((element) => element.getAttribute("data-settings-block"))).toContain("more");
+  });
+
+  it("finds a hidden page and a limit as More settings, and opens each where it lives", () => {
+    type("backups");
+    const page = host.querySelector<HTMLButtonElement>('[data-settings-more-result="backups"]')!;
+    expect(page.textContent).toBe("Backups · More settings");
+    flushSync(() => page.click());
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleAppSettings", open: true, section: "backups" });
+    expect(search().value).toBe("");
+
+    type("parallel");
+    const limit = host.querySelector<HTMLButtonElement>('[data-settings-more-result="settings.threads.title"]')!;
+    expect(limit.textContent).toBe("Parallel threads · More settings");
+    expect(host.querySelector('[data-settings-advanced-only="settings.threads.title"]')).toBeNull();
+    flushSync(() => limit.click());
+    expect(host.querySelector("h2")!.textContent).toBe("More settings");
+    expect(scrolled.map((element) => element.getAttribute("data-settings-block"))).toContain("limits");
   });
 });

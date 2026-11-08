@@ -3149,5 +3149,9 @@
   "botPanel.heavy": "यह बॉट हर बार बहुत कुछ लोड करता है।",
   "botPanel.tidyMemory": "मेमोरी व्यवस्थित करें",
   "memory.journal.instructions": "निर्देश",
-  "memory.journal.actor.teamSetup": "टीम सेटअप"
+  "memory.journal.actor.teamSetup": "टीम सेटअप",
+  "settings.simple.more.title": "और सेटिंग्स",
+  "settings.simple.more.subtitle": "बैकअप, सीमाएँ और वे सेटिंग्स जिन्हें आप कभी-कभार ही बदलते हैं।",
+  "settings.simple.more.limits": "सीमाएँ",
+  "settings.simple.more.open": "खोलें"
 }

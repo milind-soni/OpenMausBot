@@ -5580,5 +5580,9 @@
   "botPanel.heavy": "Bot này tải rất nhiều mỗi lượt.",
   "botPanel.tidyMemory": "Dọn bộ nhớ",
   "memory.journal.instructions": "chỉ dẫn",
-  "memory.journal.actor.teamSetup": "Thiết lập nhóm"
+  "memory.journal.actor.teamSetup": "Thiết lập nhóm",
+  "settings.simple.more.title": "Cài đặt khác",
+  "settings.simple.more.subtitle": "Sao lưu, giới hạn và các cài đặt bạn ít khi thay đổi.",
+  "settings.simple.more.limits": "Giới hạn",
+  "settings.simple.more.open": "Mở"
 }

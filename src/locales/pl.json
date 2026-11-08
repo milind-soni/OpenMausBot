@@ -6842,5 +6842,9 @@
   "remote.client.endsDec7": "Ten rodzaj połączenia kończy się 7 grudnia. Potem sparuj ten komputer ponownie z Telefon i urządzenia na drugim komputerze.",
   "phone.code.pairingCode": "Kod parowania",
   "phone.code.typeIntro": "Otwórz aplikację {app} i wpisz ten kod parowania.",
-  "phone.signIn.emailCode": "Kod logowania z Twojego e-maila"
+  "phone.signIn.emailCode": "Kod logowania z Twojego e-maila",
+  "settings.simple.more.title": "Więcej ustawień",
+  "settings.simple.more.subtitle": "Kopie zapasowe, limity i ustawienia, które rzadko zmieniasz.",
+  "settings.simple.more.limits": "Limity",
+  "settings.simple.more.open": "Otwórz"
 }
