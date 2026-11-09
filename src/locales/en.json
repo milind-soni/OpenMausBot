@@ -6138,6 +6138,7 @@
   "remote.serverPairing.hoursAgo": "{hours} h ago",
   "remote.serverPairing.daysAgo": "{days} d ago",
   "remote.serverPairing.error": "Couldn't connect: {error}",
+  "remote.serverPairing.retry": "Retry",
   "remote.computerName.title": "This computer's name",
   "remote.computerName.help": "What your phone calls this computer. Leave it empty to use the default.",
   "remote.computerName.placeholder": "e.g. Office PC",

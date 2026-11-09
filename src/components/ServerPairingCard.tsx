@@ -56,6 +56,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   const [session, setSession] = useState<SessionState | null>(initialSession);
   const [pairingCodes, setPairingCodes] = useState(initialPairingCodes);
   const [codesLoaded, setCodesLoaded] = useState(false);
+  const [configFailed, setConfigFailed] = useState(false);
   const [computerName, setComputerName] = useState<string | null>(null);
   const [scope, setScope] = useState<"admin" | "client">("admin");
   const [offer, setOffer] = useState<PairingOffer | null>(null);
@@ -78,17 +79,30 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     }
   }
 
+  async function loadConfig(state: SessionState) {
+    try {
+      const config = await api("/api/config");
+      setPairingCodes(readMembership(config).pairingCodes);
+      setCodesLoaded(true);
+      setConfigFailed(false);
+      if (canPairDevices(state)) setComputerName(typeof config?.computerName === "string" ? config.computerName : "");
+    } catch (e) {
+      setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
+      setConfigFailed(true);
+    }
+  }
+
+  function retryConfig() {
+    if (!session) return;
+    setError(null);
+    void loadConfig(session);
+  }
+
   useEffect(() => {
     void readSessionState().then((state) => {
       setSession(state);
       if (canPairDevices(state)) void loadDevices();
-      if (state.kind === "loopback" || state.kind === "session") {
-        void api("/api/config").then((config) => {
-          setPairingCodes(readMembership(config).pairingCodes);
-          setCodesLoaded(true);
-          if (canPairDevices(state)) setComputerName(typeof config?.computerName === "string" ? config.computerName : "");
-        }).catch((e) => { setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) })); });
-      }
+      if (state.kind === "loopback" || state.kind === "session") void loadConfig(state);
     });
   }, []);
 
@@ -258,7 +272,12 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
             {!pairingCodes && <p data-server-pairing-portal className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
           </SettingsGroup>
       )}
-      {error ? <p className="px-4 text-[12px] leading-4 text-danger">{error}</p> : null}
+      {error || configFailed ? (
+        <div className="flex flex-wrap items-center gap-2 px-4">
+          {error ? <p className="text-[12px] leading-4 text-danger">{error}</p> : null}
+          {configFailed ? <button type="button" data-server-pairing-retry onClick={retryConfig} className="ui-button">{t("remote.serverPairing.retry")}</button> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

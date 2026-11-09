@@ -81,6 +81,44 @@ describe("ServerPairingCard waits for the pairing configuration", () => {
     expect(host.textContent).toContain("config down");
   });
 
+  it("retries the config load after a failure and offers creation once it succeeds", async () => {
+    await renderCard();
+    expect(createButton().disabled).toBe(true);
+    await act(async () => {
+      rejectConfig(new Error("config down"));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    expect(createButton().disabled).toBe(true);
+    const retry = host.querySelector<HTMLButtonElement>("[data-server-pairing-retry]");
+    expect(retry).not.toBeNull();
+    await act(async () => { retry!.click(); });
+    await act(async () => {
+      resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    expect(createButton().disabled).toBe(false);
+  });
+
+  it("offers the same retry in simple mode", async () => {
+    await renderCard({ simple: true });
+    await act(async () => {
+      rejectConfig(new Error("config down"));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    const retry = host.querySelector<HTMLButtonElement>("[data-server-pairing-retry]");
+    expect(retry).not.toBeNull();
+    await act(async () => { retry!.click(); });
+    await act(async () => {
+      resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    expect(createButton().disabled).toBe(false);
+  });
+
   it("creates an admin-scoped invitation for the desktop owner", async () => {
     await renderCard();
     await act(async () => {
