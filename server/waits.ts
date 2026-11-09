@@ -21,7 +21,7 @@ import {
   type ProcessEntry,
 } from "./wait-probes.ts";
 
-export const WAIT_LIMITS = { perBot: 10, total: 50 } as const;
+export const WAIT_LIMITS = { perBot: 10, total: 50, perAssignment: 1 } as const;
 export const WAIT_TICK_MS = 5_000, URL_CHECK_MS = 60_000, URL_BACKOFF_MAX_MS = 15 * 60_000;
 /** A sleeping Cloud wakes this often while a wait is open, to check it; checks pause in between. */
 export const WAIT_WAKE_MS = 30 * 60_000;
@@ -43,11 +43,12 @@ export type WaitCondition =
 export interface WaitNotice { status: "fired" | "expired" | "stopped"; text: string }
 export interface WaitRecord {
   id: string; botId: string; threadId: string; label: string; condition: WaitCondition; followUp?: string;
+  assignmentId?: string;
   createdAt: number; expiresAt: number; nextCheckAt: number; errors: number; cardMessageId?: string;
   /** Decided and saved first; posted once its chat is free. */
   ending?: WaitNotice;
 }
-export interface NewWait { botId: string; threadId: string; label: string; condition: NewWaitCondition; followUp?: string; hours?: number }
+export interface NewWait { botId: string; threadId: string; label: string; condition: NewWaitCondition; followUp?: string; hours?: number; assignmentId?: string }
 export type CreateWaitResult =
   | { state: "created"; wait: WaitRecord; note?: string }
   | { state: "already"; text: string }
@@ -81,6 +82,7 @@ const recordSchema = z.object({
   label: z.string(),
   condition: conditionSchema,
   followUp: z.string().optional(),
+  assignmentId: z.string().optional(),
   createdAt: z.number(),
   expiresAt: z.number(),
   nextCheckAt: z.number(),
@@ -192,6 +194,7 @@ export class WaitManager {
       label: input.label,
       condition,
       ...(input.followUp ? { followUp: input.followUp } : {}),
+      ...(input.assignmentId ? { assignmentId: input.assignmentId } : {}),
       createdAt: now,
       expiresAt: now + (input.hours ?? WAIT_HOURS.default) * 3_600_000,
       nextCheckAt: now + interval(condition.kind, 0),
@@ -212,7 +215,11 @@ export class WaitManager {
     return { state: "created", wait: cloneWait(wait), ...(note ? { note } : {}) };
   }
 
-  private limitRefusal({ botId, threadId }: Pick<NewWait, "botId" | "threadId">): CreateWaitResult | null {
+  private limitRefusal({ botId, threadId, assignmentId }: Pick<NewWait, "botId" | "threadId" | "assignmentId">): CreateWaitResult | null {
+    const handed = assignmentId ? this.waits.filter((w) => w.assignmentId === assignmentId) : [];
+    if (handed.length >= WAIT_LIMITS.perAssignment) {
+      return { state: "refused", status: 409, error: `Work handed to you keeps one wait at a time, and this work already has one:\n${waitList(handed)}\nFinish this turn; it tells you here when it happens.` };
+    }
     const mine = this.waits.filter((w) => w.botId === botId && !w.ending);
     if (mine.length >= WAIT_LIMITS.perBot) {
       const here = mine.filter((w) => w.threadId === threadId), others = mine.length - here.length;

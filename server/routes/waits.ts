@@ -15,7 +15,8 @@ const CANCEL = "/api/internal/waits/cancel";
 export const WAIT_MESSAGES = {
   notYours: "This conversation is not yours.",
   room: "Waits are made in a one-to-one chat with the person, not in a room.",
-  notPerson: "Only the person can set up or stop a wait, in their own chat with you; work handed to you by a bot, a routine or an outside event cannot.",
+  notPerson: "Only the person can set up or stop a wait, in their own chat with you; a routine or an outside event cannot, and work a bot handed you can set one only when the person's own request started it.",
+  handedStop: "Work handed to you by a bot can set one wait but not stop one: it ends on its own, or the person stops it.",
   serverHost: "File and program waits look at the computer MausBot runs on, and here that is a server, not the computer you work on. Use url_contains, url_missing or bot_idle.",
   guest: "File and program waits are only for the owner of this computer. Use url_contains, url_missing or bot_idle.",
   guestFollowUp: "Guests can be told when something happens, but can't set a follow-up. Make the wait without follow_up.",
@@ -123,11 +124,22 @@ export function parseWaitRequest(body: unknown, home: string): { ok: true; reque
 
 export function waitSourceRefusal(turn: {
   owned: boolean; room: boolean; depth: number; handedOff: boolean; routineRun: boolean; outsideDriven: boolean; personStarted: boolean; guest: boolean;
+  op?: "create" | "cancel"; assignmentId?: string;
 }): string | null {
   if (!turn.owned) return WAIT_MESSAGES.notYours;
   if (turn.room) return WAIT_MESSAGES.room;
-  if (turn.depth > 0 || turn.handedOff || turn.routineRun || turn.outsideDriven || !(turn.personStarted || turn.guest)) return WAIT_MESSAGES.notPerson;
+  if (turn.routineRun || turn.outsideDriven) return WAIT_MESSAGES.notPerson;
+  if (turn.depth > 0 || turn.handedOff) {
+    if (!turn.personStarted || turn.guest || !turn.assignmentId) return WAIT_MESSAGES.notPerson;
+    return turn.op === "create" ? null : WAIT_MESSAGES.handedStop;
+  }
+  if (!(turn.personStarted || turn.guest)) return WAIT_MESSAGES.notPerson;
   return null;
+}
+
+export function handedAssignment(id: string | undefined, node: (id: string) => { id: string; parentId?: string; status: string } | undefined): string | undefined {
+  const found = id ? node(id) : undefined;
+  return found?.parentId !== undefined && found.status === "running" ? found.id : undefined;
 }
 
 export function hostWaitRefusal(turn: { cloudHome: boolean; hosted: boolean; guest: boolean; place: Surface | null }): string | null {
@@ -156,7 +168,8 @@ export interface WaitRouteContext {
   botId: string;
   threadId: string;
   readBody: () => Promise<unknown>;
-  sourceRefusal: () => string | null;
+  sourceRefusal: (op: "create" | "cancel", assignmentId: string | undefined) => string | null;
+  assignmentId?: () => string | undefined;
   hostRefusal: () => string | null;
   /** A Cloud guest's turn: its follow-up would run later as the owner's, so a guest's wait only tells. */
   guest: () => boolean;
@@ -172,15 +185,17 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
     const { res, json } = ctx;
     const here = () => deps.waits.list(ctx.botId).filter((wait) => wait.threadId === ctx.threadId);
     if (ctx.method === "GET" && ctx.path === WAITS) {
-      if (ctx.sourceRefusal() === WAIT_MESSAGES.notYours) return void json(res, 403, { error: WAIT_MESSAGES.notYours });
+      if (ctx.sourceRefusal("create", undefined) === WAIT_MESSAGES.notYours) return void json(res, 403, { error: WAIT_MESSAGES.notYours });
       const mine = here();
       return void json(res, 200, { text: mine.length ? waitList(mine) : WAIT_MESSAGES.none });
     }
     if (ctx.method !== "POST" || (ctx.path !== WAITS && ctx.path !== CANCEL)) return PASS;
 
-    const refusal = ctx.sourceRefusal();
+    const assignmentId = ctx.assignmentId?.();
+    const refusal = ctx.sourceRefusal(ctx.path === CANCEL ? "cancel" : "create", assignmentId);
     if (refusal) return void json(res, 403, { error: refusal });
     const body = await ctx.readBody();
+    if (assignmentId !== undefined && ctx.assignmentId?.() !== assignmentId) return void json(res, 403, { error: WAIT_MESSAGES.notPerson });
 
     if (ctx.path === CANCEL) {
       if (!here().length) return void json(res, 404, { error: WAIT_MESSAGES.noneToCancel });
@@ -224,6 +239,7 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
       condition,
       ...(request.followUp ? { followUp: request.followUp } : {}),
       hours: request.hours,
+      ...(assignmentId ? { assignmentId } : {}),
     });
     if (result.state === "refused") return void json(res, result.status, { error: result.error });
     if (result.state === "already") return void json(res, 200, { text: result.text });
