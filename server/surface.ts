@@ -225,10 +225,10 @@ export function surfacePrompt(
       ? ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and this computer (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → this computer tools. Pick one surface for a task and stay on it; if you need the user to sign in, say which surface — the Browser tab or this computer.${YOUR_COMPUTER_BESIDE_BROWSER}`
       : YOUR_COMPUTER_ALONE;
   } else if (computer && mounted.browser) {
-    // The two browsers share no cookies: "Web tasks → the built-in browser" alone sent a bot whose site was signed in on
-    // the computer to a signed-out tab, where it asked the person to sign in again.
+    // The two browsers usually share no cookies: "Web tasks → the built-in browser" alone sent a bot whose site was
+    // signed in on the computer to a signed-out tab, where it asked the person to sign in again.
     text =
-      ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and ${computer} (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → ${computer} tools. Pick one surface for a task and stay on it; if you need the user to sign in, say which surface — the Browser tab or ${computer}. The two browsers keep separate sign-ins: a site signed in on one is not signed in on the other. When a web task needs a site that is already signed in on ${computer}, do it there instead of asking the user to sign in again in the Browser tab, and keep that task there.`;
+      ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and ${computer} (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → ${computer} tools. Pick one surface for a task and stay on it; if you need the user to sign in, say which surface — the Browser tab or ${computer}. The built-in browser and ${computer} may not share sign-ins. Before asking the user to sign in again in the Browser tab, check whether the site is already signed in on ${computer} with the account the task needs; if it is, do the task there and keep it there, unless the user asked for the Browser tab.`;
   } else if (computer) {
     text =
       ` Everything you do on screen happens on ${computer}, web pages included, through its own browser; there is no separate built-in browser this turn. If you need the user to sign in, tell them it is on ${computer}.`;

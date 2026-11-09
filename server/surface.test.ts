@@ -204,17 +204,16 @@ describe("surfacePrompt", () => {
     expect(text).toMatch(/say which surface — the Browser tab or the cloud computer/);
   });
 
-  it("tells the bot the two browsers keep separate sign-ins, so a site signed in on the computer is used there", () => {
+  it("tells the bot to check the computer for a signed-in site before asking for a sign-in in the Browser tab", () => {
     for (const computer of ["vm", "cloud"] as const) {
       const text = surfacePrompt({ computer, browser: true });
       const label = computer === "vm" ? "the Local VM" : "the cloud computer";
-      expect(text).toContain("The two browsers keep separate sign-ins: a site signed in on one is not signed in on the other.");
-      expect(text).toContain(`When a web task needs a site that is already signed in on ${label}, do it there instead of asking the user to sign in again in the Browser tab, and keep that task there.`);
+      expect(text).toContain(`The built-in browser and ${label} may not share sign-ins.`);
+      expect(text).toContain(`Before asking the user to sign in again in the Browser tab, check whether the site is already signed in on ${label} with the account the task needs; if it is, do the task there and keep it there, unless the user asked for the Browser tab.`);
     }
-    // One surface only, or the person's own computer: nothing to tell apart, wording unchanged.
-    expect(surfacePrompt({ computer: "vm", browser: false })).not.toContain("separate sign-ins");
-    expect(surfacePrompt({ computer: null, browser: true })).not.toContain("separate sign-ins");
-    expect(surfacePrompt({ computer: "local", browser: true })).not.toContain("separate sign-ins");
+    expect(surfacePrompt({ computer: "vm", browser: false })).not.toContain("share sign-ins");
+    expect(surfacePrompt({ computer: null, browser: true })).not.toContain("share sign-ins");
+    expect(surfacePrompt({ computer: "local", browser: true })).not.toContain("share sign-ins");
   });
 
   it("names only the computer when it is the only surface", () => {
