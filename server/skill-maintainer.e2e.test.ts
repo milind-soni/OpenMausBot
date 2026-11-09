@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -29,7 +29,9 @@ it("manages single shared-skill assignments and responsibility through a live Ch
     }
     return hash.digest("hex");
   };
-  const snapshot = () => ["config.json", "bots.json"].map((file) => createHash("sha256").update(readFileSync(join(fixture.info.dataDir, file))).digest("hex")).concat(libraryDigest());
+  const snapshot = () => [["config.json", "bots.json", "skills-library/index.json"].map((file) => [
+    file, statSync(join(fixture.info.dataDir, file)).mtimeMs, createHash("sha256").update(readFileSync(join(fixture.info.dataDir, file))).digest("hex"),
+  ]), libraryDigest()];
   try {
     expect((await request("PATCH", "/api/config", { features: { skillsLibrary: true } })).status).toBe(200);
     const author = (await request("POST", "/api/bots", { name: "Author", section: "Skill fixture", settings: { chiefOfStaff: true } })).body.bot;
@@ -72,10 +74,11 @@ it("manages single shared-skill assignments and responsibility through a live Ch
     expect(await targetState("fixture-stale")).toMatchObject({ in_library: false, assigned: true });
     expect((await manage("unassign", "fixture-stale")).status).toBe(200);
     expect((await targetListing()).assignedSkills).toEqual(["fixture-keep", "fixture-audit"]);
-    const rejected = async (revision: string, expected: number) => {
+    const rejected = async (revision: string, expected: number, action = "unassign") => {
       const before = snapshot();
-      expect((await manage("unassign", "fixture-audit", revision)).status).toBe(expected);
+      expect((await manage(action, "fixture-audit", revision)).status).toBe(expected);
       expect(snapshot()).toEqual(before);
+      evidence.push({ action, rejected: expected, unchangedSnapshot: before });
     };
     await rejected("wrong-revision", 409);
     const revision = (await targetState()).management_revision;
@@ -101,6 +104,49 @@ it("manages single shared-skill assignments and responsibility through a live Ch
     expect(library.assignedBots.map((bot: { id: string }) => bot.id).sort()).toEqual([author.id, target.id].sort());
     expect((await request("GET", "/api/skills-library/fixture-audit")).body.text).toBe(text);
     expect(readFileSync(join(libraryRoot, "skills/fixture-audit/references/details.md"), "utf8")).toBe("Keep the attachment.\n");
+    const full = ["fixture-keep", ...Array.from({ length: 199 }, (_, index) => `fixture-boundary-${index}`)];
+    for (const name of full.slice(1)) {
+      expect(installLibrarySkill({ name, instructions: text.replaceAll("fixture-audit", name), source: "fixture", root: libraryRoot })).not.toHaveProperty("error");
+    }
+    expect((await request("PUT", `/api/bots/${target.id}/skills-library`, { skills: full.slice(1) })).status).toBe(200);
+    expect(await manage("assign")).toMatchObject({ status: 200, body: { state: "applied" } });
+    expect((await targetListing()).assignedSkills).toEqual([...full.slice(1), "fixture-audit"]);
+    const assigned = snapshot();
+    for (const action of ["assign", "share"]) {
+      expect(await manage(action)).toMatchObject({ status: 200, body: { state: "applied" } });
+      expect(snapshot()).toEqual(assigned);
+    }
+    expect((await request("PUT", `/api/bots/${target.id}/skills-library`, { skills: full })).status).toBe(200);
+    await rejected("wrong-revision", 409, "assign");
+    expect((await request("PATCH", `/api/bots/${author.id}`, { chiefOfStaff: false })).status).toBe(200);
+    await rejected("wrong-revision", 403, "share");
+    expect((await request("PATCH", `/api/bots/${author.id}`, { chiefOfStaff: true })).status).toBe(200);
+    const fullRevision = (await targetState()).management_revision;
+    for (const action of ["assign", "share"]) await rejected(fullRevision, 422, action);
+    const fullSnapshot = snapshot();
+    expect((await request("PUT", `/api/bots/${target.id}/skills-library`, { skills: [...full, "fixture-audit"] })).status).toBe(400);
+    expect(snapshot()).toEqual(fullSnapshot);
+    expect((await targetListing()).assignedSkills).toEqual(full);
+    const staleName = full[1]!;
+    expect(retireLibrarySkill(staleName, readSkillLibraryIndex(libraryRoot)[staleName]!.sha256, libraryRoot)).toEqual({ retired: true });
+    expect(await targetState(staleName)).toMatchObject({ assigned: true, in_library: false });
+    expect((await manage("unassign", staleName)).status).toBe(200);
+    expect((await targetListing()).assignedSkills).toEqual(full.filter((name) => name !== staleName));
+    expect((await manage("share")).status).toBe(200);
+    expect((await targetListing()).assignedSkills).toEqual([...full.filter((name) => name !== staleName), "fixture-audit"]);
+    expect((await request("PATCH", "/api/skills-library/fixture-audit", { everyBot: true })).status).toBe(200);
+    expect((await request("POST", `/api/bots/${target.id}/messages`, { threadId: target.threadId, sendId: "assignment-fixture-0002", text: "Read back fixture skills" })).status).toBeLessThan(300);
+    await expect.poll(() => dump().mcpConfig?.mcpServers?.agents?.env?.OMB_BOT_ID, { timeout: hostTimeout(30_000) }).toBe(target.id);
+    const targetToken: string = dump().mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const unassigned = await manage("unassign");
+    expect(unassigned).toMatchObject({ status: 200, body: { result: { skill: { scope: "all_bots", assigned: false, available: true } } } });
+    const state = await targetState();
+    expect(state).toEqual(unassigned.body.result.skill);
+    const general = await request("GET", "/api/internal/skills", undefined, targetToken);
+    expect(general.status).toBe(200);
+    expect(general.body.skills.find((skill: { name: string }) => skill.name === "fixture-audit")).toMatchObject({ enabled: true,
+      shared: { scope: state.scope, assigned: state.assigned, enabled: state.enabled, management_revision: state.management_revision } });
+    expect((await targetListing()).assignedSkills).toEqual(full.filter((name) => name !== staleName));
   } finally {
     const evidencePath = `${fixture.info.logPath}.skill-management.json`;
     writeFileSync(evidencePath, JSON.stringify({ fixture: fixture.info, requests: evidence }, null, 2));

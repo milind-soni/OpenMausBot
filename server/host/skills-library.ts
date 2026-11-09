@@ -17,7 +17,7 @@ import { nativeSkillListing, nativeSkills, readNativeSkillFile } from "../native
 import { canManage } from "../peer-roster.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { readSectionContext } from "../section-context.ts";
-import { libraryManagementRevision, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled, transferLibraryMaintainer } from "../skill-library.ts";
+import { assignedSkillsSchema, libraryManagementRevision, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled, transferLibraryMaintainer } from "../skill-library.ts";
 import {
   conversationAssignedSkills,
   prepareShareNote,
@@ -287,7 +287,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       return {
         scope: entry.everyBot ? "all_bots" : "selected_bots",
         enabled: listing.enabled,
-        assigned: true,
+        assigned: bot.assignedSkills?.includes(name) ?? false,
         content_revision: entry.sha256,
         package_files_revision: entry.filesSha256 ?? null,
         management_revision: libraryManagementRevision(entry, assignmentIds(name)),
@@ -321,6 +321,9 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       }
       const previous = target.assignedSkills ?? [];
       const next = action === "unassign" ? previous.filter((skill) => skill !== name) : previous.includes(name) ? previous : [...previous, name];
+      if (next.length > previous.length && !assignedSkillsSchema.safeParse(next).success) {
+        return [422, { state: "failed", error: "the target's assignments must be a list of at most 200 skill names" }];
+      }
       if (next.length !== previous.length) {
         try { store.patchBotProfile(target.id, { assignedSkills: next }); }
         catch { return [500, { state: "failed", error: "the assignment could not be saved; list with target_bot_id before retrying" }]; }

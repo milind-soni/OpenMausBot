@@ -6,7 +6,7 @@ import type { SkillAssignmentState } from "../shared/skill-request.ts";
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import { skillManagementRequest } from "./host/skill-management-request.ts";
-import { installLibrarySkill, readSkillLibraryIndex, setLibrarySkillEveryBot, setLibrarySkillReviewState, skillsLibraryRoot } from "./skill-library.ts";
+import { installLibrarySkill, libraryManagementRevision, readSkillLibraryIndex, setLibrarySkillEveryBot, setLibrarySkillReviewState, skillsLibraryRoot } from "./skill-library.ts";
 import { installSkill, listSkills } from "./skills.ts";
 import { Store, type BotRecord } from "./store.ts";
 
@@ -64,6 +64,46 @@ it.each(["share", "assign"] as const)("%s preserves other assignments, package, 
   expect((result.result as { skill: unknown }).skill).toEqual(f.state());
   expect(f.target.assignedSkills).toEqual(before.assignedSkills);
   expect(f.state()).toMatchObject({ assigned: false, available: false });
+});
+
+it.each(["share", "assign"] as const)("%s accepts the 200th assignment, rejects the 201st without writes and permits stale removal", (action) => {
+  const f = fixture();
+  const previous = Array.from({ length: 200 }, (_, index) => `stale-${index}`);
+  f.store.patchBotProfile(f.target.id, { assignedSkills: previous.slice(1) });
+  expect(f.manage(action)[0]).toBe(200);
+  expect(f.target.assignedSkills).toEqual([...previous.slice(1), f.name]);
+  expect(new Store(selection).bot(f.target.id)?.assignedSkills).toEqual(f.target.assignedSkills);
+  const patch = vi.spyOn(f.store, "patchBotProfile");
+  try {
+    const assigned = f.snapshot();
+    expect(f.manage(action)[0]).toBe(200);
+    expect(f.snapshot()).toEqual(assigned);
+    expect(patch).not.toHaveBeenCalled();
+    f.store.patchBotProfile(f.target.id, { assignedSkills: previous });
+    patch.mockClear();
+    const full = f.snapshot();
+    const revision = f.state().management_revision;
+    expect(f.manage(action, "wrong")[0]).toBe(409);
+    expect(f.manage(action, "wrong", f.name, f.target)[0]).toBe(403);
+    expect(f.manage(action, revision, f.name, f.chief, null)[0]).toBe(403);
+    expect(f.manage(action, revision)).toMatchObject([422, { state: "failed", error: expect.stringContaining("200") }]);
+    expect(f.snapshot()).toEqual(full);
+    expect(patch).not.toHaveBeenCalled();
+    expect(new Store(selection).bot(f.target.id)?.assignedSkills).toEqual(previous);
+    f.store.patchBotProfile(f.chief.id, { assignedSkills: [] });
+    patch.mockClear();
+    const inaccessible = f.snapshot();
+    expect(f.manage(action, revision)[0]).toBe(409);
+    const inaccessibleRevision = libraryManagementRevision(readSkillLibraryIndex()[f.name]!, []);
+    expect(f.manage(action, inaccessibleRevision)).toMatchObject([422, { error: expect.stringContaining("Chief's access") }]);
+    expect(f.manage(action, "wrong")[0]).toBe(409);
+    expect(f.snapshot()).toEqual(inaccessible);
+    expect(patch).not.toHaveBeenCalled();
+    const stale = f.state(previous[0]);
+    expect(f.manage("unassign", stale.management_revision, stale.name)[0]).toBe(200);
+    expect(f.target.assignedSkills).toEqual(previous.slice(1));
+    expect(new Store(selection).bot(f.target.id)?.assignedSkills).toEqual(previous.slice(1));
+  } finally { patch.mockRestore(); }
 });
 
 it("lists and removes a missing library assignment without dropping any other stale names", () => {
@@ -140,7 +180,13 @@ it("unassigns every-bot skills without claiming to revoke their access or changi
   const [status, receipt] = f.manage("unassign");
   expect(status).toBe(200);
   expect(receipt.summary).toContain("Every-bot access");
-  expect(f.state()).toMatchObject({ scope: "all_bots", assigned: false, available: true });
+  const state = f.state();
+  expect(state).toMatchObject({ scope: "all_bots", assigned: false, available: true });
+  expect((receipt.result as { skill: unknown }).skill).toEqual(state);
+  const general = f.host.harnessListing(f.target.id, f.host.listBotSkills(f.target)).find((skill) => skill.name === f.name)!;
+  expect(general.enabled).toBe(true);
+  expect(general.shared).toMatchObject({ scope: state.scope, assigned: state.assigned, enabled: state.enabled, management_revision: state.management_revision });
+  expect(new Store(selection).bot(f.target.id)?.assignedSkills).toEqual(f.target.assignedSkills);
   expect(digest(skillsLibraryRoot())).toBe(before);
 });
 

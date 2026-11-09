@@ -6,7 +6,7 @@ import { setImportedSkillEnabled } from "../imported-skills.ts";
 import { botSkillTemplateSchema } from "../new-bot-defaults.ts";
 import { fetchSkillFromSource } from "../skill-fetch.ts";
 import { skillImportSummary } from "../skill-folder.ts";
-import { installLibrarySkill, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillEveryBot, setLibrarySkillReviewState, skillsLibraryEnabled } from "../skill-library.ts";
+import { assignedSkillsSchema, installLibrarySkill, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillEveryBot, setLibrarySkillReviewState, skillsLibraryEnabled } from "../skill-library.ts";
 import {
   installSkill, listBotSkillsWithOrigin, listStagedSkillWrites, parseSkillMd, removeSkill, scanSkillText, setSkillEnabled,
   type SkillListing, type StagedSkillWrite,
@@ -170,7 +170,7 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
     if (m && method === "PUT") {
       if (!skillsLibraryEnabled(cfg)) return json(res, 404, { error: "skills library is not enabled" });
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
-      const parsed = z.object({ skills: z.array(z.string().min(1).max(64)).max(200) }).safeParse(await readBody(req));
+      const parsed = z.object({ skills: assignedSkillsSchema }).safeParse(await readBody(req));
       if (!parsed.success) return json(res, 400, { error: "skills must be a list of skill names" });
       const index = readSkillLibraryIndex();
       const names = [...new Set(parsed.data.skills)];

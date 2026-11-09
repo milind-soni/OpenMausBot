@@ -17,6 +17,8 @@ export function skillsLibraryEnabled(cfg: AppConfig): boolean {
   return cfg.features?.skillsLibrary === true;
 }
 
+export const assignedSkillsSchema = z.array(z.string().min(1).max(64)).max(200);
+
 export interface SkillManifest {
   id: string;
   name: string;
