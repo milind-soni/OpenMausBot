@@ -13,6 +13,7 @@ import { pathToFileURL } from "node:url";
 import localOriginModule from "./local-origin.cjs";
 import { createLocalComputerGrant } from "./local-computer-grant.mjs";
 import { driverFailure } from "./cua-failure.mjs";
+import { DEAD_DRIVER_RETRY_MS, restartWorthTrying, watchDriver } from "./cua-watch.mjs";
 
 const { localOnly } = localOriginModule;
 
@@ -52,6 +53,9 @@ let startupAbort = null;
  * is tried again by itself after these waits; a blocked or missing helper is not. */
 const RETRY_AFTER_MS = [15_000, 60_000];
 let retryTimer = null;
+let driverWatch = null;
+let deadDriverRetry = null;
+let deadDriverRestarts = 0;
 let lifecycleGeneration = 0;
 let macRetry = null;
 let linuxRuntime = null;
@@ -341,7 +345,26 @@ export async function startCua({ attempt = 0 } = {}) {
     retryTimer = setTimeout(() => { retryTimer = null; void startCua({ attempt: attempt + 1 }).catch(() => {}); }, RETRY_AFTER_MS[attempt]);
     retryTimer.unref?.();
   }
+  watchMacDriver(nextConnection);
   return persistAndNotify(nextConnection);
+}
+
+/** Starts computer control again when the running Mac driver stops answering, and keeps trying for a while if that fails. */
+function watchMacDriver(connection) {
+  driverWatch?.stop();
+  driverWatch = null;
+  if (process.platform !== "darwin" || (connection.mode !== "embedded" && connection.mode !== "standalone")) return;
+  deadDriverRestarts = 0;
+  driverWatch = watchDriver({ alive: () => socketAlive(connection.socketPath), restart: restartDeadDriver });
+}
+
+async function restartDeadDriver() {
+  const attempt = deadDriverRestarts;
+  const outcome = await restartCua();
+  if (outcome.enabled || !restartWorthTrying(outcome.message) || attempt >= DEAD_DRIVER_RETRY_MS.length) return;
+  deadDriverRestarts = attempt + 1;
+  deadDriverRetry = setTimeout(() => { deadDriverRetry = null; void restartDeadDriver().catch(() => {}); }, DEAD_DRIVER_RETRY_MS[attempt]);
+  deadDriverRetry.unref?.();
 }
 
 export async function cuaPermissionsStatus() {
@@ -364,6 +387,10 @@ export async function cuaPermissionsStatus() {
 export async function stopCua() {
   clearTimeout(retryTimer);
   retryTimer = null;
+  driverWatch?.stop();
+  driverWatch = null;
+  clearTimeout(deadDriverRetry);
+  deadDriverRetry = null;
   lifecycleGeneration++;
   startupAbort?.abort();
   startupAbort = null;
