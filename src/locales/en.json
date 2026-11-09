@@ -3111,6 +3111,7 @@
   "model.refreshTitle": "Refresh models",
   "model.unconfirmed": "{name} hasn't listed its models yet. These may be out of date.",
   "model.localModels": "Local models",
+  "model.local.noTools": "No tools",
   "model.localHint": "Run this agent with a model already on your machine.",
   "model.apiKeyHint": "Runs on your API key. The provider bills you for what it uses.",
   "model.chooseHint": "Choose a model for this bot.",
