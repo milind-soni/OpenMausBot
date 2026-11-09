@@ -52,7 +52,7 @@ function RowLines({ label, children }: { label: ReactNode; children?: ReactNode 
 
 function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: MenuModelRow; onPick: SimpleMenuActions["onPick"] }) {
   const { option } = row;
-  const reason = row.blocked ? t("model.orgBlocked") : undefined;
+  const reason = row.blocked ? t(option.needsCliUpdate ? "chat.claudeUpdate.offer" : "model.orgBlocked") : undefined;
   return (
     <button
       type="button"

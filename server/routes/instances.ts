@@ -1,6 +1,7 @@
 import { agentEndpointAddress, discoverAgentEndpointModels, hasExplicitModel, isGatewayEndpoint } from "../agent-endpoint-models.ts";
 import { codexEndpointSchema, codexEndpointUpdateSchema, newCodexEndpoint, updateCodexEndpoint, withCodexEndpointInfo, isCodexEndpoint } from "../codex-endpoints.ts";
 import { userError, userErrorFields } from "../user-errors.ts";
+import { modelManifest } from "../model-manifest/manifest.ts";
 import { randomUUID } from "node:crypto";
 import { providerIconError } from "../../shared/provider-icon.ts";
 import {
@@ -107,6 +108,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       // Rescan PATH: Windows never pushes PATH changes into a live process, so a CLI installed since launch stays invisible.
       resetPathCache();
       if (url.searchParams.get("fresh") === "1") registry.forgetSnapshots();
+      // Whatever this download brings shows on the next open; the answer does not wait for it.
+      void modelManifest().refreshOnDemand().catch(() => {});
       return json(res, 200, { instances: await describeInstances() });
     }
     const companyMutation = /^\/api\/instances\/(company\.[\w.-]+)(?:\/|$)/.exec(path);

@@ -241,6 +241,25 @@ describe("the Simple model menu", () => {
   });
 });
 
+describe("a model that needs a newer CLI", () => {
+  const gated = claudeModels.map((option) => option.id === "opus-5-5" ? { ...option, needsCliUpdate: "2.1.321" } : option);
+  const pick = (model: string) => ({ instanceId: "claude", model });
+  const menuOn = (model: string) => simpleModelMenu({
+    instances: [claude({}, gated)], listed: [claude({}, gated)], selection: pick(model),
+    bot: { name: "Scout", selection: pick(model) }, query: "", expanded: new Set(["claude"]), probing: new Set(), loading: false,
+  });
+
+  it("stays listed but cannot be picked", () => {
+    const body = menuOn("sonnet-5").groups[0]!.body;
+    if (body.kind !== "models") throw new Error("expected the models");
+    expect(body.rows.filter((row) => row.blocked).map((row) => row.option.id)).toEqual(["opus-5-5"]);
+  });
+
+  it("offers the update on the current row instead of failing the turn", () => {
+    expect(menuOn("opus-5-5").current).toMatchObject({ warning: true, blocked: true, meta: "Update Claude" });
+  });
+});
+
 describe("a model the organization turned off", () => {
   const blockedModels = claudeModels.map((option) => option.id === "opus-5-5" ? { ...option, orgBlocked: true as const } : option);
   const pick = (model: string) => ({ instanceId: "claude", model });
