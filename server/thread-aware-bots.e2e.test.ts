@@ -506,6 +506,55 @@ describe("start_thread on another model, reporting back", () => {
     }
   }, 60_000);
 
+  it("lets the opener steer its own report-back thread while it runs and send it a follow-up after, never another thread of its own", async () => {
+    const pm = await createBot("Pam", "gated");
+    try {
+      const token = await heldTurn(pm, "Get a review of the diff.");
+      const opened = await api("POST", "/api/internal/threads", { title: "Review: steer", message: "Review the diff. [[gate:own-steer]]", reportBack: true }, token);
+      expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+      const { threadId, requestId } = opened.body;
+      await expect.poll(() => handoffs().find((node) => node.id === requestId)?.status, { timeout: 15_000 }).toBe("running");
+      await expect.poll(() => dumpOf("own-steer"), { timeout: 15_000 }).toBeTruthy();
+      const seen = () => JSON.stringify([...promptsOf("own-steer"), ...promptsOf(threadId)]);
+      // The opener's turn ends, and the person's next message asks it to steer the thread still running.
+      rmSync(join(gates, `${pm.threadId}.json`), { force: true });
+      release(pm.threadId);
+      await expect.poll(() => handoffs().find((node) => node.threadId === pm.threadId)?.status, { timeout: 15_000 }).toBe("waiting");
+      rmSync(join(gates, `${pm.threadId}.gate`), { force: true });
+      const nextSent = await api("POST", `/api/bots/${pm.id}/messages`, { text: "Have it check the tests too.", threadId: pm.threadId });
+      expect(nextSent.status).toBe(202);
+      const later = await liveToken(pm.threadId);
+
+      const steered = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Also check the tests.", thread: threadId }, later);
+      expect(steered.status, JSON.stringify(steered.body)).toBe(200);
+      expect(steered.body.receipts).toMatchObject([{ outcome: "injected", threadId, requestId }]);
+      expect((await messages(threadId)).find((message) => message.text === "Also check the tests.")).toMatchObject({ role: "user", steered: true, peerAsk: { botId: pm.id } });
+      release(threadId);
+      release("own-steer");
+      await expect.poll(() => handoffs().filter((node) => node.threadId === threadId).every((node) => node.status === "completed"), { timeout: 15_000 }).toBe(true);
+
+      const followUp = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "One more: check the docs.", thread: threadId }, later);
+      expect(followUp.status, JSON.stringify(followUp.body)).toBe(200);
+      const [receipt] = followUp.body.receipts;
+      expect(receipt).toMatchObject({ threadId });
+      await expect.poll(seen, { timeout: 15_000 }).toContain("One more: check the docs.");
+      await expect.poll(() => handoffs().find((node) => node.id === receipt.requestId)?.status, { timeout: 15_000 }).toBe("completed");
+      expect((await botState(pm.id)).tasks.filter((task: any) => task.title === "Review: steer")).toHaveLength(1);
+
+      const standing = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Do it again." }, later);
+      expect([standing.status, standing.body.error]).toEqual([403, "Choose a teammate, not yourself"]);
+      const quiet = await api("POST", "/api/internal/threads", { title: "Quiet job", message: "Tidy up. [[gate:own-quiet]]" }, later);
+      expect(quiet.status, JSON.stringify(quiet.body)).toBe(201);
+      const notReporting = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Faster.", thread: quiet.body.threadId }, later);
+      expect([notReporting.status, notReporting.body.error]).toEqual([403, "Choose a teammate, not yourself"]);
+      release("own-quiet");
+      release(pm.threadId);
+      await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
+    } finally {
+      await cleanup([pm.id]);
+    }
+  }, 60_000);
+
   it("fails a report-back thread whose model can no longer run when its turn comes, instead of running it on the bot's own model", async () => {
     const pm = await createBot("Pam", "gated");
     try {
