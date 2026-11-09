@@ -91,6 +91,8 @@ export interface TaskOpenedBy {
    * durable conversation between two bots; "work" closes itself once its
    * result has been reported. */
   kind?: "pair" | "work";
+  /** The burst this thread is one part of: it is listed under that burst's card, not on its own. */
+  burstId?: string;
   /** The opener's own conversation this "work" thread was opened from.
    * Everything that conversation later sends this bot continues here. */
   threadId?: string;
