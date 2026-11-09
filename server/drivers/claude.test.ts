@@ -1977,6 +1977,20 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv).toContain("--strict-mcp-config");
   });
 
+  it("drops --autocompact after the CLI rejects it as an unknown option, so the next turn runs", async () => {
+    // A Mac report: --help listed the flag at the last snapshot, yet every scheduled turn and its retry failed with it.
+    const dump = join(scratch, "rejects-autocompact.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_REJECT_AUTOCOMPACT: "1" });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({ threadId: "t-rejects-autocompact", text: "first" });
+    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-rejects-autocompact");
+    // The routine's own retry is a new turn: it must launch without the refused flag.
+    await instance.adapter.sendTurn({ threadId: "t-rejects-autocompact-2", text: "second" });
+    const done = await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-rejects-autocompact-2");
+    expect(done).toMatchObject({ type: "turn.completed", ok: true });
+    expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
+  });
+
   it("keeps only the isolation flag a very old CLI accepts", async () => {
     // 1.0.100: --strict-mcp-config exists (1.0.60), --setting-sources not yet (1.0.122).
     const dump = join(scratch, "very-old-cli.json");

@@ -801,9 +801,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
     let cliVersion: ClaudeCliVersion | null = null;
     let cliVersionChecked = false;
-    // Whether `claude --help` lists --autocompact: 2.1.129 rejects it despite the floor.
-    let cliHasAutocompact: boolean | null = null;
-    let cliHelpVersion: string | null = null;
+    // Whether `claude --help` lists --autocompact (2.1.129 rejects it despite the floor); a turn refusing it turns it off.
+    let [cliHasAutocompact, cliHelpVersion]: [boolean | null, string | null] = [null, null];
     const readCliVersion = cliVersionProbe(config.cli);
     const ensureCliVersion = async (env: NodeJS.ProcessEnv): Promise<void> => {
       if (cliVersionChecked) return;
@@ -1717,6 +1716,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           }
         } else if (session.turn && !session.turn.settled) {
           const { turnId, input: turn, retryAbort } = session.turn;
+          if (/unknown option '--autocompact'/.test(session.stderr)) cliHasAutocompact = false;
           const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
