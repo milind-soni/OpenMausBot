@@ -76,7 +76,7 @@ COMPOSIO_API_KEY=ak_your_project_key pnpm dev:server
 
 The browser-only development UI can also save a key to the owner-only `~/.openmausbot/config.json` file. Using the environment variable is preferred for headless and shared development machines.
 
-OpenMausBot creates a stable random user identifier for the installation, stores the returned Session identifier, and reuses that Session across launches. No Gmail, GitHub, Slack, or other provider tokens are stored by OpenMausBot; Composio owns their connection lifecycle.
+OpenMausBot creates a stable random user identifier for the installation, stores the returned Session identifier, and reuses that Session across launches. A fresh personal installation that connects a project key uses the Composio user of an earlier OpenMausBot installation in that project when there is exactly one such user and it still has a live connection, so the apps connected there come back after a reinstall or on another computer. A Team Cloud never does this and does not even list the project's accounts, because every member's bots would then get that person's apps. No Gmail, GitHub, Slack, or other provider tokens are stored by OpenMausBot; Composio owns their connection lifecycle.
 
 Sessions created by older OpenMausBot versions are upgraded in place by creating a multi-account Session for the same stable Composio user. Connected accounts belong to that user, so existing grants remain available while the new Session adds explicit multi-account routing. Each toolkit is capped at five usable accounts.
 
@@ -84,7 +84,7 @@ Sessions created by older OpenMausBot versions are upgraded in place by creating
 
 Yes. Gmail, Google Calendar, Google Drive, and the other Google toolkits can each hold multiple labeled authorizations, and Slack can hold multiple labeled workspace/account authorizations. Accounts are scoped to the OpenMausBot installation's stable Composio user and appear by alias and connected-account ID in **Connected apps**.
 
-If a provider or restricted Composio project policy prevents another authorization, the safe fallback is a separate OpenMausBot installation/configuration with its own Composio user. Re-authorizing the same single-account Session is not a safe workaround: it can change which grant is selected. Do not share raw provider tokens or place them in bot prompts.
+If a provider or restricted Composio project policy prevents another authorization, the safe fallback is a separate OpenMausBot installation/configuration using its own Composio project key, which gives it its own Composio user; a second personal installation on the same project key picks up the earlier installation's user instead. Re-authorizing the same single-account Session is not a safe workaround: it can change which grant is selected. Do not share raw provider tokens or place them in bot prompts.
 
 The hosted/managed connected-apps broker exposes the same account-aware response shape and account-specific removal routes as the self-hosted project-key mode; it does not send broker or provider credentials to the renderer.
 

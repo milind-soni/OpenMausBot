@@ -33678,7 +33678,13 @@
       "settings.simple.more.limits": "dffb64dc70011ecf3ef3ad62cdd271f08f1b86601d7c2bc54f91978a32ca8cf4",
       "settings.simple.more.open": "ed077f3d8125d60dca1979c7133601bd187d47c73ed9975028f677e49e709942",
       "memory.journal.actor.teamSetup": "f36c1b27c9eb8da8e6f4df8b6b437eb805508fdb04b145ec229102dff39c96e9",
-      "memory.journal.instructions": "57dca9eafc1de092ccb80dfa72f853edcdb3b3e00f9b103f65e83e12aa7cbbc3"
+      "memory.journal.instructions": "57dca9eafc1de092ccb80dfa72f853edcdb3b3e00f9b103f65e83e12aa7cbbc3",
+      "native.dialog.resetSavedKeys.title": "09a032a1b21411b300becf306038111d2975ab78b24c441565a726eff5d684b4",
+      "native.dialog.resetSavedKeys.detail": "9f72b7452bdcd91042c9679f05a5b6f2f6e3e7fdc7980c42a488fa3b01d6b3b0",
+      "native.dialog.resetSavedKeys.button": "32910a15265787f53a3554f97da5787c04a7ada90822edcc7776a471b8ee3d8a",
+      "native.dialog.resetSavedKeys.failed": "e663cbf1d28235aee568f1cd2b3c837697c355d0de071f557053f0c61bba2a54",
+      "connectors.resetSavedKeys": "764411710357197d3d55fbf646d0ea6249c4236cbc635e0b4212b8d92cf5dea6",
+      "connectors.savedKeysUnreadable": "6a639d5ea19bf20de5ce7551bea2ccc330cfbd5085d0906a3ec9ece6959c4470"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
