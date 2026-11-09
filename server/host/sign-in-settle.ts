@@ -21,7 +21,7 @@ export interface SignInSettleDeps {
   computerKey(bot: BotRecord): string;
   /** True when several bots drive the computer behind this control key, so no one bot's card may hand it back alone. */
   sharedKey(key: string): boolean;
-  /** The sign-in cards that asked for the person on this control key and have not settled their plea. */
+  /** The sign-in cards on this control key that still wait for the person. */
   pleas(key: string): ComputerHelpRef[];
 }
 
@@ -35,19 +35,13 @@ export function signInChatPrompt(site: string, line: string): string {
 export function createSignInSettle(deps: SignInSettleDeps) {
   const { store } = deps;
 
-  /** A stopped card, or one whose conversation is gone, keeps its plea but no longer asks the person for anything. */
-  const stillWaits = (ref: ComputerHelpRef): boolean => {
-    const card = deps.signInMessage(ref.botId, ref.threadId, ref.messageId)?.signIn;
-    return card !== undefined && !card.stopped && signInWaits(card);
-  };
-
   /** The person is through with the place the card lent them: its plea goes, and the browser or computer goes back to the
    * bot. A computer several bots share goes back only when the person pressed Done or Cancel and no other card waits for it. */
   const handPlaceBack = (bot: BotRecord, threadId: string, messageId: string, place: Surface, byPerson: boolean): void => {
     const pleaded = deps.settleHelp(messageId);
     if (place === "browser") deps.handBackBrowser(bot, threadId);
     else for (const key of pleaded.length ? pleaded : [deps.computerKey(bot)]) {
-      if (!deps.sharedKey(key) || (byPerson && !deps.pleas(key).some(stillWaits))) deps.releaseComputer(key);
+      if (!deps.sharedKey(key) || (byPerson && !deps.pleas(key).length)) deps.releaseComputer(key);
     }
   };
 

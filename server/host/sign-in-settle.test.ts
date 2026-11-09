@@ -81,10 +81,10 @@ describe("a sign-in settled without the person pressing Done", () => {
 
 describe("the computer a sign-in card lent the person", () => {
   type Path = "done" | "cancelled" | "answered in chat" | "answered elsewhere" | "verified";
-  const handsBack = (path: Path, key: string, otherPlea: boolean | "stopped" | "gone"): boolean => {
+  const handsBack = (path: Path, key: string, otherPlea: boolean): boolean => {
     const w = world(undefined, new Map([[key, ["m1", ...(otherPlea ? ["m2"] : [])]]]));
     w.add({ ...card(), signIn: { ...card().signIn, place: "vm" } });
-    if (otherPlea && otherPlea !== "gone") w.add({ ...card("figma.com"), signIn: { ...card("figma.com").signIn, place: "vm", stopped: otherPlea === "stopped" } });
+    if (otherPlea) w.add({ ...card("figma.com"), signIn: { ...card("figma.com").signIn, place: "vm" } });
     if (path === "done" || path === "cancelled") w.settle.settle("dachs", "work", "m1", path);
     if (path === "answered in chat") w.settle.answerInChat("dachs", "work", "Bin angemeldet");
     if (path === "answered elsewhere") w.settle.answeredElsewhere({ id: "as_1", threadId: "work", botId: "dachs", cards: ["m1"] } as HandoffView);
@@ -103,14 +103,6 @@ describe("the computer a sign-in card lent the person", () => {
       ["answered in chat", true, true, false, false],
       ["answered elsewhere", true, true, false, false],
       ["verified", true, true, false, false],
-    ]);
-  });
-
-  it("is kept from going back only by a card that still waits", () => {
-    expect((["stopped", "gone", true] as const).map((other) => [other, handsBack("done", "computer_team", other)])).toEqual([
-      ["stopped", true],
-      ["gone", true],
-      [true, false],
     ]);
   });
 });
