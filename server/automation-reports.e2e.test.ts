@@ -293,7 +293,7 @@ it("hands the chat's own session the newest report of each automation, however m
   expect((await s.messages(s.main)).findLast((message) => message.role === "bot" && message.kind === "text")?.text).toBe("Sent.");
 }, 120_000);
 
-it("reports an outside event's run into the main chat too, from a conversation of its own that stays out of the way", async () => {
+it("reports an outside event's run into a chat of its own, not the main chat", async () => {
   const s = await server();
   s.script([{ key: "lead", match: ["Draft a follow-up"], reply: "Drafted a follow-up for Ada.", repeat: true }]);
   const { webhook, credential } = await s.api("POST", "/api/webhooks", { name: "Sales form leads", prompt: "Draft a follow-up for the lead.", botId: s.bot.id }, 201);
@@ -303,12 +303,20 @@ it("reports an outside event's run into the main chat too, from a conversation o
   await s.settled(runId);
   await s.reported(runId, "posted");
   const done = await s.run(runId);
-  expect(done).toMatchObject({ webhookId: webhook.id, resultsThreadId: s.main, triggerSource: "webhook" });
-  expect(await s.lines()).toEqual([expect.objectContaining({ text: "Drafted a follow-up for Ada.", automation: expect.objectContaining({ trigger: "webhook", name: "Sales form leads" }) })]);
+  expect(done).toMatchObject({ webhookId: webhook.id, triggerSource: "webhook" });
+  expect(done.resultsThreadId).not.toBe(s.main);
+  expect(await s.lines()).toEqual([]);
+  expect(await s.lines(done.resultsThreadId)).toEqual([expect.objectContaining({ text: "Drafted a follow-up for Ada.", automation: expect.objectContaining({ trigger: "webhook", name: "Sales form leads" }) })]);
   expect(s.toldOnlyReplyLeaves("lead")).toBe(true);
   const saved = await s.savedBot();
   expect(saved.threadId).toBe(s.main);
+  expect(saved.tasks.find((task: any) => task.threadId === done.resultsThreadId)).toMatchObject({ title: "Sales form leads · Results" });
   expect(saved.tasks.find((task: any) => task.threadId === done.threadId)).toMatchObject({ routineRunId: runId });
+  const again = await fetch(credential.url, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "lead-2" }, body: JSON.stringify({ lead: "Bo" }) });
+  const { runId: second } = await again.json() as any;
+  await s.settled(second);
+  await s.reported(second, "posted");
+  expect(await s.run(second)).toMatchObject({ resultsThreadId: done.resultsThreadId });
   expect(existsSync(join(s.dataDir, "room-plan.json"))).toBe(true);
 }, 120_000);
 

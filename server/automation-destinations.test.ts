@@ -4,7 +4,7 @@ import { createAutomationDestinations, type AutomationDestinationDeps } from "./
 import { CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts";
 import type { Routine } from "./routines.ts";
 
-function world(writer: string) {
+function world(writer: string, cloud = true, earlier: Array<{ webhookId: string; botId: string; resultsThreadId: string }> = []) {
   const tasks = new Map([["person-chat", { threadId: "person-chat", title: "Person" }], ["hook-chat", { threadId: "hook-chat", title: "Hook · Results" }]]);
   const opened: Array<[string, string]> = [];
   const outside: string[] = [];
@@ -15,9 +15,9 @@ function world(writer: string) {
     messagesFor: () => [],
     taskByThread: (_botId: string, threadId: string) => tasks.get(threadId),
   } as unknown as AutomationDestinationDeps["store"];
-  const destinations = createAutomationDestinations({ store, mainThread: () => "main", runs: () => [],
-    cloud: { owner: "owner", opener: () => writer, reportFromOthers: () => false, opened: (threadId, person) => { opened.push([threadId, person]); }, outside: (threadId) => { outside.push(threadId); } } });
-  return { destinations, opened, outside };
+  const destinations = createAutomationDestinations({ store, mainThread: () => "main", runs: () => earlier,
+    cloud: cloud ? { owner: "owner", opener: () => writer, reportFromOthers: () => false, opened: (threadId, person) => { opened.push([threadId, person]); }, outside: (threadId) => { outside.push(threadId); } } : null });
+  return { destinations, opened, outside, tasks };
 }
 const routine = { id: "r", name: "Daily", botId: "bot", resultsThreadId: "person-chat" } as Routine;
 
@@ -43,5 +43,26 @@ describe("where an automation reports on a Cloud", () => {
     const w = world("owner");
     expect(w.destinations.event({ webhookId: "w", webhookName: "Hook", botId: "bot" })).toBe("made-1");
     expect(w.outside).toEqual(["made-1"]);
+  });
+});
+
+describe("where an outside event reports on a desktop or self-hosted home", () => {
+  const event = { webhookId: "w", webhookName: "Hook", botId: "bot" };
+
+  it("opens a chat of its own instead of piling into the main chat", () => {
+    const w = world("owner", false);
+    expect(w.destinations.event(event)).toBe("made-1");
+    expect(w.tasks.get("made-1")).toMatchObject({ title: "Hook · Results" });
+    expect(w.outside).toEqual([]);
+  });
+
+  it("keeps using that chat for the webhook's later runs", () => {
+    const w = world("owner", false, [{ webhookId: "w", botId: "bot", resultsThreadId: "hook-chat" }]);
+    expect(w.destinations.event(event)).toBe("hook-chat");
+  });
+
+  it("moves off a person's chat that an older run reported into", () => {
+    const w = world("owner", false, [{ webhookId: "w", botId: "bot", resultsThreadId: "person-chat" }]);
+    expect(w.destinations.event(event)).toBe("made-1");
   });
 });
