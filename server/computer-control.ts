@@ -168,8 +168,17 @@ export class ComputerControl {
 
   /** Removes the deleted bot's pleas from every key; holds stay. */
   forgetBot(botId: string): void {
+    this.forgetPleas((ref) => ref.botId === botId);
+  }
+
+  /** Removes the pleas of a deleted conversation's sign-in cards from every key; holds stay. */
+  forgetThread(threadId: string): void {
+    this.forgetPleas((ref) => ref.threadId === threadId);
+  }
+
+  private forgetPleas(gone: (ref: ComputerHelpRef) => boolean): void {
     for (const [key, entry] of this.entries) {
-      const pleas = entry.pleas.filter((plea) => plea.ref.botId !== botId);
+      const pleas = entry.pleas.filter((plea) => !gone(plea.ref));
       if (pleas.length === entry.pleas.length) continue;
       entry.pleas = pleas;
       if (entry.heldSinceMs === null && !pleas.length) this.entries.delete(key);

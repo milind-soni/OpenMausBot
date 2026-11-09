@@ -421,8 +421,29 @@ describe("a person's hold on the shared Local VM", () => {
     await askSignIn((await startTurn(a.id, side)).comms, "a.example");
     await finishTurns([a.id, side]);
     expect((await control(api, witness)).body.helpReason).toBeTruthy();
+    const since = sse.frames.length;
     if (how === "stopped") await ok("POST", `/api/bots/${a.id}/interrupt`, { threadId: side });
     else await ok("DELETE", `/api/bots/${a.id}/tasks/${side}`);
+    await until(() => framesFor(witness, since).at(-1)?.helpReason, reason => reason === null);
+    expect((await control(api, witness)).body.helpReason).toBeNull();
+  }, 60_000);
+
+  it.each(["the room", "a room thread", "room threads in bulk"] as const)("a room's sign-in card asks no panel once %s is deleted", async (how) => {
+    const a = await newBot("Ada", { computer: "vm" });
+    const group = (await ok("POST", "/api/groups", { name: `Room ${randomUUID().slice(0, 6)}`, memberIds: [a.id], setup: { bulletin: "", defaultResponder: { kind: "everyone" } } })).group;
+    const threadId: string = how === "the room" ? group.threadId : (await ok("POST", `/api/groups/${group.id}/tasks`, {})).task.threadId;
+    const text = `Work on the desktop ${randomUUID()}`;
+    await ok("POST", `/api/groups/${group.id}/messages`, { text, ...(how === "the room" ? {} : { threadId }) });
+    await askSignIn((await dumpFor(text)).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN, "a.example");
+    writeFileSync(finishFile, "finish");
+    expect((await control(api, witness)).body.helpReason).toBeTruthy();
+    const since = sse.frames.length;
+    if (how === "room threads in bulk") {
+      await until(() => api("POST", `/api/groups/${group.id}/tasks/delete`, { threadIds: [threadId] }), response => Boolean(response.body?.deleted?.includes(threadId)));
+    } else {
+      await until(() => api("DELETE", how === "the room" ? `/api/groups/${group.id}` : `/api/groups/${group.id}/tasks/${threadId}`), response => response.status === 200);
+    }
+    await until(() => framesFor(witness, since).at(-1)?.helpReason, reason => reason === null);
     expect((await control(api, witness)).body.helpReason).toBeNull();
   }, 60_000);
 

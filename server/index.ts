@@ -4530,6 +4530,7 @@ store.onChange((change) => {
       break;
     case "thread.deleted":
       directRequestOwners.delete(change.threadId);
+      computerControl.forgetThread(change.threadId);
       stoppedTurns.delete(change.threadId);
       turnStops.forget(change.threadId);
       repeats.settle(change.threadId);
@@ -12281,7 +12282,7 @@ const taskRoutes = createTaskRoutes({
   coordinator,
   handoffs,
   skillReview,
-  threadStarters, settleHelp: (messageId) => computerControl.settleHelp(messageId),
+  threadStarters,
   phoneSecretSubmissions,
   titleRegenerations,
   directTurnGenerationByThread,

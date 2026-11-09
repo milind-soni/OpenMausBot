@@ -278,4 +278,19 @@ describe("computer control", () => {
     expect(control.settleHelp("a-1")).toEqual([]);
     expect(changes.map((change) => change.botId).sort()).toEqual(["a", "desk", "held"]);
   });
+
+  it("forgetThread removes only that conversation's pleas, from every key", () => {
+    const { control, changes } = tracked();
+    const plea = (threadId: string, messageId: string) => ({ botId: "a", threadId, messageId, site: "example.com", place: "vm" as const });
+    control.requestHelp("desk", "t1 asks", plea("t1", "m-1"));
+    control.requestHelp("desk", "t2 asks", plea("t2", "m-2"));
+    control.requestHelp("a", "t1 asks", plea("t1", "m-3"));
+    changes.length = 0;
+
+    control.forgetThread("t1");
+
+    expect(control.snapshot("desk")).toMatchObject({ helpReason: "t2 asks", help: { messageId: "m-2" } });
+    expect(control.snapshot("a")).toEqual({ held: false, helpReason: null, heldSinceMs: null });
+    expect(changes.map((change) => change.botId).sort()).toEqual(["a", "desk"]);
+  });
 });
