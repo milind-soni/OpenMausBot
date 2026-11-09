@@ -1,5 +1,5 @@
 // What each person on a Team Cloud keeps for themselves though the team shares the thing it is about (docs/team-cloud.md):
-// a bot's Shared chat's unread mark.
+// a bot's Shared chat's unread mark and a notification's read mark.
 // A real Team Cloud with the Owner, an Admin and two Users (Ada and Cleo), paired with the Admin's signed claims: one
 // person reading, marking or reordering changes nothing for another, and their streams hear only their own. The engine
 // is the synthetic Claude CLI.
@@ -18,6 +18,7 @@ const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.FAKE_CLAUDE_FIXTURE_D
 
 type Task = { threadId: string; unread?: boolean; lastReadMessageId?: string };
 type Bot = { id: string; mainThreadId: string; busy?: boolean; activity?: string; unread?: boolean; tasks: Task[] };
+type Note = { id: string; kind: string; threadId: string; read: boolean };
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
 let owner = "", admin = "", ada = "", cleo = "";
@@ -117,3 +118,35 @@ it("a person's read of the Shared chat reaches their own streams only", async ()
     await cleos.close();
   }
 }, hostTimeout(90_000));
+
+it("reading a notification of the Shared chat is each person's own, and only their streams hear it", async () => {
+  const feed = async (token: string) => ((await team.as(token, "GET", "/api/notifications")).body.notifications as Note[])
+    .filter((note) => note.threadId === scout.mainThreadId && note.kind === "done");
+  const unreadIn = async (token: string) => (await feed(token)).filter((note) => !note.read).map((note) => note.id);
+  await turn(owner, "Draft the weekly note.");
+  await until(async () => (await unreadIn(ada)).length > 0);
+  const [first] = await unreadIn(ada);
+  for (const token of [cleo, admin, owner]) expect(await unreadIn(token)).toContain(first);
+  expect((await team.as(ada, "POST", `/api/notifications/${first}/read`)).status).toBe(200);
+  expect(await unreadIn(ada)).not.toContain(first);
+  for (const token of [cleo, admin, owner]) expect(await unreadIn(token), "Ada reading it is Ada's alone").toContain(first);
+  // Read all is the reader's own too.
+  expect((await team.as(cleo, "POST", "/api/notifications/read-all")).status).toBe(200);
+  expect(await unreadIn(cleo)).toEqual([]);
+  expect(await unreadIn(admin)).toContain(first);
+  // Opening the chat reads its notifications for the opener, and only the opener's streams hear it.
+  await turn(owner, "And the monthly one.");
+  await until(async () => (await unreadIn(cleo)).length > 0);
+  const adas = await listen(ada), cleos = await listen(cleo);
+  try {
+    expect((await team.as(ada, "POST", `/api/bots/${scout.id}/read`, { threadId: scout.mainThreadId })).status).toBe(200);
+    await until(() => adas.frames().some((frame) => frame.kind === "notifications.read"), 10_000);
+    await settle();
+    expect(cleos.frames().filter((frame) => frame.kind === "notifications.read"), "Ada's read never reaches Cleo's stream").toEqual([]);
+    expect(await unreadIn(ada)).toEqual([]);
+    expect((await unreadIn(cleo)).length, "Ada opening the chat leaves Cleo's unread").toBeGreaterThan(0);
+  } finally {
+    await adas.close();
+    await cleos.close();
+  }
+}, hostTimeout(120_000));

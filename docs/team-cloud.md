@@ -23,7 +23,10 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   seen by whoever sees it. Its unread mark, and that of a bot's shared chats, is each person's own: a bot's reply there is
   unread for everyone until they read it, and one person reading it or marking it unread changes it for nobody else
   (`room-reads.json`, a bot's chat as `thread:<id>`); each person's lists and stream carry only their own mark and read
-  line, and a read reaches only their own streams. A private chat keeps its one mark. A bot's shared chats say who can read them, *"Shared · everyone in Acme can see"* or, on a bot set to Only people added (`onlyPeopleAdded` on everyone's copy of it), *"Shared · only people added and admins can see"*. Every private chat says so in its header, *"Private · only you"*, and the first one on a
+  line, and a read reaches only their own streams. A private chat keeps its one mark. A notification everyone who sees
+  a conversation gets (a "done", a mention) is one entry with each person's own read mark (`read_by` on the feed's
+  row, never sent): reading it, Read all and opening its conversation mark it read for that person alone and tell only
+  their own apps (`notifications.read`). A mark made before marks were each person's stays read for everyone. A bot's shared chats say who can read them, *"Shared · everyone in Acme can see"* or, on a bot set to Only people added (`onlyPeopleAdded` on everyone's copy of it), *"Shared · only people added and admins can see"*. Every private chat says so in its header, *"Private · only you"*, and the first one on a
   device also says it as a sentence: *"Your chats in Acme are private. Only you can see them: not other members, not
   Acme's admins."* The server marks such a conversation `private: true` on the wire (`WireTask.private`). When you leave
   the team (or are removed), your private chats and everything only yours there are deleted, never handed to an admin
