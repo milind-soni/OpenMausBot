@@ -70,8 +70,7 @@ export function OllamaServer({ visible }: { visible: boolean }) {
 
   return (
     <div data-ollama-server>
-      <p className="text-[12px] leading-4 text-ink-secondary">{t("ollama.desc")}</p>
-      <div role="status" aria-live="polite" className="mt-2">
+      <div role="status" aria-live="polite">
         {checking
           ? <p className="flex items-center gap-1.5 text-[12px] leading-4 text-ink-secondary"><Loader2 size={12} className="animate-spin" aria-hidden="true" />{t("ollama.checking")}</p>
           : status && <OllamaStatusLine status={status} />}
