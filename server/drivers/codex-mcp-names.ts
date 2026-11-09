@@ -11,7 +11,7 @@ import { parseToml } from "../toml-lite.ts";
 
 const HEADER = /^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([A-Za-z0-9_-]+))[ \t]*[.\]]/gm;
 
-/** Inline tables are not scanned; a collision there still surfaces as codex's own configuration error. */
+/** Best-effort table-header names when config.toml cannot be parsed. */
 export function mcpServerNamesInToml(toml: string): Set<string> {
   const names = new Set<string>();
   for (const match of toml.matchAll(HEADER)) {
@@ -39,8 +39,18 @@ export function codexConfigMcp(env: Record<string, string | undefined>): CodexCo
   try {
     const servers = parseToml(text).mcp_servers;
     if (isRecord(servers)) tables = servers;
+    return { names: new Set(Object.keys(tables)), tables };
   } catch {}
   return { names: mcpServerNamesInToml(text), tables };
+}
+
+/** Disable literal config keys before mounting per-turn servers. Codex splits CLI paths at every dot. */
+export function codexMcpDisableArgs(names: ReadonlySet<string>): string[] {
+  if ([...names].some((name) => !/^[A-Za-z0-9_-]+$/.test(name))) {
+    const tables = [...names].map((name) => `${JSON.stringify(name)} = { enabled = false }`).join(", ");
+    return ["-c", `mcp_servers={ ${tables} }`];
+  }
+  return [...names].flatMap((name) => ["-c", `mcp_servers.${name}.enabled=false`]);
 }
 
 export function codexConfigMcpServerNames(env: Record<string, string | undefined>): Set<string> {
