@@ -83,6 +83,7 @@ describe("what the step says", () => {
     expect(toolsSummary({ ...FOUND, tools: [
       { name: "a", source: "claudeCode" }, { name: "b", source: "claudeCode" }, { name: "c", source: "claudeDesktop" }, { name: "d", source: "gemini" },
     ] })).toBe("4 MCP servers from Claude Code, Claude Desktop, and Gemini CLI");
+    expect(skillsSummary({ ...FOUND, skills: [{ name: "a", source: "hermes" }, { name: "b", source: "openclaw" }] })).toBe("2 from Hermes Agent and OpenClaw");
   });
 
   it("sums up in one line, with a note only for what was left out", () => {

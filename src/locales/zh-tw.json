@@ -5985,7 +5985,6 @@
   "settings.section.backups": "備份",
   "settings.section.import": "匯入",
   "settings.import.appsTitle": "從你的 AI 應用程式匯入",
-  "settings.import.appsSubtitle": "匯入這台電腦上 Claude Code、Codex、Cursor、Claude Desktop 和 Gemini 的技能與 MCP 工具。工具匯入後預設關閉；絕不讀取登入資訊和歷史紀錄。",
   "settings.import.appsLooking": "正在這台電腦上尋找…",
   "settings.import.appsNothing": "你的 AI 應用程式沒有可匯入的新內容。",
   "settings.import.appsLocalOnly": "只有執行 {app} 那台電腦上的桌面應用程式，才能匯入該電腦的技能和工具。",

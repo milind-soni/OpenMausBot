@@ -5755,7 +5755,6 @@
   "settings.section.backups": "Backups",
   "settings.section.import": "Importar",
   "settings.import.appsTitle": "Dos seus apps de IA",
-  "settings.import.appsSubtitle": "Habilidades e ferramentas MCP do Claude Code, Codex, Cursor, Claude Desktop e Gemini neste computador. As ferramentas chegam desligadas; logins e histórico nunca são lidos.",
   "settings.import.appsLooking": "Procurando neste computador…",
   "settings.import.appsNothing": "Nada novo para trazer dos seus apps de IA.",
   "settings.import.appsLocalOnly": "Só o app para computador na máquina onde o app {app} roda pode importar as habilidades e ferramentas dela.",

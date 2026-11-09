@@ -5193,7 +5193,6 @@
   "settings.section.backups": "Резервные копии",
   "settings.section.import": "Импорт",
   "settings.import.appsTitle": "Из ваших AI-приложений",
-  "settings.import.appsSubtitle": "Навыки и инструменты MCP из Claude Code, Codex, Cursor, Claude Desktop и Gemini на этом компьютере. Инструменты импортируются выключенными; учётные данные и история никогда не считываются.",
   "settings.import.appsLooking": "Поиск на этом компьютере…",
   "settings.import.appsNothing": "Из ваших AI-приложений нечего нового импортировать.",
   "settings.import.appsLocalOnly": "Только настольное приложение на компьютере, где запущен {app}, может импортировать навыки и инструменты этого компьютера.",
