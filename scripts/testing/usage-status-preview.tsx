@@ -1,3 +1,4 @@
+// Rendered only by the usage-status verification page.
 import { createRoot } from "react-dom/client";
 import { UsageMenuRows } from "../../src/components/EngineUsage";
 import "../../src/styles.css";
