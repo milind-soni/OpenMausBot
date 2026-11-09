@@ -3915,7 +3915,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
   host: { backgroundStatus: (command, signal) => commandResult(cfg, command, signal), holdReason: (node) => queuedStatus(node), statusReply: (requester, prompt, signal) => sideJobs.text("status-reply", requester)?.generateText(prompt, { signal, timeoutMs: STATUS_REPLY_TIMEOUT_MS }) ?? Promise.resolve(undefined),
     validateBackground: (node, command) => {
       const bot = store.bot(node.botId);
-      return bot && !bot.hidden && turnProvider(bot, undefined, node.threadId) === "box" && inheritedTeamComputer(bot)?.id === command.teamComputerId
+      return bot && !bot.hidden && !computerPlaceRefusal("box") && turnProvider(bot, undefined, node.threadId) === "box" && inheritedTeamComputer(bot)?.id === command.teamComputerId
         ? undefined : "This task no longer has access to the command's cloud computer";
     },
     validate: (node, parent) => node.mode === "notify" && node.status !== "queued" ? undefined
@@ -8216,7 +8216,7 @@ async function beginTurn(
         if (!teamComputer && cloudBackend === "box" && boat.boatConfigured(cfg) && wants === "cloud") {
           integrations.localComputer = mountBotBoat(bot, resourceOwner, {
             source: placeSource,
-            onClaimed: adoptClaimedCapture,
+            onClaimed: capture => { pinAutoSurface("cloud"); adoptClaimedCapture(capture); },
             onRejected: surfaceLazyClaimRejection("the cloud computer"),
             existingOnly: handoffOwnCloud,
           });
@@ -15494,7 +15494,7 @@ restoreChannelMessages();
 
 if (CLOUD_HOME) registerCloudPower(cloudPower = createCloudPower({ dataDir: DATA_DIR, broadcast: (payload) => broadcast(payload), log: (line) => console.warn(line), probes: {
   turn: () => store.bots.some((bot) => botHasActiveTurn(bot.id)) || store.groups.some(groupIsWorking), run: () => Boolean(routines?.hasActiveRuns()), handoff: () => coordinator.pace() === "busy",
-  liveCall: () => liveCalls.current() !== null, computer: () => cloudComputerPower.awake() || boatLifecycleBusyBots.size > 0, nextDueAt: () => { const due = [routines?.nextDueAt() ?? null, proactive.brief.nextWakeAt(), botWaits.nextWakeAt()].filter((at): at is number => at !== null); return due.length ? Math.min(...due) : null; },
+  liveCall: () => liveCalls.current() !== null, computer: () => cloudComputerPower.awake() || boatLifecycleBusyBots.size > 0 || coordinator.active().some(node => coordinator.status(node.id)?.assignment.backgroundCommands?.some(command => !command.delivered)), nextDueAt: () => { const due = [routines?.nextDueAt() ?? null, proactive.brief.nextWakeAt(), botWaits.nextWakeAt()].filter((at): at is number => at !== null); return due.length ? Math.min(...due) : null; },
   maintenance: () => workspaceMaintenance.active || providerFleetReloading || providerAuthSessions.active || browserEngineInstall !== null } }));
 
 server.listen(PORT, listenHost(server), async () => {
