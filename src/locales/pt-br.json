@@ -9187,6 +9187,7 @@
   "native.connect.certificate": "O certificado de {host} ainda não é válido. Um servidor novo pode levar um minuto para obter um.",
   "native.connect.notMausBot": "Esse endereço responde, mas não é um servidor MausBot.",
   "native.connect.desktopApp": "{host} é um app de desktop do MausBot, e um app de desktop não pode se conectar a outro. Para usar esse computador daqui, compartilhe-o com o My Cloud pelo próprio app dele, ou use o My Cloud.",
+  "native.connect.desktopAppTailnet": "{host} é um app desktop do MausBot na sua tailnet. Para abri-lo daqui, ligue o Tailscale e Seus outros computadores nas Configurações dele → Celular e dispositivos e use o endereço mostrado lá.",
   "native.connect.loopback": "Isso aponta para este computador ({host}), não para o servidor. Use o endereço do próprio servidor.",
   "native.connect.localNetwork": "Não foi possível acessar {host}. No Mac, ative o OpenMausBot em Ajustes do Sistema → Privacidade e Segurança → Rede Local e tente de novo. Verifique também se o servidor está rodando nesta rede.",
   "native.connect.tailscaleOff": "{host} está em uma rede Tailscale, e o Tailscale não está conectado neste computador. Abra o Tailscale aqui, entre na mesma tailnet e tente de novo.",

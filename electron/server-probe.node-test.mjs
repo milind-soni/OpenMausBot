@@ -67,6 +67,9 @@ test("a tailnet address that doesn't answer says whose Tailscale to fix", async 
   assert.equal((await probe(fakeFetch({}).fetch)).problem, "tailnetSilent");
   // A bare tailnet address and an https name are tailnet addresses too.
   assert.equal((await probeServer({ address: "http://100.101.102.103:8799", fetch: fakeFetch({ "http://100.101.102.103:8799": blocked() }).fetch, platform: "darwin", tailnet: () => true })).problem, "tailnetBlocked");
+  // The phone port of a desktop app on the tailnet: that app can share itself, so say how.
+  const phonePort = () => new Response(JSON.stringify({ error: "pair this device from Remote access settings" }), { status: 401, headers: { "content-type": "application/json" } });
+  assert.equal((await probeServer({ address: "http://macmini.tail1234.ts.net:8810", fetch: fakeFetch({ "http://macmini.tail1234.ts.net:8810": phonePort }).fetch, tailnet: () => true })).problem, "desktopAppTailnet");
   // Off a tailnet a bare 100.64/10 address is just a private one: carrier NAT or another VPN keeps the Local Network hint.
   const bare = await probeServer({ address: "http://100.101.102.103:8799", fetch: fakeFetch({ "http://100.101.102.103:8799": blocked() }).fetch, platform: "darwin", tailnet: () => false });
   assert.deepEqual(bare, { outcome: "problem", problem: "localNetwork", host: "100.101.102.103:8799" });

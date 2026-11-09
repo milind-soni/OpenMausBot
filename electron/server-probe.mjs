@@ -23,6 +23,7 @@ export const CONNECT_PROBLEM_KEYS = Object.freeze({
   certificate: "native.connect.certificate",
   notMausBot: "native.connect.notMausBot",
   desktopApp: "native.connect.desktopApp",
+  desktopAppTailnet: "native.connect.desktopAppTailnet",
   loopback: "native.connect.loopback",
   localNetwork: "native.connect.localNetwork",
   tailscaleOff: "native.connect.tailscaleOff",
@@ -38,6 +39,7 @@ export const CONNECT_PROBLEM_KEYS = Object.freeze({
  * out), or the computer there is asleep, offline or not sharing.
  */
 function tailnetProblem(kind, platform, tailnet) {
+  if (kind === "desktopApp") return "desktopAppTailnet";
   if (!tailnet) return "tailscaleOff";
   if (kind === "dns") return "otherTailnet";
   if (kind === "noRoute" && platform === "darwin") return "tailnetBlocked";
