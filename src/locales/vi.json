@@ -5221,6 +5221,7 @@
   "ask.error": "Không gửi được câu trả lời. Hãy thử lại.",
   "ask.detail.more": "Hiện tất cả",
   "inbox.action.closeQuestion": "Đóng mà không trả lời",
+  "inbox.markAllRead": "Đánh dấu tất cả là đã đọc",
   "question.somethingElse": "Điều khác…",
   "question.done": "Xong",
   "common.done": "Xong",

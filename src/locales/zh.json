@@ -2120,6 +2120,7 @@
   "inbox.subject.notice": "需要查看",
   "inbox.reviewInChat": "请到它来自的聊天中查看并回复。",
   "inbox.youReplied": "你的回复",
+  "inbox.markAllRead": "全部标为已读",
   "sidebar.people.mention": "写给 {name}",
   "orgChart.mode.departments": "部门",
   "orgChart.chief": "总协调机器人",

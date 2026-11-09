@@ -6584,6 +6584,7 @@
   "ask.error": "Не удалось отправить ответ. Попробуйте ещё раз.",
   "ask.detail.more": "Показать всё",
   "inbox.action.closeQuestion": "Закрыть без ответа",
+  "inbox.markAllRead": "Отметить всё как прочитанное",
   "question.somethingElse": "Что-то другое…",
   "question.done": "Готово",
   "approval.status.timedOut": "Нет ответа вовремя — не выполнено",

@@ -6522,6 +6522,7 @@
   "ask.error": "Nie udało się wysłać odpowiedzi. Spróbuj ponownie.",
   "ask.detail.more": "Pokaż wszystko",
   "inbox.action.closeQuestion": "Zamknij bez odpowiedzi",
+  "inbox.markAllRead": "Oznacz wszystko jako przeczytane",
   "question.somethingElse": "Coś innego…",
   "question.done": "Gotowe",
   "approval.status.timedOut": "Brak odpowiedzi na czas — nie uruchomiono",

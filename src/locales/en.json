@@ -2268,6 +2268,7 @@
   "inbox.headline.signIn": "Sign in to {site}",
   "inbox.headline.connect": "Connect {app}",
   "inbox.youReplied": "You replied",
+  "inbox.markAllRead": "Mark all as read",
   "sidebar.people.mention": "Write to {name}",
   "orgChart.mode.departments": "Departments",
   "orgChart.chief": "Chief of Staff",

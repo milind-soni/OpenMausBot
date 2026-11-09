@@ -7602,6 +7602,7 @@
   "ask.error": "Não foi possível enviar a resposta. Tente novamente.",
   "ask.detail.more": "Mostrar tudo",
   "inbox.action.closeQuestion": "Fechar sem responder",
+  "inbox.markAllRead": "Marcar tudo como lido",
   "question.somethingElse": "Outra coisa…",
   "question.done": "Concluir",
   "question.yourAnswer": "Sua resposta",

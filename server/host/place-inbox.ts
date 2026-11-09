@@ -251,6 +251,14 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
       if (!seenAsks.has(lineId)) { seenAsks.add(lineId); save(); }
       return true;
     },
+    /** Every line and open ask this viewer lists is read; an ask is only marked read, never answered. */
+    markAllRead(auth: RequestAuth): number {
+      let changed = 0;
+      for (const line of lines) if (!line.seen && lineFor(auth, line)) { line.seen = true; changed++; }
+      for (const row of askRows(auth)) if (!seenAsks.has(row.id)) { seenAsks.add(row.id); changed++; }
+      if (changed) save();
+      return changed;
+    },
     markDone(auth: RequestAuth, lineId: string): "done" | "unknown" | "an ask" {
       const line = lines.find((one) => one.id === lineId && lineFor(auth, one));
       if (line) {

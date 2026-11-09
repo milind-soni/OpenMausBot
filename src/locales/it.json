@@ -6383,6 +6383,7 @@
   "ask.error": "Impossibile inviare la risposta. Riprova.",
   "ask.detail.more": "Mostra tutto",
   "inbox.action.closeQuestion": "Chiudi senza rispondere",
+  "inbox.markAllRead": "Segna tutto come letto",
   "question.somethingElse": "Altro…",
   "question.done": "Fatto",
   "approval.status.timedOut": "Nessuna risposta in tempo: non eseguito",
