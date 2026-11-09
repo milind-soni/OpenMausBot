@@ -25,6 +25,7 @@ import {
   classifyQuiet, describeQuiet, formatQuietLimit, quietNoticeText, lastSeenPhrase, LIMIT_WORDS, LogTail, promptIdleTimeoutMs, quietKey, quietNoticeMs, quietTickMs, quietVerdict, sampleProcessTree,
   type LogSignal, type ProcessSample, type QuietState,
 } from "./quiet-status.ts";
+import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts";
 import { notThisCli, versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts";
@@ -1294,11 +1295,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   );
                 } catch (error) {
                   const classification = support.classifyError?.(error);
-                  // OpenCode encodes ACPSessionNotFoundError as invalidParams with just the rejected
-                  // sessionId; other invalidParams (model/config errors) must not erase history.
-                  const data = (error as any)?.data;
-                  const missingSession = data && typeof data === "object" && !Array.isArray(data)
-                    && data.sessionId === cursor && Object.keys(data).length === 1;
+                  // OpenCode sends invalidParams with only the rejected sessionId. Cursor puts the id in the
+                  // message: Invalid params: Session "<id>" not found (session/load). Other invalidParams must not
+                  // erase history.
+                  const missingSession = acpMissingSession(error, cursor);
                   if (classification === "invalid_credentials" || classification === "inactive_subscription"
                       || ((error as any)?.code === -32602 && !missingSession)) throw error;
                 }

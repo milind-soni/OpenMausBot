@@ -2472,8 +2472,9 @@ describe("ACP turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: true });
   });
 
-  it.each(["null", "opencode-not-found"])("rebuilds a missing native session from the canonical recovery text once (%s)", async (failure) => {
+  it.each(["null", "opencode-not-found", "cursor-message"])("rebuilds a missing native session from the canonical recovery text once (%s)", async (failure) => {
     if (failure === "null") process.env.FAKE_ACP_LOAD_NULL = "1";
+    else if (failure === "cursor-message") process.env.FAKE_ACP_LOAD_ERROR = JSON.stringify({ code: -32602, message: "Invalid params: Session \"missing-cursor\" not found" });
     else process.env.FAKE_ACP_LOAD_ERROR = JSON.stringify({ code: -32602, message: "Session not found", data: { sessionId: "missing-cursor" } });
     const dump = join(scratch, "recovery.json");
     process.env.FAKE_ACP_DUMP = dump;

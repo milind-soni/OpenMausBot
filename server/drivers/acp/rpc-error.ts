@@ -22,3 +22,14 @@ export function acpRpcError(value: any, method: string): Error {
     acpSessionFailure: value?.code === -32603,
   });
 }
+
+/** The provider rejected this resume id. A bare invalidParams (a bad model or config) is not this. */
+export function acpMissingSession(error: unknown, cursor: string): boolean {
+  const data = error && typeof error === "object" ? (error as { data?: unknown }).data : undefined;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const record = data as Record<string, unknown>;
+    if (record.sessionId === cursor && Object.keys(record).length === 1) return true;
+  }
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  return message.includes(cursor) && /\bnot found\b/i.test(message) && /\bsession\/(?:load|resume)\b/.test(message);
+}
