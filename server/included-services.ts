@@ -9,7 +9,7 @@
 import { JEV_DEFAULT_BASE_URL } from "./decider/jev.ts";
 
 export const BOAT_API_DEFAULT = "https://boat.dev/api/v1";
-export const MOLA_API_DEFAULT = "http://127.0.0.1:4141/v1";
+export const MOLA_API_DEFAULT = "https://cloud.mola.sh/api/v1";
 export const ELEVENLABS_API_DEFAULT = "https://api.elevenlabs.io/v1";
 /** Must also be on WORKSPACE_CREDENTIAL_ENV. */
 export const INCLUDED_TOKEN_ENV = ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_AI_TOKEN", "OMB_CLOUD_X_TOKEN"] as const;

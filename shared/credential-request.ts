@@ -16,6 +16,12 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "Paste your Boat API key",
     helpUrl: "https://docs.boat.dev/api-keys",
   },
+  molaApiKey: {
+    label: "Mola API key",
+    description: "Cloud computers (Mola Cloud or self-hosted).",
+    placeholder: "Paste your Mola API key",
+    helpUrl: "https://cloud.mola.sh",
+  },
   opencodeGoApiKey: {
     label: "OpenCode API key",
     description: "Used for OpenCode Zen and Go.",
@@ -126,6 +132,7 @@ export type DesktopCredentialSlot = Exclude<ConfigCredentialTargetId, (typeof PR
 export type CredentialConfig = {
   xai?: { key?: string };
   box?: { token?: string };
+  mola?: { token?: string };
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; fishKey?: string; geminiKey?: string };
   imageGen?: { key?: string };
@@ -181,6 +188,8 @@ export function credentialConfigPatch(id: ConfigCredentialTargetId, value: strin
       return { xai: { key: value } };
     case "boxToken":
       return { box: { token: value } };
+    case "molaApiKey":
+      return { mola: { token: value } };
     case "opencodeGoApiKey":
       return { opencodeGo: { apiKey: value } };
     case "ttsKey":
@@ -221,6 +230,8 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.xai?.key);
     case "boxToken":
       return Boolean(config.box?.token);
+    case "molaApiKey":
+      return Boolean(config.mola?.token);
     case "opencodeGoApiKey":
       return Boolean(config.opencodeGo?.apiKey);
     case "ttsKey":

@@ -152,7 +152,7 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     words: ["mola", "cloud desktop", "cloud computer", "computer", "sandbox", "ubuntu", "omarchy"], mark: { icon: Monitor }, kind: "key",
     target: { patch: (value) => ({ mola: { token: value } }), slot: "molaApiKey", verifiedOnSave: true,
       saved: (config) => flag(config.mola),
-      placeholder: "…", placeholderKey: "keys.mola.placeholder", href: "https://github.com/obaid/mola-core", analytics: "mola" } },
+      placeholder: "…", placeholderKey: "keys.mola.placeholder", href: "https://cloud.mola.sh", analytics: "mola" } },
   { id: "vps", section: "computers", labelKey: "keys.vps.label", purposeKey: "keys.purpose.vps", name: "VPS", env: [],
     words: ["vps", "ssh", "server", "self-hosted", "computer", "docker"], mark: { icon: Server }, kind: "panel",
     status: (config) => ({ configured: config.vps?.configured === true }) },

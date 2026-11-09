@@ -7,7 +7,7 @@ import type { ModelSelection } from "./store";
 /** A saved credential: whether it is set and, for admins, its last four characters. The key itself never comes back. */
 export interface SavedKey { configured: boolean; last4?: string }
 
-export type NestedKeyName = "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "geminiImageApiKey";
+export type NestedKeyName = "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "geminiImageApiKey" | "molaApiKey";
 
 export interface ImageSlotStatus { provider: ImageProvider; model: string; configured: boolean }
 
@@ -49,6 +49,8 @@ export interface ConfigStatus {
   composio: SavedKey & { mode?: "managed" | "self-hosted" | "unavailable" };
   /** `included`: cloud computers come with Cloud Pro, no key is saved. */
   box: SavedKey & { included?: boolean };
+  /** Mola self-hosted cloud computers. */
+  mola?: SavedKey;
   vps: { configured: boolean; sshAlias: string };
   rooms: { turnTimeoutMinutes: number };
   /** Per-call ceiling (minutes) for a bot's MCP tools. Absent from servers

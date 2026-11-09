@@ -4,24 +4,32 @@ OpenMausBot can provision and manage cloud computers through [Mola](https://gith
 
 ## What is Mola?
 
-Mola provides instant computers powered by Omarchy. Each machine runs in its own virtual machine on hardware you control. Machines start in about one second and become usable in under ten seconds.
+Mola provides instant computers powered by Omarchy. Each machine runs in its own virtual machine. You can use Mola Cloud (hosted) or run your own Mola Core (self-hosted). Machines start in about one second and become usable in under ten seconds.
 
 ### Default Configuration
 
 - **Operating System**: Ubuntu 24.04 XFCE Desktop (`ubuntu-xfce:24.04-4`)
-- **Alternative**: Omarchy (Arch Linux + Hyprland) - default in Mola Core
+- **Alternative**: Omarchy (Arch Linux + Hyprland)
 - **Resources**: 4 vCPU, 4096 MB RAM, 40 GB disk (configurable)
 
 ## Setup
 
-### Install Mola Core
+### Option 1: Mola Cloud (Recommended)
+
+1. Create an account at [cloud.mola.sh](https://cloud.mola.sh/register)
+2. Generate an API key from your account dashboard
+3. In OpenMausBot Settings → API keys, add:
+   - **Mola API Key**: Your Cloud API key
+   - **Mola API URL**: Leave empty (defaults to `https://cloud.mola.sh/api/v1`)
+
+### Option 2: Self-Hosted Mola Core
 
 1. Install and start Mola Core locally:
    ```bash
    npx mola-core
    ```
 
-2. Copy the API token and URL from the startup banner:
+2. Copy the API token from the startup banner:
    ```
    API    http://127.0.0.1:4141/v1
    Token  7_NmOSph4PWtcZP5QpVW4rJJ-9VIlIx3
@@ -29,15 +37,21 @@ Mola provides instant computers powered by Omarchy. Each machine runs in its own
 
 3. In OpenMausBot Settings → API keys, add:
    - **Mola API Key**: Your token from the banner
-   - **Mola API URL**: `http://127.0.0.1:4141/v1` (or your custom host/port)
+   - **Mola API URL**: `http://127.0.0.1:4141/v1`
 
 ## Configuration
 
 ### Environment Variables
 
 ```bash
-export MOLA_API_KEY="your-token-from-mola-startup"
-export MOLA_API_URL="http://127.0.0.1:4141/v1"  # Optional, defaults to localhost:4141
+export MOLA_API_KEY="your-api-key"
+export MOLA_API_URL="https://cloud.mola.sh/api/v1"  # Optional, this is the default
+```
+
+For self-hosted:
+```bash
+export MOLA_API_KEY="your-token-from-mola-core"
+export MOLA_API_URL="http://127.0.0.1:4141/v1"
 ```
 
 ### Config File (~/.openmausbot/config.json)
@@ -45,16 +59,16 @@ export MOLA_API_URL="http://127.0.0.1:4141/v1"  # Optional, defaults to localhos
 ```json
 {
   "mola": {
-    "token": "your-token-from-mola-startup",
-    "apiUrl": "http://127.0.0.1:4141/v1"
+    "token": "your-api-key",
+    "apiUrl": "https://cloud.mola.sh/api/v1"
   }
 }
 ```
 
 The `apiUrl` field is optional:
-- Omit it to use the default (`http://127.0.0.1:4141/v1`)
-- Set it to your custom host/port if Mola runs elsewhere
-- For remote hosts, use SSH tunneling to keep the connection secure
+- Omit it to use Mola Cloud (default: `https://cloud.mola.sh/api/v1`)
+- Set it to `http://127.0.0.1:4141/v1` for self-hosted Mola Core
+- For remote self-hosted, use SSH tunneling to keep the connection secure
 
 ## Features
 
@@ -111,9 +125,9 @@ Assign a Mola-backed cloud computer to a bot in OpenMausBot:
 
 ### Ubuntu Desktop Setup
 
-To use Ubuntu desktops (recommended), you'll need to install the Ubuntu image in Mola Core. See the [Ubuntu desktops documentation](https://github.com/obaid/mola-core/blob/main/docs/ubuntu-desktops.md) for build and installation instructions.
+**Mola Cloud**: Ubuntu desktops are available by default. OpenMausBot defaults to `image_ref: "ubuntu-xfce:24.04-4"`.
 
-OpenMausBot defaults to `image_ref: "ubuntu-xfce:24.04-4"`. If you're using the default Omarchy image instead, you can override the image reference in your Mola host configuration.
+**Self-Hosted**: To use Ubuntu desktops, you'll need to install the Ubuntu image in Mola Core. See the [Ubuntu desktops documentation](https://github.com/obaid/mola-core/blob/main/docs/ubuntu-desktops.md) for build and installation instructions. If you're using the default Omarchy image instead, you can override the image reference in your Mola host configuration.
 
 ### Machine Naming
 
@@ -130,7 +144,9 @@ Default machine resources:
 - Memory: 4096 MB
 - Disk: 40 GB
 
-These match Mola Core's defaults and can be adjusted with environment variables on the Mola host (`MOLA_DEFAULT_VCPUS`, `MOLA_DEFAULT_MEMORY_MB`, `MOLA_DEFAULT_DISK_GB`).
+**Mola Cloud**: Resources are managed by your account plan.
+
+**Self-Hosted**: Defaults can be adjusted with environment variables on the Mola host (`MOLA_DEFAULT_VCPUS`, `MOLA_DEFAULT_MEMORY_MB`, `MOLA_DEFAULT_DISK_GB`).
 
 ## API Compatibility
 
@@ -154,17 +170,20 @@ Check that `MOLA_API_KEY` is set or `mola.token` exists in `~/.openmausbot/confi
 
 ### "Mola API key rejected"
 
-Your API key may be:
-- Invalid (check the token from Mola's startup banner)
-- From a different Mola instance
-- Stale after Mola was restarted (tokens regenerate on each start)
+**Mola Cloud**: Your API key may be invalid or revoked. Generate a fresh key from [cloud.mola.sh](https://cloud.mola.sh).
+
+**Self-Hosted**: Your token may be:
+- Invalid (check the token from Mola Core's startup banner)
+- Stale after Mola Core was restarted (tokens regenerate on each start)
 
 Copy the current token from the Mola Core startup output.
 
 ### "Could not reach Mola"
 
-Check your network connection and verify:
-- The API URL is correct (default: `http://127.0.0.1:4141/v1`)
+**Mola Cloud**: Check your network connection and firewall. The service runs at `https://cloud.mola.sh/api/v1`.
+
+**Self-Hosted**: Verify:
+- The API URL is set to `http://127.0.0.1:4141/v1`
 - Mola Core is running (`npx mola-core` in a terminal)
 - The port isn't blocked by a firewall
 - For remote hosts: SSH tunnel is active
@@ -193,8 +212,9 @@ Machines should reach `ready` state within 90 seconds. If not:
 
 ## References
 
-- [Mola Core GitHub](https://github.com/obaid/mola-core)
-- [API Reference](https://github.com/obaid/mola-core/blob/main/docs/api.md)
+- [Mola Cloud](https://cloud.mola.sh) - Hosted service
+- [Mola Cloud Docs](https://cloud.mola.sh/docs) - Cloud API documentation
+- [Mola Core GitHub](https://github.com/obaid/mola-core) - Self-hosted runtime
+- [Self-Hosted API Reference](https://github.com/obaid/mola-core/blob/main/docs/api.md)
 - [Ubuntu Desktops](https://github.com/obaid/mola-core/blob/main/docs/ubuntu-desktops.md)
 - [MCP Integration](https://github.com/obaid/mola-core/blob/main/docs/mcp.md)
-- [Getting Started](https://github.com/obaid/mola-core/blob/main/docs/getting-started.md)

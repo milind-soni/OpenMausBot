@@ -7627,7 +7627,7 @@
   "keys.purpose.elevenlabs": "Voices for spoken replies and calls",
   "keys.purpose.fishAudio": "Fish Audio voices for spoken replies and calls",
   "keys.purpose.box": "Cloud desktops your bots can use",
-  "keys.purpose.mola": "Instant cloud computers with Ubuntu desktops",
+  "keys.purpose.mola": "Cloud computers (Mola Cloud or self-hosted)",
   "keys.purpose.vps": "Your own Linux server, reached over SSH",
   "keys.purpose.onePassword": "Website logins your bots can use",
   "keys.purpose.composio": "Gmail, Slack, GitHub and more through your own Composio project",

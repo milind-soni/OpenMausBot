@@ -112,7 +112,9 @@ describe("Mola provider", () => {
 
       const result = await verifyToken("invalid-token");
       expect(result.ok).toBe(false);
-      expect(result.rejected).toBe(true);
+      if (!result.ok) {
+        expect(result.rejected).toBe(true);
+      }
     });
 
     it("returns error for network failure", async () => {
@@ -120,7 +122,9 @@ describe("Mola provider", () => {
 
       const result = await verifyToken("test-token");
       expect(result.ok).toBe(false);
-      expect(result.message).toContain("Couldn't reach");
+      if (!result.ok) {
+        expect(result.message).toContain("Couldn't reach");
+      }
     });
   });
 
