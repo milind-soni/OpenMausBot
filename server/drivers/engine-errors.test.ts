@@ -280,6 +280,14 @@ describe("classifyError reads an explicit HTTP status before body text", () => {
     ["API Error: 503: proxy said HTTP 409 for backend", { transient: true, reason: "server_error" }],
     ["Internal error: API Error: 503: proxy said HTTP 409 for backend", { transient: true, reason: "server_error" }],
     ["API Error: 409: backend said HTTP 503 for this call", { transient: false, reason: "invalid_request" }],
+    // A nested terminal status must not shadow a transient failure the same string reports in a
+    // later clause: a CLI stderr tail, or a chained cause (messageOf joins it after "Error: ").
+    ["API Error: 410: resource gone\nHTTP 503 Service Unavailable", { transient: true, reason: "server_error" }],
+    ["API Error: 410: resource gone\nHTTP 429: too many requests", { transient: true, reason: "rate_limited" }],
+    ["API Error: 410: resource gone Error: HTTP 503 Service Unavailable", { transient: true, reason: "server_error" }],
+    // ...but a status quoted inside the same clause stays nested, even on a later line.
+    ["API Error: 410: resource gone\nDetails: the backend returned HTTP 503", { transient: false, reason: "invalid_request" }],
+    ["API Error: 410: resource gone\nOpenAI HTTP 409: conflict", { transient: false, reason: "invalid_request" }],
     ["xAI HTTP 429: too many requests", { transient: true, reason: "rate_limited" }],
     ["(status 503 Service Unavailable)", { transient: true, reason: "server_error" }],
     ["(status 529) overloaded", { transient: true, reason: "overloaded" }],
@@ -299,5 +307,10 @@ describe("classifyError reads an explicit HTTP status before body text", () => {
       .toEqual({ transient: false, reason: "invalid_request" });
     expect(classifyError({ text: "OpenAI HTTP 409: max 500 tokens" }))
       .toEqual({ transient: false, reason: "invalid_request" });
+  });
+
+  it("reads the outer failure when an error's cause quotes a nested backend error", () => {
+    const nested = new Error("API Error: 410: resource gone", { cause: new Error("HTTP 503 Service Unavailable") });
+    expect(classifyError(nested)).toEqual({ transient: true, reason: "server_error" });
   });
 });

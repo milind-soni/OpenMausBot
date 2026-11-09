@@ -95,21 +95,57 @@ const messageOf = (err: FailureInput): string => {
 /** The three status-carrying forms the drivers' errors use (the STATUS pattern in engine-errors.ts):
  * Grok Build's "(status 409 …)", the chat drivers' "xAI HTTP 409: …" and Claude Code's "API Error: 409 …".
  * A bare number is not a status. The API Error form names the response's own status, so it matches wherever
- * it appears: a status quoted inside the provider's message never wins over it. */
+ * it appears: a status quoted inside the provider's message never wins over it.
+ * A status quoted from a nested backend error still must not shadow a transient failure the same string
+ * reports in a later clause: a CLI stderr tail, or a chained cause (messageOf joins it after "Error: ").
+ * Such a later status only decides when it opens its own report: the start of a line, or right after the
+ * cause marker. A status quoted mid-clause ("proxy said HTTP 409") stays nested. */
 const HTTP_STATUS = /\(status (\d{3})\b[^)]*\)|\bHTTP (\d{3})\b|\bAPI Error:? (\d{3})\b/i;
+
+/** Whether a status-form match opens its own error report instead of quoting one inside the current clause:
+ * it starts a line (a CLI stderr tail), or follows the "Error: " prefix messageOf adds for a chained cause. */
+function opensOwnReport(text: string, match: RegExpExecArray, gapStart: number): boolean {
+  if (text.slice(gapStart, match.index).includes("Error: ")) return true;
+  const lineStart = text.lastIndexOf("\n", match.index - 1) + 1;
+  return text.slice(lineStart, match.index).trim() === "";
+}
+
+/** The transient verdict a status carries on its own, if any: 5xx reads server_error here because this runs
+ * before the body patterns, which would read the same number the same way. */
+function transientStatusVerdict(status: number, provider: { openAi?: boolean }): ErrorClassification | undefined {
+  if (status === 429) return { transient: true, reason: "rate_limited" };
+  if (status === 408) return { transient: true, reason: "timeout" };
+  if (status === 409 && provider.openAi) return { transient: true, reason: "server_error" };
+  if (status >= 500 && status < 600) return { transient: true, reason: "server_error" };
+  return undefined;
+}
 
 /** A failure line that names its HTTP status is decided by the status, not by numbers in its body: a 409
  * whose body says "max 500 tokens" is a request the provider will refuse again, not a server failure.
  * 429 stays a rate limit and 408 stays a timeout; 5xx stays with the body patterns (so 529 still reads
  * as overloaded). Any other 4xx is terminal, except a 409 from OpenAI: its SDK retries one by default,
- * so it reads as a server error when the caller says the endpoint is OpenAI's. */
+ * so it reads as a server error when the caller says the endpoint is OpenAI's. A terminal 4xx quoted
+ * from a nested backend error does not decide when a later clause reports a transient failure of its own. */
 function httpStatusVerdict(text: string, provider: { openAi?: boolean }): ErrorClassification | undefined {
   const match = HTTP_STATUS.exec(text);
   const status = Number(match?.[1] ?? match?.[2] ?? match?.[3]);
   if (status === 429) return { transient: true, reason: "rate_limited" };
   if (status === 408) return { transient: true, reason: "timeout" };
   if (status === 409 && provider.openAi) return { transient: true, reason: "server_error" };
-  if (status >= 400 && status < 500) return { transient: false, reason: "invalid_request" };
+  if (status >= 400 && status < 500) {
+    const rest = new RegExp(HTTP_STATUS.source, "gi");
+    rest.lastIndex = match!.index + match![0].length;
+    let prevEnd = rest.lastIndex;
+    let later: RegExpExecArray | null;
+    while ((later = rest.exec(text)) !== null) {
+      if (opensOwnReport(text, later, prevEnd)) {
+        const verdict = transientStatusVerdict(Number(later[1] ?? later[2] ?? later[3]), provider);
+        if (verdict) return verdict;
+      }
+      prevEnd = later.index + later[0].length;
+    }
+    return { transient: false, reason: "invalid_request" };
+  }
   return undefined;
 }
 
