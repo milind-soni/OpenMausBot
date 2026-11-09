@@ -1,5 +1,8 @@
 import { ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { t } from "@/lib/i18n";
+import { isSidebarCollapseAll } from "@/lib/keyboard-shortcuts";
+import { setSidebarCollapsedAll, useSidebarCollapsedAll } from "@/lib/search-disclosure";
 
 /** The line under Inbox with the sidebar-wide actions. Each action is one icon button on the right. */
 export function SidebarActionsRow({ collapsedAll, searching, onToggleCollapsedAll }: {
@@ -26,4 +29,27 @@ export function SidebarActionsRow({ collapsedAll, searching, onToggleCollapsedAl
       </button>
     </div>
   );
+}
+
+/** The row and its ⌘⇧\ shortcut: collapses or expands every bot's thread list and the given department sections. */
+export function SidebarCollapseAllRow({ enabled, query, sectionIds, setAllCollapsed }: {
+  enabled: boolean;
+  query: string;
+  sectionIds: string[];
+  setAllCollapsed: (ids: string[], collapsed: boolean) => void;
+}) {
+  const collapsedAll = useSidebarCollapsedAll();
+  const toggle = () => {
+    if (!enabled || query) return;
+    setSidebarCollapsedAll(!collapsedAll);
+    setAllCollapsed(sectionIds, !collapsedAll);
+  };
+  const latest = useRef(toggle);
+  latest.current = toggle;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (isSidebarCollapseAll(event)) { event.preventDefault(); latest.current(); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return enabled ? <SidebarActionsRow collapsedAll={collapsedAll} searching={query !== ""} onToggleCollapsedAll={toggle} /> : null;
 }
