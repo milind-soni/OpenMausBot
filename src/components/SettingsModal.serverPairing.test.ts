@@ -85,6 +85,15 @@ describe("Settings → Phone & devices opened by Connect your phone", () => {
     expect(html).not.toContain("COMPANION_SECTION");
   });
 
+  it("on this computer's own Cloud, focuses the Cloud's pairing code and not the phone flow", () => {
+    fixture.phonePairing = 2;
+    fixture.config = { cloudHome: true };
+    vi.stubGlobal("window", { ogb: { companion: {} } });
+    const html = render();
+    expect(html).toContain("SERVER_PAIRING_CARD_MARKER cloud focus=2");
+    expect(html).toContain("COMPANION_SECTION focus=0");
+  });
+
   it("on another server in a browser, reveals that server's pairing code", () => {
     fixture.phonePairing = 1;
     vi.stubGlobal("window", {});

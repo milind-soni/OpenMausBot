@@ -55,6 +55,7 @@ export function shownDevices(devices: PairedDevice[], cloudHome: boolean): Paire
 export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, teamPhoneBlocked = null, simple = false, reveal = true, placeName = "" }: { placeName?: string; initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; teamPhoneBlocked?: string | null; simple?: boolean; /** False where another pairing flow owns the page's focus. */ reveal?: boolean }) {
   const [session, setSession] = useState<SessionState | null>(initialSession);
   const [pairingCodes, setPairingCodes] = useState(initialPairingCodes);
+  const [codesLoaded, setCodesLoaded] = useState(false);
   const [computerName, setComputerName] = useState<string | null>(null);
   const [scope, setScope] = useState<"admin" | "client">("admin");
   const [offer, setOffer] = useState<PairingOffer | null>(null);
@@ -84,8 +85,9 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       if (state.kind === "loopback" || state.kind === "session") {
         void api("/api/config").then((config) => {
           setPairingCodes(readMembership(config).pairingCodes);
+          setCodesLoaded(true);
           if (canPairDevices(state)) setComputerName(typeof config?.computerName === "string" ? config.computerName : "");
-        }).catch(() => {});
+        }).catch((e) => { setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) })); });
       }
     });
   }, []);
@@ -206,7 +208,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   ) : null;
   const scopeName = (device: PairedDevice) => t(device.scopes.includes("admin") ? "remote.serverPairing.scope.admin" : "remote.serverPairing.scope.client");
   const pairButton = (
-    <button type="button" data-phone-pairing-action={reveal ? "" : undefined} data-settings-drop="" onClick={() => void create()} disabled={busy || !pairingCodes}
+    <button type="button" data-phone-pairing-action={reveal ? "" : undefined} data-settings-drop="" onClick={() => void create()} disabled={busy || !pairingCodes || !codesLoaded}
       className={cn("ui-button ui-button-primary", !pairingCodes && "opacity-40")}>
       {busy ? t("remote.serverPairing.creating") : t("phone.pair.button")}
     </button>

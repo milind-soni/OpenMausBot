@@ -71,7 +71,7 @@ export function PhonePage() {
   return <>
     {ctx.here
       ? <>
-          <PhoneDevicesSection profileEmail={state.config?.profile?.email} focusRequest={focus} simple={!ctx.advanced} placeName={place.name} top={<PairWithCloud />} />
+          <PhoneDevicesSection profileEmail={state.config?.profile?.email} focusRequest={computerPairs ? focus : 0} simple={!ctx.advanced} placeName={place.name} top={<PairWithCloud />} />
           {card}
         </>
       : card}
