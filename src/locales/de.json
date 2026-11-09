@@ -288,7 +288,7 @@
   "server.teammates.resumedResults": "Mit den Ergebnissen von {who} fortgesetzt, wird geprüft",
   "server.teammates.resumedResultsRestart": "Nach einem Neustart mit den Ergebnissen von {who} fortgesetzt, wird geprüft",
   "server.lendingLift.title": "{bot} dafür deinen {device} benutzen lassen?",
-  "server.lendingLift.wholeBotTitle": "Die Notizen von {bot} wurden in Arbeit geändert, die du nicht geschrieben hast. Darf {bot} deinen {device} weiter nutzen?",
+  "server.lendingLift.wholeBotTitle": "Die Notizen von {bot} wurden in Arbeit geändert, die du nicht geschrieben hast. Darf der Bot deinen {device} weiter nutzen?",
   "server.lendingLift.memory": "Seine Notizen wurden in Arbeit geändert, die du nicht geschrieben hast:",
   "server.lendingLift.botOpened": "Ein Bot hat dieses Gespräch mit Arbeit für diesen Bot eröffnet. „Erlauben“ lässt nur diese eine Nachricht von dir deinen {device} benutzen.",
   "server.lendingLift.outside": "Ein Webhook oder eine Routine, die du nicht geschrieben hast, hat in diesem Gespräch gepostet. „Erlauben“ lässt nur diese eine Nachricht von dir deinen {device} benutzen.",
