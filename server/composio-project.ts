@@ -331,7 +331,8 @@ export async function listConnectedAccounts(
     accounts.push(...body.items);
     if (stop?.(body.items)) return accounts;
     const next = body.next_cursor || undefined;
-    if (!next || seenCursors.has(next)) return accounts;
+    if (!next) return accounts;
+    if (seenCursors.has(next)) throw new Error("Composio account inventory contains a pagination cursor cycle");
     seenCursors.add(next);
     cursor = next;
   }

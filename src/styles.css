@@ -2806,6 +2806,17 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
 .bg-accent {
   color: var(--color-accent-ink);
 }
+/* The accent as text (links, senders, pills) reads the accent's text tone: the
+   accent is a fill colour and sinks below 4.5:1 as text on some dark skins,
+   while --color-accent-text clears it on app, panel and card in every skin. */
+.text-accent {
+  color: var(--color-accent-text);
+}
+@media (hover: hover) {
+  .hover\:text-accent:hover {
+    color: var(--color-accent-text);
+  }
+}
 .bg-danger {
   color: var(--color-danger-ink);
 }

@@ -1,5 +1,5 @@
 // A fresh personal installation that connects a Composio project an earlier installation used picks up that installation's
-// Composio user, so the apps connected there come back without connecting each one again. A Team Cloud never looks.
+// Composio user, so the apps connected there come back without connecting each one again. A server several people share never looks.
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -131,11 +131,11 @@ describe("who may look for an earlier installation's user", () => {
   const earlier = () => { accounts = [account("openmausbot_earlier", "gmail"), account("openmausbot_earlier", "slack")]; };
 
   // Composio refuses the Session, so the route answers before it saves anything.
-  async function saveKeyThroughConfigRoute(teamCloud: boolean) {
+  async function saveKeyThroughConfigRoute(shared: boolean) {
     sessionsRefused = true;
     const replies: Array<{ status: number; body: unknown }> = [];
     const deps = {
-      teamCloud,
+      sharedMembership: () => shared,
       cfg: {},
       hostedModels: false,
       cloudHome: false,
@@ -165,7 +165,7 @@ describe("who may look for an earlier installation's user", () => {
     expect(accountQueries).toEqual([]);
   });
 
-  it("makes no account listing on a Team Cloud, and starts a new user", async () => {
+  it("makes no account listing on a server several people share, and starts a new user", async () => {
     earlier();
     const replies = await saveKeyThroughConfigRoute(true);
     expect(replies.map((reply) => reply.status)).toEqual([400]);
