@@ -28,7 +28,8 @@ function getMolaApiUrl(cfg: AppConfig): string {
  * Derives the viewer origin for Mola Cloud viewer grants.
  * Uses MOLA_VIEWER_ORIGIN env override if set, otherwise derives from OpenMausBot's
  * configured public URL (customDomain or publicUrl from CLI startup config).
- * Falls back to https://localhost (ViewerGrantController requires HTTPS).
+ * Throws if no valid origin can be determined - the https://localhost fallback
+ * will not match real deployments.
  */
 export function getMolaViewerOrigin(cfg: AppConfig): string {
   const override = process.env.MOLA_VIEWER_ORIGIN?.trim();
@@ -45,8 +46,12 @@ export function getMolaViewerOrigin(cfg: AppConfig): string {
     return cfg.cliStartup.publicUrl.trim().replace(/\/+$/, "");
   }
   
-  // Fallback to https://localhost (satisfies HTTPS requirement)
-  return "https://localhost";
+  // No valid origin found - fail clearly
+  throw new Error(
+    "Cannot determine viewer origin for Mola Cloud. " +
+    "Set MOLA_VIEWER_ORIGIN environment variable to your OpenMausBot deployment URL " +
+    "(e.g., https://your-domain.com) or configure customDomain/publicUrl in settings."
+  );
 }
 
 export const MAX_REMOTE_COMMAND_LENGTH = 4_000;
@@ -71,6 +76,7 @@ export function isolatedRemoteCommand(command: string): string {
 const READY = new Set(["ready"]);
 const SLEEPING_MOLA_STATES = new Set(["stopped"]);
 const TERMINAL = new Set(["error", "cancelled"]);
+const TRANSITIONAL = new Set(["provisioning", "booting", "starting", "stopping"]);
 const DEFAULT_MOLA_VCPUS = 4;
 const DEFAULT_MOLA_MEMORY_MB = 4096;
 const DEFAULT_MOLA_DISK_GB = 40;
@@ -196,27 +202,34 @@ export async function runCommand(cfg: AppConfig, machineId: string, command: str
   };
 }
 
-async function mintDesktopUrl(cfg: AppConfig, machineId: string, { requestMs = 30_000 } = {}) {
+async function mintDesktopUrl(cfg: AppConfig, machineId: string, { requestMs = 30_000, interactive: _interactive = false } = {}) {
   const apiUrl = getMolaApiUrl(cfg);
   const resource = resourcePath(apiUrl);
   
   if (isCloudApi(apiUrl)) {
-    // Cloud API: create viewer grant (obaid/mola-cp: app/Http/Controllers/Api/V1/ViewerGrantController.php)
-    // ViewerOrigin::normalize requires HTTPS origin format
-    const origin = getMolaViewerOrigin(cfg);
-    const { body } = await molaJson(cfg, `/${resource}/${machineId}/viewers`, { 
-      method: "POST", 
-      body: JSON.stringify({ 
-        origin, // Derived from OpenMausBot's publicUrl/customDomain or MOLA_VIEWER_ORIGIN
-        mode: "desktop", // Required: desktop, window, or browser
-        expires_in_minutes: 60 // Default 60, max 1440
-      }),
-      signal: AbortSignal.timeout(requestMs) 
-    });
-    // Response includes embed_url which has the viewer URL
-    return body?.data?.embed_url ?? body?.data?.url ?? null;
+    // Cloud API: viewer grants require iframe embedding + postMessage auth handshake
+    // OpenMausBot currently only supports direct desktop URLs (self-hosted Mola)
+    throw new Error(
+      "Mola Cloud viewer grants require iframe embedding with postMessage authentication, " +
+      "which is not yet implemented in OpenMausBot. Use self-hosted mola-core for desktop access, " +
+      "or open computers directly at cloud.mola.sh. " +
+      "See https://github.com/obaid/mola-core for self-hosted setup."
+    );
+    
+    // Future implementation would:
+    // 1. Create viewer grant with: POST /${resource}/${machineId}/viewers
+    //    body: { origin: getMolaViewerOrigin(cfg), mode: "desktop", interactive, expires_in_minutes: 60 }
+    //    response: { data: { id, embed_url, token, expires_at } }
+    // 2. Store { embedUrl, token, grantId, machineId, expiresAt } server-side (never expose token to client)
+    // 3. Return URL to OpenMausBot-hosted embedding page: /mola/viewer/${grantId}
+    // 4. Embedding page:
+    //    - Loads iframe with embed_url
+    //    - Waits for postMessage 'loaded' event from iframe
+    //    - Fetches token from server endpoint (authorized by session)
+    //    - Sends { type: 'mola-viewer-auth', token } to iframe via postMessage
+    // 5. Server endpoint delivers token only to authenticated user who owns the bot
   } else {
-    // Self-hosted API: direct desktop link
+    // Self-hosted API: direct desktop link (works as-is)
     const { body } = await molaJson(cfg, `/${resource}/${machineId}/desktop`, { 
       method: "POST", 
       signal: AbortSignal.timeout(requestMs) 
@@ -235,9 +248,18 @@ async function waitReady(cfg: AppConfig, machineId: string, budgetMs = MOLA_WAIT
       const apiUrl = getMolaApiUrl(cfg);
       const resource = resourcePath(apiUrl);
       const { body } = await molaJson(cfg, `/${resource}/${machineId}`, { signal: untilDeadline() });
-      const status = body?.data?.status;
-      if (READY.has(status)) return body.data;
+      const data = body?.data;
+      const status = data?.status;
+      const isTransitional = data?.is_transitional === true;
+      
+      if (READY.has(status)) return data;
       if (TERMINAL.has(status)) return null;
+      
+      // If status is transitional (provisioning, booting, starting) or marked as such by API, continue waiting
+      if (TRANSITIONAL.has(status) || isTransitional) {
+        await new Promise((r) => setTimeout(r, Math.min(2500, Math.max(0, deadline - Date.now()))));
+        continue;
+      }
       
       if (status === "stopped") {
         const apiUrl = getMolaApiUrl(cfg);
@@ -274,11 +296,14 @@ function molaRead(cfg: AppConfig, path: string) {
   return read().catch(async () => { await new Promise((resolve) => setTimeout(resolve, 1_000)); return read(); });
 }
 
-function safeMolaStatus(value: unknown): string {
+function safeMolaStatus(value: unknown, isTransitional?: boolean): string {
   if (typeof value !== "string") return "unknown";
   const status = value.toLowerCase();
-  const VALID_STATES = new Set(["booting", "ready", "stopped", "starting", "unknown", "error"]);
-  return VALID_STATES.has(status) ? status : "unknown";
+  const VALID_STATES = new Set(["provisioning", "booting", "ready", "stopped", "starting", "stopping", "unknown", "error", "cancelled"]);
+  if (VALID_STATES.has(status)) return status;
+  // If API says it's transitional but we don't recognize the status, treat as in-progress
+  if (isTransitional === true) return "starting";
+  return "unknown";
 }
 
 async function listMolaPages(cfg: AppConfig): Promise<{ ok: true; machines: any[] } | { ok: false; problem: string; credentialRejected?: boolean; unreachable?: boolean }> {
@@ -373,7 +398,7 @@ export async function listManagedMolas(
     instances.push({
       machineId,
       name,
-      status: safeMolaStatus(candidate.status),
+      status: safeMolaStatus(candidate.status, candidate.is_transitional),
       ownerBotId: owner?.botId ?? null,
       ownerName: owner?.name ?? null,
       orphaned: owner === null,
@@ -605,6 +630,16 @@ const molaServiceName = (included: boolean) => included ? "MausBot Cloud's compu
 
 export function molaErrorMessage(status: number, what: string, body?: any, included = false): string {
   const theirs = typeof body?.message === "string" ? body.message.trim() : "";
+  const code = body?.error?.code ?? body?.code;
+  
+  if (status === 403 && code === "insufficient_token_ability") {
+    const required = body?.error?.details?.required;
+    const abilities = required ? ` (needs ${required})` : " (needs computers:read and computers:write)";
+    return included 
+      ? INCLUDED_MOLA_UNAVAILABLE 
+      : `Mola API key has insufficient permissions${abilities} — update it in Settings → API keys`;
+  }
+  
   if (status === 401 || status === 403) {
     if (included) return INCLUDED_MOLA_UNAVAILABLE;
     return "mola.sh rejected your Mola API key — paste a current one in Settings → API keys";

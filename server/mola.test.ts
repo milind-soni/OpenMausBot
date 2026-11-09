@@ -172,9 +172,10 @@ describe("Mola provider", () => {
       ).toBe("https://custom.example.com");
     });
 
-    it("falls back to https://localhost when no config present", () => {
+    it("throws when no valid origin is configured", () => {
       delete process.env.MOLA_VIEWER_ORIGIN;
-      expect(getMolaViewerOrigin({} as AppConfig)).toBe("https://localhost");
+      expect(() => getMolaViewerOrigin({} as AppConfig)).toThrow(/Cannot determine viewer origin/);
+      expect(() => getMolaViewerOrigin({} as AppConfig)).toThrow(/MOLA_VIEWER_ORIGIN/);
     });
 
     it("strips trailing slashes from URLs", () => {
