@@ -456,6 +456,44 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
     expect(() => send(tight, chief, "gen-1", undefined, tester, "Test it")).toThrow("Room handoff budget exhausted");
   });
 
+  it("parks handed-off work a person started on an approval nobody answered, and carries the answer into its next turn", async () => {
+    const asked = { ok: true, text: "Could not run the checks.", approvalAsk: "Approve it?\nDefault: Try again" };
+    const w = world((node) => node.botId === "builder" && node.executions === 1 ? asked : undefined);
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Run the checks");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "waiting", question: "Approve it?\nDefault: Try again" });
+    expect(w.host.parks.map(p => p.question)).toEqual(["Approve it?\nDefault: Try again"]);
+    expect(w.host.reports).toEqual([]);
+    expect(w.coordinator.answerNode(node.id, "Try again")).toBe(true);
+    w.coordinator.tick(); await flush();
+    expect(w.host.runs.filter(r => r.node.botId === "builder").at(-1)!.text).toContain("The person answered: \"Try again\"");
+    expect(w.coordinator.node(node.id)?.status).toBe("completed");
+  });
+
+  it("parks a turn that failed for want of the approval too, but not a stalled one", async () => {
+    const failed = { ok: false, text: "One or more tool operations failed or were denied", approvalAsk: "Approve it?" };
+    const w = world((node) => node.botId === "builder" ? failed : node.botId === "tester" ? { ...failed, stalled: true } : undefined);
+    const { node: denied } = send(w, chief, "gen-1", undefined, builder, "Run the checks");
+    const { node: stuck } = send(w, chief, "gen-1", undefined, tester, "Run the checks");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(denied.id)?.status).toBe("waiting");
+    expect(w.coordinator.node(stuck.id)).toMatchObject({ status: "failed", outcome: "stalled" });
+  });
+
+  it("leaves a bot's own question, and work no person started, on their usual path", async () => {
+    const own = world(() => ({ ok: true, text: "NEEDS INPUT: Which region?", approvalAsk: "Approve it?" }));
+    const { node } = send(own, chief, "gen-1", undefined, builder, "Run the checks");
+    own.coordinator.tick(); await flush();
+    expect(own.coordinator.node(node.id)?.question).toBe("Which region?");
+
+    const routine = world((n) => n.botId === "builder" ? { ok: true, text: "It did not run.", approvalAsk: "Approve it?" } : undefined);
+    routine.coordinator.beginTurn({ id: "gen-1", address: chief, brief: "Nightly", level: "ask",
+      opener: { requester: { kind: "routine_run", runId: "run-1" }, origin: { kind: "routine", source: "routine" } } });
+    const { node: nightly } = routine.coordinator.enqueue(chief, "gen-1", undefined, builder, "Run the checks");
+    routine.coordinator.tick(); await flush();
+    expect(routine.coordinator.node(nightly.id)).toMatchObject({ status: "completed", result: "It did not run." });
+  });
+
   it("lets one Chief turn brief a room of 25 visitors and starts every one of them", async () => {
     const w = world((node) => node.botId.startsWith("visitor-") ? "hold" : undefined);
     const visitors = Array.from({ length: 25 }, (_, i) => ({ botId: `visitor-${i + 1}`, threadId: `visitor-${i + 1}-work` }));

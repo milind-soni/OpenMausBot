@@ -157,7 +157,7 @@ export function createActingPeople(deps: ActingPeopleDeps) {
 
 export type ActingPeople = ReturnType<typeof createActingPeople>;
 
-type HandedBack = { ok: boolean; text: string; evidence?: unknown; cards?: { question: string; ids: string[] }; privateQuestion?: boolean };
+type HandedBack = { ok: boolean; text: string; evidence?: unknown; cards?: { question: string; ids: string[] }; privateQuestion?: boolean; approvalAsk?: string };
 type Place = { child: string | null; parent: string | null };
 
 /** Work in one person's private chat, for a requester whose chat is not that one: its words stay with that person. */
@@ -178,6 +178,7 @@ export function privateHandBack<T extends HandedBack>(outcome: T, place: Place &
     ...rest,
     text: asks ? `NEEDS INPUT: ${question}` : `${outcome.ok ? "Done" : "It stopped before it finished"}. The result is in ${where}.`,
     ...(outcome.cards ? { cards: { ...outcome.cards, question } } : {}),
-    ...(asks || outcome.cards ? { privateQuestion: true } : {}),
+    ...(outcome.approvalAsk ? { approvalAsk: question } : {}),
+    ...(asks || outcome.cards || outcome.approvalAsk ? { privateQuestion: true } : {}),
   } as T;
 }

@@ -619,8 +619,9 @@ export class RuntimeCoordinator implements Coordinator {
     if (signal.aborted) return { kind: "failed", outcome: "stopped", text: result.text };
     if (result.cap) return { kind: "continue", text: result.text, note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}), ...evidence(result) };
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
-    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
     const question = root ? undefined : needsInputQuestion(result.text);
+    if (!root && a.origin.kind === "person" && result.approvalAsk && !result.stalled && question === undefined) return { kind: "needs_input", question: result.approvalAsk, ...evidence(result) };
+    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
     if (question === undefined) return { kind: "completed", text: result.text, ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };
     const named = withDefault(question);
     const decide = requesterDecides(a) && !result.privateQuestion && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
