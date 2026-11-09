@@ -1,4 +1,5 @@
 // Against the real server: the room's eligibility and the turn it reads are assembled in server/index.ts.
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,19 +8,24 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 import type { WireBot } from "../shared/wire.ts";
 import { CAPTURE_MARKER } from "./memory-capture.ts";
 
-it("captures a member bot's room turn into its memory, sourced to the room, once Learn from group chats is on", async () => {
+it("captures a verified desktop owner's room turn into a member bot's memory, sourced to the room, once Learn from group chats is on", async () => {
   const scratch = mkdtempSync(join(tmpdir(), "omb-room-capture-"));
   const routes = join(scratch, "routes.json");
   const textLog = join(scratch, "text-prompts.jsonl");
   writeFileSync(routes, JSON.stringify({
     [CAPTURE_MARKER]: JSON.stringify([{ text: "The garden launch moved to Friday", kind: "decision", confidence: 0.9 }]),
   }));
-  const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_TEXT_ROUTES: routes, FAKE_CLAUDE_TEXT_LOG: textLog });
+  const desktopOwner = randomBytes(32).toString("base64url");
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (input, init = {}) => realFetch(input, { ...init,
+    headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": desktopOwner } });
+  const fixture = await launchVerificationServer({ ...process.env, OMB_TEST_DESKTOP_OWNER_TOKEN: desktopOwner, FAKE_CLAUDE_TEXT_ROUTES: routes, FAKE_CLAUDE_TEXT_LOG: textLog })
+    .finally(() => { globalThis.fetch = realFetch; });
   const env = { OPENMAUSBOT_URL: fixture.info.url };
   const api = async <T = any>(path: string, method = "GET", body?: unknown): Promise<T> => {
     const response = await fetch(fixture.info.url + path, {
       method,
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-openmausbot-desktop-owner": desktopOwner },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     const result = await response.json() as T;
@@ -64,7 +70,7 @@ it("captures a member bot's room turn into its memory, sourced to the room, once
 }, 120_000);
 
 // Codex has no generateText: its background call is generateMemoryText, a tool-free `codex exec`.
-it("captures a Codex member bot's room turn through Codex's own background call", async () => {
+it("captures a bare API room turn as another person's words through a Codex member bot's own background call", async () => {
   const scratch = mkdtempSync(join(tmpdir(), "omb-room-capture-codex-"));
   const routes = join(scratch, "routes.json");
   const textLog = join(scratch, "codex-exec.jsonl");
@@ -107,7 +113,8 @@ it("captures a Codex member bot's room turn through Codex's own background call"
     await expect.poll(async () => (await api<{ text: string }>(`/api/bots/${lead.id}/memory/file?path=MEMORY.md`)).text, { timeout: 30_000 })
       .toMatch(/- \d{4}-\d{2}-\d{2} · from room "Orchard room" \(noticed\) · The orchard tour moved to Monday/);
     const capture = execCalls().find((call) => call.prompt.includes(CAPTURE_MARKER));
-    expect(capture?.prompt).toContain("Person: Lead, the orchard tour moved to Monday.");
+    expect(capture?.prompt).toContain("Person (another person): Lead, the orchard tour moved to Monday.");
+    expect(capture?.prompt).not.toContain("Person: Lead, the orchard tour moved to Monday.");
     expect(capture?.argv).toEqual(expect.arrayContaining(["exec", "--ignore-user-config", "--ephemeral"]));
 
     await expect.poll(async () => (await api<{ entries: Array<{ path: string; actor: string; via: string; threadId?: string }> }>(`/api/bots/${lead.id}/memory/journal`)).entries

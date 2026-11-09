@@ -36,6 +36,11 @@ it.each([undefined, OWNER, OTHER])("room capture preserves each speaker's attrib
   });
 });
 
+it("keeps a bare API room line separate from the owner", () => {
+  const asked: Message = { ...user(), via: "api" };
+  expect(capture("captureRoomTurnFor", [asked, reply])).toMatchObject({ person: "", owner: false, room: [{ by: "other" }] });
+});
+
 it("keeps other speakers separate when a room also contains the verified owner", () => {
   const other = { ...user(OTHER), id: "other", at: 2, text: "I prefer late meetings." };
   expect(capture("captureRoomTurnFor", [user(OWNER), other, reply])).toMatchObject({
