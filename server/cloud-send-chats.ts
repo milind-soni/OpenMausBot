@@ -17,6 +17,7 @@ import { addSentChats, attachmentNames, ATTACHMENT_NAME, type ChatStore, type Se
 import { threadHeads, threadRowNumbers, threadRowsFrom } from "./message-db.ts";
 import { ownerStamp, unstamped, type CloudOwner } from "./cloud-owner-lines.ts";
 import { attachmentNamesOf, linkedPath, linksOf, storedRows, threadLinks, type ThreadLinks } from "./cloud-send-rows.ts";
+import { roomGoes } from "./cloud-send-scope.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { RouteContext } from "./routes/table.ts";
 import type { BotRecord, GroupRecord, GroupTaskRecord, Message, Store, TaskPatch, TaskRecord } from "./store.ts";
@@ -236,6 +237,8 @@ export interface CloudSendChatsDeps {
   approvalSupported?(selection: ModelSelection, mode: ApprovalMode): boolean;
   /** A move of this one bot into a team: its conversations only. */
   bot?: string;
+  /** A move of only these bots: their conversations, and the rooms that go with all their bots. */
+  scope?: ReadonlySet<string>;
   /** This Cloud's owner's person key, as their lines here carry it: a bot moving into a team tells the team whose lines
    * become the mover's. */
   ownerKey?: string;
@@ -356,9 +359,11 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
   const { store } = deps;
   // This computer's side: what each conversation has, and its rows after a point.
   if (path === PREFIX && method === "GET") {
-    const heads = deps.bot ? chatHeads(store.bots.filter((bot) => bot.id === deps.bot), []) : chatHeads(store.bots, store.groups);
+    const chosen = deps.scope;
+    const rooms = chosen ? store.groups.filter((room) => roomGoes(room, chosen, (id) => store.bot(id))) : store.groups;
+    const heads = deps.bot ? chatHeads(store.bots.filter((bot) => bot.id === deps.bot), []) : chatHeads(chosen ? store.bots.filter((bot) => chosen.has(bot.id)) : store.bots, rooms);
     json(res, 200, { v: 1, dataDir: deps.dataDir, ...(deps.bot && deps.ownerKey ? { owner: deps.ownerKey } : {}), conversations: heads.map((head) => ({ ...head, settings: conversationSettings(store, head) })),
-      rooms: deps.bot ? [] : emptyRooms(store.groups, heads),
+      rooms: deps.bot ? [] : emptyRooms(rooms, heads),
       ...(url.searchParams.get("attachments") === "1" ? { attachments: await attachmentSizes(deps.dataDir, heads) } : {}) });
     return true;
   }

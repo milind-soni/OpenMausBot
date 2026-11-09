@@ -124,6 +124,23 @@ at the heavy part, the second saying which computer it waits for.
 real store and shows the server's answers read messages.db directly and never
 parse a conversation through the store.
 
+## Moving some bots
+
+```sh
+pnpm exec vitest run server/move-chosen-bots.e2e.test.ts server/cloud-send-scope.test.ts server/bot-moves.test.ts
+node --test electron/bot-move-main.node-test.mjs electron/one-home-check.node-test.mjs
+```
+
+The same two servers, started from the page's own channels. The chosen bot
+arrives with its chats, memory and routine, and what was on here is on there.
+The other bot answers here and nothing freezes; the chosen one refuses a turn
+here and stays as an archived bot that points to My Cloud. A room with a bot left
+behind stays here without the one that went. More bots can go later, and Move
+everything after that carries the rest without archiving on My Cloud the bots
+already there. The unit tests cover any number of bots in one move, a bot still
+answering holding the move, a failed check letting every bot go on here, and My
+Cloud ending bringing the bots back.
+
 ## The real utility port
 
 ```sh

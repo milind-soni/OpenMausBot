@@ -3,7 +3,7 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { BACKGROUND_HEADERS } from "./cloud-power.mjs";
 import { createLoginHandoffClient } from "./cloud-logins.mjs";
-import { MOVE_LINE, TEAM_MOVE_LINE, resultKey } from "./cloud-send-parts.mjs";
+import { BOT_MOVE_LINE, MOVE_LINE, TEAM_MOVE_LINE, resultKey } from "./cloud-send-parts.mjs";
 import { createCloudSend, sendNotice } from "./cloud-send.mjs";
 
 const SESSION_LABEL = "Send to My Cloud";
@@ -71,15 +71,17 @@ export async function openOwnerSession(target, fetchImpl, { label = SESSION_LABE
  *   space?: { disk(): unknown, grow(sizeGb: number): Promise<unknown> },
  *   move?: () => { view(): unknown, seen(): unknown, retry(): Promise<unknown> } | null,
  *   teamMove?: () => { view(): unknown, seen(): unknown } | null,
+ *   botMove?: () => { view(): unknown, seen(): unknown } | null,
  *   moveSession?: { open(target: { origin: string, grant(): Promise<{ origin: string, code: string }> }): Promise<any> },
  * }} deps `engineWaitMs`: how long a
  * move waits for My Cloud's engines (cloud-connections.mjs). `space`: My Cloud's plan disk and the Admin's grow, so a
  * move makes room for the files it carries. `move`: the one-time move (one-home.mjs), whose line either page shows.
  * `teamMove`: a bot moving from My Cloud into a team (team-move-main.mjs), whose line My Cloud's page shows.
+ * `botMove`: some of this computer's bots moving to My Cloud (bot-move-main.mjs), whose line this computer's page shows.
  * `moveSession`: the one session every pass of the move uses (move-session.mjs); without it each pass opens its own.
  */
 export function installCloudSend({ ipcMain, cloudPage, server, local, home, cookieFetch, reconnect, power, file, window, localOrigin,
-  fetch: fetchImpl = globalThis.fetch, engineWaitMs, patience, space, move = () => null, teamMove = () => null, moveSession = null, t }) {
+  fetch: fetchImpl = globalThis.fetch, engineWaitMs, patience, space, move = () => null, teamMove = () => null, botMove = () => null, moveSession = null, t }) {
   const handoff = createLoginHandoffClient();
   const pageOf = () => {
     const win = window();
@@ -92,8 +94,10 @@ export function installCloudSend({ ipcMain, cloudPage, server, local, home, cook
   const moving = () => move()?.view() ?? null;
   /** The notice either page gets, with the one-time move's line when there is one. */
   const notice = (snapshot) => {
-    const line = moving(), team = pageOf() === "cloud" ? teamMove()?.view() ?? null : null;
-    return { ...sendNotice(snapshot), ...(line ? { move: line } : {}), ...(team ? { teamMove: team } : {}) };
+    const line = moving(), team = pageOf() === "cloud" ? teamMove()?.view() ?? null : null, bots = pageOf() === "local" ? botMove()?.view() ?? null : null;
+    // Being asked which bots go is this computer's page's own.
+    const shown = line?.phase === "choose" && pageOf() !== "local" ? null : line;
+    return { ...sendNotice(snapshot), ...(shown ? { move: shown } : {}), ...(team ? { teamMove: team } : {}), ...(bots ? { botMove: bots } : {}) };
   };
   const deliver = (snapshot) => {
     if (pageOf()) window().webContents.send("cloud-send:notice-changed", notice(snapshot));
@@ -140,6 +144,7 @@ export function installCloudSend({ ipcMain, cloudPage, server, local, home, cook
   ipcMain.handle("cloud-send:notice", onPage("cloud-send:notice", () => notice(send.snapshot())));
   ipcMain.handle("cloud-send:dismiss", onPage("cloud-send:dismiss", (_event, signature) => {
     if (String(signature) === TEAM_MOVE_LINE) { teamMove()?.seen(); return notice(send.snapshot()); }
+    if (String(signature) === BOT_MOVE_LINE) { botMove()?.seen(); return notice(send.snapshot()); }
     if (String(signature) === MOVE_LINE) {
       // The done line says what the move brought; the move's own send result is not said again after it.
       move()?.seen();
@@ -157,8 +162,8 @@ export function installCloudSend({ ipcMain, cloudPage, server, local, home, cook
     handoff: (what) => handoff.request(server(), what),
     /** The one-time move to My Cloud (cloud-send.mjs): a pass that carries everything, `final` the one after this computer
      * stops, and the check of what arrived. */
-    move: (options) => send.send({ reason: "move", final: options?.final === true }),
-    check: () => send.check(),
+    move: (options) => send.send({ reason: "move", final: options?.final === true, ...(options?.scope ? { scope: options.scope } : {}) }),
+    check: (options) => send.check(options),
     /** Each automation the move carried, and whether it was on here when it went. */
     switches: () => send.switches(),
     snapshot: () => send.snapshot(),

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CloudSendNotice, CloudSendPageBridge } from "../../electron/cloud-send.mjs";
 import { moveQuietUntil } from "@/lib/cloud-send";
+import { BotMoveLine, MoveChooser } from "./MoveToMyCloud";
 import { TeamMoveLine } from "./MoveToTeam";
 
 /** My Cloud's notice from main, kept fresh: undefined until main first answers, null when it can't. */
@@ -40,6 +41,11 @@ export function useMoveQuiet(now: () => number = Date.now): boolean | null {
 export function CloudSendStrip({ cloudHome }: { cloudHome: boolean }) {
   const bridge = !window.ogb?.remoteClient?.active ? window.ogb?.cloudSendPage : undefined;
   const [notice, setNotice] = useCloudSendNotice(bridge);
-  if (!bridge || !cloudHome || !notice?.teamMove) return null;
-  return <TeamMoveLine move={notice.teamMove} onChange={(next) => setNotice({ ...notice, teamMove: next ?? undefined })} />;
+  const [notNow, setNotNow] = useState(false);
+  if (!bridge || !notice) return null;
+  if (cloudHome) return notice.teamMove ? <TeamMoveLine move={notice.teamMove} onChange={(next) => setNotice({ ...notice, teamMove: next ?? undefined })} /> : null;
+  return <>
+    {notice.move?.phase === "choose" && !notNow && <MoveChooser onClose={() => setNotNow(true)} />}
+    {notice.botMove && <BotMoveLine move={notice.botMove} onChange={(next) => setNotice({ ...notice, botMove: next ?? undefined })} />}
+  </>;
 }

@@ -27,7 +27,7 @@ function cloudLease(now) {
  * pass and check, `checks` answering in turn: true, false, an error, or a function of the moment), My Cloud's session,
  * the clock and its timers, and My Cloud's lease when `lease` is given (`name` and `id`: this computer as it asks).
  */
-function computer({ clock, checks = [], lease = null, name = "Mac", id = "computer-mac", copy = null }) {
+function computer({ clock, checks = [], lease = null, name = "Mac", id = "computer-mac", copy = null, choosing = null }) {
   let journal = null;
   const timers = [];
   const c = {
@@ -68,6 +68,7 @@ function computer({ clock, checks = [], lease = null, name = "Mac", id = "comput
     local,
     session,
     ...(lease ? { lease: createMoveLease({ session, holder: async () => id, label: async () => name, timers: { set: () => null, clear: () => {} } }) } : {}),
+    ...(choosing ? { choosing } : {}),
     lastInput: () => 0,
     now: () => clock.now,
     timers: { set: (work, ms) => { const timer = { work, ms }; timers.push(timer); return timer; }, clear: (timer) => { const at = timers.indexOf(timer); if (at >= 0) timers.splice(at, 1); } },
@@ -174,4 +175,23 @@ test("a move that waits for another computer after an earlier failure asks again
   await nuc.home.kick();
   assert.deepEqual(nuc.passes, []);
   assert.deepEqual(nuc.timers.map((timer) => timer.ms), [QUEUE_POLL_MS]);
+});
+
+test("no first move starts while the person is asked which bots go, and it goes on by itself once they say", async () => {
+  const clock = newClock();
+  let asking = true;
+  const c = computer({ clock, choosing: async () => asking });
+  await c.home.kick();
+  assert.equal(c.journal, null, "nothing has started");
+  assert.deepEqual(c.passes, []);
+  assert.equal(c.server.freezes, 0);
+  assert.deepEqual(c.home.view(), { phase: "choose" });
+  asking = false;
+  await c.home.kick();
+  assert.equal(c.journal.phase, "done");
+  assert.deepEqual(c.passes, ["copy", "final"]);
+
+  const failing = computer({ clock, choosing: async () => { throw new Error("this computer's server did not answer"); } });
+  await failing.home.kick();
+  assert.equal(failing.journal.phase, "done", "a question that can't be asked never holds a move back");
 });

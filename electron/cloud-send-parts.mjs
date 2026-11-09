@@ -41,6 +41,7 @@ export const EMPTY = "-";
 export const MOVE_LINE = "one-home";
 /** What My Cloud's page closes the line of a bot moving into a team by. */
 export const TEAM_MOVE_LINE = "team-move";
+export const BOT_MOVE_LINE = "bot-move";
 /** Logins and 1Password are compared by when they changed, never by their secrets: two sides that both have one were
  * set up on their own, and from then on a change here goes. */
 const CONTENT_COMPARED = new Set(["bot", "skill", "setting", ...MOVE_KINDS]);

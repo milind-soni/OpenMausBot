@@ -13,6 +13,7 @@ import { readAttachment } from "../attachments.ts";
 import { arrivedRoute, automationsOffRoute, homeRoute } from "../cloud-send-arrived.ts";
 import { moveFilesRoute } from "../cloud-send-files.ts";
 import { createMoveLeases, moveLeaseRoute } from "../cloud-send-lease.ts";
+import { createMoveScopes, moveScopeRoute } from "../cloud-send-scope.ts";
 import { automatedBot, moveBotParts, moveItems, moveKindsRoute, type MoveKindsDeps } from "../cloud-send-kinds.ts";
 import { cloudSendManifest } from "../cloud-send-manifest.ts";
 import { moveMemoryRoute, type MoveMemoryDeps } from "../cloud-send-memory.ts";
@@ -77,6 +78,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
   };
   const move = deps.move;
   const leases = createMoveLeases();
+  const scopes = createMoveScopes();
   return async (ctx) => {
     const { req, res, path, method, url, json, readBody } = ctx;
     if (path !== "/api/cloud-send" && !path.startsWith("/api/cloud-send/")) return PASS;
@@ -85,10 +87,14 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     if (deps.refusal && !scoped) { req.resume(); return json(res, 403, deps.refusal); }
     // A move of one bot into a team reads that bot only, on both sides.
     const bot = scoped ?? (/^[\w-]{1,128}$/u.test(url.searchParams.get("bot") ?? "") ? url.searchParams.get("bot")! : undefined);
-    if (deps.chats && await cloudSendChatsRoute({ ...deps.chats, ...(bot ? { bot } : {}) }, ctx)) return;
+    const scopeToken = url.searchParams.get("scope");
+    const scope = scopeToken === null ? undefined : scopes.get(scopeToken);
+    if (scope === null) { req.resume(); return json(res, 409, { error: "This move's bots are no longer known here." }); }
+    if (await moveScopeRoute(scopes, ctx)) return;
+    if (deps.chats && await cloudSendChatsRoute({ ...deps.chats, ...(bot ? { bot } : {}), ...(scope ? { scope } : {}) }, ctx)) return;
     if (move && await moveKindsRoute(move, ctx)) return;
     if (move && await moveMemoryRoute({ ...move, bot: (id) => move.store.bot(id) ?? undefined }, ctx)) return;
-    if (move && await moveFilesRoute({ dataDir: move.dataDir, bots: () => (bot ? move.store.bots.filter((entry) => entry.id === bot) : move.store.bots), owner: move.owner }, ctx)) return;
+    if (move && await moveFilesRoute({ dataDir: move.dataDir, bots: () => (bot ? move.store.bots.filter((entry) => entry.id === bot) : scope ? move.store.bots.filter((entry) => scope.has(entry.id)) : move.store.bots), owner: move.owner }, ctx)) return;
     if (move && home && await moveLeaseRoute({ leases, owner: move.owner }, ctx)) return;
     if (move && home && await arrivedRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks, owner: move.owner, lineLanguage: deps.lineLanguage ?? (() => deps.config().language), ...(deps.connectionsMoved ? { stayed: deps.connectionsMoved } : {}) }, ctx)) return;
     if (move && deps.cloudHome && deps.automations && await automationsOffRoute({ automations: deps.automations, owner: move.owner }, ctx)) return;
@@ -97,9 +103,9 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
       if (!deps.chats) return json(res, 404, { error: "not found" });
       res.setHeader("cache-control", "no-store");
-      return json(res, 200, await cloudSendManifest({ summary: () => cloudSendSummary(sources, { move: true, ...(bot ? { bot } : {}) }), store: deps.chats.store, dataDir: deps.chats.dataDir,
+      return json(res, 200, await cloudSendManifest({ summary: () => cloudSendSummary(sources, { move: true, leaving: !home, ...(bot ? { bot } : {}), ...(scope ? { bots: scope } : {}) }), store: deps.chats.store, dataDir: deps.chats.dataDir,
         connections: deps.connections ?? (async () => []), heads: threadHeads, ...(move ? { kinds: move, teamMemory: move.teamMemory } : {}), ...(bot ? { bot } : {}),
-        attachments: url.searchParams.get("attachments") !== "0", files: url.searchParams.get("files") !== "0" }));
+        attachments: url.searchParams.get("attachments") !== "0", files: url.searchParams.get("files") !== "0", ...(scope ? { scope } : {}) }));
     }
     if (path === "/api/cloud-send/verify-secrets") {
       if (!home || !deps.connectionFingerprints) return json(res, 404, { error: "not found" });
@@ -112,7 +118,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     if (path !== "/api/cloud-send") return PASS;
     if (method !== "GET") return json(res, 405, { error: "method not allowed" });
     res.setHeader("cache-control", "no-store");
-    const summary = cloudSendSummary(sources, { move: url.searchParams.get("move") === "1", ...(bot ? { bot } : {}) });
+    const summary = cloudSendSummary(sources, { move: url.searchParams.get("move") === "1", leaving: !home, ...(bot ? { bot } : {}), ...(scope ? { bots: scope } : {}) });
     const item = url.searchParams.get("item");
     const items = item === null ? summary.items : summary.items.filter((entry) => entry.key === item || (entry.kind === "skill" && item === `bot:${entry.bot}`));
     // `chats: 1`: this server takes chats by row.

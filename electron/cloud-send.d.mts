@@ -89,6 +89,8 @@ export interface CloudSendNotice {
   move?: import("./one-home.mjs").OneHomeView;
   /** On My Cloud's page: a bot moving into a team, while its line shows; absent from an older desktop. */
   teamMove?: import("./team-move.mjs").TeamMoveView;
+  /** On this computer's page: some of its bots on their way to My Cloud. */
+  botMove?: BotMoveView;
 }
 export type CloudSendTold = { at: number; reason: string; failed: number; seen: boolean; sent: CloudSendCounts; final?: boolean } & CloudSendFailure;
 export interface CloudSendArrived extends CloudSendCounts { chats: { conversations: number; messages: number } }
@@ -117,11 +119,24 @@ export interface CloudSendPageBridge {
   teamRetry?(): Promise<import("./team-move.mjs").TeamMoveView | null>;
   /** Shows that team's page, where the bot now lives. */
   openTeam?(teamId: string): Promise<void>;
+  /** On this computer's page: whether its bots can move to My Cloud now, and which are on their way. */
+  botMoveState?(): Promise<BotMoveState>;
+  /** Moves these bots to My Cloud; the others stay here and go on working. */
+  moveBots?(ids: string[]): Promise<BotMoveState>;
+  /** Moves everything to My Cloud: this computer's one-time move. */
+  moveEverything?(): Promise<BotMoveState>;
+  botMoveRetry?(): Promise<BotMoveView | null>;
+  /** Shows My Cloud in this window. */
+  openMyCloud?(): Promise<void>;
   /** The switch "Keep this computer's bots on this computer"; absent from an older desktop. */
   keepHere?(): Promise<KeepHereState>;
   /** Turns it (a real click on My Cloud's page). */
   setKeepHere?(on: boolean): Promise<KeepHereState>;
 }
+
+/** Some of this computer's bots moving to My Cloud (bot-move-main.mjs). `bot`: the first of them, `bots`: how many go. */
+export interface BotMoveView { bot: { id: string; name: string }; team: { id: string; name: string }; phase: "moving" | "failed" | "done"; bots?: number }
+export interface BotMoveState { available: boolean; moving: string[] }
 
 /** The switch "Keep this computer's bots on this computer" (one-home-main.mjs). `shown`: this person has a Cloud of their
  * own the move applies to; `moved`: this computer's bots live on My Cloud, so turning it on brings them home; `coming`:
@@ -212,7 +227,7 @@ export function createCloudSend(deps: {
   /** `reason: "move"`: everything this computer has, apps and keys first; `final`: the pass after this computer stopped,
    * which carries the sign-ins that refresh themselves and lets go of this computer's copies. */
   send(options?: { keys?: string[] | null; force?: string[]; reason?: string; final?: boolean }): Promise<CloudSendOutcome>;
-  check(): Promise<CloudMoveCheck>;
+  check(options?: { scope?: string }): Promise<CloudMoveCheck>;
   /** Each automation a move carried ("routine:<id>", "call:<id>", "webhook:<id>", "app-event:<id>") and whether it was
    * on here when it went. */
   switches(): Record<string, boolean>;
