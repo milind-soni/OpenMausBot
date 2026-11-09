@@ -39,3 +39,23 @@ export async function readSecureCredentials({
   }
   return { status: "unavailable", credentials: {}, error: lastError };
 }
+
+/** "Reset saved keys" for a store that cannot be read: after the person confirms, the file is moved aside (kept, not
+ * deleted) and the app restarts with an empty store it can write again. A store that was read is never touched, and
+ * nothing moves once the app has begun to quit while the person was deciding, since no restart would follow. */
+export async function resetUnreadableCredentials({ unreadable, confirm, quitting, moveAside, failed, restart }) {
+  if (!unreadable) return "readable";
+  if (!(await confirm())) return "cancelled";
+  if (quitting()) return "quitting";
+  try {
+    moveAside();
+  } catch (error) {
+    // Only a file that is really gone counts as moved; a folder that can no longer be read is a failure to report.
+    if (error?.code !== "ENOENT") {
+      await failed(error);
+      return "failed";
+    }
+  }
+  restart();
+  return "reset";
+}
