@@ -57,13 +57,14 @@ function preservesNumericText(text: string, value: number): boolean {
 
 const UNSAFE_JSON_NUMBER = Symbol("unsafe-json-number");
 
-function parsedJson(text: string): unknown {
+function parsedJson(text: string, expectedShape: "object" | "array"): unknown {
   try {
     let unsafe = false;
     const parsed = JSON.parse(text, (_key: string, value: unknown, context?: { source?: string }) => {
       if (typeof value === "number" && (context?.source === undefined || !preservesNumericText(context.source, value))) unsafe = true;
       return value;
     });
+    if (expectedShape === "array" ? !Array.isArray(parsed) : !isObject(parsed)) return undefined;
     return unsafe ? UNSAFE_JSON_NUMBER : parsed;
   } catch {
     return undefined;
@@ -77,7 +78,7 @@ function coerce(value: unknown, node: Json | null, root: Json, path: string, cha
     const items = resolved(node!.items, root);
     const field = soleStringField(items, root);
     if (typeof value === "string") {
-      const parsed = parsedJson(value);
+      const parsed = parsedJson(value, "array");
       if (parsed === UNSAFE_JSON_NUMBER) return value;
       if (Array.isArray(parsed)) {
         changed.push(`${path} from text to a list`);
@@ -105,7 +106,7 @@ function coerce(value: unknown, node: Json | null, root: Json, path: string, cha
     return value;
   }
   if (type === "object") {
-    const parsed = typeof value === "string" ? parsedJson(value) : undefined;
+    const parsed = typeof value === "string" ? parsedJson(value, "object") : undefined;
     if (parsed === UNSAFE_JSON_NUMBER) return value;
     if (isObject(parsed)) changed.push(`${path} from text to an object`);
     const object = isObject(parsed) ? parsed : value;
@@ -152,7 +153,7 @@ export function fitArguments(args: unknown, schema: unknown): { args: unknown; c
   const root = resolved(schema, isObject(schema) ? schema : {});
   if (!root || typeOf(root) !== "object" || !isObject(root.properties)) return { args, changed: [] };
   const changed: string[] = [];
-  const parsed = typeof args === "string" ? parsedJson(args) : args;
+  const parsed = typeof args === "string" ? parsedJson(args, "object") : args;
   if (parsed === UNSAFE_JSON_NUMBER) return { args, changed: [] };
   if (typeof args === "string" && isObject(parsed)) changed.push("the arguments from text to an object");
   if (!isObject(parsed)) return { args, changed: [] };

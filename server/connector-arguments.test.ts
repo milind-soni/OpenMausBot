@@ -210,4 +210,18 @@ describe("numeric text preservation", () => {
     const args = '{"value": 12,}';
     expect(fitArguments(args, { type: "object", properties: { value: { type: "number" } } })).toEqual({ args, changed: [] });
   });
+
+  it.each(["string items", "one-field objects"])("keeps numeric-looking plain text fallback for %s", (kind) => {
+    const items = kind === "string items"
+      ? { type: "string" }
+      : { type: "object", properties: { use_case: { type: "string" } }, required: ["use_case"] };
+    const schema = { type: "object", properties: { values: { type: "array", items } } };
+    for (const value of ["9007199254740993", "1e400", "0.10000000000000001", '{"value":9007199254740993}', '{"value":1e400}']) {
+      const expected = kind === "string items" ? [value] : [{ use_case: value }];
+      const fitted = fitArguments({ values: value }, schema);
+      expect(fitted.args).toEqual({ values: expected });
+      expect(fitted.changed).toHaveLength(1);
+    }
+  });
+
 });

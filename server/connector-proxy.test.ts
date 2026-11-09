@@ -602,7 +602,7 @@ describe("connected-app tools by name", () => {
         response.writeHead(200, { "content-type": "application/json" });
         if (rpc.method === "tools/list") {
           response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { tools: [
-            { name: "FIXTURE_NUMBER", inputSchema: { type: "object", properties: { value: { type: "number" }, payload: { type: "object" }, numbers: { type: "array", items: { type: "number" } } } } },
+            { name: "FIXTURE_NUMBER", inputSchema: { type: "object", properties: { value: { type: "number" }, payload: { type: "object" }, numbers: { type: "array", items: { type: "number" } }, labels: { type: "array", items: { type: "string" } }, queries: { type: "array", items: { type: "object", properties: { use_case: { type: "string" } }, required: ["use_case"] } } } } },
             { name: "FIXTURE_INTEGER", inputSchema: { type: "object", properties: { value: { type: "integer" } } } },
           ] } }));
           return;
@@ -624,6 +624,8 @@ describe("connected-app tools by name", () => {
       { name: "FIXTURE_NUMBER", args: { numbers: "[9007199254740993]" }, expected: { numbers: "[9007199254740993]" } },
       { name: "FIXTURE_NUMBER", args: '{"value":4.2e1}', expected: { value: 42 } },
       { name: "FIXTURE_INTEGER", args: { value: "42.0" }, expected: { value: 42 } },
+      { name: "FIXTURE_NUMBER", args: { labels: "9007199254740993" }, expected: { labels: ["9007199254740993"] } },
+      { name: "FIXTURE_NUMBER", args: { queries: "1e400" }, expected: { queries: [{ use_case: "1e400" }] } },
     ];
     for (const [index, sample] of cases.entries()) {
       const reply = nextJson(lines);
