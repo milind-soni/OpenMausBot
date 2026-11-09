@@ -33,9 +33,9 @@ export const CONNECT_PROBLEM_KEYS = Object.freeze({
 
 /**
  * Why an address only a tailnet reaches did not answer: Tailscale is off on this computer, the name is not on this
- * computer's tailnet (MagicDNS answers only names it knows), macOS refused at once (its Local Network permission covers
- * Tailscale's addresses too, and refuses with "no route to host" rather than letting the request time out), or the
- * computer there is asleep, offline or not sharing.
+ * computer's tailnet (MagicDNS answers only names it knows), macOS refused (its Local Network permission, from macOS 15,
+ * covers Tailscale's addresses too, and is expected to fail at once with no route to host where a sleeping peer times
+ * out), or the computer there is asleep, offline or not sharing.
  */
 function tailnetProblem(kind, platform, tailnet) {
   if (!tailnet) return "tailscaleOff";
