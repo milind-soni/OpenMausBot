@@ -19,13 +19,15 @@ it("previews, runs only on Run, and writes one merged result", async () => {
       [bot.id]: { script: [
         { key: "MERGE", match: ["The burst you ran"], reply: "MERGED: Acme, Globex and Initech." },
         ...PARTS.map((name) => ({ key: `PART-${name}`, match: [`This part: ${name}`], reply: `${name} was founded in 1990.` })),
+        { key: "SLASH", match: ["The person used /burst for this request", "SLASH-JOB"], steps: [{ tool: "burst", arguments: { task: "Slash task", instructions: "Do it.", items: ["One", "Two"] } }], reply: "Press Run." },
         { key: "PROPOSE", match: ["BURST-JOB"], steps: [{ tool: "burst", arguments: { task: "Research companies", instructions: "Find when it was founded.", items: PARTS } }], reply: "Press Run to start." },
       ] },
     }));
     const evidence = (): any[] => existsSync(`${planPath}.evidence.jsonl`)
       ? readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
     const lines = async () => (await api(`/api/threads/${bot.activeTaskId}/messages?limit=200`, undefined, "GET")).messages as any[];
-    const card = async () => (await lines()).find((message) => message.kind === "burst")?.burst;
+    const cards = async () => (await lines()).filter((message) => message.kind === "burst").map((message) => message.burst);
+    const card = async () => (await cards())[0];
 
     await cli("send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "BURST-JOB: research these three");
     await expect.poll(async () => (await card())?.phase, { timeout: 20_000 }).toBe("preview");
@@ -50,6 +52,11 @@ it("previews, runs only on Run, and writes one merged result", async () => {
     expect(replies).toContain("MERGED: Acme, Globex and Initech.");
     const inbox = await api("/api/inbox", undefined, "GET");
     expect(JSON.stringify(inbox)).toContain("MERGED: Acme, Globex and Initech.");
+
+    await cli("send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "/burst SLASH-JOB: two parts");
+    await expect.poll(async () => (await cards()).length, { timeout: 20_000 }).toBe(2);
+    expect((await cards())[1]).toMatchObject({ phase: "preview", total: 2, task: "Slash task" });
+    expect((await lines()).some((message) => message.role === "user" && message.text === "/burst SLASH-JOB: two parts")).toBe(true);
   } finally {
     await session.close();
   }
