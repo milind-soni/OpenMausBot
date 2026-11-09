@@ -1,6 +1,7 @@
-import { useMemo, useState, type JSX } from "react";
+import { requestThreadList } from "@/lib/thread-list-navigation";
+import { useMemo, useRef, useState, type JSX } from "react";
 import { Bug, Copy, Cpu, Download, Gauge, ListChecks, MessagesSquare, Monitor, MoreHorizontal, Search, Share, SquarePen, UserRound } from "lucide-react";
-import { currentTaskBot, openBotThread, useStore, visibleMessages, type Bot } from "@/state/store";
+import { currentTaskBot, useStore, visibleMessages, type Bot } from "@/state/store";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { requestChatFind, useChatFindOpen } from "@/lib/chat-find";
@@ -13,18 +14,18 @@ import {
 } from "@/lib/export-transcript";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { localizedTaskTitle } from "@/lib/task-title";
 import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_OPEN } from "./elevated";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
+import { ModelPicker } from "./ModelPicker";
 import { UsageBars } from "./EngineUsage";
 
 /** One item list for the chat's ⋯ menu wherever it sits; it lists the threads whenever the sidebar hides them. The
  * Simple bot panel draws the same items as rows, and its Share button holds the two that export. */
-export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: SidebarMenuItem[]; on: boolean } {
+export function useChatMoreItems(profile: Bot, phoneHeader = false, onModel?: () => void): { items: SidebarMenuItem[]; on: boolean } {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const messages = useMemo(() => visibleMessages(bot), [bot]);
   const { state, dispatch } = useStore();
@@ -36,39 +37,30 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
   const usage = usageSummary(bot, state.instances);
   const hasMessages = messages.length > 0;
   const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
-  const threads = showThreads ? [] : orderedThreadList((profile.tasks ?? []).filter((task) => !task.routineRunId));
+  const threads = orderedThreadList((profile.tasks ?? []).filter((task) => !task.routineRunId));
   const selection = profile.modelSelection;
-  const modelName = phoneHeader && selection
-    ? state.instances.find((candidate) => candidate.instanceId === selection.instanceId)?.models.options.find((option) => option.id === selection.model)?.label ?? selection.model
+  const modelName = selection
+    ? state.instances.find((candidate) => candidate.instanceId === selection.instanceId)?.models?.options.find((option) => option.id === selection.model)?.label ?? selection.model
     : "";
-  // On a phone the header drops the profile pill's click target, the model chip and the Bot's screen button; they live here.
   const phoneItems: SidebarMenuItem[] = phoneHeader ? [
     {
-      key: "profile",
-      label: t("chat.openProfile"),
-      icon: <UserRound size={16} />,
+      key: "profile", label: t("chat.openProfile"), icon: <UserRound size={16} />,
       onSelect: () => dispatch({ type: "toggleSettings", open: true }),
     },
   ] : [];
-  const phoneScreen: SidebarMenuItem[] = phoneHeader ? [
-    ...(remoteClient ? [] : [{
-      key: "model",
-      label: t("model.simple.model"),
-      icon: <Cpu size={16} />,
-      value: modelName,
-      trailing: <UsageBars engine={selection?.instanceId} hover={false} />,
-      onSelect: () => openBotSettings(dispatch, "model"),
-    } satisfies SidebarMenuItem]),
-    {
-      key: "computer",
-      label: t("chat.computer"),
-      icon: <Monitor size={16} />,
-      active: state.computerOpen,
-      onSelect: () => dispatch({ type: "toggleComputer" }),
-    },
-  ] : [];
+  const modelItem: SidebarMenuItem = {
+    key: "model", label: t("model.simple.model"), icon: <Cpu size={16} />, value: modelName,
+    trailing: <UsageBars engine={selection?.instanceId} hover={false} />,
+    disabled: Boolean(bot.busy || bot.waitingForTeammates),
+    onSelect: onModel ?? (() => openBotSettings(dispatch, "model")),
+  };
+  const phoneScreen: SidebarMenuItem[] = phoneHeader ? [{
+    key: "computer", label: t("chat.computer"), icon: <Monitor size={16} />, active: state.computerOpen,
+    onSelect: () => dispatch({ type: "toggleComputer" }),
+  }] : [];
   const items: SidebarMenuItem[] = [
     ...phoneItems,
+    modelItem,
     {
       key: "find",
       label: t("chat.find"),
@@ -86,19 +78,12 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       icon: <SquarePen size={16} />,
       onSelect: () => dispatch({ type: "newTask", botId: profile.id }),
     } satisfies SidebarMenuItem]),
-    // With one thread there is nothing to switch to.
-    ...(threads.length < 2 ? [] : [{
+    ...(threads.length === 0 ? [] : [{
       key: "threads",
       label: t("task.switch"),
       icon: <MessagesSquare size={16} />,
       value: String(threads.length),
-      submenu: threads.map((task) => ({
-        key: `thread:${task.threadId}`,
-      label: localizedTaskTitle(task.title || t("task.newShort")),
-        active: task.threadId === bot.threadId,
-        onSelect: () => openBotThread(dispatch, profile, task.threadId, showThreads),
-      })),
-      onSelect: () => {},
+      onSelect: () => requestThreadList(profile.id),
     } satisfies SidebarMenuItem]),
     {
       key: "copy",
@@ -220,14 +205,16 @@ function ShareMenu({ bot, className }: { bot: Bot; className: string }) {
   );
 }
 
-/** The same menu as the chat header's plain ⋯ in Advanced mode, opening on hover below the header. */
-export function ChatHeaderMenu({ bot }: { bot: Bot }): JSX.Element {
-  const { items, on } = useChatMoreItems(bot);
+export function ChatHeaderMenu({ bot, phoneHeader = false }: { bot: Bot; phoneHeader?: boolean }): JSX.Element {
+  const [modelRequest, setModelRequest] = useState(0);
+  const anchor = useRef<HTMLDivElement>(null);
+  const { items, on } = useChatMoreItems(bot, phoneHeader, () => setModelRequest(value => value + 1));
   return (
+    <div ref={anchor} className="relative flex shrink-0">
+    <ModelPicker bot={bot} threadId={bot.threadId} menuRequest={modelRequest} menuAnchor={anchor} className="absolute right-0 top-0" />
     <SidebarPopoverMenu
       items={items}
       ariaLabel={t("chat.more")}
-      openOnHover
       placement="below"
       renderTrigger={({ open }) => (
         <span
@@ -242,5 +229,6 @@ export function ChatHeaderMenu({ bot }: { bot: Bot }): JSX.Element {
         </span>
       )}
     />
+    </div>
   );
 }

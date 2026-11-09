@@ -32,8 +32,9 @@ function privacyLabelOf(privacy: ChatHeadPrivacy): string | null {
 /** Simple mode's whole chat header: the bot's face and name in one pill, which opens and closes the bot panel. Away from
  * the bot's main conversation it also names the one on screen. A dot says another of the bot's conversations needs a
  * look; a team chat says who can read it with one quiet glyph. */
-export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
+export function ChatHeadPill({ bot, avatar, privacy, onToggle, identityOnly = false }: {
   bot: Bot;
+  identityOnly?: boolean;
   avatar: Pick<ComponentProps<typeof BotAvatar>, "state" | "motion" | "motionKey" | "animated">;
   privacy: ChatHeadPrivacy;
   onToggle: () => void;
@@ -45,7 +46,7 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   const PrivacyIcon = privacy ? PRIVACY_ICONS[privacy.kind] : Users;
   const title = bot.tasks?.find((task) => task.threadId === bot.threadId)?.title;
   // Simple mode calls an untitled conversation what it is, never a "thread".
-  const conversation = !awayFromMainThread(bot, false) ? (privacy?.kind === "shared" ? t("task.sharedChat") : null)
+  const conversation = identityOnly ? null : !awayFromMainThread(bot, false) ? (privacy?.kind === "shared" ? t("task.sharedChat") : null)
     : !title || title === UNTITLED ? t("task.untitledChat") : localizedTaskTitle(title);
   const label = t("chat.openProfileAria", { name: bot.name });
   return (
@@ -58,10 +59,10 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
       aria-label={conversation ? `${label}, ${conversation}` : label}
       aria-expanded={open}
       aria-controls={open ? BOT_PANEL_ID : undefined}
-      className={cn("group flex min-w-0 max-w-full items-center gap-2 rounded-full py-[7.5px] pl-[7.5px] pr-[13.5px] text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
+      className={identityOnly ? "group flex min-w-0 max-w-[40%] shrink-0 items-center gap-2 rounded-md px-1 py-1.5 text-ink hover:bg-raised focus-visible:outline-2 focus-visible:outline-focus" : cn("group flex min-w-0 max-w-full items-center gap-2 rounded-full py-[7.5px] pl-[7.5px] pr-[13.5px] text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
     >
       <BotAvatar bot={bot} size={24} {...avatar} />
-      <span dir="auto" className="min-w-0 truncate text-[14px] font-medium leading-5">{bot.name}</span>
+      <span dir="auto" className={cn("min-w-0 truncate text-[14px] font-medium leading-5", identityOnly && "@max-[30rem]/chathead:hidden")}>{bot.name}</span>
       {conversation && (
         <>
           <ChevronRight size={12} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
@@ -74,10 +75,10 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
           <span className="sr-only">{privacyLabel}</span>
         </span>
       )}
-      {elsewhere > 0 && (
+      {!identityOnly && elsewhere > 0 && (
         <span role="img" data-chathead-elsewhere aria-label={t("task.otherActivity", { count: elsewhere })} className="size-1.5 shrink-0 rounded-full bg-accent" />
       )}
-      {!open && !conversation && (
+      {!identityOnly && !open && !conversation && (
         <span aria-hidden="true" data-chathead-chevron className="-ml-0.5 flex shrink-0">
           <ChevronRight size={12} className={cn("shrink-0 text-ink-tertiary transition-transform group-hover:translate-x-0.5 group-focus-visible:translate-x-0.5", CHEVRON_MOTION)} />
         </span>

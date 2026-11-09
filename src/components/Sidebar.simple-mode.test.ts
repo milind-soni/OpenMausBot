@@ -4,11 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initialState, type AppState, type Bot, type Group } from "@/state/store";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
-const fixture = vi.hoisted(() => ({ advanced: false, showThreads: true, admin: true as boolean | null, state: {} as Partial<AppState>, dispatch: vi.fn() }));
+const fixture = vi.hoisted(() => ({ advanced: false, showThreads: true, admin: true as boolean | null, state: {} as Partial<AppState>, dispatch: vi.fn(), threadList: vi.fn() }));
 vi.mock("@/lib/interface-mode", async (original) => ({
   ...await original<typeof import("@/lib/interface-mode")>(),
   useAdvancedMode: () => fixture.advanced,
 }));
+vi.mock("@/lib/thread-list-navigation", () => ({ requestThreadList: fixture.threadList, useThreadListRequest: () => 0 }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
@@ -370,22 +371,21 @@ describe("bot-first sidebar", () => {
     if (density !== "icons") expect(markup).toContain('aria-label="Expand Atlas threads" aria-expanded="false"');
   });
 
-  it.each(densities)("with Advanced threads off, hides thread browsing and creation but keeps attention accessible in %s density", (density) => {
+  it.each(densities)("with Advanced folders off, keeps flat thread navigation without creation in %s density", (density) => {
     fixture.advanced = true;
     fixture.showThreads = false;
     const markup = renderToStaticMarkup(createElement(BotListItem, rowProps(density)));
     expect(markup).not.toContain("data-sidebar-thread-row");
     expect(markup).not.toContain("data-sidebar-folder-row");
-    expect(markup).not.toContain("Idle history");
+    expect(markup.includes("Idle history")).toBe(density !== "icons");
     expect(markup).not.toContain("Quiet folder");
     expect(markup).not.toContain("New thread");
     expect(markup).not.toContain("New folder");
     expect(markup).not.toContain("Expand Atlas threads");
     expect(markup).toContain('data-testid="waiting-dot"');
-    for (const id of ["approval", "working", "queued", "unread"]) expect(markup).toContain(`data-sidebar-activity-row="${id}"`);
-    expect(markup).toContain('aria-label="Atlas: Review permission · Waiting for you…"');
-    expect(markup).toContain('aria-label="Atlas: Next job · Queued"');
-    expect(markup).toContain('aria-label="Atlas: Finished reply · Unread"');
+    const attribute = density === "icons" ? "data-sidebar-activity-row" : "data-agent-thread";
+    for (const id of ["approval", "working", "queued", "unread"]) expect(markup).toContain(`${attribute}="${id}"`);
+
   });
 
   it("removes child controls and portals from a retained hidden folder list", () => {
@@ -445,10 +445,14 @@ describe("bot-first sidebar", () => {
 
     fixture.dispatch.mockClear();
     named("View threads")!.props.onClick!({} as MouseEvent);
-    expect(fixture.dispatch.mock.calls).toEqual([
-      [{ type: "select", id: bot.id }],
-      [{ type: "toggleSettings", open: true, section: "history", botId: bot.id }],
-    ]);
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(fixture.threadList).toHaveBeenLastCalledWith(bot.id);
+    fixture.state.selectedId = "other-bot";
+    renderToStaticMarkup(createElement(Capture));
+    named("View threads")!.props.onClick!({} as MouseEvent);
+    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "select", id: bot.id });
+    fixture.state.selectedId = bot.id;
+    renderToStaticMarkup(createElement(Capture));
 
     fixture.dispatch.mockClear();
     const setMain = named("Set as main thread")!;
@@ -534,7 +538,7 @@ describe("bot-first sidebar", () => {
     ]);
   });
 
-  it.each(densities)("lists the bot with no thread tree in Simple mode, only a row for each thread that waits on the person, keeping its dots, in %s density", (density) => {
+  it.each(densities)("hides thread lists in Simple mode and retains attention dots, in %s density", (density) => {
     // Its threads were left expanded in Advanced mode.
     fixture.advanced = true;
     let tree: ReactNode;
@@ -552,13 +556,12 @@ describe("bot-first sidebar", () => {
       expect(markup).not.toContain('aria-label="Atlas threads"');
       if (density === "icons") expect(markup).not.toContain("data-sidebar-bot-activity");
       else {
-        // It asks the person something, or has a reply they have not read; running, queued and idle threads stay out.
-        expect([...markup.matchAll(/data-sidebar-activity-row="([^"]+)"/g)].map((match) => match[1]).sort()).toEqual(["approval", "unread"]);
+        expect(markup).not.toContain("data-agent-thread");
       }
       expect(markup).toContain('data-testid="waiting-dot"');
     }
     const unread = renderToStaticMarkup(createElement(BotListItem, rowProps(density, { ...bot, tasks: [bot.tasks![0]!, bot.tasks![5]!] })));
-    expect(unread.includes('data-sidebar-activity-row="unread"')).toBe(density !== "icons");
+    expect(unread).not.toContain("data-agent-thread");
     const read = renderToStaticMarkup(createElement(BotListItem, rowProps(density, { ...bot, unread: false, tasks: [bot.tasks![0]!, bot.tasks![1]!, bot.tasks![3]!] })));
     expect(read).not.toContain("data-sidebar-activity-row");
     expect(unread).toContain(density === "icons" ? "rounded-full border border-panel bg-accent" : density === "comfortable" ? 'data-testid="unread-dot"' : 'aria-label="Unread threads"');
@@ -643,13 +646,13 @@ describe("activity-only escape hatch", () => {
     ] };
     const ended: Bot = { ...runner, tasks: runner.tasks!.map((task) => task.routineRunId ? { ...task, busy: false, activity: "idle" as const, unread: true } : task) };
     // Searching "Main" opens the thread tree, which itself keeps routine runs out: the row is the only way in.
-    const rows = (candidate: Bot, query = "") => renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate, query))).split('data-sidebar-activity-row="run"').length - 1;
+    const rows = (candidate: Bot, query = "") => renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate, query))).match(/data-(?:sidebar-activity-row|agent-thread)="run"/g)?.length ?? 0;
     for (const showThreads of [false, true]) for (const advanced of [false, true]) {
       fixture.showThreads = showThreads;
       fixture.advanced = advanced;
-      expect(rows(runner)).toBe(1);
+      expect(rows(runner)).toBe(advanced ? 1 : 0);
       expect(rows(ended)).toBe(0);
-      if (showThreads) expect(rows(runner, "Main")).toBe(1);
+      if (showThreads) expect(rows(runner, "Main")).toBe(advanced ? 1 : 0);
     }
   });
 
@@ -660,13 +663,13 @@ describe("activity-only escape hatch", () => {
     ] };
     const rows = () => {
       const markup = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", left)));
-      return ["left-behind", "main-chat"].filter((threadId) => markup.includes(`data-sidebar-activity-row="${threadId}"`));
+      return ["left-behind", "main-chat"].filter((threadId) => markup.includes(`data-${fixture.showThreads ? "sidebar-activity-row" : "agent-thread"}="${threadId}"`));
     };
     fixture.advanced = true;
     fixture.showThreads = false;
-    expect(rows()).toEqual(["left-behind"]);
+    expect(rows()).toEqual(["left-behind", "main-chat"]);
     fixture.state.selectedId = left.id;
-    expect(rows()).toEqual(["main-chat"]);
+    expect(rows()).toEqual(["left-behind", "main-chat"]);
     fixture.showThreads = true;
     fixture.state.selectedId = "other-bot";
     expect(rows()).toEqual(["main-chat"]);

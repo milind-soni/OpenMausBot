@@ -12,10 +12,10 @@ import { formatTaskTokens, headlineTokens, usageDetail } from "@/lib/usage";
 import { nextRename } from "@/lib/rename";
 import { imeComposing } from "@/lib/send-key";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
-import { useShowThreads } from "@/lib/thread-preferences";
-import { attentionJumpAction, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
+import { attentionJumpAction, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, type AttentionThread } from "./SidebarBotActivity";
 import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency, threadUpdatedLabel, useRelativeNow } from "./SidebarThreadRow";
-import { Select } from "./Select";
+import { ThreadStatus } from "./ThreadStatus";
+import { consumeThreadListRequest, useThreadListRequest } from "@/lib/thread-list-navigation";
 
 export const TASK_PICKER_DISMISS_MS = 500;
 
@@ -65,7 +65,7 @@ function TaskUsage({ usage }: { usage: Task["usage"] }) {
   );
 }
 
-type PickerTask = Pick<Task, "threadId" | "title" | "createdAt" | "updatedAt" | "pinned" | "busy" | "activity" | "unread" | "projectId" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates"> & { usage?: Task["usage"] };
+type PickerTask = { queued?: boolean } & Pick<Task, "threadId" | "title" | "createdAt" | "updatedAt" | "pinned" | "busy" | "activity" | "unread" | "projectId" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates"> & { usage?: Task["usage"] };
 
 export function groupThreadTasks(tasks: PickerTask[], projects: BotProject[], query: string) {
   const needle = query.trim().toLowerCase();
@@ -89,11 +89,17 @@ function ConversationTaskPicker({
   attention,
   onAttentionJump,
   workingElsewhere = 0,
+  showCurrent = false,
+  compact = false,
+  openRequest = 0,
 }: {
   threadId: string;
   tasks: PickerTask[];
   busy: boolean;
   workingElsewhere?: number;
+  showCurrent?: boolean;
+  compact?: boolean;
+  openRequest?: number;
   bot?: Bot;
   onNew: () => void;
   onSwitch: (threadId: string) => void;
@@ -115,6 +121,11 @@ function ConversationTaskPicker({
   const now = useRelativeNow();
 
   const current = tasks.find((t) => t.threadId === threadId);
+  useEffect(() => {
+    if (!openRequest || !bot) return;
+    setOpen(true);
+    consumeThreadListRequest(bot.id, openRequest);
+  }, [openRequest, bot?.id]);
 
   const clearDismiss = () => {
     if (dismissTimer.current) {
@@ -219,22 +230,24 @@ function ConversationTaskPicker({
   const results = [...attentionRows.map((entry) => ({ kind: "attention" as const, entry })), ...visible.map((task) => ({ kind: "task" as const, task }))];
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative min-w-0" ref={ref}>
       <button
         type="button"
         onClick={() => {
           if (open) closeMenu();
           else setOpen(true);
         }}
-        title={switchTitle}
-        aria-label={t("task.switch")}
+        title={showCurrent ? `${localizedTaskTitle(current?.title ?? t("task.newShort"))} · ${switchTitle}` : switchTitle}
+        aria-label={showCurrent ? `${t("task.switch")}: ${localizedTaskTitle(current?.title ?? t("task.newShort"))}` : t("task.switch")}
+        aria-expanded={open}
+        aria-haspopup="dialog"
         className={cn(
-          "flex max-w-[220px] items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink",
-          COMPACT_BUBBLE,
+          compact ? "flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-1.5 text-[14px] font-medium text-ink hover:bg-raised focus-visible:outline-2 focus-visible:outline-focus" : "flex max-w-full items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink",
+          !compact && COMPACT_BUBBLE,
         )}
       >
-        <span className="truncate @max-4xl/chathead:hidden">{t("task.switch")}</span>
-        <span className="shrink-0 tabular-nums opacity-60 @max-4xl/chathead:opacity-100">{tasks.length}</span>
+        <span className="min-w-0 truncate">{showCurrent ? localizedTaskTitle(current?.title ?? t("task.newShort")) : t("task.switch")}</span>
+        {!compact && <span className="shrink-0 tabular-nums opacity-60 @max-4xl/chathead:opacity-100">{tasks.length}</span>}
         {workingElsewhere > 0 && (
           <span
             role="img"
@@ -244,12 +257,13 @@ function ConversationTaskPicker({
             className="size-1.5 shrink-0 animate-pulse rounded-full bg-accent"
           />
         )}
-        <ChevronDown size={12} className="shrink-0 @max-4xl/chathead:hidden" />
+        <ChevronDown size={12} className={cn("shrink-0", !compact && "@max-4xl/chathead:hidden")} />
       </button>
 
       {motion.shown && (
-        <div className={cn("absolute right-0 top-full z-40 mt-1 w-[300px] overflow-hidden", MENU_SHEET, motion.className)} {...motion.exitProps}>
+        <div role="dialog" aria-label={t("task.list")} className={cn("absolute top-full z-40 mt-1 w-[min(360px,calc(100vw-3rem))] overflow-hidden", showCurrent ? "left-0" : "right-0", MENU_SHEET, motion.className)} {...motion.exitProps}>
           <div>
+            <div className="px-2 pb-2 text-[12px] text-ink-secondary">{t("task.list")} ({tasks.length})</div>
             <div className="flex items-center gap-2 rounded-md bg-ink/[0.05] px-2 py-1.5 focus-within:ring-2 focus-within:ring-focus/60">
               <Search size={14} className="shrink-0 text-ink-secondary" />
               <input
@@ -348,10 +362,11 @@ function ConversationTaskPicker({
                       }}
                       className="min-w-0 flex-1 text-left"
                       title={t("task.renameHint")}
+                      aria-current={active ? "page" : undefined}
                     >
                       <div dir="auto" className="truncate text-[14px] leading-[18px] text-ink">{localizedTaskTitle(task.title)}</div>
                       <div className="text-[11px] text-ink-secondary">
-                        {task.activity === "waiting-on-you" ? `${t("task.waiting")} · ` : task.waitingForTeammates ? `${t("task.waitingOnTeammate")} · ` : task.busy ? `${t("chat.activity.working")} · ` : task.unread ? `${t("task.unread")} · ` : ""}
+                        <ThreadStatus task={task} queued={task.queued} /> · {task.unread ? `${t("task.unread")} · ` : ""}
                         <TaskUpdatedTime task={task} now={now} />
                         <TaskUsage usage={task.usage} />
                         {opener && ` · ${opener}`}
@@ -422,37 +437,33 @@ function ConversationTaskPicker({
   );
 }
 
-export function BotActivityPicker({ bot }: { bot: Bot }) {
-  const { state, dispatch } = useStore();
-  const showThreads = useShowThreads();
-  if (showThreads) return null;
-  const activity = threadsWhenTreeHidden(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId);
-  if (!activity.length) return null;
-  return (
-    <div className="flex shrink-0 items-center gap-2 px-5 py-2" data-background-activity>
-      <Select variant="pill" size="sm" className="max-w-[180px] shrink-0"
-        aria-label={t("task.otherActivity", { count: activity.length })}
-        value=""
-        onChange={(event) => dispatch({ type: "switchTask", botId: bot.id, threadId: event.target.value })}
-      >
-        <option value="" disabled>{t("task.otherActivity", { count: activity.length })}</option>
-        {activity.map((task) => <option key={task.threadId} value={task.threadId}>
-          {task.title} · {task.activity === "waiting-on-you" ? t("task.waiting") : task.waitingForTeammates ? t("task.waitingOnTeammate") : task.busy || task.activity === "working" ? t("chat.activity.working") : task.queued ? t("task.queued") : t("task.unread")}
-        </option>)}
-      </Select>
-      <span dir="auto" className="truncate text-[12px] text-ink-secondary">{bot.tasks?.find((task) => task.threadId === bot.threadId)?.title}</span>
-    </div>
-  );
+export function ThreadActivityStatus({ bot }: { bot: Bot }) {
+  const { state } = useStore();
+  const current = bot.tasks?.find(task => task.threadId === bot.threadId);
+  const elsewhere = (bot.tasks ?? []).filter(task => task.threadId !== bot.threadId && (task.busy || task.activity === "working")).length;
+  return <span className="flex shrink-0 items-center gap-2" data-thread-activity role="status" aria-live="polite">
+    <ThreadStatus task={{ ...current, busy: bot.busy, activity: bot.activity, waitingForTeammates: bot.waitingForTeammates }} queued={Boolean(state.pendingQueued[bot.threadId]?.length)} />
+    {elsewhere > 0 && <span role="img" aria-label={t("thread.otherWorking", { count: elsewhere })} title={t("thread.otherWorking", { count: elsewhere })} className="text-[11px] text-ink-secondary">+{elsewhere}</span>}
+  </span>;
 }
 
-export function TaskPicker({ bot }: { bot: Bot }) {
+export function BotActivityPicker({ bot }: { bot: Bot }) {
+  return <nav aria-label={t("thread.current")} data-thread-navigation className="flex min-w-0 items-center gap-2">
+    <div className="min-w-0 flex-1"><TaskPicker bot={bot} compact /></div>
+    <ThreadActivityStatus bot={bot} />
+  </nav>;
+}
+
+export function TaskPicker({ bot, compact = false }: { bot: Bot; compact?: boolean }) {
   const { state, dispatch } = useStore();
-  const showThreads = useShowThreads();
-  if (!showThreads) return null;
+  const openRequest = useThreadListRequest(bot.id);
   return (
     <ConversationTaskPicker
       threadId={bot.threadId}
-      tasks={orderedThreadList((bot.tasks ?? []).filter((task) => !task.routineRunId))}
+      showCurrent
+      compact={compact}
+      openRequest={openRequest}
+      tasks={orderedThreadList((bot.tasks ?? []).filter((task) => !task.routineRunId || task.threadId === bot.threadId).map(task => ({ ...task, queued: Boolean(state.pendingQueued[task.threadId]?.length) })))}
       busy={false}
       bot={bot}
       attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id, state.groups)}

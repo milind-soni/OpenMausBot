@@ -927,7 +927,7 @@ export function Composer({
           {(simpleDock ? stoppable : busy) && !locked && (
           <button
             onClick={interruptTurn}
-            aria-label={t("chat.stopTurn")}
+            aria-label={t("thread.stop")}
             data-composer-stop={simpleDock ? (stopInSlot ? "slot" : "beside") : undefined}
             className={cn(
               "flex shrink-0 items-center justify-center rounded-full",
@@ -936,7 +936,7 @@ export function Composer({
                 : SIMPLE_CONTROL,
             )}
             style={stopInSlot ? slot.button.style : undefined}
-            title={t("chat.stop")}
+            title={t("thread.stop")}
           >
             <Square size={simpleDock ? 10 : 14} className="fill-current" />
           </button>

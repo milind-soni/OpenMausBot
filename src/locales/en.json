@@ -9905,5 +9905,16 @@
   "phone.code.typeIntro": "Open the {app} app and type this pairing code.",
   "phone.signIn.emailCode": "Sign-in code from your email",
   "settings.simple.account.noNameHint": "Not set yet",
-  "settings.simple.account.yourName": "Your name"
+  "settings.simple.account.yourName": "Your name",
+  "thread.status.waitingForYou": "Waiting for you",
+  "thread.status.waitingForTeammate": "Waiting for teammate",
+  "thread.status.working": "Working",
+  "thread.status.queued": "Queued",
+  "thread.status.completed": "Completed",
+  "thread.status.idle": "Idle",
+  "thread.toggleNamed": "{name} threads ({count})",
+  "thread.current": "Current thread",
+  "thread.currentNamed": "Current thread: {title}",
+  "thread.stop": "Stop this thread",
+  "thread.otherWorking": "Working in other threads: {count}"
 }

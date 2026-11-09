@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The Simple model menu in a real DOM, where effects run, focus moves and the menu floats in a portal.
-import { createElement } from "react";
+import { createElement, createRef } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -486,5 +486,29 @@ describe("while the bot is working", () => {
     fixture.bots = [busy];
     render(busy);
     expect(chip().disabled).toBe(true);
+  });
+});
+
+
+describe("model selection from the header More menu", () => {
+  it("has no model chip, opens on request, returns focus to More and can reopen", async () => {
+    fixture.instances = [{ ...claude(three), capabilities: {} }];
+    const anchor = createRef<HTMLDivElement>();
+    const renderRequest = (menuRequest: number) => flushSync(() => root.render(createElement("div", { ref: anchor },
+      createElement("button", { "aria-label": "More" }, "More"),
+      createElement(ModelPicker, { bot: scout(), threadId: "thread-scout", menuRequest, menuAnchor: anchor }))));
+    renderRequest(0);
+    expect(chip()).toBeNull();
+    expect(menu()).toBeNull();
+    renderRequest(1);
+    await settle();
+    expect(menu()).not.toBeNull();
+    press("Escape");
+    await settle();
+    expect(menu()).toBeNull();
+    expect(focused()?.getAttribute("aria-label")).toBe("More");
+    renderRequest(2);
+    await settle();
+    expect(menu()).not.toBeNull();
   });
 });
