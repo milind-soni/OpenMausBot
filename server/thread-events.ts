@@ -1,5 +1,5 @@
 import { closeSync, fstatSync, openSync, readSync, type Stats } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { RuntimeEvent } from "./contracts.ts";
 import type { InspectorEntry, InspectorPage, NativeRecord } from "../shared/inspector.ts";
 
@@ -136,6 +136,7 @@ const askQuestionsOrMissing = (value: unknown) =>
         question.options.every((option) => isRecord(option) && typeof option.label === "string"),
     ));
 
+/** Validate persisted records, including legacy relative handoff paths normalized during replay. */
 export function isRuntimeEvent(value: unknown): value is RuntimeEvent {
   if (
     !isRecord(value) ||
@@ -177,6 +178,8 @@ export function isRuntimeEvent(value: unknown): value is RuntimeEvent {
       );
     case "turn.wait_started":
       return typeof value.resource === "string" && computerHolderOrMissing(value.holder);
+    case "cap.exhausted":
+      return typeof value.handoffPath === "string" && value.handoffPath.trim().length > 0 && value.reason === "cap";
     case "turn.wait_ended":
       return (
         typeof value.resource === "string" &&
@@ -251,7 +254,11 @@ export function readThreadEvents(input: {
   const native = readRecentLines(join(nativeDir, `${threadId}.ndjson`), limit, isNativeRecord);
 
   const merged: InspectorEntry[] = [
-    ...runtime.lines.map((data): InspectorEntry => ({ kind: "runtime", at: data.createdAt, data })),
+    ...runtime.lines.map((data): InspectorEntry => ({
+      kind: "runtime",
+      at: data.createdAt,
+      data: data.type === "cap.exhausted" ? { ...data, handoffPath: resolve(data.handoffPath) } : data,
+    })),
     ...native.lines.map((data): InspectorEntry => ({ kind: "native", at: data.at, data })),
   ];
   merged.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
