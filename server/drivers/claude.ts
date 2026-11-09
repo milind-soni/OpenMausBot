@@ -57,7 +57,7 @@ import {
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
 import type { KeepWarmContract } from "./claude-keepwarm.ts"; import { claudeForks } from "./claude-warm-summary.ts";
-import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, spawnBackgroundCall } from "./claude-background.ts";
+import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, spawnBackgroundCall } from "./claude-background.ts"; import { withEndpointFolder } from "./claude-endpoint-folder.ts";
 import { permissionLaunchCwd, shellRequest } from "./permission-command.ts"; import { readToolPaths } from "../own-file-reads.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts"; import { claudeToolDraft } from "./tool-progress.ts";
@@ -1135,6 +1135,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       allowed.push("mcp__ogb", ...gateQueryTools(mcpServers));
       // A guest pre-allows only harness tools; anything else (the browser can open file:) asks.
       if (turn.guestConfined) allowed.splice(0, allowed.length, ...allowed.filter((name) => name === "mcp__ogb" || name === "mcp__agents"));
+      const env = withEndpointFolder(environment(config.endpointModels ? undefined : turnModel), config, () => retryState.delete(threadId));
       // The MCP config carries credentials and argv is readable via `ps`: a 0600 file, removed at settle.
       let mcpConfigPath: string | null = null;
       if (Object.keys(mcpServers).length) {
@@ -1143,7 +1144,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         args.push("--allowedTools", allowed.join(","));
       }
 
-      const env = environment(config.endpointModels ? undefined : turnModel);
       const authSettings = isolated && !injected.injected
         ? readClaudeAuthSettings(env, input.environment) : {};
       // The hook helper reads its bearer from a per-thread file refreshed every turn, so a
