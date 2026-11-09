@@ -16,6 +16,7 @@ import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { CodexDriver, codexNativeIncomingLogMessage, codexUpdateCommand } from "./codex.ts";
 import { codexCliOverrides } from "./codex-process.ts";
+import { parseToml } from "../toml-lite.ts";
 import * as codexProcess from "./codex-process.ts";
 import { CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, codexSignInRefused, codexUserError } from "./codex-errors.ts";
 import { CODEX_USAGE_LIMIT_REACHED } from "../../shared/codex-usage-limit.ts";
@@ -273,6 +274,51 @@ describe("CodexDriver turns (fake app-server)", () => {
     const restored = JSON.parse(readFileSync(dump, "utf8"));
     expect(Object.keys(restored.calls.find((call: { method: string }) => call.method === "thread/resume").params.config.mcp_servers)).toEqual(["notes_openmausbot"]);
     expect(restored.calls.find((call: { method: string }) => call.method === "thread/resume").params.config.mcp_servers.notes_openmausbot.default_tools_approval_mode).toBe("prompt");
+  });
+
+  it("keeps custom MCP mount names unique after an inline collision", async () => {
+    const dump = join(scratch, "scope-inline-collision.json"); process.env.FAKE_CODEX_DUMP = dump;
+    mkdirSync(join(scratch, ".codex"), { recursive: true });
+    writeFileSync(join(scratch, ".codex/config.toml"), 'mcp_servers = { notes = { url = "https://example.test/ambient" } }');
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_MCP_OVERRIDES: "1" } });
+    await instance.adapter.sendTurn({
+      threadId: "scope-inline-collision", text: "Fixture",
+      toolScope: { allow: ["native:*", "mcp:notes:read", "mcp:notes_openmausbot:read"] },
+      integrations: { custom: {
+        notes: { type: "http", url: "https://example.test/first", headers: {} },
+        notes_openmausbot: { type: "http", url: "https://example.test/second", headers: {} },
+      } },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const selected = seen.calls.find((call: { method: string }) => call.method === "thread/start").params.config.mcp_servers;
+    expect(Object.keys(selected)).toEqual(["notes_openmausbot", "notes_openmausbot_openmausbot"]);
+    expect(Object.keys(seen.env).filter((name) => name.startsWith("OMB_GATE_CONFIG_"))).toHaveLength(2);
+    expect(seen.calls.filter((call: { method: string }) => call.method === "turn/start")).toHaveLength(1);
+  });
+
+  it("keeps literal MCP server names intact in scoped CLI overrides", async () => {
+    const dump = join(scratch, "scope-literal-name.json"); process.env.FAKE_CODEX_DUMP = dump;
+    mkdirSync(join(scratch, ".codex"), { recursive: true });
+    writeFileSync(join(scratch, ".codex/config.toml"), 'mcp_servers = { "notes.prod" = { url = "https://example.test/ambient" } }');
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_MCP_OVERRIDES: "1" } });
+    await instance.adapter.sendTurn({
+      threadId: "scope-literal-name", text: "Fixture",
+      toolScope: { allow: ["native:*", "mcp:agents:*", "mcp:notes.prod:read"] },
+      integrations: {
+        agents: { command: "node", args: ["agents.js"], env: {} },
+        custom: { "notes.prod": { type: "http", url: "https://example.test/private", headers: {} } },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const table = seen.argv.find((arg: string) => arg.startsWith("mcp_servers="));
+    expect(parseToml(table).mcp_servers).toEqual({ "notes.prod": { enabled: false } });
+    expect(seen.argv).not.toContain("mcp_servers.notes.prod.enabled=false");
+    expect(seen.argv.indexOf(table)).toBeLessThan(seen.argv.findIndex((arg: string) => arg.startsWith("mcp_servers.agents.command=")));
+    const selected = seen.calls.find((call: { method: string }) => call.method === "thread/start").params.config.mcp_servers;
+    expect(Object.keys(selected)).toEqual(["agents", "notes_prod"]);
+    expect(seen.calls.filter((call: { method: string }) => call.method === "turn/start")).toHaveLength(1);
   });
 
   it("still mounts its own copy of a config.toml server when a tool selection switches config.toml's off", async () => {

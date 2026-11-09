@@ -63,6 +63,8 @@
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
+import { parseToml } from "../toml-lite.ts";
+
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
 
 // Follow the spawning server down; on Windows ppid does not change after parent exit.
@@ -175,6 +177,13 @@ if (process.argv[2] === "exec") {
 const calls: Array<{ method: string; params: unknown }> = [];
 const mcpOverrides: Record<string, Record<string, unknown>> = {};
 for (let index = 0; process.env.FAKE_CODEX_MCP_OVERRIDES === "1" && index < process.argv.length; index++) {
+  if (process.argv[index - 1] === "-c" && process.argv[index]!.startsWith("mcp_servers=")) {
+    const tables = parseToml(process.argv[index]!).mcp_servers as Record<string, Record<string, unknown>>;
+    // The real CLI replaces its accumulated override table before later dotted-path fields apply.
+    for (const name of Object.keys(mcpOverrides)) delete mcpOverrides[name];
+    Object.assign(mcpOverrides, tables);
+    continue;
+  }
   const match = process.argv[index - 1] === "-c" ? /^mcp_servers\.([^.]+)\.([^.]+)=(.*)$/.exec(process.argv[index]!) : null;
   if (match) (mcpOverrides[match[1]!] ??= {})[match[2]!] = JSON.parse(match[3]!);
 }

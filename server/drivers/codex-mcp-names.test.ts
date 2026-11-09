@@ -2,7 +2,9 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { codexConfigMcp, codexConfigMcpServerNames, codexConfigRunsServer, mcpServerNamesInToml, mountedMcpServerName } from "./codex-mcp-names.ts";
+import { codexConfigMcp, codexConfigMcpServerNames, codexConfigRunsServer, codexMcpDisableArgs, mcpServerNamesInToml, mountedMcpServerName } from "./codex-mcp-names.ts";
+
+import { parseToml } from "../toml-lite.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { force: true, recursive: true }); });
@@ -104,3 +106,29 @@ describe("codexConfigRunsServer", () => {
   });
 });
 
+
+describe("Codex literal MCP override keys", () => {
+  it("disables literal dotted and quoted names without creating nested servers", () => {
+    const names = new Set(["notes.prod", 'quoted"name', "ordinary"]);
+    const args = codexMcpDisableArgs(names);
+    expect(args).toHaveLength(2);
+    expect(args[0]).toBe("-c");
+    expect(parseToml(args[1]!).mcp_servers).toEqual({
+      "notes.prod": { enabled: false },
+      'quoted"name': { enabled: false },
+      ordinary: { enabled: false },
+    });
+  });
+
+  it("keeps existing flat CLI overrides for ordinary names", () => {
+    expect(codexMcpDisableArgs(new Set(["notes", "plain-name"]))).toEqual([
+      "-c", "mcp_servers.notes.enabled=false", "-c", "mcp_servers.plain-name.enabled=false",
+    ]);
+    expect(codexMcpDisableArgs(new Set())).toEqual([]);
+  });
+
+  it.each(["notes.prod", "notes prod", 'notes"prod'])("gives %s a safe and unoccupied CLI mount name", (name) => {
+    expect(mountedMcpServerName(name, new Set())).toBe("notes_prod");
+    expect(mountedMcpServerName(name, new Set(["notes_prod", "notes_prod_openmausbot"]))).toBe("notes_prod_openmausbot2");
+  });
+});

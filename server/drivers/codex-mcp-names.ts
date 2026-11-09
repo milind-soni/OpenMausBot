@@ -44,6 +44,15 @@ export function codexConfigMcp(env: Record<string, string | undefined>): CodexCo
   return { names: mcpServerNamesInToml(text), tables };
 }
 
+/** Disable literal config keys before mounting per-turn servers. Codex splits CLI paths at every dot. */
+export function codexMcpDisableArgs(names: ReadonlySet<string>): string[] {
+  if ([...names].some((name) => !/^[A-Za-z0-9_-]+$/.test(name))) {
+    const tables = [...names].map((name) => `${JSON.stringify(name)} = { enabled = false }`).join(", ");
+    return ["-c", `mcp_servers={ ${tables} }`];
+  }
+  return [...names].flatMap((name) => ["-c", `mcp_servers.${name}.enabled=false`]);
+}
+
 export function codexConfigMcpServerNames(env: Record<string, string | undefined>): Set<string> {
   return codexConfigMcp(env).names;
 }
@@ -72,8 +81,9 @@ export function codexConfigRunsServer(config: CodexConfigMcp, name: string, serv
 }
 
 export function mountedMcpServerName(name: string, taken: ReadonlySet<string>): string {
-  if (!taken.has(name)) return name;
-  let candidate = `${name}_openmausbot`;
-  for (let i = 2; taken.has(candidate); i++) candidate = `${name}_openmausbot${i}`;
+  const safeName = name.replace(/[^A-Za-z0-9_-]/g, "_") || "mcp";
+  if (!taken.has(safeName)) return safeName;
+  let candidate = `${safeName}_openmausbot`;
+  for (let i = 2; taken.has(candidate); i++) candidate = `${safeName}_openmausbot${i}`;
   return candidate;
 }
