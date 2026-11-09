@@ -85,10 +85,22 @@ chmod +x release/OpenMausBot-*-x86_64.AppImage
 
 For a downloaded release AppImage, use `OpenMausBot.AppImage` in place of the versioned path above.
 
-### Arch Linux and EndeavourOS (AppImage)
+### Arch Linux and EndeavourOS
 
-Arch-based distributions are not an official target, but the release AppImage runs there. A minimal Arch
-install lacks the FUSE helper and some desktop libraries the AppImage needs, so install them first:
+Arch-based distributions can run the portable AppImage or install a native `.pacman` package.
+
+#### Native pacman package
+Build the pacman package from source:
+
+```sh
+pnpm package:arch
+sudo pacman -U release/OpenMausBot-<version>-x64.pacman
+```
+
+Replace `<version>` with the built version (for example, `0.1.149`). Then launch `openmausbot` from the application launcher or command line.
+
+#### Portable AppImage
+A minimal Arch install lacks the FUSE helper and some desktop libraries the AppImage needs, so install them first:
 
 ```sh
 sudo pacman -S --needed fuse3 gtk3 nss alsa-lib libcups mesa
