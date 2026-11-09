@@ -140,8 +140,10 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       revealed.current = 0;
       focusOrigin.current = null;
     } else if (revealed.current !== focusRequest) {
-      if (focusOrigin.current?.request !== focusRequest) focusOrigin.current = { request: focusRequest, element: document.activeElement };
-      if (codesLoaded && document.activeElement === focusOrigin.current.element && revealPhonePairing(root.current)) {
+      // Without a document there is no focus to steal, so the request stands.
+      const activeElement = typeof document === "undefined" ? null : document.activeElement;
+      if (focusOrigin.current?.request !== focusRequest) focusOrigin.current = { request: focusRequest, element: activeElement };
+      if (codesLoaded && activeElement === focusOrigin.current.element && revealPhonePairing(root.current)) {
         revealed.current = focusRequest;
         if (canPairDevices(session) && takePairOnOpen()) void create();
       }
