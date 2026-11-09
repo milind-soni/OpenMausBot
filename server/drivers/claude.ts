@@ -1144,6 +1144,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
 
       const env = environment(config.endpointModels ? undefined : turnModel);
+      // A custom endpoint has no sign-in to make its own folder, and the bot box binds that folder: bubblewrap stops a turn
+      // whose folder is missing ("Can't find source path"), so it is made here before every spawn.
+      if (config.endpointModels && config.configDir && env.CLAUDE_CONFIG_DIR) mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true, mode: 0o700 });
       const authSettings = isolated && !injected.injected
         ? readClaudeAuthSettings(env, input.environment) : {};
       // The hook helper reads its bearer from a per-thread file refreshed every turn, so a

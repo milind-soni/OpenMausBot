@@ -2,7 +2,7 @@
 // back, and the data folder is empty in there. The question tool's helper reaches the broker through a socket the driver
 // makes in the data folder, and the hook helper reads its bearer from a file there, so the box must put both back. Off a
 // Cloud the box is off and nothing changes.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { homedir, tmpdir } from "node:os";
@@ -37,6 +37,19 @@ while [ "$1" != "--" ]; do
 done
 shift
 if [ "$shown" = 0 ] && [ -n "$OMB_HOOK_TOKEN_FILE" ]; then OMB_HOOK_TOKEN_FILE="$OMB_HOOK_TOKEN_FILE.not-in-the-box"; export OMB_HOOK_TOKEN_FILE; fi
+exec "$@"
+`;
+/** Like bubblewrap, it stops before the command when a required (not -try) bind's source is missing. */
+const STRICT_BWRAP = `#!/bin/sh
+while [ "$1" != "--" ]; do
+  case "$1" in
+    --bind|--ro-bind) if [ ! -e "$2" ]; then echo "bwrap: Can't find source path $2: No such file or directory" >&2; exit 1; fi; shift 3;;
+    --bind-try|--ro-bind-try|--symlink) shift 3;;
+    --tmpfs|--dir|--proc|--dev|--chdir|--hostname|--seccomp) shift 2;;
+    *) shift;;
+  esac
+done
+shift
 exec "$@"
 `;
 const TMPDIR = process.env.TMPDIR;
@@ -144,5 +157,44 @@ describe("a Claude turn in the bot box", () => {
     } finally {
       await new Promise<void>((resolve) => harness.close(() => resolve()));
     }
+  }, 60_000);
+  // A custom endpoint (Settings > Custom endpoint) gets its own folder under providers/ but no sign-in that would make it.
+  it.skipIf(process.platform === "win32")("makes a custom endpoint's own Claude folder before the box binds it", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-claude-box-endpoint-"));
+    dirs.push(scratch);
+    const fakeBwrap = join(scratch, "fake-bwrap.sh");
+    writeFileSync(fakeBwrap, STRICT_BWRAP);
+    chmodSync(fakeBwrap, 0o755);
+    await botBox.start({
+      dataDir: DATA_DIR, home: homedir(), port: 8799, denyEnv: new Set(), env: {}, log: () => {},
+      detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: fakeBwrap, socat: "/usr/bin/true" } }),
+    });
+    const wrap = vi.spyOn(botBox, "wrap");
+    delete process.env.TMPDIR;
+    // Outside /tmp and HOME, like a server's data folder: the box binds it on its own line, as it does on a Cloud.
+    const dataOutsideTmp = mkdtempSync(join(process.cwd(), ".omb-test-endpoint-"));
+    dirs.push(dataOutsideTmp);
+    const configDir = join(dataOutsideTmp, "providers", "claude-endpoint");
+    expect(existsSync(configDir)).toBe(false);
+    instance = await ClaudeDriver.create({
+      instanceId: "claude-endpoint", displayName: "GLM", enabled: true,
+      environment: { ANTHROPIC_BASE_URL: "https://api.example.test/anthropic", ANTHROPIC_AUTH_TOKEN: "endpoint-key", ANTHROPIC_API_KEY: "endpoint-key", ANTHROPIC_MODEL: "glm-test" },
+      config: { cli: FAKE_CLI, permissionMode: "acceptEdits", configDir, requireApiKey: true, endpointModels: ["glm-test"] },
+    });
+    const recorder = recordEvents(instance.adapter);
+    const cwd = join(DATA_DIR, "task-workspaces", "bot-a", "t-boxed-endpoint");
+    mkdirSync(cwd, { recursive: true });
+    mkdirSync(join(DATA_DIR, "workspaces", "bot-a"), { recursive: true });
+
+    await instance.adapter.sendTurn({ threadId: "t-boxed-endpoint", botId: "bot-a", text: "test", approvalMode: "full", cwd, model: "glm-test" });
+    const settled = await recorder.until((event) => event.type === "turn.completed", 30_000) as { ok: boolean; stopReason: string };
+
+    expect(settled, "the turn ran instead of stopping at the box (bwrap: Can't find source path)").toMatchObject({ ok: true });
+    expect(existsSync(configDir), "the endpoint's folder was made").toBe(true);
+    const boxed = wrap.mock.results.map((result) => result.value as WrappedSpawn | null).find((spawned) => spawned?.plan.botId === "bot-a");
+    expect(boxed, "the engine ran in the box").toBeTruthy();
+    expect(visibleInBox(boxed!.plan, configDir)).toBe("rw");
   }, 60_000);
 });
