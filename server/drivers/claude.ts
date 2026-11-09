@@ -1714,13 +1714,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           }
         } else if (session.turn && !session.turn.settled) {
           const { turnId, input: turn, retryAbort } = session.turn;
-          // The CLI prints this last before exiting; the refused flag never reached the prompt, so relaunch on the same cursor.
-          const refusedAutocompact = /unknown option '--autocompact'/.test(session.stderr);
+          // Commander prints this last before exiting; only a launch that passed the flag counts, so the flag-less relaunch can't loop.
+          const refusedAutocompact = session.argsKey.includes('"--autocompact"') && /unknown option '--autocompact'/.test(session.stderr);
           if (refusedAutocompact) [cliHasAutocompact, autocompactRefusedBy] = [false, cliHelpVersion];
           const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
-          const endedBeforeTurn = session.turn.awaitingInit === true || refusedAutocompact;
+          const endedBeforeTurn = session.turn.awaitingInit === true || (refusedAutocompact && !session.turn.sawStreamDelta && session.turn.answered !== true);
           if (!retry.cancelled && mayResendTurn({ endedBeforeTurn, exitCode: code, transient: verdict.transient,
             streamed: session.turn.sawStreamDelta, answered: session.turn.answered === true, attempt: retry.attempt })) {
             // `active` stays: an interrupt during the backoff reaches stop() and cancels the retry.
