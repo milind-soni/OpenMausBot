@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Task } from "@/state/store";
+import { closeShareReplay, shareReplayTarget } from "@/lib/share-replay";
 import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 
 const fixture = vi.hoisted(() => {
@@ -81,7 +82,7 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
 
   it("offers threads in Simple mode, and Usage and the Inspector unlocked", () => {
     const menu = menuOf(createElement(ChatMoreMenu, { bot }));
-    expect(keys(menu.items)).toEqual(["find", "new-thread", "threads", "copy", "download", "activity", "inspector"]);
+    expect(keys(menu.items)).toEqual(["find", "new-thread", "threads", "copy", "download", "replay", "activity", "inspector"]);
     for (const item of menu.items) {
       expect(item.disabled, item.key).toBeFalsy();
       expect(item.heading ?? "", item.key).not.toBe("In Advanced mode");
@@ -117,7 +118,7 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
 
   it("leaves All threads out while the bot has one thread", () => {
     const single = { ...bot, threadId: "main", tasks: [task("main", "Our chat", 1), task("routine", "Morning digest", 5, { routineRunId: "run-1" })] };
-    expect(keys(menuOf(createElement(ChatMoreMenu, { bot: single })).items)).toEqual(["find", "new-thread", "copy", "download", "activity", "inspector"]);
+    expect(keys(menuOf(createElement(ChatMoreMenu, { bot: single })).items)).toEqual(["find", "new-thread", "copy", "download", "replay", "activity", "inspector"]);
     expect(keys(menuOf(createElement(ChatMoreMenu, { bot: { ...bot, tasks: undefined } })).items)).not.toContain("threads");
   });
 
@@ -147,7 +148,16 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
 describe("ChatShareMenu, the bot panel's Share", () => {
   it("copies or downloads the conversation, in those words", () => {
     const menu = menuOf(createElement(ChatShareMenu, { bot, className: "" }));
-    expect(menu.items.map((item) => [item.key, item.label])).toEqual([["copy", "Copy conversation"], ["download", "Download conversation"]]);
+    expect(menu.items.map((item) => [item.key, item.label])).toEqual([["copy", "Copy conversation"], ["download", "Download conversation"], ["replay", "Share replay"]]);
+  });
+
+  it("opens Share replay for this conversation once the bot has answered", () => {
+    const menu = menuOf(createElement(ChatShareMenu, { bot, className: "" }));
+    const replay = menu.items.find((item) => item.key === "replay")!;
+    expect(replay.disabled).toBe(false);
+    replay.onSelect();
+    expect(shareReplayTarget()).toEqual({ threadId: bot.threadId, botId: bot.id });
+    closeShareReplay();
   });
 });
 
@@ -155,7 +165,7 @@ describe("ChatHeaderMenu, Advanced mode's header ⋯", () => {
   it("keeps main's items, trigger and hover menu below the header", () => {
     fixture.advanced = true;
     const menu = menuOf(createElement(ChatHeaderMenu, { bot }));
-    expect(keys(menu.items)).toEqual(["find", "copy", "download", "activity", "inspector"]);
+    expect(keys(menu.items)).toEqual(["find", "copy", "download", "replay", "activity", "inspector"]);
     expect(menu.items.find((item) => item.key === "inspector")).toMatchObject({ separatorBefore: true });
     expect(menu.items.every((item) => !item.disabled && item.heading !== "In Advanced mode")).toBe(true);
     expect(menu).toMatchObject({ placement: "below", openOnHover: true });
