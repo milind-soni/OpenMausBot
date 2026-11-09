@@ -88,7 +88,9 @@ export function createSharedVmControl(deps: SharedVmControlDeps) {
   /** A team cloud computer or the shared Local VM serves several bots, so one bot's sign-in card must not hand it back
    * from under another. */
   const sharedKey = (key: string): boolean => key === SHARED_VM_CONTROL_KEY || key.startsWith(teamComputerOwner(""));
-  const membersOf = (key: string): string[] => sharedKey(key) ? store.bots.filter(bot => botKeys(bot).includes(key)).map(bot => bot.id) : [key];
+  /** Outside shared mode no bot's keys name the shared desktop, yet panels paused on it before the change must hear it ended. */
+  const membersOf = (key: string): string[] => key === SHARED_VM_CONTROL_KEY && !sharedDesk() ? store.bots.map(bot => bot.id)
+    : sharedKey(key) ? store.bots.filter(bot => botKeys(bot).includes(key)).map(bot => bot.id) : [key];
 
   const personHolds = (resource: string): boolean => resource === SHARED_VM_RESOURCE && control.snapshot(SHARED_VM_CONTROL_KEY).held;
 

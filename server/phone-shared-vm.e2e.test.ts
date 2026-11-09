@@ -372,6 +372,15 @@ describe("a person's hold on the shared Local VM", () => {
     expect(await held(cloud.id)).toBe(true);
   }, 30_000);
 
+  it.each(["per-bot", "pool"] as const)("a change to %s mode tells every bot paused on the shared desktop that it is free", async (mode) => {
+    const a = await newBot("Ada");
+    await control(api, a.id, { action: "take" });
+    const since = sse.frames.length;
+    await setMode(mode);
+    await until(() => framesFor(a.id, since).at(-1)?.held, value => value === false);
+    expect(framesFor(witness, since).at(-1)?.held).toBe(false);
+  }, 30_000);
+
   it("only a person's Done on the shared desktop's last open sign-in card hands it back", async () => {
     const [a, b] = [await newBot("Ada", { computer: "vm" }), await newBot("Bea", { computer: "vm" })];
     const asked = await startTurn(b.id, b.threadId);
