@@ -104,6 +104,7 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   if (a.parentId !== undefined) node.parentId = a.parentId;
   if (groupId !== undefined) node.groupId = groupId;
   if (a.batchKey !== undefined) node.requestBatchKey = a.batchKey;
+  if (a.statusOnly) node.statusOnly = true;
   if (a.startedAt !== undefined) node.startedAt = a.startedAt;
   const origin = legacyOrigin(a.origin);
   if (origin) node.origin = origin;
