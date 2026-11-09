@@ -95,9 +95,9 @@ const errorText = (error) => (typeof error?.errorKey === "string" && error.error
 
 /** The session's Cloud (`cloud`: its address, id and `formerOrigins`) is the one kept as `kept` (a journal's Cloud: its
  * address, and its id once known): the same address, the same id, or an address the Cloud had before it moved to another
- * provider. A journal from before ids were kept is known again by that last one alone. */
+ * provider, unless both ids are known and differ. A journal from before ids were kept is known again by that last one. */
 export const sameCloud = (cloud, kept) => cloud.origin === kept.origin || (Boolean(cloud.id) && cloud.id === kept.id)
-  || (Array.isArray(cloud.formerOrigins) && cloud.formerOrigins.includes(kept.origin));
+  || (Array.isArray(cloud.formerOrigins) && cloud.formerOrigins.includes(kept.origin) && !(cloud.id && kept.id && cloud.id !== kept.id));
 
 /** The session's My Cloud is known to be another Cloud than `kept`. A held Cloud that names no address gives no sign of being
  * another, so it is taken for that one. */

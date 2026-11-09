@@ -109,6 +109,9 @@ test("a Cloud that truly is another still counts as ended: a move not switched y
   const sameAddress = computer({ journal: doneTo(movedTo(OLD, { id: "c-home" })), cloud: { origin: OTHER, machine: OTHER, id: "c-other" }, admin: { [OLD]: "ended" } });
   await sameAddress.home.kick();
   assert.equal(sameAddress.journal.gone, "ended", "an id of its own is no sign of being the same Cloud");
+  const twoIds = computer({ journal: doneTo(movedTo(OLD, { id: "c-home" })), cloud: { ...other, formerOrigins: [OLD] }, admin: { [OLD]: "deleted" } });
+  await twoIds.home.kick();
+  assert.equal(twoIds.journal.gone, "deleted", "an old address listed for a Cloud with another known id never makes it this journal's");
 });
 
 test("the same Cloud that moved and then ended still brings this computer home, as My Cloud ending always has", async () => {
