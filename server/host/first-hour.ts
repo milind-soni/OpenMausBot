@@ -198,9 +198,12 @@ export function createFirstHour(deps: FirstHourDeps) {
   };
   const said = (threadId: string, from: number): boolean =>
     deps.store.messagesFor(threadId).some((message) => message.role === "user" && message.kind === "text" && message.at >= from);
-  /** The person's newest message has no answer yet: a server line now would read as that answer. */
+  /** The person's newest message on the shown branch has no answer from a bot turn yet (text or a rich reply such as a
+   * widget): a server line now would read as that answer. Server-written lines (no turnId) are not answers. */
   const personUnanswered = (threadId: string): boolean =>
-    deps.store.messagesFor(threadId).findLast((message) => message.kind === "text" && (message.role === "user" || message.role === "bot"))?.role === "user";
+    deps.store.activePath(threadId).findLast((message) =>
+      message.role === "user" ? message.kind === "text" : Boolean(message.turnId) && message.kind !== "activity" && message.kind !== "digest" && message.kind !== "compaction",
+    )?.role === "user";
   const answered = (threadId: string, from: number): boolean =>
     deps.store.messagesFor(threadId).some((message) => message.role === "bot" && message.kind === "text" && message.at >= from);
   const soon = (step: () => Promise<void>): void => { setTimeout(() => void step(), SOON_MS).unref?.(); };

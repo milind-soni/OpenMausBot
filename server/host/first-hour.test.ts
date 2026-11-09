@@ -260,7 +260,10 @@ describe("a new Cloud's first hour", () => {
     s.write("Every couple in both movies and Friends");
     fh.tick();
     expect(s.texts().filter((text) => text?.startsWith("So far"))).toEqual([]);
-    s.reply("Here they are.");
+    s.store.appendMessage(s.thread(), { role: "bot", kind: "text", text: "A server notice." });
+    fh.tick();
+    expect(s.texts().filter((text) => text?.startsWith("So far"))).toEqual([]);
+    s.store.appendMessage(s.thread(), { role: "bot", kind: "widget", text: "Pick one", turnId: "turn-1" });
     fh.tick();
     expect(s.texts().at(-1)).toBe("So far I've sorted 29 emails: about 30 minutes back.");
   });
