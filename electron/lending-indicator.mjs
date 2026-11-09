@@ -40,8 +40,8 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
   const noticeTimers = new Map(), notified = new Set();
   const followProblems = problems => {
     const now = new Set(problems.map(problem => `${problem.name}\n${problem.why}`));
-    for (const key of [...noticeTimers.keys()]) if (!now.has(key)) { clearTimer(noticeTimers.get(key)); noticeTimers.delete(key); }
-    for (const key of [...notified]) if (!now.has(key)) notified.delete(key);
+    for (const key of noticeTimers.keys()) if (!now.has(key)) { clearTimer(noticeTimers.get(key)); noticeTimers.delete(key); }
+    for (const key of notified) if (!now.has(key)) notified.delete(key);
     for (const problem of problems) {
       const key = `${problem.name}\n${problem.why}`;
       if (noticeTimers.has(key) || notified.has(key)) continue;
