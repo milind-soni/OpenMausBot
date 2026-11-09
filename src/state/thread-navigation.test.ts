@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setTeamChats } from "./team-chats";
 import { markedThread, openBotRow, openRoomThread } from "./thread-navigation";
 
-type Task = { threadId: string; activity?: string; unread?: boolean; busy?: boolean; routineRunId?: string; archivedAt?: number; createdAt?: number; updatedAt?: number };
+type Task = { threadId: string; activity?: string; unread?: boolean; busy?: boolean; routineRunId?: string; archivedAt?: number; createdAt?: number; updatedAt?: number; openedBy?: { botId: string } };
 const chief = (tasks: Task[], threadId = "main", mainThreadId = "main") => ({ id: "cos", threadId, mainThreadId, tasks: [{ threadId: "main", createdAt: 1 }, ...tasks] });
 const opened = (bot: ReturnType<typeof chief>, threadsShown: boolean, onScreen = false) => {
   const dispatch = vi.fn();
@@ -58,6 +58,24 @@ describe("a click on a bot's row or tile", () => {
   it("opens the bot as ever when nothing is marked, or when the main chat itself is what is marked", () => {
     expect(opened(chief([{ threadId: "quiet" }]), false)).toEqual([{ type: "select", id: "cos" }]);
     expect(opened({ ...chief([work]), tasks: [{ threadId: "main", unread: true, createdAt: 1 }, { threadId: "work" }] }, false)).toEqual([{ type: "select", id: "cos" }]);
+  });
+
+  it("opens a finished hand-off instead of the older chat, and a second click still returns to that chat", () => {
+    const handed = { threadId: "work", updatedAt: 20, openedBy: { botId: "lead" } };
+    const bot = chief([handed], "main");
+    bot.tasks = [{ threadId: "main", createdAt: 1, updatedAt: 2 }, handed];
+    expect(opened(bot, false)).toEqual([{ type: "switchTask", botId: "cos", threadId: "work" }]);
+    expect(opened({ ...bot, threadId: "work" }, false, true)).toEqual([{ type: "switchTask", botId: "cos", threadId: "main" }]);
+  });
+
+  it("does not prefer a hand-off the person is already on, or one older than the open chat", () => {
+    const handed = { threadId: "work", updatedAt: 2, openedBy: { botId: "lead" } };
+    const current = chief([handed], "work");
+    current.tasks = [{ threadId: "main", createdAt: 1, updatedAt: 30 }, handed];
+    expect(opened(current, false, true)).toEqual([{ type: "switchTask", botId: "cos", threadId: "main" }]);
+    const older = chief([{ threadId: "work", updatedAt: 1, openedBy: { botId: "lead" } }], "main");
+    older.tasks = [{ threadId: "main", createdAt: 1, updatedAt: 30 }, older.tasks![1]!];
+    expect(opened(older, false)).toEqual([{ type: "select", id: "cos" }]);
   });
 
   it("leaves a team's Cloud alone: there a bot's row is the person's own conversation", () => {

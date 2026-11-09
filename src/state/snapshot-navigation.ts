@@ -38,8 +38,17 @@ function keepNewTasks<T extends { threadId: string }>(previous: T[] | undefined,
   return created.length ? [...(incoming ?? []), ...created] : incoming;
 }
 
+function viewingHandoff(previous: Bot, incoming: Bot): boolean {
+  const task = previous.tasks?.find((candidate) => candidate.threadId === previous.threadId);
+  return Boolean(task?.openedBy?.botId) && (incoming.tasks ?? []).some((candidate) => candidate.threadId === previous.threadId);
+}
+
 export function keepBotNavigation(previous: Bot | undefined, incoming: Bot, preserve: boolean, taskIdsAtStart?: ReadonlySet<string>): Bot {
-  if (!preserve || !previous) return incoming;
+  // A hand-off is not the bot's server thread id (it is created without activating). A snapshot that arrives after the
+  // person opened it must not swap in the older thread: that page is only the tail, and the rest of the old transcript
+  // then loads above it.
+  const keepHandoff = previous !== undefined && !preserve && viewingHandoff(previous, incoming);
+  if ((!preserve && !keepHandoff) || !previous) return incoming;
   return {
     ...incoming,
     threadId: previous.threadId,
