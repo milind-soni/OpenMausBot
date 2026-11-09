@@ -406,6 +406,7 @@
   "server.teammates.backWithResultsRestart": "Após uma reinicialização, voltou com o trabalho que repassou e está revisando",
   "server.teammates.handedWork": "trabalho que repassou",
   "server.lendingLift.title": "Permitir que {bot} use seu {device} para isto?",
+  "server.lendingLift.wholeBotTitle": "As anotações de {bot} mudaram em um trabalho que você não escreveu. Permitir que continue usando seu {device}?",
   "server.lendingLift.memory": "As notas dele mudaram durante tarefas que não partiram de você:",
   "server.lendingLift.botOpened": "Outro bot abriu esta conversa para passar uma tarefa a este bot. “Permitir” autoriza o uso do seu {device} só para atender a esta mensagem sua.",
   "server.lendingLift.outside": "Um webhook ou uma rotina que você não criou publicou uma mensagem nesta conversa. “Permitir” autoriza o uso do seu {device} só para atender a esta mensagem sua.",

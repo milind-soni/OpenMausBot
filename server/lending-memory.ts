@@ -223,9 +223,11 @@ export interface LendingMemoryDeps {
   files: (botId: string) => Record<string, string>;
   knownBots: () => readonly string[];
   log?: (line: string) => void;
+  /** A bot just became locked: the owner hears about it, with a way to allow it, instead of finding out when something fails. */
+  onLocked?: (botId: string) => void;
 }
 
-export function createLendingMemory({ file, files: snapshot, knownBots, log = () => {} }: LendingMemoryDeps) {
+export function createLendingMemory({ file, files: snapshot, knownBots, log = () => {}, onLocked }: LendingMemoryDeps) {
   let bots: { [botId: string]: Record_ } = {};
   // Fail closed: a damaged, linked or oversized record flags every bot that existed when it was found.
   let unknownFlagged = new Set<string>();
@@ -294,6 +296,7 @@ export function createLendingMemory({ file, files: snapshot, knownBots, log = ()
       if (current.pending && !unchanged(current, snap)) {
         log(`lending: memory of bot ${botId} changed while a conversation the owner did not write was running; its turns cannot use the lent Mac until the owner reviews it`);
         set(botId, { ...current, flagged: true });
+        if (onLocked) queueMicrotask(() => onLocked(botId));
         return { changedBySomeoneElse: true };
       }
       if (snap.hash !== current.trusted || (current.pending && !foreignRunning)) {
