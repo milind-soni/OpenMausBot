@@ -40,6 +40,7 @@ const whole = (raw: string | null, fallback: number, max: number): number | null
   return /^\d{1,7}$/.test(raw) && Number(raw) <= max ? Number(raw) : null;
 };
 
+/** The usage endpoints: trace browsing plus the grouped token and cost summary with its CSV export. */
 export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
   const traces = createTraceService({ dataDir: deps.dataDir, recorder: deps.recorder, messages: deps.messages, liveBot: deps.liveBot });
   return async ({ res, url, path, method, auth, json }) => {

@@ -69,6 +69,7 @@ export function usageGroupLabel(groupBy: UsageGroupBy, group: Pick<UsageGroup, "
   return group.label;
 }
 
+/** Loads the usage summary for a range and grouping, optionally split by model, and refreshes with `version`. */
 function useUsageGroups(
   range: { from: string; to: string },
   groupBy: UsageGroupBy,
@@ -113,6 +114,7 @@ function Bar({ group, width, color }: { group: UsageGroup; width: number; color?
   return <span data-model-color={color} className={cn("block h-full rounded-full", !color && "bg-accent/70")} style={{ width: `${width}%`, backgroundColor: color }} />;
 }
 
+/** The six largest groups as proportional bars, with a model colour dot when the grouping is by model. */
 export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: readonly UsageGroup[] }) {
   const { state } = useStore();
   const top = [...groups].sort((a, b) => headlineTokens(b) - headlineTokens(a)).slice(0, 6);
@@ -169,6 +171,7 @@ function ModelLegend({ groups }: { groups: readonly UsageGroup[] }) {
   );
 }
 
+/** The "Where it went" panel: bots on one side, the chosen grouping on the other, both split by model. */
 function WhereItWent({ range, version, onBudget }: { range: { from: string; to: string }; version: number; onBudget: (budget: BudgetState | null) => void }) {
   const [other, setOther] = useState<UsageGroupBy>("model");
   const byBot = useUsageGroups(range, "bot", version, "model");

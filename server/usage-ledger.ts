@@ -311,6 +311,7 @@ function barTokens(group: UsageGroup): number {
   return Math.max(0, group.input - Math.min(group.cachedInput, group.input)) + group.output;
 }
 
+/** Groups ledger rows by `groupBy`; when `splitBy` differs, each group also carries its pieces, largest first. */
 export function summarizeUsage(
   rows: UsageRow[],
   groupBy: UsageGroupBy,

@@ -73,6 +73,7 @@ export function modelIdOf(groupKey: string): string {
   return slash === -1 ? rest : rest.slice(slash + 1);
 }
 
+/** The driver segment of a `model:<driver>/<model>` key, or undefined when the key carries no driver. */
 function driverOf(groupKey: string): string | undefined {
   if (!groupKey.startsWith("model:")) return undefined;
   const rest = groupKey.slice("model:".length);
@@ -87,6 +88,7 @@ function coreModelId(model: string): string {
   return id.replace(/(?::|-)(?:free|beta|preview|latest)$/, "");
 }
 
+/** The provider family a model belongs to, by its model id or its driver; unknown models use the neutral family. */
 export function modelFamily(groupKey: string): ModelFamily {
   const model = coreModelId(modelIdOf(groupKey));
   const known = FAMILIES.find((family) => family.pattern.test(model));
@@ -124,6 +126,7 @@ const CHROMA_STEPS = [0.93, 1, 1.07] as const;
 const SURFACES = ["#ffffff", "#3a322d"] as const;
 const MIN_CONTRAST = 3.05;
 
+/** Whether a colour meets the minimum contrast on both the light and the dark surface. */
 function readsOnBoth(hex: string): boolean {
   return SURFACES.every((surface) => contrastRatio(hex, surface) >= MIN_CONTRAST);
 }
@@ -143,6 +146,7 @@ function readableTone(hex: string, fallback: string): string {
   return fallback;
 }
 
+/** Moves a model deterministically around its family colour, then keeps the shade readable on both grounds. */
 function shadeOf(model: string, family: ModelFamily): string {
   const base = toOklch(family.color);
   const index = hash32(`${SHADE_SALT}${model}`) % (HUE_STEPS.length * LIGHT_STEPS.length * CHROMA_STEPS.length);
