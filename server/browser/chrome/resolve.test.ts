@@ -92,6 +92,19 @@ describe("which Chrome the bots' browser runs", () => {
     expect(resolveChromePlan({ ...host("linux", []), arch: "ia32" }, managed)).toEqual({ kind: "legacy", reason: "no Chrome is installed and none is pinned for this platform" });
   });
 
+  it("on a Linux server keeps a browser agent-browser already finds, rather than downloading another", () => {
+    const found = { kind: "legacy", reason: "agent-browser found a browser on this server" };
+    const withPath = (files: string[], env: NodeJS.ProcessEnv = {}) => host("linux", files, { env: { PATH: "/usr/local/bin:/usr/bin", ...env } });
+    expect(resolveChromePlan(withPath(["/usr/bin/chromium"]), managed)).toEqual(found);
+    expect(resolveChromePlan(withPath(["/usr/local/bin/google-chrome-stable"]), managed)).toEqual(found);
+    expect(resolveChromePlan(withPath(["/home/ada/.cache/puppeteer/chrome/linux-153.0.8010.47"]), managed)).toEqual(found);
+    expect(resolveChromePlan(withPath(["/home/ada/.cache/ms-playwright/chromium-1200"]), managed)).toEqual(found);
+    expect(resolveChromePlan(withPath(["/pw/chromium-1200"], { PLAYWRIGHT_BROWSERS_PATH: "/pw" }), managed)).toEqual(found);
+    expect(resolveChromePlan(withPath(["/home/ada/.cache/ms-playwright/firefox-1500", "/opt/firefox/firefox"]), managed)).toMatchObject({ kind: "download" });
+    const downloaded = chromeForTestingExecutable("/data", chromeForTestingPin("linux", "arm64")!);
+    expect(resolveChromePlan(withPath(["/usr/bin/chromium", downloaded]), managed)).toMatchObject({ kind: "chrome", chrome: { source: "downloaded" } });
+  });
+
   it("wraps a Chrome named by the environment, as the Docker image names its Chrome for Testing", () => {
     const named = (env: NodeJS.ProcessEnv, files: string[]) => host("linux", files, { env });
     expect(resolveChromePlan(named({ AGENT_BROWSER_EXECUTABLE_PATH: "/opt/openmausbot-browser/chrome" }, ["/opt/openmausbot-browser/chrome"]), null))
