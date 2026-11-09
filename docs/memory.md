@@ -477,12 +477,10 @@ also refuse approval if the accepted fact changed since the proposal.
 
 ### Checks before a dream saves a fact
 
-A dream must quote the person's statements in each cited conversation.
-The host checks numbers, dates, months, paths, URLs, names and family
-relationships against those quotes. Unsupported entries are skipped.
-An outdated note stays unchanged when its replacement fails the check.
-Entries that look like secrets are rejected with the existing secret detector.
-Relative dates in English or Polish become dates from the quoted message,
-not from the night the dream runs. Missing or ambiguous dates refuse the entry.
-These checks also apply before a dream adds a fact to About me.
-They do not merge notes into summaries.
+A dream must quote the person's statements, one per cited conversation, and
+each quote must really be something they said. Every number, path and URL in
+the entry has to come from those quotes. These checks don't depend on the
+language of the chat. Unsupported entries are skipped. An outdated note stays
+unchanged when its replacement fails the check. Entries that look like secrets
+are rejected with the existing secret detector. These checks also apply before
+a dream adds a fact to About me. They do not merge notes into summaries.

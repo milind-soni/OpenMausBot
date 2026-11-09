@@ -75,8 +75,8 @@ describe("the chats a dream reads", () => {
       b: { askedAt: 300, path: [{ id: "b1", at: 300, role: "user", kind: "text", text: "Too long again" }] },
     };
     const expected = [
-      { threadId: "b", lines: [{ by: "person", text: "Too long again", at: 300 }] },
-      { threadId: "a", lines: [{ by: "person", text: "Shorter please", at: 200 }] },
+      { threadId: "b", lines: [{ by: "person", text: "Too long again" }] },
+      { threadId: "a", lines: [{ by: "person", text: "Shorter please" }] },
     ];
     expect(dreamConversations(source(threads), "bot", 100)).toEqual(expected);
     for (const thread of Object.values(threads)) thread.path = stampOwner(thread.path, owner);
@@ -105,10 +105,10 @@ describe("the chats a dream reads", () => {
     expect(dreamConversations(source({ a: { askedAt: 140, path } }), "bot", 0, allowed,
       (sender) => ownerPerson(sender?.id))).toEqual([{
       threadId: "a", lines: [
-        { by: "person", text: "Shorter please", at: 100 },
-        { by: "bot", text: "A shorter draft.", at: 110 },
-        { by: "person", text: "Keep it plain too", at: 140 },
-        { by: "bot", text: "A plain draft.", at: 150 },
+        { by: "person", text: "Shorter please" },
+        { by: "bot", text: "A shorter draft." },
+        { by: "person", text: "Keep it plain too" },
+        { by: "bot", text: "A plain draft." },
       ],
     }]);
   });
@@ -126,7 +126,7 @@ describe("the chats a dream reads", () => {
       { id: "owner-reply", at: 130, role: "bot", kind: "text", text: "A shorter draft.", requestMessageId: "owner" },
     ];
     expect(dreamConversations(source({ a: { askedAt: 100, path } }), "bot", 0)).toEqual([{
-      threadId: "a", lines: [{ by: "person", text: "Shorter please", at: 100 }, { by: "bot", text: "A shorter draft.", at: 130 }],
+      threadId: "a", lines: [{ by: "person", text: "Shorter please" }, { by: "bot", text: "A shorter draft." }],
     }]);
   });
 
@@ -140,7 +140,7 @@ describe("the chats a dream reads", () => {
     ];
     expect(dreamConversations(source({ a: { askedAt: 100, path } }), "bot", 0, () => true,
       (sender) => sender?.id === owner.id)).toEqual([{
-      threadId: "a", lines: [{ by: "person", text: "Shorter please", at: 100 }, { by: "bot", text: "A shorter draft.", at: 120 }],
+      threadId: "a", lines: [{ by: "person", text: "Shorter please" }, { by: "bot", text: "A shorter draft." }],
     }]);
   });
 
@@ -261,7 +261,7 @@ describe("dreaming in the upkeep loop", () => {
     BOT.memoryUpkeep = true;
     clock = new Date(2026, 9, 22, 10, 0);
     chats = [
-      { threadId: "a", lines: [{ by: "person", text: "Shorter please", at: 200 }] },
+      { threadId: "a", lines: [{ by: "person", text: "Shorter please" }] },
       { threadId: "b", lines: [{ by: "person", text: "Too long again. Also I moved to Bangalore" }] },
     ];
     engine = {
@@ -314,12 +314,12 @@ describe("dreaming in the upkeep loop", () => {
     expect(upkeep().status(BOT.id)).toMatchObject({ lastDream: { conversations: 2 } });
   });
 
-  it("refuses invented numbers and family facts before notebook or profile writes", async () => {
+  it("refuses invented numbers before notebook or profile writes", async () => {
     ensureWorkspace(BOT.id);
     writeMemoryFile(BOT.id, "# Memory\n\n- 2026-09-01 · The person lives in Pune\n");
     answers.push(JSON.stringify({
       learned: [{ text: "The person has 17 sisters", from: [1, 2], evidence: ["Shorter please", "Too long again. Also I moved to Bangalore"], confidence: 0.9, aboutUser: true }],
-      outdated: [{ line: 0, now: "The person lives in Delhi", from: [2], evidence: ["Too long again. Also I moved to Bangalore"] }],
+      outdated: [{ line: 0, now: "The person lives at 12 Park Road", from: [2], evidence: ["Too long again. Also I moved to Bangalore"] }],
     }));
     const before = memory();
     const report = await upkeep().dream(BOT.id);

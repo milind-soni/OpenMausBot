@@ -2,47 +2,41 @@ import { describe, expect, it } from "vitest";
 import { checkDreamFacts } from "./memory-fact-checks.ts";
 import type { DreamConversation } from "./memory-dream.ts";
 
-const chats: DreamConversation[] = [
-  { threadId: "a", lines: [{ by: "person", text: "Anna, my sister, moved yesterday to York. Her budget is 250 in March. Notes: /work/anna.md https://example.test/anna", at: Date.parse("2026-10-20T12:00:00") }] },
-  { threadId: "b", lines: [{ by: "person", text: "Anna likes short replies too.", at: Date.parse("2026-10-21T12:00:00") }] },
+const person = (text: string): DreamConversation => ({ threadId: text, lines: [{ by: "person", text }] });
+const chats = [
+  person("Anna's budget is 250. Notes live in /work/anna.md and https://example.test/anna."),
+  person("Anna likes short replies too."),
 ];
 const quotes = [chats[0]!.lines[0]!.text, chats[1]!.lines[0]!.text];
-const check = (text: string, evidence = quotes) => checkDreamFacts(text, [1, 2], evidence, chats);
+const check = (text: string, evidence: readonly string[] | undefined = quotes) => checkDreamFacts(text, [1, 2], evidence, chats);
 
-describe("dream fact checks", () => {
-  it("keeps supported facts and anchors relative dates to the quoted message", () => {
-    expect(check("Anna, my sister, moved yesterday to York")).toBe("Anna, my sister, moved 2026-10-19 to York");
-    expect(check("Anna, my sister, has a budget of 250 in March")).toBe("Anna, my sister, has a budget of 250 in March");
-    expect(check("Anna, my sister, uses /work/anna.md and https://example.test/anna")).toBeTruthy();
+describe("the checks before a dream saves a fact", () => {
+  it("keeps an entry whose numbers, paths and URLs all come from the quotes", () => {
+    expect(check("The person's budget is 250")).toBe(true);
+    expect(check("The person keeps notes in /work/anna.md and https://example.test/anna")).toBe(true);
   });
-  it.each(["Anna has 251", "Anna visits in April", "Anna moved on 2026-10-18", "Anna uses /work/bob.md", "Anna uses https://example.test/bob", "Alice likes short replies", "Anna, my mother, moved to York"])("rejects an unsupported fact: %s", (text) => {
-    expect(check(text)).toBeNull();
+
+  it.each(["The budget is 251", "The person uses /work/bob.md", "The person uses https://example.test/bob"])("refuses an entry with a detail no quote holds: %s", (text) => {
+    expect(check(text)).toBe(false);
   });
-  it("requires actual owner statements in every cited chat", () => {
-    expect(check("Anna likes short replies", ["Invented quotation", quotes[1]!])).toBeNull();
-    expect(check("Anna likes short replies", [])).toBeNull();
-    expect(checkDreamFacts("Anna likes tea", [1], ["Anna likes tea"], [{ threadId: "q", lines: [{ by: "bot", text: "Anna likes tea" }] }])).toBeNull();
-    expect(checkDreamFacts("Anna likes tea", [1], ["Anna likes tea"], [{ threadId: "q", lines: [{ by: "person", text: "Suppose Anna likes tea?" }] }])).toBeNull();
+
+  it("saves facts in any language, with no list of months, relations or names to pass", () => {
+    const german = person("Die Person trinkt gern Kaffee am Morgen.");
+    const cyrillic = person("Человек предпочитает короткие ответы.");
+    expect(checkDreamFacts("Die Person mag Kaffee am Morgen", [1], [german.lines[0]!.text], [german])).toBe(true);
+    expect(checkDreamFacts("Человек любит короткие ответы", [1], [cyrillic.lines[0]!.text], [cyrillic])).toBe(true);
   });
-  it("rejects secrets even when the source contains them", () => {
+
+  it("needs one real statement by the person in each cited conversation", () => {
+    expect(check("Anna likes short replies", ["Invented quotation", quotes[1]!])).toBe(false);
+    expect(check("Anna likes short replies", [])).toBe(false);
+    expect(check("Anna likes short replies", undefined)).toBe(false);
+    expect(checkDreamFacts("Anna likes tea", [1], ["Anna likes tea"], [{ threadId: "q", lines: [{ by: "bot", text: "Anna likes tea" }] }])).toBe(false);
+    expect(checkDreamFacts("Anna likes tea", [1], ["Anna likes tea"], [person("Suppose Anna likes tea?")])).toBe(false);
+  });
+
+  it("refuses secrets even when the person really said them", () => {
     const secret = "password: synthetic-secret-123";
-    expect(checkDreamFacts(secret, [1], [secret], [{ threadId: "s", lines: [{ by: "person", text: secret }] }])).toBeNull();
-  });
-  it.each(["dziś", "dzisiaj", "wczoraj", "jutro", "today", "yesterday", "tomorrow"])("resolves %s at a month boundary", (word) => {
-    const text = `Anna ${word}`;
-    const day = ["wczoraj", "yesterday"].includes(word) ? "2026-02-28" : ["jutro", "tomorrow"].includes(word) ? "2026-03-02" : "2026-03-01";
-    expect(checkDreamFacts(text, [1], [text], [{ threadId: "d", lines: [{ by: "person", text, at: Date.parse("2026-03-01T12:00:00") }] }])).toBe(`Anna ${day}`);
-  });
-  it("refuses relative dates without an anchor or with ambiguous source days", () => {
-    expect(checkDreamFacts("Anna today", [1], ["Anna today"], [{ threadId: "x", lines: [{ by: "person", text: "Anna today" }] }])).toBeNull();
-    expect(checkDreamFacts("Anna today", [1, 2], ["Anna today", "Anna today"], [0, 1].map((i) => ({ threadId: String(i), lines: [{ by: "person" as const, text: "Anna today", at: Date.parse(`2026-10-2${i}T12:00:00`) }] })))).toBeNull();
-  });
-  it("leaves relative-date words inside paths and URLs alone", () => {
-    const text = "Anna keeps notes in /notes/today.md and https://example.test/today";
-    expect(checkDreamFacts(text, [1], [text], [{ threadId: "p", lines: [{ by: "person", text }] }])).toBe(text);
-    const dated = "Anna wrote /notes/today.md today";
-    expect(checkDreamFacts(dated, [1], [dated], [{ threadId: "p", lines: [{ by: "person", text: dated, at: Date.parse("2026-03-01T12:00:00") }] }])).toBe("Anna wrote /notes/today.md 2026-03-01");
-    const slashed = "Anna works remotely today/tomorrow";
-    expect(checkDreamFacts(slashed, [1], [slashed], [{ threadId: "p", lines: [{ by: "person", text: slashed, at: Date.parse("2026-03-01T12:00:00") }] }])).toBe("Anna works remotely 2026-03-01/2026-03-02");
+    expect(checkDreamFacts(secret, [1], [secret], [person(secret)])).toBe(false);
   });
 });
