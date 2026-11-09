@@ -113,6 +113,16 @@ function linuxDescendantsStopped(child: ChildProcess): boolean {
   return true;
 }
 
+function linuxPidLive(pid: number): boolean | undefined {
+  try {
+    const current = linuxProcess(pid);
+    if (!current) return false;
+    return current.state !== "Z" && current.state !== "X";
+  } catch {
+    return undefined;
+  }
+}
+
 function linuxRootIdentityMatches(child: ChildProcess): boolean | undefined {
   const start = child.pid && linuxTrees.get(child)?.get(child.pid);
   if (!child.pid || process.platform !== "linux" || !cliGroups.has(child)) return true;
@@ -330,6 +340,22 @@ export function describeSpawnFailure(err: NodeJS.ErrnoException, cli: string, cw
   return { message: `spawn failed: ${err.message}`, setup: false };
 }
 
+/** The pid spawnCli recorded is a zombie, already reaped, or a different process that reused it. */
+export function cliProcessStopped(child: ChildProcess): boolean {
+  const pid = child.pid;
+  const exited = child.exitCode !== null || child.signalCode !== null;
+  if (!pid) return exited;
+  if (process.platform !== "linux") return exited;
+  const live = linuxPidLive(pid);
+  if (live === true) return linuxRootIdentityMatches(child) === false;
+  if (live === undefined) return exited;
+  let current: ReturnType<typeof linuxProcess>;
+  try { current = linuxProcess(pid); } catch { return exited; }
+  // Missing from /proc before Node has seen the exit can mean the process has not appeared yet.
+  if (!current) return exited;
+  return current.state === "Z" || current.state === "X";
+}
+
 /** timeoutMs is the TERM grace; SIGKILL gets one more second. Linux also stops captured detached descendants. */
 export function killCliTree(child: ChildProcess, timeoutMs = 5_000): Promise<boolean> {
   const existing = stopping.get(child);
@@ -350,8 +376,15 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
   const exited = () => child.exitCode !== null || child.signalCode !== null;
   if (process.platform !== "win32") {
     const group = cliGroups.has(child);
+    // kill(pid, 0) is true for a zombie and for a reused pid. Success means this process is not still running.
+    const sameProcessLive = () => {
+      if (process.platform !== "linux") return false;
+      const live = linuxPidLive(pid);
+      if (live === false) return false;
+      return linuxRootIdentityMatches(child) !== false;
+    };
     const settled = () => {
-      if (!exited() || !linuxDescendantsStopped(child)) return false;
+      if (!exited() || !linuxDescendantsStopped(child) || sameProcessLive()) return false;
       if (!group || linuxRootIdentityMatches(child) === false) return true;
       if (linuxRootIdentityMatches(child) === undefined) return false;
       try {
@@ -368,8 +401,9 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
       try {
         if (group && (!exited() || linuxRootIdentityMatches(child) === true)) process.kill(-pid, value);
         else if (!group && !exited()) child.kill(value);
+        else if (sameProcessLive()) child.kill(value);
       } catch {
-        if (!exited()) {
+        if (!exited() || sameProcessLive()) {
           try { child.kill(value); } catch {}
         }
       }

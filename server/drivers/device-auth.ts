@@ -9,7 +9,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { deviceSignInPrompt, type DeviceSignInProvider } from "../../shared/device-sign-in.ts";
 import type { ProviderAuthenticationStart, ProviderAuthenticationStatus } from "../contracts.ts";
-import { killCliTree, spawnCli } from "../procs.ts";
+import { cliProcessStopped, killCliTree, spawnCli } from "../procs.ts";
 
 const MAX_OUTPUT = 16_384;
 // Only the auth operation on a shared credential home is exclusive, never normal turns.
@@ -92,6 +92,7 @@ export interface DeviceAuthOptions {
 export class DeviceAuthController {
   private flow: Flow | null = null;
   private command: ChildProcess | null = null;
+  private readonly spawned = new Set<ChildProcess>();
   private signingOut: Promise<void> | null = null;
   private disposed = false;
   private readonly spec: DeviceSignIn;
@@ -315,7 +316,12 @@ export class DeviceAuthController {
       this.finish(flow, "failed", `${product} could not start on this server. Install or update the configured ${product} CLI, then try again.`);
       return;
     }
+    this.watch(child);
     flow.child = child;
+    if (flow.status.phase !== "waiting") {
+      void this.stopChild(child);
+      return;
+    }
     child.stdin.end();
     let output = "";
     const receive = (chunk: Buffer) => {
@@ -357,7 +363,7 @@ export class DeviceAuthController {
       if (phase === "succeeded") flow.resolve({ ...flow.status, phase });
       else flow.reject(new Error(message ?? `${account} sign-in did not finish.`));
     }
-    flow.stopping = this.stopChild(flow.child).catch(() => false).then((stopped) => {
+    flow.stopping = this.stopSpawned(flow.child).catch(() => false).then((stopped) => {
       const release = () => authenticatingHomes.delete(flow.homeKey);
       if (stopped) { release(); return; }
       flow.terminationFailed = true;
@@ -370,18 +376,33 @@ export class DeviceAuthController {
     if (phase === "succeeded") void this.options.onAuthenticated?.().catch(() => {});
   }
 
+  private watch(child: ChildProcess): void {
+    this.spawned.add(child);
+    child.once("exit", () => this.spawned.delete(child));
+  }
+
+  private async stopSpawned(current: ChildProcess | null): Promise<boolean> {
+    const gone = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null || cliProcessStopped(child);
+    if (current && !gone(current)) this.spawned.add(current);
+    for (const child of [...this.spawned]) if (gone(child)) this.spawned.delete(child);
+    for (let pass = 0; pass < 4 && this.spawned.size > 0; pass++) {
+      for (const child of [...this.spawned]) {
+        await this.stopChild(child).catch(() => false);
+        if (gone(child)) this.spawned.delete(child);
+      }
+    }
+    return this.spawned.size === 0;
+  }
+
   private async stopChild(child: ChildProcess | null): Promise<boolean> {
-    if (!child || await killCliTree(child, this.options.terminateTimeoutMs ?? 1500)) return true;
+    if (!child) return true;
+    if (await killCliTree(child, this.options.terminateTimeoutMs ?? 1500) && cliProcessStopped(child)) return true;
     // A broken CLI may ignore SIGTERM; a cancelled device flow must not go on to write credentials.
     if (process.platform !== "win32" && child.pid) {
       try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
     } else child.kill("SIGKILL");
-    await new Promise<void>((resolveStop) => {
-      if (child.exitCode !== null || child.signalCode !== null) return resolveStop();
-      const timer = setTimeout(resolveStop, 1500);
-      timer.unref();
-      child.once("close", () => { clearTimeout(timer); resolveStop(); });
-    });
-    return child.exitCode !== null || child.signalCode !== null;
+    const deadline = Date.now() + 1_500;
+    while (Date.now() < deadline && !cliProcessStopped(child)) await new Promise((resolveStop) => setTimeout(resolveStop, 25));
+    return cliProcessStopped(child);
   }
 }
