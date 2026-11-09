@@ -10,6 +10,7 @@ import { discardNativeLog, flushNativeLog } from "./native.ts";
 import type { RuntimeEvent, SendTurnInput } from "../contracts.ts";
 import { GrokDriver } from "./grok.ts";
 import { MinimaxDriver } from "./minimax.ts";
+import { createOpenAIChatRuntime } from "./openai-chat.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { MistralDriver } from "./mistral.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
@@ -966,12 +967,12 @@ describe("createOpenAIChatRuntime rejected keys", () => {
 
 describe("createOpenAIChatRuntime transient retries", () => {
   // Like runTurn, but the turn waits out the retry backoff before it completes.
-  const runRetryTurn = async (respond: () => Response) => {
+  const runRetryTurn = async (respond: () => Response, apiUrl = "https://api.example.com/v1") => {
     vi.stubGlobal("fetch", vi.fn(async (url: string | URL) =>
       String(url).endsWith("/chat/completions") ? respond() : new Response("", { status: 404 })));
     const instance = await OpenAICompatDriver.create({
       instanceId: "compat", displayName: "Compat", enabled: true,
-      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.com/v1", apiKeyEnv: "K", model: "m" }),
+      config: OpenAICompatDriver.decodeConfig({ url: apiUrl, apiKeyEnv: "K", model: "m" }),
       environment: { K: "secret" },
     });
     const events: RuntimeEvent[] = [];
@@ -1047,6 +1048,48 @@ describe("createOpenAIChatRuntime transient retries", () => {
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
     await instance.dispose();
   });
+
+  it("retries a 409 from api.openai.com, then answers", async () => {
+    let requests = 0;
+    const conflict = () => new Response(JSON.stringify({ error: { message: "conflict with the current resource state" } }), { status: 409 });
+    const events = await runRetryTurn(() => ++requests === 1 ? conflict() : answer(), "https://api.openai.com/v1");
+    expect(requests).toBe(2);
+    expect(events.find((event) => event.type === "turn.retrying")).toMatchObject({ attempt: 1, reason: "server_error" });
+    expect(events.find((event) => event.type === "item.completed")).toMatchObject({ text: "Hello!" });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  }, 20_000);
+
+  it("does not retry a 429 when the caller opts out", async () => {
+    let requests = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL) =>
+      String(url).endsWith("/chat/completions")
+        ? (requests++, rateLimited())
+        : new Response("", { status: 404 })));
+    const runtime = createOpenAIChatRuntime({
+      input: { instanceId: "runtime", displayName: "Runtime", environment: {}, enabled: true, config: {} },
+      driverKind: "test",
+      apiKey: "secret",
+      apiUrl: "https://api.example.com/v1",
+      models: () => ({ default: "m", options: [{ id: "m", label: "m" }] }),
+      requestBody: (model, messages, stream) => ({ model, messages, stream }),
+      httpErrorLabel: "Test",
+      missingKeyError: "missing key",
+      unavailableReason: "missing key",
+      timeoutMs: 10_000,
+      noRetry: true,
+      nativeLog: { source: "test", outgoing: () => ({}), incoming: () => ({}) },
+    });
+    const events: RuntimeEvent[] = [];
+    runtime.adapter.onEvent((event) => events.push(event));
+    await runtime.adapter.sendTurn({ threadId: "thread", text: "hi" });
+    await vi.waitFor(() => {
+      if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+    }, { timeout: 10_000 });
+    await runtime.dispose();
+    expect(requests).toBe(1);
+    expect(events.filter((event) => event.type === "turn.retrying")).toHaveLength(0);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  }, 20_000);
 
   it("retries a 429 from an endpoint that omits retryScale, then answers", async () => {
     let requests = 0;

@@ -277,6 +277,9 @@ describe("classifyError reads an explicit HTTP status before body text", () => {
     ["OpenAI HTTP 409: max 500 tokens", { transient: false, reason: "invalid_request" }],
     ["(status 409 Conflict): max 500 tokens", { transient: false, reason: "invalid_request" }],
     ["API Error: 409 Conflict", { transient: false, reason: "invalid_request" }],
+    ["API Error: 503: proxy said HTTP 409 for backend", { transient: true, reason: "server_error" }],
+    ["Internal error: API Error: 503: proxy said HTTP 409 for backend", { transient: true, reason: "server_error" }],
+    ["API Error: 409: backend said HTTP 503 for this call", { transient: false, reason: "invalid_request" }],
     ["xAI HTTP 429: too many requests", { transient: true, reason: "rate_limited" }],
     ["(status 503 Service Unavailable)", { transient: true, reason: "server_error" }],
     ["(status 529) overloaded", { transient: true, reason: "overloaded" }],
@@ -285,5 +288,16 @@ describe("classifyError reads an explicit HTTP status before body text", () => {
     ["Upstream returned 402 Payment Required: exceeded your quota", { transient: false, reason: "quota" }],
   ])("classifies %s", (message, expected) => {
     expect(classifyError({ text: message })).toEqual(expected);
+  });
+
+  it("retries a 409 from OpenAI and not from any other provider", () => {
+    expect(classifyError({ text: "API Error: 409 Conflict" }, { openAi: true }))
+      .toEqual({ transient: true, reason: "server_error" });
+    expect(classifyError({ text: "OpenAI HTTP 409: conflict with the current resource state" }, { openAi: true }))
+      .toEqual({ transient: true, reason: "server_error" });
+    expect(classifyError({ text: "API Error: 409 Conflict" }))
+      .toEqual({ transient: false, reason: "invalid_request" });
+    expect(classifyError({ text: "OpenAI HTTP 409: max 500 tokens" }))
+      .toEqual({ transient: false, reason: "invalid_request" });
   });
 });

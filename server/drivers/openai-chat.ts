@@ -24,7 +24,7 @@ import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type Ch
 import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
-import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
+import { createModelRoutes, isOpenAIAddress, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { plainFailure } from "./engine-errors.ts";
@@ -113,6 +113,8 @@ interface RuntimeOptions<Config> {
   includeUsageInCompleted?: boolean;
   noBodyError?: string;
   retryScale?: number;
+  /** A caller that must not resend a turn after an ambiguous failure: no retry even for transient errors. */
+  noRetry?: boolean;
   tools?: boolean;
   computerUse?: boolean;
   /** A text-only model keeps the computer and browser tools but never receives a screenshot or attachment. */
@@ -672,7 +674,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               break;
             } catch (value) {
               const error = asError(value);
-              const verdict = classifyError(error);
+              const verdict = classifyError(error, { openAi: isOpenAIAddress(options.apiUrl) });
               // A provider refuses a request with too many tools before running anything: learn its limit and list fewer.
               const refit = streamed || seenCalls.size || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model), [ASK_USER_TOOL_DEFINITION]);
               if (refit) {
@@ -716,7 +718,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               }
               // Once a call has been handled, never replay it through a turn retry.
               if (abort.signal.aborted || streamed || seenCalls.size ||
-                  error instanceof ChatProtocolError || error instanceof RuntimeNoticeError || !verdict.transient || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
+                  error instanceof ChatProtocolError || error instanceof RuntimeNoticeError || !verdict.transient || options.noRetry || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
               const delayMs = computeBackoff(attempt++);
               emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt, delayMs, reason: verdict.reason });
               await interruptibleDelay(delayMs * (options.retryScale ?? 1), abort.signal).promise;
