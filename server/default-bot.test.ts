@@ -143,6 +143,22 @@ describe("MausBot, every person's helper", () => {
     expect(briefChief(restarted)?.id).toBe(maus.id);
   });
 
+  it("shows a hidden MausBot again after a profile rename or a department move", () => {
+    const store = new Store(selection);
+    const maus = boot(store)!;
+    const hiddenAfter = (change: () => unknown) => {
+      store.patchBot(maus.id, { sidebarHidden: true });
+      change();
+      return store.bot(maus.id)?.sidebarHidden;
+    };
+    expect(hiddenAfter(() => store.patchBotProfile(maus.id, { title: "Helper" }))).toBe(true);
+    expect(hiddenAfter(() => store.patchBotProfile(maus.id, { name: "Nova" }))).toBe(false);
+    expect(hiddenAfter(() => store.setBotsSection([maus.id], "Work"))).toBe(false);
+    expect(hiddenAfter(() => store.setBotsSection([maus.id], "Work"))).toBe(true);
+    expect(hiddenAfter(() => store.updateTeamMembers("Work", [], [maus.id]))).toBe(false);
+    expect(hiddenAfter(() => store.updateTeamMembers("Work", [maus.id], []))).toBe(false);
+  });
+
   it("knows a renamed MausBot by its mark: no second one on update, Chief tools kept", () => {
     const store = new Store(selection);
     store.createBot({ name: "Writer" });

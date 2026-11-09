@@ -122,6 +122,8 @@ describe("sidebar virtual sections", () => {
     const theirs = { id: "theirs", defaultBot: { person: "sam@example.com" }, section: "C Suite" };
     expect(partitionSidebarBots([mine, theirs], { viewerEmail: null }).sectionedBots).toEqual([]);
     expect(partitionSidebarBots([mine, theirs], { viewerEmail: null, searching: true }).sectionedBots).toEqual([mine]);
+    const plain = { id: "plain", sidebarHidden: true, section: "C Suite" };
+    expect(partitionSidebarBots([plain], { viewerEmail: null, searching: true }).sectionedBots).toEqual([]);
   });
 
   it("lists a group's pinned Chief with the pinned bots on every client; the main Chief keeps its own top slot", () => {

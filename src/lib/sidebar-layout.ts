@@ -113,7 +113,7 @@ export function partitionSidebarBots<T extends SidebarBot>(
 ) {
   const universalPins = options?.universalPins === true;
   // A search also finds the viewer's own MausBot when it is hidden from the sidebar, so it can always be reached.
-  const listed = (bot: T) => !hiddenFromSidebar(bot, options?.viewerEmail) || (options?.searching === true && !someoneElsesDefaultBot(bot, options.viewerEmail));
+  const listed = (bot: T) => !hiddenFromSidebar(bot, options?.viewerEmail) || (options?.searching === true && Boolean(bot.defaultBot) && !someoneElsesDefaultBot(bot, options.viewerEmail));
   const visible = bots.filter((bot) => !bot.hidden && listed(bot) && bot.id !== options?.welcoming);
   // The pin flag is the server's, the same on every client. Only the main Chief keeps its own top slot when pins are
   // not universal (a device's layout choice); a pinned Chief of a group is listed with the other pinned bots.

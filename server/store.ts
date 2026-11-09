@@ -1562,7 +1562,7 @@ export class Store {
   patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "lastProfileRequestId">>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
-    const next = { ...bot, ...patch };
+    const next = { ...bot, ...reshowWhenMoved(bot, patch) };
     if (patch.soul !== undefined) {
       next.soulHash = soulHash(patch.soul);
       next.soulDrift = false;
@@ -1594,7 +1594,7 @@ export class Store {
     const selected = targets as BotRecord[];
     const patches = new Map<string, Partial<BotRecord>>();
     for (const bot of selected) {
-      patches.set(bot.id, { section: targetSection || undefined });
+      patches.set(bot.id, reshowWhenMoved(bot, { section: targetSection || undefined }));
     }
     if (chiefConflict(this.bots.map((bot) => ({ ...bot, ...patches.get(bot.id) })))) return { ok: false, reason: "chief-conflict" };
 
@@ -1631,7 +1631,7 @@ export class Store {
       if (removes.has(id) && sectionKey(bot.section) !== key) return { ok: false, reason: "membership-changed" };
     }
     const next = this.bots.map(bot => ids.has(bot.id)
-      ? { ...bot, section: adds.has(bot.id) ? key : undefined } : bot);
+      ? { ...bot, ...reshowWhenMoved(bot, { section: adds.has(bot.id) ? key : undefined }) } : bot);
     if (chiefConflict(next)) return { ok: false, reason: "chief-conflict" };
     if (ids.size) {
       this.saveBots(next);
