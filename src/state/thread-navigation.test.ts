@@ -68,6 +68,26 @@ describe("a click on a bot's row or tile", () => {
     expect(opened({ ...bot, threadId: "work" }, false, true)).toEqual([{ type: "switchTask", botId: "cos", threadId: "main" }]);
   });
 
+  it("opens the newest of two finished hand-offs, and a second click on that one returns to the main chat", () => {
+    const older = { threadId: "older", updatedAt: 10, openedBy: { botId: "lead" } };
+    const newest = { threadId: "newest", updatedAt: 20, openedBy: { botId: "qa" } };
+    const bot = chief([older, newest], "main");
+    bot.tasks = [{ threadId: "main", createdAt: 1, updatedAt: 2 }, older, newest];
+    expect(opened(bot, false)).toEqual([{ type: "switchTask", botId: "cos", threadId: "newest" }]);
+    expect(opened({ ...bot, threadId: "newest" }, false, true)).toEqual([{ type: "switchTask", botId: "cos", threadId: "main" }]);
+    expect(opened({ ...bot, threadId: "newest" }, false, false)).toEqual([
+      { type: "select", id: "cos" },
+      { type: "switchTask", botId: "cos", threadId: "newest" },
+    ]);
+  });
+
+  it("does not treat a thread the bot opened on itself as a teammate hand-off", () => {
+    const own = { threadId: "own", updatedAt: 20, openedBy: { botId: "cos" } };
+    const bot = chief([own], "main");
+    bot.tasks = [{ threadId: "main", createdAt: 1, updatedAt: 2 }, own];
+    expect(opened(bot, false)).toEqual([{ type: "select", id: "cos" }]);
+  });
+
   it("does not prefer a hand-off the person is already on, or one older than the open chat", () => {
     const handed = { threadId: "work", updatedAt: 2, openedBy: { botId: "lead" } };
     const current = chief([handed], "work");

@@ -43,21 +43,30 @@ function viewingHandoff(previous: Bot, incoming: Bot): boolean {
   return Boolean(task?.openedBy?.botId) && (incoming.tasks ?? []).some((candidate) => candidate.threadId === previous.threadId);
 }
 
+function reconcileTranscript(previous: Message[], incoming: Message[]): Message[] {
+  const incomingById = new Map(incoming.map((message) => [message.id, message]));
+  const seen = new Set<string>();
+  const merged = previous.map((message) => {
+    seen.add(message.id);
+    return incomingById.get(message.id) ?? message;
+  });
+  for (const message of incoming) if (!seen.has(message.id)) merged.push(message);
+  return merged;
+}
+
 export function keepBotNavigation(previous: Bot | undefined, incoming: Bot, preserve: boolean, taskIdsAtStart?: ReadonlySet<string>): Bot {
-  // A hand-off is not the bot's server thread id (it is created without activating). A snapshot that arrives after the
-  // person opened it must not swap in the older thread: that page is only the tail, and the rest of the old transcript
-  // then loads above it.
   const keepHandoff = previous !== undefined && !preserve && viewingHandoff(previous, incoming);
   if ((!preserve && !keepHandoff) || !previous) return incoming;
+  const sameOpenHandoff = keepHandoff && incoming.threadId === previous.threadId;
   return {
     ...incoming,
     threadId: previous.threadId,
     tasks: keepNewTasks(previous.tasks, incoming.tasks, taskIdsAtStart),
     switchingTo: previous.switchingTo,
     awaitingThreadSnapshot: previous.awaitingThreadSnapshot,
-    messages: previous.messages,
-    hasMore: previous.hasMore,
-    activeLeafId: previous.activeLeafId,
+    messages: sameOpenHandoff ? reconcileTranscript(previous.messages, incoming.messages) : previous.messages,
+    hasMore: sameOpenHandoff ? Boolean(previous.hasMore || incoming.hasMore) : previous.hasMore,
+    activeLeafId: sameOpenHandoff ? incoming.activeLeafId ?? previous.activeLeafId : previous.activeLeafId,
     pinnedMessageId: previous.pinnedMessageId,
   };
 }

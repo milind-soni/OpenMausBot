@@ -18,7 +18,6 @@ type RowThread = {
   archivedAt?: unknown;
   updatedAt?: number;
   createdAt?: number;
-  /** Set when another bot opened the thread. A finished hand-off is not unread — that would put it in To review — but the row still has to land there. */
   openedBy?: { botId?: string };
 };
 
@@ -79,24 +78,20 @@ export function markedThread(bot: Pick<NotificationThreadOwner, "threadId" | "ma
 
 const stampOf = (task: RowThread) => task.updatedAt ?? task.createdAt ?? 0;
 
-/** A teammate's thread that has spoken more recently than the chat the row would otherwise open, and that is not already
- * on screen. Hand-offs are created without becoming the bot's open thread, and a finished one is deliberately not unread
- * (a teammate's own step must not land in To review). Without this, the row opens the older transcript: its tail paints
- * first and the rest of that history then loads above it, which looks like the new thread restarted and then filled with
- * the previous conversation. */
-export function latestUnseenHandoff(bot: Pick<NotificationThreadOwner, "threadId" | "mainThreadId" | "tasks">, threadsShown: boolean): string | null {
+/** The newest teammate hand-off newer than the chat the row would otherwise open. A thread the bot opened on itself is not one. */
+export function newestTeammateHandoff(bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks">, threadsShown: boolean): string | null {
   const home = botOpensTo(bot, threadsShown);
   const homeTask = bot.tasks?.find((task) => task.threadId === home);
   const homeStamp = homeTask ? stampOf(homeTask) : 0;
   const newer = (bot.tasks ?? [])
-    .filter((task) => task.openedBy?.botId && !task.routineRunId && task.archivedAt === undefined && task.threadId !== bot.threadId && stampOf(task) > homeStamp)
+    .filter((task) => task.openedBy?.botId && task.openedBy.botId !== bot.id && !task.routineRunId && task.archivedAt === undefined && stampOf(task) > homeStamp)
     .sort((a, b) => stampOf(b) - stampOf(a));
   return newer[0]?.threadId ?? null;
 }
 
 /** A click on a bot's row or tile opens the thread its mark is about; with no mark, or with that thread already on screen,
- * the bot as ever. A finished hand-off the person is not already reading is the one exception: the row opens that thread
- * instead of the older chat. Every other way into a bot is `openBot`. On a team a bot's row is the person's own chat. */
+ * the bot as ever. A finished teammate hand-off is the exception, and only the newest one: already reading it on screen
+ * returns to the main chat. Every other way into a bot is `openBot`. On a team a bot's row is the person's own chat. */
 export function openBotRow(
   dispatch: (action: Action) => void,
   bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks"> & { yourAccess?: string },
@@ -104,11 +99,10 @@ export function openBotRow(
   onScreen: boolean,
 ) {
   const marked = teamChats() ? null : markedThread(bot, threadsShown);
-  if (!marked || marked === botOpensTo(bot, threadsShown) || (onScreen && marked === bot.threadId)) {
-    const handoff = marked || teamChats() ? null : latestUnseenHandoff(bot, threadsShown);
-    if (handoff) openBotThread(dispatch, bot, handoff, threadsShown);
-    else openBot(dispatch, bot, threadsShown);
-  } else openBotThread(dispatch, bot, marked, threadsShown);
+  const handoff = marked || teamChats() ? null : newestTeammateHandoff(bot, threadsShown);
+  const target = marked && marked !== botOpensTo(bot, threadsShown) ? marked : handoff;
+  if (!target || (onScreen && target === bot.threadId)) openBot(dispatch, bot, threadsShown);
+  else openBotThread(dispatch, bot, target, threadsShown);
 }
 
 /** With threads hidden the switch alone selects the bot, so the thread left behind keeps its unread mark. */

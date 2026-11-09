@@ -31,6 +31,28 @@ describe("a snapshot must not restore an older transcript over a hand-off the pe
     expect(kept.messages.map((message) => message.id)).toEqual(["main"]);
   });
 
+  it("keeps history already loaded when a later snapshot of the same hand-off is only a tail", () => {
+    const previous = fixture("work", true);
+    previous.messages = [line("work"), line("loaded")];
+    previous.hasMore = true;
+    const incoming = fixture("work", true);
+    incoming.messages = [line("loaded"), line("tail")];
+    incoming.hasMore = false;
+    const kept = keepBotNavigation(previous, incoming, false);
+    expect(kept.threadId).toBe("work");
+    expect(kept.messages.map((message) => message.id)).toEqual(["work", "loaded", "tail"]);
+    expect(kept.hasMore).toBe(true);
+  });
+
+  it("keeps a hand-off and its pending switch until that switch resolves", () => {
+    const previous = fixture("work", true);
+    previous.switchingTo = "main";
+    const kept = keepBotNavigation(previous, fixture("main", true), true);
+    expect(kept.threadId).toBe("work");
+    expect(kept.switchingTo).toBe("main");
+    expect(kept.messages.map((message) => message.id)).toEqual(["work"]);
+  });
+
   it("follows the server when that hand-off no longer exists", () => {
     const incoming = fixture("main");
     incoming.tasks = [{ threadId: "main", title: "Main", createdAt: 1 }];
