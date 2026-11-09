@@ -394,7 +394,9 @@ function parseStep(raw: unknown, n: number): PhoneStep {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw refusal(`Step ${n} needs to be an object such as ${JSON.stringify(STEP_EXAMPLES.tap_text)}`);
   const step: Json = {};
   for (const [field, value] of Object.entries(raw)) {
-    if (STEP_FIELDS.has(field) && value !== null && value !== "") step[field] = (STEP_COERCIONS[field] ?? ((same) => same))(value);
+    if (!STEP_FIELDS.has(field) || value === null || value === "") continue;
+    const coerced = STEP_COERCIONS[field](value);
+    if (coerced !== "") step[field] = coerced;
   }
   const { action } = step;
   if (action === "screenshot") throw refusal(`Step ${n}: screenshot returns an image and cannot be a batch step; use read_screen, or call screenshot after the batch`);

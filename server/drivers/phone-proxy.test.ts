@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -190,6 +192,8 @@ describe("phone batch step parsing", () => {
     { case: "parses a step given as JSON text", raw: ['{"action":"press","key":"back"}'], steps: [{ action: "press", key: "back" }] },
     { case: "accepts waits from 0 and above 60", raw: [{ action: "wait" }, { action: "wait", seconds: 0 }, { action: "wait", seconds: "75" }], steps: [{ action: "wait" }, { action: "wait", seconds: 0 }, { action: "wait", seconds: 75 }] },
     { case: "accepts 10 steps", raw: Array(10).fill({ action: "read_screen" }), steps: Array(10).fill({ action: "read_screen" }) },
+    { case: "coerces both coordinates", raw: [{ action: "tap", x: "540", y: "1200" }], steps: [{ action: "tap", x: 540, y: 1200 }] },
+    { case: "counts text to type in characters, as type_text does", raw: [{ action: "type_text", text: "😀".repeat(256) }], steps: [{ action: "type_text", text: "😀".repeat(256) }] },
   ])("$case", ({ raw, steps }) => {
     expect(parseSteps(raw)).toEqual(steps);
   });
@@ -214,6 +218,13 @@ describe("phone batch step parsing", () => {
     { case: "a step that is not an object", raw: ["read_screen"], error: 'Step 1 needs to be an object such as {"action":"tap_text","text":"Search"}. No step was performed.' },
     { case: "11 steps", raw: Array(11).fill({ action: "read_screen" }), error: "A batch runs at most 10 steps, not 11; split them into several batches. No step was performed." },
     { case: "no steps", raw: undefined, error: 'steps needs a list of 1 to 10 steps, e.g. {"steps":[{"action":"tap_text","text":"Search"},{"action":"read_screen"}]}. No step was performed.' },
+    { case: "an empty step list", raw: [], error: 'steps needs a list of 1 to 10 steps, e.g. {"steps":[{"action":"tap_text","text":"Search"},{"action":"read_screen"}]}. No step was performed.' },
+    { case: "text that is empty once read as text, after a valid step", raw: [{ action: "tap", x: 540, y: 1200 }, { action: "type_text", text: [] }], error: 'Step 2 (type_text) needs text, e.g. {"action":"type_text","text":"iPad mini"}. No step was performed.' },
+    { case: "a negative match index", raw: [{ action: "tap_text", text: "Search", index: -1 }], error: 'Step 1 (tap_text) needs index as a whole number from 0, e.g. {"action":"tap_text","text":"Search","index":1}. No step was performed.' },
+    { case: "a y off the screen", raw: [{ action: "tap", x: 1, y: -1 }], error: 'Step 1 (tap) needs x and y from 0 to 10000, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
+    { case: "an x past 10000", raw: [{ action: "tap", x: 10001, y: 2 }], error: 'Step 1 (tap) needs x and y from 0 to 10000, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
+    { case: "a negative wait", raw: [{ action: "wait", seconds: -1 }], error: 'Step 1 (wait) needs seconds as a number from 0 to 60, e.g. {"action":"wait","seconds":3}. No step was performed.' },
+    { case: "a negative wait on another action", raw: [{ action: "tap", x: 1, y: 2, seconds: -1 }], error: 'Step 1 (tap) does not take seconds; put a separate {"action":"wait","seconds":3} step after it. No step was performed.' },
   ])("refuses $case", ({ raw, error }) => {
     expect(() => parseSteps(raw)).toThrow(new Error(error));
   });
@@ -315,15 +326,36 @@ describe("phone MCP tool surface", () => {
 
 describe.skipIf(process.platform === "win32")("phone MCP calls through a stand-in adb", () => {
   type Response = { result: { content: Array<{ type: string; text: string }>; isError?: boolean } };
+  type Call = (name: string, args: Record<string, unknown>) => Promise<Response>;
   let home = "";
-  let proxy: ChildProcess;
-  let call: (name: string, args: Record<string, unknown>) => Promise<Response>;
+  let adb = "";
+  const proxies: ChildProcess[] = [];
+  let call: Call;
   const adbLog = () => (existsSync(join(home, "adb.log")) ? readFileSync(join(home, "adb.log"), "utf8").trim().split("\n") : []);
   const DUMP = "-s FAKE123 shell uiautomator dump /dev/tty";
 
+  const startProxy = (harness: Record<string, string> = {}): Call => {
+    const env: NodeJS.ProcessEnv = { ...process.env, OMB_ADB_PATH: adb };
+    delete env.OMB_HARNESS_URL;
+    delete env.OMB_PHONE_TOKEN;
+    delete env.PH_ANDROID_SERIAL;
+    const proxy = spawn(process.execPath, [fileURLToPath(new URL("./phone-proxy.ts", import.meta.url))], { env: { ...env, ...harness }, stdio: ["pipe", "pipe", "ignore"] });
+    proxies.push(proxy);
+    const waiting = new Map<number, (response: Response) => void>();
+    createInterface({ input: proxy.stdout! }).on("line", (line) => {
+      const response = JSON.parse(line) as Response & { id: number };
+      waiting.get(response.id)?.(response);
+    });
+    let id = 0;
+    return (name, args) => new Promise((resolve) => {
+      waiting.set(++id, resolve);
+      proxy.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } })}\n`);
+    });
+  };
+
   beforeAll(() => {
     home = mkdtempSync(join(tmpdir(), "omb-phone-proxy-"));
-    const adb = join(home, "adb");
+    adb = join(home, "adb");
     writeFileSync(adb, `#!/bin/sh
 echo "$*" >> "$(dirname "$0")/adb.log"
 case "$*" in
@@ -334,24 +366,10 @@ case "$*" in
 esac
 `);
     chmodSync(adb, 0o755);
-    const env: NodeJS.ProcessEnv = { ...process.env, OMB_ADB_PATH: adb };
-    delete env.OMB_HARNESS_URL;
-    delete env.OMB_PHONE_TOKEN;
-    delete env.PH_ANDROID_SERIAL;
-    proxy = spawn(process.execPath, [fileURLToPath(new URL("./phone-proxy.ts", import.meta.url))], { env, stdio: ["pipe", "pipe", "ignore"] });
-    const waiting = new Map<number, (response: Response) => void>();
-    createInterface({ input: proxy.stdout! }).on("line", (line) => {
-      const response = JSON.parse(line) as Response & { id: number };
-      waiting.get(response.id)?.(response);
-    });
-    let id = 0;
-    call = (name, args) => new Promise((resolve) => {
-      waiting.set(++id, resolve);
-      proxy.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } })}\n`);
-    });
+    call = startProxy();
   });
   afterAll(() => {
-    proxy?.kill();
+    for (const proxy of proxies) proxy.kill();
     rmSync(home, { recursive: true, force: true });
   });
 
@@ -381,5 +399,37 @@ esac
     const response = await call("batch", { steps: [{ action: "read_screen" }, { action: "tap" }] });
     expect(response.result).toEqual({ content: [{ type: "text", text: 'Step 2 (tap) needs x and y, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' }], isError: true });
     expect(adbLog()).toEqual([]);
+  });
+
+  it("keeps a single tool to its own action whatever action its arguments name", async () => {
+    rmSync(join(home, "adb.log"), { force: true });
+    expect((await call("tap", { x: 540, y: 1200, action: "press", key: "home" })).result).toEqual({ content: [{ type: "text", text: "Tapped 540,1200" }] });
+    expect(adbLog()).toEqual(["devices -l", "-s FAKE123 shell input tap 540 1200"]);
+  });
+
+  it("runs a batch on the device its serial names", async () => {
+    rmSync(join(home, "adb.log"), { force: true });
+    const response = await call("batch", { serial: "MISSING", steps: [{ action: "tap", x: 540, y: 1200 }] });
+    expect(response.result).toEqual({ content: [{ type: "text", text: "No physical USB Android device is connected" }], isError: true });
+    expect(adbLog()).toEqual(["devices -l"]);
+  });
+
+  it("stops a batch at the next step once the harness refuses the claim", async () => {
+    const answers = [200, 409];
+    const harness = createServer((request, response) => {
+      request.resume();
+      response.writeHead(answers.shift() ?? 409).end("{}");
+    });
+    await new Promise<void>((resolve) => harness.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = harness.address() as AddressInfo;
+      const claimed = startProxy({ OMB_HARNESS_URL: `http://127.0.0.1:${port}`, OMB_PHONE_TOKEN: "tok" });
+      rmSync(join(home, "adb.log"), { force: true });
+      const response = await claimed("batch", { steps: [{ action: "tap", x: 540, y: 1200 }, { action: "press", key: "enter" }] });
+      expect(response.result).toEqual({ content: [{ type: "text", text: "1. tap: Tapped 540,1200\nStopped before step 2: Another thread is using the phone. Pause phone work until that thread finishes, then read the screen again before acting. Steps before it were done; do not repeat them. Later steps were not performed." }] });
+      expect(adbLog()).toEqual(["devices -l", "-s FAKE123 shell input tap 540 1200"]);
+    } finally {
+      harness.close();
+    }
   });
 });
