@@ -658,15 +658,19 @@ export class RuntimeCoordinator implements Coordinator {
     const root = a.parentId === undefined;
     const reports = settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node)));
     const questions = asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node)));
+    const background = input.backgroundResults?.length ? composeBackgroundResults(input.backgroundResults) : "";
+    const continuation = input.continuation ? continuationLine(input.continuation) : "";
     const context = input.backgroundResults?.length
-      ? [input.continuation ? continuationLine(input.continuation) : "", input.envelope, ...reports, ...questions].filter(Boolean).join("\n\n") : resumed
+      ? [continuation, input.envelope, ...reports, ...questions].filter(Boolean).join("\n\n") : resumed
       ? composeResume(a, this.host.names(node, parent && this.project(parent)), reports, questions)
       : root
         ? composeRootTurn(a, { turn: input.turn === "resume" ? "first" : input.turn, restartNote: "", ...(input.answer !== undefined ? { answer: input.answer } : {}),
           ...(input.continuation ? { continuation: input.continuation } : {}) })
-        : input.continuation ? `${continuationLine(input.continuation)}\n${input.envelope}` : input.envelope;
-    const body = input.backgroundResults?.length ? [composeBackgroundResults(input.backgroundResults), context].join("\n\n") : context;
-    const note = resumed || root ? body : envelopeNote(body);
+        : input.continuation ? `${continuation}\n${input.envelope}` : input.envelope;
+    const body = background ? [background, context].join("\n\n") : context;
+    const note = resumed
+      ? [background, continuation, composeResume(a, this.host.names(node, parent && this.project(parent)), [], questions)].filter(Boolean).join("\n\n")
+      : root ? body : envelopeNote(body);
     const evidence = (result: HostTurnResult) => result.evidence ? { evidence: result.evidence } : {};
     const result = await this.host.run(node, resumed, signal,
       { text: `${input.restartNote}${body}`, note: `${input.restartNote}${note}`, restartNote: input.restartNote, turn: input.turn });

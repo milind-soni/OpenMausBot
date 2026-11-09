@@ -360,6 +360,11 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     const resumed = w.host.runs.find(run => run.node.id === node.id && run.resumed)!;
     expect(resumed.text).toContain("terminal result · information only");
     expect(resumed.text).toContain("Independent artifact evidence");
+    expect(resumed.composed.note).not.toContain("Independent artifact evidence");
+    expect(resumed.composed.note).toContain("Your downstream room requests have settled");
+    expect(resumed.composed.note).toContain("terminal result · information only");
+    expect(resumed.composed.note).toContain("exitCode");
+    expect(resumed.composed.note).toContain("validate the artifacts");
     await w.host.release(node.id, { ok: true, text: "Both checked" });
     w.coordinator.tick(); await flush(); w.coordinator.close();
   });

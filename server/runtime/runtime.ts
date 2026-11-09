@@ -94,17 +94,17 @@ export class Runtime {
           continue;
         }
         if (n.status !== "running") continue;
-        for (const command of n.backgroundCommands ?? []) if (command.verifying) { delete command.delivered; delete command.verifying; }
         const carried = n.carrying ?? [];
         const handedOut = childrenSince(this.store, n).length > 0;
         const outward = handedOut ? [] : this.outwardOf(n);
-        if (handedOut || n.backgroundCommands?.some(c => !c.delivered)) {
+        if (outward.length > 0) {
+          this.store.update(n, { kind: "restart_reconciled", at: now, detail: "failed: outward action done" });
+          this.settle(n, "failed", "interrupted", outwardDetail(outward));
+        } else if (handedOut || n.backgroundCommands?.some(c => !c.delivered || c.verifying)) {
+          for (const command of n.backgroundCommands ?? []) if (command.verifying) { delete command.delivered; delete command.verifying; }
           n.status = "waiting"; n.restart = "cut"; n.lastActivityAt = now;
           this.store.update(n, { kind: "restart_reconciled", at: now, detail: "waiting: cut after handing out work" });
           this.touch(n);
-        } else if (outward.length > 0) {
-          this.store.update(n, { kind: "restart_reconciled", at: now, detail: "failed: outward action done" });
-          this.settle(n, "failed", "interrupted", outwardDetail(outward));
         } else if (n.restart === "rerun") {
           this.store.update(n, { kind: "restart_reconciled", at: now, detail: "failed: cut twice" });
           this.settle(n, "failed", "interrupted", CUT_TWICE);
