@@ -121,9 +121,22 @@ export const APP_POINT_SOURCE = `(function () {
     }
     return parts.join(" > ");
   };
+  // innerText runs a badge (an inline-block span) into the next word ("CloudRestore"): any box that is not plain inline
+  // is a word break on screen, so it is one here too.
+  var wordsOf = function (node) {
+    if (node.nodeType === 3) return node.data;
+    if (node.nodeType !== 1 || /^(script|style|noscript|template)$/i.test(node.tagName)) return "";
+    var style = window.getComputedStyle(node);
+    var display = style.display;
+    if (display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return "";
+    var shown = node.tagName === "DETAILS" && !node.open
+      ? Array.prototype.filter.call(node.children, function (child) { return child.tagName === "SUMMARY"; }) : node.childNodes;
+    var words = Array.prototype.map.call(shown, wordsOf).join("");
+    return /^(inline|contents)?$/.test(display) && node.tagName !== "BR" ? words : " " + words + " ";
+  };
   var describe = function (element) {
     var tag = element.tagName.toLowerCase();
-    var text = element.innerText || element.textContent || element.getAttribute("aria-label") || element.getAttribute("alt") ||
+    var text = wordsOf(element).trim() || element.getAttribute("aria-label") || element.getAttribute("alt") ||
       element.getAttribute("placeholder") || element.getAttribute("title") || "";
     return { tag: tag, role: element.getAttribute("role") || ROLES[tag] || "", text: clip(text, 200), selector: clip(selectorOf(element), 300),
       html: clip(element.outerHTML, 600) };

@@ -85,6 +85,15 @@ describe("the page's point script", () => {
     expect(posted).toHaveLength(1);
   });
 
+  it("keeps a space between a badge and the words after it, so the chip label reads as the page does", () => {
+    const { say } = boot();
+    document.body.innerHTML = `<div class="card"><span style="display:inline-block">Cloud</span>Restore <b>fin</b>ishes<script>ignored()</script>
+      <i style="visibility:hidden">tooltip</i><details><summary>More</summary>folded</details></div>`;
+    say(pointMessage(true));
+    click(document.querySelector(".card")!);
+    expect(posted.at(-1)).toMatchObject({ params: { tag: "div", text: "Cloud Restore finishes More" } });
+  });
+
   it("names a keyed part by its key, and Escape ends point mode with word to the parent", () => {
     const { say } = boot();
     say(pointMessage(true));
