@@ -36,7 +36,7 @@ import { t } from "@/lib/i18n";
 import { serverErrorText } from "@/lib/server-error";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
-import { ImageLoading } from "./ImageLoading";
+import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu";
 
 export interface PreviewImage {
   src: string;
@@ -301,8 +301,8 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
       if (response.headers.get("x-openmausbot-folder") === "1") {
         const listing = await response.json() as MessageFolderListing;
         if (!mounted.current || controller.signal.aborted) return;
-        setFolder(listing);
         setState("idle");
+        if (!(await openLinkedFolder(filePath)) && !controller.signal.aborted) setFolder(listing); // Security: only a path this message's route just authorized reaches the desktop bridge.
         return;
       }
       const blob = await response.blob();

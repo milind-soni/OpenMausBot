@@ -1,7 +1,7 @@
 import type { AppConfig } from "./config.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { ACCOUNT_ID, connectedAccountsPageSchema, inventoryAccountSchema, toolkitInventoryPageSchema, toolkitPageSchema, type ConnectedAccountResponse, type ToolkitItem } from "./composio-inventory-schema.ts";
+import { ACCOUNT_ID, inventoryAccountSchema, toolkitInventoryPageSchema, toolkitPageSchema, type ToolkitItem } from "./composio-inventory-schema.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { managedConnectorUnavailableReason, managedCustomAuthReason } from "../shared/connector-availability.ts";
 import {
@@ -10,10 +10,13 @@ import {
   canonicalToolkitSlug,
   inputError,
   keepAuthConfigPick,
+  listConnectedAccounts,
+  MAX_CONNECTED_ACCOUNT_PAGES,
   noAuthConfigReason,
   projectHeaders,
   refusedAuthConfigReason,
   responseError,
+  type ConnectedAccountResponse,
 } from "./composio-project.ts";
 import { MULTI_ACCOUNT_CONFIG, authConfigRefusal, ensureProjectSession, projectApiKey, sessionForToolkit } from "./composio-session.ts";
 import { authConfigUseLine, noManagedAuthToolkit, withNoManagedAuthNote } from "./connector-auth-config-hint.ts";
@@ -67,7 +70,6 @@ const removalResponseSchema = z.object({ removed: z.number() });
 const authUrlResponseSchema = z.object({ url: z.string().optional() });
 const linkResponseSchema = z.object({ redirect_url: z.string().optional() });
 
-const MAX_CONNECTED_ACCOUNT_PAGES = 100;
 const printableAliasSchema = z.string().min(1).max(64).refine((value) => {
   for (const character of value) {
     const codePoint = character.codePointAt(0);
@@ -309,40 +311,6 @@ export async function relayMcp(
     ? await withNoManagedAuthNote(raw, contentType, toolkit, apiKey ? () => sessionForToolkit(cfg, toolkit, { fresh: true }) : null)
     : raw;
   return { status: response.status, bytes, contentType, transportSessionId: nextTransportSessionId };
-}
-
-async function listConnectedAccounts(
-  apiKey: string,
-  userId: string,
-  slugs: string[],
-): Promise<ConnectedAccountResponse[]> {
-  const accounts: ConnectedAccountResponse[] = [];
-  const seenCursors = new Set<string>();
-  let cursor: string | undefined;
-
-  for (let page = 0; page < MAX_CONNECTED_ACCOUNT_PAGES; page += 1) {
-    const params = new URLSearchParams({
-      limit: "50",
-      user_ids: userId,
-      order_by: "updated_at",
-      order_direction: "desc",
-    });
-    if (slugs.length) params.set("toolkit_slugs", slugs.join(","));
-    if (cursor) params.set("cursor", cursor);
-    const response = await fetch(`${apiBase()}/connected_accounts?${params}`, {
-      headers: projectHeaders(apiKey),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!response.ok) throw new Error(await responseError(response, `Composio accounts: HTTP ${response.status}`));
-    const body = connectedAccountsPageSchema.parse(await response.json());
-    accounts.push(...body.items);
-    const next = body.next_cursor || undefined;
-    if (!next) return accounts;
-    if (seenCursors.has(next)) throw new Error("Composio account inventory contains a pagination cursor cycle");
-    seenCursors.add(next);
-    cursor = next;
-  }
-  throw new Error("Composio account inventory exceeded the pagination safety limit");
 }
 
 async function listSessionToolkits(

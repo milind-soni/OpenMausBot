@@ -3,20 +3,6 @@ import { z } from "zod";
 export const ACCOUNT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const TOOLKIT_SLUG = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
-const connectedAccountResponseSchema = z.object({
-  id: z.string().optional(),
-  alias: z.string().nullable().optional(),
-  status: z.string().optional(),
-  updated_at: z.string().optional(),
-  toolkit: z.object({ slug: z.string().optional() }).optional(),
-});
-export type ConnectedAccountResponse = z.infer<typeof connectedAccountResponseSchema>;
-
-export const connectedAccountsPageSchema = z.object({
-  items: z.array(connectedAccountResponseSchema),
-  next_cursor: z.string().nullable().optional(),
-});
-
 const toolkitItemSchema = z.object({
   slug: z.string().optional(),
   is_no_auth: z.boolean().optional(),
