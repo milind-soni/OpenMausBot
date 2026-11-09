@@ -8,8 +8,15 @@ export interface LocalModelFacts {
   vision?: boolean;
 }
 
+/** A model's thinking controls: `described` when its server listed them, not only that the model thinks. */
+export interface LocalModelThinking {
+  choices: string[];
+  described: boolean;
+}
+
 export interface LocalModel extends LocalModelFacts {
   name: string;
+  thinking?: LocalModelThinking;
 }
 
 /** `ready`: running with models. `no-models`: running, nothing pulled. `not-running`: nothing listens there.

@@ -93,7 +93,7 @@ interface RuntimeOptions<Config> {
   apiKey: string;
   apiUrl: string;
   models: () => ModelCatalog;
-  requestBody(model: string, messages: OpenAIChatMessage[], stream: boolean): Record<string, unknown>;
+  requestBody(model: string, messages: OpenAIChatMessage[], stream: boolean, variant?: string): Record<string, unknown>;
   httpErrorLabel: string;
   missingKeyError: string;
   unavailableReason: string;
@@ -116,8 +116,8 @@ interface RuntimeOptions<Config> {
   computerUse?: boolean;
   /** A text-only model keeps the computer and browser tools but never receives a screenshot or attachment. */
   imageInput?: (model: string) => boolean;
-  /** False for a model its server says cannot call tools: its turns go without them instead of being refused. */
-  toolUse?: (model: string) => boolean;
+  /** Some models list `variants`; the picked one reaches `requestBody`. */ modelVariants?: boolean;
+  /** False for a model its server says cannot call tools: its turns go without them instead of being refused. */ toolUse?: (model: string) => boolean;
   /** Why the server cannot answer now (not running, nothing to run), asked before the key is. */
   serverUnavailable?: () => Promise<Pick<ProviderSnapshot, "reason" | "ollama"> | null>;
   /** The name to send for a model, when its server knows it by another. */
@@ -260,7 +260,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     signal?: AbortSignal,
     onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
     tools: ChatToolDefinition[] = [],
-    onUsage?: TextGenerationOptions["onUsage"],
+    onUsage?: TextGenerationOptions["onUsage"], variant?: string,
   ): Promise<Completion> => {
     const timeoutController = new AbortController();
     let idleTimer: NodeJS.Timeout | null = null;
@@ -283,7 +283,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const payload = JSON.stringify(route === "responses"
         ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model) })
         : {
-          ...options.requestBody(served, messages, stream),
+          ...options.requestBody(served, messages, stream, variant),
           ...(route === "chat-reasoning-off" ? { reasoning_effort: "none" } : {}),
           ...(tools.length ? { tools } : {}),
         });
@@ -462,7 +462,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     signal?: AbortSignal,
     onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
     tools: ChatToolDefinition[] = [],
-    onUsage?: TextGenerationOptions["onUsage"],
+    onUsage?: TextGenerationOptions["onUsage"], variant?: string,
   ): Promise<Completion> => {
     for (;;) {
       let replied = false;
@@ -470,7 +470,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         return await completeOn(routes.routeFor(model, tools.length > 0), messages, model, stream, signal, onDelta && ((text, kind) => {
           replied = true;
           onDelta(text, kind);
-        }), tools, onUsage);
+        }), tools, onUsage, variant);
       } catch (error) {
         if (!(error instanceof ModelRouteRefused) || replied || signal?.aborted) throw error;
         if (!routes.advance(model, error.refusal)) throw new ChatProtocolError(noRouteLeft(error.message));
@@ -651,7 +651,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 if (streamKind === "assistant_text") answerStreamed = true;
                 const shown = holdback && streamKind === "assistant_text" ? holdback.feed(text) : text;
                 if (shown) delta(shown, streamKind);
-              }, tools.definitions);
+              }, tools.definitions, undefined, turn.variant);
               // A reply cut off at the token limit may be a call cut short; running half of one is worse than saying so.
               const written = holdback && !completion.toolCalls.length && completion.finishReason !== "length" ? textToolCalls(completion.text, tools.definitions) : null;
               unreadable = written?.kind === "unreadable" && !askedAgain;
@@ -949,7 +949,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       capabilities: { ...(options.computerUse ? { computerMcp: options.tools !== false,
         localComputerMcp: options.tools !== false,
         browserMcp: options.tools !== false, nativeImageInput: true, images: true } : {}),
-        sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false,
+        ...(options.modelVariants ? { modelVariants: true } : {}), sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false,
         dataMcp: options.tools !== false,
         emailMcp: options.tools !== false,
         deviceMcp: options.tools !== false,

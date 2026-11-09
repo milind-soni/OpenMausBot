@@ -3284,6 +3284,7 @@
   "model.variant.unavailableChoice": "Saved variant “{variant}” is unavailable. Choose an available variant.",
   "model.variant.unverifiedChoice": "Saved variant “{variant}” has not been checked in this session.",
   "model.variant.none": "No variant selected.",
+  "model.variant.on": "On",
   "model.variant.sessionValue": "Session: {variant}.",
   "model.variant.clearHint": "Send no thinking selection; the agent keeps its session or configured setting",
   "model.variant.clear": "Clear variant selection",

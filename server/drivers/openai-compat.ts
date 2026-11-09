@@ -1,10 +1,10 @@
 // Transcript-replay driver for OpenRouter, Groq, Together, llama.cpp, and
 // other endpoints that speak the OpenAI chat-completions contract.
-import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
+import { titleCaseModelId, type ModelCatalog, type ProviderDriver } from "../contracts.ts";
 import { isLoopback } from "../provider-key-check.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
-import { isContextName, isOllama, serveWithWindow } from "./ollama-context.ts";
-import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, ollamaOrigin, ollamaUnavailable, onOllamaPort, probeOllama, type OllamaModel, type OllamaStatus } from "./ollama.ts";
+import { isContextName, isOllama, pickedName, serveWithWindow } from "./ollama-context.ts";
+import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, ollamaOrigin, ollamaUnavailable, onOllamaPort, probeOllama, thinkingEffort, type OllamaModel, type OllamaStatus } from "./ollama.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 import {
   freeDefault, freeFallbackCatalog, freeLabel, freeToolModels, freeToolsFirst, isOpenRouterOrigin, openRouterFreeTier,
@@ -41,6 +41,8 @@ const DEFAULT_MODELS: ModelCatalog = {
 const NO_MODELS: ModelCatalog = { default: "", options: [] };
 const OLLAMA_STATUS_MS = 5_000;
 const OLLAMA_FIRST_LIST_MS = 2_000;
+
+const withEffort = (effort: string | undefined) => effort ? { reasoning_effort: effort } : {};
 
 const localFacts = ({ bytes, parameters, quantization, tools, vision }: OllamaModel) => ({
   ...(bytes ? { bytes } : {}), ...(parameters ? { parameters } : {}), ...(quantization ? { quantization } : {}),
@@ -230,7 +232,10 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       facts.clear();
       for (const model of status.models) facts.set(model.name, model);
       if (config.managedModels) return true;
-      const options: ModelCatalog["options"] = status.models.map((model) => ({ id: model.name, label: model.name, custom: true, local: localFacts(model) }));
+      const options: ModelCatalog["options"] = status.models.map((model) => ({
+        id: model.name, label: model.name, custom: true, local: localFacts(model),
+        ...(model.thinking ? { variants: model.thinking.choices.map((id) => ({ id, label: titleCaseModelId(id, /[-_ ]+/) })) } : {}),
+      }));
       if (config.model && !options.some((model) => model.id === config.model)) options.unshift({ id: config.model, label: config.model, custom: true });
       catalog = { default: config.model ?? options[0]?.id ?? "", options };
       return true;
@@ -366,11 +371,13 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           return reason ? { reason, ollama: { state: status.state, url: status.url, ...(status.problem ? { problem: status.problem } : {}) } } : null;
         },
       } : {}),
-      requestBody: (model, messages, stream) => ({
+      modelVariants: ollamaCandidate,
+      requestBody: (model, messages, stream, variant) => ({
         model,
         messages,
         stream,
         stream_options: stream ? { include_usage: true } : undefined,
+        ...withEffort(thinkingEffort(fact(pickedName(model))?.thinking, variant)),
         ...(config.provider && isOpenRouterUrl(config.url)
           ? { provider: { order: [config.provider], allow_fallbacks: false } }
           : {}),
