@@ -11,6 +11,7 @@ import type { Surface } from "../shared/wire.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
 import { parseMemberClaim, teamRoleScopes, type CloudTeam } from "./cloud-team.ts";
+import { isLoopbackHost } from "./request-auth.ts";
 import { formatPairingCode, type SessionRegistry } from "./sessions.ts";
 
 /** Any of these switches the server into Cloud home mode; then all are required. */
@@ -42,6 +43,10 @@ export interface CloudHomeConfig {
   machineId: string;
   adminOrigin: string;
   publicOrigin: string;
+  /** The addresses this home answered at before a move to another provider (OMB_CLOUD_LEGACY_ORIGINS), each an exact https
+   * origin. The old address forwards here with Host rewritten to `publicOrigin`'s name, so a page or client still on it
+   * sends that address as its Origin, which counts as this home's own. Empty for a home that never moved. */
+  legacyOrigins: string[];
   bootstrapSecret: string;
   warnings: string[];
 }
@@ -66,6 +71,18 @@ function exactHttpsOrigin(raw: string | undefined, name: string): string {
   return url.origin;
 }
 
+export const MAX_LEGACY_ORIGINS = 8;
+
+/** OMB_CLOUD_LEGACY_ORIGINS, comma-separated: exact https origins only, never a loopback name (a loopback Origin means this
+ * machine), at most MAX_LEGACY_ORIGINS; this home's own address among them is dropped. */
+function legacyOrigins(raw: string | undefined, publicOrigin: string): string[] {
+  const entries = (raw ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (entries.length > MAX_LEGACY_ORIGINS) invalid(`OMB_CLOUD_LEGACY_ORIGINS names more than ${MAX_LEGACY_ORIGINS} origins`);
+  const origins = entries.map((entry) => exactHttpsOrigin(entry, "every OMB_CLOUD_LEGACY_ORIGINS entry"));
+  if (origins.some((origin) => isLoopbackHost(new URL(origin).host))) invalid("OMB_CLOUD_LEGACY_ORIGINS must not name a loopback address");
+  return [...new Set(origins)].filter((origin) => origin !== publicOrigin);
+}
+
 /** Null on any machine that is not a Cloud home; throws, so the server refuses to start, on a partial or invalid one. */
 export function cloudHomeConfiguration(env: NodeJS.ProcessEnv = process.env): CloudHomeConfig | null {
   if (!cloudHomeConfigured(env)) return null;
@@ -78,12 +95,13 @@ export function cloudHomeConfiguration(env: NodeJS.ProcessEnv = process.env): Cl
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/.test(machineId)) invalid("OMB_CLOUD_MACHINE_ID must be the Admin's machine id (letters, digits, dashes)");
   const adminOrigin = exactHttpsOrigin(env.OMB_CLOUD_ADMIN_URL, "OMB_CLOUD_ADMIN_URL");
   const publicOrigin = exactHttpsOrigin(env.OMB_PUBLIC_URL, "OMB_PUBLIC_URL");
+  const legacy = legacyOrigins(env.OMB_CLOUD_LEGACY_ORIGINS, publicOrigin);
   const bootstrapSecret = env.OMB_CLOUD_BOOTSTRAP_SECRET ?? "";
   if (!/^[A-Za-z0-9_-]{43,128}$/.test(bootstrapSecret)) invalid("OMB_CLOUD_BOOTSTRAP_SECRET must be at least 256 bits of base64url");
   const warnings: string[] = [];
   const ignored = CLOUD_IGNORED_KEYS.filter((key) => env[key] !== undefined);
   if (ignored.length) warnings.push(`ignoring ${ignored.join(", ")}: Cloud Pro includes no AI; people sign in with their own Claude or ChatGPT account, or an API key`);
-  return { role, team, machineId, adminOrigin, publicOrigin, bootstrapSecret, warnings };
+  return { role, team, machineId, adminOrigin, publicOrigin, legacyOrigins: legacy, bootstrapSecret, warnings };
 }
 
 const TEAM_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;

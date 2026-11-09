@@ -543,7 +543,7 @@ import {
   resolveRequestAuth,
   parseCookies,
   serializeSessionCookie,
-  sessionCookieName, ownerOrAdmin,
+  sessionCookieName, ownerOrAdmin, acceptLegacyOrigins,
 } from "./request-auth.ts";
 import { cookieMaxAgeSeconds, formatPairingCode, pairingRequest, SessionRegistry, type SessionRecord } from "./sessions.ts";
 import { ThreadStarters } from "./thread-starters.ts";
@@ -697,7 +697,7 @@ const CLOUD_HOME = cloudHomeConfiguration(CLOUD_ENV);
 const CLOUD_TEAM = CLOUD_HOME?.team ?? null, CLOUD_PERSONAL = CLOUD_HOME !== null && CLOUD_TEAM === null, TEAM_LABEL = CLOUD_TEAM ? { label: CLOUD_TEAM.name } : {};
 /** The language set on this server, else (on a Team Cloud) the team's default from the Admin. threadLanguage: the one a line in a conversation is written in, its one person's, else the place's (server/server-lines.ts). */
 const appLanguage = (): string | undefined => cfg.language ?? CLOUD_TEAM?.language; const personLanguages = createPersonLanguages({ dataDir: DATA_DIR, configured: appLanguage, privateTo: (threadId) => teamHost.privateTo(threadId) }); const threadLanguage = personLanguages.forThread; setConversationLanguage(threadLanguage);
-if (CLOUD_HOME) repairMovedWorkspacePaths(DATA_DIR);
+if (CLOUD_HOME) { repairMovedWorkspacePaths(DATA_DIR); acceptLegacyOrigins(CLOUD_HOME.legacyOrigins); }
 if (CLOUD_PERSONAL) sessions.requireAdmin(userError("serverError.cloud.personal"));
 const lendingEnabled = () => sharedComputersEnabled(cfg) || CLOUD_HOME !== null || ownHome.here(); const ownerLends = () => ownerLendingEnabled(cfg) && ownHome.takesMove(); const botLending = () => lendingEnabled() || (ownerLends() && sharedComputers.anyLent()); // ownerLends: a server only its one owner signs in to (own-home.ts) takes that owner's computer by default, never anyone else's (routes/shared-computers.ts); the desktop asks its person first, and the public description stays as it was.
 const CLOUD_HOME_LENDER = "cloud-home";

@@ -203,11 +203,21 @@ export function ipcPeer(req: IncomingMessage): boolean {
   return Boolean(socket) && socket.remoteAddress === undefined && socket.remoteFamily === undefined;
 }
 
+let legacyOrigins: ReadonlySet<string> = new Set();
+
+/** A Cloud home that moved to another provider (OMB_CLOUD_LEGACY_ORIGINS): its old address forwards here with Host
+ * rewritten to this home's own name, so a page or client still on the old address sends that address as its Origin.
+ * Security: only these exact origins count as this server's own besides its Host's; X-Forwarded-Host, which any client
+ * writes, is never read. */
+export function acceptLegacyOrigins(origins: readonly string[]): void {
+  legacyOrigins = new Set(origins);
+}
+
 export function isSameOrigin(req: IncomingMessage): boolean {
   const origin = headerValue(req.headers.origin);
   if (!origin) return true;
-  const own = requestOrigin(req);
-  return own !== null && origin.trim().toLowerCase() === own;
+  const own = requestOrigin(req), presented = origin.trim().toLowerCase();
+  return own !== null && (presented === own || legacyOrigins.has(presented));
 }
 
 /** The desktop window's session adds the owner header to every request for this server, whichever page in it asks, and

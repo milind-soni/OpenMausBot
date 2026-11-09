@@ -48,14 +48,35 @@ it("is off on every ordinary server and desktop", () => {
 
 it("reads the Admin's contract", () => {
   expect(cloudHomeConfiguration(contract())).toEqual({
-    role: "home", team: null, machineId, adminOrigin: "https://cloud.example.test", publicOrigin: "https://omb-u-1a2b3c4d5e6f.fly.dev", bootstrapSecret: secret, warnings: [],
+    role: "home", team: null, machineId, adminOrigin: "https://cloud.example.test", publicOrigin: "https://omb-u-1a2b3c4d5e6f.fly.dev", legacyOrigins: [], bootstrapSecret: secret,
+    warnings: [],
   });
   expect(cloudHomeConfiguration(contract({ OMB_CLOUD_ADMIN_URL: "https://cloud.example.test/" }))!.adminOrigin).toBe("https://cloud.example.test");
 });
 
+it("reads the addresses a moved home answered at before, exactly and once each, without its own", () => {
+  const legacy = (value: string) => cloudHomeConfiguration(contract({ OMB_CLOUD_LEGACY_ORIGINS: value }))!.legacyOrigins;
+  expect(legacy("https://omb-u-old.fly.dev")).toEqual(["https://omb-u-old.fly.dev"]);
+  expect(legacy(" https://omb-u-old.fly.dev/ , https://older.example.test,https://omb-u-old.fly.dev,https://omb-u-1a2b3c4d5e6f.fly.dev ,"))
+    .toEqual(["https://omb-u-old.fly.dev", "https://older.example.test"]);
+  expect(legacy("")).toEqual([]);
+});
+
+it.each([
+  ["an http origin", "http://omb-u-old.fly.dev"],
+  ["an origin with a path", "https://omb-u-old.fly.dev/app"],
+  ["an origin with credentials", "https://user:pass@omb-u-old.fly.dev"],
+  ["a host that is not written as its origin", "https://OMB-U-OLD.fly.dev"],
+  ["a loopback name", "https://localhost"],
+  ["a loopback address", "https://127.0.0.1:8443"],
+  ["too many", Array.from({ length: 9 }, (_, at) => `https://old-${at}.example.test`).join(",")],
+])("refuses to start with %s as a former address", (_why, value) => {
+  expect(() => cloudHomeConfiguration(contract({ OMB_CLOUD_LEGACY_ORIGINS: value }))).toThrow(/Cloud home configuration is invalid: .*OMB_CLOUD_LEGACY_ORIGINS/);
+});
+
 it("ignores a platform gateway's settings with one warning, whatever they hold, and never serves them", () => {
   const all = cloudHomeConfiguration(withGateway())!;
-  expect(Object.keys(all).sort()).toEqual(["adminOrigin", "bootstrapSecret", "machineId", "publicOrigin", "role", "team", "warnings"]);
+  expect(Object.keys(all).sort()).toEqual(["adminOrigin", "bootstrapSecret", "legacyOrigins", "machineId", "publicOrigin", "role", "team", "warnings"]);
   expect(all.warnings).toEqual(["ignoring OMB_HOSTED_MODEL_URL, OMB_HOSTED_MODEL_TOKEN, OMB_HOSTED_MODELS: Cloud Pro includes no AI; people sign in with their own Claude or ChatGPT account, or an API key"]);
   for (const stray of [{ OMB_HOSTED_MODEL_TOKEN: token }, { OMB_HOSTED_MODEL_TOKEN: "sk-ant-api03-platform-key" }, { OMB_HOSTED_MODELS: "{not json" },
     { OMB_HOSTED_MODEL_URL: "https://gateway.attacker.test/v1" }, { OMB_HOSTED_MODELS: "" }]) {
@@ -403,6 +424,13 @@ it("hands the server the Admin's export-only switch, so an ended Cloud started f
   // window while the computers that came home ran the same ones.
   const config = cloudHomeConfiguration(withGateway())!;
   expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_CLOUD_EXPORT_ONLY: "1" }, "/data").server).toMatchObject({ OMB_CLOUD_EXPORT_ONLY: "1" });
+});
+
+it("hands the server the addresses a moved home answered at before, and never its edge", () => {
+  const env = contract({ PATH: "/usr/bin", OMB_CLOUD_LEGACY_ORIGINS: "https://omb-u-old.fly.dev" });
+  const children = cloudHomeChildEnvironments(cloudHomeConfiguration(env)!, env, "/data");
+  expect(children.server).toMatchObject({ OMB_CLOUD_LEGACY_ORIGINS: "https://omb-u-old.fly.dev" });
+  expect(children.edge).not.toHaveProperty("OMB_CLOUD_LEGACY_ORIGINS");
 });
 
 it("gives the server only an allow-listed environment: a secret added later, a test's key or anything unknown never reaches it", () => {
