@@ -509,7 +509,8 @@ describe("surface pin provenance against the real server", () => {
     expect(savedTask(tester.id, workThread)).toMatchObject({ surface: "browser" });
     // The asker hears back from the browser turn, never from the turn that only asked to move.
     const replies = async () => JSON.stringify((await apiOk("GET", `/api/threads/${own.threadId}/messages?limit=60`)).messages);
-    expect(await until(replies, (text) => text.includes("Continue the handed-off request"))).toBeTruthy();
+    // "reply to: ..." is the fixture engine's own answer from the browser turn, not the prompt that started it.
+    expect(await until(replies, (text) => /reply to: [^"]*The computer selection is now the built-in browser/.test(text))).toBeTruthy();
     await idle(tester.id, workThread);
     await idle(asker.id, own.threadId);
     await stop();

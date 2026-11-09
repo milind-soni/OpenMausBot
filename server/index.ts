@@ -271,7 +271,7 @@ import {
   SendSequencer,
 } from "./send-idempotency.ts";
 import { EventBus } from "./harness/bus.ts";
-import { ENGINE_LIST_REUSE_MS, engineMemory, enginesByUse, ProviderRegistry } from "./harness/registry.ts"; import { afterFirstEngineRead, holdUntilFirstEngineRead } from "./first-engine-read.ts"; import { HANDOFF_BROWSER_NOTE, HANDOFF_BROWSER_ONLY, handoffSurface } from "./host/handoff-browser.ts";
+import { ENGINE_LIST_REUSE_MS, engineMemory, enginesByUse, ProviderRegistry } from "./harness/registry.ts"; import { afterFirstEngineRead, holdUntilFirstEngineRead } from "./first-engine-read.ts"; import { HANDOFF_BROWSER_NOTE, HANDOFF_BROWSER_ONLY, handoffSurface, stoppedHandoffResult } from "./host/handoff-browser.ts";
 import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { mainThread, wasOldestThread } from "./main-thread.ts";
 import { computerKindForResource, ManagedDesktopPolicy, type ComputerKind } from "./managed-policy.ts"; import { nudgeCloudTeamPolicy, remoteAccessPaths, startCloudTeamPolicy, stopCloudTeamPolicy } from "./cloud-team-policy.ts";
@@ -6114,8 +6114,8 @@ function selectTurnPlace(turn: { botId: string; threadId: string; generation: st
 function continueComputerSelection(threadId: string, generation: string | undefined, succeeded: boolean): boolean {
   const selection = computerSelectionTurns.get(threadId);
   if (!selection || selection.generation !== generation) return false;
-  // A hand-off that does not continue still returns the result it kept back.
-  const giveUp = () => { if (computerSelectionTurns.get(threadId) === selection) computerSelectionTurns.delete(threadId); if (selection.handoff?.outcome) settleDirectCoordination(generation, selection.handoff.outcome); };
+  // A hand-off that does not continue reports that its work was not done (or its own failure), never the move request.
+  const giveUp = () => { if (computerSelectionTurns.get(threadId) === selection) computerSelectionTurns.delete(threadId); if (selection.handoff?.outcome) settleDirectCoordination(generation, stoppedHandoffResult(selection.handoff.outcome)); };
   if (!succeeded || !selection.selected || hasQueuedSteeredMessages(selection.botId, threadId)) return giveUp(), false;
   const surface = selection.selected;
   setImmediate(() => {
