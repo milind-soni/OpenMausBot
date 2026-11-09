@@ -74,7 +74,7 @@ export function createSharedVmControl(deps: SharedVmControlDeps) {
     const held = snapshots.find(snapshot => snapshot.held);
     const pleading = snapshots.find(snapshot => snapshot.helpReason !== null);
     if (!held) return pleading ?? snapshots[0]!;
-    return held.helpReason !== null || !pleading ? held : { ...held, helpReason: pleading.helpReason, ...(pleading.help ? { help: pleading.help } : {}) };
+    return held.helpReason !== null || !pleading ? held : { ...held, helpReason: pleading.helpReason, help: pleading.help };
   };
 
   /** A hold taken without a conversation pauses every conversation of the bot, as a hold on its own key does; a turn still
@@ -121,6 +121,13 @@ export function createSharedVmControl(deps: SharedVmControlDeps) {
     /** The bots told about a change on this key. */
     membersOf,
     botSnapshot,
+    /** A snapshot carrying the bot's sign-in plea as this viewer may see it: an answer never hides a plea the bot's frames
+     * show, and never shows one from a conversation the viewer cannot see. */
+    shown: <T extends ControlSnapshot>(snapshot: T, botId: string, hides: (threadId: string) => boolean): T => {
+      const { helpReason, help } = botSnapshot(botId);
+      const { help: _help, ...rest } = snapshot;
+      return (help && hides(help.threadId) ? { ...rest, helpReason: null } : { ...rest, helpReason, ...(help ? { help } : {}) }) as T;
+    },
     /** Deleting a bot a person's hold reaches would leave that hold to panels that may no longer exist. */
     deletionRefusal: (botId: string): string | null =>
       botSnapshot(botId).held ? "Hand back control of this bot's computer before deleting it" : null,

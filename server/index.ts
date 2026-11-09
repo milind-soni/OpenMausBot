@@ -184,7 +184,7 @@ import {
 } from "./config.ts";
 import { serveStatic } from "./static-files.ts";
 import { startUpkeep } from "./host/start-upkeep.ts";
-import { ComputerControl } from "./computer-control.ts"; import { createSharedVmControl } from "./host/shared-vm-control.ts";
+import { ComputerControl, type ControlSnapshot } from "./computer-control.ts"; import { createSharedVmControl } from "./host/shared-vm-control.ts";
 import { resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts"; import { engineUpdatesFor } from "./engine-updates-host.ts";
 import { appendUsage, flushUsageLedger, queuedTurnTrigger, usageTriggerFor, type UsageRow, type UsageTrigger } from "./usage-ledger.ts"; import { createUsageAttribution } from "./usage-attribution.ts";
@@ -2460,16 +2460,17 @@ function setupConnectedApps(bot: Pick<BotRecord, "composio" | "connectorTools">,
 }
 
 const computerControlRevision = new Map<string, number>();
-const computerControl = new ComputerControl((key) => {
-  for (const botId of sharedVm.membersOf(key)) { const snapshot = sharedVm.botSnapshot(botId);
+const computerControl = new ComputerControl((key) => { for (const botId of sharedVm.membersOf(key)) announceControl(botId);
+}, Date.now, (ref) => signInCardWaits(signInMessage(ref.botId, ref.threadId, ref.messageId)?.signIn));
+function announceControl(botId: string): void {
+  const snapshot = sharedVm.botSnapshot(botId);
   computerControlRevision.set(botId, (computerControlRevision.get(botId) ?? 0) + 1);
   // One-way, fail-closed mirror into Electron: never send release, since a loopback caller can influence the server record.
   if (snapshot.held && /^[A-Za-z0-9_-]{1,120}$/.test(botId)) {
     postDesktopPrivateMessage({ type: "openmausbot:browser-control", botId, held: true });
   }
   broadcast({ kind: "computer-control", botId, held: snapshot.held, helpReason: snapshot.helpReason, ...(snapshot.help ? { help: snapshot.help } : {}) });
-  }
-}, Date.now, (ref) => signInCardWaits(signInMessage(ref.botId, ref.threadId, ref.messageId)?.signIn));
+}
 const controlLeaseIdSchema = z.string().min(16).max(120).regex(/^[A-Za-z0-9_-]+$/);
 function controlIntegration(
   botId: string,
@@ -4527,10 +4528,11 @@ store.onChange((change) => {
       break;
     case "thread":
       broadcast({ kind: "thread", threadId: change.threadId, activeLeafId: change.activeLeafId });
+      for (const botId of computerControl.recheck([change.threadId])) announceControl(botId);
       break;
     case "thread.deleted":
       directRequestOwners.delete(change.threadId);
-      computerControl.forgetThread(change.threadId);
+      for (const botId of computerControl.forgetThread(change.threadId)) announceControl(botId);
       stoppedTurns.delete(change.threadId);
       turnStops.forget(change.threadId);
       repeats.settle(change.threadId);
@@ -4562,6 +4564,7 @@ store.onChange((change) => {
       const group = store.group(change.groupId);
       if (group) broadcast({ kind: "group", group: { ...publicGroupState(group), ...pageIfThreadChanged(group.id, group.threadId) } });
       if (group) settleRoomFloor(group);
+      if (group) for (const botId of computerControl.recheck([group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)])) announceControl(botId);
       break;
     }
     case "group.deleted":
@@ -15227,7 +15230,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const bot = computerPreviewBot(m[1], url);
       if (!bot) return json(res, 404, { error: "no such bot" });
       const threadId = url.searchParams.get("threadId") ?? undefined;
-      if (method === "GET") return json(res, 200, sharedVm.botSnapshot(bot.id));
+      const shown = <T extends ControlSnapshot>(snapshot: T) => sharedVm.shown(snapshot, bot.id, (id) => visibleTo(viewerFor(auth)).hides(id));
+      if (method === "GET") return json(res, 200, shown(sharedVm.botSnapshot(bot.id)));
       if (method === "POST") {
         const action = String(body.action ?? "");
         const currentBot = store.bot(bot.id);
@@ -15244,24 +15248,24 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (action === "release") cloudComputerPower.renew(boatKey);
         if (action === "release" && controlLeaseId) {
           const result = sharedVm.release(bot, threadId, controlLeaseId);
-          return json(res, 200, { ...result.snapshot, released: result.released });
+          return json(res, 200, { ...shown(result.snapshot), released: result.released });
         }
         if (action === "check" && controlLeaseId) {
-          return json(res, 200, sharedVm.check(bot, threadId, controlLeaseId));
+          return json(res, 200, shown(sharedVm.check(bot, threadId, controlLeaseId)));
         }
         if (action !== "take" && action !== "release") return json(res, 400, { error: "action must be take, release, or check" });
         if (body.target !== undefined && (typeof body.target !== "string" || !DESKTOP_VIEWER_TARGET.test(body.target))) return json(res, 400, { error: "target is not a desktop" });
         const controlKey = sharedVm.holdKey(bot, threadId, body.target);
         if (controlKey === null) return json(res, 409, { error: "This conversation does not show that desktop" });
-        if (action === "release") return json(res, 200, computerControl.release(controlKey));
+        if (action === "release") return json(res, 200, shown(computerControl.release(controlKey)));
         if (boatLifecycleBusyBots.has(bot.id) || boatLifecycleBusyBots.has(boatKey)) {
           return json(res, 409, { error: "this bot's cloud computer is being changed — wait before taking control" });
         }
         const refusal = sharedVm.takeRefusal(controlKey);
         if (refusal) return json(res, 409, { error: refusal });
-        if (!controlLeaseId) return json(res, 200, computerControl.take(controlKey));
+        if (!controlLeaseId) return json(res, 200, shown(computerControl.take(controlKey)));
         const result = computerControl.acquireLease(controlKey, controlLeaseId, { armed: sharedVm.armed(auth, bot, threadId, controlKey, body.target) });
-        return json(res, 200, { ...result.snapshot, owned: result.owned, acquired: result.acquired });
+        return json(res, 200, { ...shown(result.snapshot), owned: result.owned, acquired: result.acquired });
       }
       return json(res, 405, { error: "method not allowed" });
     }

@@ -122,6 +122,22 @@ describe("what a hold on the shared desktop reaches", () => {
     control.take(held);
     control.requestHelp(plea, "sign in to a.example", { botId: "ada", threadId: "t", messageId: "m", site: "a.example", place: "browser" });
     expect(vm.botSnapshot("ada")).toMatchObject({ held: true, helpReason: "sign in to a.example", help: { messageId: "m" } });
+    expect(vm.botSnapshot("ada").heldSinceMs).toBe(control.snapshot(held).heldSinceMs);
+  });
+
+  it("a control answer for a viewer who cannot see the asking conversation carries no sign-in request", () => {
+    const { control, vm } = fixture({ bots: [{ id: "ada" }] });
+    control.requestHelp(DESK, "sign in to a.example", { botId: "ada", threadId: "t", messageId: "m", site: "a.example", place: "vm" });
+    expect(vm.shown(control.snapshot(DESK), "ada", (id) => id === "t")).toEqual({ held: false, helpReason: null, heldSinceMs: null });
+    expect(vm.shown(control.snapshot("ada"), "ada", () => false)).toMatchObject({ helpReason: "sign in to a.example", help: { messageId: "m" } });
+  });
+
+  it("a bot's held computer with its own sign-in plea shows that plea, not one on another of its computers", () => {
+    const { control, vm } = fixture({ bots: [{ id: "ada" }] });
+    control.requestHelp("ada", "sign in to b.example", { botId: "ada", threadId: "t", messageId: "own", site: "b.example", place: "browser" });
+    control.take(DESK);
+    control.requestHelp(DESK, "sign in to d.example", { botId: "ada", threadId: "t", messageId: "desk", site: "d.example", place: "vm" });
+    expect(vm.botSnapshot("ada")).toMatchObject({ held: true, helpReason: "sign in to d.example", help: { messageId: "desk" } });
   });
 
   it("tells every bot with a conversation on the desktop, and each its merged state", () => {

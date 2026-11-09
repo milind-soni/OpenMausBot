@@ -279,6 +279,17 @@ describe("computer control", () => {
     expect(changes.map((change) => change.botId).sort()).toEqual(["a", "desk", "held"]);
   });
 
+  it("recheck tells every key with a plea from those conversations, and names the bots that asked", () => {
+    const { control, changes } = tracked();
+    const plea = (botId: string, threadId: string, messageId: string) => ({ botId, threadId, messageId, site: "example.com", place: "vm" as const });
+    control.requestHelp("desk", "a asks", plea("a", "t1", "m-1"));
+    control.requestHelp("b", "b asks", plea("b", "t2", "m-2"));
+    changes.length = 0;
+    expect(control.recheck(["t1", "t9"])).toEqual(["a"]);
+    expect(changes.map((change) => change.botId)).toEqual(["desk"]);
+    expect(control.snapshot("desk")).toMatchObject({ helpReason: "a asks" });
+  });
+
   it("forgetThread removes only that conversation's pleas, from every key", () => {
     const { control, changes } = tracked();
     const plea = (threadId: string, messageId: string) => ({ botId: "a", threadId, messageId, site: "example.com", place: "vm" as const });
@@ -287,7 +298,7 @@ describe("computer control", () => {
     control.requestHelp("a", "t1 asks", plea("t1", "m-3"));
     changes.length = 0;
 
-    control.forgetThread("t1");
+    expect(control.forgetThread("t1")).toEqual(["a"]);
 
     expect(control.snapshot("desk")).toMatchObject({ helpReason: "t2 asks", help: { messageId: "m-2" } });
     expect(control.snapshot("a")).toEqual({ held: false, helpReason: null, heldSinceMs: null });

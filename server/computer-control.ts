@@ -171,19 +171,34 @@ export class ComputerControl {
     this.forgetPleas((ref) => ref.botId === botId);
   }
 
-  /** Removes the pleas of a deleted conversation's sign-in cards from every key; holds stay. */
-  forgetThread(threadId: string): void {
-    this.forgetPleas((ref) => ref.threadId === threadId);
+  /** Removes the pleas of a deleted conversation's sign-in cards from every key, and returns the bots that asked; holds stay. */
+  forgetThread(threadId: string): string[] {
+    return this.forgetPleas((ref) => ref.threadId === threadId);
   }
 
-  private forgetPleas(gone: (ref: ComputerHelpRef) => boolean): void {
+  /** Tells every key with a plea from these conversations that its cards may have stopped or started waiting, and returns the
+   * bots that asked. */
+  recheck(threadIds: Iterable<string>): string[] {
+    const threads = new Set(threadIds), askers = new Set<string>();
+    for (const [key, entry] of this.entries) {
+      const asked = entry.pleas.filter((plea) => threads.has(plea.ref.threadId));
+      for (const plea of asked) askers.add(plea.ref.botId);
+      if (asked.length) this.changed(key);
+    }
+    return [...askers];
+  }
+
+  private forgetPleas(gone: (ref: ComputerHelpRef) => boolean): string[] {
+    const askers = new Set<string>();
     for (const [key, entry] of this.entries) {
       const pleas = entry.pleas.filter((plea) => !gone(plea.ref));
       if (pleas.length === entry.pleas.length) continue;
+      for (const plea of entry.pleas) if (gone(plea.ref)) askers.add(plea.ref.botId);
       entry.pleas = pleas;
       if (entry.heldSinceMs === null && !pleas.length) this.entries.delete(key);
       this.changed(key);
     }
+    return [...askers];
   }
 
   private drop(botId: string, entry: Entry): void {

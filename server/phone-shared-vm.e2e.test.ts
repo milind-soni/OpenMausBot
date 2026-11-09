@@ -428,6 +428,57 @@ describe("a person's hold on the shared Local VM", () => {
     expect((await control(api, witness)).body.helpReason).toBeNull();
   }, 60_000);
 
+  it("deleting a cloud bot's only conversation on the shared VM tells that bot its sign-in request is gone", async () => {
+    const a = await newBot("Ada", { computer: "cloud" });
+    const side = await newTask(a.id, "vm");
+    await askSignIn((await startTurn(a.id, side)).comms, "a.example");
+    await finishTurns([a.id, side]);
+    await until(() => framesFor(a.id, 0).at(-1)?.helpReason, reason => typeof reason === "string");
+    const since = sse.frames.length;
+    await ok("DELETE", `/api/bots/${a.id}/tasks/${side}`);
+    await until(() => framesFor(a.id, since).at(-1)?.helpReason, reason => reason === null);
+  }, 60_000);
+
+  it("every control answer carries the bot's sign-in request from another of its computers, as its frames do", async () => {
+    const a = await newBot("Ada", { computer: "cloud" });
+    const side = await newTask(a.id, "vm");
+    const card = await askSignIn((await startTurn(a.id, side)).comms, "a.example");
+    await finishTurns([a.id, side]);
+    const id = lease();
+    for (const body of [{ action: "take", controlLeaseId: id }, { action: "check", controlLeaseId: id }, { action: "release", controlLeaseId: id }, { action: "take" }, { action: "release" }]) {
+      expect((await control(api, a.id, body)).body, JSON.stringify(body)).toMatchObject({ help: { messageId: card } });
+    }
+  }, 60_000);
+
+  it("an edit that leaves a sign-in card's branch takes its request off every panel", async () => {
+    const a = await newBot("Ada", { computer: "vm" });
+    await askSignIn((await startTurn(a.id, a.threadId)).comms, "a.example");
+    await finishTurns([a.id, a.threadId]);
+    expect((await control(api, witness)).body.helpReason).toBeTruthy();
+    const asked = (await ok("GET", `/api/threads/${a.threadId}/messages?limit=50`)).messages.find((message: any) => message.role === "user");
+    const since = sse.frames.length;
+    await ok("POST", `/api/bots/${a.id}/messages/${asked.id}/edit`, { text: `Edited ${randomUUID()}`, threadId: a.threadId });
+    await until(() => framesFor(witness, since).at(-1)?.helpReason, reason => reason === null);
+    expect((await control(api, witness)).body.helpReason).toBeNull();
+    await finishTurns([a.id, a.threadId]);
+  }, 60_000);
+
+  it.each(["main conversation", "a room thread"] as const)("removing a bot from its room takes that bot's sign-in request in the %s off every panel", async (where) => {
+    const [a, b] = [await newBot("Ada", { computer: "vm" }), await newBot("Bea", { computer: "vm" })];
+    const group = (await ok("POST", "/api/groups", { name: `Room ${randomUUID().slice(0, 6)}`, memberIds: [a.id], setup: { bulletin: "", defaultResponder: { kind: "everyone" } } })).group;
+    const threadId = where === "a room thread" ? (await ok("POST", `/api/groups/${group.id}/tasks`, {})).task.threadId : undefined;
+    const text = `Work on the desktop ${randomUUID()}`;
+    await ok("POST", `/api/groups/${group.id}/messages`, { text, ...(threadId ? { threadId } : {}) });
+    await askSignIn((await dumpFor(text)).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN, "a.example");
+    writeFileSync(finishFile, "finish");
+    expect((await control(api, witness)).body.helpReason).toBeTruthy();
+    if (threadId) await until(() => api("POST", `/api/groups/${group.id}/tasks/${group.threadId}`, {}), response => response.status === 200);
+    const since = sse.frames.length;
+    await until(() => api("PATCH", `/api/groups/${group.id}`, { memberIds: [b.id] }), response => response.status === 200);
+    await until(() => framesFor(witness, since).at(-1)?.helpReason, reason => reason === null);
+    expect((await control(api, witness)).body.helpReason).toBeNull();
+  }, 60_000);
+
   it.each(["the room", "a room thread", "room threads in bulk"] as const)("a room's sign-in card asks no panel once %s is deleted", async (how) => {
     const a = await newBot("Ada", { computer: "vm" });
     const group = (await ok("POST", "/api/groups", { name: `Room ${randomUUID().slice(0, 6)}`, memberIds: [a.id], setup: { bulletin: "", defaultResponder: { kind: "everyone" } } })).group;
