@@ -305,10 +305,28 @@ describe("Chat MCP session", () => {
   it.each([
     ["too many tools", `reply(message, {tools:Array.from({length:2001},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
     ["invalid RPC", `process.stdout.write('{"result":1}\\n');`],
-  ])("still fails startup for a harness mount and awaits child cleanup for %s", async (_label, response) => {
+  ])("skips a harness mount that fails startup and awaits child cleanup for %s", async (_label, response) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const f = fixture(`if (message.method === "tools/list") { ${response} continue; }`);
-    await expect(f.mount(true, true)).rejects.toThrow(/MCP/);
+    const session = await f.mount(true, true);
+    expect(session.definitions).toEqual([]);
+    expect(session.skipped).toEqual([{ server: "computer", reason: expect.stringMatching(/MCP/) }]);
     expect(alive(f.read().pid)).toBe(false);
+    warn.mockRestore();
+  });
+
+  it("keeps the turn going when a built-in server exits during startup, and says which one and why", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const exits = fixture(`if (message.method === "initialize") process.exit(3);`);
+    const session = await mountChatTools({ localComputer: exits.server, agents: ready.server }, ready.controller.signal, true);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["agents_write"]);
+    expect(session.skipped).toEqual([{ server: "computer", reason: "MCP server exited before the session closed (exit code 3)" }]);
+    expect(chatToolNotices(session)).toEqual(['MCP server "computer" was skipped for this turn: MCP server exited before the session closed (exit code 3)']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"computer"`));
+    await expect(session.execute("agents_write", { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:still works" });
+    warn.mockRestore();
   });
 
   it("rejects untrusted transport error text without leaking it", async () => {
@@ -389,12 +407,17 @@ describe("Chat MCP session", () => {
     warn.mockRestore();
   });
 
-  it("still fails setup when a harness mount (not a configured server) fails", async () => {
+  it("skips a failed built-in server and keeps the configured ones", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const ready = fixture();
     const failed = fixture(`if(message.method === "tools/list") { reply(message,{tools:"invalid"}); continue; }`);
-    await expect(mountChatTools({ agents: failed.server, custom: { ready: ready.server } }, ready.controller.signal)).rejects.toThrow("invalid result");
-    expect(alive(ready.read().pid)).toBe(false);
+    const session = await mountChatTools({ agents: failed.server, custom: { ready: ready.server } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
+    expect(session.skipped).toEqual([{ server: "agents", reason: expect.stringContaining("invalid result") }]);
     expect(alive(failed.read().pid)).toBe(false);
+    expect(alive(ready.read().pid)).toBe(true);
+    warn.mockRestore();
   });
 
   it("skips a connected-apps mount that fails, and keeps the turn alive", async () => {
@@ -436,9 +459,11 @@ describe("Chat MCP session", () => {
     warn.mockRestore();
   });
 
-  it("fails setup when the Local VM lists no tools, but not when the owner's selection leaves none", async () => {
+  it("skips the Local VM when it lists no tools, but not when the owner's selection leaves none", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const empty = fixture(`if(message.method === "tools/list") { reply(message,{tools:[]}); continue; }`);
-    await expect(empty.mount(true, true)).rejects.toThrow("The Local VM listed no tools");
+    expect((await empty.mount(true, true)).skipped).toEqual([{ server: "computer", reason: "The Local VM listed no tools" }]);
+    warn.mockRestore();
     expect(alive(empty.read().pid)).toBe(false);
     expect((await empty.mount(false)).definitions).toEqual([]);
     expect((await fixture().mount(true, true, { allow: ["mcp:computer:screenshot"] })).definitions).toEqual([]);

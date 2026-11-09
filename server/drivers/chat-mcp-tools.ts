@@ -114,7 +114,7 @@ export class ChatMcpClient {
     // Stderr may contain credentials; drain without recording or returning it.
     this.child.stderr.on("data", () => {});
     this.child.on("error", () => this.fail(new Error("MCP server could not start; check its command and installation")));
-    this.child.on("exit", () => this.fail(new Error("MCP server exited before the session closed")));
+    this.child.on("exit", (code, signal) => this.fail(new Error(`MCP server exited before the session closed (${signal ? `signal ${signal}` : `exit code ${code}`})`)));
     this.child.stdin.on("error", () => this.fail(new Error("MCP server input closed")));
   }
 
@@ -434,12 +434,6 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   if (integrations?.data && eligible("data")) servers.push(["data", integrations.data]);
   if (integrations?.email && eligible("email")) servers.push(["email", integrations.email]);
   if (integrations?.device && eligible("device")) servers.push(["device", integrations.device]);
-  // Connected apps are optional: their tool catalog is fetched from the connected-apps service while
-  // mounting, so an unreachable service must not fail the whole turn. A failed mount is skipped like a
-  // configured server's, which the model is told about. (CLI engines already drop them and go on.)
-  const optionalBuiltIns = new Set<string>();
-  if (integrations?.composio) optionalBuiltIns.add("composio");
-  if (integrations?.composioOwn) optionalBuiltIns.add(OWN_APPS_SERVER);
   const builtIns = servers.length;
   const besideBrowser = servers.some(([, descriptor]) => descriptor === integrations?.browser);
   const merged: MergedChatMcpServers[] = [];
@@ -608,8 +602,8 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       if (signal.aborted || closed) throw aborted();
       const name = servers[index]![0];
       if (mount.status === "rejected") {
-        if (index >= builtIns || optionalBuiltIns.has(name)) { await skip(name, mount.reason, startedAt[index]); continue; }
-        throw mount.reason;
+        await skip(name, mount.reason, startedAt[index]);
+        continue;
       }
       if (index < builtIns) {
         offeredTools.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) });
