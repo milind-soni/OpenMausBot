@@ -96,6 +96,7 @@ export function speakable(input: string): string {
 export const VOICE_FIRST_BLOCK_MAX_CHARS = 90;
 
 const BOUNDARY = /(?<!\b(?:e\.g|i\.e|etc|vs|Dr|Mr|Mrs|Ms|No|approx))(?<![.\d])([.!?])(["')\]]*)\s+/g;
+const WORD_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "word" });
 
 export function toUtterances(
   input: string,
@@ -121,7 +122,7 @@ export function toUtterances(
     const parts = piece.length <= maxChars ? [piece] : splitLong(piece, maxChars);
     for (const part of parts) {
       const prev = out[out.length - 1];
-      if (prev && (prev.length < minChars || part.length < minChars)) {
+      if (prev && prev.length + part.length + 1 <= maxChars && (prev.length < minChars || part.length < minChars)) {
         out[out.length - 1] = `${prev} ${part}`;
       } else {
         out.push(part);
@@ -143,7 +144,13 @@ function splitLong(text: string, maxChars: number): string[] {
   while (rest.length > maxChars) {
     const window = rest.slice(0, maxChars);
     const at = Math.max(window.lastIndexOf(", "), window.lastIndexOf("; "), window.lastIndexOf(" — "));
-    const cut = at > maxChars / 2 ? at + 1 : window.lastIndexOf(" ");
+    let cut = at > maxChars / 2 ? at + 1 : window.lastIndexOf(" ");
+    if (cut <= 0) {
+      for (const { index } of WORD_SEGMENTER.segment(rest)) {
+        if (index > maxChars) break;
+        if (index > 0) cut = index;
+      }
+    }
     if (cut <= 0) break;
     out.push(rest.slice(0, cut).trim());
     rest = rest.slice(cut).trim();
