@@ -463,7 +463,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
     firstKeptId: string;
     foldedThroughId: string;
     tokensBefore: number;
-    by: "person" | "harness";
+    by: "person" | "harness"; /** The divider "Start fresh" leaves: no summary, and a provider reads nothing before it. */ fresh?: true;
   };
   /** Renderers receive only the allowlisted /api/attachments URL. `file` entries are opened through the message-scoped
    * file route, never by path. `source`: a bot attach-file copy's original path on the server, for Show in folder.

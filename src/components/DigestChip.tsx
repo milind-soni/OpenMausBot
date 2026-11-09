@@ -47,6 +47,15 @@ export function DigestChip({ message }: { message: Message }) {
 
 export function CompactionChip({ message }: { message: Message }) {
   if (!message.compaction) return null;
+  if (message.compaction.fresh) {
+    return (
+      <div role="separator" data-testid="fresh-start-divider" className="flex w-full items-center gap-3 py-1 text-[12px] text-ink-secondary">
+        <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
+        <span className="text-center"><span className="font-medium">{t("chat.startFresh.divider")}</span> · {t("chat.startFresh.dividerHint")}</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
+      </div>
+    );
+  }
   const excerpts = message.compaction.summary.startsWith(EXCERPT_SUMMARY_HEADER);
   return (
     <details className="max-w-[600px] rounded-xl border border-hairline/40 bg-panel px-3 py-2 text-[12px] text-ink-secondary" data-testid="compaction-chip">
