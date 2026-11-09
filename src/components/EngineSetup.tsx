@@ -405,7 +405,7 @@ export function hasSavedApiKey(instance: InstanceInfo): boolean {
 }
 
 function apiKeySetup(instance: InstanceInfo): boolean {
-  if (!(isApiKeyEngine(instance) || instance.install?.settings === "connections") || instance.snapshot.authenticationUnavailableReason) return false;
+  if (!(isApiKeyEngine(instance) || instance.install?.settings === "connections") || instance.snapshot.authenticationUnavailableReason || instance.serverKind === "ollama") return false;
   // A key engine with its own CLI (DeepSeek Harness) is installed first, then given the key.
   if (instance.snapshot.state !== "available") return !installCommandFor(instance.install);
   return instance.snapshot.authenticated === false;
@@ -576,7 +576,7 @@ export function EngineSetup({
     return <GrokKeyInstead className={className} unframed={unframed} />;
   }
 
-  if (!install || instance.snapshot.authenticationUnavailableReason) {
+  if (!install || instance.snapshot.authenticationUnavailableReason || instance.serverKind === "ollama") {
     return (
       <div className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
         <div className="text-[13px] font-semibold text-ink">{t("engineSetup.notReady", { name: engineDisplayName(instance) })}</div>

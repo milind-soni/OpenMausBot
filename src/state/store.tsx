@@ -458,7 +458,7 @@ export interface InstanceInfo extends InstanceEndpointInfo {
   instanceId: string;
   driverKind: string;
   displayName: string;
-  icon?: import("../../shared/provider-icon").ProviderIcon;
+  icon?: import("../../shared/provider-icon").ProviderIcon; /** An OpenAI-compatible server recognised as Ollama. */ serverKind?: "ollama";
   readOnly?: boolean;
   trialCredit?: "active" | "used_up" | "ended";
   managed?: { organizationId: string; organizationName: string };
@@ -481,7 +481,7 @@ export interface InstanceInfo extends InstanceEndpointInfo {
   aiTest?: import("../../shared/ai-ranking").AiTestState;
   /** Why it didn't answer, in plain words, when it said (signed out, a used-up limit…). */
   aiTestError?: string;
-  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string; variants?: ModelVariantOption[]; orgBlocked?: true }> };
+  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string; variants?: ModelVariantOption[]; orgBlocked?: true; local?: import("../../shared/local-model").LocalModelFacts }> };
   capabilities?: {
     computerMcp?: boolean;
     agentsMcp?: boolean;
