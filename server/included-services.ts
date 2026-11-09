@@ -9,9 +9,10 @@
 import { JEV_DEFAULT_BASE_URL } from "./decider/jev.ts";
 
 export const BOAT_API_DEFAULT = "https://boat.dev/api/v1";
+export const MOLA_API_DEFAULT = "https://api.mola.sh/v1";
 export const ELEVENLABS_API_DEFAULT = "https://api.elevenlabs.io/v1";
 /** Must also be on WORKSPACE_CREDENTIAL_ENV. */
-export const INCLUDED_TOKEN_ENV = ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_AI_TOKEN", "OMB_CLOUD_X_TOKEN"] as const;
+export const INCLUDED_TOKEN_ENV = ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_MOLA_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_AI_TOKEN", "OMB_CLOUD_X_TOKEN"] as const;
 
 export interface ServiceCredential {
   token: string;
@@ -22,6 +23,7 @@ export interface ServiceCredential {
 
 interface Included {
   boat: ServiceCredential | null;
+  mola: ServiceCredential | null;
   voice: ServiceCredential | null;
   decider: ServiceCredential | null;
   ai: ServiceCredential | null;
@@ -36,6 +38,7 @@ function includedService(url: string | undefined, token: string | undefined): Se
 
 const includedFrom = (env: NodeJS.ProcessEnv): Included => ({
   boat: includedService(env.OMB_CLOUD_BOAT_URL, env.OMB_CLOUD_BOAT_TOKEN),
+  mola: includedService(env.OMB_CLOUD_MOLA_URL, env.OMB_CLOUD_MOLA_TOKEN),
   voice: includedService(env.OMB_CLOUD_VOICE_URL, env.OMB_CLOUD_VOICE_TOKEN),
   decider: includedService(env.OMB_CLOUD_DECIDER_URL, env.OMB_CLOUD_DECIDER_TOKEN),
   ai: trialCreditService(env.OMB_CLOUD_AI_URL, env.OMB_CLOUD_AI_TOKEN),
@@ -73,11 +76,16 @@ function resolve(own: string | undefined, providerApi: string, included: Service
 }
 
 export const boatProviderApi = (env: NodeJS.ProcessEnv = process.env): string => env.OMB_BOAT_API || BOAT_API_DEFAULT;
+export const molaProviderApi = (env: NodeJS.ProcessEnv = process.env): string => env.MOLA_API_URL || MOLA_API_DEFAULT;
 export const elevenLabsProviderApi = (env: NodeJS.ProcessEnv = process.env): string =>
   env.OMB_ELEVENLABS_API || ELEVENLABS_API_DEFAULT;
 
 export function boatCredential(own: string | undefined, env: NodeJS.ProcessEnv = process.env): ServiceCredential | null {
   return resolve(own, boatProviderApi(env), (held ?? includedFrom(env)).boat);
+}
+
+export function molaCredential(own: string | undefined, apiUrl: string | undefined, env: NodeJS.ProcessEnv = process.env): ServiceCredential | null {
+  return resolve(own, apiUrl?.trim() || molaProviderApi(env), (held ?? includedFrom(env)).mola);
 }
 
 export function voiceCredential(own: string | undefined, env: NodeJS.ProcessEnv = process.env): ServiceCredential | null {
