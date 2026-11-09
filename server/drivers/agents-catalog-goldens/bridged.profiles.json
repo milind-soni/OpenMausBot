@@ -648,5 +648,50 @@
       "find_tool",
       "use_tool"
     ]
+  },
+  "default+operator": {
+    "bytes": 17796,
+    "sha256": "870db7cda7e1fb869dbe7c760758ce7290d806f70d22135b9230314a3c9ffeb9",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "publish_page",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "message_person",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "skills+shared+voice+escalations+x+team+images+operator": {
+    "bytes": 18739,
+    "sha256": "925d1b97631cff587669d399d5ccda020bae49595be5d9f168873f91e03f8c68",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "publish_page",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "message_person",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
   }
 }

@@ -85,6 +85,7 @@ describe("describeTool", () => {
     ["decide", "Decide", "activity.tool.team.decide"],
     ["extract", "Extract", "activity.tool.team.extract"],
     ["message_person", "Message person", "activity.tool.team.messagePerson"],
+    ["operator_settings", "Operator settings", "activity.tool.team.operatorSettings"],
     ["report_bug", "Report bug", "activity.tool.team.reportBug"],
     ["delete_trigger", "Delete trigger", "activity.tool.team.deleteTrigger"],
     ["wait_until", "Wait until", "activity.tool.team.waitUntil"],

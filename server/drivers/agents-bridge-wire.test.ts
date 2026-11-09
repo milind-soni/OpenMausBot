@@ -69,14 +69,17 @@ function profiles(): Record<string, Record<string, string>> {
   all["default+no-computer-pick"] = { ...all.default!, OMB_COMPUTER_SELECTION: "0" };
   for (const name of ["default", "non-chief"]) all[`${name}+room`] = { ...all[name]!, OMB_COMPUTER_SELECTION: "0", OMB_ROOM: "1" };
   all["default+images"] = { ...all.default!, OMB_IMAGE_GENERATION: "1" };
+  for (const name of ["default", "skills+shared+voice+escalations+x+team+images"]) {
+    all[`${name}+operator`] = { ...all[name]!, OMB_CHIEF_OPERATOR: "1" };
+  }
   return all;
 }
 
 const PROFILES = profiles();
 /** Refused by the server to every bot that is not a Chief of Staff. */
-const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
+const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
 /** The profile that mounts the most: its bridged list is checked in whole. */
-const FULL = "skills+shared+voice+escalations+x+team+images";
+const FULL = "skills+shared+voice+escalations+x+team+images+operator";
 
 /** Bytes of each bridged list when its budget was last set. A list may not
  * exceed this by more than 2%, and may not undercut it by more than 2%
@@ -112,6 +115,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "non-chief+room": 16096,
   "skills+shared+voice+escalations+x+team+images": 18429,
   "default+images": 17502,
+  "default+operator": 17796,
+  "skills+shared+voice+escalations+x+team+images+operator": 18739,
 };
 
 type RpcAnswer = { id: number; result?: { tools?: unknown[]; content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };
@@ -274,6 +279,21 @@ describe("agents proxy tools/list golden with the tool bridge on", () => {
       for (const tool of CHIEF_ONLY_TOOLS) expect(wires[name], `${name}: ${tool}`).not.toContain(tool);
       const chiefTwin = name.startsWith("non-chief") ? name.replace("non-chief", "default") : name.replace("+non-chief", "");
       expect(namedHidden(wires[chiefTwin]!), name).toEqual(expect.arrayContaining(CHIEF_ONLY_TOOLS));
+    }
+  });
+
+  it("discovers Operator settings only with the exact appointment switch and without Chief of Staff powers", async () => {
+    for (const value of [undefined, "0", "", "true", "yes", "on", "1"]) {
+      const env = { ...PROFILES["non-chief"]!, ...BRIDGE_ON, ...(value === undefined ? {} : { OMB_CHIEF_OPERATOR: value }) };
+      const [listed, found] = await proxyAnswers(PROXY_SOURCE, env, [
+        { method: "tools/list" },
+        { method: "tools/call", params: { name: FIND_TOOL, arguments: { query: "operator_settings" } } },
+      ]);
+      const matches = (JSON.parse(found!.result!.content![0]!.text) as { matches: Tool[] }).matches;
+      expect(matches.some((tool) => tool.name === "operator_settings"), String(value)).toBe(value === "1");
+      const hidden = namedHidden(JSON.stringify(listed!.result));
+      expect(hidden.includes("operator_settings"), String(value)).toBe(value === "1");
+      for (const tool of CHIEF_ONLY_TOOLS) expect(hidden, tool).not.toContain(tool);
     }
   });
 

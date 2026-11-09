@@ -4,9 +4,10 @@ import { createInterface } from "node:readline";
 import { expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { ownMcpOverHttp } from "./drivers/turn-mcp.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 
-it("appoints one operator through an owner session and changes only an allowed setting through its live turn", async () => {
+it.each(["stdio", "http"])("appoints one operator through an owner session and changes only an allowed setting through its live turn over %s", async (transport) => {
   const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
   const { url } = fixture.info;
   const proxies: ChildProcess[] = [];
@@ -39,6 +40,16 @@ it("appoints one operator through an owner session and changes only an allowed s
       return dump.mcpConfig.mcpServers.agents as { command: string; args: string[]; env: Record<string, string> };
     };
     const connect = (mounted: Awaited<ReturnType<typeof mount>>) => {
+      if (transport === "http") {
+        const endpoint = ownMcpOverHttp({ name: "agents", ...mounted });
+        expect(endpoint).not.toBeNull();
+        return async (method: string, params: Record<string, unknown> = {}) => {
+          const response = await fetch(endpoint!.url, { method: "POST", headers: { "content-type": "application/json", ...endpoint!.headers },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+          expect(response.status).toBe(200);
+          return (await response.json() as { result: any }).result;
+        };
+      }
       const proxy = spawn(mounted.command, mounted.args, { cwd: process.cwd(), env: { ...mounted.env, HOME: fixture.info.dataDir, USERPROFILE: fixture.info.dataDir }, stdio: ["pipe", "pipe", "pipe"] });
       proxies.push(proxy);
       const pending = new Map<number, (value: any) => void>();
@@ -57,6 +68,8 @@ it("appoints one operator through an owner session and changes only an allowed s
     const otherMount = await mount(otherBot);
     expect(otherMount.env.OMB_CHIEF_OPERATOR).toBe("0");
     expect((await connect(otherMount)("tools/list")).tools.map((tool: { name: string }) => tool.name)).not.toContain("operator_settings");
+    const forged = connect({ ...otherMount, env: { ...otherMount.env, OMB_CHIEF_OPERATOR: "1" } });
+    expect((await forged("tools/call", { name: "operator_settings", arguments: { action: "read" } })).isError).toBe(true);
     await cli("interrupt", "--bot", otherBot.id);
 
     const selected = await mount(operatorBot);

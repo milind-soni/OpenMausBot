@@ -9345,6 +9345,7 @@
   "native.update.installFailedPlain": "The update could not be installed.",
   "mcp.check.unauthorized": "unauthorized",
   "activity.tool.team.messagePerson": "Message person",
+  "activity.tool.team.operatorSettings": "Operator settings",
   "activity.tool.team.reportBug": "Report bug",
   "browser.control.held": "{name} is paused for you",
   "native.lendTray.and": " and ",

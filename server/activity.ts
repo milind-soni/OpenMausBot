@@ -110,6 +110,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   memory_log: "activity.tool.team.memoryLog",
   memory_update: "activity.tool.team.memoryUpdate",
   message_person: "activity.tool.team.messagePerson",
+  operator_settings: "activity.tool.team.operatorSettings",
   post_to_room: "activity.tool.team.postToRoom",
   propose_bot_deletion: "activity.tool.team.proposeBotDeletion",
   propose_model: "activity.tool.team.proposeModel",
