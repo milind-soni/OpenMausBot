@@ -120,7 +120,8 @@ function opensOwnReport(
 
 /** The transient verdict a status carries on its own, if any: 5xx reads server_error here because this runs
  * before the body patterns, which would read the same number the same way — unless the report body says
- * overloaded, which keeps that reason, matching the report on its own. */
+ * overloaded, which keeps that reason, matching the report on its own. The body is the report itself: its
+ * status form, the rest of its line, and the line after it, where a provider puts the detail. */
 function transientStatusVerdict(
   status: number,
   provider: { openAi?: boolean },
@@ -153,20 +154,23 @@ function httpStatusVerdict(text: string, provider: { openAi?: boolean }): ErrorC
     let prevEnd = rest.lastIndex;
     let lineStart = text.lastIndexOf("\n", match!.index - 1) + 1;
     let lineHasMatch = true;
+    let nextNewline = text.indexOf("\n", prevEnd);
     let later: RegExpExecArray | null;
     while ((later = rest.exec(text)) !== null) {
-      let newline = text.indexOf("\n", prevEnd);
-      while (newline !== -1 && newline < later.index) {
-        lineStart = newline + 1;
+      if (nextNewline !== -1 && nextNewline < prevEnd) nextNewline = text.indexOf("\n", prevEnd);
+      while (nextNewline !== -1 && nextNewline < later.index) {
+        lineStart = nextNewline + 1;
         lineHasMatch = false;
-        newline = text.indexOf("\n", lineStart);
+        nextNewline = text.indexOf("\n", lineStart);
       }
       if (opensOwnReport(text, later, prevEnd, lineStart, lineHasMatch)) {
-        const lineEnd = text.indexOf("\n", later.index);
+        const matchEnd = later.index + later[0].length;
+        const lineEnd = text.indexOf("\n", matchEnd);
+        const nextLineEnd = lineEnd === -1 ? -1 : text.indexOf("\n", lineEnd + 1);
         const verdict = transientStatusVerdict(
           Number(later[1] ?? later[2] ?? later[3]),
           provider,
-          text.slice(later.index + later[0].length, lineEnd === -1 ? undefined : lineEnd),
+          text.slice(later.index, nextLineEnd === -1 ? undefined : nextLineEnd),
         );
         if (verdict) return verdict;
       }

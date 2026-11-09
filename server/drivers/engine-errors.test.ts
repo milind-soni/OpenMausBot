@@ -287,6 +287,12 @@ describe("classifyError reads an explicit HTTP status before body text", () => {
     ["API Error: 410: resource gone Error: HTTP 503 Service Unavailable", { transient: true, reason: "server_error" }],
     ["API Error: 410: resource gone\nxAI HTTP 503 Service Unavailable", { transient: true, reason: "server_error" }],
     ["API Error: 410: resource gone\nHTTP 529: overloaded", { transient: true, reason: "overloaded" }],
+    // A later 5xx report keeps the overloaded reason when the detail sits inside the
+    // status parentheses or on the line after the report.
+    ["API Error: 410: resource gone\n(status 503 overloaded)", { transient: true, reason: "overloaded" }],
+    ["API Error: 410: resource gone\nHTTP 503 Service Unavailable\noverloaded: capacity exceeded", { transient: true, reason: "overloaded" }],
+    // Many quoted statuses on one line still leave the later report's verdict alone.
+    ["API Error: 410: resource gone" + " quoted HTTP 409".repeat(50) + " Error: HTTP 503 Service Unavailable", { transient: true, reason: "server_error" }],
     // ...but a status quoted inside the same clause stays nested, even on a later line.
     ["API Error: 410: resource gone\nDetails: the backend returned HTTP 503", { transient: false, reason: "invalid_request" }],
     ["API Error: 410: resource gone Error: proxy said HTTP 503", { transient: false, reason: "invalid_request" }],
