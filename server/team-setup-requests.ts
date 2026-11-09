@@ -90,6 +90,8 @@ interface Options {
   ownsThread(botId: string, threadId: string): boolean;
   /** `request` only for a reviewed deletion; Undo of a creation deletes without one. */
   deleteBot(botId: string, revalidate: () => void, request?: TeamSetupRequest): Promise<void>;
+  /** Why deleting this bot would be refused now, as a person's hold reaches it; null when it would not. */
+  deletionRefusal(botId: string): string | null;
 }
 
 type RequestFrom = { botId: string; name: string; color: string };
@@ -413,6 +415,8 @@ export class TeamSetupRequestService {
     const ids = Object.keys(revisions);
     if (changed(ids)) return { ...cannot(UNDO_STALE), stale: true };
     if (ids.some((id) => this.options.targetBusy(id))) return cannot("Wait for the bots this setup changed to finish their work, then undo.");
+    const refusal = created.map((id) => this.options.deletionRefusal(id)).find((reason) => reason !== null);
+    if (refusal) return cannot(refusal);
     try {
       for (const id of created) await this.options.deleteBot(id, () => { if (changed([id])) throw new TeamSetupError(UNDO_STALE, 409); });
       const restore = before.filter((entry) => Object.keys(entry.fields).length);

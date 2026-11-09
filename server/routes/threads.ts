@@ -53,7 +53,7 @@ export interface ThreadRouteDeps {
   publicBotQueuedMessages(): ReturnType<typeof queuedSteerSnapshot>;
   publicGroupState(record: GroupRecord): WireGroup;
   wireBot(bot: BotRecord): WireBot;
-  botComputerControlSnapshot(botId: string): ReturnType<ComputerControl["snapshot"]>;
+  botControlSnapshot(botId: string): ReturnType<ComputerControl["snapshot"]>;
   messageFileRootsForThread(senderId: string, threadId: string): string[];
   viewerFor(auth: RequestAuth): Viewer;
   /** A room's unread mark as this person has read it (a Team Cloud); the room as it is anywhere else. */
@@ -73,7 +73,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     store, userName: userNameFor, sessions, groupUsageReader, lendingEnabled,
     hostedWorkspace: HOSTED_WORKSPACE, sessionCookie: SESSION_COOKIE, loopback: LOOPBACK, defaultPage: DEFAULT_PAGE,
     pageSize, messagePage, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot,
-    botComputerControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo,
+    botControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo,
   } = deps;
   const jobs = createJobRoutes({ store, coordinator: deps.coordinator, groupThreadIsWorking: deps.groupThreadIsWorking, viewerFor, visibleTo, sessions });
   const handle = async ({ req, res, url, path, method, auth, json, readBody }: RouteContext): Promise<unknown> => {
@@ -108,7 +108,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         }),
         computerControl: Object.fromEntries(
           shownBots.map((bot) => {
-            const snapshot = botComputerControlSnapshot(bot.id);
+            const snapshot = botControlSnapshot(bot.id);
             // A plea from someone else's private chat (a Team Cloud) names its site and reason: held is all that is shared.
             if (snapshot.help && visible.hides(snapshot.help.threadId)) return [bot.id, { held: snapshot.held, helpReason: null }];
             return [bot.id, { held: snapshot.held, helpReason: snapshot.helpReason, ...(snapshot.help ? { help: snapshot.help } : {}) }];

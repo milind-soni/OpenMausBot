@@ -30,7 +30,7 @@ function world(parked?: Partial<HandoffView>, pleas = new Map<string, string[]>(
     }),
     handBackBrowser: (_bot, threadId) => { handedBack.push(threadId); },
     releaseComputer: (key) => { handedBackKeys.push(key); },
-    computerKey: (bot) => bot.id,
+    computerKey: (bot, threadId) => `${bot.id}/${threadId}`,
     sharedKey: (key) => key.startsWith("computer_"),
     pleas: (key) => (pleas.get(key) ?? []).map((messageId) => ({ botId: "dachs", threadId: "work", messageId, site: "notion.so", place: "vm" })),
   };
@@ -94,6 +94,13 @@ describe("the computer a sign-in card lent the person", () => {
     }
     return w.handedBackKeys.includes(key);
   };
+
+  it("goes back from the card's own conversation when no plea of it is left, as after a restart", () => {
+    const w = world();
+    w.add({ ...card(), signIn: { ...card().signIn, place: "vm" } });
+    w.settle.settle("dachs", "work", "m1", "done");
+    expect(w.handedBackKeys).toEqual(["dachs/work"]);
+  });
 
   it("goes back on every path when it is the bot's own, and a shared one only when the person settles its last plea", () => {
     const paths: Path[] = ["done", "cancelled", "answered in chat", "answered elsewhere", "verified"];

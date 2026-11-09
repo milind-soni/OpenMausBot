@@ -39,8 +39,11 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
     patchBot: (id: string, patch: Partial<BotRecord>) => Object.assign(bots.find((item) => item.id === id)!, patch),
   };
   let sourceExists = true;
+  const deletionRefusal = vi.fn((_id: string): string | null => null);
   const deleteBot = vi.fn(async (id: string, revalidate: () => void, request?: TeamSetupRequest) => {
     revalidate();
+    const refusal = deletionRefusal(id);
+    if (refusal) throw new TeamSetupError(refusal, 409);
     const target = bots.find((item) => item.id === id)!;
     if (request) chief.lastTeamSetupReceipt = { requestId: request.requestId, result: { state: "applied", bots: [{ id, name: target.name, action: "deleted" }], newTeams: [] } };
     bots.splice(bots.indexOf(target), 1);
@@ -51,7 +54,7 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
   const validateChange = vi.fn();
   const canPersist = vi.fn((): { ok: true } | { ok: false; status: number; error: string } => ({ ok: true }));
   const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, hasTeamAuthority, botLimit: createBotLimit({ starter: () => plan.starter, bots: () => bots }),
-    canPersist, ownsThread: () => sourceExists, targetBusy, deleteBot, autoApply, validateChange,
+    canPersist, ownsThread: () => sourceExists, targetBusy, deleteBot, deletionRefusal, autoApply, validateChange,
     validateModel: (selection, current) => {
       if (!({ claude: ["sonnet", "opus"], codex: ["gpt-fixture"] }[selection.instanceId]?.includes(selection.model))) return "Model is not in the current catalog";
       return current?.approvalMode === "full" && selection.instanceId !== current.modelSelection.instanceId ? "Existing permissions are incompatible" : null;
@@ -61,7 +64,7 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
   const propose = (operations: unknown[], newTeams: string[] = []) => service.propose({ botId: chief.id, threadId: chief.threadId, plan: { reason: "Requested specialist setup", operations, newTeams } });
   const submit = (operations: unknown[], newTeams: string[] = []) => service.submit({ botId: chief.id, threadId: chief.threadId, plan: { reason: "Requested specialist setup", operations, newTeams } });
   const resolve = (requestId: string, behavior = "allow") => service.resolve({ botId: chief.id, threadId: chief.threadId, requestId, behavior });
-  return { service, store, chief, peer, bot, teams, propose, submit, resolve, apply, deleteBot, messages, autoApply, targetBusy, validateChange, canPersist, removeSource: () => { sourceExists = false; } };
+  return { service, store, chief, peer, bot, teams, propose, submit, resolve, apply, deleteBot, deletionRefusal, messages, autoApply, targetBusy, validateChange, canPersist, removeSource: () => { sourceExists = false; } };
 }
 const specialist = (key: string, section: string, modelSelection = { instanceId: "claude", model: "sonnet" }) => ({ action: "create", key,
   fields: { name: key, title: "Specialist", soul: "Finish the assigned work.", section, modelSelection } });
@@ -574,6 +577,19 @@ describe("team setup below Full access", () => {
     h.messages.push({ id: "person-line", role: "user" });
     expect(await undo(h, created.requestId)).toMatchObject({ state: "invalid", stale: true });
     expect(h.deleteBot).not.toHaveBeenCalled();
+  });
+
+  it("refuses Undo up front, deleting none of the bots it created, while one of them may not be deleted, and undoes it all once it may", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("level");
+    const response = await h.submit([specialist("Mira", "Work"), specialist("Noor", "Work")]);
+    const noor = h.store.bots.find((bot) => bot.name === "Noor")!;
+    h.deletionRefusal.mockImplementation((id) => id === noor.id ? "Hand back control of this bot's computer before deleting it" : null);
+    expect(await undo(h, response.requestId)).toMatchObject({ state: "invalid", error: "Hand back control of this bot's computer before deleting it" });
+    expect(h.deleteBot).not.toHaveBeenCalled();
+    expect(h.store.bots.filter((bot) => ["Mira", "Noor"].includes(bot.name))).toHaveLength(2);
+    h.deletionRefusal.mockImplementation(() => null);
+    expect(await undo(h, response.requestId)).toEqual({ claimed: true, state: "undone" });
+    expect(h.store.bots.some((bot) => ["Mira", "Noor"].includes(bot.name))).toBe(false);
   });
 
   it("deletes a teammate at Ask with no card and no Undo", async () => {

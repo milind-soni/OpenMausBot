@@ -10658,7 +10658,10 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it.each(["shared", "pool"])("refuses Local VM phone joins in %s mode for direct and companion callers", async testedMode => {
+  it.each([
+    { testedMode: "shared", refusal: expect.not.stringMatching(/take control|pool mode|per-bot Local VM/i) },
+    { testedMode: "pool", refusal: "Phone control is not available in pool mode. Select shared or per-bot mode in Settings → Computers." },
+  ])("answers Local VM phone joins in $testedMode mode for direct and companion callers past the mode check only when it is not pool", async ({ testedMode, refusal }) => {
     const { mode, maxInstances } = (await api("GET", "/api/config")).body.localVm;
     const previous = { mode, maxInstances };
     const bot = (await api("POST", "/api/bots")).body.bot;
@@ -10668,9 +10671,10 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", "/api/config", { localVm: { ...previous, mode: testedMode } })).status).toBe(200);
       expect((await owner.call("POST", `/api/bots/${bot.id}/computer/control`, { action: "take", controlLeaseId: lease })).body.owned).toBe(true);
       const join = `/api/bots/${bot.id}/local-computer/join?controlLeaseId=${lease}`;
+      // This suite's container runtime is unavailable, so a join past the mode and lease checks stops at readiness.
       for (const response of [await owner.call("POST", join, {}), await api("POST", join, {})]) {
         expect(response.status).toBe(409);
-        expect(response.body.error).toContain("per-bot Local VM");
+        expect(response.body.error).toEqual(refusal);
         expect(response.body.joinUrl).toBeUndefined();
         expect(response.body.socketPath).toBeUndefined();
         expect(response.body.password).toBeUndefined();

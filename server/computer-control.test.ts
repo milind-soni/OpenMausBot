@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ComputerControl, type ControlSnapshot } from "./computer-control.ts";
 
@@ -165,20 +165,6 @@ describe("computer control", () => {
     expect(control.snapshot("b2").held).toBe(false);
   });
 
-  it("forget clears a hold and tells the listeners", () => {
-    const { control, changes } = tracked();
-    control.take("b1");
-    control.forget("b1");
-    expect(control.snapshot("b1").held).toBe(false);
-    expect(changes.at(-1)?.snapshot).toEqual({ held: false, helpReason: null, heldSinceMs: null });
-  });
-
-  it("forgetting an unknown bot is silent", () => {
-    const { control, changes } = tracked();
-    control.forget("ghost");
-    expect(changes).toEqual([]);
-  });
-
   it("reports whether a lease holds the computer without taking a free one", () => {
     const control = new ComputerControl();
     expect(control.ownsLease("bot", "lease-aaaaaaaaaaaaaa")).toBe(false);
@@ -188,5 +174,108 @@ describe("computer control", () => {
     expect(control.ownsLease("bot", "lease-bbbbbbbbbbbbbb")).toBe(false);
     control.release("bot");
     expect(control.ownsLease("bot", "lease-aaaaaaaaaaaaaa")).toBe(false);
+  });
+
+  describe("lease expiry", () => {
+    const lease = "6f1d2c4e-0b7a-4d58-9a3e-2c1f8e7b5a90";
+    const other = "a2b9c7d1-5e3f-4a6b-8c0d-1e2f3a4b5c6d";
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it("a beaten hold is released 60 s after the beat, keeping the plea and broadcasting", () => {
+      const { control, changes } = tracked();
+      control.requestHelp("b1", "sign in to example.com", ref("card-1"));
+      control.acquireLease("b1", lease);
+      expect(control.beat("b1", lease)).toBe(true);
+      vi.advanceTimersByTime(59_999);
+      expect(control.snapshot("b1").held).toBe(true);
+      const before = changes.length;
+      vi.advanceTimersByTime(2);
+      expect(control.snapshot("b1")).toMatchObject({ held: false, help: { messageId: "card-1" } });
+      expect(changes.slice(before)).toEqual([{ botId: "b1", snapshot: control.snapshot("b1") }]);
+    });
+
+    it("a second beat restarts the 60 s", () => {
+      const { control } = tracked();
+      control.acquireLease("b1", lease);
+      control.beat("b1", lease);
+      vi.advanceTimersByTime(30_000);
+      control.beat("b1", lease);
+      vi.advanceTimersByTime(59_999);
+      expect(control.snapshot("b1").held).toBe(true);
+      vi.advanceTimersByTime(2);
+      expect(control.snapshot("b1").held).toBe(false);
+    });
+
+    it("a beat with another lease is refused and does not renew", () => {
+      const { control } = tracked();
+      control.acquireLease("b1", lease);
+      control.beat("b1", lease);
+      vi.advanceTimersByTime(30_000);
+      expect(control.beat("b1", other)).toBe(false);
+      expect(control.beat("b2", lease)).toBe(false);
+      vi.advanceTimersByTime(30_001);
+      expect(control.snapshot("b1").held).toBe(false);
+    });
+
+    it.each([
+      ["a fresh armed acquire", (control: ComputerControl) => control.acquireLease("b1", lease, { armed: true })],
+      ["an armed acquire of a lease already held", (control: ComputerControl) => {
+        control.acquireLease("b1", lease);
+        return control.acquireLease("b1", lease, { armed: true });
+      }],
+    ])("%s with no beat expires at 60 s", (_name, acquire) => {
+      const { control } = tracked();
+      expect(acquire(control)).toMatchObject({ owned: true, snapshot: { held: true } });
+      vi.advanceTimersByTime(59_999);
+      expect(control.snapshot("b1").held).toBe(true);
+      vi.advanceTimersByTime(2);
+      expect(control.snapshot("b1").held).toBe(false);
+    });
+
+    it("an unarmed take or acquire that never beats is still held after 2 h", () => {
+      const { control } = tracked();
+      control.take("b1");
+      control.acquireLease("b2", lease);
+      vi.advanceTimersByTime(2 * 60 * 60_000);
+      expect(control.snapshot("b1").held).toBe(true);
+      expect(control.snapshot("b2").held).toBe(true);
+    });
+
+    it.each([
+      ["releaseLease", (control: ComputerControl) => control.releaseLease("b1", lease)],
+      ["release", (control: ComputerControl) => control.release("b1")],
+    ])("dropping a beaten hold by %s stops its clock", (_name, drop) => {
+      const { control } = tracked();
+      control.acquireLease("b1", lease);
+      control.beat("b1", lease);
+      vi.advanceTimersByTime(30_000);
+      drop(control);
+      control.acquireLease("b1", lease);
+      vi.advanceTimersByTime(2 * 60 * 60_000);
+      expect(control.snapshot("b1").held).toBe(true);
+    });
+  });
+
+  it("forgetBot removes only that bot's pleas, from every key", () => {
+    const { control, changes } = tracked();
+    const plea = (botId: string, messageId: string) => ({ botId, threadId: "t1", messageId, site: "example.com", place: "browser" as const });
+    control.requestHelp("desk", "a asks", plea("a", "a-1"));
+    control.requestHelp("desk", "b asks", plea("b", "b-1"));
+    control.requestHelp("desk", "a asks again", plea("a", "a-2"));
+    control.requestHelp("a", "a asks", plea("a", "a-3"));
+    control.take("held");
+    control.requestHelp("held", "a asks", plea("a", "a-4"));
+    control.requestHelp("b", "b asks", plea("b", "b-2"));
+    changes.length = 0;
+
+    control.forgetBot("a");
+
+    expect(control.snapshot("desk")).toEqual({ held: false, helpReason: "b asks", heldSinceMs: null, help: plea("b", "b-1") });
+    expect(control.snapshot("a")).toEqual({ held: false, helpReason: null, heldSinceMs: null });
+    expect(control.snapshot("held")).toMatchObject({ held: true, helpReason: null });
+    expect(control.snapshot("b")).toMatchObject({ helpReason: "b asks", help: { messageId: "b-2" } });
+    expect(control.settleHelp("a-1")).toEqual([]);
+    expect(changes.map((change) => change.botId).sort()).toEqual(["a", "desk", "held"]);
   });
 });
