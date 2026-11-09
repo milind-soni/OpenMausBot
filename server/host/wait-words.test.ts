@@ -80,6 +80,20 @@ describe("a hand-off held a while", () => {
     expect(posted).toEqual(["r1", "r2", "q"]);
   });
 
+  it("forgets a hand-off once it has started, so finished ones are not kept", () => {
+    const held = new Map(["a", "b", "c"].map((id) => [id, { ...node, id, status: "resume" } as HandoffView]));
+    const looked: string[] = [];
+    const { note } = notes({ threadBusy: () => true, node: (id) => (looked.push(id), held.get(id)) });
+    note(held.get("a")!);
+    held.set("a", { ...held.get("a")!, status: "done" });
+    looked.length = 0;
+    note(held.get("b")!);
+    expect(looked).toEqual(["a"]);
+    looked.length = 0;
+    note(held.get("c")!);
+    expect(looked).toEqual(["b"]);
+  });
+
   it("stays quiet for a short hold, a room's own hand-off, a computer's wait and a person's open card, which say so themselves", () => {
     const busy = { threadBusy: () => true };
     for (const { over, at, row } of [
