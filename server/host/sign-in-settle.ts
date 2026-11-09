@@ -37,11 +37,12 @@ export function createSignInSettle(deps: SignInSettleDeps) {
   const { store } = deps;
 
   /** The person is through with the place the card lent them: its plea goes, and the browser or computer goes back to the
-   * bot. A computer several bots share goes back only when the person pressed Done or Cancel and no other card waits for it. */
+   * bot. A computer several bots share goes back only when the person pressed Done or Cancel and no other card waits for it.
+   * Their Done also hands back where the conversation works now, which a repin since the card may have moved. */
   const handPlaceBack = (bot: BotRecord, threadId: string, messageId: string, place: Surface, byPerson: boolean): void => {
     const pleaded = deps.settleHelp(messageId);
     if (place === "browser") deps.handBackBrowser(bot, threadId);
-    else for (const key of pleaded.length ? pleaded : [deps.computerKey(bot, threadId)]) {
+    else for (const key of new Set([...pleaded, ...(byPerson || !pleaded.length ? [deps.computerKey(bot, threadId)] : [])])) {
       if (!deps.sharedKey(key) || (byPerson && !deps.pleas(key).length)) deps.releaseComputer(key);
     }
   };

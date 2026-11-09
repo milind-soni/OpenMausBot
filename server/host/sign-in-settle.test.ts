@@ -112,4 +112,19 @@ describe("the computer a sign-in card lent the person", () => {
       ["verified", true, true, false, false],
     ]);
   });
+
+  it("on the person's Done or Cancel also goes back from where the conversation works now, as after a move", () => {
+    const released = (path: Path) => {
+      const w = world(undefined, new Map([["computer_team", ["m1"]]]));
+      w.add({ ...card(), signIn: { ...card().signIn, place: "vm" } });
+      if (path === "done" || path === "cancelled") w.settle.settle("dachs", "work", "m1", path);
+      if (path === "answered in chat") w.settle.answerInChat("dachs", "work", "Bin angemeldet");
+      return w.handedBackKeys;
+    };
+    expect([released("done"), released("cancelled"), released("answered in chat")]).toEqual([
+      ["computer_team", "dachs/work"],
+      ["computer_team", "dachs/work"],
+      [],
+    ]);
+  });
 });

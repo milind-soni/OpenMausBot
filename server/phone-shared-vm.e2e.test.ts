@@ -790,6 +790,23 @@ describe("a person's hold on the shared Local VM", () => {
     await finishTurns([worker.id, worker.threadId]);
   }, 45_000);
 
+  it.each([
+    { row: "repinned from the shared VM to the cloud", bot: { computer: "vm" }, pin: undefined, move: { surface: "cloud" }, target: undefined },
+    { row: "repinned from the cloud to the shared VM", bot: {}, pin: "cloud", move: { surface: "vm" }, target: "local/shared" },
+    { row: "moved by Works on from the shared VM to the cloud", bot: { computer: "vm" }, pin: undefined, move: { computer: "cloud" }, target: undefined },
+  ])("Done on a card whose conversation was $row since it asked hands back the computer the person took there", async ({ bot, pin, move, target }) => {
+    const worker = await newBot("Worker", bot);
+    if (pin) await ok("PATCH", `/api/bots/${worker.id}/tasks/${worker.threadId}`, { surface: pin });
+    const card = await askSignIn((await startTurn(worker.id, worker.threadId)).comms, "w.example");
+    await finishTurns([worker.id, worker.threadId]);
+    if ("surface" in move) await ok("PATCH", `/api/bots/${worker.id}/tasks/${worker.threadId}`, move);
+    else await ok("PATCH", `/api/bots/${worker.id}`, move);
+    expect((await control(api, worker.id, { action: "take", ...(target ? { target } : {}) }, worker.threadId)).body.held).toBe(true);
+    await ok("POST", `/api/bots/${worker.id}/sign-in-cards/${card}/done`, { threadId: worker.threadId });
+    expect({ desk: await held(witness), conversation: await held(worker.id, worker.threadId), bot: await held(worker.id) })
+      .toEqual({ desk: false, conversation: false, bot: false });
+  }, 60_000);
+
   it("a bot moved to the cloud while its turn asks a sign-in hands back, on Done, the computer the person took once the turn ended", async () => {
     const worker = await newBot("Worker", { computer: "vm" });
     const turn = await startTurn(worker.id, worker.threadId);
