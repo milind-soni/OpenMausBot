@@ -106,6 +106,11 @@ export class ComputerControl {
     return { snapshot: this.changed(botId), released: true };
   }
 
+  /** Open pleas on this key, oldest first. */
+  pleas(botId: string): ComputerHelpRef[] {
+    return this.entries.get(botId)?.pleas.map((plea) => plea.ref) ?? [];
+  }
+
   /** Never grants anything by itself; the same card asking again replaces its own plea. */
   requestHelp(botId: string, reason: unknown, ref: ComputerHelpRef): ControlSnapshot {
     const text = typeof reason === "string" ? reason.trim().slice(0, MAX_REASON_CHARS) : "";

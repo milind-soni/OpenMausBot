@@ -99,6 +99,17 @@ describe("computer control", () => {
     expect(control.snapshot("b1")).toMatchObject({ helpReason: "first", help: { messageId: "card-1" } });
   });
 
+  it("lists every open plea on a key, oldest first", () => {
+    const { control } = tracked();
+    control.requestHelp("b1", "first", ref("card-1"));
+    control.requestHelp("b1", "second", ref("card-2"));
+    control.requestHelp("b2", "elsewhere", ref("card-3"));
+    expect(control.pleas("b1").map((plea) => plea.messageId)).toEqual(["card-1", "card-2"]);
+    control.settleHelp("card-1");
+    expect(control.pleas("b1").map((plea) => plea.messageId)).toEqual(["card-2"]);
+    expect(control.pleas("nobody")).toEqual([]);
+  });
+
   it("settles only the card it names, wherever it was raised", () => {
     const { control, changes } = tracked();
     control.requestHelp("b1", "first", ref("card-1"));
