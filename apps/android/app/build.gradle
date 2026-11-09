@@ -33,6 +33,8 @@ android {
     buildTypes {
         release {
             minifyEnabled false
+            // Local distribution only: sideloaded builds must be signed to install.
+            signingConfig signingConfigs.debug
         }
         debug {
             applicationIdSuffix '.debug'
