@@ -707,11 +707,17 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 continue;
               }
               // Once a call has been handled, never replay it through a turn retry.
-              if (options.retryScale === undefined || abort.signal.aborted || streamed || seenCalls.size ||
-                  error instanceof ChatProtocolError || !verdict.transient || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
+              // A stream the provider closed with no completion marker is the one protocol error
+              // worth resending: the guards above prove nothing streamed and no tool call ran, so
+              // the resend repeats no text and executes nothing — and it applies even where the
+              // caller never opted into transient retries (openai-compat and five friends).
+              const truncation = verdict.reason === "stream_truncated";
+              const retryScale = truncation ? options.retryScale ?? 1 : options.retryScale;
+              if (retryScale === undefined || abort.signal.aborted || streamed || seenCalls.size ||
+                  (error instanceof ChatProtocolError && !truncation) || !verdict.transient || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
               const delayMs = computeBackoff(attempt++);
               emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt, delayMs, reason: verdict.reason });
-              await interruptibleDelay(delayMs * options.retryScale, abort.signal).promise;
+              await interruptibleDelay(delayMs * retryScale, abort.signal).promise;
               abort.signal.throwIfAborted();
             }
           }
