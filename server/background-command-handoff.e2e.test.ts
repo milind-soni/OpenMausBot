@@ -1,20 +1,25 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 
-it("resumes a delegated task after a real background exit, validates its artifact, and reports once without a new user message", async () => {
+it.each([false, true])("resumes a delegated task after a real background exit, validates its artifact, and reports once without a new user message (room=%s)", async room => {
   const boxes: Array<{ id: string; name: string; state: string }> = [];
   const jobs: Array<{ child: ChildProcess; closed: Promise<unknown[]>; artifact: string; stdout: string; exitCode: number | null; running: boolean }> = [];
   const validations: number[] = [];
   const requests: unknown[] = [];
   let dataDir = "";
+  let statusStarted: (() => void) | undefined;
+  let statusGate: Promise<void> | undefined;
+  let releaseStatus: (() => void) | undefined;
   const upstream = createServer(async (req, res) => {
     const path = new URL(req.url ?? "/", "http://fixture").pathname;
     let raw = ""; for await (const part of req) raw += part;
@@ -23,7 +28,7 @@ it("resumes a delegated task after a real background exit, validates its artifac
     const send = (value: unknown) => res.end(JSON.stringify(value));
     res.setHeader("content-type", "application/json");
     if (path === "/sandboxes" && req.method === "POST") {
-      const box = { id: boxes.length ? "bx_3456789a" : "bx_23456789", name: body.name, state: "idle" };
+      const box = { id: `bx_${(0x23456789 + boxes.length).toString(16)}`, name: body.name, state: "idle" };
       boxes.push(box); return send({ sandbox: box });
     }
     if (path === "/sandboxes") return send({ sandboxes: boxes });
@@ -40,7 +45,10 @@ it("resumes a delegated task after a real background exit, validates its artifac
     }
     const status = /\/commands\/(\d+)$/.exec(path);
     if (status) {
+      statusStarted?.();
+      await statusGate;
       const job = jobs[Number(status[1]) - 1];
+      if (job.running) await job.closed;
       return send({ running: job.running, status: job.running ? "running" : "exited", exitCode: job.exitCode, stdout: job.stdout, stderr: "" });
     }
     if (path.endsWith("/commands")) {
@@ -83,11 +91,13 @@ it("resumes a delegated task after a real background exit, validates its artifac
       const { bot: worker } = await control("new-bot", "--name", `Executor ${id}`, "--section", "Team");
       await api("PATCH", `/api/bots/${owner.id}`, { chiefOfStaff: true, managedSections: ["Team"], acknowledgePeerScope: true, approvalMode: "full", computer: "off" });
       await api("PATCH", `/api/bots/${worker.id}`, { computer: "cloud", browser: false, approvalMode: "full" });
+      const group = room ? (await api("POST", "/api/groups", { name: `Command room ${id}`, memberIds: [worker.id] })).group : undefined;
+      if (group) await api("PATCH", `/api/groups/${group.id}/setup`, { action: "skip" });
       writeFileSync(join(dataDir, "room-plan.json"), JSON.stringify({
-        [owner.id]: { steps: [{ arguments: { bot_ids: [worker.id], message: `Run background fixture ${id}` } }], reply: "Assigned the work", resumeReply: `Checked result ${id}` },
+        [owner.id]: { steps: [{ arguments: { bot_ids: [worker.id], ...(group ? { group_id: group.id } : {}), message: `Run background fixture ${id}` } }], reply: "Assigned the work", resumeReply: `Checked result ${id}` },
         [worker.id]: { script: [
           { key: "start", match: [`Run background fixture ${id}`], steps: [{ server: "computer", tool: "exec", arguments: { command: `background-fixture-${id}`, background: true } }], reply: "The command is still running" },
-          { key: "validate", match: ["A background command for this task ended."], expectContextIncludes: ["terminal result · information only", "exitCode", "(From a person"],
+          { key: "validate", match: ["A background command for this task ended."], expectContextIncludes: ["terminal result · information only", "exitCode", "(From a person", "validate the artifacts"],
             steps: [{ server: "computer", tool: "exec", arguments: { command: `validate-result-${id}` } },
               { tool: "wait_until", arguments: { label: "unauthorized follow-up", kind: "bot_idle", bot: owner.id }, expectError: true }], reply: `Validated terminal exit ${exitCode}` },
         ] },
@@ -99,6 +109,7 @@ it("resumes a delegated task after a real background exit, validates its artifac
       jobs[id - 1]!.child.send!(exitCode);
       await jobs[id - 1]!.closed;
       expect(jobs[id - 1]!.exitCode).toBe(exitCode);
+      if (room) await expect.poll(() => validations, { timeout: 20_000 }).toContain(id);
       const wait = await control("wait", "--bot", owner.id, "--task", owner.activeTaskId, "--timeout", "40");
       expect(wait.status, JSON.stringify(wait)).toBe("settled");
       expect(validations.filter(value => value === id), JSON.stringify(readHandoffs(dataDir))).toHaveLength(1);
@@ -107,7 +118,45 @@ it("resumes a delegated task after a real background exit, validates its artifac
       expect(rows.find(n => n.botId === worker.id)).toMatchObject({ status: "completed", executions: 2, result: `Validated terminal exit ${exitCode}` });
       expect(rows.filter(n => n.botId === owner.id)).toMatchObject([{ status: "completed", executions: 2 }]);
       expect(JSON.stringify(messages)).toContain(`Checked result ${id}`);
-      evidence.push({ exitCode, wait, messages, rows, validations: [...validations] });
+      evidence.push({ room, exitCode, wait, messages, rows, validations: [...validations] });
+    }
+    if (!room) for (const phase of ["before-poll", "in-flight", "team-unassigned"]) {
+      const id = jobs.length + 1;
+      const { bot: owner } = await control("new-bot", "--name", `Permission owner ${id}`, "--section", "Team");
+      const { bot: worker } = await control("new-bot", "--name", `Permission worker ${id}`, "--section", "Team");
+      await api("PATCH", `/api/bots/${owner.id}`, { chiefOfStaff: true, managedSections: ["Team"], acknowledgePeerScope: true, approvalMode: "full", computer: "off" });
+      await api("PATCH", `/api/bots/${worker.id}`, { ...(phase === "team-unassigned" ? {} : { computer: "cloud" }), browser: false, approvalMode: "full" });
+      const computer = phase === "team-unassigned" ? await api("POST", "/api/team-computers", { name: "Fixture shared computer", requestId: randomUUID(), acknowledgeCost: true }) : undefined;
+      if (computer) await api("PATCH", `/api/team-computers/${computer.id}`, { section: "Team", acknowledgeSharedAccess: true });
+      let reading = false;
+      statusStarted = () => { reading = true; };
+      statusGate = phase !== "before-poll" ? new Promise<void>(resolve => { releaseStatus = resolve; }) : undefined;
+      writeFileSync(join(dataDir, "room-plan.json"), JSON.stringify({
+        [owner.id]: { steps: [{ arguments: { bot_ids: [worker.id], message: `Permission fixture ${id}` } }], reply: "Assigned", resumeReply: "Reported revoked access" },
+        [worker.id]: { steps: [{ server: "computer", tool: "exec", arguments: { command: `permission-fixture-${id}`, background: true } }], reply: "The command is still running" },
+      }));
+      await control("send", "--bot", owner.id, "--task", owner.activeTaskId, "--text", `Permission fixture ${id}`);
+      await expect.poll(() => readHandoffs(dataDir).find(n => n.botId === worker.id)?.status, { timeout: 10_000 }).toBe("waiting");
+      if (phase !== "before-poll") await expect.poll(() => reading, { timeout: 10_000 }).toBe(true);
+      if (computer) await api("PATCH", `/api/team-computers/${computer.id}`, { section: null, acknowledgeSharedAccess: true });
+      else await api("PATCH", `/api/bots/${worker.id}`, { computer: "off" });
+      const readsAtRevocation = requests.filter((request: any) => /\/commands\/\d+$/.test(request.path)).length;
+      jobs[id - 1]!.child.send!(7); await jobs[id - 1]!.closed;
+      releaseStatus?.(); releaseStatus = undefined; statusGate = undefined; statusStarted = undefined;
+      await expect.poll(() => readHandoffs(dataDir).find(n => n.botId === worker.id)?.status, { timeout: 10_000 }).toBe("failed");
+      const wait = await control("wait", "--bot", owner.id, "--task", owner.activeTaskId, "--timeout", "10");
+      expect(wait.status).toBe("settled");
+      const db = new DatabaseSync(join(dataDir, "runtime.db"), { readOnly: true });
+      try {
+        const rows = (db.prepare("SELECT json FROM assignments WHERE assignee_bot_id = ?").all(worker.id) as Array<{ json: string }>).map(row => JSON.parse(row.json));
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ status: "failed", outcome: "refused", executions: 1 });
+        expect(rows[0].backgroundCommands[0].result).toBeUndefined();
+        if (computer) expect(rows[0].backgroundCommands[0].teamComputerId).toBe(computer.id);
+        expect(requests.filter((request: any) => /\/commands\/\d+$/.test(request.path))).toHaveLength(readsAtRevocation);
+        expect(validations).not.toContain(id);
+        evidence.push({ phase, wait, rows, readsAtRevocation, exitCode: jobs[id - 1]!.exitCode });
+      } finally { db.close(); }
     }
     const plans = readFileSync(join(dataDir, "room-plan.json.evidence.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
     const resumed = plans.filter(turn => turn.planKey === "validate");
@@ -118,19 +167,28 @@ it("resumes a delegated task after a real background exit, validates its artifac
       expect(context).toContain("(From a person · approval");
     }
     expect(plans.filter(turn => turn.unplanned)).toEqual([]);
-    expect(JSON.stringify(plans)).toContain("Only the person can set up or stop a wait");
+    if (!room) expect(plans.some(turn => JSON.stringify(turn.evidence).includes("Only the person can set up or stop a wait"))).toBe(true);
     evidence.push({ plans });
   } finally {
     try {
       const planPath = join(dataDir, "room-plan.json.evidence.jsonl");
       const plans = existsSync(planPath) ? readFileSync(planPath, "utf8") : "";
       const rows = readHandoffs(dataDir);
-      const messages = await Promise.all(rows.map(n => control("messages", "--bot", n.botId, "--task", n.threadId, "--limit", "30").catch(error => String(error))));
-      writeFileSync(`${fixture.info.logPath}.background.json`, JSON.stringify({ evidence, validations, rows, plans, messages, requests }, null, 2));
+      const messages = await Promise.all(rows.map(n => control("messages", ...(n.groupId ? ["--channel", n.groupId] : ["--bot", n.botId]), "--task", n.threadId, "--limit", "30").catch(error => String(error))));
+      const db = new DatabaseSync(join(dataDir, "runtime.db"), { readOnly: true });
+      let assignments: unknown[];
+      try { assignments = (db.prepare("SELECT json FROM assignments").all() as Array<{ json: string }>).map(row => JSON.parse(row.json)); }
+      finally { db.close(); }
+      writeFileSync(`${fixture.info.logPath}.background.json`, JSON.stringify({ evidence, validations, rows, assignments, plans, messages, requests }, null, 2));
     } finally {
+      releaseStatus?.();
       for (const job of jobs) await waitForExit(job.child, { signal: "SIGTERM", graceMs: 1_000 });
       await fixture.close(); upstream.closeAllConnections();
       await new Promise<void>(resolve => upstream.close(() => resolve()));
+      writeFileSync(`${fixture.info.logPath}.exits.json`, JSON.stringify({
+        server: { argv: fixture.child.spawnargs, exitCode: fixture.child.exitCode, signal: fixture.child.signalCode },
+        commands: jobs.map(job => ({ argv: job.child.spawnargs, exitCode: job.child.exitCode, signal: job.child.signalCode })),
+      }, null, 2));
     }
   }
 }, 120_000);

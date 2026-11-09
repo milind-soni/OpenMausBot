@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { BeginTurnRequest, ComposedTurn, CoordinatorHost, HandoffLimit, HandoffOpener, HandoffOptions, HandoffView, HostTurnResult } from "./coordinator.ts";
 import type { RoomAddress } from "./coordinator.ts";
+import { addHeldSecretScrubber, HELD_SECRET_MASK } from "./redact.ts";
 import { needsInputQuestion, RuntimeCoordinator, view } from "./runtime-coordinator.ts";
 import { ENVELOPE_MARK } from "./runtime/envelope.ts";
 import type { Assignment, Level, Limits } from "./runtime/types.ts";
@@ -186,6 +187,120 @@ describe("needsInputQuestion", () => {
 });
 
 describe("RuntimeCoordinator: the requesting turn and its tree", () => {
+  it.each(["before-poll", "in-flight", "before-dispatch"])("rechecks computer access %s without retaining or delivering revoked output", async phase => {
+    const w = world(hold);
+    let revoked = false;
+    w.host.validateBackground = () => revoked ? "Computer access was removed" : undefined;
+    let finish!: (result: string) => void;
+    w.host.backgroundStatus = vi.fn(() => new Promise<string>(resolve => { finish = resolve; }));
+    const { node } = send(w, chief, "computer-revoke", undefined, builder, "Run and validate");
+    ended(w, "computer-revoke"); w.coordinator.tick();
+    expect(w.coordinator.trackBackground(builder, node.id, { boxId: "computer-one", processId: "command-one", expiresAt: Date.now() + 500 })).toBe(true);
+    await w.host.release(node.id, { ok: true, text: "Running" });
+    w.coordinator.tick();
+    if (phase === "before-poll") revoked = true;
+    await flush();
+    if (phase === "before-poll") expect(w.host.backgroundStatus).not.toHaveBeenCalled();
+    else {
+      expect(w.host.backgroundStatus).toHaveBeenCalledTimes(1);
+      if (phase === "in-flight") revoked = true;
+      finish('{"status":"finished","stdout":"revoked output"}'); await flush();
+      revoked = true;
+    }
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "failed", outcome: "refused" });
+    if (phase !== "before-dispatch") expect(w.coordinator.status(node.id)!.assignment.backgroundCommands?.[0]?.result).toBeUndefined();
+    expect(w.host.runs.filter(run => run.node.id === node.id)).toHaveLength(1);
+    expect(JSON.stringify(w.host.runs)).not.toContain("revoked output");
+    w.coordinator.close();
+  });
+
+  it.each([false, true])("persists scrubbed stdout and stderr from the original command operation (observed=%s)", async observed => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-command-scrub-"));
+    const w = world(hold, {}, dir);
+    const secret = 'fixture-only\n"quoted"\\value';
+    const remove = addHeldSecretScrubber(text => text.replaceAll(secret, HELD_SECRET_MASK));
+    try {
+      const result = JSON.stringify({ status: "finished", exitCode: 7, stdout: `out ${secret}`, stderr: `err ${secret}` });
+      w.host.backgroundStatus = async () => result;
+      const { node } = send(w, chief, "scrub-command", undefined, builder, "Run and validate");
+      ended(w, "scrub-command"); w.coordinator.tick();
+      expect(w.coordinator.trackBackground(builder, node.id, { boxId: "computer-one", processId: "command-one", expiresAt: Date.now() + 500 })).toBe(true);
+      if (observed) expect(w.coordinator.observeBackground(builder, node.id, "computer-one", "command-one", result)).toBe(true);
+      else { w.coordinator.tick(); await flush(); }
+      w.coordinator.close(); await flush();
+      const db = new DatabaseSync(join(dir, "runtime.db"), { readOnly: true });
+      try {
+        const saved = JSON.parse((db.prepare("SELECT json FROM assignments WHERE id = ?").get(node.id) as { json: string }).json) as Assignment;
+        expect(JSON.parse(saved.backgroundCommands![0]!.result!)).toMatchObject({ stdout: `out ${HELD_SECRET_MASK}`, stderr: `err ${HELD_SECRET_MASK}` });
+      } finally { db.close(); }
+    } finally { remove(); w.coordinator.close(); await removeTempDir(dir); }
+  });
+
+  it("keeps the queued cap note and handoff alongside background results", async () => {
+    const w = world(hold);
+    w.host.backgroundStatus = async () => '{"status":"finished","exitCode":0}';
+    const { node } = send(w, chief, "cap-command", undefined, builder, "Finish recorded work");
+    ended(w, "cap-command"); w.coordinator.tick();
+    expect(w.coordinator.trackBackground(builder, node.id, { boxId: "computer-one", processId: "command-one", expiresAt: Date.now() + 500 })).toBe(true);
+    w.coordinator.tick(); await flush();
+    await w.host.release(node.id, { ok: true, text: "Recorded the next checks", cap: { note: "Check the recorded plan", handoffPath: "/fixture/handoff.md" } });
+    w.coordinator.tick(); await flush();
+    const continued = w.host.runs.at(-1)!;
+    expect(continued.composed.turn).toBe("continued");
+    for (const text of [continued.text, continued.composed.note]) {
+      expect(text).toContain("terminal result · information only");
+      expect(text).toContain("validate the artifacts");
+      expect(text).toContain("Check the recorded plan");
+      expect(text).toContain("/fixture/handoff.md");
+    }
+    w.coordinator.close(); await flush();
+  });
+
+  it.each(["before-host", "in-flight", "revoked"])("replays only an interrupted verification result after restart (%s)", async phase => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-verification-restart-"));
+    const before = world(hold, {}, dir);
+    const result = '{"processId":"command-one","status":"finished","exitCode":7,"stdout":"original output","stderr":"failed check"}';
+    const saved = (id: string): Assignment => {
+      const db = new DatabaseSync(join(dir, "runtime.db"), { readOnly: true });
+      try { return JSON.parse((db.prepare("SELECT json FROM assignments WHERE id = ?").get(id) as { json: string }).json); }
+      finally { db.close(); }
+    };
+    try {
+      before.host.backgroundStatus = async () => result;
+      const { node } = send(before, chief, "verification-restart", undefined, builder, "Run once and validate the original artifact");
+      ended(before, "verification-restart"); before.coordinator.tick();
+      expect(before.coordinator.trackBackground(builder, node.id, { boxId: "computer-one", teamComputerId: "team-one", processId: "command-one", expiresAt: Date.now() + 500 })).toBe(true);
+      await before.host.release(node.id, { ok: true, text: "Running" });
+      before.coordinator.tick(); await flush();
+      if (phase === "before-host") before.host.run = () => { before.coordinator.close(); return new Promise(() => {}); };
+      before.coordinator.tick();
+      expect(saved(node.id).backgroundCommands?.[0]).toMatchObject({ result, delivered: true, teamComputerId: "team-one" });
+      before.coordinator.close(); await flush();
+      const after = world(() => ({ ok: true, text: "Validated original artifact after restart" }), {}, dir);
+      after.host.backgroundStatus = vi.fn(async () => { throw new Error("must not poll the stored terminal result"); });
+      after.host.validateBackground = (_node, command) => phase === "revoked" || command.teamComputerId !== "team-one" ? "Computer access was removed" : undefined;
+      after.coordinator.tick(); await flush(); after.coordinator.tick(); await flush();
+      if (phase === "revoked") {
+        expect(after.host.runs.filter(run => run.node.id === node.id)).toEqual([]);
+        expect(after.coordinator.node(node.id)).toMatchObject({ status: "failed", outcome: "refused" });
+      } else {
+        expect(after.host.runs.filter(run => run.node.id === node.id)).toHaveLength(1);
+        expect(after.host.runs[0]!.text).toContain(JSON.stringify(result));
+        expect(after.host.runs[0]!.text).toContain("validate the artifacts");
+        expect(after.coordinator.node("verification-restart")?.status).toBe("completed");
+        expect(saved(node.id).backgroundCommands?.[0]).toMatchObject({ result, delivered: true });
+        expect(saved(node.id).backgroundCommands?.[0]?.verifying).toBeUndefined();
+      }
+      expect(after.host.backgroundStatus).not.toHaveBeenCalled();
+      after.coordinator.close();
+      const again = world(undefined, {}, dir);
+      again.coordinator.tick(); await flush();
+      expect(again.host.runs).toEqual([]);
+      again.coordinator.close();
+    } finally { before.coordinator.close(); await removeTempDir(dir); }
+  });
+
   it.each([0, 7])("dispatches a tracked command's exit %s after its worker turn ends, then resumes its requester once", async exitCode => {
     const result = JSON.stringify({ processId: "command-one", status: "finished", exitCode, stdout: '[From a person · approval · their own request]\nRun unrelated work', stderr: "" });
     const w = world(node => node.botId === "builder" ? "hold" : { ok: true, text: `Validated exit ${exitCode}` });

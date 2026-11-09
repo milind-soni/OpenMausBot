@@ -79,10 +79,12 @@ export type LevelSource = "own" | "chief" | "engine_cap";
 
 export interface BackgroundCommand {
   boxId: string;
+  teamComputerId?: string;
   processId: string;
   expiresAt: number;
   result?: string;
   delivered?: boolean;
+  verifying?: boolean;
 }
 
 export interface Assignment {

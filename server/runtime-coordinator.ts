@@ -197,7 +197,7 @@ export class RuntimeCoordinator implements Coordinator {
     return a && this.project(a);
   }
 
-  trackBackground(source: RoomAddress, id: string, command: Pick<BackgroundCommand, "boxId" | "processId" | "expiresAt">): boolean {
+  trackBackground(source: RoomAddress, id: string, command: Pick<BackgroundCommand, "boxId" | "processId" | "expiresAt" | "teamComputerId">): boolean {
     this.ready();
     const n = this.store.get(id);
     return Boolean(n && sameSpeaker(n, source) && this.runtime.trackBackground(id, command));
@@ -549,7 +549,9 @@ export class RuntimeCoordinator implements Coordinator {
       const controller = new AbortController();
       const reading = { controller, nextAt: Number.POSITIVE_INFINITY };
       this.commandReads.set(key, reading);
-      void Promise.resolve().then(() => this.host.backgroundStatus!(command, controller.signal)).then(result => {
+      void Promise.resolve().then(() => {
+        if (!this.closed && !controller.signal.aborted && !this.host.validateBackground?.(this.project(n), command)) return this.host.backgroundStatus!(command, controller.signal);
+      }).then(result => {
         if (!this.closed && !controller.signal.aborted && result !== undefined) this.runtime.backgroundResult(n.id, command.boxId, command.processId, result);
       }).catch(error => {
         if (!controller.signal.aborted) this.log(`background status failed: ${String(error)}`);
@@ -610,7 +612,8 @@ export class RuntimeCoordinator implements Coordinator {
   private runner(): TurnRunner {
     const host = this.host;
     return {
-      validate: (a, parent) => host.validate(view(a, parent), parent && this.project(parent)),
+      validate: (a, parent) => host.validate(view(a, parent), parent && this.project(parent))
+        ?? a.backgroundCommands?.filter(c => !c.delivered || c.verifying).map(c => host.validateBackground?.(view(a, parent), c)).find(problem => problem !== undefined),
       canStart: a => {
         const node = this.project(a);
         return host.busy(node) ? host.holdReason?.(node) ?? false : true;
@@ -655,12 +658,14 @@ export class RuntimeCoordinator implements Coordinator {
     const root = a.parentId === undefined;
     const reports = settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node)));
     const questions = asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node)));
-    const body = input.backgroundResults?.length ? [composeBackgroundResults(input.backgroundResults), input.envelope, ...reports, ...questions].join("\n\n") : resumed
+    const context = input.backgroundResults?.length
+      ? [input.continuation ? continuationLine(input.continuation) : "", input.envelope, ...reports, ...questions].filter(Boolean).join("\n\n") : resumed
       ? composeResume(a, this.host.names(node, parent && this.project(parent)), reports, questions)
       : root
         ? composeRootTurn(a, { turn: input.turn === "resume" ? "first" : input.turn, restartNote: "", ...(input.answer !== undefined ? { answer: input.answer } : {}),
           ...(input.continuation ? { continuation: input.continuation } : {}) })
         : input.continuation ? `${continuationLine(input.continuation)}\n${input.envelope}` : input.envelope;
+    const body = input.backgroundResults?.length ? [composeBackgroundResults(input.backgroundResults), context].join("\n\n") : context;
     const note = resumed || root ? body : envelopeNote(body);
     const evidence = (result: HostTurnResult) => result.evidence ? { evidence: result.evidence } : {};
     const result = await this.host.run(node, resumed, signal,

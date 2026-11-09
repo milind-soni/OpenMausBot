@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { addHeldSecretScrubber, HELD_SECRET_MASK } from "../redact.ts";
 import { checkInvariants } from "./invariants.ts";
 import { Runtime, type BeginRequest } from "./runtime.ts";
 import { openRuntimeStore, type RuntimeStore } from "./store.ts";
@@ -89,6 +90,69 @@ type EnqueueResult = ReturnType<Runtime["enqueue"]>;
 const invariants = (w: World) => expect(checkInvariants(w.store, w.runner.live())).toEqual([]);
 
 describe("Runtime: one tree, one lane", () => {
+  it.each([false, true])("scrubs decoded held output before storing a command result (observed=%s)", observed => {
+    const w = world();
+    const root = w.runtime.begin(beginReq());
+    const command = { boxId: "computer-one", processId: "command-one", expiresAt: w.clock.t + 500 };
+    expect(w.runtime.trackBackground(root.id, command)).toBe(true);
+    const secret = 'fixture-only\n"quoted"\\value';
+    const remove = addHeldSecretScrubber(text => text.replaceAll(secret, HELD_SECRET_MASK));
+    try {
+      const result = JSON.stringify({ status: "finished", exitCode: 0, stdout: `out ${secret}`, stderr: `err ${secret}` });
+      expect(w.runtime.backgroundResult(root.id, command.boxId, command.processId, result, observed)).toBe(true);
+      const saved = w.store.get(root.id)!.backgroundCommands![0]!;
+      expect(JSON.parse(saved.result!)).toMatchObject({ stdout: `out ${HELD_SECRET_MASK}`, stderr: `err ${HELD_SECRET_MASK}` });
+      expect(saved.delivered).toBe(observed || undefined);
+    } finally { remove(); w.runtime.close(); w.store.close(); }
+  });
+
+  it.each([0, 7])("keeps a tracked exit %s alive beyond a short root stall and then resumes once", async exitCode => {
+    const w = world(() => "hold", { stallMs: 10, turnStallMs: 1_000 });
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Assigned" });
+    w.runtime.tick();
+    const command = { boxId: "computer-one", processId: "command-one", expiresAt: w.clock.t + 500 };
+    expect(w.runtime.trackBackground(child.id, command)).toBe(true);
+    await w.runner.release(child.id, { kind: "completed", text: "Still running" });
+    w.clock.advance(100);
+    w.runtime.tick();
+    expect(w.store.get(root.id)?.status).toBe("waiting");
+    expect(w.store.get(child.id)?.status).toBe("waiting");
+    const result = JSON.stringify({ status: "finished", exitCode });
+    expect(w.runtime.backgroundResult(child.id, command.boxId, command.processId, result)).toBe(true);
+    w.runtime.tick();
+    expect(w.runner.runs.at(-1)!.input.backgroundResults).toEqual([result]);
+    await w.runner.release(child.id, exitCode ? { kind: "failed", outcome: "provider_error", text: `Validated ${exitCode}` } : { kind: "completed", text: `Validated ${exitCode}` });
+    w.runtime.tick();
+    expect(w.runner.runs.at(-1)!.a.id).toBe(root.id);
+    await w.runner.release(root.id, { kind: "completed", text: `Reported ${exitCode}` });
+    w.runtime.tick();
+    expect(w.store.get(root.id)?.status).toBe("completed");
+    expect(w.runner.runs).toHaveLength(3);
+    w.runtime.close(); w.store.close();
+  });
+
+  it("bounds the root stall after tracking expires or a saved result cannot dispatch", async () => {
+    for (const terminal of [false, true]) {
+      const w = world(() => "hold", { stallMs: 10, turnStallMs: 1_000 });
+      const root = w.runtime.begin(beginReq());
+      const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+      w.runtime.end(root.id, { ok: true, text: "Assigned" }); w.runtime.tick();
+      const command = { boxId: "computer-one", processId: "command-one", expiresAt: w.clock.t + 100 };
+      expect(w.runtime.trackBackground(child.id, command)).toBe(true);
+      await w.runner.release(child.id, { kind: "completed", text: "Running" });
+      w.clock.advance(100);
+      if (terminal) expect(w.runtime.backgroundResult(child.id, command.boxId, command.processId, '{"status":"finished","exitCode":7}')).toBe(true);
+      w.runner.canStartAnswer = false;
+      w.runtime.tick();
+      expect(w.store.get(root.id)?.status).toBe("waiting");
+      w.clock.advance(11); w.runtime.tick();
+      expect(w.store.get(root.id)).toMatchObject({ status: "failed", outcome: "stalled" });
+      w.runtime.close(); w.store.close();
+    }
+  });
+
   it("runs a child, reports it once, then wakes the root with the settled children in one resume turn", async () => {
     const w = world();
     const root = w.runtime.begin(beginReq());

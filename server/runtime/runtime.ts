@@ -1,6 +1,7 @@
 // The store is the only state: tick() is the only place work is admitted or dispatched, and no timer lives here.
 import { randomUUID } from "node:crypto";
 
+import { redactSecrets, redactSecretsInText } from "../redact.ts";
 import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
@@ -93,6 +94,7 @@ export class Runtime {
           continue;
         }
         if (n.status !== "running") continue;
+        for (const command of n.backgroundCommands ?? []) if (command.verifying) { delete command.delivered; delete command.verifying; }
         const carried = n.carrying ?? [];
         const handedOut = childrenSince(this.store, n).length > 0;
         const outward = handedOut ? [] : this.outwardOf(n);
@@ -171,7 +173,7 @@ export class Runtime {
     return this.store.prune(before);
   }
 
-  trackBackground(id: string, command: Pick<BackgroundCommand, "boxId" | "processId" | "expiresAt">): boolean {
+  trackBackground(id: string, command: Pick<BackgroundCommand, "boxId" | "processId" | "expiresAt" | "teamComputerId">): boolean {
     const n = this.store.get(id);
     if (!n || n.status !== "running" || n.origin.kind !== "person" || n.mode !== "work" || this.store.get(n.rootId)?.goalRunId) return false;
     const commands = n.backgroundCommands ?? [];
@@ -191,10 +193,16 @@ export class Runtime {
     const parent = n.parentId ? this.store.get(n.parentId) : undefined;
     const problem = this.safe("validate", () => this.runner.validate(n, parent));
     if (this.lastThrew || problem) return false;
+    try { result = JSON.stringify(redactSecrets(JSON.parse(result))); }
+    catch { result = redactSecretsInText(result); }
     command.result = clip(result, RESULT_MAX);
     if (observed && n.status === "running") command.delivered = true;
-    this.store.update(n);
-    this.touch(n);
+    const root = n.parentId ? this.store.get(n.rootId) : n;
+    this.store.transaction(() => {
+      if (root && !isTerminal(root)) { root.lastActivityAt = this.clock.now(); if (root.id !== n.id) this.store.update(root); }
+      this.store.update(n);
+    });
+    this.touch(n, ...root && root.id !== n.id ? [root] : []);
     return true;
   }
 
@@ -313,6 +321,7 @@ export class Runtime {
       const anchor = Math.max(this.since(root.lastActivityAt), this.rootActivity.get(rootId) ?? 0);
       if (now - anchor <= this.limits.stallMs) continue;
       const tree = this.store.all({ rootId });
+      if (tree.some(n => !isTerminal(n) && n.backgroundCommands?.some(c => !c.delivered && c.result === undefined && now <= c.expiresAt + this.limits.stallMs))) continue;
       if (tree.some(n => n.status === "needs_input" || (n.status === "queued" && n.continuation !== undefined))) continue;
       this.store.update(root, { kind: "stalled", at: now, detail: `no progress for ${duration(now - anchor)}` });
       this.cancelTree(root, `no progress for ${duration(this.limits.stallMs)}`, "failed", "stalled");
@@ -422,7 +431,7 @@ export class Runtime {
     }
     n.status = "running"; n.startedAt = now; n.executions += 1; n.lastActivityAt = now;
     delete n.continuation; delete n.cards;
-    for (const command of n.backgroundCommands ?? []) if (command.result !== undefined) command.delivered = true;
+    for (const command of n.backgroundCommands ?? []) if (command.result !== undefined && !command.delivered) { command.delivered = true; command.verifying = true; }
     if (carrying.length) n.carrying = carrying; else delete n.carrying;
     if (root.id !== n.id) root.lastActivityAt = now;
     if (root.budgets) root.budgets.executions += 1;
@@ -488,6 +497,7 @@ export class Runtime {
     const parentRow = n.parentId ? this.store.get(n.parentId) : undefined;
     const problem = this.safe("validate", () => this.runner.validate(n, parentRow));
     if (!this.lastThrew && problem) { this.settle(n, "failed", "refused", problem); return; }
+    for (const command of n.backgroundCommands ?? []) delete command.verifying;
     if (result.evidence) n.evidence = result.evidence;
     const root = n.parentId ? this.store.get(n.rootId) : n;
     if (result.kind === "continue") {

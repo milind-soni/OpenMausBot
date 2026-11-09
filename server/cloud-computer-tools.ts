@@ -13,12 +13,13 @@ import { controlRefusal, type ControlState } from "./control-client.ts";
 import { COMPUTER_COPY_BUDGET_MS, HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
 import { compileToolSchema } from "./mcp-schema-validator.ts";
 
-export function commandHandoff(coordinator: Coordinator, source: RoomAddress, id: string, assertActive: () => void): BackgroundCommandHooks {
+export function commandHandoff(coordinator: Coordinator, source: RoomAddress & Pick<BackgroundCommand, "teamComputerId">, id: string, assertActive: () => void): BackgroundCommandHooks {
   const address = { ...source, groupId: source.groupId ?? coordinator.node(id)?.groupId };
   return {
     started: (boxId, processId) => {
       assertActive();
-      return coordinator.trackBackground(address, id, { boxId, processId, expiresAt: Date.now() + BACKGROUND_KEEPS_AWAKE_MS });
+      return coordinator.trackBackground(address, id, { boxId, processId, expiresAt: Date.now() + BACKGROUND_KEEPS_AWAKE_MS,
+        ...(source.teamComputerId ? { teamComputerId: source.teamComputerId } : {}) });
     },
     observed: (boxId, processId, result) => {
       assertActive();
