@@ -405,7 +405,7 @@ describe("a secret a linked 1Password holds", () => {
     const file = /to the file (\S+)\. /u.exec(String(answer.body.text))?.[1];
     expect(file?.startsWith(join(one.dataDir, ".openmausbot-secrets", "t1", "vault-linked-"))).toBe(true);
     expect(readFileSync(file!, "utf8")).toBe(NOTION);
-    expect(statSync(file!).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(file!).mode & 0o777).toBe(0o600);
   });
 
   it("is not for a bot its 1Password vault is kept from, which gets a card instead", async () => {
