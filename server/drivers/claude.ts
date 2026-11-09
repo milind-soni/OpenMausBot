@@ -801,8 +801,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
     let cliVersion: ClaudeCliVersion | null = null;
     let cliVersionChecked = false;
-    // Whether `claude --help` lists --autocompact (2.1.129 rejects it despite the floor); a turn refusing it turns it off.
-    let [cliHasAutocompact, cliHelpVersion]: [boolean | null, string | null] = [null, null];
+    // Whether `claude --help` lists --autocompact (2.1.129 rejects it despite the floor); a launch refusing it keeps it off for that version.
+    let [cliHasAutocompact, cliHelpVersion, autocompactRefusedBy]: [boolean | null, string | null, string | null] = [null, null, null];
     const readCliVersion = cliVersionProbe(config.cli);
     const ensureCliVersion = async (env: NodeJS.ProcessEnv): Promise<void> => {
       if (cliVersionChecked) return;
@@ -817,7 +817,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         done: new Promise<string | null>((resolve) => {
           execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout));
         }).then((help) => {
-          cliHasAutocompact = help === null ? null : /^\s*--autocompact\b/m.test(help);
+          cliHasAutocompact = help === null ? null : version !== autocompactRefusedBy && /^\s*--autocompact\b/m.test(help);
           cliHelpVersion = version;
           if (helpRead === read) helpRead = null;
         }),
@@ -1036,9 +1036,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (turn.userSkillsDir) args.push("--add-dir", turn.userSkillsDir);
       }
       const compactWindow = autoCompactWindow(turnEnvironment);
-      if (compactWindow && cliHasAutocompact === true) {
-        args.push("--autocompact", compactWindow);
-      }
+      if (compactWindow && cliHasAutocompact === true) args.push("--autocompact", compactWindow);
       // --resume keeps the recorded system prompt, so every turn refreshes it.
       if (cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) {
         args.push("--system-prompt-snapshot", "off");
@@ -1716,11 +1714,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           }
         } else if (session.turn && !session.turn.settled) {
           const { turnId, input: turn, retryAbort } = session.turn;
-          if (/unknown option '--autocompact'/.test(session.stderr)) cliHasAutocompact = false;
+          // The CLI prints this last before exiting; the refused flag never reached the prompt, so relaunch on the same cursor.
+          const refusedAutocompact = /unknown option '--autocompact'/.test(session.stderr);
+          if (refusedAutocompact) [cliHasAutocompact, autocompactRefusedBy] = [false, cliHelpVersion];
           const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
-          const endedBeforeTurn = session.turn.awaitingInit === true;
+          const endedBeforeTurn = session.turn.awaitingInit === true || refusedAutocompact;
           if (!retry.cancelled && mayResendTurn({ endedBeforeTurn, exitCode: code, transient: verdict.transient,
             streamed: session.turn.sawStreamDelta, answered: session.turn.answered === true, attempt: retry.attempt })) {
             // `active` stays: an interrupt during the backoff reaches stop() and cancels the retry.

@@ -1977,18 +1977,27 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv).toContain("--strict-mcp-config");
   });
 
-  it("drops --autocompact after the CLI rejects it as an unknown option, so the next turn runs", async () => {
-    // A Mac report: --help listed the flag at the last snapshot, yet every scheduled turn and its retry failed with it.
+  it("drops --autocompact after the CLI rejects it as an unknown option, relaunching on the same cursor", async () => {
     const dump = join(scratch, "rejects-autocompact.json");
-    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_REJECT_AUTOCOMPACT: "1" });
+    const refused = join(scratch, "refused-autocompact.jsonl");
+    const cursor = "existing-claude-session";
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_REJECT_AUTOCOMPACT: refused });
     await instance.snapshot();
-    await instance.adapter.sendTurn({ threadId: "t-rejects-autocompact", text: "first" });
-    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-rejects-autocompact");
-    // The routine's own retry is a new turn: it must launch without the refused flag.
+    await instance.adapter.sendTurn({ threadId: "t-rejects-autocompact", text: "first", resumeCursor: cursor });
+    const first = await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-rejects-autocompact");
+    expect(first).toMatchObject({ type: "turn.completed", ok: true });
+    const refusals = readFileSync(refused, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toContain("--autocompact");
+    const relaunch = JSON.parse(readFileSync(dump, "utf8")).argv as string[];
+    expect(relaunch).not.toContain("--autocompact");
+    expect(relaunch[relaunch.indexOf("--resume") + 1]).toBe(cursor);
+    // A later turn, such as a routine's own retry, launches without the refused flag too.
     await instance.adapter.sendTurn({ threadId: "t-rejects-autocompact-2", text: "second" });
     const done = await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-rejects-autocompact-2");
     expect(done).toMatchObject({ type: "turn.completed", ok: true });
     expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
+    expect(readFileSync(refused, "utf8").trim().split("\n")).toHaveLength(1);
   });
 
   it("keeps only the isolation flag a very old CLI accepts", async () => {
