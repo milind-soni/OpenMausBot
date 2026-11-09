@@ -9,6 +9,7 @@ import { loadPageLanguage } from "./lib/language-preference";
 import { applySkinChoice, readSkinChoice } from "./lib/skins";
 import { applyChatWidth, readChatWidth } from "./lib/chat-width";
 import { applyFont, readFont } from "./lib/fonts";
+import { applySoftwareRendering } from "./lib/software-rendering";
 import { settleInterfaceMode } from "./lib/new-look";
 import { BrowserSignInPage } from "./pair/BrowserSignInPage";
 import { PairPage } from "./pair/PairPage";
@@ -21,6 +22,7 @@ import "./styles.css";
 settleInterfaceMode();
 applySkinChoice(readSkinChoice());
 applyFont(readFont());
+applySoftwareRendering();
 applyChatWidth(readChatWidth());
 const pageLanguage = loadPageLanguage();
 
