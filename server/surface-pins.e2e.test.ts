@@ -503,6 +503,8 @@ describe("surface pin provenance against the real server", () => {
       .tasks.find((task: any) => task.openedBy?.botId === asker.id).threadId as string;
     rmSync(teammateDump, { force: true });
     // Hold the asker's own turn that resumes with the result, to check it is not offered the hand-off's browser move.
+    // Its first turn must have used up the finish gate before the gate is removed for the resumed turn.
+    await idle(asker.id, own.threadId);
     rmSync(dumpFile, { force: true });
     rmSync(finishFile, { force: true });
     writeFileSync(teammateFinish, "finish");
