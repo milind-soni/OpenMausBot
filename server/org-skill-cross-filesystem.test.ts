@@ -37,6 +37,8 @@ const { SKILL_RECOVERY_MAX_BYTES, SKILL_RECOVERY_MAX_ROOTS } = await import("./s
 const { removeOwnedNativeLink } = await import("./skill-native-link-removal.ts");
 const nativeFs = await vi.importActual<typeof import("node:fs")>("node:fs");
 const differentDevices = fs.statSync(paths.workspaces).dev !== fs.statSync(paths.data).dev;
+// Windows refuses to rename a directory while a file inside it is open (EPERM). Retirement fails closed until that descriptor closes.
+const directoryRenamePreservesOpenFiles = process.platform !== "win32";
 console.log(JSON.stringify({ crossFilesystem: differentDevices ? "real" : "injected-only", workspace: paths.workspaces,
   state: paths.data, workspaceDev: fs.statSync(paths.workspaces).dev, stateDev: fs.statSync(paths.data).dev }));
 
@@ -85,7 +87,8 @@ afterAll(() => { fs.rmSync(paths.workspaces, { recursive: true, force: true }); 
 it("publishes across filesystems, preserves disabled state and task inodes, then retires after task links switch", async () => {
   const { bot, next, before, after, old, state } = fixture();
   const task = ensureTaskWorkspaceWithSkills(bot, "task-one"), oldFile = join(old, "references/guide.md");
-  const inode = fs.statSync(oldFile).ino, fd = fs.openSync(oldFile, "a");
+  const inode = fs.statSync(oldFile).ino;
+  let fd = fs.openSync(oldFile, "a");
   try {
     expect(setSkillEnabled(bot, name, false)).toMatchObject({ enabled: false });
     expect(await replaceOrganizationSkill(bot, "org:fixture", next, after, before)).toEqual({ updated: true });
@@ -97,20 +100,21 @@ it("publishes across filesystems, preserves disabled state and task inodes, then
     expect(fs.statSync(join(task, ".claude/skills", name, "references/guide.md")).ino).toBe(inode);
     expect(fs.readdirSync(join(state, "org-skill-staging"))).toEqual([]);
     ensureTaskWorkspaceWithSkills(bot, "task-one");
+    if (!directoryRenamePreservesOpenFiles) { fs.closeSync(fd); fd = -1; }
     expect(await recoverOrganizationSkillLinks(bot, name)).toEqual({ ok: true });
     const { record, held } = receipt(state);
     expect(record.state).toBe("retained");
     expect(fs.existsSync(old)).toBe(false);
     expect(fs.statSync(join(held, "references/guide.md")).ino).toBe(inode);
-    fs.writeSync(fd, "after retirement\n");
+    if (fd >= 0) fs.writeSync(fd, "after retirement\n");
     const code = `const m = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "skill-retirement.ts")).href)}); console.log(JSON.stringify(m.retireUnchangedSkillRoot(process.argv[1], JSON.parse(process.argv[2]), process.argv[3])));`;
     const restarted = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", code, old,
       JSON.stringify({ identity: record.identity, hash: before.w, executableFiles: [] }), state], { encoding: "utf8" });
     expect(restarted.status, restarted.stderr).toBe(0);
     expect(JSON.parse(restarted.stdout.trim())).toEqual({ retired: true });
-    fs.writeSync(fd, "after restart\n");
-    expect(fs.readFileSync(join(held, "references/guide.md"), "utf8")).toBe("Old guide\nafter retirement\nafter restart\n");
-  } finally { fs.closeSync(fd); }
+    if (fd >= 0) fs.writeSync(fd, "after restart\n");
+    expect(fs.readFileSync(join(held, "references/guide.md"), "utf8")).toBe(fd >= 0 ? "Old guide\nafter retirement\nafter restart\n" : "Old guide\n");
+  } finally { if (fd >= 0) fs.closeSync(fd); }
 });
 
 it("retains a failed publication on its original filesystem and leaves the previous manifest active", async () => {
@@ -131,7 +135,8 @@ it("switches enabled native and task links across two releases and retains the p
   const previous = orgSkillStorage.readManifest(bot)[name]!;
   const directory = orgSkillStorage.skillDirectory(bot, name, previous)!;
   const task = ensureTaskWorkspaceWithSkills(bot, "task-two"), file = join(directory, "scripts/run.sh");
-  const inode = fs.statSync(file).ino, fd = fs.openSync(file, "a");
+  const inode = fs.statSync(file).ino;
+  let fd = fs.openSync(file, "a");
   const third = { ...next, instructions: `${next.instructions}Third release.\n` };
   const hash = partHash(skillReleaseValue(third)), stamp = { ...after, release: "1.2.0", r: hash, w: hash };
   try {
@@ -141,23 +146,24 @@ it("switches enabled native and task links across two releases and retains the p
       expect(fs.statSync(join(task, family, "skills", name, "scripts/run.sh")).ino).toBe(inode);
     }
     ensureTaskWorkspaceWithSkills(bot, "task-two");
+    if (!directoryRenamePreservesOpenFiles) { fs.closeSync(fd); fd = -1; }
     expect(await recoverOrganizationSkillLinks(bot, name)).toEqual({ ok: true });
     const quarantine = join(state, "retired-roots");
     const record = fs.readdirSync(quarantine).filter((item) => item.endsWith(".json"))
       .map((item) => readSkillRetirementReceipt(join(quarantine, item))!).find((record) => record.directory === directory)!;
     const held = localSkillRetirementPath(record);
-    fs.writeSync(fd, "late script edit\n");
+    if (fd >= 0) fs.writeSync(fd, "late script edit\n");
     expect(fs.statSync(join(held, "scripts/run.sh")).ino).toBe(inode);
-    expect(fs.readFileSync(join(held, "scripts/run.sh"), "utf8")).toContain("late script edit");
+    expect(fs.readFileSync(join(held, "scripts/run.sh"), "utf8")).toContain(fd >= 0 ? "late script edit" : "echo fixture");
     expect(fs.readFileSync(join(task, ".agents/skills", name, "SKILL.md"), "utf8")).toBe(third.instructions);
-  } finally { fs.closeSync(fd); }
+  } finally { if (fd >= 0) fs.closeSync(fd); }
 });
 
 it("rejects a substituted publication inode after the local rename", async () => {
   const { bot, next, before, after } = fixture(), rename = vi.mocked(fs.renameSync).getMockImplementation()!;
   vi.mocked(fs.renameSync).mockImplementation((from, to) => {
     rename(from, to);
-    if (String(from).includes("/.prepare-")) {
+    if (String(from).includes(".prepare-")) {
       rename(to, `${to}-original`);
       writeSkillFolder(String(to), next.instructions, [
         { path: "references/guide.md", content: "New guide\n" },
@@ -169,7 +175,11 @@ it("rejects a substituted publication inode after the local rename", async () =>
   expect(orgSkillStorage.readManifest(bot)[name]!.package).toEqual(before);
 });
 
-it.each(["bytes", "instructions", "mode", "symlink"] as const)("rejects %s tampering in destination staging", async (tamper) => {
+// Windows keeps executable intent in the manifest; chmod cannot change a POSIX mode bit there.
+const destinationTampers = (["bytes", "instructions", "mode", "symlink"] as const).filter(
+  (tamper) => process.platform !== "win32" || tamper !== "mode",
+);
+it.each(destinationTampers)("rejects %s tampering in destination staging", async (tamper) => {
   const { bot, next, before, after, old } = fixture();
   const result = await replaceOrganizationSkill(bot, "org:fixture", next, after, before, { writeFolder: (...args) => {
     writeSkillFolder(...args);
@@ -213,12 +223,23 @@ it("retries an interrupted local receipt and accounts for late writes, root limi
 it("keeps late descriptor edits on an interrupted local retirement across restart", () => {
   const { old, before, state } = fixture(), fd = fs.openSync(join(old, "references/guide.md"), "a");
   const expected = { identity: skillRootIdentity(old)!, hash: before.w, executableFiles: [] };
+  const code = `const m = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "skill-retirement.ts")).href)}); console.log(JSON.stringify(m.retireUnchangedSkillRoot(process.argv[1], JSON.parse(process.argv[2]), process.argv[3])));`;
   try {
+    if (!directoryRenamePreservesOpenFiles) {
+      expect(retireUnchangedSkillRoot(old, expected, state, { afterVerify: () => { throw new Error("fixture interruption"); } }))
+        .toEqual({ error: "the previous skill folder could not be moved safely" });
+      expect(fs.existsSync(old)).toBe(true);
+      fs.writeSync(fd, "late edit\n");
+      const restarted = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", code, old, JSON.stringify(expected), state], { encoding: "utf8" });
+      expect(restarted.status, restarted.stderr).toBe(0);
+      expect(JSON.parse(restarted.stdout.trim())).toHaveProperty("error");
+      expect(fs.readFileSync(join(old, "references/guide.md"), "utf8")).toBe("Old guide\nlate edit\n");
+      return;
+    }
     expect(retireUnchangedSkillRoot(old, expected, state, { afterVerify: () => { throw new Error("fixture interruption"); } })).toHaveProperty("error");
     const { held, record } = receipt(state);
     expect(record.state).toBe("pending");
     fs.writeSync(fd, "late edit\n");
-    const code = `const m = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "skill-retirement.ts")).href)}); console.log(JSON.stringify(m.retireUnchangedSkillRoot(process.argv[1], JSON.parse(process.argv[2]), process.argv[3])));`;
     const restarted = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", code, old, JSON.stringify(expected), state], { encoding: "utf8" });
     expect(restarted.status, restarted.stderr).toBe(0);
     expect(JSON.parse(restarted.stdout.trim())).toHaveProperty("error", expect.stringContaining("still needs recovery"));

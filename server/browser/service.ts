@@ -56,7 +56,7 @@ export interface BrowserServiceOptions {
   /** What the egress gate of this profile's browser refused since it was last asked, as one line. */
   egressNotice?: (key: string) => string | null;
   onTiming?: (timing: BrowserTiming) => void;
-  callBudgetMs?: number;
+  callBudgetMs?: number | (() => number);
   laneWaitMs?: number;
   takeoverMs?: number;
   capacityWaitMs?: number;
@@ -418,7 +418,8 @@ export class BrowserService {
     for (let stopping = profile.stopping; stopping; stopping = profile.stopping) await stopping;
     profile.calls++;
     const name = toolNameOf(params) ?? "browser";
-    const deadline = Date.now() + this.#options.callBudgetMs;
+    const budget = this.#options.callBudgetMs;
+    const deadline = Date.now() + (typeof budget === "function" ? budget() : budget);
     const started = performance.now();
     let result: ToolResult | null;
     try {
