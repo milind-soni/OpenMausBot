@@ -434,6 +434,11 @@ it("brings the files a run sent with attach_file into its report", async () => {
   expect(await s.lines()).toEqual([expect.objectContaining({
     text: "Today's brief is attached.", attachments: [expect.objectContaining({ kind: "file", name: "brief.pdf" })],
   })]);
+  const inRun = await s.messages((await s.run(id)).threadId);
+  const reply = inRun.findLast((message) => message.role === "bot" && message.turnTerminal);
+  const sentLine = inRun.find((message) => message.attachments?.some((file: any) => file.name === "brief.pdf"));
+  expect(sentLine).toMatchObject({ sentInTurn: reply.turnId });
+  expect(sentLine).not.toHaveProperty("turnId");
 }, 120_000);
 
 it("leaves the images a run's tools returned in the run, and reports the files it sent", async () => {
