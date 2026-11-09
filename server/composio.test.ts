@@ -11,6 +11,7 @@ import {
   connectedServices,
   connectedServicesInventory,
   connectionMode,
+  connectorSetup,
   connectionStatus,
   listConnectorTools,
   listToolkits,
@@ -38,6 +39,23 @@ import { EMAIL_READ_TOOL_NAMES, EMAIL_SLUG } from "../shared/email.ts";
 let api: Server;
 it("lists exactly the curated apps product analytics may name, in the same order", () => {
   expect(CURATED_SLUGS).toEqual([...CURATED_CONNECTOR_SLUGS]);
+});
+
+it("reports an unconfigured OpenConnector backend as setup, not a broker outage", () => {
+  const names = ["OMB_CONNECTOR_PROVIDER", "OMB_OPENCONNECTOR_URL", "OMB_OPENCONNECTOR_ADMIN_TOKEN", "OMB_OPENCONNECTOR_ADMIN_TOKEN_REF"] as const;
+  const saved = names.map((name) => [name, process.env[name]] as const);
+  try {
+    process.env.OMB_CONNECTOR_PROVIDER = "openconnector";
+    delete process.env.OMB_OPENCONNECTOR_URL;
+    delete process.env.OMB_OPENCONNECTOR_ADMIN_TOKEN;
+    delete process.env.OMB_OPENCONNECTOR_ADMIN_TOKEN_REF;
+    expect(connectorSetup({}, true)).toBe("needs-setup");
+  } finally {
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
 });
 
 it("only sends Session MCP credentials over HTTPS or loopback HTTP", () => {
@@ -79,6 +97,10 @@ let brokerConnectedServicesBody: { complete?: boolean; services: Record<string, 
 let brokerConnectedServicesFail = false;
 // What /broker/v1/catalog serves; null falls back to github only.
 let brokerCatalogBody: { items: Array<{ slug: string; name: string }> } | null = null;
+let sessionLookupFail = false;
+let isolationSessionBarrier: Promise<void> | null = null;
+let releaseIsolationSessionBarrier: (() => void) | null = null;
+let isolationSessionLookups = 0;
 // The project's own auth configs, and those the stub Session was created with: a Session knows only the configs named at creation.
 let customAuthConfigs: Array<Record<string, unknown>> = [];
 let sessionAuthConfigs: Record<string, string> = {};
@@ -166,9 +188,9 @@ beforeAll(async () => {
     }
 
     const apiKey = String(req.headers["x-api-key"] ?? "");
-    if (!["ak_test", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck",
+    if (!["ak_test", "ak_identity_cache", "ak_status_pages", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck",
         "ak_catalog_page_stuck", "ak_catalog_exhausted", "ak_catalog_stalled_total", "ak_catalog_end_short",
-        "ak_catalog_http_no_total"].includes(apiKey)) {
+        "ak_catalog_http_no_total", "ak_isolation"].includes(apiKey)) {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: { message: "invalid project key" } }));
     }
@@ -301,7 +323,26 @@ beforeAll(async () => {
       }
       return res.end(JSON.stringify({ items: [{ slug: "x", name: "X (Twitter)" }, { slug: "github", name: "GitHub" }] }));
     }
+    if (req.method === "GET" && /^\/api\/v3.1\/tool_router\/session\/trs_isolation_[ab]$/.test(url.pathname)) {
+      const sessionId = url.pathname.split("/").at(-1)!;
+      isolationSessionLookups += 1;
+      if (isolationSessionBarrier && isolationSessionLookups >= 2) queueMicrotask(() => releaseIsolationSessionBarrier?.());
+      if (isolationSessionBarrier) await isolationSessionBarrier;
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({
+        session_id: sessionId,
+        mcp: { type: "http", url: `https://app.composio.dev/tool_router/v3/${sessionId}/mcp` },
+        config: {
+          user_id: "openmausbot_existing",
+          multi_account: { enable: true, max_accounts_per_toolkit: 5, require_explicit_selection: true },
+        },
+      }));
+    }
     if (req.method === "GET" && url.pathname === "/api/v3.1/tool_router/session/trs_test") {
+      if (sessionLookupFail) {
+        res.writeHead(503, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: { message: "Session lookup unavailable" } }));
+      }
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         session_id: "trs_test",
@@ -329,7 +370,29 @@ beforeAll(async () => {
         config: { user_id: "openmausbot_legacy" },
       }));
     }
+    if (req.method === "GET" && url.pathname === "/api/v3.1/tool_router/session/trs_isolation_a/toolkits") {
+      const slug = "github";
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({
+        items: [{ slug, connected_account: { id: `ca_${slug}`, status: "ACTIVE" } }],
+      }));
+    }
+    if (req.method === "GET" && url.pathname === "/api/v3.1/tool_router/session/trs_isolation_b/toolkits") {
+      const slug = "linear";
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({
+        items: [{ slug, connected_account: { id: `ca_${slug}`, status: "ACTIVE" } }],
+      }));
+    }
     if (req.method === "GET" && url.pathname.endsWith("/toolkits")) {
+      if (apiKey === "ak_status_pages") {
+        const pageTwo = url.searchParams.get("cursor") === "status-page-2";
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          items: pageTwo ? [{ slug: "status_page_b" }] : [{ slug: "status_page_a" }],
+          ...(pageTwo ? {} : { next_cursor: "status-page-2" }),
+        }));
+      }
       res.writeHead(200, { "content-type": "application/json" });
       if (url.searchParams.get("cursor") === "toolkits-page-2") {
         return res.end(JSON.stringify({
@@ -351,6 +414,10 @@ beforeAll(async () => {
         next_cursor: url.searchParams.has("toolkits") ? undefined : "toolkits-page-2",
       };
       return res.end(JSON.stringify(page));
+    }
+    if (req.method === "GET" && url.pathname === "/api/v3.1/connected_accounts" && apiKey === "ak_isolation") {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ items: [] }));
     }
     if (req.method === "GET" && url.pathname === "/api/v3.1/connected_accounts") {
       if (connectedAccountsUnavailable) {
@@ -417,7 +484,12 @@ afterAll(async () => {
 
 describe.sequential("Composio Sessions", () => {
   // Fixtures change the project's auth configs from test to test; production reads them at most once a minute.
-  beforeEach(() => forgetProjectAuthConfigs());
+  beforeEach(() => {
+    forgetProjectAuthConfigs();
+    isolationSessionBarrier = null;
+    releaseIsolationSessionBarrier = null;
+    isolationSessionLookups = 0;
+  });
 
   it("rejects broker URL components and invalid tokens from the environment", () => {
     process.env.OMB_COMPOSIO_BROKER_TOKEN = "a".repeat(64);
@@ -1058,6 +1130,83 @@ describe.sequential("Composio Sessions", () => {
     }
   });
 
+  it("does not call Session again while the service-slug cache is fresh", async () => {
+    const cfg: AppConfig = { composio: { apiKey: "ak_identity_cache", userId: "openmausbot_existing", sessionId: "trs_test" } };
+    const slugs = await connectedServiceSlugs(cfg);
+    const before = calls.length;
+    await expect(connectedServiceSlugs(cfg)).resolves.toBe(slugs);
+    expect(calls.slice(before)).toEqual([]);
+  });
+
+  it("serves cached project slugs without a Session lookup, then falls back when the Session fails", async () => {
+    const cfg = { composio: { apiKey: "ak_test", sessionId: "trs_test" } } as AppConfig;
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now");
+    const sessionReads = () => calls.filter((call) => call.path === "/api/v3.1/tool_router/session/trs_test").length;
+    try {
+      forgetProjectAuthConfigs();
+      await expect(connectedServiceSlugs(cfg)).resolves.toContain("github");
+      const firstReads = sessionReads();
+      now.mockReturnValue(start + 1_000);
+      await expect(connectedServiceSlugs(cfg)).resolves.toContain("github");
+      expect(sessionReads()).toBe(firstReads);
+      now.mockReturnValue(start + 61_000);
+      sessionLookupFail = true;
+      await expect(connectedServiceSlugs(cfg)).resolves.toContain("github");
+      expect(sessionReads()).toBe(firstReads + 1);
+    } finally {
+      sessionLookupFail = false;
+      now.mockRestore();
+      forgetProjectAuthConfigs();
+    }
+  });
+
+  it("does not share unresolved requests for one API key across sessions, and still serves a valid cache", async () => {
+    const apiKey = "ak_isolation";
+    const configA = { composio: { apiKey, sessionId: "trs_isolation_a" } } as AppConfig;
+    const configB = { composio: { apiKey, sessionId: "trs_isolation_b" } } as AppConfig;
+    forgetProjectAuthConfigs();
+    isolationSessionLookups = 0;
+    isolationSessionBarrier = new Promise<void>((resolve) => { releaseIsolationSessionBarrier = resolve; });
+    const before = calls.length;
+    const [slugsA, slugsB] = await Promise.all([
+      connectedServiceSlugs(configA),
+      connectedServiceSlugs(configB),
+    ]);
+    expect(slugsA).toEqual(["github"]);
+    expect(slugsB).toEqual(["linear"]);
+    const concurrent = calls.slice(before);
+    expect(concurrent.filter((call) => call.path.endsWith("/tool_router/session/trs_isolation_a"))).not.toHaveLength(0);
+    expect(concurrent.filter((call) => call.path.endsWith("/tool_router/session/trs_isolation_b"))).not.toHaveLength(0);
+    expect(isolationSessionLookups).toBeGreaterThanOrEqual(2);
+    expect(concurrent.filter((call) => call.path.endsWith("/trs_isolation_a/toolkits")).map((call) => call.apiKey))
+      .toEqual([apiKey]);
+    expect(concurrent.filter((call) => call.path.endsWith("/trs_isolation_b/toolkits")).map((call) => call.apiKey))
+      .toEqual([apiKey]);
+
+    const afterResolved = calls.length;
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(start + 1_000);
+      await expect(connectedServiceSlugs(configB)).resolves.toEqual(["linear"]);
+      expect(calls.slice(afterResolved)).toEqual([]);
+    } finally {
+      now.mockRestore();
+      isolationSessionBarrier = null;
+      releaseIsolationSessionBarrier = null;
+    }
+  });
+
+  it("clears a completed final pagination cursor instead of reporting the safety limit", async () => {
+    const cfg = { composio: { apiKey: "ak_status_pages", sessionId: "trs_test" } } as AppConfig;
+    calls.length = 0;
+    const status = await connectionStatus(cfg, ["status_page_a", "status_page_b"]);
+    expect(status.status_page_a).toMatchObject({ connected: false, status: "not_connected" });
+    expect(status.status_page_b).toMatchObject({ connected: false, status: "not_connected" });
+    expect(calls.filter((call) => call.query.includes("status-page-2"))).toHaveLength(1);
+  });
+
   it("validates grant patches against connected services and the catalog", async () => {
     const cfg: AppConfig = {
       composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
@@ -1502,6 +1651,52 @@ describe("connector tool inventory", () => {
     } finally {
       brokerMcpTools = null;
       setManagedBrokerAccess(null);
+    }
+  });
+
+  it("does not share the connector tool cache across Sessions under one project API key", async () => {
+    const apiKey = "ak_isolation";
+    const configA = { composio: { apiKey, userId: "openmausbot_existing", sessionId: "trs_isolation_a" } } as AppConfig;
+    const configB = { composio: { apiKey, userId: "openmausbot_existing", sessionId: "trs_isolation_b" } } as AppConfig;
+    forgetProjectAuthConfigs();
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(start + 1_000);
+    const remoteCalls: Array<{ url: string; method: string }> = [];
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const session = ["trs_isolation_a", "trs_isolation_b"].find((id) => url.includes(`${id}/mcp`));
+      if (!session) return realFetch(input, init);
+      const payload = JSON.parse(String(init?.body ?? "{}"));
+      remoteCalls.push({ url, method: payload.method ?? "" });
+      if (payload.method !== "tools/list") {
+        return Response.json({ jsonrpc: "2.0", id: payload.id ?? null, result: {} }, {
+          headers: { "mcp-session-id": session.replace("trs_", "mcp_") },
+        });
+      }
+      const tools = session.endsWith("_a")
+        ? [{ name: "GITHUB_CREATE_ISSUE", description: "session A" }]
+        : [{ name: "SLACK_POST_MESSAGE", description: "session B" }];
+      return Response.json({ jsonrpc: "2.0", id: payload.id, result: { tools } });
+    });
+    try {
+      await expect(listConnectorTools(configA)).resolves.toEqual({
+        github: [{ name: "GITHUB_CREATE_ISSUE", description: "session A" }],
+      });
+      await expect(listConnectorTools(configB)).resolves.toEqual({
+        slack: [{ name: "SLACK_POST_MESSAGE", description: "session B" }],
+      });
+      expect(remoteCalls.filter((call) => call.method === "tools/list" && call.url.includes("trs_isolation_b")))
+        .toHaveLength(1);
+      const afterFirstRead = remoteCalls.length;
+      await expect(listConnectorTools(configB)).resolves.toEqual({
+        slack: [{ name: "SLACK_POST_MESSAGE", description: "session B" }],
+      });
+      expect(remoteCalls.slice(afterFirstRead)).toEqual([]);
+    } finally {
+      fetchSpy.mockRestore();
+      now.mockRestore();
+      forgetProjectAuthConfigs();
     }
   });
 

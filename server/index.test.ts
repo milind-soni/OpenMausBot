@@ -12704,6 +12704,68 @@ describe("harness HTTP API", () => {
     });
   });
 
+  it("accepts a boundary-length non-BMP OpenConnector alias when removing one account", async () => {
+    const configPath = join(home, ".openmausbot", "config.json");
+    const originalConfig = readFileSync(configPath, "utf8");
+    const tokenPath = join(home, ".openmausbot", "openconnector-route-test-token");
+    writeFileSync(tokenPath, "0".repeat(64), { mode: 0o600 });
+    const config = JSON.parse(originalConfig);
+    const alias = "\u{1F600}".repeat(64);
+    const accountId = encodeURIComponent(`oc:github:${alias}`);
+    const statePath = join(home, ".openmausbot", "openconnector-state.json");
+    const disconnectCalls: Array<{ method: string; path: string; authorization: string | undefined }> = [];
+    const openConnector = createServer((req, res) => {
+      disconnectCalls.push({
+        method: req.method ?? "",
+        path: req.url ?? "",
+        authorization: req.headers.authorization,
+      });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ success: true, data: { deleted: true } }));
+    });
+    await new Promise<void>((resolve) => openConnector.listen(0, "127.0.0.1", resolve));
+    const openConnectorUrl = `http://127.0.0.1:${(openConnector.address() as { port: number }).port}`;
+    writeFileSync(configPath, JSON.stringify({
+      ...config,
+      connectors: {
+        provider: "openconnector",
+        openconnector: { url: openConnectorUrl, adminTokenRef: `file:${tokenPath}` },
+      },
+    }));
+    writeFileSync(statePath, JSON.stringify({
+      runtimeUrl: openConnectorUrl,
+      connections: [{
+        accountId: decodeURIComponent(accountId),
+        service: "github",
+        alias,
+        status: "connected",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }],
+    }), { mode: 0o600 });
+    try {
+      const response = await api("DELETE", `/api/connectors/github/accounts/${accountId}`);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ removed: 1 });
+      expect(disconnectCalls).toEqual([{
+        method: "DELETE",
+        path: `/api/connections/github?alias=${encodeURIComponent(alias)}`,
+        authorization: `Bearer ${"0".repeat(64)}`,
+      }]);
+    } finally {
+      await new Promise<void>((resolve) => openConnector.close(() => resolve()));
+      rmSync(statePath, { force: true });
+      rmSync(`${statePath}.lock.db`, { force: true });
+      rmSync(tokenPath, { force: true });
+      writeFileSync(configPath, originalConfig);
+    }
+  });
+
+  it("rejects malformed percent-encoded OpenConnector account IDs with 400", async () => {
+    const response = await api("DELETE", "/api/connectors/github/accounts/oc%ZZ");
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: "invalid connected-account ID" });
+  });
+
   it.skipIf(process.platform === "win32")("stores the credentials file with owner-only permissions", () => {
     expect(statSync(join(home, ".openmausbot", "config.json")).mode & 0o777).toBe(0o600);
   });
