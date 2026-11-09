@@ -266,7 +266,7 @@ const BATCH_HINT = "To do several steps, or to act and then read the screen, in 
 
 const SINGLE_TOOLS = [
   { name: "status", description: "Check physical USB Android devices and USB-debugging authorization before any Android phone task.", inputSchema: { type: "object", properties: {} } },
-  { name: "read_screen", description: "Read visible text, accessibility labels, resource ids, and pixel bounds from the connected Android screen. Use it before the first action. To act and see the result in one call, put the action and read_screen in one batch.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
+  { name: "read_screen", description: "Read visible text, accessibility labels, resource ids, and pixel bounds from the connected Android screen. Use it before choosing what to act on. To act and see the result in one call, put the action and read_screen in one batch.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
   { name: "screenshot", description: "Capture the connected Android screen when accessibility text is insufficient. Returns a PNG image.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
   { name: "list_apps", description: "List installed launchable Android package names, optionally filtered by a human app name. Prefer open_app first.", inputSchema: { type: "object", properties: { query: { type: "string" }, serial: { type: "string" } } } },
   { name: "open_app", description: `Open an installed Android app directly by its English name, such as Uber or Skyscanner, or by its package name. Do not scan the app drawer first. ${BATCH_HINT}`, inputSchema: { type: "object", properties: { name: { type: "string" }, serial: { type: "string" } }, required: ["name"] } },
@@ -307,9 +307,10 @@ const STEP_EXAMPLES: Record<StepAction, Json> = {
   wait: { action: "wait", seconds: 3 },
 };
 const lower = (value: unknown) => String(value).toLowerCase();
+const toNumber = (value: unknown) => (typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN);
 const STEP_COERCIONS: Record<string, (value: unknown) => unknown> = {
   action: lower, key: lower, direction: lower,
-  x: Number, y: Number, index: Number, seconds: Number,
+  x: toNumber, y: toNumber, index: toNumber, seconds: toNumber,
   text: String, name: String,
   exact: (value) => (value === "true" || value === "false" ? value === "true" : value),
 };
@@ -353,7 +354,7 @@ export const TOOLS = [
   ...SINGLE_TOOLS,
   {
     name: "batch",
-    description: `Run up to ${MAX_STEPS} phone steps in order in one call. A step is one of open_app, tap_text, tap, swipe, type_text, press, read_screen or wait, with that tool's fields: {action, ...fields}. Add read_screen as the last step to see the result; nothing is read unless you ask. A wait step (0 to ${MAX_WAIT_SECONDS} s) gives content time to load. It stops at the first failing step. Example: {"steps":[{"action":"tap_text","text":"Search"},{"action":"type_text","text":"iPad mini"},{"action":"press","key":"enter"},{"action":"wait","seconds":3},{"action":"read_screen"}]}`,
+    description: `Run up to ${MAX_STEPS} phone steps in order in one call. A step is one of open_app, tap_text, tap, swipe, type_text, press, read_screen or wait, with that tool's fields: {action, ...fields}. Add read_screen as the last step to see the result; the batch returns the screen only at a read_screen step. A wait step (0 to ${MAX_WAIT_SECONDS} s) gives content time to load. It stops at the first failing step. Example: {"steps":[{"action":"tap_text","text":"Search"},{"action":"type_text","text":"iPad mini"},{"action":"press","key":"enter"},{"action":"wait","seconds":3},{"action":"read_screen"}]}`,
     inputSchema: {
       type: "object",
       properties: {

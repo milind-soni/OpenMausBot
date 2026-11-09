@@ -223,6 +223,8 @@ describe("phone batch step parsing", () => {
     { case: "a negative match index", raw: [{ action: "tap_text", text: "Search", index: -1 }], error: 'Step 1 (tap_text) needs index as a whole number from 0, e.g. {"action":"tap_text","text":"Search","index":1}. No step was performed.' },
     { case: "a y off the screen", raw: [{ action: "tap", x: 1, y: -1 }], error: 'Step 1 (tap) needs x and y from 0 to 10000, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
     { case: "an x past 10000", raw: [{ action: "tap", x: 10001, y: 2 }], error: 'Step 1 (tap) needs x and y from 0 to 10000, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
+    { case: "a coordinate that is not a number", raw: [{ action: "tap", x: [], y: 1200 }], error: 'Step 1 (tap) needs x and y from 0 to 10000, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
+    { case: "a blank coordinate string", raw: [{ action: "tap", x: " ", y: 1200 }], error: 'Step 1 (tap) needs x and y from 0 to 10000, e.g. {"action":"tap","x":540,"y":1200}. No step was performed.' },
     { case: "a negative wait", raw: [{ action: "wait", seconds: -1 }], error: 'Step 1 (wait) needs seconds as a number from 0 to 60, e.g. {"action":"wait","seconds":3}. No step was performed.' },
     { case: "a negative wait on another action", raw: [{ action: "tap", x: 1, y: 2, seconds: -1 }], error: 'Step 1 (tap) does not take seconds; put a separate {"action":"wait","seconds":3} step after it. No step was performed.' },
   ])("refuses $case", ({ raw, error }) => {
@@ -312,11 +314,11 @@ describe("phone MCP tool surface", () => {
   });
 
   it("describes batch as designed", () => {
-    expect(tool("batch").description).toBe('Run up to 10 phone steps in order in one call. A step is one of open_app, tap_text, tap, swipe, type_text, press, read_screen or wait, with that tool\'s fields: {action, ...fields}. Add read_screen as the last step to see the result; nothing is read unless you ask. A wait step (0 to 60 s) gives content time to load. It stops at the first failing step. Example: {"steps":[{"action":"tap_text","text":"Search"},{"action":"type_text","text":"iPad mini"},{"action":"press","key":"enter"},{"action":"wait","seconds":3},{"action":"read_screen"}]}');
+    expect(tool("batch").description).toBe('Run up to 10 phone steps in order in one call. A step is one of open_app, tap_text, tap, swipe, type_text, press, read_screen or wait, with that tool\'s fields: {action, ...fields}. Add read_screen as the last step to see the result; the batch returns the screen only at a read_screen step. A wait step (0 to 60 s) gives content time to load. It stops at the first failing step. Example: {"steps":[{"action":"tap_text","text":"Search"},{"action":"type_text","text":"iPad mini"},{"action":"press","key":"enter"},{"action":"wait","seconds":3},{"action":"read_screen"}]}');
   });
 
   it("points read_screen and the actions at batch", () => {
-    expect(tool("read_screen").description).toBe("Read visible text, accessibility labels, resource ids, and pixel bounds from the connected Android screen. Use it before the first action. To act and see the result in one call, put the action and read_screen in one batch.");
+    expect(tool("read_screen").description).toBe("Read visible text, accessibility labels, resource ids, and pixel bounds from the connected Android screen. Use it before choosing what to act on. To act and see the result in one call, put the action and read_screen in one batch.");
     for (const name of ["open_app", "tap_text", "tap", "swipe", "type_text", "press"]) {
       expect(tool(name).description).toMatch(/\. To do several steps, or to act and then read the screen, in one call, use batch\.$/);
       expect(tool(name).description).not.toContain("then use read_screen to verify");
@@ -387,7 +389,7 @@ esac
     expect(adbLog()).toEqual(["devices -l", ...adb]);
   });
 
-  it("runs a batch's steps in one call and reads the screen only at its read_screen step", async () => {
+  it("runs a batch's steps in one call and returns the screen only at its read_screen step", async () => {
     rmSync(join(home, "adb.log"), { force: true });
     const response = await call("batch", { steps: [{ action: "tap_text", text: "Search" }, { action: "wait", seconds: 0 }, { action: "read_screen" }] });
     expect(response.result).toEqual({ content: [{ type: "text", text: `1. tap_text: Tapped "Search"\n2. wait: Waited 0 s\n3. read_screen:\n${SCREEN}` }] });

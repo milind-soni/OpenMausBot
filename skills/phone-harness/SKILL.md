@@ -16,7 +16,7 @@ with Bash, raw `adb`, `subprocess`, an emulator, network ADB, or Tailscale.
 2. Call `open_app` with the human app name. Do not scan the launcher first.
    Use `list_apps` only when the name is ambiguous or not found, then pass the
    package name.
-3. Call `read_screen` before the first action. After that, to act and see the
+3. Call `read_screen` before choosing a target. After that, to act and see the
    result, put the action and `read_screen` in one `batch`. Prefer `tap_text`;
    use `screenshot` and pixel `tap` only when accessibility text cannot
    identify the target.
