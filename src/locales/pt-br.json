@@ -7633,6 +7633,7 @@
   "botPanel.memory.forget": "Esquecer",
   "botPanel.memory.empty": "Nada guardado na memória ainda.",
   "botPanel.memory.addPlaceholder": "Diga algo para {name} lembrar",
+  "botPanel.memory.editText": "Editar como texto",
   "botPanel.skills.remove": "Remover {name}",
   "botPanel.skills.removeConfirm": "Remover a habilidade “{name}”?",
   "botPanel.skills.removeFailed": "Não foi possível remover esta habilidade.",

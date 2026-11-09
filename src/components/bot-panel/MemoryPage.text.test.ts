@@ -25,7 +25,6 @@ let root: Root;
 beforeEach(() => {
   puts.length = 0;
   files["MEMORY.md"] = "# Memory\n\n- Prefers short replies.\n";
-  // The memory file route, hash check and all: a save against a stale hash is a 409 with the file as it is now.
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://x");
     if (init?.method === "PUT") {
@@ -125,4 +124,51 @@ it("closes the text when the person moves to another bot, so coming back shows t
   await settle();
   expect(textarea()).toBeNull();
   expect(host.querySelector('[data-panel-link="memory-text"]')).toBeTruthy();
+});
+
+it("keeps every earlier draft when Reload is needed twice", async () => {
+  await open();
+  await type("# Memory\n\n- First draft.\n");
+  files["MEMORY.md"] += "- The bot's note.\n";
+  await click(host.querySelector('[data-panel-done="memory-text"]'));
+  await click(button("Reload"));
+  await type("# Memory\n\n- Second draft.\n");
+  files["MEMORY.md"] += "- Another bot note.\n";
+  await click(host.querySelector('[data-panel-done="memory-text"]'));
+  await click(button("Reload"));
+  const kept = host.querySelector("[data-memory-draft] pre")?.textContent;
+  expect(kept).toContain("First draft.");
+  expect(kept).toContain("Second draft.");
+});
+
+it("locks the text while it saves, so nothing typed after Save is lost", async () => {
+  await open();
+  let finish!: () => void;
+  const fetchMock = vi.mocked(fetch);
+  const real = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementationOnce((input, init) => new Promise((resolve) => { finish = () => resolve(real(input as string, init)); }));
+  await type("# Memory\n\n- Saved.\n");
+  await click(host.querySelector('[data-panel-done="memory-text"]'));
+  expect(textarea()?.readOnly).toBe(true);
+  await act(async () => finish());
+  await settle();
+  expect(textarea()).toBeNull();
+});
+
+it("a save that finishes after moving to another bot does not show in that bot's notes", async () => {
+  await open();
+  let finish!: () => void;
+  const fetchMock = vi.mocked(fetch);
+  const real = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementationOnce((input, init) => new Promise((resolve) => { finish = () => resolve(real(input as string, init)); }));
+  await type("# Memory\n\n- Late note.\n");
+  await click(host.querySelector('[data-panel-done="memory-text"]'));
+  const other = { ...bot, id: "atlas", name: "Atlas" } as Bot;
+  await act(async () => root.render(createElement(MemoryPage, { bot: other, derived: {} as never })));
+  await settle();
+  await act(async () => finish());
+  await settle();
+  expect(files["MEMORY.md"]).toContain("Late note.");
+  expect(host.textContent).toContain("Prefers short replies.");
+  expect(host.textContent).not.toContain("Late note.");
 });
