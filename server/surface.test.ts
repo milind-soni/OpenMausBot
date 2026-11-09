@@ -209,7 +209,7 @@ describe("surfacePrompt", () => {
       const text = surfacePrompt({ computer, browser: true });
       const label = computer === "vm" ? "the Local VM" : "the cloud computer";
       expect(text).toContain(`The built-in browser and ${label} may not share sign-ins.`);
-      expect(text).toContain(`Before asking the user to sign in again in the Browser tab, check whether the site is already signed in on ${label} with the account the task needs; if it is, do the task there and keep it there, unless the user asked for the Browser tab.`);
+      expect(text).toContain(`Unless the user asked for the Browser tab, check whether the site is already signed in on ${label} with the account the task needs before asking them to sign in again in the Browser tab; if it is, do the task there and keep it there. If you cannot check ${label}, ask for the sign-in in the Browser tab.`);
     }
     expect(surfacePrompt({ computer: "vm", browser: false })).not.toContain("share sign-ins");
     expect(surfacePrompt({ computer: null, browser: true })).not.toContain("share sign-ins");
