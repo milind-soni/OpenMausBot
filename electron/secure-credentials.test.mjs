@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { readSecureCredentials, resetUnreadableCredentials } from "./secure-credentials.mjs";
+import { installCredentialStoreIpc, readSecureCredentials, resetUnreadableCredentials } from "./secure-credentials.mjs";
 
 const transient = () =>
   new Error("safeStorage.decryptStringAsync is temporarily unavailable. Please try again.");
@@ -129,5 +129,67 @@ describe("resetUnreadableCredentials", () => {
     await expect(resetUnreadableCredentials(d)).resolves.toBe("failed");
     expect(d.failed).toHaveBeenCalledWith(denied);
     expect(d.restart).not.toHaveBeenCalled();
+  });
+});
+
+describe("installCredentialStoreIpc", () => {
+  const installed = (over = {}) => {
+    const handlers = new Map();
+    const deps = {
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+      localOnly: vi.fn((channel, handler) => handler),
+      dialog: { showMessageBox: vi.fn(async () => ({ response: 0 })) },
+      windowFor: () => null,
+      t: (key) => key,
+      appName: () => "OpenMausBot",
+      unreadable: () => true,
+      quitting: () => false,
+      moveAside: vi.fn(),
+      log: vi.fn(),
+      relaunch: vi.fn(),
+      ...over,
+    };
+    installCredentialStoreIpc(deps);
+    return { handlers, deps };
+  };
+
+  it("guards both calls as this app's own page only", () => {
+    const { deps } = installed();
+    expect(deps.localOnly.mock.calls.map(([channel]) => channel)).toEqual(["credential-store:unreadable", "credential-store:reset"]);
+  });
+
+  it("answers from the launch read's current result, not one captured at install", async () => {
+    let unreadable = false;
+    const { handlers, deps } = installed({ unreadable: () => unreadable });
+    expect(handlers.get("credential-store:unreadable")()).toBe(false);
+    await expect(handlers.get("credential-store:reset")({ sender: {} })).resolves.toBe("readable");
+    expect(deps.dialog.showMessageBox).not.toHaveBeenCalled();
+    unreadable = true;
+    expect(handlers.get("credential-store:unreadable")()).toBe(true);
+    await expect(handlers.get("credential-store:reset")({ sender: {} })).resolves.toBe("reset");
+  });
+
+  it("moves nothing when the person cancels", async () => {
+    const { handlers, deps } = installed({ dialog: { showMessageBox: vi.fn(async () => ({ response: 1 })) } });
+    await expect(handlers.get("credential-store:reset")({ sender: {} })).resolves.toBe("cancelled");
+    expect(deps.moveAside).not.toHaveBeenCalled();
+    expect(deps.relaunch).not.toHaveBeenCalled();
+  });
+
+  it("asks over the window that asked, moves the file aside and relaunches on yes", async () => {
+    const win = { id: 7 };
+    const { handlers, deps } = installed({ windowFor: () => win });
+    await expect(handlers.get("credential-store:reset")({ sender: {} })).resolves.toBe("reset");
+    expect(deps.dialog.showMessageBox).toHaveBeenCalledWith(win, expect.objectContaining({ message: "native.dialog.resetSavedKeys.title", cancelId: 1, defaultId: 1 }));
+    expect(deps.moveAside).toHaveBeenCalledTimes(1);
+    expect(deps.relaunch).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells the person and stays put when the file cannot be moved aside", async () => {
+    const busy = new Error("EBUSY: resource busy or locked");
+    const { handlers, deps } = installed({ moveAside: () => { throw busy; } });
+    await expect(handlers.get("credential-store:reset")({ sender: {} })).resolves.toBe("failed");
+    expect(deps.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({ type: "error", message: "native.dialog.resetSavedKeys.failed", detail: busy.message }));
+    expect(deps.relaunch).not.toHaveBeenCalled();
   });
 });

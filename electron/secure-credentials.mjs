@@ -59,3 +59,35 @@ export async function resetUnreadableCredentials({ unreadable, confirm, quitting
   restart();
   return "reset";
 }
+
+/** The page's two calls for this store. `unreadable` is a function because the launch read finishes after this is installed.
+ * Asking first is deliberate: "unavailable" can be a keychain failure on a good file, and a reset drops every key. */
+export function installCredentialStoreIpc({ ipcMain, localOnly, dialog, windowFor, t, appName, unreadable, quitting, moveAside, log, relaunch }) {
+  ipcMain.handle("credential-store:unreadable", localOnly("credential-store:unreadable", () => unreadable()));
+  ipcMain.handle("credential-store:reset", localOnly("credential-store:reset", (event) => resetUnreadableCredentials({
+    unreadable: unreadable(),
+    confirm: async () => {
+      const options = {
+        type: "warning",
+        buttons: [t("native.dialog.resetSavedKeys.button"), t("native.common.cancel")],
+        defaultId: 1,
+        cancelId: 1,
+        message: t("native.dialog.resetSavedKeys.title"),
+        detail: t("native.dialog.resetSavedKeys.detail", { app: appName() }),
+      };
+      const parent = windowFor(event.sender);
+      const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+      return response === 0;
+    },
+    quitting,
+    moveAside,
+    failed: async (error) => {
+      log(`saved keys reset failed: ${message(error)}`);
+      await dialog.showMessageBox({ type: "error", message: t("native.dialog.resetSavedKeys.failed"), detail: message(error) });
+    },
+    restart: () => {
+      log("saved keys reset by the person: unreadable credential store moved aside, restarting");
+      relaunch();
+    },
+  })));
+}
