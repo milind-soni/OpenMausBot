@@ -105,6 +105,8 @@ export interface ProbeOptions {
   key?: string;
   /** Also ask /api/show what each model can do. */
   capabilities?: boolean;
+  /** Where "this computer" is looked for, when not Ollama's defaults. */
+  localUrls?: readonly string[];
 }
 
 /** Never throws. */
@@ -158,7 +160,7 @@ const RANK: Record<OllamaState, number> = { ready: 0, "no-models": 1, unreachabl
 
 /** Ollama on this computer, or at an address someone set: the first that runs, else what the first address said. */
 export async function findOllama(urls: readonly string[] = [], options: ProbeOptions = {}): Promise<OllamaStatus> {
-  const origins = [...new Set([...urls, ...OLLAMA_LOCAL_URLS].map(ollamaOrigin))];
+  const origins = [...new Set([...urls, ...(options.localUrls ?? OLLAMA_LOCAL_URLS)].map(ollamaOrigin))];
   const found = await Promise.all(origins.map((origin) => probeOllama(origin, options)));
   return found.reduce((best, status) => RANK[status.state] < RANK[best.state] ? status : best);
 }

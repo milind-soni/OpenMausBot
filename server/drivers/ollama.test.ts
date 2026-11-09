@@ -31,10 +31,12 @@ interface FakeModel { name: string; size?: number; details?: Record<string, unkn
 async function fakeOllama(options: { models?: FakeModel[]; version?: string | null; tags?: boolean } = {}) {
   const models = options.models ?? [];
   const chats: Array<{ model: string; tools?: unknown[] }> = [];
+  const asked: string[] = [];
   const server = createServer(async (request, response) => {
     let data = "";
     for await (const part of request) data += part.toString();
     const path = request.url ?? "";
+    asked.push(path);
     const json = (body: unknown, status = 200) => {
       response.writeHead(status, { "content-type": "application/json" });
       response.end(JSON.stringify(body));
@@ -58,7 +60,7 @@ async function fakeOllama(options: { models?: FakeModel[]; version?: string | nu
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   running.push(server);
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, chats };
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, chats, asked };
 }
 
 /** An address nothing listens on. */
@@ -171,9 +173,9 @@ describe("finding Ollama", () => {
   it("takes the first address that runs, else what the first address said", async () => {
     const { url } = await fakeOllama({ models: [LLAMA] });
     const closed = await closedPort();
-    expect(await findOllama([closed, url])).toMatchObject({ state: "ready", url });
+    expect(await findOllama([closed], { localUrls: [url] })).toMatchObject({ state: "ready", url });
     const silent = await silentServer();
-    expect(await findOllama([closed, silent], { timeoutMs: 150 })).toMatchObject({ state: "unreachable", url: silent });
+    expect(await findOllama([closed, silent], { timeoutMs: 150, localUrls: [] })).toMatchObject({ state: "unreachable", url: silent });
   });
 });
 
@@ -254,6 +256,18 @@ describe("the chat engine on Ollama", () => {
       expect(instance.models.options).toEqual([{ id: "llama3.2:latest", label: "llama3.2:latest", custom: true }]);
       expect(await instance.snapshot()).toMatchObject({ state: "available" });
       expect(instanceLook({ driver: "openai-compat", displayName: "Local", config: { url: `${url}/v1` } })).toEqual({});
+    } finally { await instance.dispose(); }
+  });
+
+  it("never asks another server on this network for Ollama's model list", async () => {
+    const { url, asked } = await fakeOllama({ models: [LLAMA], version: null });
+    const instance = await create({ url: `${url}/v1`, apiKeyEnv: "FIXTURE_KEY" }, { FIXTURE_KEY: "fixture-key" });
+    try {
+      await instance.refreshModels?.();
+      await instance.snapshot();
+      expect(asked).toContain("/api/version");
+      expect(asked).not.toContain("/api/tags");
+      expect(instance.models.options.map((option) => option.id)).toEqual(["llama3.2:latest"]);
     } finally { await instance.dispose(); }
   });
 

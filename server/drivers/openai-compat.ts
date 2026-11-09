@@ -4,7 +4,7 @@ import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
 import { isLoopback } from "../provider-key-check.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
 import { isContextName, isOllama, serveWithWindow } from "./ollama-context.ts";
-import { answeredAsOllama, isOllamaServer, OLLAMA_PLACEHOLDER_KEY, ollamaUnavailable, onOllamaPort, probeOllama, type OllamaModel, type OllamaStatus } from "./ollama.ts";
+import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, ollamaOrigin, ollamaUnavailable, onOllamaPort, probeOllama, type OllamaModel, type OllamaStatus } from "./ollama.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 import {
   freeDefault, freeFallbackCatalog, freeLabel, freeToolModels, freeToolsFirst, isOpenRouterOrigin, openRouterFreeTier,
@@ -192,7 +192,9 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       "";
     // A server someone gave a fixed model list to is not asked what else it might be, unless it is on Ollama's own port.
     const ollamaCandidate = config.catalog === "ollama" || (config.catalog === undefined && (onOllamaPort(config.url) || (onThisNetwork(config.url) && !config.managedModels)));
-    if (!savedKey && ollamaCandidate && !isOllamaServer(config)) await probeOllama(config.url, { timeoutMs: 1_500 });
+    // Another server on this network is only asked for Ollama's model list once it has answered Ollama's version route.
+    const answersAsOllama = () => isOllamaServer(config) || isOllama(ollamaOrigin(config.url));
+    if (!savedKey && ollamaCandidate && !isOllamaServer(config) && await answersAsOllama()) await probeOllama(config.url, { timeoutMs: 1_500 });
     const apiKey = savedKey || (ollamaCandidate && isOllamaServer(config) ? OLLAMA_PLACEHOLDER_KEY : "");
     const missingKey = !ownKeyVariable || OWN_KEY_ENVS.has(config.apiKeyEnv)
       ? "No API key — open Settings → API keys."
@@ -220,6 +222,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       return ollama.status;
     };
     const listOllama = async (): Promise<boolean> => {
+      if (!await answersAsOllama()) return false;
       const status = await probeOllama(config.url, { key: apiKey, timeoutMs: 8_000, capabilities: true });
       ollama = { at: Date.now(), status: Promise.resolve(status) };
       if (!isOllamaServer(config) || (status.state !== "ready" && status.state !== "no-models")) return false;
@@ -352,9 +355,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       toolUse: (model) => fact(model)?.tools ?? true,
       ...(ollamaCandidate ? {
         serverUnavailable: async () => {
-          if (config.catalog !== "ollama" && !onOllamaPort(config.url) && answeredAsOllama(config.url) === false) return null;
-          const status = await checkOllama();
-          return isOllamaServer(config) ? ollamaUnavailable(status) : null;
+          return isOllamaServer(config) ? ollamaUnavailable(await checkOllama()) : null;
         },
       } : {}),
       requestBody: (model, messages, stream) => ({
