@@ -219,7 +219,7 @@ import {
   isRemoteMcpServer,
   parseStoredMcpServer,
 } from "./mcp-registry.ts";
-import { attachCustomMcp } from "./mcp-result-budget.ts";
+import { attachCustomMcp } from "./mcp-result-budget.ts"; import { mcpToolProblem } from "./mcp-failure.ts";
 import { MCP_OAUTH_CALLBACK_PATH, McpOAuthManager } from "./mcp-oauth.ts";
 import {
   GROUP_GOAL_WAIT_MAX_MS,
@@ -6461,7 +6461,7 @@ bus.subscribe((event: RuntimeEvent) => {
           const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId)?.tool;
           toolName = existing?.name ?? "tool";
           store.patchMessage(event.threadId, messageId, {
-            tool: { ...existing, name: toolName, ok: event.ok, output: event.output === undefined ? undefined : scrubHeldSecrets(event.output) },
+            tool: { ...existing, name: toolName, ok: event.ok, output: event.output === undefined ? undefined : scrubHeldSecrets(event.output), ...mcpToolProblem(toolName, event.ok, event.output, Object.keys(cfg.mcpServers ?? {}), threadLanguage(event.threadId)) },
           });
           toolMessageByItem.delete(itemKey);
         }
