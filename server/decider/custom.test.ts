@@ -97,12 +97,21 @@ describe("a custom decision endpoint", () => {
     expect(deciderAccount(local)).toMatchObject({ provider: "custom", api: "http://127.0.0.1:8080/v1" });
   });
 
-  it("decides before a saved Jev key, and Settings sees its model, protocol and address but not the key", () => {
+  it("decides only while it is the chosen provider, and Settings sees its model, protocol and address but not the key", () => {
     const both: AppConfig = { decider: { ...ON("decisions").decider, key: "jev-key" } };
     expect(deciderAccount(both)?.provider).toBe("custom");
     const described = describeDecider(both);
     expect(described).toMatchObject({ provider: "custom", model: MODEL, api: "decisions", baseUrl: BASE, configured: true });
     expect(JSON.stringify(described)).not.toContain(KEY);
+    const backToJev: AppConfig = { decider: { ...both.decider, provider: "jev" } };
+    expect(deciderAccount(backToJev)?.provider).toBe("jev");
+    expect(describeDecider(backToJev).provider).toBe("jev");
+  });
+
+  it("stays chosen while it is being set up, even with another key saved, and lends that key nothing", () => {
+    const settingUp: AppConfig = { decider: { enabled: true, provider: "custom", key: "jev-key" } };
+    expect(deciderAccount(settingUp)).toBeNull();
+    expect(describeDecider(settingUp)).toMatchObject({ provider: "custom", configured: false, model: "", baseUrl: "" });
   });
 
   it("tests a saved key before keeping it, and needs a usable base URL with it", () => {

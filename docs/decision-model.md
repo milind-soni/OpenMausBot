@@ -14,16 +14,20 @@ Cloudflare Workers AI card, the Jev/OpenRouter/Custom endpoint picker under
 **Another key**, for OpenRouter the model, for a custom endpoint its base URL,
 model ID and protocol, one master switch, each key with **Save** and
 **Test**, and a switch for room routing (**Who answers in rooms**). Each
-provider keeps its own key, but picking a provider does not choose whose key
-decides: the fixed order below does. To use Workers AI or OpenRouter while a
+provider keeps its own key. Picking **Custom endpoint** makes it the only one
+that decides; picking Jev or OpenRouter does not choose whose key decides: the
+fixed order below does. To use Workers AI or OpenRouter while a
 Jev key is saved, clear the Jev key (an `OMB_JEV_API_KEY` in the environment
 replaces the saved one, so remove it too). OpenRouter needs no key here when
 you already saved one under **Settings → API keys**: the decision model uses
 that one.
 
-With several keys saved, one fixed order picks whose key decides: your own
-custom endpoint, then your own Jev key, then your own Workers AI key, then
-Cloud's included decisions, then OpenRouter.
+With **Custom endpoint** picked, only the custom endpoint decides, and nothing
+does until its base URL and key are saved; any other key saved stays unused
+until another provider is picked. Otherwise, with several keys saved, one fixed
+order picks whose key decides: your own Jev key, then your own Workers AI key,
+then Cloud's included decisions, then OpenRouter. A custom endpoint's key is
+not part of that order.
 
 ## Cloudflare Workers AI (free tier)
 

@@ -51,11 +51,13 @@ export function deciderApi(cfg: AppConfig): OpenRouterApi {
   return cfg.decider.openrouterApi === "decisions" ? "decisions" : "chat";
 }
 
-/** In order: the person's own gateway, their own Jev key, their own Workers AI key (Clef), Cloud's included relay (only for seams it
- * accepts), the OpenRouter LLM fallback, nothing. */
+/** A chosen custom gateway decides alone, or nothing does until it is set up. Otherwise, in order: the person's own Jev
+ * key, their own Workers AI key (Clef), Cloud's included relay (only for seams it accepts), the OpenRouter LLM fallback,
+ * nothing. */
 export function deciderAccount(cfg: AppConfig, seam?: DeciderSeam): HelperAccount | null {
+  if (cfg.decider?.provider === "custom") return customAccount(cfg);
   const jev = jevAccount(cfg);
-  const candidates = [customAccount(cfg), jev, workersAiAccount(cfg), jev?.included ? null : includedAccount(), openrouterAccount(cfg)];
+  const candidates = [jev, workersAiAccount(cfg), jev?.included ? null : includedAccount(), openrouterAccount(cfg)];
   return candidates.find((account): account is HelperAccount => Boolean(account) && !(account!.included && seam && !relaySeam(seam))) ?? null;
 }
 
