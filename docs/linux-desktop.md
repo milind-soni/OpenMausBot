@@ -87,10 +87,12 @@ For a downloaded release AppImage, use `OpenMausBot.AppImage` in place of the ve
 
 ### Arch Linux and EndeavourOS
 
-Arch-based distributions can run the portable AppImage or install a native `.pacman` package.
+Arch-based distributions are not an official target. The release AppImage runs there, or you can build a native
+`.pacman` package yourself.
 
 #### Native pacman package
-Build the pacman package from source:
+Releases and CI do not build this package and nothing tests it. Removing it cleans up the launcher and browser
+profile; whether a pacman upgrade re-applies the install steps has not been verified. Build it from source:
 
 ```sh
 pnpm package:arch
