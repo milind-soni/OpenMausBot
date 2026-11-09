@@ -1,7 +1,8 @@
 import type { RuntimeEvent } from "./contracts.ts";
 
-// A turn whose thread emits nothing for stallMs is wedged; waiting on a person or a computer is not a stall.
-// Drivers report a tool only when it starts and when it ends, so a turn with a tool running may stay silent for toolStallMs.
+// A turn whose thread emits nothing for stallMs is wedged; waiting on a person or a computer is not a stall while the
+// turn's engine still runs it. Drivers report a tool only when it starts and when it ends, so a turn with a tool running
+// may stay silent for toolStallMs.
 export interface WatchedTurn {
   threadId: string;
   botId: string;
@@ -25,14 +26,22 @@ const parked = (turn: WatchedTurn): boolean => turn.waitingOnHuman || turn.waiti
 export interface TurnWatchdogOptions {
   stallMs: number;
   toolStallMs: number;
+  /** The silence that stops a parked turn whose engine has no process for it: longer than any wait the harness bounds itself. */
+  parkedStallMs: number;
   checkMs: number;
-  /** silentMs: the silence that stopped the turn, stallMs or toolStallMs. */
+  /** The engine has a process running this turn; absent, no driver can say so and every parked turn has parkedStallMs. */
+  engineRunning?: (turn: WatchedTurn) => boolean;
+  /** silentMs: the silence that stopped the turn, stallMs, toolStallMs or parkedStallMs. */
   onStall: (turn: WatchedTurn, silentMs: number) => void;
+  /** The conversations shown working that nothing holds but a watched turn (no dispatch, engine or settling turn): one no
+   * watched turn holds either is freed once it has stayed so for stallMs. */
+  unheld?: { threads(): Iterable<{ threadId: string; botId: string }>; free(threadId: string, botId: string): void };
   now?: () => number;
 }
 
 export class TurnWatchdog {
   private turns = new Map<string, WatchedTurn>();
+  private unheldSince = new Map<string, number>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private opts: TurnWatchdogOptions;
 
@@ -63,6 +72,7 @@ export class TurnWatchdog {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.turns.clear();
+    this.unheldSince.clear();
   }
 
   watch(threadId: string, botId: string): void {
@@ -129,11 +139,30 @@ export class TurnWatchdog {
     const at = this.now();
     for (const turn of this.turns.values()) {
       if (sleptMs) turn.lastEventAt = Math.min(at, turn.lastEventAt + sleptMs);
-      if (parked(turn)) continue;
-      const silentMs = turn.runningTools.size > 0 ? Math.max(this.opts.stallMs, this.opts.toolStallMs) : this.opts.stallMs;
-      if (at - turn.lastEventAt < silentMs) continue;
+      const silentMs = this.silenceLimit(turn);
+      if (silentMs === null || at - turn.lastEventAt < silentMs) continue;
       this.turns.delete(turn.threadId);
       this.opts.onStall(turn, silentMs);
     }
+    this.freeUnheld(at);
+  }
+
+  /** null: the turn may wait on, parked while its engine still runs it. */
+  private silenceLimit(turn: WatchedTurn): number | null {
+    if (parked(turn)) return this.opts.engineRunning?.(turn) ? null : this.opts.parkedStallMs;
+    return turn.runningTools.size > 0 ? Math.max(this.opts.stallMs, this.opts.toolStallMs) : this.opts.stallMs;
+  }
+
+  private freeUnheld(at: number): void {
+    const unheld = this.opts.unheld;
+    if (!unheld) return;
+    const still = new Map<string, number>();
+    for (const { threadId, botId } of unheld.threads()) {
+      if (this.turns.has(threadId)) continue;
+      const since = this.unheldSince.get(threadId) ?? at;
+      if (at - since < this.opts.stallMs) still.set(threadId, since);
+      else unheld.free(threadId, botId);
+    }
+    this.unheldSince = still;
   }
 }

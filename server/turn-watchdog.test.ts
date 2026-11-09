@@ -12,6 +12,7 @@ import { stallLimitMs, TurnWatchdog, type WatchedTurn } from "./turn-watchdog.ts
 
 const STALL = 10_000;
 const TOOL_STALL = 50_000;
+const PARKED_STALL = 1_000 * STALL;
 const base = { eventId: "e1", provider: "claudeAgent", threadId: "t1", createdAt: "2026-01-01T00:00:00.000Z" };
 const text: RuntimeEvent = { ...base, type: "content.delta", streamKind: "assistant_text", delta: "working" };
 const toolStarted = (itemId: string): RuntimeEvent => ({ ...base, type: "item.started", itemType: "tool", itemId });
@@ -21,14 +22,23 @@ function rig() {
   let now = 0;
   const stalls: WatchedTurn[] = [];
   const limits: number[] = [];
+  const engine = { running: false };
+  const working: Array<{ threadId: string; botId: string }> = [];
+  const freed: string[] = [];
   const dog = new TurnWatchdog({
     stallMs: STALL,
     toolStallMs: TOOL_STALL,
+    parkedStallMs: PARKED_STALL,
     checkMs: 60_000,
+    engineRunning: () => engine.running,
     onStall: (turn, silentMs) => { stalls.push(turn); limits.push(silentMs); },
+    unheld: {
+      threads: () => [...working],
+      free: (threadId) => { freed.push(threadId); working.splice(working.findIndex((thread) => thread.threadId === threadId), 1); },
+    },
     now: () => now,
   });
-  return { dog, stalls, limits, tick: (ms: number) => (now += ms) };
+  return { dog, stalls, limits, engine, working, freed, tick: (ms: number) => (now += ms) };
 }
 
 describe("TurnWatchdog", () => {
@@ -57,11 +67,12 @@ describe("TurnWatchdog", () => {
     expect(stalls).toHaveLength(0);
   });
 
-  it("never stalls a turn waiting on a human, however long they take", () => {
-    const { dog, stalls, tick } = rig();
+  it("never stalls a turn waiting on a human while its engine runs it, however long they take", () => {
+    const { dog, stalls, engine, tick } = rig();
+    engine.running = true;
     dog.watch("t1", "bot1");
     dog.setWaitingOnHuman("t1", true);
-    tick(STALL * 100);
+    tick(PARKED_STALL * 2);
     dog.sweep();
     expect(stalls).toHaveLength(0);
     dog.setWaitingOnHuman("t1", false);
@@ -71,6 +82,37 @@ describe("TurnWatchdog", () => {
     tick(2);
     dog.sweep();
     expect(stalls).toHaveLength(1);
+  });
+
+  it("stops a parked turn whose engine has no process for it, once it has been silent past the parked limit", () => {
+    for (const park of ["human", "computer"] as const) {
+      const { dog, stalls, limits, tick } = rig();
+      dog.watch("t1", "bot1");
+      if (park === "human") dog.setWaitingOnHuman("t1", true);
+      else dog.setWaitingOnComputer("t1", true);
+      tick(PARKED_STALL - 1);
+      dog.sweep();
+      expect(stalls, park).toHaveLength(0);
+      expect(dog.answering("bot1"), park).toBe(false);
+      tick(2);
+      dog.sweep();
+      expect(stalls, park).toEqual([expect.objectContaining({ threadId: "t1", botId: "bot1" })]);
+      expect(limits, park).toEqual([PARKED_STALL]);
+      expect(dog.watching("t1"), park).toBe(false);
+    }
+  });
+
+  it("stops a turn that waited long on a live engine as soon as that engine's process is gone", () => {
+    const { dog, stalls, limits, engine, tick } = rig();
+    engine.running = true;
+    dog.watch("t1", "bot1");
+    dog.setWaitingOnHuman("t1", true);
+    tick(PARKED_STALL * 3);
+    dog.sweep();
+    expect(stalls).toHaveLength(0);
+    engine.running = false;
+    dog.sweep();
+    expect(limits).toEqual([PARKED_STALL]);
   });
 
   it("a settled turn is forgotten", () => {
@@ -190,7 +232,7 @@ describe("TurnWatchdog", () => {
   it("does not count the time the computer slept as a turn's silence", () => {
     vi.useFakeTimers({ now: 0 });
     const stalls: WatchedTurn[] = [];
-    const dog = new TurnWatchdog({ stallMs: STALL, toolStallMs: TOOL_STALL, checkMs: 1_000, onStall: (turn) => stalls.push(turn) });
+    const dog = new TurnWatchdog({ stallMs: STALL, toolStallMs: TOOL_STALL, parkedStallMs: PARKED_STALL, checkMs: 1_000, onStall: (turn) => stalls.push(turn) });
     try {
       dog.start();
       dog.watch("t1", "bot1");
@@ -212,7 +254,7 @@ describe("TurnWatchdog", () => {
   it("still counts silence across sweeps that are only a little late", () => {
     vi.useFakeTimers({ now: 0 });
     const stalls: WatchedTurn[] = [];
-    const dog = new TurnWatchdog({ stallMs: STALL, toolStallMs: TOOL_STALL, checkMs: 1_000, onStall: (turn) => stalls.push(turn) });
+    const dog = new TurnWatchdog({ stallMs: STALL, toolStallMs: TOOL_STALL, parkedStallMs: PARKED_STALL, checkMs: 1_000, onStall: (turn) => stalls.push(turn) });
     try {
       dog.start();
       dog.watch("t1", "bot1");
@@ -242,6 +284,59 @@ describe("TurnWatchdog", () => {
     dog.settle("t3");
     expect(dog.answering("bot1")).toBe(false);
     expect(dog.answering("bot2")).toBe(true);
+  });
+
+  it("frees a conversation shown working that no turn holds, once it has stayed so for the stall limit", () => {
+    const { dog, working, freed, stalls, tick } = rig();
+    working.push({ threadId: "t1", botId: "bot1" });
+    dog.sweep();
+    tick(STALL - 1);
+    dog.sweep();
+    expect(freed).toEqual([]);
+    tick(1);
+    dog.sweep();
+    expect(freed).toEqual(["t1"]);
+    tick(STALL * 2);
+    dog.sweep();
+    expect(freed).toEqual(["t1"]);
+    expect(stalls).toEqual([]);
+  });
+
+  it("leaves a conversation to the turn it watches, and counts from that turn's end", () => {
+    const { dog, working, freed, tick } = rig();
+    dog.watch("t1", "bot1");
+    working.push({ threadId: "t1", botId: "bot1" });
+    dog.setWaitingOnHuman("t1", true);
+    dog.sweep();
+    tick(STALL * 3);
+    dog.sweep();
+    expect(freed).toEqual([]);
+    dog.settle("t1");
+    dog.sweep();
+    tick(STALL - 1);
+    dog.sweep();
+    expect(freed).toEqual([]);
+    tick(1);
+    dog.sweep();
+    expect(freed).toEqual(["t1"]);
+  });
+
+  it("counts again from the start for a conversation that went back to being held in between", () => {
+    const { dog, working, freed, tick } = rig();
+    working.push({ threadId: "t1", botId: "bot1" });
+    dog.sweep();
+    tick(STALL - 1);
+    working.pop();
+    dog.sweep();
+    working.push({ threadId: "t1", botId: "bot1" });
+    tick(1);
+    dog.sweep();
+    tick(STALL - 1);
+    dog.sweep();
+    expect(freed).toEqual([]);
+    tick(1);
+    dog.sweep();
+    expect(freed).toEqual(["t1"]);
   });
 });
 
