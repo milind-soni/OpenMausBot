@@ -52,6 +52,7 @@
 //     processes; a compaction leaves FAKE_CLAUDE_COMPACTED_TOKENS (default 30000)
 //   FAKE_CLAUDE_REJECT_AUTOCOMPACT  a file: --help still lists --autocompact, but a turn given it appends its argv
 //     there as a JSON line and exits 1 with "error: unknown option '--autocompact'" (a CLI that changed under a running app)
+//   FAKE_CLAUDE_REJECT_GATE  path: that refusal first writes `<path>.waiting`, then waits until <path> exists
 //   FAKE_CLAUDE_AUTOCOMPACT_AT  tokens: a turn that starts at or above it compacts first, as Claude Code does at its threshold
 //     (PreCompact, FAKE_CLAUDE_COMPACT_MS of nothing, compact_boundary, then SessionStart "compact")
 //   FAKE_CLAUDE_COMPACT_MS  how long a compaction takes: that one, or a one-shot `/compact` on a fork
@@ -320,6 +321,9 @@ if (argv[0] === "--help") {
 }
 
 if (process.env.FAKE_CLAUDE_REJECT_AUTOCOMPACT && argv.includes("--autocompact")) {
+  const gate = process.env.FAKE_CLAUDE_REJECT_GATE;
+  if (gate) writeFileSync(`${gate}.waiting`, "");
+  while (gate && !existsSync(gate)) await new Promise((resolve) => setTimeout(resolve, 20));
   appendFileSync(process.env.FAKE_CLAUDE_REJECT_AUTOCOMPACT, `${JSON.stringify(argv)}\n`);
   process.stderr.write("error: unknown option '--autocompact'\n");
   process.exit(1);

@@ -2000,6 +2000,33 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(readFileSync(refused, "utf8").trim().split("\n")).toHaveLength(1);
   });
 
+  it("keeps --autocompact for a newer CLI when an older CLI's turn refuses it after the newer help probe", async () => {
+    const dump = join(scratch, "newer-cli-autocompact.json");
+    const refused = join(scratch, "older-cli-refused.jsonl");
+    const gate = join(scratch, "older-cli-gate");
+    const saved = { ...process.env };
+    try {
+      Object.assign(process.env, { FAKE_CLAUDE_REJECT_AUTOCOMPACT: refused, FAKE_CLAUDE_REJECT_GATE: gate, FAKE_CLAUDE_VERSION: "2.1.232" });
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump });
+      await instance.snapshot();
+      await instance.adapter.sendTurn({ threadId: "t-older-cli-refuses", text: "first" });
+      await vi.waitFor(() => expect(existsSync(`${gate}.waiting`)).toBe(true), { timeout: 10_000 });
+      // The CLI is swapped for a newer one that accepts the flag; its help probe lands before the old turn exits.
+      delete process.env.FAKE_CLAUDE_REJECT_AUTOCOMPACT;
+      process.env.FAKE_CLAUDE_VERSION = "2.1.240";
+      await instance.snapshot();
+      writeFileSync(gate, "");
+      const done = await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-older-cli-refuses");
+      expect(done).toMatchObject({ type: "turn.completed", ok: true });
+      expect(readFileSync(refused, "utf8").trim().split("\n")).toHaveLength(1);
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toContain("--autocompact");
+    } finally {
+      for (const key of ["FAKE_CLAUDE_REJECT_AUTOCOMPACT", "FAKE_CLAUDE_REJECT_GATE", "FAKE_CLAUDE_VERSION"]) {
+        if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
+      }
+    }
+  });
+
   it("keeps only the isolation flag a very old CLI accepts", async () => {
     // 1.0.100: --strict-mcp-config exists (1.0.60), --setting-sources not yet (1.0.122).
     const dump = join(scratch, "very-old-cli.json");

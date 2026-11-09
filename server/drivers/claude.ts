@@ -837,7 +837,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       elicit: ReturnType<typeof claudeElicitations>;
       mcpConfigPath: string | null;
       systemPromptPath: string | null;
-      argsKey: string;
+      argsKey: string; /** the CLI version whose --help chose the args */ cliVersion: string | null;
       /** the volatile half the conversation holds; null once a compaction may have summarized it away */
       volatile: string | null;
       sessionId: string | null;
@@ -1350,7 +1350,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           (event) => emit({ ...base(threadId, session.turn?.turnId ?? turnId), ...event })),
         mcpConfigPath,
         systemPromptPath,
-        argsKey,
+        argsKey, cliVersion: cliHelpVersion,
         volatile: turn.systemVolatile ?? "",
         sessionId: sessionId ?? newSessionId,
         sawInit: false,
@@ -1716,7 +1716,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           const { turnId, input: turn, retryAbort } = session.turn;
           // Commander prints this last before exiting; only a launch that passed the flag counts, so the flag-less relaunch can't loop.
           const refusedAutocompact = session.argsKey.includes('"--autocompact"') && /unknown option '--autocompact'/.test(session.stderr);
-          if (refusedAutocompact) [cliHasAutocompact, autocompactRefusedBy] = [false, cliHelpVersion];
+          if (refusedAutocompact) [cliHasAutocompact, autocompactRefusedBy] = [session.cliVersion === cliHelpVersion ? false : cliHasAutocompact, session.cliVersion];
           const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
