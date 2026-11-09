@@ -34,7 +34,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Starts the Google sign-in and returns the "Signing in from another computer?" fold. */
 async function startSignIn(cloudHome: boolean, ogb: object): Promise<HTMLDetailsElement> {
   vi.stubGlobal("ogb", { platform: "linux", openExternal: vi.fn(async () => {}), ...ogb });
   const store = { state: { config: cloudHome ? { cloudHome: true } : {} }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
