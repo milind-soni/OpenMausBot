@@ -5,7 +5,8 @@ export function parseMcpResponse(text: string, id: unknown): Record<string, unkn
   const trimmed = text.trim();
   if (!trimmed) return null;
   const candidate = (value: unknown): value is Record<string, unknown> =>
-    Boolean(value) && typeof value === "object" && !Array.isArray(value);
+    value !== null && typeof value === "object" && !Array.isArray(value) &&
+    "id" in value && value.id === id && !("method" in value) && ("result" in value || "error" in value);
   if (trimmed.startsWith("{")) {
     const parsed: unknown = JSON.parse(trimmed);
     return candidate(parsed) ? parsed : null;
@@ -23,7 +24,7 @@ export function parseMcpResponse(text: string, id: unknown): Record<string, unkn
       }
     })
     .filter(candidate);
-  return frames.findLast((frame) => frame.id === id) ?? frames.at(-1) ?? null;
+  return frames.at(-1) ?? null;
 }
 
 const lastToolsLists = new Map<string, unknown>();
