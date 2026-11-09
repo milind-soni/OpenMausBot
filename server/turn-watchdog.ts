@@ -1,8 +1,9 @@
-import type { RuntimeEvent } from "./contracts.ts";
+import { processAlive } from "./browser-processes.ts";
+import type { ProviderAdapter, RuntimeEvent } from "./contracts.ts";
 
-// A turn whose thread emits nothing for stallMs is wedged; waiting on a person or a computer is not a stall while the
-// turn's engine still runs it. Drivers report a tool only when it starts and when it ends, so a turn with a tool running
-// may stay silent for toolStallMs.
+// A turn whose thread emits nothing for stallMs is wedged; waiting on a person or a computer is not a stall unless the
+// turn's engine is known to have no process left. Drivers report a tool only when it starts and when it ends, so a turn
+// with a tool running may stay silent for toolStallMs.
 export interface WatchedTurn {
   threadId: string;
   botId: string;
@@ -19,6 +20,14 @@ export function stallLimitMs(raw: string | undefined, fallback: number): number 
   return Number.isFinite(ms) && ms > 0 ? ms : fallback;
 }
 
+/** The engine is known to run no process for the thread's turn: its driver tracks one and has none, or the one it names has
+ * exited. A driver that tracks no process proves nothing, so this is false for it. */
+export function engineProcessGone(adapter: Pick<ProviderAdapter, "enginePid"> | null | undefined, threadId: string, alive = processAlive): boolean {
+  if (!adapter?.enginePid) return false;
+  const pid = adapter.enginePid(threadId);
+  return pid === undefined || !alive(pid);
+}
+
 const SUSPENDED_SWEEPS = 3;
 
 const parked = (turn: WatchedTurn): boolean => turn.waitingOnHuman || turn.waitingOnComputer;
@@ -26,11 +35,11 @@ const parked = (turn: WatchedTurn): boolean => turn.waitingOnHuman || turn.waiti
 export interface TurnWatchdogOptions {
   stallMs: number;
   toolStallMs: number;
-  /** The silence that stops a parked turn whose engine has no process for it: longer than any wait the harness bounds itself. */
+  /** The silence that stops a parked turn whose engine is known to be gone: longer than any wait the harness bounds itself. */
   parkedStallMs: number;
   checkMs: number;
-  /** The engine has a process running this turn; absent, no driver can say so and every parked turn has parkedStallMs. */
-  engineRunning?: (turn: WatchedTurn) => boolean;
+  /** The turn's engine is known to have no process left for it; absent or false, a parked turn waits on. */
+  engineGone?: (turn: WatchedTurn) => boolean;
   /** silentMs: the silence that stopped the turn, stallMs, toolStallMs or parkedStallMs. */
   onStall: (turn: WatchedTurn, silentMs: number) => void;
   /** The conversations shown working that nothing holds but a watched turn (no dispatch, engine or settling turn): one no
@@ -147,9 +156,9 @@ export class TurnWatchdog {
     this.freeUnheld(at);
   }
 
-  /** null: the turn may wait on, parked while its engine still runs it. */
+  /** null: the turn may wait on, parked while its engine is not known to be gone. */
   private silenceLimit(turn: WatchedTurn): number | null {
-    if (parked(turn)) return this.opts.engineRunning?.(turn) ? null : this.opts.parkedStallMs;
+    if (parked(turn)) return this.opts.engineGone?.(turn) ? this.opts.parkedStallMs : null;
     return turn.runningTools.size > 0 ? Math.max(this.opts.stallMs, this.opts.toolStallMs) : this.opts.stallMs;
   }
 

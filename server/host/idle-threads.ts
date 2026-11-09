@@ -11,8 +11,10 @@ export interface IdleThreadsDeps {
   generations: ReadonlyMap<string, string>;
   /** An engine has the thread's turn, or that turn's end is still settling. */
   engineTurn(threadId: string): boolean;
-  /** Ends what the harness keeps for a turn on the thread: its watch, follow-ups, resources and screen. */
+  /** Ends what the harness keeps for a turn on the thread: its watch, follow-ups and screen. */
   settle(botId: string, threadId: string): void;
+  /** Lets go of the computer the thread's turn held: its claims, Local VM lease and remote computer. */
+  releaseComputer(botId: string, threadId: string): void;
   drain(): void;
 }
 
@@ -24,6 +26,7 @@ export function createIdleThreads(deps: IdleThreadsDeps) {
   function free(botId: string, threadId: string): void {
     if (held(threadId) || !store.taskByThread(botId, threadId)?.busy) return;
     deps.settle(botId, threadId);
+    deps.releaseComputer(botId, threadId);
     store.setTaskActivity(botId, threadId, "idle");
     deps.drain();
   }

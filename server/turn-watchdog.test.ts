@@ -4,11 +4,11 @@ import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 
 import { chatNotice, failedNoticeTool } from "./chat-notices.ts";
-import type { RuntimeEvent } from "./contracts.ts";
+import type { ProviderAdapter, RuntimeEvent } from "./contracts.ts";
 import { EngineMemory } from "./engine-memory.ts";
 import type { Message } from "./store.ts";
 import { TurnStops, stoppedTurnOutcome } from "./turn-outcome.ts";
-import { stallLimitMs, TurnWatchdog, type WatchedTurn } from "./turn-watchdog.ts";
+import { engineProcessGone, stallLimitMs, TurnWatchdog, type WatchedTurn } from "./turn-watchdog.ts";
 
 const STALL = 10_000;
 const TOOL_STALL = 50_000;
@@ -22,7 +22,8 @@ function rig() {
   let now = 0;
   const stalls: WatchedTurn[] = [];
   const limits: number[] = [];
-  const engine = { running: false };
+  const adapters = new Map<string, Pick<ProviderAdapter, "enginePid">>();
+  const alive = new Set<number>();
   const working: Array<{ threadId: string; botId: string }> = [];
   const freed: string[] = [];
   const dog = new TurnWatchdog({
@@ -30,7 +31,7 @@ function rig() {
     toolStallMs: TOOL_STALL,
     parkedStallMs: PARKED_STALL,
     checkMs: 60_000,
-    engineRunning: () => engine.running,
+    engineGone: (turn) => engineProcessGone(adapters.get(turn.threadId), turn.threadId, (pid) => alive.has(pid)),
     onStall: (turn, silentMs) => { stalls.push(turn); limits.push(silentMs); },
     unheld: {
       threads: () => [...working],
@@ -38,8 +39,12 @@ function rig() {
     },
     now: () => now,
   });
-  return { dog, stalls, limits, engine, working, freed, tick: (ms: number) => (now += ms) };
+  return { dog, stalls, limits, adapters, alive, working, freed, tick: (ms: number) => (now += ms) };
 }
+
+const ENGINE_PID = 4242;
+/** A driver that tracks its engine process: it names one while the turn is active, and none once it is not. */
+const tracked = (pid: number | undefined): Pick<ProviderAdapter, "enginePid"> => ({ enginePid: () => pid });
 
 describe("TurnWatchdog", () => {
   it("stalls a silent turn once, and only once", () => {
@@ -67,52 +72,73 @@ describe("TurnWatchdog", () => {
     expect(stalls).toHaveLength(0);
   });
 
-  it("never stalls a turn waiting on a human while its engine runs it, however long they take", () => {
-    const { dog, stalls, engine, tick } = rig();
-    engine.running = true;
-    dog.watch("t1", "bot1");
-    dog.setWaitingOnHuman("t1", true);
-    tick(PARKED_STALL * 2);
-    dog.sweep();
-    expect(stalls).toHaveLength(0);
-    dog.setWaitingOnHuman("t1", false);
-    tick(STALL - 1);
-    dog.sweep();
-    expect(stalls).toHaveLength(0);
-    tick(2);
-    dog.sweep();
-    expect(stalls).toHaveLength(1);
-  });
-
-  it("stops a parked turn whose engine has no process for it, once it has been silent past the parked limit", () => {
-    for (const park of ["human", "computer"] as const) {
-      const { dog, stalls, limits, tick } = rig();
+  it("never stalls a turn waiting on a human while its engine may still run it, however long they take", () => {
+    const engines: Array<[string, Pick<ProviderAdapter, "enginePid"> | undefined]> = [
+      ["no engine known", undefined],
+      // An in-process engine (the OpenAI-compatible ask_user path) names no process: that proves nothing about its turn.
+      ["an engine that names no process", {}],
+      ["an engine whose process runs", tracked(ENGINE_PID)],
+    ];
+    for (const [name, adapter] of engines) {
+      const { dog, stalls, adapters, alive, tick } = rig();
+      if (adapter) adapters.set("t1", adapter);
+      alive.add(ENGINE_PID);
       dog.watch("t1", "bot1");
-      if (park === "human") dog.setWaitingOnHuman("t1", true);
-      else dog.setWaitingOnComputer("t1", true);
-      tick(PARKED_STALL - 1);
+      dog.setWaitingOnHuman("t1", true);
+      tick(PARKED_STALL * 2);
       dog.sweep();
-      expect(stalls, park).toHaveLength(0);
-      expect(dog.answering("bot1"), park).toBe(false);
+      expect(stalls, name).toHaveLength(0);
+      dog.setWaitingOnHuman("t1", false);
+      tick(STALL - 1);
+      dog.sweep();
+      expect(stalls, name).toHaveLength(0);
       tick(2);
       dog.sweep();
-      expect(stalls, park).toEqual([expect.objectContaining({ threadId: "t1", botId: "bot1" })]);
-      expect(limits, park).toEqual([PARKED_STALL]);
-      expect(dog.watching("t1"), park).toBe(false);
+      expect(stalls, name).toHaveLength(1);
     }
   });
 
-  it("stops a turn that waited long on a live engine as soon as that engine's process is gone", () => {
-    const { dog, stalls, limits, engine, tick } = rig();
-    engine.running = true;
+  it("stops a parked turn whose engine is known to be gone, once it has been silent past the parked limit", () => {
+    for (const park of ["human", "computer"] as const) {
+      for (const [name, adapter] of [["no process tracked for the turn", tracked(undefined)], ["its process exited", tracked(ENGINE_PID)]] as const) {
+        const { dog, stalls, limits, adapters, tick } = rig();
+        adapters.set("t1", adapter);
+        dog.watch("t1", "bot1");
+        if (park === "human") dog.setWaitingOnHuman("t1", true);
+        else dog.setWaitingOnComputer("t1", true);
+        tick(PARKED_STALL - 1);
+        dog.sweep();
+        expect(stalls, `${park}, ${name}`).toHaveLength(0);
+        expect(dog.answering("bot1"), park).toBe(false);
+        tick(2);
+        dog.sweep();
+        expect(stalls, `${park}, ${name}`).toEqual([expect.objectContaining({ threadId: "t1", botId: "bot1" })]);
+        expect(limits, `${park}, ${name}`).toEqual([PARKED_STALL]);
+        expect(dog.watching("t1"), park).toBe(false);
+      }
+    }
+  });
+
+  it("stops a turn that waited long on a live engine as soon as that engine's process exits", () => {
+    const { dog, stalls, limits, adapters, alive, tick } = rig();
+    adapters.set("t1", tracked(ENGINE_PID));
+    alive.add(ENGINE_PID);
     dog.watch("t1", "bot1");
     dog.setWaitingOnHuman("t1", true);
     tick(PARKED_STALL * 3);
     dog.sweep();
     expect(stalls).toHaveLength(0);
-    engine.running = false;
+    alive.delete(ENGINE_PID);
     dog.sweep();
     expect(limits).toEqual([PARKED_STALL]);
+  });
+
+  it("reads an engine as gone only when its driver tracks a process and that process is not there", () => {
+    expect(engineProcessGone(undefined, "t1")).toBe(false);
+    expect(engineProcessGone({}, "t1")).toBe(false);
+    expect(engineProcessGone(tracked(undefined), "t1")).toBe(true);
+    expect(engineProcessGone(tracked(process.pid), "t1")).toBe(false);
+    expect(engineProcessGone(tracked(ENGINE_PID), "t1", () => false)).toBe(true);
   });
 
   it("a settled turn is forgotten", () => {

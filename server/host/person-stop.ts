@@ -46,15 +46,14 @@ export function createPersonStop(deps: PersonStopDeps) {
   async function stopThreadForPerson(botId: string, threadId: string): Promise<void> {
     const routines = deps.routines();
     const routine = routines?.activeBotRunForBot(botId);
-    if (routine?.threadId === threadId) {
-      await routines!.cancelRun(routine.id);
-      return;
-    }
-    deps.handoffs().stoppedByPerson(threadId);
-    deps.markStopped(threadId);
-    deps.stopGoal(threadId);
     const free = deps.stopping(botId, threadId);
-    await deps.interruptDirectThread(botId, threadId);
+    if (routine?.threadId === threadId) await routines!.cancelRun(routine.id);
+    else {
+      deps.handoffs().stoppedByPerson(threadId);
+      deps.markStopped(threadId);
+      deps.stopGoal(threadId);
+      await deps.interruptDirectThread(botId, threadId);
+    }
     free();
   }
 
