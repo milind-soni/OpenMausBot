@@ -71,6 +71,8 @@ export interface TaskRouteDeps {
   revokeInternalCapabilitiesForThread(threadId: string): void;
   stagedSkillCleanupsForThread(threadId: string): Array<{ botId: string; stagedId: string }>;
   rejectDeletedThreadSkillStages(cleanups: Array<{ botId: string; stagedId: string }>): void;
+  /** Ends a sign-in card's plea for the person, so a deleted conversation's card asks no panel any more. */
+  settleHelp(messageId: string): void;
   /** A person opened this conversation (a Team Cloud's Needs you lines for them there are done). */
   threadRead?(auth: RequestAuth, threadId: string): void;
 }
@@ -82,7 +84,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
     directTurnGenerationByThread, actorKey, cloudOwnerSession, cloudThreadRefusal, sharedWorkspaceFullAccessEnabled,
     supportsApprovalMode, threadBusy, broadcast, notificationListed, publicBot, wireBot, wireTask, pageSize, messagePage, checkedModelSelection,
     checkedTaskModelSwitch, threadTitleGate, generateThreadTitle, settleDirectFollowup, clearTurnDigestState,
-    revokeInternalCapabilitiesForThread, stagedSkillCleanupsForThread, rejectDeletedThreadSkillStages,
+    revokeInternalCapabilitiesForThread, stagedSkillCleanupsForThread, rejectDeletedThreadSkillStages, settleHelp,
   } = deps;
   const CLOUD_HOME = deps.cloudHome;
   const DESKTOP_MANAGED = deps.desktopManaged;
@@ -102,6 +104,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
   };
   const deleteTasks = (botId: string, threadIds: string[]) => {
     const stagedSkillCleanups = new Map(threadIds.map((threadId) => [threadId, stagedSkillCleanupsForThread(threadId)]));
+    const signIns = new Map(threadIds.map((threadId) => [threadId, store.messagesFor(threadId).filter((message) => message.signIn).map((message) => message.id)]));
     for (const threadId of threadIds) coordinator.cancelDirect(threadId, "The source conversation was deleted");
     const result = store.deleteTasks(botId, threadIds);
     for (const threadId of result?.deleted ?? []) {
@@ -111,6 +114,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       handoffs.forget(threadId);
       settleDirectFollowup(directTurnGenerationByThread.get(threadId));
       rejectDeletedThreadSkillStages(stagedSkillCleanups.get(threadId) ?? []);
+      for (const messageId of signIns.get(threadId) ?? []) settleHelp(messageId);
     }
     return result;
   };

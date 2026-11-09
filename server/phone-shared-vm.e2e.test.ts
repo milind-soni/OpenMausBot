@@ -415,6 +415,17 @@ describe("a person's hold on the shared Local VM", () => {
     expect(await held(witness)).toBe(false);
   }, 60_000);
 
+  it.each(["stopped", "in a deleted conversation"] as const)("a sign-in card %s asks no shared-desktop panel any more", async (how) => {
+    const a = await newBot("Ada", { computer: "vm" });
+    const side = how === "stopped" ? a.threadId : await newTask(a.id);
+    await askSignIn((await startTurn(a.id, side)).comms, "a.example");
+    await finishTurns([a.id, side]);
+    expect((await control(api, witness)).body.helpReason).toBeTruthy();
+    if (how === "stopped") await ok("POST", `/api/bots/${a.id}/interrupt`, { threadId: side });
+    else await ok("DELETE", `/api/bots/${a.id}/tasks/${side}`);
+    expect((await control(api, witness)).body.helpReason).toBeNull();
+  }, 60_000);
+
   it("only a person's Done on the shared desktop's last open sign-in card hands it back", async () => {
     const [a, b] = [await newBot("Ada", { computer: "vm" }), await newBot("Bea", { computer: "vm" })];
     const asked = await startTurn(b.id, b.threadId);

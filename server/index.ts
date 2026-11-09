@@ -2050,7 +2050,7 @@ function stopCards(threadId: string, ids: ReadonlySet<string>): void {
     if (!ids.has(message.id)) continue;
     if (message.secret) store.patchMessage(threadId, message.id, { secret: { ...message.secret, stopped: true } });
     else if (message.connector) store.patchMessage(threadId, message.id, { connector: { ...message.connector, stopped: true } });
-    else if (message.signIn) store.patchMessage(threadId, message.id, { signIn: { ...message.signIn, stopped: true } });
+    else if (message.signIn) { store.patchMessage(threadId, message.id, { signIn: { ...message.signIn, stopped: true } }); computerControl.settleHelp(message.id); }
     else {
       const closed = closedByStop(message.card);
       if (closed) store.patchMessage(threadId, message.id, { card: closed });
@@ -12281,7 +12281,7 @@ const taskRoutes = createTaskRoutes({
   coordinator,
   handoffs,
   skillReview,
-  threadStarters,
+  threadStarters, settleHelp: (messageId) => computerControl.settleHelp(messageId),
   phoneSecretSubmissions,
   titleRegenerations,
   directTurnGenerationByThread,
