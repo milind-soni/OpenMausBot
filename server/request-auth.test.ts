@@ -92,6 +92,11 @@ describe("request source for the lockout", () => {
 });
 
 describe("scopes", () => {
+  it("lets clients read slash metadata while keeping skill files and management admin-only", () => {
+    expect(requiredScope("GET", "/api/bots/b1/slash-skills")).toBe("client");
+    for (const method of ["POST", "PATCH", "DELETE"]) expect(requiredScope(method, "/api/bots/b1/slash-skills")).toBe("admin");
+    for (const path of ["/api/bots/b1/skills", "/api/bots/b1/skills/report", "/api/skills-library"]) expect(requiredScope("GET", path)).toBe("admin");
+  });
   it("lets a member reach a connection card's authorize, whose handler decides who may sign in, and nothing past it", () => {
     for (const [method, path] of [
       ["POST", "/api/bots/bot-1/connector-cards/card-1/authorize"],

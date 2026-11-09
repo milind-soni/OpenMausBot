@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
 
+const skillFixture = vi.hoisted(() => ({ status: "ready" as "ready" | "error" | "loading", retry: vi.fn() }));
+
 const ENGINE = "claude-3f0c2b1e-9d1a-4c55-8a51-0a3a6f1e2b7c";
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
@@ -21,7 +23,7 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("@/lib/use-slash-skills", () => ({
   useSlashSkills: (_botId: string | undefined, _threadId: string, active: boolean) =>
-    active ? [{ name: "standup", description: "Writes the weekly standup note." }] : [],
+    ({ skills: active && skillFixture.status === "ready" ? [{ name: "standup", description: "Writes the weekly standup note." }] : [], status: active ? skillFixture.status : "idle", retry: skillFixture.retry }),
 }));
 vi.mock("./CallView", () => ({ CallButton: () => null }));
 
@@ -39,6 +41,7 @@ describe("the / menu in the composer", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
+    skillFixture.status = "ready"; skillFixture.retry.mockClear();
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
     vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
     restoreComposerDraft(draftId, { text: "", attachments: [] });
@@ -65,6 +68,16 @@ describe("the / menu in the composer", () => {
   }
   const options = () => [...document.body.querySelectorAll<HTMLElement>('[role="option"]')];
   const labels = () => options().map((option) => option.querySelector(".truncate")?.textContent);
+
+  it("shows a failed skill request with Retry instead of silently hiding it", () => {
+    skillFixture.status = "error";
+    fill("/");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Couldn’t load skills");
+    expect(labels()).toContain("/goal");
+    const retry = [...container.querySelectorAll("button")].find(button => button.textContent === "Retry")!;
+    flushSync(() => retry.click());
+    expect(skillFixture.retry).toHaveBeenCalledOnce();
+  });
 
   it("offers the built-in commands and skills at the start of a message", () => {
     fill("/");
