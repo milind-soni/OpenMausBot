@@ -110,7 +110,8 @@ export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null)
     return { kind: "chrome", chrome: { path: paths(platform).isAbsolute(named) ? named : resolve(named), source: "named" }, fallback: null };
   }
   if (!engine?.managed) return { kind: "legacy", reason: "agent-browser was named, so it picks its own browser" };
-  const pin = platform === "darwin" || platform === "win32" ? chromeForTestingPin(platform, host.arch) : null;
+  // The Linux desktop app keeps its bundled browser; a Linux server downloads Chrome for Testing like a Mac.
+  const pin = platform === "linux" && env.OMB_RESOURCES_PATH ? null : chromeForTestingPin(platform, host.arch);
   const installed = installedGoogleChrome(host);
   if (installed && !chromePolicyManaged(host)) return { kind: "chrome", chrome: { path: installed, source: "installed" }, fallback: pin };
   if (platform === "linux" && env.OMB_RESOURCES_PATH) return { kind: "legacy", reason: installed ? "Google Chrome here is managed by an organization" : "Google Chrome is not installed" };

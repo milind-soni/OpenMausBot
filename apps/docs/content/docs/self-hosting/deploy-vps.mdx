@@ -168,7 +168,10 @@ npx --yes openmausbot browser install
 ```
 
 The administrator's browser download is in a different home; it does not install
-the service account's browser. Both commands must finish successfully.
+the service account's browser. Both commands must finish successfully. If the
+service account has no browser, `serve` downloads Chrome for Testing (about
+190 MB) into its data directory when it starts; the system
+libraries from the first command are still needed.
 
 On Ubuntu 24.04, AppArmor may also require [administrator sandbox setup](#ubuntu-2404-browser-sandbox).
 The one-click installer downloads the browser; it does not grant these OS permissions.
