@@ -190,6 +190,21 @@ describe("usage summaries", () => {
     ]);
   });
 
+  it("keeps the bar total additive when one row's cached input exceeds its input", () => {
+    const uneven: UsageRow[] = [
+      { ...row({ model: "claude-sonnet-5", input: 100, output: 10, cachedInput: 150 }), at: "2026-09-01T10:00:00.000Z" } as UsageRow,
+      { ...row({ model: "gpt-6.1-sol", driverKind: "codex", instanceId: "codex", input: 500, output: 50, cachedInput: 100 }), at: "2026-09-01T11:00:00.000Z" } as UsageRow,
+    ];
+    const [scout] = summarizeUsage(uneven, "bot", null, "model").groups;
+    const fresh = (entry: UsageRow) =>
+      Math.max(0, entry.input - Math.min(entry.cachedInput ?? 0, entry.input)) + entry.output;
+    const expected = uneven.reduce((sum, entry) => sum + fresh(entry), 0);
+    expect(scout!.barTokens).toBe(expected);
+    expect(scout!.segments!.reduce((sum, piece) => sum + (piece.barTokens ?? 0), 0)).toBe(expected);
+    expect(scout!.barTokens).toBe(460);
+    expect(scout!.input - Math.min(scout!.cachedInput, scout!.input) + scout!.output).toBe(410);
+  });
+
   it("groups by routine, with every non-routine turn in one manual bucket", () => {
     const summary = summarizeUsage(rows, "routine");
     expect(summary.groups.map((g) => [g.key, g.label, g.turns, g.costUsd])).toEqual([

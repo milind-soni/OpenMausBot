@@ -30,6 +30,11 @@ describe("model colours", () => {
     expect(modelColor("model:opencode/beam-free")).toBe(modelColor("model:opencode/beam"));
   });
 
+  it("canonicalizes a provider namespace before choosing the shade", () => {
+    expect(modelColor("model:test/claude-sonnet-5")).toBe(modelColor("model:openrouter/anthropic/claude-sonnet-5"));
+    expect(modelColor("model:openrouter/openai/gpt-6.1-sol")).toBe(modelColor("model:codex/gpt-6.1-sol"));
+  });
+
   it("names the provider of the models seen in the ledger", () => {
     expect(modelFamily("model:opencodeGo/opencode-go/deepseek-v4.1-flash").id).toBe("deepseek");
     expect(modelFamily("model:codex/gpt-6.1-sol").id).toBe("openai");
@@ -39,6 +44,19 @@ describe("model colours", () => {
     expect(modelFamily("model:test/aya").id).toBe("cohere");
     expect(modelFamily("model:test/playa").id).toBe("unknown");
     expect(modelFamily("model:test/mystery-model").id).toBe("unknown");
+  });
+
+  it("does not read a GPTQ quantization as an OpenAI model", () => {
+    expect(modelFamily("model:test/Qwen2.5-72B-GPTQ").id).toBe("qwen");
+    expect(modelFamily("model:test/Llama-3-8B-GPTQ").id).toBe("meta");
+    expect(modelFamily("model:test/gpt-6.1-sol").id).toBe("openai");
+    expect(modelFamily("model:test/gpt4").id).toBe("openai");
+  });
+
+  it("falls back to the driver when the model id is empty", () => {
+    expect(modelFamily("model:claude/").id).toBe("anthropic");
+    expect(modelFamily("model:opencodeGo/").id).toBe("opencode");
+    expect(modelFamily("model:test/").id).toBe("unknown");
   });
 
   it("gives each provider family its own colour", () => {

@@ -66,6 +66,12 @@ describe("Usage page bars", () => {
     expect(painted[1]!.title).toContain("36%");
   });
 
+  it("draws the server's additive bar total instead of a clamped aggregate", () => {
+    render("bot", [group({ input: 600, cachedInput: 250, output: 60, barTokens: 460 })]);
+    expect(host.textContent).toContain("460");
+    expect(host.textContent).not.toContain("410");
+  });
+
   it("keeps one solid slice when a bot used a single model, and repeats its colour as the model swatch", () => {
     const segments = [group({ key: "model:codex/gpt-6-astra", label: "gpt-6-astra" })];
     render("bot", [group({ segments })]);

@@ -27,6 +27,8 @@ export interface UsageGroup {
   output: number;
   cachedInput: number;
   costUsd: number | null;
+  /** The additive tokens the bar shows, summed row by row on the server. */
+  barTokens?: number;
   /** The group broken down by the requested split, largest first. */
   segments?: UsageGroup[];
 }
@@ -69,6 +71,11 @@ export function usageGroupLabel(groupBy: UsageGroupBy, group: Pick<UsageGroup, "
   return group.label;
 }
 
+/** The tokens a bar shows: the server's additive sum when present, or the older aggregate. */
+function barTokens(group: UsageGroup): number {
+  return group.barTokens ?? headlineTokens(group);
+}
+
 /** Loads the usage summary for a range and grouping, optionally split by model, and refreshes with `version`. */
 function useUsageGroups(
   range: { from: string; to: string },
@@ -91,12 +98,12 @@ function useUsageGroups(
 function Bar({ group, width, color }: { group: UsageGroup; width: number; color?: string }) {
   const { state } = useStore();
   const segments = group.segments ?? [];
-  const stack = segments.reduce((sum, piece) => sum + headlineTokens(piece), 0);
+  const stack = segments.reduce((sum, piece) => sum + barTokens(piece), 0);
   if (segments.length && stack > 0) {
     return (
       <span className="flex h-full" style={{ width: `${width}%` }}>
         {segments.map((piece) => {
-          const tokens = headlineTokens(piece);
+          const tokens = barTokens(piece);
           const share = Math.round((tokens / stack) * 100);
           return (
             <span
@@ -117,8 +124,8 @@ function Bar({ group, width, color }: { group: UsageGroup; width: number; color?
 /** The six largest groups as proportional bars, with a model colour dot when the grouping is by model. */
 export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: readonly UsageGroup[] }) {
   const { state } = useStore();
-  const top = [...groups].sort((a, b) => headlineTokens(b) - headlineTokens(a)).slice(0, 6);
-  const max = Math.max(...top.map(headlineTokens), 0);
+  const top = [...groups].sort((a, b) => barTokens(b) - barTokens(a)).slice(0, 6);
+  const max = Math.max(...top.map(barTokens), 0);
   if (!top.length || max <= 0) return <p className="text-[13px] text-ink-secondary">{t("usage.page.whereEmpty")}</p>;
   return (
     <ul className="flex flex-col gap-2.5">
@@ -134,10 +141,10 @@ export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: 
               <span className="truncate">{groupBy === "model" ? modelName(group.label, state.instances) : usageGroupLabel(groupBy, group)}</span>
             </span>
             <span className="h-2 overflow-hidden rounded-full bg-raised">
-              <Bar group={group} width={Math.max(2, (headlineTokens(group) / max) * 100)} color={color} />
+              <Bar group={group} width={Math.max(2, (barTokens(group) / max) * 100)} color={color} />
             </span>
             <span className="min-w-[4.5rem] text-right tabular-nums text-ink-secondary">
-              {formatTokens(headlineTokens(group))}
+              {formatTokens(barTokens(group))}
               {hasFiniteCost(group.costUsd) && group.costUsd > 0 && ` · ${formatCost(group.costUsd)}`}
             </span>
           </li>

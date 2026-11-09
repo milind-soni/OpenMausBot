@@ -19,7 +19,7 @@ interface FamilyRule extends ModelFamily {
 
 const FAMILIES: readonly FamilyRule[] = [
   { id: "anthropic", label: "Anthropic", color: "#D97757", pattern: /claude|anthropic|sonnet|opus|haiku/i },
-  { id: "openai", label: "OpenAI", color: "#0C9A76", pattern: /gpt|openai|chatgpt|codex|^o[134](?:-|$)/i },
+  { id: "openai", label: "OpenAI", color: "#0C9A76", pattern: /(?:^|[-_/])gpt(?:\d|[-_.]|$)|openai|chatgpt|codex|^o[134](?:-|$)/i },
   { id: "xai", label: "xAI", color: "#7D8794", pattern: /grok|xai/i },
   { id: "deepseek", label: "DeepSeek", color: "#4C7DFF", pattern: /deepseek/i },
   { id: "google", label: "Google", color: "#9A6BE0", pattern: /gemini|google|gemma/i },
@@ -39,7 +39,7 @@ const FAMILIES: readonly FamilyRule[] = [
   { id: "cursor", label: "Cursor", color: "#74818C", pattern: /cursor|composer/i },
   { id: "factory", label: "Factory", color: "#7B8794", pattern: /droid/i },
   { id: "greenference", label: "Greenference", color: "#3F8F5F", pattern: /greenference/i },
-  { id: "unknown", label: "Other", color: "#76828F", pattern: /$^/ },
+  { id: "unknown", label: "Other", color: "#76828F", pattern: /(?!)/ },
 ];
 
 /** Every family's base tone, for the contrast guard in the tests. */
@@ -65,6 +65,9 @@ const DRIVER_FAMILIES: ReadonlyArray<readonly [RegExp, string]> = [
 
 const GATEWAY = /^(?:opencode-go|opencode|zen|openrouter|vercel|groq|fireworks(?:-ai)?|together(?:_ai)?|deepinfra|cerebras|togetherai|ollama|lmstudio|local)\//;
 
+/** Provider namespaces an aggregator or a model id can carry, stripped before hashing so one model keeps one tone. */
+const PROVIDER_NAMESPACE = /^(?:anthropic|openai|google|meta-llama|meta|mistralai|deepseek|qwen|moonshotai|moonshot|x-ai|xai|z-ai|zhipu|minimax|cohere|perplexity|amazon|nvidia|nousresearch|microsoft|cursor|factory)\//;
+
 /** The model id inside a usage group key (`model:<driver>/<model>`), or the key itself. */
 export function modelIdOf(groupKey: string): string {
   if (!groupKey.startsWith("model:")) return groupKey;
@@ -81,17 +84,18 @@ function driverOf(groupKey: string): string | undefined {
   return slash === -1 ? undefined : rest.slice(0, slash);
 }
 
-/** The model name without the gateway prefix or the free/beta marker, so the same model keeps one tone on every engine. */
+/** The model name without the gateway prefix, a provider namespace or the free/beta marker, so one model keeps one tone. */
 function coreModelId(model: string): string {
   let id = model.trim().toLowerCase();
   if (GATEWAY.test(id)) id = id.replace(GATEWAY, "");
+  while (PROVIDER_NAMESPACE.test(id)) id = id.replace(PROVIDER_NAMESPACE, "");
   return id.replace(/(?::|-)(?:free|beta|preview|latest)$/, "");
 }
 
 /** The provider family a model belongs to, by its model id or its driver; unknown models use the neutral family. */
 export function modelFamily(groupKey: string): ModelFamily {
   const model = coreModelId(modelIdOf(groupKey));
-  const known = FAMILIES.find((family) => family.pattern.test(model));
+  const known = FAMILIES.find((family) => family.id !== "unknown" && family.pattern.test(model));
   if (known) return known;
   const driver = driverOf(groupKey);
   const fallback = driver && DRIVER_FAMILIES.find(([pattern]) => pattern.test(driver))?.[1];

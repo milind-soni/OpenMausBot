@@ -71,6 +71,8 @@ export interface UsageGroup {
   estimatedUsd: number | null;
   unpriced: number;
   billableUsd: number | null;
+  /** The additive tokens the bar shows: fresh input plus output, summed row by row. */
+  barTokens?: number;
   /** The group broken down by the requested split, largest first. */
   segments?: UsageGroup[];
 }
@@ -282,8 +284,9 @@ function groupOf(row: UsageRow, groupBy: UsageGroupBy): { key: string; label: st
   }
 }
 
+/** An empty group before any ledger row is booked into it. */
 function emptyGroup(key: string, label: string): UsageGroup {
-  return { key, label, turns: 0, input: 0, output: 0, cachedInput: 0, costUsd: null, estimatedUsd: null, unpriced: 0, billableUsd: null };
+  return { key, label, turns: 0, input: 0, output: 0, cachedInput: 0, costUsd: null, estimatedUsd: null, unpriced: 0, billableUsd: null, barTokens: 0 };
 }
 
 export function costSourceOf(row: Pick<UsageRow, "costUsd" | "costSource">): CostSource | null {
@@ -291,11 +294,16 @@ export function costSourceOf(row: Pick<UsageRow, "costUsd" | "costSource">): Cos
   return row.costSource === "estimated" ? "estimated" : "reported";
 }
 
+/** Books one row into a group, keeping its raw aggregates and its additive bar total. */
 function add(group: UsageGroup, row: UsageRow, prices: PriceList | null): void {
+  const input = clean(row.input);
+  const output = clean(row.output);
+  const cachedInput = clean(row.cachedInput);
   group.turns += 1;
-  group.input += clean(row.input);
-  group.output += clean(row.output);
-  group.cachedInput += clean(row.cachedInput);
+  group.input += input;
+  group.output += output;
+  group.cachedInput += cachedInput;
+  group.barTokens = (group.barTokens ?? 0) + Math.max(0, input - Math.min(cachedInput, input)) + output;
   const cost = finiteOrNull(row.costUsd);
   if (cost === null) group.unpriced += 1;
   else {
@@ -306,9 +314,9 @@ function add(group: UsageGroup, row: UsageRow, prices: PriceList | null): void {
   if (billable !== null) group.billableUsd = (group.billableUsd ?? 0) + billable;
 }
 
-/** The tokens a bar shows: fresh input plus output, the same count the Usage page writes beside each bar. */
-function barTokens(group: UsageGroup): number {
-  return Math.max(0, group.input - Math.min(group.cachedInput, group.input)) + group.output;
+/** The tokens a bar shows: the row-by-row sum when the ledger has it, or the old aggregate for older callers. */
+function barTokensOf(group: UsageGroup): number {
+  return group.barTokens ?? Math.max(0, group.input - Math.min(group.cachedInput, group.input)) + group.output;
 }
 
 /** Groups ledger rows by `groupBy`; when `splitBy` differs, each group also carries its pieces, largest first. */
@@ -346,7 +354,7 @@ export function summarizeUsage(
     add(piece, row, prices);
   }
   for (const [key, inside] of splits) {
-    groups.get(key)!.segments = [...inside.values()].sort((a, b) => barTokens(b) - barTokens(a));
+    groups.get(key)!.segments = [...inside.values()].sort((a, b) => barTokensOf(b) - barTokensOf(a));
   }
   const ordered = [...groups.values()];
   if (groupBy === "day") ordered.sort((a, b) => a.key.localeCompare(b.key));
