@@ -51,7 +51,7 @@ describe("a hand-off held a while", () => {
   const node = { id: "h", threadId: "t", botId: "b", lastProgressAt: 0, status: "queued" } as HandoffView;
   const notes = (over: Partial<QueuedNotesDeps> = {}, now = QUEUED_NOTE_AFTER_MS) => {
     const posted: string[] = [];
-    const note = createQueuedNotes({ now: () => now, language: () => undefined, botName: () => "Ops", parent: () => ({ threadId: "p" }) as HandoffView, post: (_p, _n, line) => posted.push(line), live: () => true,
+    const note = createQueuedNotes({ now: () => now, language: () => undefined, botName: () => "Ops", parent: () => ({ threadId: "p" }) as HandoffView, post: (_p, _n, line) => posted.push(line), node: () => node,
       threadBusy: () => false, slots: () => ({ busy: [], limit: 16 }), groupTurn: () => false, waitsForComputer: () => false, behindPerson: () => undefined, ...over });
     return { note, posted };
   };
@@ -70,6 +70,13 @@ describe("a hand-off held a while", () => {
     const room = notes({ groupTurn: () => true });
     room.note(node);
     expect(room.posted).toEqual(["Ops hasn't started this yet: it's finishing a turn in a room."]);
+  });
+
+  it("says it once for each of several hand-offs held behind the same turn, however often the queue is checked", () => {
+    const held = ["r1", "r2", "q"].map((id) => ({ ...node, id, status: id === "q" ? "queued" : "resume" }) as HandoffView);
+    const { note, posted } = notes({ threadBusy: () => true, node: (id) => held.find((n) => n.id === id) });
+    for (let tick = 0; tick < 4; tick++) for (const n of held) note(n);
+    expect(posted).toHaveLength(3);
   });
 
   it("stays quiet for a short hold, a room's own hand-off, a computer's wait and a person's open card, which say so themselves", () => {
