@@ -155,3 +155,18 @@ function selectProvider(settings: ConnectorSettings, env: NodeJS.ProcessEnv): Co
   }
   return composioProvider;
 }
+
+/** The admin token the settings page may show: configured-and-last4 only, never the value. A reference
+ * that cannot be resolved (a missing file, an unset env name) reads as unconfigured. */
+export function openConnectorTokenStatus(
+  settings: OpenConnectorSettings,
+  env: NodeJS.ProcessEnv = process.env,
+): { configured: boolean; last4?: string } {
+  let token: string | undefined;
+  try {
+    token = resolveToken(settings, env);
+  } catch {
+    token = undefined; // an unreadable file reference reads as unconfigured
+  }
+  return token ? { configured: true, ...(token.length >= 12 ? { last4: token.slice(-4) } : {}) } : { configured: false };
+}

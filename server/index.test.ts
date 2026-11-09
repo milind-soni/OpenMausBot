@@ -12160,6 +12160,49 @@ describe("harness HTTP API", () => {
     expect((await api("PATCH", "/api/config", { vps: { sshAlias: "" } })).status).toBe(200);
   });
 
+  it("keeps connector availability for client sessions while hiding OpenConnector details", async () => {
+    const saved = await api("PUT", "/api/config", {
+      connectors: { openconnector: { url: "http://127.0.0.1:3001", adminToken: "runtime-token-1234" } },
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.body.connectors).toMatchObject({
+      provider: "openconnector",
+      configured: true,
+      openconnector: { url: "http://127.0.0.1:3001", configured: true, last4: "1234" },
+    });
+    try {
+      const window = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+      const paired = await fetch(`${BASE}/api/auth/pair`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: window.body.code }),
+      });
+      const memberToken = ((await paired.json()) as any).token as string;
+      const response = await fetch(`${BASE}/api/config`, { headers: { authorization: `Bearer ${memberToken}` } });
+      const member = await response.json() as any;
+      expect(member.connectors).toEqual({
+        provider: "openconnector",
+        configured: true,
+        openconnector: { url: "", configured: true },
+      });
+      expect(JSON.stringify(member)).not.toContain("runtime-token-1234");
+
+      // A removal failure must fail the save instead of claiming the token is gone.
+      const tokenFile = join(home, ".openmausbot", "openconnector-admin-token");
+      rmSync(tokenFile, { force: true });
+      mkdirSync(tokenFile);
+      try {
+        const failed = await api("PUT", "/api/config", { connectors: { openconnector: { url: "", adminToken: "" } } });
+        expect(failed.status).toBe(500);
+        const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+        expect(disk.connectors.openconnector.adminTokenRef).toBe(`file:${tokenFile}`);
+      } finally {
+        rmSync(tokenFile, { recursive: true, force: true });
+      }
+    } finally {
+      const cleared = await api("PUT", "/api/config", { connectors: { openconnector: { url: "", adminToken: "" } } });
+      expect(cleared.status).toBe(200);
+    }
+  });
+
   it("validates a Composio project key, creates a Session, and keeps externally stored secrets off disk", async () => {
     const oldKey = await api("PUT", "/api/config", { composio: { apiKey: "old_key" } });
     expect(oldKey.status).toBe(400);

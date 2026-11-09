@@ -147,6 +147,13 @@ describe("the keys page", () => {
     expect(host.querySelector("[data-keys-empty]")!.textContent).toBe("No keys match “zzz”.");
   });
 
+  it("finds the OpenConnector row even when no catalog key matches", () => {
+    page();
+    type(host.querySelector<HTMLInputElement>("[data-keys-search]")!, "openconnector");
+    expect(rowsShown()).toEqual(["openconnector"]);
+    expect(host.querySelector("[data-keys-empty]")).toBeNull();
+  });
+
   it("lands the live-call notice's button on the OpenAI row in Voice and calls, focused and lit", async () => {
     render(() => createElement(LiveKeyNeeded, { key: "notice" }), () => createElement(KeysPage, { key: "page" }));
     expect(expanded("voice")).toBe("false");

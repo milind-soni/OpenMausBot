@@ -201,3 +201,50 @@ describe("resolveTokenRef", () => {
     expect(settings.openconnector.adminTokenRef).toBe("env:OMB_OPENCONNECTOR_ADMIN_TOKEN");
   });
 });
+
+describe("openConnectorTokenStatus", () => {
+  it("reports the env token as configured with its last four", async () => {
+    const { openConnectorTokenStatus } = await import("./provider.ts");
+    const status = openConnectorTokenStatus({}, env({ [OPENCONNECTOR_ADMIN_TOKEN_ENV]: "secret-tok-9876" }));
+    expect(status).toEqual({ configured: true, last4: "9876" });
+  });
+
+  it("reads a file reference and reports unconfigured when the file is gone", async () => {
+    const { openConnectorTokenStatus } = await import("./provider.ts");
+    const dir = mkdtempSync(join(tmpdir(), "omb-oc-token-"));
+    try {
+      const file = join(dir, "admin-token");
+      writeFileSync(file, "file-token-abcd", { mode: 0o600 });
+      expect(openConnectorTokenStatus({ adminTokenRef: `file:${file}` }, env())).toEqual({ configured: true, last4: "abcd" });
+      rmSync(file);
+      expect(openConnectorTokenStatus({ adminTokenRef: `file:${file}` }, env())).toEqual({ configured: false });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("resolves an env: reference, and hides the last four of a short token", async () => {
+    const { openConnectorTokenStatus } = await import("./provider.ts");
+    expect(openConnectorTokenStatus({ adminTokenRef: "env:MY_RUNTIME_TOKEN" }, env({ MY_RUNTIME_TOKEN: "ref-token-4321" })))
+      .toEqual({ configured: true, last4: "4321" });
+    expect(openConnectorTokenStatus({ adminTokenRef: "env:UNSET" }, env())).toEqual({ configured: false });
+    expect(openConnectorTokenStatus({}, env({ [OPENCONNECTOR_ADMIN_TOKEN_ENV]: "short" }))).toEqual({ configured: true });
+  });
+
+  it("reports the referenced token the provider uses, ahead of the inline env fallback", async () => {
+    const { openConnectorTokenStatus } = await import("./provider.ts");
+    const dir = mkdtempSync(join(tmpdir(), "omb-oc-token-order-"));
+    const file = join(dir, "admin-token");
+    try {
+      writeFileSync(file, "file-token-abcd", { mode: 0o600 });
+      const withFallback = env({ [OPENCONNECTOR_ADMIN_TOKEN_ENV]: "env-token-9876" });
+      expect(openConnectorTokenStatus({ adminTokenRef: `file:${file}` }, withFallback))
+        .toEqual({ configured: true, last4: "abcd" });
+      if (process.platform !== "win32") {
+        chmodSync(file, 0o644);
+        expect(openConnectorTokenStatus({ adminTokenRef: `file:${file}` }, withFallback)).toEqual({ configured: false });
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -64,7 +64,8 @@ export function useBotSettingsDerived(bot: Bot) {
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
   // Connected apps reach a bot through Composio's MCP or the native Email one; either lets the switch work.
   const canUseConnectedApps = engine?.capabilities?.composioMcp === true || engine?.capabilities?.emailMcp === true;
-  const connectedAppsConfigured = state.config?.composio?.configured === true;
+  // The connector layer as a whole: OpenConnector counts too. Older servers report only composio.configured.
+  const connectedAppsConfigured = state.config?.connectors?.configured ?? (state.config?.composio?.configured === true);
   const connectedAppsEnabled = bot.composio !== false;
   const connectorGrantState: ConnectorGrantsState = connectorGrantsState(bot);
   const canUseBrowser = engine?.capabilities?.browserMcp === true;
