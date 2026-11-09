@@ -897,6 +897,26 @@ describe("Chat MCP tool limit", () => {
     expect(names).not.toContain("computer_install_ffmpeg");
   });
 
+  it.each([
+    ["fails to start", `if(message.method === "tools/list") { reply(message, {tools:"invalid"}); continue; }`],
+    ["lists a tool the checks refuse", `if(message.method === "tools/list") { reply(message, {tools:[{name:"a",inputSchema:{type:"string"}}]}); continue; }`],
+  ])("lists the computer's own browser tools when the built-in browser %s", async (_how, body) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const failing = fixture(body);
+      const { session, names } = await mount({ localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" }, browser: failing.server });
+      expect(session.skipped.map((entry) => entry.server)).toEqual(["browser"]);
+      expect(names).toEqual(expect.arrayContaining(["computer_browser_navigate", "computer_get_browser_state", "computer_click"]));
+      expect(names).not.toContain("computer_install_ffmpeg");
+    } finally { warn.mockRestore(); }
+  });
+
+  it("hides the computer's own browser tools while the built-in browser is mounted", async () => {
+    const { names } = await mount({ localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" }, browser: catalog(syntheticToolNames("agent_browser", 3)) });
+    expect(names.filter((name) => /^computer_(?:browser_|get_browser_state$|page$)/.test(name))).toEqual([]);
+    expect(names).toEqual(expect.arrayContaining(["computer_click", "browser_agent_browser_1"]));
+  });
+
   it("caps built-ins that still overflow instead of failing the turn, keeping the agents server whole and saying what was left out", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {

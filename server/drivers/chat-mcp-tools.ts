@@ -441,7 +441,6 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   if (integrations?.email && eligible("email")) servers.push(["email", integrations.email]);
   if (integrations?.device && eligible("device")) servers.push(["device", integrations.device]);
   const builtIns = servers.length;
-  const besideBrowser = servers.some(([, descriptor]) => descriptor === integrations?.browser);
   const merged: MergedChatMcpServers[] = [];
   const firstOf = new Map<string, MergedChatMcpServers>();
   for (const [name, server] of Object.entries(integrations?.custom ?? {})) {
@@ -523,7 +522,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     console.warn(`chat-mcp: skipping MCP server "${server}" for this turn: ${reason}`);
     await client?.close();
   };
-  const offeredTools: Array<{ origin: ToolOrigin; tools: CheckedTool[] }> = [];
+  const offeredTools: Array<{ origin: ToolOrigin; tools: CheckedTool[]; computer: boolean }> = [];
   let configured: Array<{ origin: ToolOrigin; tools: CheckedTool[] }> = [];
   /** Lists the built-ins afresh; returns the one whose tools the catalog has no room for, with nothing of it registered. */
   const listBuiltIns = (limit: number | null, room: number) => {
@@ -534,19 +533,22 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     directory = undefined;
     trimmed.length = 0;
     Object.assign(budget, { limit, listed: 0, servers: [] });
-    const wanted = [...offeredTools, ...configured].reduce((sum, server) => sum + server.tools.length, 0);
+    // The computer's own browser tools stay hidden only while the built-in browser is mounted to take their place.
+    const browserMounted = offeredTools.some(({ origin }) => origin.builtInBrowser);
+    const shown = offeredTools.map((entry) => entry.computer ? { ...entry, tools: entry.tools.filter(({ tool }) => listsComputerTool(tool.name, browserMounted)) } : entry);
+    const wanted = [...shown, ...configured].reduce((sum, server) => sum + server.tools.length, 0);
     const searchRoom = configured.some((server) => server.tools.length) && wanted > room ? DIRECTORY_TOOL_COUNT : 0;
     // The agents server keeps its whole list first; configured servers fit in what the built-ins leave.
-    const shares = limit === null ? undefined : shareToolBudget(offeredTools.map(({ origin, tools }, index) => ({ name: String(index), tools: tools.length, agents: origin.agents }))
+    const shares = limit === null ? undefined : shareToolBudget(shown.map(({ origin, tools }, index) => ({ name: String(index), tools: tools.length, agents: origin.agents }))
       .sort((a, b) => Number(b.agents) - Number(a.agents)), room - searchRoom);
-    for (const [index, entry] of offeredTools.entries()) {
-      const tools = capToolList(entry.tools, shares?.get(String(index)));
-      if (tools.length < entry.tools.length) {
-        trimmed.push({ server: entry.origin.server, listed: tools.length, of: entry.tools.length });
-        console.warn(`chat-mcp: "${entry.origin.server}" listed ${tools.length} of ${entry.tools.length} tools to fit the model's ${limit}-tool limit`);
+    for (const [index, { origin, tools: listed }] of shown.entries()) {
+      const tools = capToolList(listed, shares?.get(String(index)));
+      if (tools.length < listed.length) {
+        trimmed.push({ server: origin.server, listed: tools.length, of: listed.length });
+        console.warn(`chat-mcp: "${origin.server}" listed ${tools.length} of ${listed.length} tools to fit the model's ${limit}-tool limit`);
       }
-      try { register(entry.origin, tools); }
-      catch (error) { return { entry, error }; }
+      try { register(origin, tools); }
+      catch (error) { return { entry: offeredTools[index]!, error }; }
     }
     return undefined;
   };
@@ -600,7 +602,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       clients.push(client);
       startedAt[index] = client;
       const computer = descriptor === integrations?.localComputer;
-      const keeps = (tool: unknown) => !computer || !object(tool) || typeof tool.name !== "string" || listsComputerTool(tool.name, besideBrowser);
+      const keeps = (tool: unknown) => !computer || !object(tool) || typeof tool.name !== "string" || listsComputerTool(tool.name, false);
       const include = (tool: unknown) => keeps(tool) && (scope === undefined || (object(tool) && typeof tool.name === "string"
         && ((searchable.has(name) && isDirectoryTool(tool.name)) || allowsTool(scope, { kind: "mcp", server: name, name: tool.name }))));
       const tools = await client.tools(signal, include, searchable.has(name) ? REMOTE_MCP_STARTUP_MS : STARTUP_MS, observers.get(name));
@@ -629,7 +631,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       if (origin.client.failure) { await dropped(index, name, origin.client.failure, origin.client); continue; }
       try {
         const checked = checkedTools(tools, origin.server);
-        if (index < builtIns) offeredTools.push({ origin, tools: checked }); else configured.push({ origin, tools: checked });
+        if (index < builtIns) offeredTools.push({ origin, tools: checked, computer: servers[index]![1] === integrations?.localComputer }); else configured.push({ origin, tools: checked });
       } catch (error) { await dropped(index, name, error, origin.client); }
     }
     await Promise.all(cleanups);
