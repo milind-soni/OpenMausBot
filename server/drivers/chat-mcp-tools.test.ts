@@ -459,11 +459,9 @@ describe("Chat MCP session", () => {
     warn.mockRestore();
   });
 
-  it("skips the Local VM when it lists no tools, but not when the owner's selection leaves none", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("fails the turn when the Local VM lists no tools, but not when the owner's selection leaves none", async () => {
     const empty = fixture(`if(message.method === "tools/list") { reply(message,{tools:[]}); continue; }`);
-    expect((await empty.mount(true, true)).skipped).toEqual([{ server: "computer", reason: "The Local VM listed no tools" }]);
-    warn.mockRestore();
+    await expect(empty.mount(true, true)).rejects.toThrow("The Local VM listed no tools");
     expect(alive(empty.read().pid)).toBe(false);
     expect((await empty.mount(false)).definitions).toEqual([]);
     expect((await fixture().mount(true, true, { allow: ["mcp:computer:screenshot"] })).definitions).toEqual([]);
