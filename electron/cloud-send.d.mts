@@ -229,7 +229,8 @@ export function createCloudSend(deps: {
   /** `reason: "move"`: everything this computer has, apps and keys first; `final`: the pass after this computer stopped,
    * which carries the sign-ins that refresh themselves and lets go of this computer's copies. */
   send(options?: { keys?: string[] | null; force?: string[]; reason?: string; final?: boolean }): Promise<CloudSendOutcome>;
-  check(options?: { scope?: string }): Promise<CloudMoveCheck>;
+  /** `scope`: only the bots a move of some of them carries. `stopped`: the person stopped the move, so a check waiting for My Cloud ends now. */
+  check(options?: { scope?: string; stopped?(): boolean }): Promise<CloudMoveCheck>;
   /** Each automation a move carried ("routine:<id>", "call:<id>", "webhook:<id>", "app-event:<id>") and whether it was
    * on here when it went. */
   switches(): Record<string, boolean>;

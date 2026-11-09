@@ -56,7 +56,8 @@ function computer({ clock, checks = [], lease = null, name = "Mac", id = "comput
     cloud: () => ({ origin: CLOUD, account: "acct-1", machine: CLOUD, ready: true, moves: true, ended: false, paid: false }),
     send: {
       async move(options) { c.passes.push(options?.final ? "final" : "copy"); if (!options?.final && copy) await copy(); },
-      async check() {
+      async check(options) {
+        c.checkOptions = options;
         const next = checks.shift();
         const answer = typeof next === "function" ? await next(c) : next;
         if (answer instanceof Error) throw answer;
@@ -194,4 +195,17 @@ test("no first move starts while the person is asked which bots go, and it goes 
   const failing = computer({ clock, choosing: async () => { throw new Error("this computer's server did not answer"); } });
   await failing.home.kick();
   assert.equal(failing.journal.phase, "done", "a question that can't be asked never holds a move back");
+});
+
+test("a check is told when the person stops the move, and a failed one lifts the freeze before it lets go of My Cloud", async () => {
+  const clock = newClock();
+  const order = [];
+  const lease = cloudLease(() => clock.now);
+  const answer = lease.answer;
+  lease.answer = (body) => { if (body.release) order.push(c.server.frozen ? "released frozen" : "released thawed"); return answer(body); };
+  const c = computer({ clock, lease, checks: [Object.assign(new Error("My Cloud did not answer."), { cause: timeout() })] });
+  await c.home.kick();
+  assert.equal(typeof c.checkOptions.stopped, "function");
+  assert.equal(c.checkOptions.stopped(), false);
+  assert.ok(order.includes("released thawed") && !order.includes("released frozen"), order.join());
 });

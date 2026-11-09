@@ -317,3 +317,37 @@ test("the whole move of 100 bots and 3,000 conversations, copy to switch, finish
   const hours = (cloud.now() - started) / 3_600_000;
   assert.ok(hours < 4, `${hours.toFixed(1)} h on the slow Cloud`);
 });
+
+test("a gateway error on My Cloud's own description is waited out, never read as a Cloud too old to take a move", async () => {
+  const workspace = bigWorkspace();
+  const cloud = slowCloud(workspace);
+  const call = cloud.session.call;
+  let bad = 2;
+  cloud.session.call = async (method, route, body, options) => (route === "/.well-known/openmausbot/environment" && bad-- > 0 ? reply(503, {}) : call(method, route, body, options));
+  assert.equal((await mover(workspace, cloud).send.check()).ok, true);
+  assert.equal(bad, -1);
+});
+
+test("a conversation whose visible path changed on either side is checked again, though its rows did not", async () => {
+  const leafed = (workspace, leaf) => { const copy = structuredClone(workspace); copy.manifest.conversations = copy.manifest.conversations.map((head) => ({ ...head, leaf: head.threadId === "t-b1-1" ? leaf : head.newest })); return copy; };
+  const workspace = leafed(bigWorkspace(), "first");
+  const store = stored();
+  await mover(workspace, slowCloud(workspace), store).send.check();
+  const same = slowCloud(workspace);
+  await mover(workspace, same, store).send.check();
+  assert.deepEqual(same.conversationsAsked, []);
+  const here = leafed(workspace, "another-branch");
+  const again = slowCloud(workspace);
+  await mover(here, again, store).send.check();
+  assert.deepEqual([...new Set(again.conversationsAsked)], ["t-b1-1"]);
+});
+
+test("the person stopping the move ends a check that waits for My Cloud at once, not when My Cloud stands still long enough", async () => {
+  const workspace = bigWorkspace();
+  const cloud = slowCloud(workspace, { down: () => true });
+  const started = cloud.now();
+  let stop = false;
+  const { send } = mover(workspace, cloud);
+  await assert.rejects(send.check({ stopped: () => { if (cloud.now() - started > 150_000) stop = true; return stop; } }), { message: "The move stopped." });
+  assert.ok(cloud.now() - started < 5 * 60_000, `over in ${Math.round((cloud.now() - started) / 1000)} s`);
+});

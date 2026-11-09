@@ -20,6 +20,8 @@ const THREAD = /^[\w-]{1,200}$/u;
  * answer: a slow Cloud that keeps answering is waited for however long its work takes. */
 export const PATIENCE_MS = Object.freeze([15_000, 30_000, 60_000, 120_000, 300_000]);
 export const STALL_MS = 10 * 60_000;
+/** How often a check that waits for My Cloud looks whether the person stopped the move. */
+const STOP_LOOK_MS = 5_000;
 /** The waits before a move's pass gives up on a request it can safely ask again: as long as a Cloud takes to start again. */
 export const BLIP_MS = Object.freeze([5_000, 15_000, 30_000, 60_000]);
 
@@ -47,12 +49,13 @@ const nap = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
  * request got an answer in the last STALL_MS (`moved`). Then it gives up with an error that still reads as unanswered and
  * says whether any of the work got done (`progressed`), which the next check does not do again; an answer that only
  * opens the work (`run(work, { counts: false })`) keeps it waiting without counting as work done. `onWait(until)` while it
- * waits, `onWait(null)` once it asks again.
+ * waits, `onWait(null)` once it asks again. `stopped()`: the person stopped the move, so it ends at the next answer or look.
  */
-export function createPatience({ now = Date.now, sleep = nap, onWait = () => {}, stallMs = STALL_MS, waits = PATIENCE_MS } = {}) {
+export function createPatience({ now = Date.now, sleep = nap, onWait = () => {}, stallMs = STALL_MS, waits = PATIENCE_MS, stopped = () => false } = {}) {
   let movedAt = now(), progressed = false, tries = 0;
+  const stop = () => { if (stopped()) throw Object.assign(new Error("The move stopped."), { code: "stopped" }); };
   const patience = {
-    moved({ counts = true } = {}) { movedAt = now(); tries = 0; if (counts) progressed = true; },
+    moved({ counts = true } = {}) { movedAt = now(); tries = 0; if (counts) progressed = true; stop(); },
     get progressed() { return progressed; },
     /** Waits before asking again after `error`, or throws once the check has stood still too long. */
     async wait(error) {
@@ -62,7 +65,8 @@ export function createPatience({ now = Date.now, sleep = nap, onWait = () => {},
         throw Object.assign(new Error(`My Cloud did not answer for ${Math.round((now() - movedAt) / 60_000)} min (${error?.message ?? "no answer"}).`), { cause: error, code: "slow", progressed });
       }
       onWait(now() + ms);
-      await sleep(ms);
+      for (let left = ms; left > 0; left -= STOP_LOOK_MS) { stop(); await sleep(Math.min(left, STOP_LOOK_MS)); }
+      stop();
       onWait(null);
     },
     /** `work()` until it is answered. */
@@ -314,8 +318,9 @@ export async function missingAttachments(session, names, { patience = IMPATIENT,
   for (let i = 0; i < names.length; i += ATTACHMENT_NAMES) {
     const asked = names.slice(i, i + ATTACHMENT_NAMES);
     const answer = await patience.run(async () => answered(await session.call("POST", "/api/cloud-send/chats/attachments", { names: asked }), "My Cloud did not check the attachments."));
+    if (!Array.isArray(answer.body?.missing)) throw new Error("My Cloud did not check the attachments.");
     const named = new Set(asked);
-    missing.push(...list(answer.body?.missing).filter((name) => named.has(name)));
+    missing.push(...answer.body.missing.filter((name) => named.has(name)));
     onProgress(Math.min(names.length, i + ATTACHMENT_NAMES), names.length);
   }
   return missing;
@@ -352,15 +357,15 @@ const BOT_FILE = /^(?:workspaces|task-workspaces)\/([\w-]{1,128})\//u;
  *
  * Every request is a bounded piece of the work, so a Cloud with thousands of conversations answers each in time: My
  * Cloud's manifest without the attachments and files it never needs to list for this, its files a bot at a time, the
- * chats many conversations to a request. A conversation found whole before (`kept.verified`) and unchanged on both sides
- * since is not asked about again, so a check cut short goes on where it was. A slow Cloud is waited for while it keeps
+ * chats many conversations to a request. A conversation found whole before (`kept.verified`), with its rows and the path
+ * it shows unchanged on both sides since, is not asked about again, so a check cut short goes on where it was. A slow Cloud is waited for while it keeps
  * answering (createPatience). `onStep({ step, done, total, bots, until? })`: which step it is at, how far, and until when
  * it waits for My Cloud. `refuse(answer, message)`: the error a refusal of My Cloud's is.
  */
-export async function moveCheck({ session, kept, persist, localJson, handoff, scoped = (route) => route, now = Date.now, sleep, patience: pace = {}, takesMove, refuse = null, onStep = () => {} }) {
+export async function moveCheck({ session, kept, persist, localJson, handoff, scoped = (route) => route, now = Date.now, sleep, patience: pace = {}, stopped, takesMove, refuse = null, onStep = () => {} }) {
   let bots = 0, at = null;
   const step = (name, done = 0, total = 0) => { at = { step: name, done, total, bots }; onStep(at); };
-  const patience = createPatience({ now, ...(sleep ? { sleep } : {}), ...(pace.stallMs !== undefined ? { stallMs: pace.stallMs } : {}), ...(pace.waits ? { waits: pace.waits } : {}), onWait: (until) => {
+  const patience = createPatience({ now, ...(sleep ? { sleep } : {}), ...(pace.stallMs !== undefined ? { stallMs: pace.stallMs } : {}), ...(pace.waits ? { waits: pace.waits } : {}), ...(stopped ? { stopped } : {}), onWait: (until) => {
     if (!at) return;
     const { until: _, ...rest } = at;
     at = until ? { ...rest, until } : rest;
@@ -372,7 +377,7 @@ export async function moveCheck({ session, kept, persist, localJson, handoff, sc
   await patience.run(takesMove, { counts: false });
   const here = await localJson(scoped("/api/cloud-send/manifest"), { timeoutMs: LOCAL_LISTING_MS });
   const heads = new Map(list(here?.conversations).filter(record).map((head) => [head.threadId, head]));
-  const there = (await ask("GET", scoped("/api/cloud-send/manifest?attachments=0&files=0"), listingMs(heads.size * 20), undefined, false)).body;
+  const there = (await ask("GET", scoped("/api/cloud-send/manifest?attachments=0&files=0"), listingMs(heads.size * 20 + list(here?.items).length * 300), undefined, false)).body;
   if (!record(here) || !record(there)) throw new Error("My Cloud did not say what it has. Try again.");
   const removed = new Set([...Object.entries(kept.off).filter(([, why]) => why === "removed").map(([key]) => key),
     ...Object.entries(kept.chats).filter(([, cursor]) => cursor === "removed").map(([threadId]) => threadId),
@@ -385,16 +390,19 @@ export async function moveCheck({ session, kept, persist, localJson, handoff, sc
   const rooms = roomsThatGo(here, going);
   const threads = list(here.conversations).filter((head) => !removed.has(head.threadId)
     && (head.room ? rooms.has(head.room) && !removed.has(`room:${head.room}`) : going.has(head.bot))).map((head) => head.threadId);
-  const theirRows = new Map(list(there.conversations).filter(record).map((head) => [head.threadId, Number.isSafeInteger(head.rows) ? head.rows : 0]));
+  const theirs = new Map(list(there.conversations).filter(record).map((head) => [head.threadId, head]));
+  const theirRows = (threadId) => (Number.isSafeInteger(theirs.get(threadId)?.rows) ? theirs.get(threadId).rows : 0);
   const whole = (threadId) => {
     const seen = kept.verified?.[threadId], head = heads.get(threadId);
-    return Boolean(seen && head && seen.newest === head.newest && seen.rows === head.rows && (theirRows.get(threadId) ?? -1) >= seen.there);
+    return Boolean(seen && head && seen.newest === head.newest && seen.rows === head.rows && seen.leaf === head.leaf && theirs.has(threadId) && theirRows(threadId) >= seen.there && seen.theirLeaf === theirs.get(threadId).leaf);
   };
   step("chats", 0, threads.length);
   const chats = await checkChats({ localJson, session, threads, patience, timeoutMs: LISTING_MS, skip: whole,
     checked: (threadId) => {
       const head = heads.get(threadId);
-      if (kept.verified && head && typeof head.newest === "string" && Number.isSafeInteger(head.rows)) kept.verified[threadId] = { newest: head.newest, rows: head.rows, there: theirRows.get(threadId) ?? 0 };
+      if (kept.verified && head && typeof head.newest === "string" && Number.isSafeInteger(head.rows)) {
+        kept.verified[threadId] = { newest: head.newest, rows: head.rows, there: theirRows(threadId), ...(head.leaf ? { leaf: head.leaf } : {}), ...(theirs.get(threadId)?.leaf ? { theirLeaf: theirs.get(threadId).leaf } : {}) };
+      }
     },
     onProgress: (done, total) => { if (done % 50 === 0) persist(); step("chats", done, total); } });
   for (const entry of chats) if (entry.unstamped && kept.stamped) delete kept.stamped[entry.threadId];

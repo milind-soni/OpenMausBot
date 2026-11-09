@@ -29,6 +29,12 @@ export function threadLinks(threadId: string): ThreadLinks | null {
   return { ids, parent, leaf: state?.active_leaf_id || ids.at(-1) || null };
 }
 
+/** Each conversation's kept active leaf, without reading any of its rows. */
+export function activeLeaves(): Map<string, string> {
+  const rows = prepared("SELECT thread_id AS threadId, active_leaf_id AS leaf FROM thread_state WHERE active_leaf_id IS NOT NULL").all() as Array<{ threadId: string; leaf: string }>;
+  return new Map(rows.map((row) => [row.threadId, row.leaf]));
+}
+
 /** The links of rows the store already holds parsed. */
 export function linksOf(rows: readonly Message[], leaf: string | null): ThreadLinks {
   return { ids: rows.map((row) => row.id), parent: new Map(rows.map((row) => [row.id, row.parentId ?? null])), leaf };

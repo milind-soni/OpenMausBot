@@ -77,6 +77,7 @@ describe("a move's check of a big workspace", () => {
     expect(manifest.conversations).toHaveLength(BOTS * TASKS);
     expect(manifest.attachments).toBeUndefined();
     expect(manifest.files).toBeUndefined();
+    expect(manifest.conversations[0]!.leaf, "where the conversation stands, read without its rows").toBe(base.activeLeaf(manifest.conversations[0]!.threadId));
     const whole = await cloudSendManifest({ summary: () => ({ v: 1, appVersion: "0", items: [] }), store, dataDir: DATA_DIR, connections: async () => [], heads: threadHeads });
     expect(whole.attachments).toHaveLength(BOTS * TASKS * (ROWS / 4));
     expect(reads.messagesFor, "not one conversation parsed and kept by the store").toBe(0);

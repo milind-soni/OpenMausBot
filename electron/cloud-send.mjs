@@ -378,6 +378,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   /** A move goes only to a Cloud that says it takes one: an older one would lose the owner's lines and the checks. */
   async function assertTakesMove(session) {
     const described = await session.call("GET", "/.well-known/openmausbot/environment");
+    if (described.status >= 500) throw Object.assign(new CloudSendError("unreachable", "My Cloud did not answer. Try again."), { status: described.status });
     if (!(Number(described.body?.capabilities?.move) >= 1)) throw new CloudSendError("outdated", OUTDATED_FOR_MOVE);
   }
 
@@ -899,13 +900,13 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
    * as someone using My Cloud; `snapshot().checking` says how far it is. A check that stood still too long fails as
    * unanswered, saying whether it got anywhere (`progressed`). `scope`: only the bots a move of some of them carries; its
    * credentials are copies this computer goes on using, and are not checked. */
-  async function check({ scope = null } = {}) {
+  async function check({ scope = null, stopped } = {}) {
     const origin = cloud.origin();
     if (!origin) throw new CloudSendError("no_cloud", "This computer has no My Cloud yet.");
     const session = await cloud.open({ move: true }).catch((error) => { throw new CloudSendError("session", sentence(error?.message) ?? "This app could not sign in to My Cloud. Try again.", { cause: error }); });
     localScope = scope;
     try {
-      return await moveCheck({ session, kept: entry(origin), persist, localJson, handoff: team || scope ? null : handoff, scoped, now, sleep, patience, takesMove: () => assertTakesMove(session),
+      return await moveCheck({ session, kept: entry(origin), persist, localJson, handoff: team || scope ? null : handoff, scoped, now, sleep, patience, stopped, takesMove: () => assertTakesMove(session),
         refuse: (answer, message) => refusedError("unreachable", answer, message), onStep: (value) => { checking = value; publish(); } });
     } catch (error) {
       if (error?.code === "slow") throw Object.assign(new CloudSendError("unreachable", sentence(error.message) ?? "My Cloud did not answer.", { cause: error.cause }), { progressed: error.progressed === true });
