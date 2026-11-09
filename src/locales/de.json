@@ -3439,5 +3439,6 @@
   "settings.simple.more.title": "Weitere Einstellungen",
   "settings.simple.more.subtitle": "Backups, Limits und Einstellungen, die du selten änderst.",
   "settings.simple.more.limits": "Limits",
-  "settings.simple.more.open": "Öffnen"
+  "settings.simple.more.open": "Öffnen",
+  "activity.tool.team.startExternalAgent": "Externen Agenten starten"
 }

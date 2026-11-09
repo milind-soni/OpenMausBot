@@ -7764,5 +7764,6 @@
   "remote.client.endsDec7": "この接続方法は 12 月 7 日に終了します。その後は、もう一方のコンピューターの「スマホとデバイス」からこのコンピューターをペアリングし直してください。",
   "phone.code.pairingCode": "ペアリングコード",
   "phone.code.typeIntro": "{app} アプリを開いて、このペアリングコードを入力してください。",
-  "phone.signIn.emailCode": "メールに届いたサインインコード"
+  "phone.signIn.emailCode": "メールに届いたサインインコード",
+  "activity.tool.team.startExternalAgent": "外部エージェントを起動"
 }

@@ -132,6 +132,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   show_widget: "activity.tool.team.showWidget",
   skill_manage: "activity.tool.team.skillManage",
   skills_list: "activity.tool.team.skillsList",
+  start_external_agent: "activity.tool.team.startExternalAgent",
   start_thread: "activity.tool.team.startThread",
   tool_result_read: "activity.tool.team.toolResultRead",
   unpublish_page: "activity.tool.team.unpublishPage",

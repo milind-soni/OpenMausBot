@@ -3597,5 +3597,6 @@
   "settings.simple.more.title": "Інші налаштування",
   "settings.simple.more.subtitle": "Резервні копії, обмеження та налаштування, які ви змінюєте рідко.",
   "settings.simple.more.limits": "Обмеження",
-  "settings.simple.more.open": "Відкрити"
+  "settings.simple.more.open": "Відкрити",
+  "activity.tool.team.startExternalAgent": "Запустити зовнішнього агента"
 }

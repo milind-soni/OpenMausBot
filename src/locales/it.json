@@ -6711,5 +6711,6 @@
   "settings.simple.more.title": "Altre impostazioni",
   "settings.simple.more.subtitle": "Backup, limiti e impostazioni che cambi di rado.",
   "settings.simple.more.limits": "Limiti",
-  "settings.simple.more.open": "Apri"
+  "settings.simple.more.open": "Apri",
+  "activity.tool.team.startExternalAgent": "Avvia agente esterno"
 }

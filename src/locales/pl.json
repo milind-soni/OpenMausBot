@@ -6849,5 +6849,6 @@
   "settings.simple.more.title": "Więcej ustawień",
   "settings.simple.more.subtitle": "Kopie zapasowe, limity i ustawienia, które rzadko zmieniasz.",
   "settings.simple.more.limits": "Limity",
-  "settings.simple.more.open": "Otwórz"
+  "settings.simple.more.open": "Otwórz",
+  "activity.tool.team.startExternalAgent": "Uruchom zewnętrznego agenta"
 }

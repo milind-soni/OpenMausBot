@@ -90,6 +90,7 @@ describe("describeTool", () => {
     ["wait_until", "Wait until", "activity.tool.team.waitUntil"],
     ["list_waits", "List waits", "activity.tool.team.listWaits"],
     ["cancel_wait", "Cancel wait", "activity.tool.team.cancelWait"],
+    ["start_external_agent", "Start external agent", "activity.tool.team.startExternalAgent"],
   ])("names %s with its own activity key and unchanged English", (tool, label, labelKey) => {
     expect(describedTool(`mcp__agents__${tool}`)).toEqual({ app: "Team", appKey: "activity.app.team", label, labelKey });
     expect(describeTool(`mcp__agents__${tool}`)).toEqual({ app: "Team", label });

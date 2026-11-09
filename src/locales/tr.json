@@ -5587,5 +5587,6 @@
   "settings.simple.more.title": "Diğer ayarlar",
   "settings.simple.more.subtitle": "Yedekler, sınırlar ve nadiren değiştirdiğiniz ayarlar.",
   "settings.simple.more.limits": "Sınırlar",
-  "settings.simple.more.open": "Aç"
+  "settings.simple.more.open": "Aç",
+  "activity.tool.team.startExternalAgent": "Harici ajanı başlat"
 }

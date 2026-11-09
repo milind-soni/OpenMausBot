@@ -6087,5 +6087,6 @@
   "settings.simple.more.title": "Más ajustes",
   "settings.simple.more.subtitle": "Copias de seguridad, límites y ajustes que cambias poco.",
   "settings.simple.more.limits": "Límites",
-  "settings.simple.more.open": "Abrir"
+  "settings.simple.more.open": "Abrir",
+  "activity.tool.team.startExternalAgent": "Iniciar agente externo"
 }

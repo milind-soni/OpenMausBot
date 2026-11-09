@@ -7433,5 +7433,6 @@
   "remote.client.endsDec7": "이 연결 방식은 12월 7일에 끝납니다. 그 후에는 다른 컴퓨터의 휴대폰 및 기기에서 이 컴퓨터를 다시 페어링하세요.",
   "phone.code.pairingCode": "페어링 코드",
   "phone.code.typeIntro": "{app} 앱을 열고 이 페어링 코드를 입력하세요.",
-  "phone.signIn.emailCode": "이메일로 받은 로그인 코드"
+  "phone.signIn.emailCode": "이메일로 받은 로그인 코드",
+  "activity.tool.team.startExternalAgent": "외부 에이전트 시작"
 }
