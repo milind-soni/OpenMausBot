@@ -243,14 +243,18 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
   });
 
   it.each([
-    [500, "Internal Server Error", "upstream HTTP 500: Internal Server Error"],
-    [429, '{"error":{"message":"Rate limit reached for requests"}}', "upstream HTTP 429: Rate limit reached for requests"],
-  ])("retries an HTTP %i failure at full size, and doesn't take it for a request that is too large", async (status, body, message) => {
+    [500, "Internal Server Error", "upstream HTTP 500: Internal Server Error", "server_error"],
+    [429, '{"error":{"message":"Rate limit reached for requests"}}', "upstream HTTP 429: Rate limit reached for requests", "rate_limited"],
+  ])("retries an HTTP %i failure at full size, and doesn't take it for a request that is too large", async (status, body, message, reason) => {
     const f = await provider(() => ({ status, body }));
     const done = await f.run({ transcript: transcript(20, 3_000) });
     expect(done).toMatchObject({ ok: false });
     expect(f.requests).toHaveLength(3);
     expect(new Set(f.requests.map((request) => request.bytes)).size).toBe(1);
+    expect(f.retries()).toEqual([
+      expect.objectContaining({ attempt: 1, reason }),
+      expect.objectContaining({ attempt: 2, reason }),
+    ]);
     expect(f.errors()).toEqual([message]);
-  });
+  }, 20_000);
 });

@@ -924,7 +924,7 @@ describe("createOpenAIChatRuntime rejected keys", () => {
     await instance.adapter.sendTurn({ threadId: "thread", text: "hi" });
     await vi.waitFor(() => {
       if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
-    });
+    }, { timeout: 10_000 });
     stop();
     return events;
   };
@@ -961,5 +961,46 @@ describe("createOpenAIChatRuntime rejected keys", () => {
     await turn(instance);
     expect(await instance.snapshot()).toMatchObject({ state: "available", authenticated: true });
     await instance.dispose();
-  });
+  }, 20_000);
+});
+
+describe("createOpenAIChatRuntime transient retries", () => {
+  // Like runTurn, but the turn waits out the retry backoff before it completes.
+  const runRetryTurn = async (respond: () => Response) => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL) =>
+      String(url).endsWith("/chat/completions") ? respond() : new Response("", { status: 404 })));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.com/v1", apiKeyEnv: "K", model: "m" }),
+      environment: { K: "secret" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    await instance.adapter.sendTurn({ threadId: "thread", text: "hi" });
+    await vi.waitFor(() => {
+      if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+    }, { timeout: 10_000 });
+    await instance.dispose();
+    return events;
+  };
+  const rateLimited = () => new Response(JSON.stringify({ error: { message: "Rate limit reached", code: "rate_limit_exceeded" } }), { status: 429 });
+  const answer = () => sse('data: {"choices":[{"index":0,"finish_reason":"stop","delta":{"content":"Hello!"}}]}\n\ndata: [DONE]\n\n');
+
+  it("retries a 429 from an endpoint that omits retryScale, then answers", async () => {
+    let requests = 0;
+    const events = await runRetryTurn(() => ++requests === 1 ? rateLimited() : answer());
+    expect(requests).toBe(2);
+    expect(events.find((event) => event.type === "turn.retrying")).toMatchObject({ attempt: 1, reason: "rate_limited" });
+    expect(events.find((event) => event.type === "item.completed")).toMatchObject({ text: "Hello!" });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  }, 20_000);
+
+  it("gives up after three 429s and reports the last one", async () => {
+    let requests = 0;
+    const events = await runRetryTurn(() => (requests++, rateLimited()));
+    expect(requests).toBe(3);
+    expect(events.filter((event) => event.type === "turn.retrying")).toHaveLength(2);
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("HTTP 429") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  }, 20_000);
 });
