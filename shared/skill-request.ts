@@ -5,6 +5,27 @@
  */
 export type SkillRequestAction = "create" | "update" | SkillSwitchAction;
 
+/** Chief-only management of an existing library skill; share assigns one target without changing its scope. */
+export type SkillManagementAction = "share" | "assign" | "unassign" | "transfer_maintainer";
+
+export function isSkillManagementAction(action: unknown): action is SkillManagementAction {
+  return action === "share" || action === "assign" || action === "unassign" || action === "transfer_maintainer";
+}
+
+/** Explicit assignment and effective library access differ for every-bot skills and private namesakes. */
+export interface SkillAssignmentState {
+  name: string;
+  in_library: boolean;
+  scope: "all_bots" | "selected_bots" | null;
+  assigned: boolean;
+  shadowed: boolean;
+  enabled: boolean;
+  available: boolean;
+  content_revision: string | null;
+  package_files_revision: string | null;
+  management_revision: string;
+}
+
 /** Turning one of the bot's existing skills on or off, or deleting it: no new
  * SKILL.md, so the card shows the current one and approval binds to it. */
 export type SkillSwitchAction = "enable" | "disable" | "delete";

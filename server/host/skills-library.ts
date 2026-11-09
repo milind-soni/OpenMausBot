@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { skillCalls, skillCommandTurnText } from "../../shared/skill-command.ts";
-import { isSkillSwitchAction, type SkillRequestCardData, type SkillShareRecord } from "../../shared/skill-request.ts";
+import { isSkillSwitchAction, type SkillAssignmentState, type SkillManagementAction, type SkillRequestCardData, type SkillShareRecord } from "../../shared/skill-request.ts";
+import { isSkillName } from "../../shared/skill-md.ts";
 import { audienceWithin, narrowestAudience, intersectAudience } from "../bot-visibility.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
+import { chiefLevel } from "../chief-level.ts";
 import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE, type DirectApply } from "../direct-apply.ts";
 import {
@@ -12,6 +14,7 @@ import {
   readImportedSkills, type ImportedSkillView, type SkillTurnEngine,
 } from "../imported-skills.ts";
 import { nativeSkillListing, nativeSkills, readNativeSkillFile } from "../native-skills.ts";
+import { canManage } from "../peer-roster.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { readSectionContext } from "../section-context.ts";
 import { libraryManagementRevision, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled, transferLibraryMaintainer } from "../skill-library.ts";
@@ -242,6 +245,29 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   }
 
   const assignmentIds = (name: string) => store.bots.filter((bot) => bot.assignedSkills?.includes(name)).map((bot) => bot.id);
+  const managementTarget = (fromId: string, targetId: string): BotRecord | null => {
+    const from = store.bot(fromId);
+    const target = store.bot(targetId);
+    return from && !from.hidden && chiefLevel(from) && target && !target.hidden &&
+      (from.id === target.id || canManage(from, target)) ? target : null;
+  };
+  const assignmentReadbackFor = (target: BotRecord) => {
+    const entries = readSkillLibraryIndex();
+    const listings = new Map(listLibrarySkills().map((skill) => [skill.name, skill]));
+    const privateNames = new Set(listSkills(target.id).map((skill) => skill.name));
+    return (name: string): SkillAssignmentState => {
+      const entry = entries[name];
+      const assigned = target.assignedSkills?.includes(name) ?? false;
+      const shadowed = privateNames.has(name);
+      const enabled = listings.get(name)?.enabled ?? false;
+      return {
+        name, in_library: Boolean(entry), scope: entry ? entry.everyBot ? "all_bots" : "selected_bots" : null,
+        assigned, shadowed, enabled, available: enabled && !shadowed && (assigned || entry?.everyBot === true),
+        content_revision: entry?.sha256 ?? null, package_files_revision: entry?.filesSha256 ?? null,
+        management_revision: libraryManagementRevision(entry ?? { name, missing: true }, assignmentIds(name)),
+      };
+    };
+  };
   const sharedReadbackFor = (botId: string) => {
     if (!skillsLibraryEnabled(cfg)) return (_name: string) => null;
     const bot = store.bot(botId);
@@ -273,17 +299,48 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
 
   return {
     listBotSkills,
+    assignmentListing(from: BotRecord, targetId: string): [number, Record<string, unknown>] {
+      if (!skillsLibraryEnabled(cfg)) return [404, { error: "skills library is not enabled" }];
+      const target = managementTarget(from.id, targetId);
+      if (!target) return [403, { error: "only a current Chief can manage a visible target in its authorized team and peer scope" }];
+      const sourceReadback = sharedReadbackFor(from.id);
+      const names = new Set([...Object.keys(readSkillLibraryIndex()).filter((name) => sourceReadback(name)), ...target.assignedSkills ?? []]);
+      const readback = assignmentReadbackFor(target);
+      return [200, { target_bot_id: target.id, assignedSkills: target.assignedSkills ?? [], library: [...names].sort().map(readback) }];
+    },
+    manageAssignment(from: BotRecord, threadId: string, action: Exclude<SkillManagementAction, "transfer_maintainer">,
+      name: string, targetId: string, revision: string, direct: DirectApply | null): [number, Record<string, unknown>] {
+      if (!skillsLibraryEnabled(cfg)) return [404, { state: "failed", error: "skills library is not enabled" }];
+      const target = managementTarget(from.id, targetId);
+      if (!direct || !target) return [403, { state: "failed", error: "this conversation needs current Chief authority over a visible target in its team and peer scope" }];
+      if (!isSkillName(name)) return [400, { state: "failed", error: "invalid skill name" }];
+      const before = assignmentReadbackFor(target)(name);
+      if (before.management_revision !== revision) return [409, { state: "failed", error: "the skill or its assignments changed; list with target_bot_id again" }];
+      if (action !== "unassign" && (!sharedReadbackFor(from.id)(name)?.enabled || !before.in_library || !before.enabled || before.shadowed)) {
+        return [422, { state: "failed", error: "assign/share requires the Chief's access to an enabled, intact shared library skill and no private namesake on the target" }];
+      }
+      const previous = target.assignedSkills ?? [];
+      const next = action === "unassign" ? previous.filter((skill) => skill !== name) : previous.includes(name) ? previous : [...previous, name];
+      if (next.length !== previous.length) {
+        try { store.patchBotProfile(target.id, { assignedSkills: next }); }
+        catch { return [500, { state: "failed", error: "the assignment could not be saved; list with target_bot_id before retrying" }]; }
+      }
+      const result = assignmentReadbackFor(target)(name);
+      if (result.assigned !== (action !== "unassign")) return [500, { state: "failed", error: "the assignment could not be verified; list with target_bot_id before retrying" }];
+      appendDecision(DATA_DIR, { threadId, requestId: randomUUID(), botId: from.id, botName: from.name,
+        tool: "skill_manage", summary: `${action} ${name} for ${target.name}`, decision: "auto-approved", source: direct });
+      return [200, { state: "applied", name, action, result: { target_bot_id: target.id, assignedSkills: target.assignedSkills ?? [], skill: result },
+        summary: action === "unassign" ? "Explicit assignment removed. Every-bot access and private skills are unchanged." : "Shared library skill assigned. Scope, package, enabled state and execution permissions are unchanged." }];
+    },
     transferMaintainer(from: BotRecord, threadId: string, name: string, targetId: string, revision: string, direct: DirectApply | null):
       [number, Record<string, unknown>] {
       if (!direct) return [403, { state: "failed", error: "this conversation cannot transfer a shared skill's maintainer; no transfer occurred" }];
+      const target = managementTarget(from.id, targetId);
+      if (!target) return [403, { state: "failed", error: "only a current Chief can manage a visible target in its authorized team and peer scope" }];
+      from = store.bot(from.id)!;
       const current = sharedReadbackFor(from.id)(name);
       if (!current) return [422, { state: "failed", error: "only a shared library skill available to this bot supports a maintainer; private or unassigned skills cannot be transferred" }];
       if (!current.enabled) return [422, { state: "failed", error: "the shared skill is disabled or its package failed verification" }];
-      const target = store.bot(targetId);
-      if (!target || (target.section?.trim() || "") !== (from.section?.trim() || "") ||
-          !audienceWithin(from.visibility, target.visibility)) {
-        return [422, { state: "failed", error: "the target must be a visible bot in the same team" }];
-      }
       const targetReadback = sharedReadbackFor(target.id)(name);
       if (!targetReadback?.enabled) return [422, { state: "failed", error: "the target must already have access to the enabled shared skill without a private copy shadowing it; assignment is unchanged" }];
       const updated = transferLibraryMaintainer({ name, maintainerBotId: target.id, baseRevision: revision, assignedBotIds: assignmentIds(name) });

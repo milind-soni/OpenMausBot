@@ -1880,6 +1880,10 @@
           "query": {
             "type": "string",
             "description": "Words about the task; returns the best matches and where to read each."
+          },
+          "target_bot_id": {
+            "type": "string",
+            "description": "Chief: list a managed target's explicit assignments, library availability and management revisions, including stale names, before assign/share/unassign."
           }
         }
       },
@@ -1892,7 +1896,7 @@
     },
     {
       "name": "skill_manage",
-      "description": "Submit a new or updated reusable SKILL.md, turn one of your own skills on or off, delete it, or designate a shared skill maintainer. A maintainer is a responsibility label, not an owner or an access grant. Never change a skill unless the user explicitly asked for that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged. Read the result: it applies immediately at every access level, and the person sees it with an Undo where possible. If applied, continue the work without another confirmation. Only a pending result (a Cloud conversation its owner did not drive) means ending the turn to wait for the owner. Never claim success without an applied result; report failures honestly. This does not elevate another bot's execution permissions.",
+      "description": "Submit a new or updated reusable SKILL.md, switch or delete your own skill. Chiefs may share/assign/unassign one library skill or designate its maintainer. A maintainer is a responsibility label, not a grant. Unassign removes only an explicit assignment; every-bot access stays. Never change a skill unless the user explicitly asked for that named skill. Follow the applied or pending result. Read the result: it applies immediately at every access level, and the person sees it with an Undo where possible. If applied, continue the work without another confirmation. Only a pending result (a Cloud conversation its owner did not drive) means ending the turn to wait for the owner. Never claim success without an applied result; report failures honestly. This does not elevate another bot's execution permissions.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1905,17 +1909,20 @@
               "enable",
               "disable",
               "delete",
+              "share",
+              "assign",
+              "unassign",
               "transfer_maintainer"
             ],
-            "description": "Create a uniquely named skill, update a learned one, switch or delete one of your own, or designate a maintainer for an existing shared skill."
+            "description": "Share and assign both add one existing enabled library skill to one target. Unassign also removes stale names. Private namesakes block assignment. Transfer designates responsibility without granting access."
           },
           "skill_name": {
             "type": "string",
-            "description": "Required for every action but create: the exact existing name from skills_list."
+            "description": "Required except create: the exact name from skills_list (target_bot_id lists stale assignments too)."
           },
           "target_bot_id": {
             "type": "string",
-            "description": "transfer_maintainer: the exact ID of a same-team bot already able to use the shared skill."
+            "description": "Share/assign/unassign/transfer_maintainer: exact managed bot ID. Transfer requires existing access. No operation changes execution permissions or library scope."
           },
           "skill_md": {
             "type": "string",
@@ -1950,7 +1957,7 @@
           },
           "base_revision": {
             "type": "string",
-            "description": "For a shared skill update, pass its content revision from skills_list; for transfer_maintainer, pass its management_revision. If it changed, list and read it again."
+            "description": "Shared update: content revision from skills_list. Share/assign/unassign/transfer_maintainer: management_revision; list with target_bot_id for assignments. After applied, list again to verify."
           },
           "source": {
             "type": "string",

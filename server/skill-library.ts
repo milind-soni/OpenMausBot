@@ -314,7 +314,7 @@ function canonicalValue(value: unknown): unknown {
   return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalValue(item)]));
 }
 
-export function libraryManagementRevision(entry: SkillLibraryEntry, assignedBotIds: readonly string[]): string {
+export function libraryManagementRevision(entry: SkillLibraryEntry | { name: string; missing: true }, assignedBotIds: readonly string[]): string {
   return createHash("sha256").update(JSON.stringify([canonicalValue(entry), [...assignedBotIds].sort()])).digest("hex");
 }
 

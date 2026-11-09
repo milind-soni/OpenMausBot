@@ -3,7 +3,7 @@
 import { agentsCallMember, resolveAgentsCall } from "../../shared/agents-tool-names.ts";
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
 import { rankSkills } from "../../shared/skill-fit.ts";
-import { isSkillSwitchAction, skillSwitchVerb } from "../../shared/skill-request.ts";
+import { isSkillManagementAction, isSkillSwitchAction, skillSwitchVerb } from "../../shared/skill-request.ts";
 import { EMAIL_CREDENTIAL } from "../../shared/email.ts";
 
 import { peerName } from "../peer-roster.ts";
@@ -26,7 +26,7 @@ import { callMausBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.ts";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
 import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
 import { callDevsTool, DEVS_TOOL_NAMES } from "./agents-devs-tools.ts";
-import { callSkillMaintainer } from "./agents-call-skill-maintainer.ts";
+import { callSkillManagement } from "./agents-call-skill-management.ts";
 
 export interface ToolCallContext {
   botId: string;
@@ -877,7 +877,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === "skills_list") {
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
+    if (typeof args.target_bot_id === "string" && args.target_bot_id.trim()) query.set("targetBotId", args.target_bot_id.trim());
     const r = await api(`/api/internal/skills?${query.toString()}`);
+    if (query.has("targetBotId")) return { text: JSON.stringify(r) };
     const skills = Array.isArray(r.skills) ? r.skills : [];
     const staged = Array.isArray(r.staged) ? r.staged : [];
     const words = typeof args.query === "string" ? args.query.trim() : "";
@@ -905,7 +907,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return { text: `Imported skills:\n${live}\n\nStaged (waiting for the user's decision):\n${pending}` };
   }
   if (name === "skill_manage") {
-    if (args.action === "transfer_maintainer") return callSkillMaintainer(args, context.client, BOT_ID, THREAD_ID);
+    if (isSkillManagementAction(args.action)) return callSkillManagement(args, context.client, BOT_ID, THREAD_ID);
     if (isSkillSwitchAction(args.action)) {
       const skillName = typeof args.skill_name === "string" ? args.skill_name.trim() : "";
       const verb = skillSwitchVerb(args.action);
@@ -921,7 +923,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       };
     }
     if (args.action !== "create" && args.action !== "update") {
-      return { text: 'skill_manage action must be "create", "update", "enable", "disable", "delete" or "transfer_maintainer".', isError: true };
+      return { text: 'skill_manage action must be "create", "update", "enable", "disable", "delete", "share", "assign", "unassign" or "transfer_maintainer".', isError: true };
     }
     const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
     if (!skillMd.trim()) {

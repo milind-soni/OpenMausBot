@@ -1,30 +1,81 @@
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer } from "../scripts/control-omb.ts";
+import { installLibrarySkill, readSkillLibraryIndex, retireLibrarySkill, skillsLibraryRoot } from "./skill-library.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
-it("transfers a shared skill's maintainer through the live turn capability without changing access", async () => {
-  const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "slow" });
+it("manages single shared-skill assignments and responsibility through a live Chief capability", async () => {
+  const gates = mkdtempSync(join(tmpdir(), "omb-skill-management-"));
+  const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: join(gates, "finish") })
+    .catch((error) => { rmSync(gates, { recursive: true, force: true }); throw error; });
   const base = fixture.info.url;
+  const evidence: unknown[] = [];
   const request = async (method: string, path: string, body?: unknown, token?: string) => {
     const response = await fetch(base + path, { method, headers: { "content-type": "application/json", origin: base,
       ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
-    return { status: response.status, body: await response.json() as any };
+    const result = { status: response.status, body: await response.json() as any };
+    evidence.push({ method, path, body, internal: Boolean(token), result });
+    return result;
   };
   const dump = (): any => { try { return JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")); } catch { return {}; } };
+  const libraryRoot = skillsLibraryRoot(fixture.info.dataDir);
+  const libraryDigest = () => {
+    const hash = createHash("sha256");
+    for (const path of readdirSync(libraryRoot, { recursive: true }).map(String).sort()) {
+      try { hash.update(path).update(readFileSync(join(libraryRoot, path))); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EISDIR") throw error; }
+    }
+    return hash.digest("hex");
+  };
+  const snapshot = () => ["config.json", "bots.json"].map((file) => createHash("sha256").update(readFileSync(join(fixture.info.dataDir, file))).digest("hex")).concat(libraryDigest());
   try {
     expect((await request("PATCH", "/api/config", { features: { skillsLibrary: true } })).status).toBe(200);
-    const author = (await request("POST", "/api/bots", { name: "Author" })).body.bot;
-    const target = (await request("POST", "/api/bots", { name: "Target" })).body.bot;
+    const author = (await request("POST", "/api/bots", { name: "Author", section: "Skill fixture", chiefOfStaff: true })).body.bot;
+    const target = (await request("POST", "/api/bots", { name: "Target", section: "Skill fixture" })).body.bot;
     const text = "---\nname: fixture-audit\ndescription: Audits a fixture.\n---\n\nReview it.\n";
-    expect((await request("POST", "/api/skills-library", { text })).status).toBe(201);
+    expect(installLibrarySkill({ name: "fixture-audit", instructions: text, source: "fixture-provenance", root: libraryRoot,
+      files: [{ path: "references/details.md", content: "Keep the attachment.\n" }] })).not.toHaveProperty("error");
     expect((await request("PATCH", "/api/skills-library/fixture-audit", { enabled: true })).status).toBe(200);
-    for (const bot of [author, target]) {
-      expect((await request("PUT", `/api/bots/${bot.id}/skills-library`, { skills: ["fixture-audit"] })).status).toBe(200);
+    for (const name of ["fixture-keep", "fixture-stale"]) {
+      expect((await request("POST", "/api/skills-library", { text: text.replaceAll("fixture-audit", name) })).status).toBe(201);
     }
+    expect((await request("PUT", `/api/bots/${author.id}/skills-library`, { skills: ["fixture-audit"] })).status).toBe(200);
+    expect((await request("PUT", `/api/bots/${target.id}/skills-library`, { skills: ["fixture-keep", "fixture-stale"] })).status).toBe(200);
+    expect(retireLibrarySkill("fixture-stale", readSkillLibraryIndex(libraryRoot)["fixture-stale"]!.sha256, libraryRoot)).toEqual({ retired: true });
     expect((await request("POST", `/api/bots/${author.id}/messages`, { threadId: author.threadId, sendId: "maintainer-fixture-0001", text: "Start fixture" })).status).toBeLessThan(300);
     await expect.poll(() => dump().mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN, { timeout: hostTimeout(30_000) }).toBeTruthy();
     const token: string = dump().mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const targetListing = async () => (await request("GET", `/api/internal/skills?targetBotId=${target.id}`, undefined, token)).body;
+    const targetState = async (name = "fixture-audit") => (await targetListing()).library.find((skill: { name: string }) => skill.name === name);
+    const manage = async (action: string, name = "fixture-audit", revision?: string) => request("POST", "/api/internal/skills/stage", {
+      action, skill_name: name, target_bot_id: target.id, base_revision: revision ?? (await targetState(name)).management_revision,
+    }, token);
+    const packageBefore = libraryDigest();
+    for (const action of ["assign", "unassign", "share"]) {
+      const applied = await manage(action);
+      expect(applied).toMatchObject({ status: 200, body: { state: "applied", result: { skill: { assigned: action !== "unassign", available: action !== "unassign" } } } });
+      expect(await targetState()).toEqual(applied.body.result.skill);
+      expect((await targetListing()).assignedSkills).toEqual(action === "unassign" ? ["fixture-keep", "fixture-stale"] : ["fixture-keep", "fixture-stale", "fixture-audit"]);
+      expect(libraryDigest()).toBe(packageBefore);
+    }
+    expect(await targetState("fixture-stale")).toMatchObject({ in_library: false, assigned: true });
+    expect((await manage("unassign", "fixture-stale")).status).toBe(200);
+    expect((await targetListing()).assignedSkills).toEqual(["fixture-keep", "fixture-audit"]);
+    const rejected = async (revision: string, expected: number) => {
+      const before = snapshot();
+      expect((await manage("unassign", "fixture-audit", revision)).status).toBe(expected);
+      expect(snapshot()).toEqual(before);
+    };
+    await rejected("wrong-revision", 409);
+    const revision = (await targetState()).management_revision;
+    expect((await request("PATCH", `/api/bots/${author.id}`, { chiefOfStaff: false })).status).toBe(200);
+    await rejected(revision, 403);
+    expect((await request("PATCH", `/api/bots/${author.id}`, { chiefOfStaff: true })).status).toBe(200);
+    expect((await request("PATCH", `/api/bots/${target.id}`, { visibility: "admins" })).status).toBe(200);
+    await rejected(revision, 403);
+    expect((await request("PATCH", `/api/bots/${target.id}`, { visibility: "everyone" })).status).toBe(200);
     const listing = async () => (await request("GET", `/api/internal/skills?fromBotId=${author.id}&fromThreadId=${author.threadId}`, undefined, token)).body.skills.find((skill: { name: string }) => skill.name === "fixture-audit");
     const before = await listing();
     expect(before.shared).toMatchObject({ scope: "selected_bots", enabled: true, maintainer_status: "unassigned" });
@@ -36,7 +87,12 @@ it("transfers a shared skill's maintainer through the live turn capability witho
     const library = (await request("GET", "/api/skills-library")).body.skills.find((skill: { name: string }) => skill.name === "fixture-audit");
     expect(library.assignedBots.map((bot: { id: string }) => bot.id).sort()).toEqual([author.id, target.id].sort());
     expect((await request("GET", "/api/skills-library/fixture-audit")).body.text).toBe(text);
+    expect(readFileSync(join(libraryRoot, "skills/fixture-audit/references/details.md"), "utf8")).toBe("Keep the attachment.\n");
   } finally {
+    const evidencePath = `${fixture.info.logPath}.skill-management.json`;
+    writeFileSync(evidencePath, JSON.stringify({ fixture: fixture.info, requests: evidence }, null, 2));
+    console.info(JSON.stringify({ ...fixture.info, evidencePath }));
     await fixture.close();
+    rmSync(gates, { recursive: true, force: true });
   }
-}, hostTimeout(60_000));
+}, hostTimeout(90_000));

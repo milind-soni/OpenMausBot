@@ -1559,7 +1559,7 @@ export class Store {
     return changed;
   }
 
-  patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "lastProfileRequestId">>): BotRecord | null {
+  patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "lastProfileRequestId" | "assignedSkills">>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
     const next = { ...bot, ...patch };

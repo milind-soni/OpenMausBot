@@ -282,7 +282,7 @@ describe("shared skill maintainer", () => {
     const { createSkillsLibraryHost } = await import("./host/skills-library.ts");
     const name = `transfer-${Math.random().toString(36).slice(2, 10)}`;
     const bots = [
-      { id: `author-${name}`, name: "Author", section: "team", assignedSkills: [name] },
+      { id: `author-${name}`, name: "Author", section: "team", chiefOfStaff: true, assignedSkills: [name] },
       { id: `target-${name}`, name: "Target", section: "team", assignedSkills: [name] },
       { id: `other-${name}`, name: "Other", section: "team", assignedSkills: [] as string[] },
       { id: `private-${name}`, name: "Private", section: "team", visibility: "admins", assignedSkills: [name] },
@@ -299,7 +299,7 @@ describe("shared skill maintainer", () => {
     expect(host.transferMaintainer(author, "fixture", name, target.id, before.management_revision, null)[0]).toBe(403);
     const direct = "full-access" as import("./direct-apply.ts").DirectApply;
     expect(host.transferMaintainer(author, "fixture", name, bots[2]!.id, before.management_revision, direct)[0]).toBe(422);
-    expect(host.transferMaintainer(author, "fixture", name, bots[3]!.id, before.management_revision, direct)[0]).toBe(422);
+    expect(host.transferMaintainer(author, "fixture", name, bots[3]!.id, before.management_revision, direct)[0]).toBe(403);
     const [status, receipt] = host.transferMaintainer(author, "fixture", name, target.id, before.management_revision, direct);
     expect(status).toBe(200);
     expect(receipt).toMatchObject({ state: "applied", result: { maintainer_bot_id: target.id, maintainer_status: "assigned", scope: "selected_bots", enabled: true } });
