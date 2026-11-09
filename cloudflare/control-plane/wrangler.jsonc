@@ -72,12 +72,12 @@
     "RELAY_NODES": "relay1.openmausbot.com,relay2.openmausbot.com",
     "RELAY_NODES_AMERICAS": "",
     "RELAY_TOKEN_KID": "k1",
-    "RELAY_ROLLOUT_PERCENT": "0",
+    "RELAY_ROLLOUT_PERCENT": "100",
     "RELAY_ALLOW_INSTALLATIONS": "",
     "RELAY_DISABLED": "0",
     // The first desktop release that reaches phones through the relay. From it, a desktop with no old phones paired
     // gets 409 relay_capable instead of a new tunnel. Empty: never refused.
-    "RELAY_CAPABLE_MIN_VERSION": ""
+    "RELAY_CAPABLE_MIN_VERSION": "0.1.145"
   },
   "secrets": {
     "required": ["BETTER_AUTH_SECRET", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN_MAUSBOT_SI", "RELAY_TOKEN_SIGNING_KEY"]
