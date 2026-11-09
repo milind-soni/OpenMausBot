@@ -69,8 +69,8 @@ export function showCapabilities(show: unknown): Pick<OllamaModel, "tools" | "vi
   return { tools: capabilities.includes("tools"), vision: capabilities.includes("vision"), ...(controls && controls.choices.length > 1 ? { thinking: controls } : {}) };
 }
 
-/** The `reasoning_effort` a thinking choice sends on /v1, undefined to leave the model's default. Before /api/show
- * listed a model's controls Ollama refused a level on a model that only thinks or doesn't, so "on" stays unsent there. */
+/** The `reasoning_effort` a thinking choice sends on /v1, undefined to leave the model's default. Ollama v0.12.6, which
+ * lists no controls in /api/show, refuses a level on any model without named levels, so "on" stays unsent there. */
 export function thinkingEffort(thinking: OllamaThinking | undefined, choice: string | undefined): string | undefined {
   if (!thinking || !choice || !thinking.choices.includes(choice)) return undefined;
   if (choice === "off") return "none";
