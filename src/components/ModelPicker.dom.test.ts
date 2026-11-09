@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The Simple model menu in a real DOM, where effects run, focus moves and the menu floats in a portal.
-import { createElement } from "react";
+import { createElement, createRef } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,20 +14,23 @@ const fixture = vi.hoisted(() => ({
   refreshModels: vi.fn(() => Promise.resolve()),
   refreshInstances: vi.fn(() => Promise.resolve()),
 }));
-vi.mock("@/state/store", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/state/store")>()),
+vi.mock("@/state/store", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/state/store")>();
+  return { ...original,
   useStore: () => ({
-    state: { instances: fixture.instances, bots: fixture.bots, modelVariantSessions: {}, config: {} },
+    state: { ...original.initialState, instances: fixture.instances, bots: fixture.bots, modelVariantSessions: {}, config: {} },
     dispatch: fixture.dispatch,
     refreshInstances: fixture.refreshInstances,
     refreshModels: fixture.refreshModels,
   }),
-}));
+  };
+});
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("./Avatar", () => ({ BotAvatar: () => null }));
 
 const { ModelPicker } = await import("./ModelPicker");
+const { ChatHeaderMenu } = await import("./ChatMoreMenu");
 
 type Option = InstanceInfo["models"]["options"][number];
 const claude = (options: Option[], authenticated = true): InstanceInfo => ({
@@ -486,5 +489,50 @@ describe("while the bot is working", () => {
     fixture.bots = [busy];
     render(busy);
     expect(chip().disabled).toBe(true);
+  });
+});
+
+
+describe("model selection from the header More menu", () => {
+  it("opens Model from the actual More menu while busy, then returns focus to More on Escape", async () => {
+    const busy = { ...scout(), busy: true };
+    fixture.bots = [busy];
+    flushSync(() => root.render(createElement(ChatHeaderMenu, { bot: busy })));
+    const more = host.querySelector<HTMLButtonElement>('button[aria-label="More"]')!;
+    expect(more).not.toBeNull();
+    flushSync(() => more.click());
+    await settle();
+    const model = document.querySelector<HTMLButtonElement>('[role="menuitem"][data-menu-key="model"]')!;
+    expect(model).not.toBeNull();
+    expect(model.disabled).toBe(false);
+    flushSync(() => model.click());
+    await settle();
+    expect(menu()).not.toBeNull();
+    expect(menu()!.contains(focused())).toBe(true);
+    press("Escape");
+    await settle();
+    expect(menu()).toBeNull();
+    expect(focused()).toBe(more);
+  });
+
+  it("has no model chip, opens on request, returns focus to More and can reopen", async () => {
+    fixture.instances = [{ ...claude(three), capabilities: {} }];
+    const anchor = createRef<HTMLDivElement>();
+    const renderRequest = (menuRequest: number) => flushSync(() => root.render(createElement("div", { ref: anchor },
+      createElement("button", { "aria-label": "More" }, "More"),
+      createElement(ModelPicker, { bot: scout(), threadId: "thread-scout", menuRequest, menuAnchor: anchor }))));
+    renderRequest(0);
+    expect(chip()).toBeNull();
+    expect(menu()).toBeNull();
+    renderRequest(1);
+    await settle();
+    expect(menu()).not.toBeNull();
+    press("Escape");
+    await settle();
+    expect(menu()).toBeNull();
+    expect(focused()?.getAttribute("aria-label")).toBe("More");
+    renderRequest(2);
+    await settle();
+    expect(menu()).not.toBeNull();
   });
 });

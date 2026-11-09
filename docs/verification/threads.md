@@ -29,7 +29,7 @@ switching and Stop can be exercised without a real provider or account.
 6. Expand Launch team and select its separate histories. Group collaboration
    retains the existing serialized behavior; this does not enable concurrent
    group member turns.
-7. Check the model selector in the header opens downward and Ask/Auto sits
+7. Check **More → Model** in the header opens downward and Ask/Auto sits
    inside the composer beside attachments. Both menus must stay visible.
    Selecting a thread must not scroll the whole document or hide the header.
    Test keyboard access to row menus too.
@@ -57,29 +57,33 @@ switching and Stop can be exercised without a real provider or account.
     expanding the thread tree. Its separate chevron controls the tree. Repeat
     in Comfortable, Compact, and the Icons view (history is in the header in
     Icons view).
-12. In **Settings → Appearance**, turn **Show threads** off. Bot trees, folder
-    creation, the bot context menu's new-thread actions, and **All threads**
-    disappear; the selected transcript, model, queues, and running jobs remain.
-    Group/channel histories are unchanged. Background working, queued, unread,
-    and waiting conversations remain reachable through activity-only controls.
-    The header stays uncluttered; **Other activity** appears below it only when
-    there is sibling activity, including when the sidebar is closed. Open a
-    sibling from its activity entry, then click the bot's row: it returns to
-    the conversation you last wrote in (the bot's main thread). Open another
-    bot, let a reply land in the sibling it was left on, and check that the
-    sibling has its own activity entry under that bot. Follow a notification,
-    a thread chip or a search hit to a third thread of that bot: the sibling
-    keeps its unread entry, and the third thread is read once open. An
-    `openmausbot://bot/<id>` link opens the main thread. A row or tile with a
-    mark on it opens the thread the mark is about (waiting on you, then unread,
-    then work under way, a thread another bot opened included); a second click
-    returns to the main thread.
-13. Stop a running job through its activity entry while a sibling is queued;
-    verify only the chosen job stops and the queued message starts normally.
-    Reload and confirm Show threads remains off. Turn it back on to recover
-    all histories/folders. Also toggle off/on without reloading and check that
-    folder disclosure state survives. Check the Appearance switch in a narrow
-    window and keyboard navigation through bot rows and activity controls.
+12. Before switching modes, use the idle **Website ideas** thread's row menu
+    to archive it. Switch to Miso, create a thread named **Miso isolation check**
+    and return to Pepper before sending. In a second terminal, send to Miso
+    with `node --experimental-strip-types scripts/control-omb.ts send --bot
+    <MISO_ID> --task <MISO_THREAD_ID> --text "Isolation check" --url <FIXTURE_URL>`.
+    Keep Pepper selected until Miso's reply appears and its row shows Unread;
+    confirm that unread marker before opening Pepper's picker.
+    These fixture-only states make both the Completed and isolation checks
+    meaningful. Turn Advanced mode off in Settings → General. Each bot stays a single
+    sidebar row, with its activity and unread indicator; no bot thread list
+    appears beneath it. The chat header shows the current thread title as a
+    dropdown. Open it and switch between Gmail and iCloud: each must keep its
+    own messages, selection and Working/Idle state. Use the bot row menu's
+    **View threads** and the header's **All threads** to open the same picker.
+    Check waiting, queued, unread and completed entries as well as idle work.
+    The picker names the current bot and includes only its conversations,
+    divided into **Open** and **Completed**. A closed or archived conversation
+    remains searchable and selectable in Completed; other bots' waiting/unread
+    conversations must not appear. The count must match this bot's rows.
+13. Stop iCloud using **Stop this thread** in the header. Gmail must remain
+    Working in the dropdown and the header must show one working sibling.
+    Switch back to Gmail and reload: its messages and status must survive.
+    The header's **More → Model** opens the model picker without a permanent
+    model chip. Verify keyboard dismissal, focus return and narrow widths.
+    Turn Advanced mode back on: folder navigation remains available. With
+    **Show threads** off, a flat expandable list replaces the folder tree;
+    turning the setting back on restores the folder tree and its disclosure.
 14. In a bot with only one completed thread, use its row menu → **Delete
     thread** and confirm. The old transcript must disappear immediately and
     one empty **New thread** must replace it, with the bot still selected.

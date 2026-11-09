@@ -15,7 +15,6 @@ import { computerStartLine, useScreensWhile } from "@/lib/computer-start";
 import { rememberComputerPanelOpen } from "@/lib/computer-panel-focus";
 import { useCaptionChrome, useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import {
-  api,
   currentTaskBot,
   useStore,
   formatTime,
@@ -28,8 +27,6 @@ import {
   type InstanceInfo,
   type Message,
   type AppState,
-  awayFromMainThread,
-  openBot,
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
 import { CHATGPT_USAGE_URL, ManageUsageLink } from "./ChatGptPlanStatus";
@@ -91,11 +88,8 @@ import { CallRecordRow } from "./CallRecordRow";
 import { AttachmentGallery, collectMessageFiles, replyAttachmentGroup, splitMessageAttachments } from "./AttachmentGallery";
 import { ScreenFrame } from "./ScreenFrame";
 import { CompactionChip, DigestChip } from "./DigestChip";
-import { RenameTitle } from "./RenameTitle"; import { ChatHeadRole, chiefOfStaffBadge } from "./BotRole";
-import { BotActivityPicker } from "./TaskPicker"; import { ChatHeadPill } from "./ChatHeadPill"; import { useStoreRef } from "@/state/store-ref";
-import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
-import { ModelPicker } from "./ModelPicker";
-import { ChatHeaderMenu, ChatMoreMenu } from "./ChatMoreMenu"; import { TeamOwnHelperHeader, TeamPrivateFirstLine, TeamPrivateHeader, TeamSharedHeader } from "./TeamPrivateChatsLine";
+import { TaskPicker, ThreadActivityStatus } from "./TaskPicker"; import { ChatHeadPill } from "./ChatHeadPill"; import { useStoreRef } from "@/state/store-ref";
+import { ChatHeaderMenu } from "./ChatMoreMenu"; import { TeamPrivateFirstLine } from "./TeamPrivateChatsLine";
 import { useChatFindRequests } from "@/lib/chat-find";
 import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
 import { SpeakButton } from "./SpeakButton";
@@ -808,7 +802,6 @@ const MessagesList = memo(function MessagesList({
   );
 });
 
-const CHATHEAD_PILL = `flex min-w-0 items-center gap-2 rounded-full py-0.5 pl-1.5 text-ink ${ELEVATED_FLOAT}`;
 
 export function ChatView({ bot: profile }: { bot: Bot }) {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
@@ -1017,121 +1010,57 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           simpleHead ? "px-5 pt-2.5 pb-2.5 max-md:pl-14 max-md:pr-3" : "px-5 py-3 pl-11 md:pl-5 max-md:pl-14 max-md:pr-3",
         )}
       >
-        <div data-chathead-row className={cn("flex items-center justify-between", phone ? "gap-2" : "@max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:gap-y-1 @min-[30rem]/chathead:grid @min-[30rem]/chathead:grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(max-content,1fr)]")}>
-        <div data-chathead-identity className={cn("flex min-w-0 items-center gap-2", phone ? "flex-1" : "@max-[30rem]/chathead:basis-full @min-[30rem]/chathead:col-start-2 @min-[30rem]/chathead:justify-self-center", simpleHead && phone && "justify-center")} style={headerNoDragStyle}>
-          {simpleHead ? (
-            <ChatHeadPill
-              bot={bot}
-              avatar={{ state: stateForBot({ ...bot, messages }), motion: mascotMotion?.kind ?? "none", motionKey: mascotMotion?.nonce ?? 0, animated: headerAnimated }}
-              privacy={privateChat ? { kind: "private" } : ownHelper ? { kind: "ownHelper" } : sharedChat && team ? { kind: "shared", team: team.name, onlyPeopleAdded: bot.onlyPeopleAdded } : null}
-              onToggle={() => dispatch({ type: "toggleSettings", open: !state.settingsOpen })}
-            />
-          ) : advanced ? (
-            <div data-chathead-pill className={cn(CHATHEAD_PILL, "pr-1")}>
-              <button
-                type="button"
-                onClick={() => dispatch({ type: "toggleSettings", open: true })}
-                className="flex shrink-0 items-center justify-center rounded-full"
-                title={t("chat.openProfile")}
-                aria-label={t("chat.openProfileAria", { name: bot.name })}
-              >
-                <BotAvatar
-                  bot={bot}
-                  state={stateForBot({ ...bot, messages })}
-                  size={24}
-                  motion={mascotMotion?.kind ?? "none"}
-                  motionKey={mascotMotion?.nonce ?? 0}
-                  animated={headerAnimated}
-                />
-              </button>
-              <RenameTitle
-                value={bot.name}
-                onCommit={(name) => {
-                  if (window.ogb?.remoteClient?.active) {
-                    void api(`/api/bots/${bot.id}/profile`, { method: "PATCH", body: JSON.stringify({ name }) })
-                      .then(({ bot: updated }) => dispatch({ type: "botPatched", bot: updated }))
-                      .catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }));
-                  } else {
-                    dispatch({ type: "updateBot", botId: bot.id, patch: { name } });
-                  }
-                }}
-                onActivate={() => dispatch({ type: "toggleSettings", open: true })}
-                showEditButton
-                className="truncate text-[14px] font-semibold text-ink"
-                editButtonClassName="size-6 rounded-full"
-                inputClassName="max-w-[220px] rounded-full bg-inset px-2 py-0.5 text-[14px] font-semibold"
-              />
-              {chiefOfStaffBadge(bot)}
-            </div>
-          ) : (
-            <button
-              type="button"
-              data-chathead-pill data-tour="bot-pill"
-              onClick={() => dispatch({ type: "toggleSettings", open: true })}
-              title={t("chat.openProfile")}
-              aria-label={t("chat.openProfileAria", { name: bot.name })}
-              className={cn("group flex h-9 min-w-0 items-center gap-2.5 rounded-full py-0.5 pl-2 pr-3.5 text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
-            >
-              <BotAvatar bot={bot} state={stateForBot({ ...bot, messages })} size={24}
-                motion={mascotMotion?.kind ?? "none"} motionKey={mascotMotion?.nonce ?? 0} animated={headerAnimated} />
-              <span className="min-w-0 truncate text-[14px] font-medium text-ink">{bot.name}</span>
-              {chiefOfStaffBadge(bot)}
-              <ChevronRight size={14} aria-hidden="true" className="-ml-2.5 w-0 shrink-0 text-ink-secondary opacity-0 transition-[width,margin,opacity] duration-150 group-hover:ml-0 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:ml-0 group-focus-visible:w-3.5 group-focus-visible:opacity-100" />
-            </button>
-          )}
-          {!phone && !simpleHead && <ChatHeadRole bot={bot} />}<span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>{!simpleHead && privateChat && <TeamPrivateHeader />}{!simpleHead && ownHelper && <TeamOwnHelperHeader />}{!simpleHead && sharedChat && team && <TeamSharedHeader team={team} onlyPeopleAdded={bot.onlyPeopleAdded} />}
-          {!simpleHead && !bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">{t("chat.teammatesWorking")}</span>}
-          {(advanced || remoteClient) && awayFromMainThread(profile, showThreads) && (
-            <button
-              type="button"
-              data-chathead-back
-              onClick={() => openBot(dispatch, profile, false)}
-              className="shrink-0 whitespace-nowrap rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium text-ink-secondary hover:bg-raised-hover hover:text-ink"
-            >
-              {t("chat.backToMainThread")}
-            </button>
-          )}
+        <div data-chathead-row className="flex min-w-0 items-center justify-between gap-3 @max-[36rem]/chathead:flex-wrap @max-[36rem]/chathead:gap-y-1">
+        <div data-chathead-identity className="flex min-w-0 flex-1 items-center gap-1 @max-[36rem]/chathead:basis-full" style={headerNoDragStyle}>
+          <ChatHeadPill
+            bot={bot}
+            identityOnly
+            avatar={{ state: stateForBot({ ...bot, messages }), motion: mascotMotion?.kind ?? "none", motionKey: mascotMotion?.nonce ?? 0, animated: headerAnimated }}
+            privacy={privateChat ? { kind: "private" } : ownHelper ? { kind: "ownHelper" } : sharedChat && team ? { kind: "shared", team: team.name, onlyPeopleAdded: bot.onlyPeopleAdded } : null}
+            onToggle={() => dispatch({ type: "toggleSettings", open: !state.settingsOpen })}
+          />
+          <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
+          <div className="min-w-0 flex-1" data-thread-navigation><TaskPicker bot={bot} compact /></div>
         </div>
         <div
           data-chathead-controls
-          className={cn("flex shrink-0 items-center gap-2", !phone && "@max-[30rem]/chathead:ml-auto @max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:justify-end @min-[30rem]/chathead:col-start-3 @min-[30rem]/chathead:justify-self-end")}
+          className="flex shrink-0 items-center gap-1.5 @max-[36rem]/chathead:w-full @max-[36rem]/chathead:flex-wrap @max-[36rem]/chathead:justify-end"
         >
-          {!simpleHead && (bot.busy || bot.waitingForTeammates) && (
+          <ThreadActivityStatus bot={bot} />
+          {(bot.busy || bot.waitingForTeammates) && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id, threadId: bot.threadId })}
               className={cn(
                 "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink",
                 COMPACT_BUBBLE,
               )}
-              title={t("chat.stopTurn")}
+              title={t("thread.stop")} aria-label={t("thread.stop")} data-header-thread-stop
             >
               <Square size={12} className="fill-current" />
-              <span className="@max-4xl/chathead:hidden">{t("chat.stop")}</span>
+              <span className="@max-[42rem]/chathead:hidden">{t("chat.stop")}</span>
             </button>
           )}
           <ThreadContextWarning bot={bot} messages={messages} />
           {phone && <UsageAlert engine={bot.modelSelection?.instanceId} />}
-          {/* The model and the bot's computer stay in view in both modes; Simple mode moves only ⋯ into the bot panel. */}
-          {!phone && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} />}
           <LiveCallChip currentBotId={bot.id} onOpen={(botId, threadId) => openThread(dispatch, { botId, threadId }, state, showThreads)} />{!phoneMenu && <WatchScreenButton botId={bot.id} messages={messages} liveTools={liveTools} place={place} />}
           {!phoneMenu && <button
             data-tour="computer"
             onClick={(event) => { if (!state.computerOpen) rememberComputerPanelOpen({ botId: bot.id, opener: event.currentTarget, tabs: event.detail === 0 }); dispatch({ type: "toggleComputer" }); }}
             className={cn(
               "relative",
-              "flex size-8 items-center justify-center rounded-full", ELEVATED_FLOAT, ELEVATED_HOVER,
+              "flex size-8 items-center justify-center rounded-md hover:bg-raised",
               state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
             )}
             title={t("chat.computer")} aria-label={busy && place === "browser" ? `${t("chat.computer")}, ${t("place.live")}` : t("chat.computer")}
           >
             <Monitor size={16} />{busy && place === "browser" && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 animate-pulse rounded-full bg-success" data-testid="computer-button-live" />}
           </button>}
-          {phoneMenu ? <ChatMoreMenu bot={bot} phoneHeader /> : (advanced || remoteClient) && <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} />}
+          <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} phoneHeader={phone} />
         </div>
         </div>
       </div>
 
-      {(advanced || remoteClient) && <BotActivityPicker bot={bot} />}{privateChat && team && <TeamPrivateFirstLine key={team.id} team={team} />}
+      {privateChat && team && <TeamPrivateFirstLine key={team.id} team={team} />}
       {routineExecution && <div className="mx-5 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12px] text-ink-secondary">
         <span className="min-w-0 flex-1 truncate">{t("routines.executionDetails", { name: routineExecution.routineName })}</span>
         {canOpenResults && resultsThreadId && <button type="button" onClick={() => openThread(dispatch, { botId: bot.id, threadId: resultsThreadId }, state, showThreads)} className="rounded px-2 py-1 text-accent hover:bg-raised">{t("routines.results.back")}</button>}

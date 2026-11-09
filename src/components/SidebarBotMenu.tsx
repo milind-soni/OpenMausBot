@@ -1,3 +1,4 @@
+import { requestThreadList } from "@/lib/thread-list-navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Archive, BellDot, Check, CheckCheck, ChevronRight, ClipboardCopy, Copy, Crown, FolderMinus, FolderOpen, FolderPlus, Loader2, MessagesSquare, MoreHorizontal, Pencil, Pin, PinOff, SquarePen, Star, Trash2, Users } from "lucide-react";
@@ -21,7 +22,6 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { useMoveToTeam } from "./MoveToTeam";
 import type { MenuState } from "./Sidebar";
 import { departmentNames, moveBotsToSection, useMayMoveBots } from "./bot-sections";
-import { openBotSettings } from "./bot-panel/panel-link";
 import { isArchived } from "./SidebarThreadRow";
 
 type Flyout = "more" | "move";
@@ -263,11 +263,10 @@ export function BotContextMenu({
       ...moveToTeam.items(bot, item),
       ...deleteAll,
     ];
-    // Simple view hides the thread list: start one, see them all (the panel's Conversations), and choose the one it opens.
     const newThread = bot.yourAccess === "view" ? null : item(<SquarePen size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }));
     const viewThreads = item(<MessagesSquare size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.viewThreads"), () => {
-      openForSettings();
-      openBotSettings(dispatch, "history", { botId: bot.id, anchor: "conversations" });
+      if (state.selectedId !== bot.id || state.activeView !== "chat") dispatch({ type: "select", id: bot.id });
+      requestThreadList(bot.id);
     });
     const openTask = state.selectedId === bot.id ? bot.tasks?.find((task) => task.threadId === bot.threadId) : undefined;
     const setMain = remoteClient || admin !== true || !openTask || openTask.routineRunId || openTask.private || isArchived(openTask) ? null : item(

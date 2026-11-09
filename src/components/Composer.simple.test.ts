@@ -200,7 +200,7 @@ describe("the Simple composer in a bot chat", () => {
     const busy = { ...bot, busy: true };
     render({ bot: busy });
     const slot = container.querySelector<HTMLButtonElement>('[data-composer-stop="slot"]')!;
-    expect(slot.getAttribute("aria-label")).toBe("Stop this turn");
+    expect(slot.getAttribute("aria-label")).toBe("Stop this thread");
     expectBotButton(slot, "purple");
     expect(fixture.call).toBeNull();
     click(slot);

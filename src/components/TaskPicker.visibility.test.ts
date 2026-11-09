@@ -6,10 +6,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "@/lib/i18n";
 import type { Bot, Group } from "@/state/store";
-import { Select } from "./Select";
 
 const fixture = vi.hoisted(() => ({ showThreads: true, queued: {} as Record<string, unknown[]>, bots: [] as Bot[], dispatch: vi.fn() }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
+vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: (_id: string, level?: string) => level !== "view" }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   useStore: () => ({ state: { bots: fixture.bots, pendingQueued: fixture.queued }, dispatch: fixture.dispatch }),
@@ -125,41 +125,23 @@ describe("task picker IME keyboard handling", () => {
 
 describe("optional bot thread picker", () => {
   it("keeps the usual picker when threads are shown", () => {
-    expect(renderToStaticMarkup(createElement(TaskPicker, { bot }))).toContain('aria-label="All threads"');
+    expect(renderToStaticMarkup(createElement(TaskPicker, { bot }))).toContain('aria-label="All threads: Current chat"');
   });
 
-  it("hides quiet histories and creation but keeps sibling activity reachable", () => {
+  it("keeps the current title and status visible when the thread tree is hidden", () => {
     fixture.showThreads = false;
-    fixture.queued = { queued: [{ queueId: "pending" }] };
-    expect(renderToStaticMarkup(createElement(TaskPicker, { bot }))).toBe("");
     const markup = renderToStaticMarkup(createElement(BotActivityPicker, { bot }));
-    expect(markup).toContain('aria-label="Other activity (4)"');
-    expect(markup).toContain('value="waiting">Approval needed · Waiting');
-    expect(markup).toContain('value="working">Research · Working');
-    expect(markup).toContain('value="queued">Next job · Queued');
-    expect(markup).toContain('value="unread">Finished reply · Unread');
-    expect(markup).not.toContain("Quiet history");
+    expect(markup).not.toContain(">Current thread<");
     expect(markup).toContain("Current chat");
-    expect(markup).not.toContain('value="current"');
-    expect(markup).not.toContain("All threads");
-    expect(markup).not.toContain("New thread");
-    expect(markup).not.toContain("Rename");
-    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(markup).toContain('data-thread-status="working"');
+    expect(markup).toContain('aria-label="Working in other threads: 1"');
   });
 
-  it("selects the exact sibling without creating or stopping work", () => {
+  it("keeps current-thread navigation visible even with no background work", () => {
     fixture.showThreads = false;
-    const picker = BotActivityPicker({ bot });
-    const select = picker!.props.children[0];
-    expect(select.type).toBe(Select);
-    select.props.onChange({ target: { value: "waiting" } });
-    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: "pepper", threadId: "waiting" });
-  });
-
-  it("renders nothing when only the selected conversation is working", () => {
-    fixture.showThreads = false;
-    expect(renderToStaticMarkup(createElement(BotActivityPicker, { bot: { ...bot, tasks: bot.tasks!.slice(0, 2) } }))).toBe("");
-    expect(fixture.dispatch).not.toHaveBeenCalled();
+    const markup = renderToStaticMarkup(createElement(BotActivityPicker, { bot: { ...bot, busy: false, tasks: bot.tasks!.slice(0, 2).map(task => ({ ...task, busy: false })) } }));
+    expect(markup).toContain("Current chat");
+    expect(markup).toContain('aria-label="All threads: Current chat"');
   });
 
   it("does not remove channel history controls", () => {

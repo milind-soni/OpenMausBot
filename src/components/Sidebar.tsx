@@ -1,3 +1,5 @@
+export { currentArchivableBot } from "./bot-archive";
+import { CompactBotThreads } from "./CompactBotThreads";
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { createPortal } from "react-dom";
@@ -86,7 +88,7 @@ import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useBotUnread } from "./unread-notice";
-import { attentionHasRunningWork, attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
+import { attentionHasRunningWork, attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
@@ -102,7 +104,7 @@ import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { myDefaultBot, useViewerEmail, useWelcomingBot } from "@/lib/default-bot";
 import { PinnedBotRoster, PinnedCircleThreadSection } from "./PinnedCircleThreads";
-import { archiveBotWithNotice, onArchiveNotice } from "./bot-archive";
+import { archiveBotWithNotice, currentArchivableBot, onArchiveNotice } from "./bot-archive";
 import { ArchivedBotsPanel, botConfirmProps, type BotConfirmKind } from "./ArchivedBotsPanel"; import { MovedBotRows } from "./MoveToTeam";
 import { NewRoomPanel } from "./SidebarNewRoomPanel";
 import { SectionPicker } from "./SidebarSectionPicker";
@@ -439,13 +441,6 @@ function RoomContextMenu({
     </div>,
     document.body,
   );
-}
-
-/** A confirmation may span live fleet updates; never authorize from its snapshot. */
-export function currentArchivableBot(bots: readonly Bot[], id: string): Bot | undefined {
-  const active = bots.filter((candidate) => !candidate.hidden);
-  if (active.length <= 1) return undefined;
-  return active.find((candidate) => candidate.id === id && !candidate.chiefOfStaff && !candidate.defaultBot);
 }
 
 const NO_FOLDERS: BotProject[] = [];
@@ -914,7 +909,8 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     {advanced && !iconOnly && threadsOpen && hasThreadList && <BotThreadList {...props} hidden={!showThreads}
       activityLabel={liveActivityLabel(sidebarMessage(last))}
       query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
-    {(advanced || (!iconOnly && (waiting || unread || bot.tasks?.some(runningRoutineRun)))) && <SidebarBotActivity bot={bot} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} density={density} pendingQueued={pendingQueued} dispatch={dispatch} waitingOnly={!advanced} runsOnly={expanded} />}
+    {advanced && !showThreads && !iconOnly && <CompactBotThreads bot={bot} selected={selected} query={query} pendingQueued={pendingQueued} dispatch={dispatch} />}
+    {advanced && (showThreads || iconOnly) && <SidebarBotActivity bot={bot} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} density={density} pendingQueued={pendingQueued} dispatch={dispatch} waitingOnly={!advanced} runsOnly={expanded} />}
     {showThreads && creatingProject && <BotProjectDialog bot={bot} onClose={() => setCreatingProject(false)} />}
     </>
   );
