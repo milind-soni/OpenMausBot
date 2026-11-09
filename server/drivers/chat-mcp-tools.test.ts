@@ -93,7 +93,7 @@ async function expectSkipped(f: ReturnType<typeof fixture>, reason: RegExp) {
   try {
     const session = await f.mount();
     expect(session.definitions).toEqual([]);
-    expect(session.skipped).toEqual([{ server: "audit", reason: expect.stringMatching(reason) }]);
+    expect(session.skipped).toEqual([{ server: "audit", reason: expect.stringMatching(reason), builtIn: false }]);
     expect(alive(f.read().pid)).toBe(false);
   } finally { warn.mockRestore(); }
 }
@@ -310,7 +310,7 @@ describe("Chat MCP session", () => {
     const f = fixture(`if (message.method === "tools/list") { ${response} continue; }`);
     const session = await f.mount(true, true);
     expect(session.definitions).toEqual([]);
-    expect(session.skipped).toEqual([{ server: "computer", reason: expect.stringMatching(/MCP/) }]);
+    expect(session.skipped).toEqual([{ server: "computer", reason: expect.stringMatching(/MCP/), builtIn: true }]);
     expect(alive(f.read().pid)).toBe(false);
     warn.mockRestore();
   });
@@ -322,8 +322,8 @@ describe("Chat MCP session", () => {
     const session = await mountChatTools({ localComputer: exits.server, agents: ready.server }, ready.controller.signal, true);
     sessions.push(session);
     expect(session.definitions.map((definition) => definition.function.name)).toEqual(["agents_write"]);
-    expect(session.skipped).toEqual([{ server: "computer", reason: "MCP server exited before the session closed (exit code 3)" }]);
-    expect(chatToolNotices(session)).toEqual(['MCP server "computer" was skipped for this turn: MCP server exited before the session closed (exit code 3)']);
+    expect(session.skipped).toEqual([{ server: "computer", reason: "MCP server exited before the session closed (exit code 3)", builtIn: true }]);
+    expect(chatToolNotices(session)).toEqual(['Built-in MCP server "computer" was skipped for this turn: MCP server exited before the session closed (exit code 3)']);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"computer"`));
     await expect(session.execute("agents_write", { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:still works" });
     warn.mockRestore();
@@ -383,7 +383,8 @@ describe("Chat MCP session", () => {
     const session = await mountChatTools({custom:{ready:ready.server,failed:failed.server}},ready.controller.signal);
     sessions.push(session);
     expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
-    expect(session.skipped).toEqual([{ server: "failed", reason: expect.stringContaining("invalid result") }]);
+    expect(session.skipped).toEqual([{ server: "failed", reason: expect.stringContaining("invalid result"), builtIn: false }]);
+    expect(chatToolNotices(session)).toEqual([expect.stringMatching(/^MCP server "failed" was skipped for this turn: /)]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"failed"`));
     await vi.waitFor(() => expect(alive(failed.read().pid)).toBe(false));
     expect(alive(ready.read().pid)).toBe(true);
@@ -414,7 +415,7 @@ describe("Chat MCP session", () => {
     const session = await mountChatTools({ agents: failed.server, custom: { ready: ready.server } }, ready.controller.signal);
     sessions.push(session);
     expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
-    expect(session.skipped).toEqual([{ server: "agents", reason: expect.stringContaining("invalid result") }]);
+    expect(session.skipped).toEqual([{ server: "agents", reason: expect.stringContaining("invalid result"), builtIn: true }]);
     expect(alive(failed.read().pid)).toBe(false);
     expect(alive(ready.read().pid)).toBe(true);
     warn.mockRestore();
@@ -427,7 +428,7 @@ describe("Chat MCP session", () => {
     const session = await mountChatTools({ composio: refused.server, custom: { ready: ready.server } }, ready.controller.signal);
     sessions.push(session);
     expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
-    expect(session.skipped).toEqual([{ server: "composio", reason: expect.stringContaining("MCP request failed") }]);
+    expect(session.skipped).toEqual([{ server: "composio", reason: expect.stringContaining("MCP request failed"), builtIn: true }]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"composio"`));
     await vi.waitFor(() => expect(alive(refused.read().pid)).toBe(false));
     expect(alive(ready.read().pid)).toBe(true);
@@ -452,7 +453,8 @@ describe("Chat MCP session", () => {
     const missing = { command: join(ready.dir, "does-not-exist"), args: [], env: {} };
     const session = await mountChatTools({ composioOwn: missing, custom: { [OWN_APPS_SERVER]: ready.server } }, ready.controller.signal);
     sessions.push(session);
-    expect(session.skipped.map((entry) => entry.server)).toEqual([OWN_APPS_SERVER]);
+    expect(session.skipped).toEqual([{ server: OWN_APPS_SERVER, reason: expect.any(String), builtIn: true }]);
+    expect(chatToolNotices(session)).toEqual([expect.stringMatching(new RegExp(`^Built-in MCP server "${OWN_APPS_SERVER}" was skipped`))]);
     expect(alive(ready.read().pid)).toBe(true);
     expect(session.definitions).toHaveLength(1);
     await expect(session.execute(session.definitions[0]!.function.name, { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true });
@@ -1024,7 +1026,7 @@ describe("Chat MCP startup budgets", () => {
       // stopped at 8 seconds: well short of the 30 a URL server gets
       await settleWithin(1_000, () => mounting.done);
       expect(mounting.error).toBeUndefined();
-      expect(mounting.value?.skipped).toEqual([{ server: "audit", reason: expect.stringMatching(/timed out/) }]);
+      expect(mounting.value?.skipped).toEqual([{ server: "audit", reason: expect.stringMatching(/timed out/), builtIn: false }]);
     } finally { vi.useRealTimers(); }
   });
 });

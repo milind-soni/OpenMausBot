@@ -36,7 +36,8 @@ export interface ChatToolResult { text: string; ok: boolean; images?: ChatImageP
 export interface ChatToolCallView { title: string; input: Record<string, unknown>; ask: boolean; grant?: string }
 /** A dispatched operation may already have taken effect: never retry it through a new round. */
 export class ChatToolSessionError extends Error {}
-export interface SkippedChatMcpServer { server: string; reason: string }
+/** `builtIn`: a harness mount, which a configured server of the same name is not. */
+export interface SkippedChatMcpServer { server: string; reason: string; builtIn: boolean }
 /** Configured servers at the same address with the same sign-in as `server`, mounted once under its name. */
 export interface MergedChatMcpServers { server: string; same: string[] }
 /** A built-in server that listed only its first `listed` of `of` tools, so the turn fits the model's tool limit. */
@@ -300,7 +301,7 @@ export async function refitChatTools(session: ChatToolSession, error: unknown, k
 export function chatToolNotices(session: Pick<ChatToolSession, "skipped" | "trimmed" | "budget"> & Partial<Pick<ChatToolSession, "merged">>): string[] {
   return [
     ...(session.merged ?? []).map(mergedServersNotice),
-    ...session.skipped.map(({ server, reason }) => `MCP server "${server}" was skipped for this turn: ${reason}`),
+    ...session.skipped.map(({ server, reason, builtIn }) => `${builtIn ? "Built-in MCP" : "MCP"} server "${server}" was skipped for this turn: ${reason}`),
     ...toolLimitNotices(session),
   ];
 }
@@ -459,8 +460,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const clients: ChatMcpClient[] = [];
   const skipped: SkippedChatMcpServer[] = [];
   const trimmed: TrimmedChatMcpServer[] = [];
-  const started = new Map<string, ChatMcpClient>();
-  // By mount index too: a configured server may share a built-in's name, and a failed mount closes only its own client.
+  // By mount index: a configured server may share a built-in's name, and a failed mount closes only its own client.
   const startedAt: Array<ChatMcpClient | undefined> = [];
   let closed = false;
   let closing: Promise<void> | undefined;
@@ -513,9 +513,9 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       }
     }
   };
-  const skip = async (server: string, error: unknown, client = started.get(server)) => {
+  const skip = async (server: string, builtIn: boolean, error: unknown, client?: ChatMcpClient) => {
     const reason = error instanceof Error ? error.message : "MCP server failed to start";
-    skipped.push({ server, reason });
+    skipped.push({ server, reason, builtIn });
     console.warn(`chat-mcp: skipping MCP server "${server}" for this turn: ${reason}`);
     await client?.close();
   };
@@ -552,7 +552,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       if (!direct.has(server.origin.server)) searched.push(server);
       else {
         try { register(server.origin, server.tools); }
-        catch (error) { configured = configured.filter((entry) => entry !== server); await skip(server.origin.server, error, server.origin.client); continue; }
+        catch (error) { configured = configured.filter((entry) => entry !== server); await skip(server.origin.server, false, error, server.origin.client); continue; }
       }
       budget.servers.push({ name: server.origin.server, tools: server.tools.length, direct: direct.has(server.origin.server) });
     }
@@ -584,7 +584,6 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       if (signal.aborted || closed) throw aborted();
       const client = new ChatMcpClient(descriptor, computerUse, index >= builtIns);
       clients.push(client);
-      started.set(name, client);
       startedAt[index] = client;
       const computer = descriptor === integrations?.localComputer;
       const keeps = (tool: unknown) => !computer || !object(tool) || typeof tool.name !== "string" || listsComputerTool(tool.name, besideBrowser);
@@ -604,7 +603,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       const name = servers[index]![0];
       if (mount.status === "rejected") {
         if (mount.reason instanceof Error && mount.reason.message === EMPTY_LOCAL_VM_TOOLS) throw mount.reason;
-        await skip(name, mount.reason, startedAt[index]);
+        await skip(name, index < builtIns, mount.reason, startedAt[index]);
         continue;
       }
       if (index < builtIns) {
@@ -612,7 +611,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         continue;
       }
       try { configured.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) }); }
-      catch (error) { await skip(mount.value.origin.server, error, mount.value.origin.client); }
+      catch (error) { await skip(mount.value.origin.server, false, error, mount.value.origin.client); }
     }
     await layout(toolLimit);
     if (signal.aborted || closed) throw aborted();
