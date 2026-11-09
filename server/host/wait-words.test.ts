@@ -74,9 +74,10 @@ describe("a hand-off held a while", () => {
 
   it("says it once for each of several hand-offs held behind the same turn, however often the queue is checked", () => {
     const held = ["r1", "r2", "q"].map((id) => ({ ...node, id, status: id === "q" ? "queued" : "resume" }) as HandoffView);
-    const { note, posted } = notes({ threadBusy: () => true, node: (id) => held.find((n) => n.id === id) });
+    const posted: string[] = [];
+    const { note } = notes({ threadBusy: () => true, node: (id) => held.find((n) => n.id === id), post: (_p, n) => posted.push(n.id) });
     for (let tick = 0; tick < 4; tick++) for (const n of held) note(n);
-    expect(posted).toHaveLength(3);
+    expect(posted).toEqual(["r1", "r2", "q"]);
   });
 
   it("stays quiet for a short hold, a room's own hand-off, a computer's wait and a person's open card, which say so themselves", () => {

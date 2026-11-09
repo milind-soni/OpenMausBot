@@ -44,8 +44,6 @@ export interface QueuedNotesDeps extends Pick<QueuedReasonDeps, "botName" | "thr
   node(id: string): HandoffView | undefined;
 }
 
-/** The runtime holds a resuming hand-off behind a busy turn too: counting only "queued" as still held let two such
- * hand-offs prune each other's note and post it again on every check. */
 const stillHeld = (node: HandoffView | undefined): boolean => node?.status === "queued" || node?.status === "resume";
 
 /** One line in the requester's chat once a hand-off has been held a while, naming the limit. A computer's wait and a person's
