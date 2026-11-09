@@ -121,17 +121,25 @@ export const APP_POINT_SOURCE = `(function () {
     }
     return parts.join(" > ");
   };
+  var cased = function (text, transform) {
+    return transform === "uppercase" ? text.toUpperCase() : transform === "lowercase" ? text.toLowerCase()
+      : transform === "capitalize" ? text.replace(/(^|\\s)(\\S)/g, function (all, gap, letter) { return gap + letter.toUpperCase(); }) : text;
+  };
   // innerText runs a badge (an inline-block span) into the next word ("CloudRestore"): any box that is not plain inline
   // is a word break on screen, so it is one here too.
   var wordsOf = function (node) {
-    if (node.nodeType === 3) return node.data;
     if (node.nodeType !== 1 || /^(script|style|noscript|template)$/i.test(node.tagName)) return "";
     var style = window.getComputedStyle(node);
     var display = style.display;
-    if (display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return "";
-    var shown = node.tagName === "DETAILS" && !node.open
-      ? Array.prototype.filter.call(node.children, function (child) { return child.tagName === "SUMMARY"; }) : node.childNodes;
-    var words = Array.prototype.map.call(shown, wordsOf).join("");
+    if (display === "none") return "";
+    // A hidden wrapper's own text stays out, but a descendant set visible again is on screen.
+    var hidden = style.visibility === "hidden" || style.visibility === "collapse";
+    var closed = node.tagName === "DETAILS" && !node.open;
+    var summary = closed && Array.prototype.find.call(node.children, function (child) { return child.tagName === "SUMMARY"; });
+    var shown = style.contentVisibility === "hidden" ? [] : closed ? (summary ? [summary] : []) : node.childNodes;
+    var words = Array.prototype.map.call(shown, function (child) {
+      return child.nodeType === 3 ? (hidden ? "" : cased(child.data, style.textTransform)) : wordsOf(child);
+    }).join("");
     return /^(inline|contents)?$/.test(display) && node.tagName !== "BR" ? words : " " + words + " ";
   };
   var describe = function (element) {

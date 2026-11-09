@@ -94,6 +94,16 @@ describe("the page's point script", () => {
     expect(posted.at(-1)).toMatchObject({ params: { tag: "div", text: "Cloud Restore finishes More" } });
   });
 
+  it("keeps the page's capitals, a visible child of a hidden wrapper, and leaves out text the page does not render", () => {
+    const { say } = boot();
+    document.body.innerHTML = `<div class="card"><span style="text-transform:uppercase">save</span>
+      <span style="visibility:hidden">tip <em style="visibility:visible">shown</em></span><details><summary>One</summary><summary>Two</summary>x</details>
+      <section style="content-visibility:hidden">skipped</section></div>`;
+    say(pointMessage(true));
+    click(document.querySelector(".card")!);
+    expect(posted.at(-1)).toMatchObject({ params: { tag: "div", text: "SAVE shown One" } });
+  });
+
   it("names a keyed part by its key, and Escape ends point mode with word to the parent", () => {
     const { say } = boot();
     say(pointMessage(true));
