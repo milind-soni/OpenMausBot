@@ -123,7 +123,7 @@ describe("the relay client", () => {
     const first = await relayAt(firstPort);
     await waitFor(() => instance.node === "relay1.openmausbot.com", 5_000);
     await waitFor(() => first.admitted(hid).size === 2);
-    expect(second.hosts.has(hid)).toBe(false);
+    await waitFor(() => !second.hosts.has(hid));
   });
 
   it("redials at once when the wall clock jumps past the monotonic one (sleep)", async () => {

@@ -1678,6 +1678,13 @@ body {
     background: color-mix(in srgb, black 50%, transparent);
   }
 }
+/* Linux without a GPU (electron/linux-gpu.mjs): the blur is redrawn on the CPU and keeps the fan busy, so pop-ups are solid. */
+:root[data-software-rendering] .glass-surface {
+  background: var(--color-menu);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root[data-software-rendering] .glass-surface .bg-card { background: var(--color-card); }
 @media (forced-colors: active) {
   .glass-surface,
   .glass-card {

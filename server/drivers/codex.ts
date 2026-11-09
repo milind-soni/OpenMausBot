@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { codexConfigMcp, codexConfigRunsServer, mountedMcpServerName } from "./codex-mcp-names.ts";
+import { codexConfigMcp, codexConfigRunsServer, codexMcpDisableArgs, mountedMcpServerName } from "./codex-mcp-names.ts";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { laterStartup, openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
@@ -108,7 +108,7 @@ const renamedMcpServers = new Set<string>();
 function noteRenamedMcpServer(name: string, mountName: string): void {
   if (renamedMcpServers.has(name)) return;
   renamedMcpServers.add(name);
-  console.error(`codex: MCP server ${JSON.stringify(name)} is also declared in Codex's own config.toml — mounted as ${JSON.stringify(mountName)} for this bot so the two do not merge`);
+  console.error(`codex: MCP server ${JSON.stringify(name)} is mounted as ${JSON.stringify(mountName)} for this bot to keep its CLI configuration distinct`);
 }
 
 interface CodexApprovalParams {
@@ -551,6 +551,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           ...(turn.toolScope === undefined && !authBridge ? [] : ["-c", "features.shell_snapshot=false"]),
           // A guest-driven turn: no shell, no file reads (-c wins over config files).
           ...(turn.guestConfined ? GUEST_CONFINED_CODEX_ARGS : [])];
+        const codexConfig = codexConfigMcp(env), declaredInCodexConfig = codexConfig.names;
+        if (turn.toolScope !== undefined) appServerArgs.push(...codexMcpDisableArgs(declaredInCodexConfig));
         const baseEnv = new Map(Object.entries(env).filter(([, value]) => value !== undefined));
         const mountedNames = new Set<string>();
         const selectedMcp = new Map<string, StdioMcpSpec>();
@@ -606,12 +608,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         for (const name of ["data", "email", "device"] as const) if (turn.integrations?.[name]) mountSelected(name, name, turn.integrations[name]);
         // A `-c` override merges with a same-named server in config.toml, and stdio over url is
         // "invalid configuration" that kills the turn, so such a server mounts under its own name.
-        const codexConfig = codexConfigMcp(env), declaredInCodexConfig = codexConfig.names;
-        if (turn.toolScope !== undefined) {
-          for (const name of declaredInCodexConfig) appServerArgs.push("-c", `mcp_servers.${name}.enabled=false`);
-        }
+        const takenMcpNames = new Set([...declaredInCodexConfig, ...selectedMcp.keys(), ...(turn.integrations?.phone ? ["openmausbot_phone"] : [])]);
         for (const [name, server] of Object.entries(turn.integrations?.custom ?? {}).filter(([name, server]) => turn.toolScope !== undefined || !codexConfigRunsServer(codexConfig, name, server))) {
-          const mountName = mountedMcpServerName(name, declaredInCodexConfig);
+          const mountName = mountedMcpServerName(name, takenMcpNames);
+          takenMcpNames.add(mountName);
           if (mountName !== name) noteRenamedMcpServer(name, mountName);
           mountSelected(name, mountName, server, "prompt", turn.toolScope === undefined && !("url" in server) ? boxProxyEnvNames() : []);
         }
