@@ -72,4 +72,3 @@ export function currentArchivableBot(bots: readonly Bot[], id: string): Bot | un
   if (active.length <= 1) return undefined;
   return active.find((candidate) => candidate.id === id && !candidate.chiefOfStaff && !candidate.defaultBot);
 }
-
