@@ -898,12 +898,16 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   it. A conversation a bot opened (a hand-off's work thread, one a bot
   started itself, a Chief's notices) starts with that bot's words, which are
   no line in it, so it is not the owner's for memory capture, the daily log,
-  recall or the brief. For the Mac, work a bot hands on keeps the Mac only
-  when the turn that handed it on could itself use it at that moment, on the
-  owner's own line in a one-on-one conversation (not a card, a routine or a
-  webhook), recorded by the harness as it was handed on: a thread opened for
-  it, and each line it brings in, then counts as the owner's for the Mac, and
-  a hand-in from any other turn ends that for good. A conversation a guest opened (and
+  recall or the brief. For the Mac, work handed on with `coordinate_bots` keeps
+  the Mac only when the turn that handed it on could itself use it at that
+  moment, on the owner's own line in a one-on-one conversation (not a card, a
+  routine or a webhook), recorded by the harness as it was handed on, and only
+  at a level no looser than that turn's. The thread opened for it then counts
+  as the owner's for the Mac and nothing else: it can't write the bot's memory
+  or reach their phones, and what it writes is still watched. A hand-in or an
+  answer from any other turn ends that for good. A thread a bot starts with
+  `start_thread` stays refused, since Stop on the turn that started it doesn't
+  reach it. A conversation a guest opened (and
   named) is never the owner's, whoever writes in it. Whenever a computer is lent but a turn can't use it,
   `list_shared_computers` answers why in `unavailable` and `say` (`cloudLendingRefusalText` in
   `server/cloud-lending.ts`), and a refused `shared_computer` call answers the same, so the bot says the reason instead

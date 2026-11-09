@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cloudHomeLendingRefusal, cloudLendingRefusalText, createCloudRoutineAuthors, handedOnForOwner, ownerOnlyConversation, routineFingerprint, teamLendingRefusal, type CloudLendingTurn } from "./cloud-lending.ts";
+import { cloudHomeLendingRefusal, cloudHomeOwnTurnRefusal, cloudLendingRefusalText, createCloudRoutineAuthors, handedOnForOwner, ownerOnlyConversation, routineFingerprint, teamLendingRefusal, type CloudLendingTurn } from "./cloud-lending.ts";
 import { CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts";
 
 const OWNER = "p_owner", GUEST = "p_guest";
@@ -129,8 +129,6 @@ describe("work handed on inherits the lent computer only from an owner-started r
   it("a hand-off the harness recorded as coming from a turn that could use it may, with no line of the owner's in the thread", () => {
     expect(handedOnForOwner(handed())).toBe(true);
     expect(cloudHomeLendingRefusal(handed())).toBeNull();
-    // A thread opened with the opener's words as a line of its own.
-    expect(cloudHomeLendingRefusal(turn({ thread: [said("m1", undefined, { peerAsk: { botId: "b2", forOwner: true } }), reply("r1")], request: { generations, messageId: "m1", origin: origin() } }))).toBeNull();
   });
   it("a recorded person the owner no longer vouches for, an unrecorded hop or a run of automation may not", () => {
     expect(cloudHomeLendingRefusal(handed({ origin: origin({ person: GUEST }) }))).toBe("unproven");
@@ -149,10 +147,17 @@ describe("work handed on inherits the lent computer only from an owner-started r
     expect(cloudHomeLendingRefusal(handed({ reportsFromOthers: true }))).toBe("someone-else");
     expect(cloudHomeLendingRefusal(handed({ starters: [GUEST] }))).toBe("someone-else");
     expect(cloudHomeLendingRefusal(handed({ botOpened: true }))).toBe("someone-else");
+    expect(cloudHomeLendingRefusal(handed({ botOpened: true, openedForOwner: true }))).toBeNull();
   });
-  it("a vouched hand-in never makes a conversation the owner's for what feeds memory, recall or the brief", () => {
-    const thread = [said("m1", undefined, { peerAsk: { botId: "b2", forOwner: true } })];
-    expect(ownerOnlyConversation(thread, ownerPerson, cardAnswerer)).toBe(false);
+  it("a line a bot delivered is never vouched for, even in work that keeps the computer", () => {
+    expect(cloudHomeLendingRefusal(handed({ thread: [said("m1", undefined, { peerAsk: { botId: "b2", forOwner: true } })] }))).toBe("someone-else");
+  });
+  it("counts for the lent computer alone: writing memory, phones and going unwatched take the owner's own conversation", () => {
+    expect(cloudHomeOwnTurnRefusal(handed())).toBe("unproven");
+    // Even the owner's own line, in a thread a hand-off opened.
+    expect(cloudHomeLendingRefusal(turn({ botOpened: true, openedForOwner: true }))).toBeNull();
+    expect(cloudHomeOwnTurnRefusal(turn({ botOpened: true, openedForOwner: true }))).toBe("someone-else");
+    expect(cloudHomeOwnTurnRefusal(turn({}))).toBeNull();
   });
 });
 

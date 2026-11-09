@@ -58,6 +58,14 @@ describe("handing the lent computer on (server/host/cloud-lending-turns.ts)", ()
     expect(lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn, openedBy: { ...opened, forOwner: true } }).host.cloudLendingRefusal(turn)).toBeNull();
     expect(lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn, openedBy: opened }).host.cloudLendingRefusal(turn)).toBe("someone-else");
   });
+  it("what a hand-off gets stops at the computer: the owner's phones take the owner's own conversation", () => {
+    const openedBy = { botId: "b2", name: "Two", at: 1, forOwner: true };
+    const handed = lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn, openedBy }).host;
+    expect(handed.cloudLendingRefusal(turn)).toBeNull();
+    expect(handed.cloudOwnTurnRefusal(turn)).toBe("unproven");
+    expect(lending().host.cloudOwnTurnRefusal(turn)).toBeNull();
+    expect(lending({ flagged: true }).host.cloudOwnTurnRefusal(turn)).toBe("memory-changed");
+  });
   it("a hand-in from a turn that couldn't hand it on clears the record for good, and an unproven thread stays unproven", () => {
     const openedBy = { botId: "b2", name: "Two", at: 1, forOwner: true };
     const world = lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn, openedBy });

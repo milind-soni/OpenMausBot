@@ -944,13 +944,13 @@ async function postedThread(bot: { id: string }): Promise<string> {
   return thread;
 }
 
-it("the owner's own line handed on keeps the Mac for the teammate's turn, and locks nothing", async () => {
+it("the owner's own line handed on keeps the Mac for the teammate's turn, and what that turn writes is still watched", async () => {
   const sender = await newBot("Hands owner's work", "held");
   const receiver = await newBot("Takes owner's work", "held");
   await review(receiver);
   const { thread, tools } = await handedThread(sender, receiver);
-  // Not a foreign turn: nothing to reconcile when it ends.
-  expect(lendingRecord(receiver)).toEqual(expect.not.objectContaining({ pending: true }));
+  // It keeps the computer, but it is no line of the owner's: its writes are still judged.
+  expect(lendingRecord(receiver)).toMatchObject({ pending: true });
   const listing = await sees(tools);
   expect(listing.unavailable).toBeUndefined();
   expect(listing.computers).toHaveLength(1);
@@ -958,8 +958,60 @@ it("the owner's own line handed on keeps the Mac for the teammate's turn, and lo
   appendFileSync(ws(receiver, "MEMORY.md"), "\n- Owner's work kept here.\n");
   await stop(receiver, thread);
   await stop(sender, sender.threadId);
-  await expect.poll(() => lendingRecord(receiver)?.flagged).toBeFalsy();
+  await expect.poll(() => lendingRecord(receiver)?.flagged).toBe(true);
 }, 60_000);
+
+it("work the owner's line handed on can't write the bot's memory", async () => {
+  const sender = await newBot("Memory sender", "held"), receiver = await newBot("Memory receiver", "held");
+  await review(receiver);
+  const { thread, tools } = await handedThread(sender, receiver);
+  expect((await tools("memory_update", { action: "append", text: INJECTED })).isError).toBe(true);
+  expect(existsSync(ws(receiver, "MEMORY.md")) ? readFileSync(ws(receiver, "MEMORY.md"), "utf8") : "").not.toContain(INJECTED);
+  await stop(receiver, thread); await stop(sender, sender.threadId);
+}, 60_000);
+it("a thread a bot starts on itself doesn't keep the Mac, since Stop on the turn that started it doesn't reach it", async () => {
+  const sender = await newBot("Starts a thread", "held");
+  const senderTools = await toolsFor(() => say(owner, sender, "Open a job.", sender.threadId));
+  const opened = await toolsFor(async () => { expect((await senderTools("start_thread", { title: "Own job", message: "Do it." })).isError).toBeFalsy(); });
+  const listing = await sees(opened);
+  expect(listing.computers).toEqual([]);
+  expect(listing.unavailable).toBeTruthy();
+  await stopRunningTurns();
+}, 60_000);
+it("Stop on the turn that handed work on takes the handed-on turn's access with it", async () => {
+  const sender = await newBot("Stop sender", "held"), receiver = await newBot("Stop receiver", "held");
+  const { tools, thread } = await handedThread(sender, receiver);
+  expect((await sees(tools)).computers).toHaveLength(1);
+  await stop(sender, sender.threadId);
+  await expect.poll(async () => (await tools("list_shared_computers")).isError === true, { timeout: 5_000 }).toBe(true);
+  await stop(receiver, thread).catch(() => {});
+}, 60_000);
+it("a handed-on turn run again after a restart still keeps the Mac, from what was recorded", async () => {
+  const sender = await newBot("Restart sender", "held"), receiver = await newBot("Restart receiver", "held");
+  await handedThread(sender, receiver);
+  const rerun = await toolsFor(async () => { for (const proxy of proxies.splice(0)) proxy.kill(); await waitForExit(child, { signal: "SIGTERM" }); await boot(); macAway = true; });
+  expect((await sees(rerun)).computers).toHaveLength(1);
+  await stopRunningTurns();
+}, 90_000);
+it("work handed in by a turn that can't use the Mac ends it for that thread, for good", async () => {
+  const sender = await newBot("Clears sender", "held"), receiver = await newBot("Clears receiver", "held");
+  await review(receiver);
+  const { thread, tools } = await handedThread(sender, receiver);
+  expect((await sees(tools)).computers).toHaveLength(1);
+  await stop(receiver, thread); await stop(sender, sender.threadId);
+  // The sender loses the computer, then hands more into the same thread.
+  const guests = await guestThread(sender);
+  await toolsFor(() => say(owner, sender, "Save a note in your memory file.", guests));
+  appendFileSync(ws(sender, "MEMORY.md"), "\n- Written in a conversation a guest left behind.\n");
+  await stop(sender, guests);
+  await expect.poll(() => lendingRecord(sender)?.flagged).toBe(true);
+  await stopRunningTurns();
+  const again = await handedThread(sender, receiver);
+  expect(again.thread).toBe(thread);
+  const after = await sees(again.tools);
+  expect(after.computers).toEqual([]);
+  await stopRunningTurns();
+}, 90_000);
 
 it("a hand-off that only opens a thread on a bot leaves its Mac in reach of the owner's new conversation", async () => {
   const sender = await lockedSender("Handing");

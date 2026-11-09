@@ -1,7 +1,7 @@
 // Which turns on a Cloud home may use the Mac lent to it, read from the harness's own records (server/cloud-lending.ts
 // decides), and the plain words a turn that can't is told. A room member turn acts for the person's line that started
 // its run, for that turn generation alone, while the run lasts.
-import { answersOwnersLine, cloudHomeLendingRefusal, cloudLendingRefusalText, handedOnForOwner, ON_THE_CARD, ONLY_THE_PERSON, teamLendingRefusal, type CloudLendingRefusal, type CloudLendingTurn } from "../cloud-lending.ts";
+import { answersOwnersLine, cloudHomeLendingRefusal, cloudHomeOwnTurnRefusal, cloudLendingRefusalText, handedOnForOwner, ON_THE_CARD, ONLY_THE_PERSON, teamLendingRefusal, type CloudLendingRefusal, type CloudLendingTurn } from "../cloud-lending.ts";
 import { unstamped } from "../cloud-owner-lines.ts";
 import { deviceWord } from "../lent-computers.ts";
 import type { Routine, RoutineManager, RoutineRun } from "../routines.ts";
@@ -53,7 +53,8 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
       thread: store.messagesFor(capability.threadId),
       starters: cloudThreadStarters(capability.threadId),
       reportsFromOthers: store.messagesFor(capability.threadId).some(cloudReportFromOthers),
-      botOpened: cloudBotOpened(capability.threadId) && !openedForOwner(capability.threadId),
+      botOpened: cloudBotOpened(capability.threadId),
+      openedForOwner: openedForOwner(capability.threadId),
       ownerPerson: deps.ownerPerson,
       cardAnswerer: deps.cardAnswerer,
       routineRun: () => {
@@ -72,10 +73,10 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
    * theirs on a card (a webhook's or another's routine's post, the work a bot opened it with) doesn't count against it, and
    * whatever comes in after does. The same judge decides; every other gate, and what feeds a bot's memory, reads the
    * conversation as it is. */
-  function conversationGate(capability: Turn): CloudLendingRefusal | null {
+  function conversationGate(capability: Turn, judge: typeof cloudHomeLendingRefusal = cloudHomeLendingRefusal): CloudLendingRefusal | null {
     const turn = cloudLendingTurn(capability);
     const allowed = deps.lifts?.()?.outsideAllowed(capability.threadId, turn.request?.messageId);
-    return cloudHomeLendingRefusal(!allowed ? turn : {
+    return judge(!allowed ? turn : {
       ...turn,
       reportsFromOthers: store.messagesFor(capability.threadId).slice(allowed.index + 1).some(cloudReportFromOthers),
       botOpened: turn.botOpened === true && deps.handedSince?.(capability.threadId, allowed.at) !== false,
@@ -124,6 +125,11 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
     const { conversation, memoryChanged } = gates(capability);
     if (memoryChanged) return conversation ? "memory-changed-here" : "memory-changed";
     return conversation;
+  }
+
+  /** What the owner's phones take: every gate, with work handed on for the owner not counting as the owner's. */
+  function cloudOwnTurnRefusal(capability: Turn): CloudLendingRefusal | "memory-changed" | null {
+    return deps.memoryChangedBySomeoneElse(capability.botId) ? "memory-changed" : conversationGate(capability, cloudHomeOwnTurnRefusal);
   }
 
   /** A bot opened this conversation (a hand-off's work thread, one a bot started itself, a Chief's notices). */
@@ -178,7 +184,7 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
   }
 
   return {
-    cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusalForBot, cloudLendingRefusal, cloudThreadStarters, cloudBotOpened, cloudLendingView, cloudReportFromOthers, handsOnLending, handedInUnproven,
+    cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusalForBot, cloudLendingRefusal, cloudThreadStarters, cloudBotOpened, cloudLendingView, cloudReportFromOthers, handsOnLending, handedInUnproven, cloudOwnTurnRefusal,
     /** A room member turn of this run started: its generation acts for the line the run answers. */
     roomTurnStarted(generation: string, run: RoomRun): void { roomTurnOperations.set(generation, run); },
     /** The run ended: none of its turn generations act for anyone any more. */

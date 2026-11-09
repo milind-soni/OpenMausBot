@@ -22,9 +22,11 @@ export interface CloudLendingTurn {
   /** Words someone else chose: a "post" webhook's payload, or a report of a routine the owner did not write. */
   reportsFromOthers?: boolean;
   /** A bot opened the conversation: with work another bot handed in, or with its own words from wherever it was. Those
-   * words start the conversation's session, but they are no line in it. Not when a turn that could itself use the lent
-   * computer opened it, and nothing else has been handed in since (`TaskOpenedBy.forOwner`). */
+   * words start the conversation's session, but they are no line in it. */
   botOpened?: boolean;
+  /** A hand-off from a turn that could itself use the lent computer opened it, and nothing else has been handed in since
+   * (`TaskOpenedBy.forOwner`): counts for the lent computer alone. */
+  openedForOwner?: boolean;
   ownerPerson: (person: string | undefined) => boolean;
   cardAnswerer: (card: Card) => string | undefined;
   routineRun: () => { triggerSource: RoutineRunTrigger; ownerStarted: boolean; ownerAuthored: boolean } | null;
@@ -40,8 +42,6 @@ export function handedOnForOwner(turn: CloudLendingTurn): boolean {
   const origin = turn.request?.automation === undefined ? turn.request?.origin : undefined;
   return origin?.kind === "user" && origin.lends === true && turn.ownerPerson(origin.person);
 }
-
-const vouchedHandIn = (line: Line) => (line.peerAsk as { forOwner?: unknown } | undefined)?.forOwner === true;
 
 /** This turn answers a line the owner wrote: no run of a routine or a webhook, and no line a bot handed in. */
 export function answersOwnersLine(turn: CloudLendingTurn): boolean {
@@ -86,11 +86,22 @@ export function teamLendingRefusal(team: string): string {
   return `${team}'s bots never use anyone's own computer; they use ${team}'s cloud computer.`;
 }
 
+/** Who may use the lent computer. */
 export function cloudHomeLendingRefusal(turn: CloudLendingTurn): CloudLendingRefusal | null {
+  return judgeCloudTurn(turn, true);
+}
+
+/** Security invariant: everything else a turn gets for being the owner's (writing the bot's memory, the owner's phones, not
+ * being watched for what it writes) takes the owner's own conversation: work handed on for them never counts. */
+export function cloudHomeOwnTurnRefusal(turn: CloudLendingTurn): CloudLendingRefusal | null {
+  return judgeCloudTurn(turn, false);
+}
+
+function judgeCloudTurn(turn: CloudLendingTurn, handOffsCount: boolean): CloudLendingRefusal | null {
   const { request } = turn;
   if (!request || request.stopped || !request.generations.has(turn.generation)) return "unproven";
   // A hand-off carries its request with no line of the owner's, only the harness's record that it was handed on for them.
-  const handed = handedOnForOwner(turn);
+  const handed = handOffsCount && handedOnForOwner(turn);
   let owner = handed;
   if (!handed) {
     if (!request.messageId) return "unproven";
@@ -107,24 +118,22 @@ export function cloudHomeLendingRefusal(turn: CloudLendingTurn): CloudLendingRef
   if (!owner) return "not-owner";
   // A conversation someone else opened (and named) is theirs, whoever writes in it.
   if (turn.starters?.some((person) => person !== undefined && !turn.ownerPerson(person))) return "someone-else";
-  if (turn.botOpened || turn.reportsFromOthers) return "someone-else";
+  if ((turn.botOpened && !(handOffsCount && turn.openedForOwner)) || turn.reportsFromOthers) return "someone-else";
   // No line (sent, queued, steered or handed in) and no card answer by anyone else, ever; a routine's own prompt names nobody.
   const clean = ownerOnlyConversation(turn.thread, turn.ownerPerson, turn.cardAnswerer,
-    request.automation !== undefined ? request.messageId : undefined, vouchedHandIn);
+    request.automation !== undefined ? request.messageId : undefined);
   return clean ? null : "someone-else";
 }
 
-/** Every user line and every answered card is the owner's; the same test gates what feeds a turn on a Cloud home. `vouched`
- * is for the lent computer's gate alone: what feeds memory, recall and the brief stays the owner's own lines. */
+/** Every user line and every answered card is the owner's; the same test gates what feeds a turn on a Cloud home. */
 export function ownerOnlyConversation(
   thread: readonly Line[],
   ownerPerson: (person: string | undefined) => boolean,
   cardAnswerer: (card: Card) => string | undefined,
   exempt?: string,
-  vouched: (line: Line) => boolean = () => false,
 ): boolean {
   return thread.every(line =>
-    (line.role !== "user" || line.id === exempt || ownerPerson(personOf(line)) || vouched(line)) &&
+    (line.role !== "user" || line.id === exempt || ownerPerson(personOf(line))) &&
     (!answeredByPerson(line.card) || ownerPerson(cardAnswerer(line.card!))));
 }
 
