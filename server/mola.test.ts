@@ -9,6 +9,7 @@ import {
   describeMolaAccount,
   verifyToken,
   getMolaViewerOrigin,
+  runCommand,
 } from "./mola.ts";
 import type { AppConfig } from "./config.ts";
 
@@ -132,6 +133,91 @@ describe("Mola provider", () => {
   describe("command length validation", () => {
     it("has a reasonable max command length", () => {
       expect(MAX_REMOTE_COMMAND_LENGTH).toBe(4_000);
+    });
+  });
+
+  describe("runCommand timeout clamping", () => {
+    const originalFetch = global.fetch;
+
+    beforeEach(() => {
+      vi.stubGlobal("fetch", vi.fn());
+    });
+
+    afterEach(() => {
+      vi.stubGlobal("fetch", originalFetch);
+    });
+
+    it("clamps timeout to 1-120 seconds range", async () => {
+      const mockResponse = {
+        ok: true,
+        json: async () => ({ data: { exit_code: 0, stdout: "ok", stderr: "" } }),
+      };
+      
+      vi.mocked(fetch).mockResolvedValue(mockResponse as any);
+      
+      const cfg: AppConfig = { mola: { token: "test-token" } };
+      
+      // Test timeout < 1 second (500ms should clamp to 1)
+      await runCommand(cfg, "test-id", "echo test", { timeoutMs: 500 });
+      let lastCall = vi.mocked(fetch).mock.calls[vi.mocked(fetch).mock.calls.length - 1];
+      let body = JSON.parse((lastCall[1]?.body as string) || "{}");
+      expect(body.timeout).toBe(1);
+      
+      // Test timeout > 120 seconds (180000ms should clamp to 120)
+      await runCommand(cfg, "test-id", "echo test", { timeoutMs: 180_000 });
+      lastCall = vi.mocked(fetch).mock.calls[vi.mocked(fetch).mock.calls.length - 1];
+      body = JSON.parse((lastCall[1]?.body as string) || "{}");
+      expect(body.timeout).toBe(120);
+      
+      // Test timeout in valid range (60000ms = 60 seconds)
+      await runCommand(cfg, "test-id", "echo test", { timeoutMs: 60_000 });
+      lastCall = vi.mocked(fetch).mock.calls[vi.mocked(fetch).mock.calls.length - 1];
+      body = JSON.parse((lastCall[1]?.body as string) || "{}");
+      expect(body.timeout).toBe(60);
+    });
+
+    it("returns truncated flag when output is truncated", async () => {
+      const mockResponse = {
+        ok: true,
+        json: async () => ({ 
+          data: { 
+            exit_code: 0, 
+            stdout: "partial output...", 
+            stderr: "", 
+            truncated: true 
+          } 
+        }),
+      };
+      
+      vi.mocked(fetch).mockResolvedValue(mockResponse as any);
+      
+      const cfg: AppConfig = { mola: { token: "test-token" } };
+      const result = await runCommand(cfg, "test-id", "cat /dev/zero | head -c 10M");
+      
+      expect(result.truncated).toBe(true);
+      expect(result.stdout).toBe("partial output...");
+    });
+
+    it("returns timedOut flag when command times out", async () => {
+      const mockResponse = {
+        ok: true,
+        json: async () => ({ 
+          data: { 
+            exit_code: 124, 
+            stdout: "", 
+            stderr: "timeout", 
+            timed_out: true 
+          } 
+        }),
+      };
+      
+      vi.mocked(fetch).mockResolvedValue(mockResponse as any);
+      
+      const cfg: AppConfig = { mola: { token: "test-token" } };
+      const result = await runCommand(cfg, "test-id", "sleep 1000");
+      
+      expect(result.timedOut).toBe(true);
+      expect(result.ok).toBe(false);
     });
   });
 

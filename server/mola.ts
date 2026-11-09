@@ -187,9 +187,14 @@ export async function molaNameMatchesBot(botId: string, name: string): Promise<b
 export async function runCommand(cfg: AppConfig, machineId: string, command: string, { timeoutMs = 120_000, signal }: { timeoutMs?: number; signal?: AbortSignal } = {}) {
   const apiUrl = getMolaApiUrl(cfg);
   const resource = resourcePath(apiUrl);
+  
+  // Mola Cloud validates timeout as integer 1-120 seconds (422 if out of range)
+  const timeoutSeconds = Math.floor(timeoutMs / 1000);
+  const clampedTimeout = Math.max(1, Math.min(120, timeoutSeconds));
+  
   const res = await molaFetch(cfg, `/${resource}/${machineId}/actions`, {
     method: "POST",
-    body: JSON.stringify({ action: "exec", command, timeout: Math.floor(timeoutMs / 1000) }),
+    body: JSON.stringify({ action: "exec", command, timeout: clampedTimeout }),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs + 5_000)]) : AbortSignal.timeout(timeoutMs + 5_000),
   });
   const body: any = await res.json().catch(() => null);
@@ -199,6 +204,7 @@ export async function runCommand(cfg: AppConfig, machineId: string, command: str
     stdout: body?.data?.stdout ?? "",
     stderr: body?.data?.stderr ?? "",
     ...(body?.data?.timed_out === true ? { timedOut: true as const } : {}),
+    ...(body?.data?.truncated === true ? { truncated: true as const } : {}),
   };
 }
 
