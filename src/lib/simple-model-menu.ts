@@ -4,6 +4,7 @@ import { t } from "./i18n";
 import { modelOptionLabel } from "./model-label";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "./custom-models";
 import { engineDisplayName, isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail } from "./engine-rail";
+import { favoriteKey, favoriteModels } from "./favorite-models";
 import { localModelDetail } from "./local-model";
 import { displayModelLabel, shortModelLabel } from "./model-friendly";
 import { choiceIsSelected, modelChoices, takesTypedModels, type ModelChoice } from "./model-choices";
@@ -198,8 +199,10 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
     }
     const others = all.filter((option) => (!currentSelection || !choiceIsSelected(option, currentSelection))
       && (!botSelection || !choiceIsSelected(option, botSelection)));
-    const suggested = suggestedModels(others, instance.models.default, undefined,
-      currentSelection === undefined ? GROUP_SUGGESTIONS : CURRENT_GROUP_SUGGESTIONS);
+    const starred = favoriteModels();
+    const favorites = others.filter((option) => starred.has(favoriteKey(instance.instanceId, option.id)));
+    const limit = currentSelection === undefined ? GROUP_SUGGESTIONS : CURRENT_GROUP_SUGGESTIONS;
+    const suggested = [...favorites, ...suggestedModels(others.filter((option) => !favorites.includes(option)), instance.models.default, undefined, Math.max(0, limit - favorites.length))];
     const rest = others.filter((option) => !suggested.includes(option));
     const open = expanded.has(instance.instanceId) || rest.length === 1;
     const rows = (open ? [...suggested, ...rest] : suggested).map(row);

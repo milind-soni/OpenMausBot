@@ -2974,6 +2974,8 @@
   "model.unconfirmed": "{name} ainda não informou quais modelos oferece. Esta lista pode estar desatualizada.",
   "model.localModels": "Modelos locais",
   "model.local.noTools": "Sem ferramentas",
+  "model.favorite.add": "Adicionar {name} aos favoritos",
+  "model.favorite.remove": "Remover {name} dos favoritos",
   "model.localHint": "Rode este agente com um modelo que já está na sua máquina.",
   "model.apiKeyHint": "Usa sua chave de API. O provedor cobra pelo uso.",
   "model.chooseHint": "Escolha um modelo para este bot.",
