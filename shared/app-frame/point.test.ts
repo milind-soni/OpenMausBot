@@ -118,6 +118,18 @@ describe("the page's point script", () => {
     expect(posted).toHaveLength(1);
   });
 
+  it("keeps a capital after leading punctuation, and names a closed select by its chosen option", () => {
+    const { say } = boot();
+    document.body.innerHTML = `<p class="cap" style="text-transform:capitalize">(note) <b>"</b>two</p>
+      <select id="plan"><option>Free</option><option selected>Pro</option></select>`;
+    say(pointMessage(true));
+    click(document.querySelector(".cap")!);
+    expect(posted.at(-1)).toMatchObject({ params: { tag: "p", text: '(Note) "Two' } });
+    say(pointMessage(true));
+    click(document.querySelector("#plan")!);
+    expect(posted.at(-1)).toMatchObject({ params: { tag: "select", text: "Pro" } });
+  });
+
   it("names a keyed part by its key, and Escape ends point mode with word to the parent", () => {
     const { say } = boot();
     say(pointMessage(true));

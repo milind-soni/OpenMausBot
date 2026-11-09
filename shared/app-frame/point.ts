@@ -121,17 +121,18 @@ export const APP_POINT_SOURCE = `(function () {
     }
     return parts.join(" > ");
   };
-  // state.last is the last character written, so a capitalized word that spans inline tags keeps one capital.
+  // state.start is true at a word start; punctuation before the first letter keeps it, as CSS capitalize does ("(Note)"),
+  // and it carries across inline tags so a word split by them gets one capital.
   var cased = function (text, transform, state) {
-    var prev = state.last;
-    var out = transform === "uppercase" ? text.toUpperCase() : transform === "lowercase" ? text.toLowerCase()
-      : transform === "capitalize" ? text.replace(/[\\s\\S]/g, function (letter) {
-        var start = /\\s/.test(prev) && /\\S/.test(letter);
-        prev = letter;
-        return start ? letter.toUpperCase() : letter;
-      }) : text;
-    if (text) state.last = text.slice(-1);
-    return out;
+    if (transform === "uppercase") return text.toUpperCase();
+    if (transform === "lowercase") return text.toLowerCase();
+    return text.replace(/[\\s\\S]/g, function (letter) {
+      if (/\\s/.test(letter)) { state.start = true; return letter; }
+      if (!/[\\p{L}\\p{N}]/u.test(letter)) return letter;
+      var start = state.start;
+      state.start = false;
+      return start && transform === "capitalize" ? letter.toUpperCase() : letter;
+    });
   };
   // innerText runs a badge (an inline-block span) into the next word ("CloudRestore"): any box that is not plain inline
   // is a word break on screen, so it is one here too.
@@ -146,16 +147,18 @@ export const APP_POINT_SOURCE = `(function () {
     var summary = closed && Array.prototype.find.call(node.children, function (child) { return child.tagName === "SUMMARY"; });
     var shown = style.contentVisibility === "hidden" ? [] : closed ? (summary ? [summary] : []) : node.childNodes;
     var block = !/^(inline|contents)?$/.test(display) || node.tagName === "BR";
-    if (block) state.last = " ";
+    if (block) state.start = true;
     var words = Array.prototype.map.call(shown, function (child) {
       return child.nodeType === 3 ? (hidden ? "" : cased(child.data, style.textTransform, state)) : wordsOf(child, state);
     }).join("");
-    if (block) state.last = " ";
+    if (block) state.start = true;
     return block ? " " + words + " " : words;
   };
   var describe = function (element) {
     var tag = element.tagName.toLowerCase();
-    var text = wordsOf(element, { last: " " }).trim() || element.getAttribute("aria-label") || element.getAttribute("alt") ||
+    // A closed single select shows only its chosen option, not every option.
+    var chosen = tag === "select" && !element.multiple && !(element.size > 1);
+    var text = (chosen ? (element.selectedOptions[0] ? element.selectedOptions[0].text : "") : wordsOf(element, { start: true })).trim() || element.getAttribute("aria-label") || element.getAttribute("alt") ||
       element.getAttribute("placeholder") || element.getAttribute("title") || "";
     return { tag: tag, role: element.getAttribute("role") || ROLES[tag] || "", text: clip(text, 200), selector: clip(selectorOf(element), 300),
       html: clip(element.outerHTML, 600) };
