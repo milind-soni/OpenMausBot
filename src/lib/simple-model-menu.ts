@@ -114,7 +114,7 @@ export function repeatedModelLabels(options: readonly ModelOption[]): Set<string
 
 function listedModels(instance: InstanceInfo) {
   const signedOut = !isCustomOnly(instance) && needsSignIn(instance);
-  const own = isCustomOnly(instance) || signedOut ? [] : modelChoices(instance, instance.models.options.filter((option) => !option.custom));
+  const own = signedOut ? [] : modelChoices(instance, instance.models.options.filter((option) => !option.custom));
   const local = partitionCustomModels(instance.models.options.filter((option) => option.custom));
   return { signedOut, own, all: [...own, ...local.pinned, ...local.rest] };
 }
