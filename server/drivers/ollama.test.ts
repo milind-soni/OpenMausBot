@@ -238,7 +238,6 @@ describe("the chat engine on Ollama", () => {
     const { url } = await fakeOllama({ models: [LLAMA, GEMMA] });
     const instance = await create({ url: `${url}/v1`, catalog: "ollama" });
     try {
-      await instance.refreshModels?.();
       expect(instance.models).toEqual({
         default: "llama3.2:latest",
         options: [
@@ -253,14 +252,14 @@ describe("the chat engine on Ollama", () => {
   it("is unavailable, saying why, while Ollama is not running or has nothing to run", async () => {
     const closed = await create({ url: `${await closedPort()}/v1`, catalog: "ollama" });
     try {
-      expect(await closed.snapshot()).toMatchObject({ state: "unavailable", reason: expect.stringMatching(/^Ollama isn't running at /) });
+      expect(await closed.snapshot()).toMatchObject({ state: "unavailable", reason: expect.stringMatching(/^Ollama isn't running at /), ollama: { state: "not-running" } });
       expect(closed.models).toEqual({ default: "", options: [] });
     } finally { await closed.dispose(); }
     const { url } = await fakeOllama({ models: [] });
     const empty = await create({ url: `${url}/v1`, catalog: "ollama" });
     try {
       await empty.refreshModels?.();
-      expect(await empty.snapshot()).toMatchObject({ state: "unavailable", reason: expect.stringContaining("ollama pull llama3.2") });
+      expect(await empty.snapshot()).toMatchObject({ state: "unavailable", reason: expect.stringContaining("ollama pull llama3.2"), ollama: { state: "no-models", url } });
     } finally { await empty.dispose(); }
   });
 

@@ -40,6 +40,7 @@ const DEFAULT_MODELS: ModelCatalog = {
 
 const NO_MODELS: ModelCatalog = { default: "", options: [] };
 const OLLAMA_STATUS_MS = 5_000;
+const OLLAMA_FIRST_LIST_MS = 2_000;
 
 const localFacts = ({ bytes, parameters, quantization, tools, vision }: OllamaModel) => ({
   ...(bytes ? { bytes } : {}), ...(parameters ? { parameters } : {}), ...(quantization ? { quantization } : {}),
@@ -341,6 +342,9 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       return served.model;
     } : undefined;
 
+    // The first list says which models can call tools, and is what the engine list shows right after adding Ollama.
+    if (loading && isOllamaServer(config)) await Promise.race([loading, new Promise((done) => { setTimeout(done, OLLAMA_FIRST_LIST_MS).unref(); })]);
+
     const runtime = createOpenAIChatRuntime({
       input,
       driverKind: DRIVER_KIND,
@@ -356,7 +360,10 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       toolUse: (model) => fact(model)?.tools ?? true,
       ...(ollamaCandidate ? {
         serverUnavailable: async () => {
-          return isOllamaServer(config) ? ollamaUnavailable(await checkOllama()) : null;
+          if (!isOllamaServer(config)) return null;
+          const status = await checkOllama();
+          const reason = ollamaUnavailable(status);
+          return reason ? { reason, ollama: { state: status.state, url: status.url, ...(status.problem ? { problem: status.problem } : {}) } } : null;
         },
       } : {}),
       requestBody: (model, messages, stream) => ({

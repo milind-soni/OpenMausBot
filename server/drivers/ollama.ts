@@ -1,6 +1,7 @@
 // Ollama's own API (docs/api.md in github.com/ollama/ollama): /api/tags lists the pulled models with their size and
 // details, /api/version answers with a version, and /api/show names a model's capabilities ("tools", "vision") from
 // v0.6.4. A default install takes no key on these routes or on the OpenAI-compatible ones under /v1.
+import type { LocalModel, OllamaState, OllamaStatus } from "../../shared/local-model.ts";
 import { isContextName } from "./ollama-context.ts";
 
 export const OLLAMA_PORT = "11434";
@@ -11,31 +12,8 @@ export const OLLAMA_PLACEHOLDER_KEY = "ollama";
 export const OLLAMA_PULL_COMMAND = "ollama pull llama3.2";
 
 /** A pulled model, as /api/tags and /api/show describe it. */
-export interface OllamaModel {
-  name: string;
-  /** Bytes on disk. */
-  bytes?: number;
-  /** As Ollama writes it, such as "3.2B". */
-  parameters?: string;
-  /** As Ollama writes it, such as "Q4_K_M". */
-  quantization?: string;
-  /** Absent when the server does not say (before v0.6.4). */
-  tools?: boolean;
-  vision?: boolean;
-}
-
-/** `ready`: running with models. `no-models`: running, nothing pulled. `not-running`: nothing listens there.
- * `unreachable`: no answer in time, the host or network is unknown, or something else answers there. */
-export type OllamaState = "ready" | "no-models" | "not-running" | "unreachable";
-
-export interface OllamaStatus {
-  state: OllamaState;
-  url: string;
-  version?: string;
-  models: OllamaModel[];
-  /** Why an `unreachable` server could not be used. */
-  problem?: "timeout" | "network" | "not-ollama";
-}
+export type OllamaModel = LocalModel;
+export type { OllamaState, OllamaStatus };
 
 /** The server's own address: the base URL without the /v1 the OpenAI-compatible routes sit under. */
 export function ollamaOrigin(baseUrl: string): string {
