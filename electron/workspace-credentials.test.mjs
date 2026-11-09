@@ -61,6 +61,15 @@ describe("workspace credential migration", () => {
     });
   });
 
+  it("moves a custom endpoint's key to the store and leaves its address, model and protocol in the file", () => {
+    const result = migrateWorkspaceCredentials({
+      decider: { provider: "custom", customKey: "gw-secret", customBaseUrl: "https://gw.example.com/v1", customModel: "m-1", customApi: "decisions" },
+    }, {});
+    expect(result.credentials).toEqual({ customDeciderKey: "gw-secret" });
+    expect(result.config.decider).toEqual({ provider: "custom", customBaseUrl: "https://gw.example.com/v1", customModel: "m-1", customApi: "decisions" });
+    expect(workspaceCredentialEnv(result.credentials)).toEqual({ OMB_CUSTOM_DECIDER_KEY: "gw-secret" });
+  });
+
   it("is idempotent: a second boot over migrated output changes nothing", () => {
     const first = migrateWorkspaceCredentials(
       { xai: { key: "xai-secret" }, tts: { key: "tts-secret", voice: "narrator" } },

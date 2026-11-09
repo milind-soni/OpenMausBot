@@ -57,7 +57,6 @@ const click = (node: Node) => (node.props.onClick as () => void)();
 const type = (node: Node, value: string) => (node.props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 const status = (decider: NonNullable<ConfigStatus["decider"]>) => ({ decider } as ConfigStatus);
-const change = (node: Node, value: string) => (node.props.onChange as (event: { target: { value: string } }) => void)({ target: { value } });
 const runEffects = () => { for (const effect of fixture.effects) effect(); };
 const SHARED = { configured: true, keySource: "shared", sharedKey: true } as const;
 const openrouter = (extra: Partial<NonNullable<ConfigStatus["decider"]>> = {}) =>
@@ -70,7 +69,8 @@ const MODELS = {
     { id: "acme/zippy", name: "Acme: Zippy", group: "more" },
   ],
 };
-const optionsOf = (node: Node) => nodes(node.props.children).filter((child) => child.type === "option").map((child) => child.props.value);
+const optionsOf = (node: Node) => (node.props.options as Array<{ value: string }>).map((option) => option.value);
+const pickOption = (node: Node, value: string) => (node.props.onChange as (value: string) => void)(value);
 
 beforeEach(() => {
   fixture.values = [];
@@ -102,15 +102,31 @@ describe("DecisionModelSettings", () => {
     expect(helpersStatusLine(null)).toBe("Decisões: sem configuração · Extração: sem configuração");
   });
 
-  it("offers both providers, with Jev selected for an existing install and no model picker", () => {
+  it("offers every provider, with Jev selected for an existing install and no model picker", () => {
     const view = render();
     expect(view.provider!.props.value).toBe("jev");
-    expect(optionsOf(view.provider!)).toEqual(["jev", "openrouter"]);
+    expect(optionsOf(view.provider!)).toEqual(["jev", "openrouter", "custom"]);
     expect(view.html).toContain("TypeSafe Jev");
     expect(view.model).toBeUndefined();
-    expect(fixture.effects).toHaveLength(1);
     runEffects();
     expect(fixture.api).not.toHaveBeenCalled();
+  });
+
+  it("asks a custom endpoint for its base URL, model and protocol, and saves its key in its own slot", async () => {
+    fixture.config = status({ provider: "custom", model: "m-1", api: "decisions", baseUrl: "https://gw.example.com/v1", configured: false, enabled: false, jobs: { roomRouting: true } });
+    let view = render();
+    expect(view.html).toContain('value="https://gw.example.com/v1"');
+    expect(view.html).toContain('value="m-1"');
+    expect(view.html).toContain("Endpoint API key");
+    expect(view.html).not.toContain("typesafe.ai");
+    fixture.api.mockResolvedValue(fixture.config);
+    type(view.input, "gw-key");
+    view = render();
+    click(view.save);
+    await flush();
+    expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { customKey: "gw-key" } }) });
+    expect(deciderFailureText({ reason: "malformed" }, false, "custom")).toContain("Check the protocol and model ID.");
+    expect(deciderFailureText({ reason: "http_error", status: 500 }, false, "custom")).toBe("Your endpoint sent back an error (500).");
   });
 
   it("lists the coming-soon jobs with no switch", () => {
@@ -250,14 +266,14 @@ describe("DecisionModelSettings", () => {
       fixture.config = status({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
       fixture.api.mockResolvedValueOnce(openrouter({ configured: false, enabled: false }));
       type(render().input, "half-typed");
-      change(render().provider!, "openrouter");
+      pickOption(render().provider!, "openrouter");
       await flush();
       expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { provider: "openrouter" } }) });
       const view = render();
       expect(view.provider!.props.value).toBe("openrouter");
       expect(view.input.props.value).toBe("");
       fixture.api.mockResolvedValueOnce(status({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } }));
-      change(view.provider!, "jev");
+      pickOption(view.provider!, "jev");
       await flush();
       expect(fixture.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { provider: "jev" } }) });
     });
@@ -281,9 +297,8 @@ describe("DecisionModelSettings", () => {
       expect(fixture.api).toHaveBeenCalledWith("/api/decider/models");
       let view = render();
       expect(optionsOf(view.model!)).toEqual(["openai/gpt-4.1-nano", "meta-llama/llama-3.3-70b-instruct", "acme/zippy"]);
-      expect(view.html).toContain("Recommended");
-      expect(view.html).toContain("More models");
-      expect(view.html).toContain("Meta: Llama 3.3 70B Instruct");
+      expect((view.model!.props.options as Array<{ group?: string }>).map((option) => option.group)).toEqual(["Recommended", "Recommended", "More models"]);
+      expect((view.model!.props.options as Array<{ label: string }>)[1]!.label).toBe("Meta: Llama 3.3 70B Instruct");
       expect(view.html).not.toContain("built-in list");
       runEffects();
       expect(fixture.api).toHaveBeenCalledTimes(1);
@@ -311,7 +326,7 @@ describe("DecisionModelSettings", () => {
 
     it("choosing a model saves it", async () => {
       fixture.api.mockResolvedValueOnce(openrouter({ model: "acme/zippy" }));
-      change(render().model!, "acme/zippy");
+      pickOption(render().model!, "acme/zippy");
       await flush();
       expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { openrouterModel: "acme/zippy", openrouterApi: "chat" } }) });
       expect(render().model!.props.value).toBe("acme/zippy");

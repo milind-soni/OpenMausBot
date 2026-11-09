@@ -6,15 +6,28 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
-import { Select } from "./Select";
+import { MenuSelect, type MenuSelectOption } from "./MenuSelect";
 import { WorkersAiKeyCard } from "./WorkersAiKeyCard";
 import { openKeySettings } from "./keys/key-focus";
 
 const KEY_URL = { jev: "https://typesafe.ai", openrouter: "https://openrouter.ai/keys" } as const;
+const KEY_SLOT = {
+  jev: { credential: "jevApiKey", field: "key" },
+  openrouter: { credential: "openrouterDeciderKey", field: "openrouterKey" },
+  custom: { credential: "customDeciderKey", field: "customKey" },
+} as const;
+const COPY: Record<"jev" | "openrouter" | "custom", { master: LocaleKey; needsKey: LocaleKey; keyLabel: LocaleKey; placeholder: LocaleKey }> = {
+  jev: { master: "decider.master", needsKey: "decider.masterNeedsKey", keyLabel: "decider.key.label", placeholder: "decider.key.placeholder" },
+  openrouter: {
+    master: "decider.openrouter.master", needsKey: "decider.masterNeedsKey.openrouter",
+    keyLabel: "decider.openrouter.key.label", placeholder: "decider.openrouter.key.placeholder",
+  },
+  custom: { master: "decider.custom.master", needsKey: "decider.custom.masterNeedsKey", keyLabel: "decider.custom.key.label", placeholder: "decider.custom.key.placeholder" },
+};
 /** The room decision budget in server/decider/room-routing.ts; slower falls back to the lead. */
 const ROOM_BUDGET_MS = 1_500;
 
-type Provider = "jev" | "openrouter";
+type Provider = "jev" | "openrouter" | "custom";
 type ModelList = { source: "openrouter" | "builtin"; models: Array<{ id: string; name: string; group: "recommended" | "more"; api?: "chat" | "decisions" }> };
 type TestResult = { ok: true; latencyMs: number } | { ok: false; reason: string; status?: number };
 
@@ -45,6 +58,17 @@ const OPENROUTER_FAILURES: Record<string, LocaleKey> = {
   malformed: "decider.openrouter.error.malformed",
 };
 
+const CUSTOM_FAILURES: Record<string, LocaleKey> = {
+  ...FAILURES,
+  rejected: "decider.custom.error.rejected",
+  unreachable: "decider.custom.error.unreachable",
+  timeout: "decider.custom.error.timeout",
+  rate_limited: "decider.custom.error.rateLimited",
+  overloaded: "decider.custom.error.overloaded",
+  malformed: "decider.custom.error.malformed",
+  misconfigured: "decider.custom.error.misconfigured",
+};
+
 const WORKERS_AI_FAILURES: Record<string, LocaleKey> = {
   ...FAILURES,
   rejected: "decider.workersAi.error.rejected",
@@ -55,8 +79,8 @@ const WORKERS_AI_FAILURES: Record<string, LocaleKey> = {
   malformed: "decider.workersAi.error.malformed",
 };
 
-const BY: Record<"jev" | "workersai" | "openrouter", LocaleKey> = {
-  jev: "decider.status.byJev", workersai: "decider.status.byWorkersAi", openrouter: "decider.status.byOpenRouter",
+const BY: Record<"jev" | "workersai" | "openrouter" | "custom", LocaleKey> = {
+  jev: "decider.status.byJev", workersai: "decider.status.byWorkersAi", openrouter: "decider.status.byOpenRouter", custom: "decider.status.byCustom",
 };
 
 /** Who decides and who reads, in a word each: the person's own key, the Cloud plan's, or nothing yet. */
@@ -77,6 +101,11 @@ export function deciderFailureText(result: { reason: string; status?: number }, 
     const key = WORKERS_AI_FAILURES[result.reason];
     return key ? t(key) : t("decider.error.other");
   }
+  if (provider === "custom") {
+    if (result.reason === "http_error") return t("decider.custom.error.http", { status: String(result.status ?? "?") });
+    const key = CUSTOM_FAILURES[result.reason];
+    return key ? t(key) : t("decider.error.other");
+  }
   if (provider === "openrouter") {
     // 402 is OpenRouter's answer for an account with no credits left.
     if (result.reason === "http_error" && result.status === 402) return t("decider.openrouter.error.credits");
@@ -93,11 +122,53 @@ export function deciderFailureText(result: { reason: string; status?: number }, 
 
 const COMING_SOON: LocaleKey[] = ["decider.jobs.browserClicks", "decider.jobs.toolSelection", "decider.jobs.placement"];
 
+/** A model saved by id stays choosable even when the list no longer carries it. */
+export function modelOptions(saved: string | undefined, models: ModelList | null): MenuSelectOption[] {
+  const listed = models?.models ?? [];
+  const groupLabel = { recommended: t("decider.model.recommended"), more: t("decider.model.more") };
+  return [
+    ...(saved && !listed.some((model) => model.id === saved) ? [{ value: saved, label: saved }] : []),
+    ...(["recommended", "more"] as const).flatMap((group) =>
+      listed.filter((model) => model.group === group).map((model) => ({ value: model.id, label: model.name, group: groupLabel[group] }))),
+  ];
+}
+
+const asProvider = (value: string | undefined): Provider => (value === "openrouter" || value === "custom" ? value : "jev");
+
+const FIELD_WIDTH = "w-60 max-w-full";
+const TEXT_INPUT = "w-60 max-w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none disabled:opacity-50";
+
+/** A text setting saved when it loses focus or on Enter, and only when it changed. */
+function SavedText({ saved, onSave, disabled, label, placeholder, testId }: {
+  saved: string; onSave: (value: string) => void; disabled: boolean; label: string; placeholder: string; testId: string;
+}) {
+  const [value, setValue] = useState(saved);
+  useEffect(() => setValue(saved), [saved]);
+  const commit = () => { if (value.trim() !== saved) onSave(value.trim()); };
+  return (
+    <input
+      type="text"
+      data-testid={testId}
+      value={value}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => event.key === "Enter" && commit()}
+      disabled={disabled}
+      placeholder={placeholder}
+      aria-label={label}
+      autoComplete="off"
+      spellCheck={false}
+      className={TEXT_INPUT}
+    />
+  );
+}
+
 export function DecisionModelSettings() {
   const { state, dispatch } = useStore();
   const decider = state.config?.decider;
-  const provider: Provider = decider?.provider === "openrouter" ? "openrouter" : "jev";
+  const provider = asProvider(decider?.provider);
   const openrouter = provider === "openrouter";
+  const custom = provider === "custom";
   const configured = decider?.configured ?? false;
   const included = configured && decider?.included === true;
   const usingShared = openrouter && configured && decider?.keySource === "shared";
@@ -149,7 +220,7 @@ export function DecisionModelSettings() {
     return () => { cancelled = true; };
   }, [openrouter, models]);
 
-  const choose = (decision: { provider: Provider } | { openrouterModel: string; openrouterApi: "chat" | "decisions" }) => {
+  const choose = (decision: { provider: Provider } | { openrouterModel: string; openrouterApi: "chat" | "decisions" } | { customApi: "systemone" | "decisions" }) => {
     setValue("");
     setVerdict(null);
     void patch(decision);
@@ -162,8 +233,8 @@ export function DecisionModelSettings() {
     setVerdict(null);
     try {
       const status = window.ogb?.setCredential
-        ? await window.ogb.setCredential(openrouter ? "openrouterDeciderKey" : "jevApiKey", draft)
-        : await api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ decider: { [openrouter ? "openrouterKey" : "key"]: draft } }) });
+        ? await window.ogb.setCredential(KEY_SLOT[provider].credential, draft)
+        : await api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ decider: { [KEY_SLOT[provider].field]: draft } }) });
       applied(status);
       setValue("");
     } catch (cause) {
@@ -185,9 +256,9 @@ export function DecisionModelSettings() {
       setVerdict(result.ok
         ? {
           ok: true,
-          text: openrouter
+          text: openrouter || custom
             ? [
-              t(testingShared ? "decider.openrouter.test.okShared" : "decider.openrouter.test.ok", { ms: String(result.latencyMs) }),
+              t(custom ? "decider.custom.test.ok" : testingShared ? "decider.openrouter.test.okShared" : "decider.openrouter.test.ok", { ms: String(result.latencyMs) }),
               ...(result.latencyMs > ROOM_BUDGET_MS ? [t("decider.test.slow")] : []),
             ].join(" ")
             : t("decider.test.ok", { ms: String(result.latencyMs) }),
@@ -208,50 +279,65 @@ export function DecisionModelSettings() {
       </section>
       <WorkersAiKeyCard failureText={(result) => deciderFailureText(result, false, "workersai")} />
       <SettingRow title={t("decider.provider.label")}>
-        <Select className="w-48"
+        <MenuSelect className={FIELD_WIDTH}
           data-testid="decider-provider"
           value={provider}
-          onChange={(event) => choose({ provider: event.target.value === "openrouter" ? "openrouter" : "jev" })}
+          options={[
+            { value: "jev", label: t("decider.provider.jev") },
+            { value: "openrouter", label: t("decider.provider.openrouter") },
+            { value: "custom", label: t("decider.provider.custom") },
+          ]}
+          onChange={(value) => choose({ provider: asProvider(value) })}
           disabled={switching || !state.config}
-          aria-label={t("decider.provider.label")}
-        >
-          <option value="jev">{t("decider.provider.jev")}</option>
-          <option value="openrouter">{t("decider.provider.openrouter")}</option>
-        </Select>
+          ariaLabel={t("decider.provider.label")}
+        />
       </SettingRow>
+      {custom && (
+        <>
+          <SettingRow title={t("decider.custom.baseUrl")} subtitle={t("decider.custom.baseUrlDetail")}>
+            <SavedText testId="decider-custom-base-url" saved={decider?.baseUrl ?? ""} disabled={switching}
+              label={t("decider.custom.baseUrl")} placeholder={t("decider.custom.baseUrlPlaceholder")}
+              onSave={(customBaseUrl) => void patch({ customBaseUrl })} />
+          </SettingRow>
+          <SettingRow title={t("decider.custom.model")}>
+            <SavedText testId="decider-custom-model" saved={decider?.model ?? ""} disabled={switching}
+              label={t("decider.custom.model")} placeholder={t("decider.custom.modelPlaceholder")}
+              onSave={(customModel) => void patch({ customModel })} />
+          </SettingRow>
+          <SettingRow title={t("decider.custom.api")}>
+            <MenuSelect className={FIELD_WIDTH}
+              data-testid="decider-custom-api"
+              value={decider?.api === "decisions" ? "decisions" : "systemone"}
+              options={[
+                { value: "systemone", label: t("decider.custom.api.systemone") },
+                { value: "decisions", label: t("decider.custom.api.decisions") },
+              ]}
+              onChange={(value) => choose({ customApi: value === "decisions" ? "decisions" : "systemone" })}
+              disabled={switching}
+              ariaLabel={t("decider.custom.api")}
+            />
+          </SettingRow>
+        </>
+      )}
       {openrouter && (
         <SettingRow title={t("decider.model.label")} subtitle={models?.source === "builtin" ? t("decider.model.builtinNote") : undefined}>
-          <Select className="w-64 max-w-full"
+          <MenuSelect className={FIELD_WIDTH}
             data-testid="decider-model"
             value={decider?.model ?? ""}
-            onChange={(event) => choose({
-              openrouterModel: event.target.value,
-              openrouterApi: models?.models.find((model) => model.id === event.target.value)?.api ?? "chat",
-            })}
+            options={modelOptions(decider?.model, models)}
+            onChange={(id) => choose({ openrouterModel: id, openrouterApi: models?.models.find((model) => model.id === id)?.api ?? "chat" })}
             disabled={switching}
-            aria-label={t("decider.model.label")}
-          >
-            {decider?.model && !models?.models.some((model) => model.id === decider.model) && (
-              <option value={decider.model}>{decider.model}</option>
-            )}
-            {(["recommended", "more"] as const).map((group) => {
-              const inGroup = models?.models.filter((model) => model.group === group) ?? [];
-              return inGroup.length > 0 && (
-                <optgroup key={group} label={t(group === "recommended" ? "decider.model.recommended" : "decider.model.more")}>
-                  {inGroup.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}
-                </optgroup>
-              );
-            })}
-          </Select>
+            ariaLabel={t("decider.model.label")}
+          />
         </SettingRow>
       )}
       <SettingRow
-        title={t(openrouter ? "decider.openrouter.master" : "decider.master")}
-        subtitle={configured ? undefined : t(openrouter ? "decider.masterNeedsKey.openrouter" : "decider.masterNeedsKey")}
+        title={t(COPY[provider].master)}
+        subtitle={configured ? undefined : t(COPY[provider].needsKey)}
       >
         <Switch
           data-testid="decider-master"
-          aria-label={t(openrouter ? "decider.openrouter.master" : "decider.master")}
+          aria-label={t(COPY[provider].master)}
           checked={enabled}
           disabled={!configured || switching || !state.config}
           onClick={() => void patch({ enabled: !enabled })}
@@ -259,7 +345,7 @@ export function DecisionModelSettings() {
         />
       </SettingRow>
 
-      <Card title={t(openrouter ? "decider.openrouter.key.label" : "decider.key.label")}>
+      <Card title={t(COPY[provider].keyLabel)}>
         <div role="status" className="mb-2 flex items-center gap-2 text-[13px] text-ink-secondary">
           <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
           <span className={configured ? "text-success" : undefined}>
@@ -297,8 +383,8 @@ export function DecisionModelSettings() {
             onChange={(event) => { setVerdict(null); setError(null); setValue(event.target.value); }}
             onKeyDown={(event) => event.key === "Enter" && void save()}
             disabled={saving}
-            placeholder={ownKey ? t("keys.replace") : t(usingShared ? "decider.openrouter.key.overridePlaceholder" : openrouter ? "decider.openrouter.key.placeholder" : "decider.key.placeholder")}
-            aria-label={t(openrouter ? "decider.openrouter.key.label" : "decider.key.label")}
+            placeholder={ownKey ? t("keys.replace") : t(usingShared ? "decider.openrouter.key.overridePlaceholder" : COPY[provider].placeholder)}
+            aria-label={t(COPY[provider].keyLabel)}
             autoComplete="off"
             spellCheck={false}
             className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
@@ -328,14 +414,14 @@ export function DecisionModelSettings() {
         </div>
         {error && <p role="alert" className="mt-1 text-[12px] text-danger">{error}</p>}
         {verdict && <p role="status" className={cn("mt-1 text-[12px]", verdict.ok ? "text-success" : "text-danger")}>{verdict.text}</p>}
-        {!usingShared && (
+        {!usingShared && provider !== "custom" && (
           <a
             href={KEY_URL[provider]}
             target="_blank"
             rel="noopener noreferrer"
             className="mt-2 inline-flex cursor-pointer items-center gap-1 text-[12px] text-accent hover:underline"
           >
-            {t(openrouter ? "decider.openrouter.key.getKey" : "decider.key.getKey")}
+            {t(provider === "openrouter" ? "decider.openrouter.key.getKey" : "decider.key.getKey")}
             <ExternalLink size={11} aria-hidden="true" />
           </a>
         )}

@@ -41,7 +41,7 @@ export interface KeyTarget {
 export type KeyId =
   | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
   | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
-  | "jev" | "openrouterHelper" | "workersAi" | "imageOpenai" | "imageGemini" | "imageCustom";
+  | "jev" | "openrouterHelper" | "workersAi" | "customDecider" | "imageOpenai" | "imageGemini" | "imageCustom";
 
 export type KeyMark = { driverKind: string; preset?: ProviderIconPreset } | { icon: LucideIcon };
 
@@ -182,6 +182,10 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     words: ["cloudflare", "workers ai", "clef", "clairic", "decisions", "helper"], mark: { icon: Zap }, kind: "elsewhere",
     opens: "decisionModel", whereKey: "keys.where.decisions",
     status: (config) => flag(config.savedKeys?.workersAiToken ?? { configured: config.helpers?.own.workersAi === true }) },
+  { id: "customDecider", section: "helpers", labelKey: "decider.custom.key.label", purposeKey: "keys.purpose.customDecider", name: "Custom endpoint", env: ["OMB_CUSTOM_DECIDER_KEY"],
+    words: ["custom", "endpoint", "gateway", "system one", "decisions", "helper"], mark: { icon: Zap }, kind: "elsewhere",
+    opens: "decisionModel", whereKey: "keys.where.decisions",
+    status: (config) => flag(config.savedKeys?.customDeciderKey ?? { configured: false }) },
   { id: "imageOpenai", section: "helpers", labelKey: "keys.label.imageOpenai", purposeKey: "keys.purpose.imageOpenai", name: "OpenAI", env: ["OMB_OPENAI_IMAGE_KEY"],
     words: ["openai", "image", "images", "pictures", "avatar", "gpt image"], mark: { icon: Image }, kind: "key",
     target: { patch: (value) => ({ imageGen: { key: value } }), slot: "openaiImageApiKey",

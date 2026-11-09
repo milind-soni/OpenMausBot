@@ -1,7 +1,7 @@
 // No `reasoning` parameter is sent, and `provider.require_parameters` keeps the request on hosts that honour the
 // schema. Error bodies are never read into a message: they can echo the request.
 import type { BackendRequest, BackendResult, DeciderBackend, DeciderQuestion, OpenRouterApi } from "./types.ts";
-import { isLoopback } from "../provider-key-check.ts";
+import { keySafeUrl } from "../provider-key-check.ts";
 import { jevRequestBody, parseJevResponse, questionsFit, refusal } from "./jev.ts";
 
 export const OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
@@ -15,18 +15,8 @@ const MAX_TOKENS_PER_KEY_CHAR = 1;
 const MODEL_ECHO_MAX = 80;
 
 /** Null when a key must not be sent there: https anywhere, plain http only to this machine. */
-export function openrouterEndpoint(baseUrl?: string | null, path = "chat/completions"): URL | null {
-  const root = (baseUrl?.trim() || OPENROUTER_DEFAULT_BASE_URL).replace(/\/+$/, "");
-  let url: URL;
-  try {
-    url = new URL(`${root}/${path}`);
-  } catch {
-    return null;
-  }
-  if (url.username || url.password) return null;
-  if (url.protocol === "https:") return url;
-  return url.protocol === "http:" && isLoopback(url.hostname) ? url : null;
-}
+export const openrouterEndpoint = (baseUrl?: string | null, path = "chat/completions"): URL | null =>
+  keySafeUrl(baseUrl?.trim() || OPENROUTER_DEFAULT_BASE_URL, path);
 
 /** OpenRouter serves it at /api/alpha/decisions, beside /api/v1: hence the `../`. */
 export const openrouterDecisionsEndpoint = (baseUrl?: string | null): URL | null => openrouterEndpoint(baseUrl, "../alpha/decisions");
