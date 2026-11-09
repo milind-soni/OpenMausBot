@@ -105,8 +105,13 @@ describe("describeQuiet", () => {
 
   it("does not blame a rate limit while the request is still open", () => {
     const text = describeQuiet("OpenCode", { kind: "waiting-model", nearFullContext: false }, 60_000, 900_000);
-    expect(text).toBe("OpenCode is waiting on its model: no reply for 60 s, but its request is still open. Its model provider may be slow or busy; this turn stops on its own after 15 min.");
+    expect(text).toBe("OpenCode is waiting on its model: no reply for 60 s, but its request is still open. Its model provider may be slow or busy; the turn stops after 15 min of silence.");
     expect(text).not.toContain("rate limit");
+  });
+
+  it("states the silence guard without rounding it up", () => {
+    expect(describeQuiet("OpenCode", { kind: "waiting-model", nearFullContext: false }, 60_000, 90_000))
+      .toContain("the turn stops after 90 s of silence");
   });
 
   it("leaves out the stop time when the prompt silence guard is off", () => {
