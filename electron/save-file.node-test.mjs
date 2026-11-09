@@ -276,7 +276,7 @@ describe("openFolder for a folder a chat links to", () => {
   it("opens an existing folder by its normalised absolute path", async () => {
     const { opened, open } = shell();
     assert.equal(await openFolder(path.join(botHome, "..", path.basename(botHome)), { open }), "opened");
-    assert.deepEqual(opened, [fs.realpathSync(botHome)]);
+    assert.deepEqual(opened, [await fs.promises.realpath(botHome)]);
   });
 
   it("never opens a file (that would run it): the page keeps its save-a-copy", async () => {

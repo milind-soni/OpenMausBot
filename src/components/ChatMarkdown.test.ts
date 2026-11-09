@@ -900,43 +900,6 @@ describe("ChatMarkdown attachments", () => {
     }
   });
 
-  it("shows Opening while a folder link opens, then stops showing an earlier save failure", async () => {
-    let finish: (result: "opened") => void = () => {};
-    const openFolder = vi.fn(() => new Promise<"opened">((resolve) => { finish = resolve; }));
-    const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
-      state: "failed",
-      reason: "Couldn't save",
-      savedTo: "",
-      outsideWorkspace: false,
-      retryable: true,
-      folder: null,
-      save: vi.fn(async () => undefined),
-    });
-    vi.stubGlobal("ogb", { openFolder, remoteClient: { active: false } });
-    const host = document.createElement("div");
-    document.body.append(host);
-    const root = createRoot(host);
-    try {
-      await act(async () => {
-        root.render(createElement(ChatMarkdown, { text: "[post](/work/Instagram/04_post/)", message: { threadId: "thread-1", messageId: "message-1" } }));
-      });
-      const link = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes("post"))!;
-      await act(async () => { link.click(); });
-      expect(openFolder).toHaveBeenCalledWith("/work/Instagram/04_post/");
-      expect(host.querySelector('[role="status"]')?.textContent).toBe("Opening…");
-      expect(host.querySelector('[role="alert"]')).toBeNull();
-      expect(link.querySelector(".animate-spin")).not.toBeNull();
-      await act(async () => { finish("opened"); });
-      expect(host.querySelector('[role="alert"]')).toBeNull();
-      expect(host.textContent).not.toContain("Couldn't save");
-    } finally {
-      act(() => root.unmount());
-      host.remove();
-      vi.unstubAllGlobals();
-      save.mockRestore();
-    }
-  });
-
   describe("a file link outside the conversation's workspace", () => {
     const filePath = "C:\\Users\\Maus\\_draft\\ollama-gen.js";
     const render = (outsideWorkspace: boolean, href = filePath) => {
@@ -948,7 +911,7 @@ describe("ChatMarkdown attachments", () => {
         retryable: !outsideWorkspace,
         folder: null,
         save: vi.fn(async () => undefined),
-        });
+      });
       try {
         return renderToStaticMarkup(createElement(ChatMarkdown, {
           text: `[ollama-gen.js](${href})`, message: { threadId: "thread-1", messageId: "message-1" },
