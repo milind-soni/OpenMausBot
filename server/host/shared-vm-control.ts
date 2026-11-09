@@ -68,9 +68,13 @@ export function createSharedVmControl(deps: SharedVmControlDeps) {
     return [...new Set(keys)];
   };
 
+  /** Held if any key is held, with the first sign-in plea on any of them, so a hold on one computer never hides a plea on another. */
   const merged = (keys: string[]): ControlSnapshot => {
     const snapshots = keys.map(key => control.snapshot(key));
-    return snapshots.find(snapshot => snapshot.held) ?? snapshots.find(snapshot => snapshot.helpReason !== null) ?? snapshots[0]!;
+    const held = snapshots.find(snapshot => snapshot.held);
+    const pleading = snapshots.find(snapshot => snapshot.helpReason !== null);
+    if (!held) return pleading ?? snapshots[0]!;
+    return held.helpReason !== null || !pleading ? held : { ...held, helpReason: pleading.helpReason, ...(pleading.help ? { help: pleading.help } : {}) };
   };
 
   /** A hold taken without a conversation pauses every conversation of the bot, as a hold on its own key does; a turn still

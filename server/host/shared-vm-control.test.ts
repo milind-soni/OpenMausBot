@@ -117,6 +117,13 @@ describe("what a hold on the shared desktop reaches", () => {
     expect(vm.snapshot("ada", "r").held).toBe(false);
   });
 
+  it.each([{ held: "ada", plea: DESK }, { held: DESK, plea: "ada" }])("a bot's hold on $held still shows its sign-in plea on $plea", ({ held, plea }) => {
+    const { control, vm } = fixture({ bots: [{ id: "ada" }] });
+    control.take(held);
+    control.requestHelp(plea, "sign in to a.example", { botId: "ada", threadId: "t", messageId: "m", site: "a.example", place: "browser" });
+    expect(vm.botSnapshot("ada")).toMatchObject({ held: true, helpReason: "sign in to a.example", help: { messageId: "m" } });
+  });
+
   it("tells every bot with a conversation on the desktop, and each its merged state", () => {
     const { control, vm } = fixture({ bots: [{ id: "ada" }, { id: "books", computer: "cloud" }, { id: "cy", computer: "cloud" }], tasks: { t: ["books", "vm"] } });
     expect(vm.membersOf(DESK)).toEqual(["ada", "books"]);
