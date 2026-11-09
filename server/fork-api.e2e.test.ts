@@ -66,6 +66,7 @@ it("forks bot and room conversations through the public API and keeps a fork aft
     const roomFork = await api("POST", `/api/groups/${room.id}/tasks/${roomThreadId}/forks`, { messageId: roomAnchor.id });
     expect(roomFork.status).toBe(201);
     expect(roomFork.body.task.origin).toEqual({ threadId: roomThreadId, messageId: roomAnchor.id });
+    expect((await api("POST", `/api/groups/${room.id}/read`)).status).toBe(200);
     expect((await api("POST", `/api/groups/${room.id}/read`, { threadId: roomFork.body.task.threadId })).status).toBe(200);
     expect((await api("DELETE", `/api/groups/${room.id}/tasks/${roomThreadId}`)).status).toBe(200);
     expect((await messages(roomFork.body.task.threadId)).some((message) => message.id === roomAnchor.id)).toBe(true);
