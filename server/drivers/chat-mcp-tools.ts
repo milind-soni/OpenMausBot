@@ -525,9 +525,8 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   };
   const offeredTools: Array<{ origin: ToolOrigin; tools: CheckedTool[] }> = [];
   let configured: Array<{ origin: ToolOrigin; tools: CheckedTool[] }> = [];
-  /** Built-ins are listed first, trimmed to their share when they alone overflow; configured servers then fill the room
-   * left, and those that do not fit are reached through the tool search. */
-  const layout = async (limit: number | null) => {
+  /** Lists the built-ins afresh; returns the one whose tools the catalog has no room for, with nothing of it registered. */
+  const listBuiltIns = (limit: number | null, room: number) => {
     definitions.length = 0;
     registered.clear();
     catalog.clear();
@@ -535,19 +534,29 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     directory = undefined;
     trimmed.length = 0;
     Object.assign(budget, { limit, listed: 0, servers: [] });
-    const room = limit === null ? Infinity : Math.max(0, limit - RUNTIME_TOOLS);
     const wanted = [...offeredTools, ...configured].reduce((sum, server) => sum + server.tools.length, 0);
     const searchRoom = configured.some((server) => server.tools.length) && wanted > room ? DIRECTORY_TOOL_COUNT : 0;
     // The agents server keeps its whole list first; configured servers fit in what the built-ins leave.
     const shares = limit === null ? undefined : shareToolBudget(offeredTools.map(({ origin, tools }, index) => ({ name: String(index), tools: tools.length, agents: origin.agents }))
       .sort((a, b) => Number(b.agents) - Number(a.agents)), room - searchRoom);
-    for (const [index, { origin, tools: listed }] of offeredTools.entries()) {
-      const tools = capToolList(listed, shares?.get(String(index)));
-      if (tools.length < listed.length) {
-        trimmed.push({ server: origin.server, listed: tools.length, of: listed.length });
-        console.warn(`chat-mcp: "${origin.server}" listed ${tools.length} of ${listed.length} tools to fit the model's ${limit}-tool limit`);
+    for (const [index, entry] of offeredTools.entries()) {
+      const tools = capToolList(entry.tools, shares?.get(String(index)));
+      if (tools.length < entry.tools.length) {
+        trimmed.push({ server: entry.origin.server, listed: tools.length, of: entry.tools.length });
+        console.warn(`chat-mcp: "${entry.origin.server}" listed ${tools.length} of ${entry.tools.length} tools to fit the model's ${limit}-tool limit`);
       }
-      register(origin, tools);
+      try { register(entry.origin, tools); }
+      catch (error) { return { entry, error }; }
+    }
+    return undefined;
+  };
+  /** Built-ins are listed first, trimmed to their share when they alone overflow; configured servers then fill the room
+   * left, and those that do not fit are reached through the tool search. */
+  const layout = async (limit: number | null) => {
+    const room = limit === null ? Infinity : Math.max(0, limit - RUNTIME_TOOLS);
+    for (let refused = listBuiltIns(limit, room); refused; refused = listBuiltIns(limit, room)) {
+      offeredTools.splice(offeredTools.indexOf(refused.entry), 1);
+      await skip(refused.entry.origin.server, true, refused.error, refused.entry.origin.client);
     }
     const direct = directServers(configured.map(({ origin, tools }) => ({ name: origin.server, tools: tools.length })), room - definitions.length);
     const searched: typeof configured = [];

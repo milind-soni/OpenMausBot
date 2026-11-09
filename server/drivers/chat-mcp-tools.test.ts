@@ -467,6 +467,21 @@ describe("Chat MCP session", () => {
     warn.mockRestore();
   });
 
+  it("skips a built-in server whose tools overflow the 1MB catalog, closes it, and keeps the other servers' tools", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const big = fixture(`if(message.method === "tools/list") { reply(message, {tools:[{name:"big",description:"x".repeat(1_100_000),inputSchema:schema}]}); continue; }`);
+    const session = await mountChatTools({ agents: big.server, data: ready.server, custom: { custom_ready: fixture().server } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["data_write", "custom_ready_write"]);
+    expect(session.skipped).toEqual([{ server: "agents", reason: "MCP tool catalog exceeds the 1MB limit", builtIn: true }]);
+    expect(chatToolNotices(session)).toEqual(['Built-in MCP server "agents" was skipped for this turn: MCP tool catalog exceeds the 1MB limit']);
+    expect(() => session.validate("agents_big", { value: "x" })).toThrow("not advertised");
+    expect(alive(big.read().pid)).toBe(false);
+    await expect(session.execute("data_write", { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true });
+    warn.mockRestore();
+  });
+
   it("skips a connected-apps mount that fails, and keeps the turn alive", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const ready = fixture();
