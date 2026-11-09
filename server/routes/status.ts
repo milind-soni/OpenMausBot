@@ -8,7 +8,7 @@ import { flushNativeLog } from "../drivers/native.ts";
 import { editionForMembers, editionStatus, entitled } from "../enterprise.ts";
 import { fleetAvailable, fleetRequest, fleetSocketPath } from "../fleet-client.ts";
 import { noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
-import { loadPlanUsage, planAccountsFromInstances } from "../plan-usage.ts";
+import { loadPlanUsage, planAccountsFromInstances, type PlanUsageReport } from "../plan-usage.ts";
 import { tregProviderApi } from "../included-services.ts";
 import { checkProviderKey, PROVIDER_KEY_KINDS, providerBaseUrl, type ProviderKeyKind } from "../provider-key-check.ts";
 import { checkTregKey } from "../research.ts";
@@ -23,6 +23,7 @@ export interface StatusRouteDeps {
   store: Pick<Store, "bot" | "bots" | "tasks" | "groupByThread">;
   cfg: AppConfig;
   staticDir: string | null;
+  notePlanUsage(report: PlanUsageReport): void;
   sharedWorkspaceFullAccessEnabled(): boolean;
   adminActivityRecording(): boolean;
   configStatus(): ConfigStatus;
@@ -134,6 +135,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
         accounts: planAccountsFromInstances(instanceConfigs(cfg)),
         refresh: url.searchParams.get("refresh") === "1",
       });
+      deps.notePlanUsage(report);
       return json(res, 200, report);
     }
 

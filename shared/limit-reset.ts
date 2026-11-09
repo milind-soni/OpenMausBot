@@ -55,6 +55,10 @@ export interface EngineLimit {
 export interface EngineLimitsReport {
   checkedAt: number;
   engines: EngineLimit[];
+  /** Engines whose provider returned a successful usage reading in this check. Absent on older servers. */
+  checkedEngines?: string[];
+  /** Usage reads that failed, keyed by engine instance. */
+  errors?: Record<string, string>;
 }
 
 export function isLimitResetSchedule(schedule: { type: string } | null | undefined): schedule is LimitResetSchedule {

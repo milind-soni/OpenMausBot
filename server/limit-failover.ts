@@ -75,6 +75,7 @@ export interface LimitFailoverDeps {
   now?: () => number;
   /** Until when this engine refuses work; null when it should be working. */
   blockedUntil: (engine: string) => number | null;
+  modelHeld?: (selection: ModelSelection) => boolean;
   /** This engine refused a turn because it is signed out, and has not been signed in again since. */
   signedOut?: (engine: string) => boolean;
   /** The thread's model now, or null when the thread is gone. */
@@ -126,12 +127,23 @@ export class LimitFailovers {
     const current = this.deps.threadModel(botId, threadId);
     if (!current || !sameModelSelection(current, row.to)) return this.forget(threadId);
     const waitUntil = row.why === "signed-out" ? row.at : row.resetsAt ?? row.at + UNKNOWN_RESET_WAIT_MS;
-    if (waitUntil > now || this.deps.blockedUntil(row.from.instanceId) !== null) return false;
+    if (waitUntil > now || this.deps.blockedUntil(row.from.instanceId) !== null || this.deps.modelHeld?.(row.from)) return false;
     if (row.why === "signed-out" && this.deps.signedOut?.(row.from.instanceId)) return false;
     if (!this.deps.switchBack(row)) return false;
     this.forget(threadId);
     this.deps.note(threadId, backLine(this.deps.engineName(row.from.instanceId), row.why), row.why === "signed-out" ? { key: "chat.notice.failoverSignedInAgain", params: { engine: this.deps.engineName(row.from.instanceId) } } : undefined);
     return true;
+  }
+
+  usageRecovered(engine: string, previousReset: number): void {
+    const now = this.deps.now?.() ?? Date.now();
+    let changed = false;
+    this.rows = this.rows.map((row) => {
+      if (row.from.instanceId !== engine || row.why === "signed-out" || row.resetsAt !== previousReset || row.resetsAt <= now || this.deps.modelHeld?.(row.from)) return row;
+      changed = true;
+      return { ...row, resetsAt: now };
+    });
+    if (changed) this.save();
   }
 
   forget(threadId: string): false {

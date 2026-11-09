@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import {
-  limitLine, limitsCheckedAt, loadLimits, reportsUsage, resetTime, usageBars, usageRows, usageTone, useEngineLimits, USAGE_BARS, windowLabel,
+  limitLine, limitRefreshError, limitsCheckedAt, limitWasChecked, loadLimits, reportsUsage, resetTime, usageBars, usageRows, usageTone, useEngineLimits, USAGE_BARS, windowLabel,
   type EngineLimit, type UsageTone,
 } from "@/lib/limit-resets";
 import type { Routine } from "@/lib/routines";
@@ -99,10 +99,8 @@ export function UsageGlyph({ limit, className }: { limit: EngineLimit; className
   );
 }
 
-/** When the usage was last read, each window's share left with its reset and a track filled by use; at the limit, how it
- * clears and a fresh check. */
+/** When usage was last checked, each window's share left, and a refresh of the provider's status. */
 export function UsageRows({ limit }: { limit: EngineLimit }) {
-  const [checking, setChecking] = useState(false);
   const now = Date.now();
   const checkedAt = limitsCheckedAt();
   return (
@@ -125,16 +123,49 @@ export function UsageRows({ limit }: { limit: EngineLimit }) {
           </div>
         </div>
       ))}
-      {limit.blocked && (
-        <div className="flex items-start justify-between gap-3 border-t-[0.5px] border-ink/10 pt-2.5 text-[12px] leading-4">
-          <p className="min-w-0 text-ink-tertiary">{t("limits.clearsOnReply", { engine: limit.name })}</p>
-          <button type="button" data-usage-check disabled={checking} aria-busy={checking}
-            onClick={() => { setChecking(true); void loadLimits(true).finally(() => setChecking(false)); }}
-            className="shrink-0 font-medium text-ink underline underline-offset-2 hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60">
-            {t("common.checkAgain")}
-          </button>
-        </div>
-      )}
+      <UsageStatusRefresh key={limit.engine} limit={limit} />
+    </div>
+  );
+}
+
+function UsageStatusRefresh({ limit }: { limit: EngineLimit }) {
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState<{ error: boolean; message: string } | null>(null);
+  const pending = useRef(false);
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const refresh = async () => {
+    if (pending.current) return;
+    pending.current = true;
+    setChecking(true);
+    setResult(null);
+    try {
+      if (!await loadLimits(true)) throw new Error(t("limits.refreshUnavailable"));
+      const error = limitRefreshError(limit.engine);
+      if (error) throw new Error(error);
+      if (!limitWasChecked(limit.engine)) throw new Error(t("limits.refreshUnavailable"));
+      if (mounted.current) setResult({ error: false, message: t("limits.refreshed") });
+    } catch (cause) {
+      const reason = cause instanceof Error && cause.message ? cause.message : t("planUsage.fetchError");
+      const signIn = /^Sign in again in (.+)$/i.exec(reason);
+      if (mounted.current) setResult({ error: true, message: t("limits.refreshFailed", {
+        reason: signIn ? t("planUsage.signInAgain", { provider: signIn[1]! }) : reason,
+      }) });
+    } finally {
+      pending.current = false;
+      if (mounted.current) setChecking(false);
+    }
+  };
+  return (
+    <div className="flex flex-col gap-2 border-t-[0.5px] border-ink/10 pt-2.5 text-[12px] leading-4">
+      <div className="flex items-start justify-between gap-3">
+        {limit.blocked && <p className="min-w-0 text-ink-tertiary">{t("limits.clearsOnReply", { engine: limit.name })}</p>}
+        <button type="button" data-usage-check disabled={checking} aria-busy={checking} onClick={() => void refresh()}
+          className="ms-auto shrink-0 font-medium text-ink underline underline-offset-2 hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60">
+          {t(checking ? "common.checking" : "limits.refresh")}
+        </button>
+      </div>
+      {result && <p role={result.error ? "alert" : "status"} className={result.error ? "text-warning" : "text-ink-tertiary"}>{result.message}</p>}
     </div>
   );
 }

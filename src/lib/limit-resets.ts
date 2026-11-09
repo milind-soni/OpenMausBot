@@ -13,7 +13,9 @@ export { AFTER_RESET_MS, nearLimit, NEAR_LIMIT_PERCENT, isLimitResetSchedule, ty
 const POLL_MS = 60_000;
 const names = new Map<string, string>();
 let report: EngineLimitsReport | null = null;
-let loading: Promise<void> | null = null;
+let loading: Promise<boolean> | null = null;
+let refreshing: Promise<boolean> | null = null;
+let requestId = 0;
 let timer: ReturnType<typeof setInterval> | null = null;
 const listeners = new Set<(next: EngineLimitsReport) => void>();
 
@@ -24,22 +26,33 @@ export function engineName(engine: string): string {
 
 /** A server that predates limit resets answers without engines: that reads as none. */
 export function rememberLimits(next: Partial<EngineLimitsReport> | null | undefined): void {
-  report = { checkedAt: next?.checkedAt ?? 0, engines: Array.isArray(next?.engines) ? next.engines : [] };
+  report = { checkedAt: next?.checkedAt ?? 0, engines: Array.isArray(next?.engines) ? next.engines : [], errors: next?.errors, checkedEngines: next?.checkedEngines };
   for (const limit of report.engines) names.set(limit.engine, limit.name);
   for (const listener of listeners) listener(report);
 }
 
-function readLimits(request: () => Promise<EngineLimitsReport>): Promise<void> {
+function readLimits(request: () => Promise<EngineLimitsReport>, reportErrors = false): Promise<boolean> {
+  const id = ++requestId;
   return unlessRefused("/api/limit-resets", request, null)
-    .then((next) => { if (next) rememberLimits(next); }, () => undefined);
+    .then((next) => { if (next && id === requestId) rememberLimits(next); return next !== null; }, (cause: unknown) => { if (reportErrors) throw cause; return false; });
 }
 
-/** A person's refresh always asks again; a background read joins the one already on its way. */
-export function loadLimits(refresh = false): Promise<void> {
-  if (refresh) return readLimits(() => api<EngineLimitsReport>("/api/limit-resets?refresh=1"));
+/** A person's refresh bypasses the cache; overlapping reads of the same kind share one request. */
+export function loadLimits(refresh = false): Promise<boolean> {
+  if (refresh) {
+    refreshing ??= readLimits(() => api<EngineLimitsReport>("/api/limit-resets?refresh=1"), true).finally(() => { refreshing = null; });
+    return refreshing;
+  }
+  if (refreshing) return refreshing.catch(() => false);
   loading ??= readLimits(() => api<EngineLimitsReport>("/api/limit-resets", { background: true })).finally(() => { loading = null; });
   return loading;
 }
+
+/** Whether the last check successfully read this engine's own provider. */
+export const limitWasChecked = (engine: string) => report?.checkedEngines?.includes(engine) ?? false;
+
+/** A failed usage read for one engine, when the server reports it. */
+export const limitRefreshError = (engine: string) => report?.errors?.[engine] ?? null;
 
 /** When the server last read the engines' usage; 0 before any read. */
 export const limitsCheckedAt = () => report?.checkedAt ?? 0;

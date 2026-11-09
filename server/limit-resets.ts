@@ -82,6 +82,8 @@ export interface LimitClockOptions {
   waiting?: () => boolean;
   /** The known reset times changed. */
   onChange?: () => void;
+  /** Provider-confirmed recovery permits ending this engine's saved failover waits. */
+  onRecovered?: (engine: string, resetsAt: number) => void;
   now?: () => number;
   /** Where the refusals' holds are kept across restarts; none in tests that need no file. */
   file?: string;
@@ -111,7 +113,12 @@ export class LimitResetClock {
   private readonly heldAt = new Map<string, number>();
   private readonly turnEngines = new Map<string, string>();
   private checkedAt = 0;
+  private errors: Record<string, string> = {};
+  private checkedEngines: string[] = [];
+  private usageFetchedAt = Number.NEGATIVE_INFINITY;
   private loading: Promise<void> | null = null;
+  private loadingForced = false;
+  private queuedRefresh: Promise<void> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private soon: ReturnType<typeof setTimeout> | null = null;
 
@@ -150,7 +157,7 @@ export class LimitResetClock {
       const known = engines.get(engine);
       if (until !== null) engines.set(engine, { ...(known ?? this.unnamed(engine)), blocked: true, usedPercent: 100, resetsAt: this.guessed.has(engine) ? known?.resetsAt ?? null : until });
     }
-    return { checkedAt: this.checkedAt, engines: [...engines.values()] };
+    return { checkedAt: this.checkedAt, engines: [...engines.values()], checkedEngines: this.checkedEngines, ...(Object.keys(this.errors).length ? { errors: this.errors } : {}) };
   }
 
   /** Every runtime event, with the engine its turn runs on when known: a refusal holds the engine, and a turn that
@@ -203,20 +210,33 @@ export class LimitResetClock {
   noteUsage(report: PlanUsageReport): void {
     const next = new Map<string, EngineLimit>();
     const fetchedAt = Date.parse(report.fetchedAt);
-    let released = false;
+    if (!Number.isFinite(fetchedAt) || fetchedAt < this.usageFetchedAt) return;
+    this.usageFetchedAt = fetchedAt;
+    const released: Array<{ engine: string; resetsAt: number }> = [];
+    const errors: Record<string, string> = {};
     for (const row of report.providers) {
+      if (!row.ok) {
+        errors[row.id] = row.error || "Could not read usage.";
+        const known = this.usage.get(row.id);
+        if (known) next.set(row.id, known);
+        continue;
+      }
       const limit = engineLimitFromUsage(row);
       if (!limit) continue;
       next.set(limit.engine, limit);
-      if (fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && codexHoldGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
+      const held = this.refusals.get(limit.engine);
+      if (held !== undefined && fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && codexHoldGone(row, limit, held, this.guessed.has(limit.engine))) {
         this.refusals.delete(limit.engine);
         this.heldAt.delete(limit.engine);
-        released = true;
+        released.push({ engine: limit.engine, resetsAt: held });
       }
     }
-    if (released) this.saveHolds();
+    if (released.length) this.saveHolds();
     this.usage = next;
+    this.errors = errors;
+    this.checkedEngines = report.providers.filter((row) => row.ok).map((row) => row.id);
     this.checkedAt = this.now();
+    for (const { engine, resetsAt } of released) this.options.onRecovered?.(engine, resetsAt);
     this.options.onChange?.();
   }
 
@@ -227,17 +247,28 @@ export class LimitResetClock {
   }
 
   async refresh(force: boolean): Promise<void> {
-    if (this.loading) return this.loading;
+    if (this.loading) {
+      if (!force || this.loadingForced) return this.loading;
+      this.queuedRefresh ??= this.loading.then(() => this.refresh(true)).finally(() => { this.queuedRefresh = null; });
+      return this.queuedRefresh;
+    }
     const accounts = this.options.accounts();
+    const startedAt = this.now();
+    this.loadingForced = force;
     this.loading = (async () => {
       try {
         if (accounts.length) this.noteUsage(await this.load(accounts, force));
-        else this.checkedAt = this.now();
+        else { this.checkedAt = this.now(); this.errors = {}; this.checkedEngines = []; }
       } catch {
+        if (startedAt < this.usageFetchedAt) return;
+        this.checkedEngines = [];
+        this.errors = Object.fromEntries(accounts.filter((account) => !account.noUsage).map((account) => [account.id, "Could not read usage."]));
         this.checkedAt = this.now();
+        this.options.onChange?.();
       }
     })().finally(() => {
       this.loading = null;
+      this.loadingForced = false;
     });
     return this.loading;
   }

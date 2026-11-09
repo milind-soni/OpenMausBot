@@ -153,6 +153,16 @@ describe("the limit-reset routes", () => {
     return { ...h, call, created };
   }
 
+  it("forces an explicit refresh even when the clock was just checked", async () => {
+    const { call, clock } = routes(null);
+    await clock.refresh(false);
+    const refresh = vi.spyOn(clock, "refresh");
+    expect(await call("GET", "/api/limit-resets?refresh=1")).toMatchObject({ status: 200 });
+    expect(refresh).toHaveBeenCalledExactlyOnceWith(true);
+    await call("GET", "/api/limit-resets");
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("Continue creates a one-time limit-reset automation in that same conversation, told the turn hit the limit", async () => {
     const { call, routines, store, created } = routes();
     const response = await call("POST", "/api/limit-resets/continue", { botId: "scout", threadId: "thread-1" });

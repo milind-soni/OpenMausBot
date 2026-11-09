@@ -75,6 +75,56 @@ describe("LimitFailovers", () => {
     expect(refused.failovers.list()).toHaveLength(1);
   });
 
+  it("persists provider-confirmed recovery for only that engine, waiting for the next normal turn", () => {
+    const f = fixture();
+    f.failovers.record({ botId: "scout", threadId: "t", from, to, resetsAt: NOW + 24 * HOUR, at: NOW });
+    f.failovers.record({ botId: "scout", threadId: "sibling", from: { ...from, instanceId: "claude-work" }, to, resetsAt: NOW + 24 * HOUR, at: NOW });
+    f.failovers.record({ botId: "scout", threadId: "signed-out", from, to, resetsAt: null, at: NOW, why: "signed-out" });
+    f.failovers.usageRecovered("claude", NOW + 24 * HOUR);
+    expect(f.switched).toEqual([]);
+    expect(f.failovers.list().find((row) => row.threadId === "sibling")?.resetsAt).toBe(NOW + 24 * HOUR);
+    expect(f.failovers.list().find((row) => row.threadId === "signed-out")?.resetsAt).toBeNull();
+    const restarted = new LimitFailovers(f.deps);
+    expect(restarted.restore("scout", "t")).toBe(true);
+    expect(restarted.restore("scout", "sibling")).toBe(false);
+  });
+
+  it("keeps a model-held or nonmatching reset wait even after the shorter model hold expires", () => {
+    const f = fixture();
+    let held = true;
+    const failovers = new LimitFailovers({ ...f.deps, modelHeld: () => held });
+    failovers.record({ botId: "scout", threadId: "model", from, to, resetsAt: NOW + 24 * HOUR, at: NOW });
+    failovers.usageRecovered("claude", NOW + 24 * HOUR);
+    expect(failovers.list()[0]?.resetsAt).toBe(NOW + 24 * HOUR);
+    held = false;
+    f.at(NOW + 7 * HOUR);
+    expect(failovers.restore("scout", "model")).toBe(false);
+    failovers.usageRecovered("claude", NOW + 12 * HOUR);
+    expect(failovers.list()[0]?.resetsAt).toBe(NOW + 24 * HOUR);
+  });
+
+  it("keeps model holds, live engine limits, permission changes and manual model choices after usage recovery", () => {
+    const f = fixture({ blocked: NOW + 24 * HOUR });
+    f.failovers.record({ botId: "scout", threadId: "t", from, to, resetsAt: NOW + 24 * HOUR, at: NOW });
+    f.failovers.usageRecovered("claude", NOW + 24 * HOUR);
+    expect(f.failovers.restore("scout", "t")).toBe(false);
+    f.state.blocked = null;
+    let held = true;
+    const guarded = new LimitFailovers({ ...f.deps, modelHeld: () => held });
+    expect(guarded.restore("scout", "t")).toBe(false);
+    held = false;
+    expect(guarded.restore("scout", "t")).toBe(true);
+    const denied = fixture({ allowed: false });
+    denied.failovers.record({ botId: "scout", threadId: "t", from, to, resetsAt: NOW + 24 * HOUR, at: NOW });
+    denied.failovers.usageRecovered("claude", NOW + 24 * HOUR);
+    expect(denied.failovers.restore("scout", "t")).toBe(false);
+    const changed = fixture({ current: { instanceId: "grok", model: "fixture" } });
+    changed.failovers.record({ botId: "scout", threadId: "t", from, to, resetsAt: NOW + 24 * HOUR, at: NOW });
+    changed.failovers.usageRecovered("claude", NOW + 24 * HOUR);
+    expect(changed.failovers.restore("scout", "t")).toBe(false);
+    expect(changed.failovers.list()).toEqual([]);
+  });
+
   it("with no known reset, waits an hour before trying the engine again", () => {
     const f = fixture();
     f.failovers.record({ botId: "scout", threadId: "t", from, to, resetsAt: null, at: NOW });

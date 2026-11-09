@@ -65,8 +65,8 @@ const button = (container: HTMLElement, label: string) => {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 /** What the app already knows and what the next poll answers. */
 const serve = (engines: EngineLimit[]) => {
-  fixture.api.mockImplementation(async () => ({ checkedAt: NOW, engines }));
-  limits.rememberLimits({ checkedAt: NOW, engines });
+  fixture.api.mockImplementation(async () => ({ checkedAt: NOW, engines, checkedEngines: engines.map((engine) => engine.engine) }));
+  limits.rememberLimits({ checkedAt: NOW, engines, checkedEngines: engines.map((engine) => engine.engine) });
 };
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const hover = (target: Element, pointerType: string) => flushSync(() => target.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType })));
@@ -212,7 +212,7 @@ describe("the bars", () => {
     expect(card.querySelector("[data-usage-rows] > div")?.textContent).toBe("Claude usagechecked just now");
     expect([...card.querySelectorAll("[data-usage-row]")].map((row) => row.textContent)).toEqual(["5-hour62% left · resets 3:40 PM", "Weekly20% left · resets Mon 9:00 AM"]);
     expect([...card.querySelectorAll<HTMLElement>("[data-usage-track]")].map((track) => track.style.width)).toEqual(["38%", "80%"]);
-    expect(card.textContent).not.toContain("Check again");
+    expect(card.querySelector("[data-usage-check]")?.textContent).toBe("Refresh status");
     leave(spot);
     await wait(HOVER_MS);
     expect(document.querySelector("[data-usage-card]")).toBeNull();
@@ -229,6 +229,73 @@ describe("the bars", () => {
     await settle();
     expect(fixture.api).toHaveBeenCalledWith("/api/limit-resets?refresh=1");
     expect(opened).not.toHaveBeenCalled();
+  });
+
+  it("disable refresh until it finishes and ignore repeated clicks", async () => {
+    let finish!: (value: unknown) => void;
+    fixture.api.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const container = mount(createElement(UsageRows, { limit: windows(38, 80) }));
+    const refresh = container.querySelector<HTMLButtonElement>("[data-usage-check]")!;
+    flushSync(() => { refresh.click(); refresh.click(); });
+    expect(refresh.disabled).toBe(true);
+    expect(refresh.getAttribute("aria-busy")).toBe("true");
+    expect(refresh.textContent).toBe("Checking…");
+    expect(fixture.api).toHaveBeenCalledTimes(1);
+    finish({ checkedAt: NOW, engines: [windows(38, 80)], checkedEngines: ["claude"] });
+    await vi.waitFor(() => expect(refresh.disabled).toBe(false));
+    expect(container.querySelector('[role="status"]')?.textContent).toBe("Usage status refreshed.");
+  });
+
+  it("show a failed refresh without changing the displayed usage and allow a successful retry", async () => {
+    fixture.api.mockRejectedValueOnce(new Error("Fixture server offline"));
+    const container = mount(createElement(UsageRows, { limit: windows(100, 80, { blocked: true }) }));
+    flushSync(() => container.querySelector<HTMLButtonElement>("[data-usage-check]")!.click());
+    await vi.waitFor(() => expect(container.querySelector('[role="alert"]')?.textContent).toContain("The previous status is still shown. Fixture server offline"));
+    expect(container.querySelector('[data-usage-row="5-hour"]')?.textContent).toContain("At its limit");
+    expect(container.querySelector<HTMLButtonElement>("[data-usage-check]")!.disabled).toBe(false);
+    fixture.api.mockResolvedValueOnce({ checkedAt: NOW, engines: [windows(100, 80, { blocked: true })], checkedEngines: ["claude"] });
+    flushSync(() => container.querySelector<HTMLButtonElement>("[data-usage-check]")!.click());
+    await vi.waitFor(() => expect(container.querySelector('[role="status"]')?.textContent).toBe("Usage status refreshed."));
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('[data-usage-row="5-hour"]')?.textContent).toContain("At its limit");
+  });
+
+  it("show the affected provider's sign-in error instead of claiming refresh succeeded", async () => {
+    fixture.api.mockResolvedValueOnce({ checkedAt: NOW, engines: [claude(100, true)], errors: { claude: "Sign in again in Claude" } });
+    const container = mount(createElement(UsageRows, { limit: claude(100, true) }));
+    flushSync(() => container.querySelector<HTMLButtonElement>("[data-usage-check]")!.click());
+    await vi.waitFor(() => expect(container.querySelector('[role="alert"]')?.textContent).toContain("Sign in again in Claude"));
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(container.textContent).toContain("At its limit");
+  });
+
+  it("keep a sibling provider's error out of the selected provider's refresh result", async () => {
+    fixture.api.mockResolvedValueOnce({ checkedAt: NOW, engines: [claude(38)], checkedEngines: ["claude"], errors: { codex: "Sign in again in Codex" } });
+    const container = mount(createElement(UsageRows, { limit: claude(38) }));
+    flushSync(() => container.querySelector<HTMLButtonElement>("[data-usage-check]")!.click());
+    await vi.waitFor(() => expect(container.querySelector('[role="status"]')?.textContent).toBe("Usage status refreshed."));
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("do not claim success for an account whose usage was not checked", async () => {
+    fixture.api.mockResolvedValueOnce({ checkedAt: NOW, engines: [claude(100, true)], checkedEngines: [] });
+    const container = mount(createElement(UsageRows, { limit: claude(100, true) }));
+    flushSync(() => container.querySelector<HTMLButtonElement>("[data-usage-check]")!.click());
+    await vi.waitFor(() => expect(container.querySelector('[role="alert"]')?.textContent).toContain("Usage status is not available to this session."));
+    expect(container.querySelector('[role="status"]')).toBeNull();
+  });
+
+  it("discard a late refresh result when a different engine's rows replace it", async () => {
+    let finish!: (value: unknown) => void;
+    fixture.api.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const container = mount(createElement(UsageRows, { limit: claude(100, true) }));
+    flushSync(() => container.querySelector<HTMLButtonElement>("[data-usage-check]")!.click());
+    flushSync(() => root!.render(createElement(UsageRows, { limit: { ...claude(38), engine: "codex", name: "Codex", driver: "codex" } })));
+    expect(container.querySelector<HTMLButtonElement>("[data-usage-check]")!.disabled).toBe(false);
+    finish({ checkedAt: NOW, engines: [claude(100, true)], errors: { claude: "Sign in again in Claude" } });
+    await settle();
+    expect(container.querySelector('[role="alert"], [role="status"]')).toBeNull();
+    expect(container.textContent).toContain("Codex usage");
   });
 
   it("say how long ago the usage was read", () => {

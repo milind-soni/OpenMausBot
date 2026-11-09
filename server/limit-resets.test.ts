@@ -116,6 +116,93 @@ describe("LimitResetClock", () => {
     return { instance, at: (next: number) => { now = next; } };
   };
 
+  it("forces a provider read inside the normal freshness interval", async () => {
+    const loadUsage = vi.fn().mockResolvedValue(report(claude([100, NOW + HOUR], [20, NOW + 90 * HOUR])));
+    const { instance } = clock({ loadUsage });
+    await instance.ensureFresh();
+    await instance.ensureFresh();
+    expect(loadUsage).toHaveBeenCalledTimes(1);
+    await instance.refresh(true);
+    expect(loadUsage.mock.calls.map((call) => call[1])).toEqual([false, true]);
+  });
+
+  it("queues one forced read after an in-flight background read, sharing overlapping refreshes", async () => {
+    let finishBackground!: (value: PlanUsageReport) => void;
+    let finishRefresh!: (value: PlanUsageReport) => void;
+    const loadUsage = vi.fn()
+      .mockImplementationOnce(() => new Promise<PlanUsageReport>((resolve) => { finishBackground = resolve; }))
+      .mockImplementationOnce(() => new Promise<PlanUsageReport>((resolve) => { finishRefresh = resolve; }));
+    const { instance } = clock({ loadUsage });
+    const background = instance.ensureFresh();
+    const first = instance.refresh(true), second = instance.refresh(true);
+    expect(loadUsage).toHaveBeenCalledTimes(1);
+    finishBackground(report(claude([100, NOW + HOUR], [20, NOW + 90 * HOUR])));
+    await background;
+    await vi.waitFor(() => expect(loadUsage).toHaveBeenCalledTimes(2));
+    const third = instance.refresh(true);
+    finishRefresh(report(claude([12, NOW + 4 * HOUR], [20, NOW + 90 * HOUR])));
+    await Promise.all([first, second, third]);
+    expect(loadUsage.mock.calls.map((call) => call[1])).toEqual([false, true]);
+    expect(instance.limit("claude")).toMatchObject({ usedPercent: 20, blocked: false });
+  });
+
+  it("keeps known limits when a provider read fails and clears its error after a successful retry", async () => {
+    const previous = claude([100, NOW + HOUR], [20, NOW + 90 * HOUR]);
+    const loadUsage = vi.fn().mockResolvedValue(report({ ...previous, ok: false, error: "Sign in again in Claude" }));
+    const { instance } = clock({ loadUsage });
+    instance.noteUsage(report(previous));
+    await instance.refresh(true);
+    expect(instance.limit("claude")).toMatchObject({ blocked: true, usedPercent: 100, resetsAt: NOW + HOUR });
+    expect(instance.blockedUntil("claude")).toBe(NOW + HOUR);
+    expect(instance.report().errors).toEqual({ claude: "Sign in again in Claude" });
+    loadUsage.mockResolvedValue(report(claude([12, NOW + 4 * HOUR], [20, NOW + 90 * HOUR])));
+    await instance.refresh(true);
+    expect(instance.report().errors).toBeUndefined();
+    expect(instance.limit("claude")).toMatchObject({ blocked: false, usedPercent: 20 });
+  });
+
+  it("ignores older quota and error reports that arrive after newer recovered usage", () => {
+    const { instance } = clock();
+    instance.noteUsage({ fetchedAt: iso(NOW + 1_000), providers: [codex([12, NOW + 4 * HOUR], [20, NOW + 90 * HOUR])] });
+    instance.noteUsage(report(codex([100, NOW + HOUR], [20, NOW + 90 * HOUR])));
+    expect(instance.limit("codex")).toMatchObject({ usedPercent: 20, blocked: false });
+    instance.noteUsage(report({ ...codex([100, NOW + HOUR], [20, NOW + 90 * HOUR]), ok: false, error: "Sign in again in Codex" }));
+    expect(instance.report().errors).toBeUndefined();
+    expect(instance.report().checkedEngines).toEqual(["codex"]);
+  });
+
+  it("does not replace a newer Settings reading with an older failed background request", async () => {
+    let fail!: (cause: Error) => void;
+    const { instance, at } = clock({ loadUsage: () => new Promise<PlanUsageReport>((_resolve, reject) => { fail = reject; }) });
+    const background = instance.refresh(false);
+    at(NOW + 1_000);
+    instance.noteUsage({ fetchedAt: iso(NOW + 1_000), providers: [claude([12, NOW + 4 * HOUR], [20, NOW + 90 * HOUR])] });
+    fail(new Error("older request failed"));
+    await background;
+    expect(instance.report().errors).toBeUndefined();
+    expect(instance.report().checkedEngines).toEqual(["claude"]);
+  });
+
+  it("does not report a successful provider check when the account has no usage reading", async () => {
+    const loadUsage = vi.fn().mockResolvedValue(report());
+    const { instance } = clock({ accounts: () => [{ id: "chatgpt", name: "ChatGPT plan", driver: "codex", environment: {}, noUsage: true }], loadUsage });
+    instance.noteRefusal("chatgpt", NOW + HOUR);
+    await instance.refresh(true);
+    expect(instance.report().checkedEngines).toEqual([]);
+    expect(instance.blockedUntil("chatgpt")).toBe(NOW + HOUR);
+    instance.stop();
+  });
+
+  it("retains refusal holds when the load throws, exposing only a safe failure message", async () => {
+    const { instance } = clock({ loadUsage: async () => { throw new Error("private fixture detail"); } });
+    instance.noteRefusal("codex", NOW + 23 * HOUR);
+    await instance.refresh(true);
+    expect(instance.blockedUntil("codex")).toBe(NOW + 23 * HOUR);
+    expect(instance.report().errors).toEqual({ claude: "Could not read usage." });
+    expect(JSON.stringify(instance.report())).not.toContain("private fixture detail");
+    instance.stop();
+  });
+
   it("derives the reset from usage, and recomputes when usage moves it", () => {
     const changed = vi.fn();
     const { instance } = clock({ onChange: changed });
@@ -378,6 +465,22 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("reports only the Codex holds that fresh provider evidence actually releases", () => {
+    const onRecovered = vi.fn();
+    const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW, onRecovered });
+    try {
+      instance.noteRefusal("codex", NOW + 23 * HOUR);
+      instance.noteRefusal("claude", NOW + 23 * HOUR);
+      instance.noteLimit("codexGuessed", undefined);
+      instance.noteUsage(report({ ...codex([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR]), ok: false, error: "Sign in again in Codex" }));
+      expect(onRecovered).not.toHaveBeenCalled();
+      instance.noteUsage(report(codex([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR]), claude([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR])));
+      expect(onRecovered).toHaveBeenCalledExactlyOnceWith("codex", NOW + 23 * HOUR);
+      expect(instance.blockedUntil("claude")).toBe(NOW + 23 * HOUR);
+      expect(instance.blockedUntil("codexGuessed")).toBe(NOW + UNNAMED_LIMIT_MS);
+    } finally { instance.stop(); }
   });
 
   it("keeps a Codex hold when the usage was read before the refusal, as a cached read can be", () => {

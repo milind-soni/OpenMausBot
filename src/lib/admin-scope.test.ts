@@ -15,7 +15,7 @@ it("stops asking for the engines' limits once the server says this session lacks
   const { loadLimits } = await import("./limit-resets");
   await loadLimits();
   await loadLimits();
-  await loadLimits(true);
+  expect(await loadLimits(true)).toBe(false);
   expect(api).toHaveBeenCalledTimes(1);
 });
 
@@ -25,6 +25,38 @@ it("keeps asking after any other failure", async () => {
   await loadLimits();
   await loadLimits();
   expect(api).toHaveBeenCalledTimes(2);
+});
+
+it("reports a manual refresh failure while preserving the previous usage", async () => {
+  const { loadLimits, rememberLimits, limitsCheckedAt } = await import("./limit-resets");
+  rememberLimits({ checkedAt: 42, engines: [] });
+  api.mockRejectedValue(new Error("fixture offline"));
+  await expect(loadLimits(true)).rejects.toThrow("fixture offline");
+  expect(limitsCheckedAt()).toBe(42);
+});
+
+it("ignores a background response that arrives after a newer manual refresh", async () => {
+  const { loadLimits, limitsCheckedAt, limitRefreshError, limitWasChecked } = await import("./limit-resets");
+  let finishBackground!: (value: unknown) => void;
+  api.mockImplementationOnce(() => new Promise((resolve) => { finishBackground = resolve; }));
+  const background = loadLimits();
+  api.mockResolvedValueOnce({ checkedAt: 200, engines: [], checkedEngines: ["codex"] });
+  await loadLimits(true);
+  finishBackground({ checkedAt: 100, engines: [], errors: { codex: "Sign in again in Codex" } });
+  await background;
+  expect(limitsCheckedAt()).toBe(200);
+  expect(limitRefreshError("codex")).toBeNull();
+  expect(limitWasChecked("codex")).toBe(true);
+});
+
+it("shares simultaneous manual refreshes and does not start another poll while they run", async () => {
+  const { loadLimits } = await import("./limit-resets");
+  let finish!: (value: unknown) => void;
+  api.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  const first = loadLimits(true), second = loadLimits(true), poll = loadLimits();
+  expect(api).toHaveBeenCalledExactlyOnceWith("/api/limit-resets?refresh=1");
+  finish({ checkedAt: 42, engines: [] });
+  expect(await Promise.all([first, second, poll])).toEqual([true, true, true]);
 });
 
 it("asks for the connected apps once, and answers a refused session's later reads from that", async () => {
