@@ -201,7 +201,7 @@ describe("an OpenAI-compatible server that is really Ollama", () => {
 
 describe("the chat engine on Ollama", () => {
   const create = (config: Record<string, unknown>, environment: Record<string, string> = {}) => OpenAICompatDriver.create({
-    instanceId: randomUUID(), displayName: undefined, enabled: true, config, environment,
+    instanceId: randomUUID(), displayName: undefined, enabled: true, config: OpenAICompatDriver.decodeConfig(config), environment,
   });
 
   it("needs no key, lists the pulled models with their facts, and is available", async () => {
