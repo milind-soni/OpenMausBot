@@ -22,6 +22,19 @@ describe("announcesAction reads a report's last sentence", () => {
     ]) expect(announcesAction(text), text).toBe(false);
   });
 
+  it("still nudges a plan whose object names finished work", () => {
+    expect(announcesAction("我接下来会读取已保存的配置文件。")).toBe(true);
+    expect(announcesAction("结论如上。我接下来会读取已保存的配置文件。")).toBe(true);
+  });
+
+  it("leaves a completed narrative alone", () => {
+    for (const text of [
+      "我在 Browser 标签页查找相关资料的过程中，发现一个问题。",
+      "我在查阅官方文档的时候，看到它的授权限制很严格。",
+      "我在读取日志期间，发现有三条报错。",
+    ]) expect(announcesAction(text), text).toBe(false);
+  });
+
   it("keeps a question or an approval wait at one request", () => {
     for (const text of [
       "我在 Browser 标签页读取文档，需要你先确认授权。",

@@ -17,7 +17,8 @@ const EXPLAINING = /(?:如何|怎麼|怎么|怎样|怎樣|是否)/u;
 
 const LAST_SENTENCE_ACTION = new RegExp(`^[^。！？?\n]{0,60}?(?:${VERB})`, "u");
 
-const FINISHED = new RegExp(`(?:已经|已經)|(?:^|[^未没沒])已|(?:${VERB})(?:了|过|過|完|到|出)`, "u");
+/** A narrative says a step happened on the way to a finding; only the plan is nudged. */
+const NARRATIVE = /(?:的过程中|的過程|的时候|的時候|期间|期間|以后|以後|之后|之後|时，|時，)/u;
 
 function announcesChineseAction(prose: string): boolean {
   const tail = prose.trim().split(/\n\s*\n/).at(-1)!.trim();
@@ -29,11 +30,15 @@ function announcesChineseAction(prose: string): boolean {
     if (match && !/^[了过過完]/u.test(action.slice(match[0].length))) return true;
   }
   const sentence = tail.split(/(?<=[。！])/u).map((part) => part.trim()).filter(Boolean).at(-1) ?? "";
-  if (sentence.length < 8 || sentence.length > 220 || FINISHED.test(sentence)) return false;
+  if (sentence.length < 8 || sentence.length > 220 || NARRATIVE.test(sentence)) return false;
   const lead = LAST_SENTENCE_OPENER.exec(sentence);
   if (!lead) return false;
   const promise = sentence.slice(lead[0].length);
-  return !EXPLAINING.test(promise) && LAST_SENTENCE_ACTION.test(promise);
+  if (EXPLAINING.test(promise)) return false;
+  const verb = LAST_SENTENCE_ACTION.exec(promise);
+  // Only what follows the verb says whether it already happened: `读取到` and `打开了` are done, while what is read
+  // may itself be described as already saved (`读取已保存的配置文件`) and still be work left to do.
+  return Boolean(verb && !/^[了过過完到出]/u.test(promise.slice(verb[0].length)));
 }
 
 export function announcesAction(text: string): boolean {
