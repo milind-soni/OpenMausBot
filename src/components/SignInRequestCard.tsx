@@ -11,6 +11,7 @@ import { answerSignIn, signInHostIsHere } from "@/lib/sign-in";
 import { useStore, type Bot, type Message } from "@/state/store";
 import { ASK_CHIP, ASK_CHIP_IDLE, askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
 import { LoginForm } from "./LoginForm";
+import { VaultChoices } from "./VaultChoices";
 
 // Security: a saved login is encrypted on the server and filled by fill_login; neither the bot nor any screen ever gets
 // it back.
@@ -158,6 +159,7 @@ export function SignInRequestCard({
           <bdi dir="auto">“{card.reason}”</bdi> <span className="text-ink-tertiary">— {botName}</span>
         </blockquote>
       )}
+      {canSave && !saving && <div className="mt-2.5"><VaultChoices kind="login" botId={botId} botName={botName} threadId={threadId} messageId={message.id} /></div>}
       {saving ? (
         <div className="mt-2.5" data-testid="sign-in-save">
           <p className="mb-2 text-[13px] leading-snug text-ink-secondary">{mates.length
