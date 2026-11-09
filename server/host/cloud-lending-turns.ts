@@ -1,7 +1,7 @@
 // Which turns on a Cloud home may use the Mac lent to it, read from the harness's own records (server/cloud-lending.ts
 // decides), and the plain words a turn that can't is told. A room member turn acts for the person's line that started
 // its run, for that turn generation alone, while the run lasts.
-import { answersOwnersLine, cloudHomeLendingRefusal, cloudLendingRefusalText, ON_THE_CARD, ONLY_THE_PERSON, teamLendingRefusal, type CloudLendingRefusal, type CloudLendingTurn } from "../cloud-lending.ts";
+import { answersOwnersLine, changedRoutineRefusalText, cloudHomeLendingRefusal, cloudLendingRefusalText, ON_THE_CARD, ONLY_THE_PERSON, teamLendingRefusal, type CloudLendingRefusal, type CloudLendingTurn } from "../cloud-lending.ts";
 import { unstamped } from "../cloud-owner-lines.ts";
 import { deviceWord } from "../lent-computers.ts";
 import type { Routine, RoutineManager, RoutineRun } from "../routines.ts";
@@ -105,6 +105,8 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
     const { conversation, memoryChanged } = shut;
     if (!conversation && !memoryChanged) return null;
     if (deps.team) return teamLendingRefusal(deps.team);
+    const changed = conversation === "not-owner" && !memoryChanged ? changedRoutine(capability) : undefined;
+    if (changed !== undefined) return changedRoutineRefusalText(changed, deviceWord(deps.lentPlatform()));
     const thread = store.messagesFor(capability.threadId);
     const others = thread.filter((line) => line.role === "user" && !deps.ownerPerson(line.peerAsk ? undefined : line.sender?.id));
     return cloudLendingRefusalText(conversation ?? "memory-changed", { room: Boolean(store.groupByThread(capability.threadId)), fromBefore: others.length > 0 && others.every(unstamped),
@@ -124,6 +126,18 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
     const { conversation, memoryChanged } = gates(capability);
     if (memoryChanged) return conversation ? "memory-changed-here" : "memory-changed";
     return conversation;
+  }
+
+  /** The name of the routine this turn runs, when the run is refused only because the routine is no longer the owner's
+   * (someone else changed it); a webhook's or another app's run, or one somebody else started by hand, is not this. */
+  function changedRoutine(capability: Turn): string | undefined {
+    const turn = cloudLendingTurn(capability);
+    const automation = turn.request?.automation;
+    if (automation === undefined || automation === "webhook" || automation === "api") return undefined;
+    const run = turn.routineRun();
+    if (!run || run.ownerAuthored || run.triggerSource === "webhook" || run.triggerSource === "api" || (run.triggerSource === "manual" && !run.ownerStarted)) return undefined;
+    const routineId = deps.activeRoutineRun(capability.threadId)?.routineId;
+    return deps.routines()?.listRoutines().find((routine) => routine.id === routineId)?.name;
   }
 
   /** A bot opened this conversation (a hand-off's work thread, one a bot started itself, a Chief's notices). */

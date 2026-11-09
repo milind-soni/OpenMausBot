@@ -68,6 +68,11 @@ export function cloudLendingRefusalText(why: CloudLendingRefusal | "memory-chang
   return `Only conversations you start with a bot, and routines you wrote, can use ${yours}. Start a new conversation with this bot to use it.`;
 }
 
+/** A routine's run that someone else's change made no longer the owner's: saving it again in its editor renews it. */
+export function changedRoutineRefusalText(name: string, device: "Mac" | "PC" | "computer"): string {
+  return `"${name}" was changed outside your own chats, so it can't use your ${device}. Open it and save it to make it yours again.`;
+}
+
 /** On a team nobody's own computer is lent: the team's bots use the team's cloud computer. */
 export function teamLendingRefusal(team: string): string {
   return `${team}'s bots never use anyone's own computer; they use ${team}'s cloud computer.`;
