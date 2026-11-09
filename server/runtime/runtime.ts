@@ -262,8 +262,8 @@ export class Runtime {
       if (!n || isTerminal(n)) continue;
       if (n.status === "queued" && !n.continuation && now - this.since(n.lastActivityAt) > this.limits.queueMs) {
         this.cancelTree(n, n.executions > 0 ? "not resumed" : "never started", "failed", "expired");
-      } else if (n.status === "needs_input" && this.inputExpires(n) && now - this.since(n.lastActivityAt) > this.limits.inputWaitMs) {
-        this.cancelTree(n, "the person did not answer", "failed", "expired");
+      } else if (n.status === "needs_input" && this.inputExpires(n)) {
+        this.chaseParked(n, now);
       } else if (n.status === "running") {
         const turn = this.turns.get(n.id);
         if (turn && mono - turn.activeAt > this.limits.turnStallMs) {
@@ -482,7 +482,7 @@ export class Runtime {
     }
     delete n.guard;
     if (result.kind === "needs_input") {
-      n.status = "needs_input"; n.question = clip(result.question, BRIEF_MAX); n.lastActivityAt = now;
+      n.status = "needs_input"; n.question = clip(result.question, BRIEF_MAX); n.lastActivityAt = now; delete n.remindedAt;
       if (result.cards?.length) n.cards = result.cards; else delete n.cards;
       const choice = result.decide?.default?.trim();
       if (result.decide && n.parentId && !n.cards) n.decide = choice ? { default: clip(choice, BRIEF_MAX) } : {}; else delete n.decide;
@@ -745,7 +745,24 @@ export class Runtime {
   }
 
   private inputExpires(n: Assignment): boolean {
-    return Number.isFinite(this.limits.inputWaitMs) && !(n.cards && n.cards.length > 0);
+    return Number.isFinite(this.limits.inputWaitMs) && n.parentId !== undefined;
+  }
+
+  /** One reminder, then expiry. Not on this.since(): a window every boot reopened would never close on a host that restarts. A
+   * question its requester decides asks the person nothing, so it gets no reminder. */
+  private chaseParked(n: Assignment, now: number): void {
+    const { inputWaitMs, inputRemindMs } = this.limits;
+    const closesAt = n.lastActivityAt + inputWaitMs;
+    if (n.remindedAt === undefined && Number.isFinite(inputRemindMs) && !n.decide) {
+      if (now - n.lastActivityAt <= inputRemindMs) return;
+      n.remindedAt = now;
+      this.store.update(n, { kind: "reminded", at: now, detail: "waiting on the person" });
+      this.touch(n);
+      this.safe("remind", () => this.runner.remind?.(n, Math.max(closesAt, now + inputWaitMs - inputRemindMs)));
+      return;
+    }
+    const notBefore = n.remindedAt === undefined ? closesAt : Math.max(closesAt, n.remindedAt + inputWaitMs - inputRemindMs);
+    if (now > notBefore) this.cancelTree(n, "the person did not answer", "failed", "expired");
   }
 
   /** Whether its requester takes a turn for its question: a one-way notice's never does, nor a `poll` root. */

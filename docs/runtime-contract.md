@@ -30,7 +30,7 @@ Storage: SQLite (`node:sqlite`, like `messages.db`) in `DATA_DIR/runtime.db`: `a
 queued ──admit──> running ──turn ends──> completed | failed | cancelled
                     │  └──handed out work──> waiting ──all children settled, or a child's new question──> resume ──> running
                     └──question for the person──> needs_input ──answer──> running
-                       (or, at Full access, its requester)   └──wait expires (only a host's finite inputWaitMs)──> failed(expired)
+                       (or, at Full access, its requester)   └──wait expires (handed-off work, a host's finite inputWaitMs)──> failed(expired)
 ```
 
 - **Enqueue** checks the parent is running (or there is no parent), refuses work back to an ancestor (one exception, `ownThread` in `server/runtime/tree.ts`: a direct conversation may hand work to a new thread of its own bot, which `start_thread`'s `report_back` uses; only the requesting turn is passed over, never a conversation already in the chain, so that thread cannot open another of its own), dedupes (same brief, same assignee, same parent, unless `rework`), checks depth and the root's budgets, computes the level, writes the row with event `enqueued`. Refusals return a typed reason; they never throw into a turn.
@@ -69,7 +69,7 @@ Model-written fields that imitate the envelope's opening marker are escaped. The
 
 ## 5. One restart policy
 
-Downtime is nobody's budget: every window restarts at boot. At open, before anything is dispatched:
+Downtime is nobody's budget: every window but the wait on the person restarts at boot. At open, before anything is dispatched:
 
 | State at shutdown | What happens |
 |---|---|
@@ -88,9 +88,9 @@ What a cut turn did outward is the host's knowledge, read through the optional p
 
 Three budgets per root, counted since the root's last durable progress (a settlement, a completed turn): `requests`, `executions`, `wakes`. Progress renews them; nothing else does. The owed follow-up turn of a node whose children all settled is never refused for budget.
 
-Three clocks and no others: a queue bound (`queueMs`, expired means `failed(expired)`, "never started"); a per-root stall window on durable progress (`stallMs`, fails the tree); a per-turn activity window (`turnStallMs`, on the monotonic clock, so a laptop sleep is not a stall; a tool visibly in flight counts as activity through `progress()`). Time spent parked on the person is charged to no window. A wait on the person's words is bounded by `inputWaitMs`, which is infinite unless a host sets it: a question waits for the person however long they take. Where a host sets it, expiry is `failed(expired)`: not run, not refused, never reported as approved.
+Three clocks and no others: a queue bound (`queueMs`, expired means `failed(expired)`, "never started"); a per-root stall window on durable progress (`stallMs`, fails the tree); a per-turn activity window (`turnStallMs`, on the monotonic clock, so a laptop sleep is not a stall; a tool visibly in flight counts as activity through `progress()`). Time spent parked on the person is charged to no window. Handed-off work parked on the person, on words or on cards, is bounded by `inputWaitMs` on the wall clock, restarts included, since a window each boot reopened would never close on a host that restarts. It is infinite unless a host sets it; OpenMausBot sets three days. `inputRemindMs` (one day here) reminds the person once, and the rest of the window always follows that reminder. Expiry is `failed(expired)`: not run, not refused, never reported as approved.
 
-Waiting never expires where nothing of the runtime's is held: a node parked on the person's **cards** has no clock at all (the answer, however late, resumes it; a non-finite `inputWaitMs` makes every wait on the person like that), and a node **queued to continue** in place (a seat the host holds it for) is bounded by neither `queueMs` nor the tree's stall window; the only bound on a computer wait is the host's own person-hold rule.
+Waiting never expires where nothing of the runtime's is held: a root parked on the person's **cards** has no clock at all (the answer, however late, resumes it, and no requester waits on it; a non-finite `inputWaitMs` makes every wait on the person like that), and a node **queued to continue** in place (a seat the host holds it for) is bounded by neither `queueMs` nor the tree's stall window; the only bound on a computer wait is the host's own person-hold rule.
 
 Two loop guards bound a node that continues in place, read from the evidence of its continuing executions (`TurnEvidence.okToolCalls`, `errors`) and kept on the row (`guard`): after two consecutive continuations with no successful tool call, or when the last three error texts across continuing executions are identical, the node ends `failed(stalled)` instead of continuing (event `stalled` "no progress: …", then the settlement). A continuation whose evidence names no ok count is progress-unknown and counts neither way; a turn that ends any other way (parks, waits, settles) clears the guard. The executions budget stays as the backstop.
 

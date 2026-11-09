@@ -384,6 +384,8 @@
   "server.teammates.goal.stopped": "Goal stopped: {detail}",
   "server.teammates.goal.failed": "Goal failed: {detail}",
   "server.teammates.noAnswerInTime": "Nobody answered {who}'s question in time",
+  "server.teammates.stillWaiting": "Still waiting on your answer: {question} This work closes in {days} days if nobody answers.",
+  "server.teammates.stillWaitingCard": "This work is still waiting on you. It closes in {days} days if nothing changes.",
   "server.teammates.noApprovalInTime": "Nobody answered {who}'s approval in time — that step did not run",
   "server.teammates.turnEndedBeforeAnswer": "{who}'s turn ended before anyone answered its question",
   "server.teammates.approvalClosed": "{who}'s approval closed before anyone answered — that step did not run",

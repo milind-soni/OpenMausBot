@@ -68,6 +68,7 @@ const assignmentSchema = z.object({
   reportedAt: z.number().optional(),
   rework: z.boolean(),
   question: z.string().optional(),
+  remindedAt: z.number().optional(),
   decide: z.object({ default: z.string().optional() }).optional(),
   answer: z.string().optional(),
   answeredBy: z.discriminatedUnion("kind", [z.object({ kind: z.literal("bot"), botId: z.string().min(1) }), z.object({ kind: z.literal("default") })]).optional(),

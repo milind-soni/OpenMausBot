@@ -887,6 +887,88 @@ describe("Runtime: a root's later executions (every turn a root)", () => {
     invariants(w);
   });
 
+  it("reminds the person once when handed-off work has waited, then closes it, across a restart and on the wall clock", async () => {
+    const store = openRuntimeStore(":memory:");
+    const w = world((a) => a.assignee.botId === "builder" ? { kind: "needs_input", question: "Region?" } : undefined, { inputRemindMs: 1_000, inputWaitMs: 3_000 }, store);
+    const reminded: Array<{ id: string; closesAt: number }> = [];
+    w.runner.remind = (a, closesAt) => { reminded.push({ id: a.id, closesAt }); };
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick(); await flush();
+    w.runtime.end(root.id, { ok: true, text: "" });
+    const parkedAt = w.store.get(child.id)!.lastActivityAt;
+    w.clock.advance(1_000);
+    w.runtime.tick();
+    expect(reminded).toEqual([]);
+    w.clock.advance(1);
+    w.runtime.tick(); w.runtime.tick();
+    expect(reminded).toEqual([{ id: child.id, closesAt: parkedAt + 3_001 }]);
+    expect(w.store.events(child.id).filter(e => e.kind === "reminded")).toHaveLength(1);
+
+    const again = new Runtime(store, w.runner, { clock: w.clock, limits: { inputRemindMs: 1_000, inputWaitMs: 3_000 }, log: () => {} });
+    again.open();
+    w.clock.advance(1_999);
+    again.tick();
+    expect(reminded).toHaveLength(1);
+    expect(store.get(child.id)?.status).toBe("needs_input");
+    w.clock.advance(2);
+    again.tick();
+    expect(store.get(child.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "the person did not answer" });
+  });
+
+  it("reminds late work first and still gives it the rest of the window after a long downtime", async () => {
+    const w = world((a) => a.assignee.botId === "builder" ? { kind: "needs_input", question: "Region?" } : undefined, { inputRemindMs: 1_000, inputWaitMs: 3_000 });
+    const reminded: number[] = [];
+    w.runner.remind = (_a, closesAt) => { reminded.push(closesAt); };
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick(); await flush();
+    w.runtime.end(root.id, { ok: true, text: "" });
+    w.clock.advance(50_000);
+    w.runtime.tick();
+    expect(reminded).toEqual([w.clock.t + 2_000]);
+    expect(w.store.get(child.id)?.status).toBe("needs_input");
+    w.clock.advance(2_000);
+    w.runtime.tick();
+    expect(w.store.get(child.id)?.status).toBe("needs_input");
+    w.clock.advance(1);
+    w.runtime.tick();
+    expect(w.store.get(child.id)).toMatchObject({ status: "failed", outcome: "expired" });
+  });
+
+  it("a newer question restarts the wait and its reminder; a question its requester decides reminds nobody", async () => {
+    const asks: RunResult = { kind: "needs_input", question: "Region?" };
+    const w = world((a) => a.assignee.botId === "builder" ? asks : undefined, { inputRemindMs: 1_000, inputWaitMs: 3_000 });
+    const reminded: string[] = [];
+    w.runner.remind = (a) => { reminded.push(a.id); };
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick(); await flush();
+    w.runtime.end(root.id, { ok: true, text: "" });
+    w.clock.advance(1_001);
+    w.runtime.tick();
+    expect(reminded).toEqual([child.id]);
+    expect(w.runtime.answer(child.id, "eu-west")).toBe(true);
+    w.runtime.tick(); await flush();
+    expect(w.store.get(child.id)).toMatchObject({ status: "needs_input" });
+    expect(w.store.get(child.id)?.remindedAt).toBeUndefined();
+    w.clock.advance(1_001);
+    w.runtime.tick();
+    expect(reminded).toEqual([child.id, child.id]);
+
+    const quiet = world((a) => a.assignee.botId === "builder" ? { kind: "needs_input", question: "Region?", decide: {} } : undefined, { inputRemindMs: 1_000, inputWaitMs: 3_000 });
+    const told: string[] = [];
+    quiet.runner.remind = (a) => { told.push(a.id); };
+    const root2 = quiet.runtime.begin(beginReq());
+    const decided = ok(quiet.runtime.enqueue(toBot("builder", root2.id)));
+    quiet.runtime.tick(); await flush();
+    expect(quiet.store.get(decided.id)?.decide).toEqual({});
+    quiet.clock.advance(3_001);
+    quiet.runtime.tick();
+    expect(told).toEqual([]);
+    expect(quiet.store.get(decided.id)).toMatchObject({ status: "failed", outcome: "expired" });
+  });
+
   it("a root parked on cards never expires; a child's question does; a non-finite inputWaitMs never expires anything", async () => {
     const w = world((a) => a.assignee.botId === "builder" ? { kind: "needs_input", question: "Region?" } : undefined, { inputWaitMs: 1_000 });
     const root = w.runtime.begin(beginReq());

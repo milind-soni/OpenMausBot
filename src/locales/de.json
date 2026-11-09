@@ -257,6 +257,8 @@
   "server.teammates.goal.stopped": "Ziel gestoppt: {detail}",
   "server.teammates.goal.failed": "Ziel fehlgeschlagen: {detail}",
   "server.teammates.noAnswerInTime": "Niemand hat die Frage von {who} rechtzeitig beantwortet",
+  "server.teammates.stillWaiting": "Wartet noch auf deine Antwort: {question} Diese Arbeit wird in {days} Tagen beendet, wenn niemand antwortet.",
+  "server.teammates.stillWaitingCard": "Diese Arbeit wartet noch auf dich. Sie wird in {days} Tagen beendet, wenn sich nichts ändert.",
   "server.teammates.noApprovalInTime": "Niemand hat die Freigabe von {who} rechtzeitig erteilt, dieser Schritt lief nicht",
   "server.teammates.turnEndedBeforeAnswer": "Der Zug von {who} endete, bevor jemand seine Frage beantwortet hat",
   "server.teammates.approvalClosed": "Die Freigabe von {who} wurde geschlossen, bevor jemand geantwortet hat, dieser Schritt lief nicht",

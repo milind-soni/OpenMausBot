@@ -367,6 +367,8 @@
   "server.teammates.goal.stopped": "Objetivo interrompido: {detail}",
   "server.teammates.goal.failed": "O objetivo falhou: {detail}",
   "server.teammates.noAnswerInTime": "Ninguém respondeu à pergunta de {who} a tempo",
+  "server.teammates.stillWaiting": "Ainda aguardando sua resposta: {question} Este trabalho será encerrado em {days} dias se ninguém responder.",
+  "server.teammates.stillWaitingCard": "Este trabalho ainda está esperando por você. Ele será encerrado em {days} dias se nada mudar.",
   "server.teammates.noApprovalInTime": "Ninguém respondeu ao pedido de aprovação de {who} a tempo — essa etapa não foi executada",
   "server.teammates.turnEndedBeforeAnswer": "A sessão de {who} terminou antes de alguém responder à pergunta dele",
   "server.teammates.approvalClosed": "O pedido de aprovação de {who} foi encerrado antes de alguém responder — essa etapa não foi executada",

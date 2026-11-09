@@ -3939,7 +3939,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
       if (directThreadIds.size > 0) drainQueuedSends();
     },
     report: (child, parent) => {
-      askCards.closed(child);
+      askCards.closed(child); if (child.outcome === "expired" && child.cards?.length) stopCards(child.threadId, new Set(child.cards));
       if (!parent) {
         parkedSeats.delete(child.id);
         const followupEnded = followupEndedRoots.has(child.id);
@@ -4086,7 +4086,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
         ...(node.answeredBy?.kind === "bot" ? { answerer: store.bot(node.answeredBy.botId)?.name ?? "Teammate" } : {}),
       };
     },
-    park: (node, question, restored) => askCards.park(node, question, restored),
+    park: (node, question, restored) => askCards.park(node, question, restored), remind: (node, closesAt) => askCards.remind(node, closesAt),
     levelOf: (target, source) => delegatedLevel.levelOf(target, source),
     chiefOf: address => chiefLevel(store.bot(address.botId)),
     // A person's cut root never reruns after a follow-up in its thread: that would hand the person's words to a model again, or redo an older request.

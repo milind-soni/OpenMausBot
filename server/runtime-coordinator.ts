@@ -35,6 +35,10 @@ const NEEDS_INPUT = /^needs input:/i;
 /** Per-turn stalls belong to the host's watchdog: this only keeps the runtime's window out of its way. */
 const TURN_STALL_MS = 24 * 60 * 60_000;
 
+/** Handed-off work parked on the person: a reminder after a day, closed after three. */
+const PARKED_REMIND_MS = 24 * 60 * 60_000;
+const PARKED_LIMIT_MS = 72 * 60 * 60_000;
+
 const REQUESTS_PER_ROOT = 64;
 const EXECUTIONS_PER_ROOT = 96;
 
@@ -160,7 +164,7 @@ export class RuntimeCoordinator implements Coordinator {
     this.store = options.wrote ? announcingWrites(store, options.wrote) : store;
     this.runtime = new Runtime(this.store, this.runner(), {
       clock: { now: () => this.now(), monotonic: () => performance.now() },
-      limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, ...options.runtimeLimits },
+      limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, inputWaitMs: PARKED_LIMIT_MS, inputRemindMs: PARKED_REMIND_MS, ...options.runtimeLimits },
       ...(options.log ? { log: options.log } : {}),
     });
   }
@@ -568,6 +572,7 @@ export class RuntimeCoordinator implements Coordinator {
       },
       run: (a, input, signal) => this.run(a, input, signal),
       park: (a, question, restored) => host.park(this.project(a), question, restored),
+      remind: (a, closesAt) => host.remind?.(this.project(a), closesAt),
       report: (a, parent) => host.report(view(a, parent), parent && this.project(parent)),
       changed: rows => {
         const groups = new Set<string>();
