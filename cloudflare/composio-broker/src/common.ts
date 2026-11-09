@@ -143,11 +143,11 @@ export function composioRequest(env: Env, path: string, init?: RequestInit) {
 }
 
 const connectedAccountResponseSchema = z.object({
-  id: z.string().optional(),
+  id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/),
   alias: z.string().nullable().optional(),
   status: z.string().optional(),
   updated_at: z.string().optional(),
-  toolkit: z.object({ slug: z.string().optional() }).optional(),
+  toolkit: z.object({ slug: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/) }),
 });
 export type ConnectedAccountResponse = z.infer<typeof connectedAccountResponseSchema>;
 const connectedAccountsPageSchema = z.object({
@@ -173,7 +173,8 @@ export async function listConnectedAccounts(env: Env, userId: string, slugs: str
     const body = connectedAccountsPageSchema.parse(await response.json());
     accounts.push(...body.items);
     const next = body.next_cursor || undefined;
-    if (!next || seenCursors.has(next)) return accounts;
+    if (!next) return accounts;
+    if (seenCursors.has(next)) throw new Error("Connected-account inventory contains a pagination cursor cycle");
     seenCursors.add(next);
     cursor = next;
   }
