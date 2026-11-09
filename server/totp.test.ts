@@ -56,6 +56,23 @@ describe("TOTP (RFC 6238)", () => {
     expect(totpCode(key, 30_000)).toBe(totpCode(key, 59_999));
     expect(totpCode(key, 60_000)).not.toBe(totpCode(key, 59_999));
   });
+  it.each([
+    ["JBSWY3DPEHPK3PXPA", "48656c6c6f21deadbeef"],
+    ["JBSWY3DPEHPK3PXPAAA", "48656c6c6f21deadbeef00"],
+    ["JBSWY3DPEHPK3PXPAAAAAA", "48656c6c6f21deadbeef000000"],
+  ])("preserves the decoded bytes of an existing saved key (%s)", (secret, hex) => {
+    const key = { secret, algorithm: "SHA1" as const, digits: 6, period: 30 };
+    const bytes = Buffer.from(hex, "hex");
+    expect(parseTotpKey(secret)).toBeNull();
+    expect(totpCode(key, 59_000)).toBe(hotp(bytes, 1, 6));
+    expect(totpCode(key, 120_000)).toBe(hotp(bytes, 4, 6));
+  });
+
+  it("refuses invalid characters in an existing saved key", () => {
+    const key = { secret: "JBSWY3DPEHPK3PXP0", algorithm: "SHA1" as const, digits: 6, period: 30 };
+    expect(() => totpCode(key, 59_000)).toThrow("not valid base32");
+  });
+
 });
 
 describe("2FA setup keys", () => {

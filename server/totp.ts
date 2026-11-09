@@ -14,6 +14,10 @@ const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 /** RFC 4648 base32, case-insensitive; spaces, dashes and padding ignored. */
 export function decodeBase32(text: string): Buffer | null {
+  return decodeBase32Secret(text, false);
+}
+
+function decodeBase32Secret(text: string, allowIncompleteGroups: boolean): Buffer | null {
   const clean = text.replace(/[\s-]/gu, "").replace(/=+$/u, "").toUpperCase();
   if (!clean || !/^[A-Z2-7]+$/u.test(clean)) return null;
   const bytes: number[] = [];
@@ -27,7 +31,7 @@ export function decodeBase32(text: string): Buffer | null {
       bytes.push((buffer >> bits) & 0xff);
     }
   }
-  if (bits >= 5) return null;
+  if (!allowIncompleteGroups && bits >= 5) return null;
   return Buffer.from(bytes);
 }
 
@@ -69,7 +73,7 @@ export function hotp(key: Buffer, counter: number, digits: number, algorithm: To
 
 /** The code a key shows at `nowMs` (RFC 6238, T0 = 0). */
 export function totpCode(key: TotpKey, nowMs: number = Date.now()): string {
-  const bytes = decodeBase32(key.secret);
+  const bytes = decodeBase32Secret(key.secret, true);
   if (!bytes) throw new Error("The saved 2FA key is not valid base32.");
   return hotp(bytes, Math.floor(nowMs / 1000 / key.period), key.digits, key.algorithm);
 }
