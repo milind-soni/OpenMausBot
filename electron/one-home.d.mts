@@ -86,7 +86,8 @@ export function createOneHome(deps: {
   openHome?(): void;
   openLocal?(): void;
   lastInput?(): number;
-  /** Whether this computer's own copy is the server answering now. */
+  /** Whether this computer's own copy, the server on its own data folder, is the one answering now: while it isn't, no first
+   * move starts and no top-up goes. */
   ownCopy?(): boolean;
   again?: { bring(): Promise<{ restored: string; switches: Record<string, boolean> } | { deleted: true } | { later: number }> };
   /** The person's choice to keep this computer's bots here. */
