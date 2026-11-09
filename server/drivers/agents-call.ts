@@ -15,6 +15,7 @@ import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
 import { boundedAgentResult } from "./agents-result.ts";
 import { outOfBounds } from "./agents-schema.ts";
+import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
@@ -206,27 +207,6 @@ function recallWhen(at: unknown, dateOnly: boolean): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   const day = `${said.getFullYear()}-${pad(said.getMonth() + 1)}-${pad(said.getDate())}`;
   return dateOnly ? day : `${day} ${pad(said.getHours())}:${pad(said.getMinutes())}`;
-}
-
-/** The top-level arguments a model may fill with `""` (or spaces) when it means to leave them out, per tool. Only these:
- * elsewhere a blank can be the value itself, such as a cleared room bulletin or a bot's private folder. */
-const BLANK_MEANS_LEFT_OUT: Readonly<Record<string, readonly string[]>> = {
-  coordinate_bots: ["group_id", "reason", "thread", "title", "reply", "done_when", "answers"],
-  session_search: ["thread_id", "message_id", "query", "since", "until", "scope"],
-  show_html: ["html", "jsx", "path"],
-  // A blank text or old_text is a mistake the schema names, not "not given".
-  memory_update: ["until"],
-};
-
-function dropBlankArguments(name: string, input: Json): Json {
-  const keys = Object.hasOwn(BLANK_MEANS_LEFT_OUT, name) ? BLANK_MEANS_LEFT_OUT[name] : undefined;
-  if (!keys || !input || typeof input !== "object" || Array.isArray(input)) return input;
-  const out: Json = { ...input };
-  for (const key of keys) {
-    const value = out[key];
-    if (typeof value === "string" && !value.trim()) delete out[key];
-  }
-  return out;
 }
 
 export async function callTool(called: string, input: Json, context: ToolCallContext): Promise<ToolCallResult> {
