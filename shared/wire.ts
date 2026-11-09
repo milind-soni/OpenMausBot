@@ -458,13 +458,9 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";
   text?: string;
   digest?: TurnDigest;
-  compaction?: {
-    summary: string;
-    firstKeptId: string;
-    foldedThroughId: string;
-    tokensBefore: number;
-    by: "person" | "harness";
-  };
+  /** kind "compaction" with no `compaction` record: the engine condensed its own session. A marker for people, never context. */
+  engineCompaction?: true;
+  compaction?: { summary: string; firstKeptId: string; foldedThroughId: string; tokensBefore: number; by: "person" | "harness" };
   /** Renderers receive only the allowlisted /api/attachments URL. `file` entries are opened through the message-scoped
    * file route, never by path. `source`: a bot attach-file copy's original path on the server, for Show in folder.
    * `fromTool`: an image a tool's result returned while the bot worked, which it did not make or send. */

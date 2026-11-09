@@ -2474,6 +2474,8 @@
   "chat.digestChipNoFiles": "Fez {tools} chamadas de ferramenta",
   "chat.digestTitle": "O que foi feito nesta sessão",
   "chat.compactionTitle": "Contexto anterior resumido",
+  "chat.engineCompactionTitle": "Conversa condensada em um resumo",
+  "chat.engineCompactionHint": "A IA resumiu as mensagens anteriores para abrir espaço. Sua conversa completa continua aqui, mas o agente pode não lembrar exatamente de detalhes mais antigos.",
   "chat.compactionHint": "Sua conversa completa continua aqui. O agente usa este resumo e as mensagens recentes ao continuar.",
   "chat.compactionExcerptTitle": "Contexto anterior reduzido a trechos recentes",
   "chat.compactionExcerptHint": "Sem um resumo escrito disponível, o agente continua com estes trechos e as mensagens recentes. Detalhes mais antigos podem faltar no contexto dele. A conversa completa continua aqui.",
