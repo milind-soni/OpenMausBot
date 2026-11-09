@@ -38,6 +38,17 @@ describe("the app's run window", () => {
     expect(ids(appRunWindow(runs, NOW - 14 * DAY))).toEqual(runs.slice(0, 11).map((candidate) => candidate.id));
   });
 
+  it.each(["queued", "running", "waiting"] as const)("keeps the failure streak while a newer run is %s", (status) => {
+    const runs = [
+      run("active", "r", 20, status),
+      ...Array.from({ length: 8 }, (_, i) => run(`fail-${i}`, "r", 21 + i, "failed", { seenAt: NOW })),
+      run("ok", "r", 40, "completed"),
+      run("older", "r", 41, "completed"),
+    ];
+
+    expect(ids(appRunWindow(runs, NOW - 14 * DAY))).toEqual(ids(runs.slice(0, -1)));
+  });
+
   it("answers a range, a thread, the window, or everything", () => {
     const runs = [run("a", "r", 1, "completed", { threadId: "t1" }), run("b", "r", 30, "completed")];
     const listRuns = (from?: number, to?: number) => runs.filter((candidate) => (from === undefined || candidate.scheduledFor >= from) && (to === undefined || candidate.scheduledFor <= to));
