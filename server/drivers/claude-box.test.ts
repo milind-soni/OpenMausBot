@@ -159,7 +159,8 @@ describe("a Claude turn in the bot box", () => {
     }
   }, 60_000);
   // A custom endpoint (Settings > Custom endpoint) gets its own folder under providers/ but no sign-in that would make it.
-  it.skipIf(process.platform === "win32")("makes a custom endpoint's own Claude folder before the box binds it", async () => {
+  // The fixture lives under the checkout, outside /tmp (never bound): skip where the checkout itself is under /tmp.
+  it.skipIf(process.platform === "win32" || process.cwd().startsWith(tmpdir()))("makes a custom endpoint's own Claude folder before the box binds it", async () => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
     const scratch = mkdtempSync(join(tmpdir(), "omb-claude-box-endpoint-"));
@@ -195,6 +196,7 @@ describe("a Claude turn in the bot box", () => {
     expect(existsSync(configDir), "the endpoint's folder was made").toBe(true);
     const boxed = wrap.mock.results.map((result) => result.value as WrappedSpawn | null).find((spawned) => spawned?.plan.botId === "bot-a");
     expect(boxed, "the engine ran in the box").toBeTruthy();
+    expect(boxed!.plan.mounts, "the endpoint folder is bound on its own line").toContainEqual(expect.objectContaining({ source: configDir, target: configDir }));
     expect(visibleInBox(boxed!.plan, configDir)).toBe("rw");
   }, 60_000);
 });
