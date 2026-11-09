@@ -186,6 +186,7 @@ export async function prepareProjectSession(
   apiKey: string,
   current?: { apiKey?: string; userId?: string; sessionId?: string },
   knownAuthConfigs?: AuthConfigMap,
+  options: { reuseEarlierUser?: boolean } = {},
 ): Promise<{ apiKey: string; userId: string; sessionId: string }> {
   const trimmed = apiKey.trim();
   if (!trimmed) throw new Error("Enter a Composio project API key");
@@ -207,8 +208,8 @@ export async function prepareProjectSession(
     priorUserId = existing?.config?.user_id ?? priorUserId;
   }
 
-  // A fresh installation keeps the Composio user an earlier one connected apps with in this project.
-  const userId = priorUserId ?? (await earlierInstallationUser(trimmed)) ?? `openmausbot_${randomUUID()}`;
+  // Security: the earlier user holds another installation's apps, so only a caller that says this server is one person's may look.
+  const userId = priorUserId ?? (options.reuseEarlierUser ? await earlierInstallationUser(trimmed) : null) ?? `openmausbot_${randomUUID()}`;
   const sessionId = await createProjectSession(trimmed, userId, authConfigs);
   return { apiKey: trimmed, userId, sessionId };
 }
