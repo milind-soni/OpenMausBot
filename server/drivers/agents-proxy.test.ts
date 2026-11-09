@@ -2072,7 +2072,7 @@ describe("agents-proxy MCP surface", () => {
     const manage = list.result.tools.find((t: { name: string }) => t.name === "skill_manage");
     expect(JSON.stringify(manage.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
     expect(manage.inputSchema.required).toEqual(["action"]);
-    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update", "enable", "disable", "delete"]);
+    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update", "enable", "disable", "delete", "transfer_maintainer"]);
 
     const listed = await callTool("skills_list", {});
     expect(listed.result.content[0].text).toContain("file-expense");
@@ -2145,6 +2145,19 @@ describe("agents-proxy MCP surface", () => {
     expect(missingSkillMd.result.isError).toBe(true);
     expect(missingSkillMd.result.content[0].text).toContain("needs skill_md");
     expect(lastSkillStageBody).toBeNull();
+  });
+
+  it("requires a management revision and returns the transfer receipt, not an enable receipt", async () => {
+    lastSkillStageBody = null;
+    const missing = await callTool("skill_manage", { action: "transfer_maintainer", skill_name: "team-cut", target_bot_id: "bot-helper" });
+    expect(missing.result.isError).toBe(true);
+    expect(lastSkillStageBody).toBeNull();
+    skillStageResponse = { state: "applied", result: { scope: "selected_bots", enabled: true, assigned: true,
+      content_revision: "content", management_revision: "new-revision", maintainer_bot_id: "bot-helper", maintainer_status: "assigned" } };
+    const transferred = await callTool("skill_manage", { action: "transfer_maintainer", skill_name: "team-cut", target_bot_id: "bot-helper", base_revision: "old-revision" });
+    expect(lastSkillStageBody).toMatchObject({ action: "transfer_maintainer", skill_name: "team-cut", target_bot_id: "bot-helper", base_revision: "old-revision" });
+    expect(transferred.result.content[0].text).toContain('"maintainer_bot_id":"bot-helper"');
+    expect(transferred.result.content[0].text).toContain('"management_revision":"new-revision"');
   });
 
   it("sends turning a skill on, off or deleting it to the skill stage route", async () => {

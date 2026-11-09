@@ -765,20 +765,21 @@ const TOOL_DEFINITIONS = [
   {
     name: "skill_manage",
     description:
-      "Submit a new or updated reusable SKILL.md, or turn one of your own skills on or off, or delete it. Never change a skill unless the user explicitly asked for that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged." + APPLIES_OUTCOME,
+      "Submit a new or updated reusable SKILL.md, turn one of your own skills on or off, delete it, or designate a shared skill maintainer. A maintainer is a responsibility label, not an owner or an access grant. Never change a skill unless the user explicitly asked for that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         action: {
           type: "string",
-          enum: ["create", "update", "enable", "disable", "delete"],
-          description: "Create a uniquely named skill, update a learned one, or switch or delete one of your own.",
+          enum: ["create", "update", "enable", "disable", "delete", "transfer_maintainer"],
+          description: "Create a uniquely named skill, update a learned one, switch or delete one of your own, or designate a maintainer for an existing shared skill.",
         },
         skill_name: {
           type: "string",
           description: "Required for every action but create: the exact existing name from skills_list.",
         },
+        target_bot_id: { type: "string", description: "transfer_maintainer: the exact ID of a same-team bot already able to use the shared skill." },
         skill_md: {
           type: "string",
           description:
@@ -805,7 +806,7 @@ const TOOL_DEFINITIONS = [
         },
         base_revision: {
           type: "string",
-          description: "Required to update a skill shared with your team: the revision skills_list shows for it, listed before you read the skill. A teammate's newer change makes the update fail; list and read it again.",
+          description: "For a shared skill update, pass its content revision from skills_list; for transfer_maintainer, pass its management_revision. If it changed, list and read it again.",
         },
         source: {
           type: "string",

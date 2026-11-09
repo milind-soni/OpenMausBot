@@ -26,6 +26,7 @@ import { callMausBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.ts";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
 import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
 import { callDevsTool, DEVS_TOOL_NAMES } from "./agents-devs-tools.ts";
+import { callSkillMaintainer } from "./agents-call-skill-maintainer.ts";
 
 export interface ToolCallContext {
   botId: string;
@@ -889,8 +890,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         const row = skill as Json;
         // Unreviewed imports: a hostile description is still prompt content, so only names and status.
         const revision = typeof row.revision === "string" ? `, shared with your team, revision ${row.revision}` : "";
+        const shared = jsonRecord(row.shared) ? `, shared state ${JSON.stringify(row.shared)}` : "";
         const unlisted = row.enabled && row.listed === false ? ", not in your prompt: search to read it" : "";
-        return `- ${row.name} (${row.enabled ? "enabled" : "disabled"}, ${row.editable === true ? "learned/editable" : "imported"}${revision}${unlisted})`;
+        return `- ${row.name} (${row.enabled ? "enabled" : "disabled"}, ${row.editable === true ? "learned/editable" : "imported"}${revision}${shared}${unlisted})`;
       }).join("\n")
       : "(none)";
     const pending = staged.length
@@ -903,6 +905,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return { text: `Imported skills:\n${live}\n\nStaged (waiting for the user's decision):\n${pending}` };
   }
   if (name === "skill_manage") {
+    if (args.action === "transfer_maintainer") return callSkillMaintainer(args, context.client, BOT_ID, THREAD_ID);
     if (isSkillSwitchAction(args.action)) {
       const skillName = typeof args.skill_name === "string" ? args.skill_name.trim() : "";
       const verb = skillSwitchVerb(args.action);
@@ -918,7 +921,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       };
     }
     if (args.action !== "create" && args.action !== "update") {
-      return { text: 'skill_manage action must be "create", "update", "enable", "disable" or "delete".', isError: true };
+      return { text: 'skill_manage action must be "create", "update", "enable", "disable", "delete" or "transfer_maintainer".', isError: true };
     }
     const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
     if (!skillMd.trim()) {

@@ -1,0 +1,9 @@
+# Shared skill maintainers
+
+A library skill is shared; a bot cannot own it. A maintainer is a responsibility label, not an access grant or a change in ownership. The existing skill package, provenance, assignments, enabled state, and bot execution permissions remain unchanged.
+
+With the skills library enabled, `skills_list` shows shared scope (`all_bots` or `selected_bots`), this bot's assignment and enabled state, the SKILL.md content revision, the companion-files revision when present, a management revision, and the maintainer's ID and access status when visible. The management revision covers the library entry and assigned bot IDs. It is distinct from the content revision used for shared skill edits.
+
+When the person explicitly asks to designate a maintainer, use `skill_manage` with `action: "transfer_maintainer"`, the exact `skill_name`, `target_bot_id`, and the latest `management_revision` as `base_revision`. The target must be a visible same-team bot already able to use the enabled shared library skill, without a private skill of the same name shadowing it. This operation does not assign a skill. If the skill, its assignments, or the package changed, list and verify it again. The applied receipt includes the resulting state; list the skill again for readback before considering the change complete. Do not delete a prior copy based on an enable receipt.
+
+Private, unassigned, disabled, tampered, or unavailable skills cannot be transferred through this operation. A conversation that cannot apply shared-skill changes receives an explicit refusal rather than a confirmation card. If a designated bot is removed, loses visibility or access, the readback reports an unavailable or no-access maintainer. Moving a workspace does not currently transfer this designation. Older versions do not preserve it when rewriting the library index.

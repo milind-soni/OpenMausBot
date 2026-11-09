@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, beforeEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppConfig } from "./config.ts";
@@ -235,5 +235,78 @@ describe("assignment resolution", () => {
     expect(withLibrary).toContain("library-skill");
     expect(withLibrary).toContain(JSON.stringify(join(library.skillsLibraryRoot(), "skills", "library-skill", "SKILL.md")));
     expect(withLibrary).toContain("own-skill");
+  });
+});
+
+
+describe("shared skill maintainer", () => {
+  it("preserves the package and assignment state and rejects stale, tampered and invalid transfers", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-maintainer-"));
+    const name = "maintainer-fixture";
+    const installed = library.installLibrarySkill({ name, instructions: SKILL(name), source: "fixture", reviewState: "approved", root,
+      files: [{ path: "references/details.md", content: "important details" }] });
+    expect(installed).not.toHaveProperty("error");
+    const original = library.readSkillLibraryIndex(root)[name]!;
+    const originalFile = readFileSync(join(root, "skills", name, "references", "details.md"), "utf8");
+    const assignedBotIds = ["author", "target"];
+    const baseRevision = library.libraryManagementRevision(original, assignedBotIds);
+    const transfer = library.transferLibraryMaintainer({ name, maintainerBotId: "target", baseRevision, assignedBotIds, root });
+    expect(transfer).toHaveProperty("entry.maintainerBotId", "target");
+    if ("error" in transfer) throw new Error(transfer.error);
+    const { maintainerBotId, maintainerVersion, ...after } = library.readSkillLibraryIndex(root)[name]!;
+    expect({ maintainerBotId, maintainerVersion }).toMatchObject({ maintainerBotId: "target" });
+    expect(after).toEqual(original);
+    expect(readFileSync(join(root, "skills", name, "references", "details.md"), "utf8")).toBe(originalFile);
+    expect(library.transferLibraryMaintainer({ name, maintainerBotId: "author", baseRevision, assignedBotIds, root })).toHaveProperty("error");
+    expect(library.transferLibraryMaintainer({ name, maintainerBotId: "author", baseRevision: transfer.revision, assignedBotIds: ["author"], root })).toHaveProperty("error");
+    writeFileSync(join(root, "skills", name, "references", "details.md"), "tampered");
+    expect(library.transferLibraryMaintainer({ name, maintainerBotId: "author", baseRevision: transfer.revision, assignedBotIds, root })).toHaveProperty("error");
+    expect(library.readSkillLibraryIndex(root)[name]?.maintainerBotId).toBe("target");
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("leaves the old maintainer and package intact if the index cannot be written", () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-maintainer-write-"));
+    const name = "write-failure";
+    library.installLibrarySkill({ name, instructions: SKILL(name), source: "fixture", reviewState: "approved", root });
+    const before = readFileSync(join(root, "index.json"), "utf8");
+    const revision = library.libraryManagementRevision(library.readSkillLibraryIndex(root)[name]!, ["target"]);
+    chmodSync(root, 0o500);
+    try {
+      expect(library.transferLibraryMaintainer({ name, maintainerBotId: "target", baseRevision: revision, assignedBotIds: ["target"], root })).toHaveProperty("error");
+      expect(readFileSync(join(root, "index.json"), "utf8")).toBe(before);
+      expect(library.readLibrarySkillFile(name, root)).toBe(SKILL(name));
+    } finally { chmodSync(root, 0o700); }
+  });
+
+  it("validates visibility, existing access, revisions and readback without changing bot permissions", async () => {
+    const { createSkillsLibraryHost } = await import("./host/skills-library.ts");
+    const name = `transfer-${Math.random().toString(36).slice(2, 10)}`;
+    const bots = [
+      { id: `author-${name}`, name: "Author", section: "team", assignedSkills: [name] },
+      { id: `target-${name}`, name: "Target", section: "team", assignedSkills: [name] },
+      { id: `other-${name}`, name: "Other", section: "team", assignedSkills: [] as string[] },
+      { id: `private-${name}`, name: "Private", section: "team", visibility: "admins", assignedSkills: [name] },
+    ] as import("./store.ts").BotRecord[];
+    const store = { bots, bot: (id: string) => bots.find((item) => item.id === id), groupByThread: () => undefined } as unknown as import("./store.ts").Store;
+    const host = createSkillsLibraryHost({ store, cfg: { features: { skillsLibrary: true } } as AppConfig,
+      appendSkillRequestCard: () => ({ requestId: "unused", summary: "" }) });
+    library.installLibrarySkill({ name, instructions: SKILL(name), source: "fixture", reviewState: "approved" });
+    const author = bots[0]!; const target = bots[1]!;
+    const listing = () => host.harnessListing(author.id, host.listBotSkills(author)).find((item) => item.name === name)!;
+    const before = listing().shared!;
+    expect(before).toMatchObject({ scope: "selected_bots", assigned: true, enabled: true, maintainer_status: "unassigned" });
+    const assignmentSnapshot = JSON.stringify(bots.map((item) => item.assignedSkills));
+    expect(host.transferMaintainer(author, "fixture", name, target.id, before.management_revision, null)[0]).toBe(403);
+    const direct = "full-access" as import("./direct-apply.ts").DirectApply;
+    expect(host.transferMaintainer(author, "fixture", name, bots[2]!.id, before.management_revision, direct)[0]).toBe(422);
+    expect(host.transferMaintainer(author, "fixture", name, bots[3]!.id, before.management_revision, direct)[0]).toBe(422);
+    const [status, receipt] = host.transferMaintainer(author, "fixture", name, target.id, before.management_revision, direct);
+    expect(status).toBe(200);
+    expect(receipt).toMatchObject({ state: "applied", result: { maintainer_bot_id: target.id, maintainer_status: "assigned", scope: "selected_bots", enabled: true } });
+    expect(listing().shared).toEqual(receipt.result);
+    expect(JSON.stringify(bots.map((item) => item.assignedSkills))).toBe(assignmentSnapshot);
+    expect(host.transferMaintainer(author, "fixture", name, author.id, before.management_revision, direct)[0]).toBe(409);
+    target.assignedSkills = [];
+    expect(listing().shared?.maintainer_status).toBe("no_access");
   });
 });
