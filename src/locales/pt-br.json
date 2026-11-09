@@ -9905,5 +9905,8 @@
   "phone.code.typeIntro": "Abra o app do {app} e digite este código de pareamento.",
   "phone.signIn.emailCode": "Código de login do seu e-mail",
   "settings.simple.account.noNameHint": "Ainda não definido",
-  "settings.simple.account.yourName": "Seu nome"
+  "settings.simple.account.yourName": "Seu nome",
+  "sidebar.collapseAll": "Recolher tudo",
+  "sidebar.expandAll": "Expandir tudo",
+  "shortcuts.collapse-all-sidebar": "Recolher ou expandir todos os bots e departamentos na barra lateral"
 }

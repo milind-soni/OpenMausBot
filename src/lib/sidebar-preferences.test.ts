@@ -7,6 +7,7 @@ import {
   PINNED_CIRCLE_ORDER_KEY,
   SIDEBAR_ATTENTION_PINNED_KEY,
   UNIVERSAL_PINS_KEY,
+  SIDEBAR_COLLAPSED_ALL_KEY,
   SIDEBAR_COLLAPSED_SECTIONS_KEY,
   SIDEBAR_DENSITY_KEY,
   SIDEBAR_TOOLS_LAYOUT_KEY,
@@ -18,6 +19,8 @@ import {
   loadPinnedCircleOrder,
   loadUniversalPins,
   loadSidebarAttentionPinned,
+  loadSidebarCollapsedAll,
+  saveSidebarCollapsedAll,
   loadCollapsedSections,
   loadSectionOrder,
   loadSidebarDensity,
@@ -272,5 +275,25 @@ describe("sidebar tools layout preference", () => {
       unsubscribe();
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("collapse-all preference", () => {
+  it("is expanded until saved, then round-trips under its own key", () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+    expect(SIDEBAR_COLLAPSED_ALL_KEY).toBe("openmausbot.sidebarCollapsedAll.v1");
+    expect(loadSidebarCollapsedAll(storage)).toBe(false);
+    saveSidebarCollapsedAll(true, storage);
+    expect(values.get(SIDEBAR_COLLAPSED_ALL_KEY)).toBe("true");
+    expect(loadSidebarCollapsedAll(storage)).toBe(true);
+    saveSidebarCollapsedAll(false, storage);
+    expect(loadSidebarCollapsedAll(storage)).toBe(false);
+  });
+
+  it("reads anything but \"true\" as expanded and survives storage that throws", () => {
+    expect(loadSidebarCollapsedAll({ getItem: () => "1" })).toBe(false);
+    expect(loadSidebarCollapsedAll({ getItem: () => { throw new Error("denied"); } })).toBe(false);
+    expect(() => saveSidebarCollapsedAll(true, { setItem: () => { throw new Error("full"); } })).not.toThrow();
   });
 });

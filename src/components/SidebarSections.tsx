@@ -67,6 +67,13 @@ export function useSidebarSections({ simple, rail, density, query, label, sideba
       setCollapsedIds(next);
       saveCollapsedSections(next);
     },
+    /** Collapses or expands every one of these sections at once. */
+    setAllCollapsed: (ids: string[], collapsed: boolean) => {
+      if (!interactive) return;
+      const next = collapsed ? [...new Set([...collapsedIds, ...ids])] : collapsedIds.filter((id) => !ids.includes(id));
+      setCollapsedIds(next);
+      saveCollapsedSections(next);
+    },
     /** A department's new name keeps its place and its collapsed state. */
     renamed: (from: string, to: string) => {
       const replace = (ids: string[]) => [...new Set(ids.map((id) => (id === userSectionId(from) ? userSectionId(to) : id)))];

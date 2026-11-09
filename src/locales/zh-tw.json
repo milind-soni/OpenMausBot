@@ -9824,5 +9824,8 @@
   "remote.client.endsDec7": "這種連線方式將於 12 月 7 日停止。之後請在另一台電腦的「手機和裝置」中重新配對這台電腦。",
   "phone.code.pairingCode": "配對碼",
   "phone.code.typeIntro": "開啟 {app} 應用程式並輸入這個配對碼。",
-  "phone.signIn.emailCode": "電子郵件中的登入碼"
+  "phone.signIn.emailCode": "電子郵件中的登入碼",
+  "sidebar.collapseAll": "全部摺疊",
+  "sidebar.expandAll": "全部展開",
+  "shortcuts.collapse-all-sidebar": "摺疊或展開側邊欄中的所有機器人和部門"
 }

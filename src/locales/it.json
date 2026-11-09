@@ -6711,5 +6711,8 @@
   "settings.simple.more.title": "Altre impostazioni",
   "settings.simple.more.subtitle": "Backup, limiti e impostazioni che cambi di rado.",
   "settings.simple.more.limits": "Limiti",
-  "settings.simple.more.open": "Apri"
+  "settings.simple.more.open": "Apri",
+  "sidebar.collapseAll": "Comprimi tutto",
+  "sidebar.expandAll": "Espandi tutto",
+  "shortcuts.collapse-all-sidebar": "Comprimi o espandi tutti i bot e i reparti nella barra laterale"
 }

@@ -13,6 +13,7 @@ export const SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth";
 export const SIMPLE_SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth.simple";
 export const SIDEBAR_ATTENTION_PINNED_KEY = "openmausbot.sidebarAttentionPinned.v1";
 export const SIDEBAR_COLLAPSED_SECTIONS_KEY = "openmausbot.sidebarCollapsedSections.v1";
+export const SIDEBAR_COLLAPSED_ALL_KEY = "openmausbot.sidebarCollapsedAll.v1";
 export const SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.v1";
 export const SIMPLE_SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.simple.v1";
 export const PINNED_CIRCLES_KEY = "openmausbot.pinnedCircles";
@@ -430,6 +431,32 @@ export function saveCollapsedSections(
   storage?: Pick<Storage, "setItem"> | null,
 ): void {
   saveStringList(SIDEBAR_COLLAPSED_SECTIONS_KEY, ids, storage);
+}
+
+/** What the person last chose with collapse-all, or undefined while they never have. */
+export function loadSidebarCollapsedAllChoice(storage?: Pick<Storage, "getItem"> | null): boolean | undefined {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    const value = target?.getItem(SIDEBAR_COLLAPSED_ALL_KEY);
+    return value === "true" ? true : value === "false" ? false : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function loadSidebarCollapsedAll(storage?: Pick<Storage, "getItem"> | null): boolean {
+  return loadSidebarCollapsedAllChoice(storage) === true;
+}
+
+export function saveSidebarCollapsedAll(
+  collapsed: boolean,
+  storage?: Pick<Storage, "setItem"> | null,
+): void {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    target?.setItem(SIDEBAR_COLLAPSED_ALL_KEY, String(collapsed));
+  } catch {
+  }
 }
 
 export function toggleCollapsedSection(ids: string[], id: string): string[] {

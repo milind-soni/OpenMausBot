@@ -24,7 +24,8 @@ vi.mock("react", () => ({
   },
 }));
 
-const { forgetSearchDisclosuresForTests, searchMatchesThreads, useSearchDisclosure } = await import("./search-disclosure");
+const { forgetSearchDisclosuresForTests, searchMatchesThreads, setSidebarCollapsedAll, useSearchDisclosure } = await import("./search-disclosure");
+const { SIDEBAR_COLLAPSED_ALL_KEY } = await import("./sidebar-preferences");
 
 /** Renders twice so an effect's state change is visible, as React would show it. */
 const row = (key: string, initial = false) => (query: string, matches: boolean) => {
@@ -37,7 +38,11 @@ const row = (key: string, initial = false) => (query: string, matches: boolean) 
   return result;
 };
 
+const store = new Map<string, string>();
+vi.stubGlobal("localStorage", { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); } });
+
 beforeEach(() => {
+  store.clear();
   runtime.slots = [];
   runtime.deps = [];
   forgetSearchDisclosuresForTests();
@@ -99,5 +104,60 @@ describe("sidebar search disclosure (MOCA-293)", () => {
     expect(searchMatchesThreads("post run", tasks)).toBe(false);
     expect(searchMatchesThreads("launch", [], [{ name: "Launch week" }])).toBe(true);
     expect(searchMatchesThreads("  ", tasks)).toBe(false);
+  });
+});
+
+describe("sidebar collapse all", () => {
+  const mount = (key: string, initial = false) => {
+    runtime.slots = [];
+    runtime.deps = [];
+    return row(key, initial);
+  };
+
+  it("closes and persists every row that is mounted or has a choice, then opens them again", () => {
+    const first = row("bot:first", true);
+    expect(first("", false)[0]).toBe(true);
+    const chosen = mount("group:chosen");
+    chosen("", false)[1](true);
+    setSidebarCollapsedAll(true);
+    expect(chosen("", false)[0]).toBe(false);
+    expect(store.get(SIDEBAR_COLLAPSED_ALL_KEY)).toBe("true");
+    setSidebarCollapsedAll(false);
+    expect(chosen("", false)[0]).toBe(true);
+    expect(store.get(SIDEBAR_COLLAPSED_ALL_KEY)).toBe("false");
+  });
+
+  it("is the default for a bot or group the person has not toggled, even one that appears later", () => {
+    setSidebarCollapsedAll(true);
+    expect(mount("bot:later", true)("", false)[0]).toBe(false);
+    expect(mount("group:later", true)("", false)[0]).toBe(false);
+  });
+
+  it("starts from the saved value after a reload, and a person's own toggle still wins afterwards", () => {
+    store.set(SIDEBAR_COLLAPSED_ALL_KEY, "true");
+    forgetSearchDisclosuresForTests();
+    const bot = mount("bot:reloaded", true);
+    expect(bot("", false)[0]).toBe(false);
+    bot("", false)[1](true);
+    expect(bot("", false)[0]).toBe(true);
+  });
+
+  it("leaves a row's default alone until the person has chosen", () => {
+    expect(mount("bot:plain", true)("", false)[0]).toBe(true);
+    expect(mount("bot:closed")("", false)[0]).toBe(false);
+  });
+
+  it("keeps a bot that appears after Expand all open, and after a reload", () => {
+    setSidebarCollapsedAll(false);
+    expect(mount("bot:after-expand")("", false)[0]).toBe(true);
+    expect(store.get(SIDEBAR_COLLAPSED_ALL_KEY)).toBe("false");
+    forgetSearchDisclosuresForTests();
+    expect(mount("bot:reloaded-open")("", false)[0]).toBe(true);
+  });
+
+  it("does not change what a search shows", () => {
+    const bot = mount("bot:found");
+    setSidebarCollapsedAll(true);
+    expect(bot("pos", true)[0]).toBe(true);
   });
 });

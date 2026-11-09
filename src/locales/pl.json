@@ -6849,5 +6849,8 @@
   "settings.simple.more.title": "Więcej ustawień",
   "settings.simple.more.subtitle": "Kopie zapasowe, limity i ustawienia, które rzadko zmieniasz.",
   "settings.simple.more.limits": "Limity",
-  "settings.simple.more.open": "Otwórz"
+  "settings.simple.more.open": "Otwórz",
+  "sidebar.collapseAll": "Zwiń wszystko",
+  "sidebar.expandAll": "Rozwiń wszystko",
+  "shortcuts.collapse-all-sidebar": "Zwiń lub rozwiń wszystkie boty i działy na pasku bocznym"
 }

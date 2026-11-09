@@ -7651,5 +7651,8 @@
   "remote.client.endsDec7": "这种连接方式将于 12 月 7 日停止。之后请在另一台电脑的「手机和设备」中重新配对这台电脑。",
   "phone.code.pairingCode": "配对码",
   "phone.code.typeIntro": "打开 {app} 应用并输入这个配对码。",
-  "phone.signIn.emailCode": "邮件中的登录码"
+  "phone.signIn.emailCode": "邮件中的登录码",
+  "sidebar.collapseAll": "全部折叠",
+  "sidebar.expandAll": "全部展开",
+  "shortcuts.collapse-all-sidebar": "折叠或展开侧边栏中的所有机器人和部门"
 }

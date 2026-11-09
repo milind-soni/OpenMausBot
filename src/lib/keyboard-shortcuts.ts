@@ -49,6 +49,12 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
         winKeys: ["Ctrl", "\\"],
       },
       {
+        id: "collapse-all-sidebar",
+        description: "Collapse or expand all bots and departments in the sidebar",
+        macKeys: ["⌘", "⇧", "\\"],
+        winKeys: ["Ctrl", "Shift", "\\"],
+      },
+      {
         id: "switch-bot",
         description: "Switch to previous / next bot",
         macKeys: ["⌘", "⇧", "[ / ]"],
@@ -179,6 +185,14 @@ export function shortcutGroupsFor(sendKey: SendKey): readonly ShortcutGroup[] {
 
 export function isSidebarToggle(event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "defaultPrevented">): boolean {
   return !event.defaultPrevented && event.key === "\\" && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey;
+}
+
+/** ⌘⇧\ (Ctrl+Shift+\ outside macOS). Shift turns the key into "|" on US layouts, so both count. */
+export function isSidebarCollapseAll(
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "defaultPrevented">,
+  isMac: boolean = isMacPlatform(),
+): boolean {
+  return !event.defaultPrevented && (event.key === "\\" || event.key === "|") && (isMac ? event.metaKey : event.ctrlKey) && event.shiftKey && !event.altKey;
 }
 
 /**

@@ -3304,5 +3304,8 @@
   "settings.simple.more.title": "Plus de paramètres",
   "settings.simple.more.subtitle": "Sauvegardes, limites et paramètres que vous modifiez rarement.",
   "settings.simple.more.limits": "Limites",
-  "settings.simple.more.open": "Ouvrir"
+  "settings.simple.more.open": "Ouvrir",
+  "sidebar.collapseAll": "Tout réduire",
+  "sidebar.expandAll": "Tout développer",
+  "shortcuts.collapse-all-sidebar": "Réduire ou développer tous les bots et services de la barre latérale"
 }

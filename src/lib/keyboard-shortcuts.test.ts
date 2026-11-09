@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   botCycleStep,
   filterShortcutGroups,
+  isSidebarCollapseAll,
   isSidebarToggle,
   SHORTCUT_GROUPS,
   shortcutGroupsFor,
@@ -22,6 +23,24 @@ describe("keyboard-shortcuts", () => {
     setLocale("pt-br");
     expect(shortcutDescription(followUp)).toBe("Enquanto um bot trabalha: colocar na fila em vez de enviar agora, ou o contrário");
     expect(shortcutDescription(items.find((item) => item.id === "toggle-sidebar")!)).toBe("Recolher ou expandir a barra lateral");
+  });
+
+  it("lists ⌘⇧\\ or Ctrl+Shift+\\ for collapsing every bot and department, and matches only that chord", () => {
+    const item = SHORTCUT_GROUPS.flatMap((group) => group.items).find((entry) => entry.id === "collapse-all-sidebar")!;
+    expect(item).toMatchObject({ macKeys: ["⌘", "⇧", "\\"], winKeys: ["Ctrl", "Shift", "\\"] });
+    const mac = { key: "\\", metaKey: true, ctrlKey: false, shiftKey: true, altKey: false, defaultPrevented: false };
+    const win = { ...mac, metaKey: false, ctrlKey: true };
+    expect(isSidebarCollapseAll(mac, true)).toBe(true);
+    expect(isSidebarCollapseAll(win, false)).toBe(true);
+    expect(isSidebarCollapseAll({ ...mac, key: "|" }, true)).toBe(true);
+    expect(isSidebarCollapseAll({ ...win, key: "|" }, false)).toBe(true);
+    expect(isSidebarCollapseAll(win, true)).toBe(false);
+    expect(isSidebarCollapseAll(mac, false)).toBe(false);
+    expect(isSidebarCollapseAll({ ...mac, shiftKey: false }, true)).toBe(false);
+    expect(isSidebarCollapseAll({ ...mac, altKey: true }, true)).toBe(false);
+    expect(isSidebarCollapseAll({ ...mac, defaultPrevented: true }, true)).toBe(false);
+    expect(isSidebarCollapseAll({ ...mac, key: "]" }, true)).toBe(false);
+    expect(isSidebarToggle(mac)).toBe(false);
   });
 
   it("keeps an uncatalogued shortcut's own description", () => {

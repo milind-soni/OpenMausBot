@@ -13,7 +13,8 @@ import { BotAvatar } from "./Avatar";
 import { BotEngineMark, BotModelBadge, botTooltip } from "./BotModelBadge"; import { SidebarBotRole } from "./BotRole";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
-import { searchMatchesThreads, useSearchDisclosure } from "@/lib/search-disclosure";
+import { searchMatchesThreads, setSidebarCollapsedAll, useSearchDisclosure, useSidebarCollapsedAll } from "@/lib/search-disclosure";
+import { SidebarActionsRow } from "./SidebarActionsRow";
 import { useHeldMenuMotion, useMenuMotion } from "./MenuMotion";
 import { lastNonReceipt } from "@/lib/receipts";
 import { botPreview, groupPreview } from "./sidebar-preview";
@@ -82,7 +83,7 @@ import { useTeamPeople } from "@/state/team-people";
 export { TeamMenuItems };
 import { SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
 import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BUTTON, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
-import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
+import { isSidebarCollapseAll, isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useBotUnread } from "./unread-notice";
@@ -1133,6 +1134,20 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const showPinnedCircleThreads = !simpleDesk && pinnedCircleThreadListVisible(pinnedCircles, density, pinnedBots.length);
   const tiles = simpleDesk && (primary !== null || pinnedBots.length > 0);
   const { interactive: layoutInteractive, collapsed: sectionCollapsed, toggle: toggleSection } = sections;
+  const collapsedAll = useSidebarCollapsedAll();
+  const showActions = advanced && density !== "icons" && !phone;
+  const toggleCollapsedAll = () => {
+    if (!showActions || q) return;
+    setSidebarCollapsedAll(!collapsedAll);
+    sections.setAllCollapsed(sectionNames.map(userSectionId), !collapsedAll);
+  };
+  const toggleCollapsedAllRef = useRef(toggleCollapsedAll);
+  toggleCollapsedAllRef.current = toggleCollapsedAll;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (isSidebarCollapseAll(event)) { event.preventDefault(); toggleCollapsedAllRef.current(); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const archivedBots = state.bots.filter((bot) => bot.hidden && !bot.movedTo);
   const archivedEntry = remoteClient ? undefined : { count: archivedBots.length, open: () => setArchivedBotsOpen(true) };
   const attention = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups);
@@ -1327,6 +1342,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         </div>
       </div>}
       {!q && <SidebarInboxRow icons={density === "icons"} large={!advanced} running={attentionHasRunningWork(attention)} onOpened={phone ? onClose : undefined} />}
+      {showActions && <SidebarActionsRow collapsedAll={collapsedAll} searching={q !== ""} onToggleCollapsedAll={toggleCollapsedAll} />}
       {universalPins && pinnedBots.length > 0 && !simpleDesk && (
         <div
           data-sidebar-universal-pins=""

@@ -3597,5 +3597,8 @@
   "settings.simple.more.title": "Інші налаштування",
   "settings.simple.more.subtitle": "Резервні копії, обмеження та налаштування, які ви змінюєте рідко.",
   "settings.simple.more.limits": "Обмеження",
-  "settings.simple.more.open": "Відкрити"
+  "settings.simple.more.open": "Відкрити",
+  "sidebar.collapseAll": "Згорнути все",
+  "sidebar.expandAll": "Розгорнути все",
+  "shortcuts.collapse-all-sidebar": "Згорнути або розгорнути всіх ботів і відділи на бічній панелі"
 }

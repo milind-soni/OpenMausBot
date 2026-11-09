@@ -6087,5 +6087,8 @@
   "settings.simple.more.title": "Más ajustes",
   "settings.simple.more.subtitle": "Copias de seguridad, límites y ajustes que cambias poco.",
   "settings.simple.more.limits": "Límites",
-  "settings.simple.more.open": "Abrir"
+  "settings.simple.more.open": "Abrir",
+  "sidebar.collapseAll": "Contraer todo",
+  "sidebar.expandAll": "Expandir todo",
+  "shortcuts.collapse-all-sidebar": "Contraer o expandir todos los bots y departamentos de la barra lateral"
 }
