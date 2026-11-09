@@ -441,6 +441,8 @@ const __APP_VERSION__: string;
       /** Points this computer's file manager at a file a bot linked outside
        * its workspace, without opening or reading it. Local app only. */
       revealInFolder?(filePath: string): Promise<"shown" | "missing" | "invalid">;
+      /** Opens a folder (never a file) in Finder or Explorer; "not-folder" means keep the page's own handling. */
+      openFolder?(folderPath: string): Promise<"opened" | "not-folder" | "missing" | "invalid" | "failed">;
       /** Opens this app's logs folder in Explorer or Finder and says where it is. */
       openLogsFolder?(): Promise<{ folder: string; opened: boolean; error?: string }>;
       /** This app's own login item, which opens the window. `available`: false in a build that cannot add one. */
