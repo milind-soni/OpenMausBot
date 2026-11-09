@@ -909,7 +909,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     {advanced && !iconOnly && threadsOpen && hasThreadList && <BotThreadList {...props} hidden={!showThreads}
       activityLabel={liveActivityLabel(sidebarMessage(last))}
       query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
-    {advanced && !showThreads && !iconOnly && <CompactBotThreads bot={bot} selected={selected} pendingQueued={pendingQueued} dispatch={dispatch} />}
+    {advanced && !showThreads && !iconOnly && <CompactBotThreads bot={bot} selected={selected} query={query} pendingQueued={pendingQueued} dispatch={dispatch} />}
     {advanced && (showThreads || iconOnly) && <SidebarBotActivity bot={bot} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} density={density} pendingQueued={pendingQueued} dispatch={dispatch} waitingOnly={!advanced} runsOnly={expanded} />}
     {showThreads && creatingProject && <BotProjectDialog bot={bot} onClose={() => setCreatingProject(false)} />}
     </>

@@ -9,6 +9,7 @@ import { threadStatus } from "./ThreadStatus";
 import { requestThreadList } from "@/lib/thread-list-navigation";
 
 const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), bots: [] as Bot[], queued: {} as Record<string, unknown[]> }));
+vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: (_id: string, level?: string) => level !== "view" }));
 vi.mock("@/state/store", async importOriginal => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   useStore: () => ({ state: { bots: fixture.bots, groups: [], pendingQueued: fixture.queued }, dispatch: fixture.dispatch }),
@@ -38,7 +39,7 @@ beforeEach(() => {
 afterEach(() => { flushSync(() => root.unmount()); container.remove(); });
 const row = (id: string) => container.querySelector<HTMLButtonElement>(`[data-agent-thread="${id}"]`)!;
 const click = (button: HTMLElement) => flushSync(() => button.click());
-const mount = () => flushSync(() => root.render(createElement(CompactBotThreads, { bot, selected: true, pendingQueued: { d: [{}] }, dispatch: fixture.dispatch })));
+const mount = () => flushSync(() => root.render(createElement(CompactBotThreads, { bot, selected: true, query: "", pendingQueued: { d: [{}] }, dispatch: fixture.dispatch })));
 
 describe("persistent thread navigation", () => {
   it("keeps both conversations visible after switching and marks only the current one", () => {

@@ -452,6 +452,12 @@ describe("bot-first sidebar", () => {
     named("View threads")!.props.onClick!({} as MouseEvent);
     expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "select", id: bot.id });
     fixture.state.selectedId = bot.id;
+    fixture.state.activeView = "files";
+    fixture.dispatch.mockClear();
+    renderToStaticMarkup(createElement(Capture));
+    named("View threads")!.props.onClick!({} as MouseEvent);
+    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "select", id: bot.id });
+    fixture.state.activeView = "chat";
     renderToStaticMarkup(createElement(Capture));
 
     fixture.dispatch.mockClear();

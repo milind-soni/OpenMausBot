@@ -1,6 +1,8 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useCanWriteIn } from "@/lib/cloud-guest";
+import { runningRoutineRun } from "./SidebarBotActivity";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, FolderInput, Pin, PinOff, Search, SquarePen, Trash2 } from "lucide-react";
-import { useStore, type Bot, type BotProject, type Group, type Task } from "@/state/store";
+import { useStore, type Bot, type BotProject, type Group, type Task, currentTaskBot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
 import { roomThreadsWorkingElsewhere } from "@/lib/room-threads";
@@ -72,6 +74,10 @@ export function groupThreadTasks(tasks: PickerTask[], projects: BotProject[], qu
     const members = tasks.filter((task) => project.id ? task.projectId === project.id : !projects.some((item) => item.id === task.projectId));
     return { project, tasks: project.name.toLowerCase().includes(needle) ? members : filterTasks(members, query) };
   }).filter((group) => group.tasks.length > 0);
+}
+
+function ThreadWriteAccess({ threadId, level, children }: { threadId: string; level?: string; children: (canWrite: boolean) => ReactNode }) {
+  return children(useCanWriteIn(threadId, level) === true);
 }
 
 function ConversationTaskPicker({
@@ -302,14 +308,14 @@ function ConversationTaskPicker({
               const sectionStart = section?.groups[0]?.tasks[0]?.threadId === task.threadId;
               const heading = section?.groups.find(group => group.tasks[0]?.threadId === task.threadId)?.project;
               return (
-                <Fragment key={task.threadId}>
+                <ThreadWriteAccess key={task.threadId} threadId={task.threadId} level={bot?.yourAccess}>{canWrite => <Fragment>
                 {sectionStart && <div data-thread-section={section?.completed ? "completed" : "open"} className="px-2 pb-1 pt-2 text-[12px] font-semibold text-ink-secondary">{t(section?.completed ? "thread.section.completed" : "thread.section.open")}</div>}
                 {bot?.projects?.length && heading ? <div className={cn("flex items-center gap-1.5 px-2 pb-1 pt-2 text-[12px] font-medium text-ink-secondary", index > 0 && "border-t border-hairline/30")}>{heading.id && <FolderIcon emoji={heading.emoji} size={12} />}{heading.name}</div> : null}
                 <div
                   className={cn("group flex items-center gap-2 rounded-md px-2 py-1.5", active ? "bg-menu-active" : "hover:bg-menu-hover")}
                 >
                   <Check size={14} className={cn("shrink-0", active ? "text-accent" : "opacity-0")} />
-                  {renaming === task.threadId ? (
+                  {canWrite && renaming === task.threadId ? (
                     <input
                       autoFocus
                       value={draft}
@@ -344,17 +350,19 @@ function ConversationTaskPicker({
                         queueDismiss();
                       }}
                       onDoubleClick={(e) => {
+                        if (!canWrite) return;
                         e.preventDefault();
                         e.stopPropagation();
                         startRename(task);
                       }}
                       onContextMenu={(e) => {
+                        if (!canWrite) return;
                         e.preventDefault();
                         e.stopPropagation();
                         startRename(task);
                       }}
                       className="min-w-0 flex-1 text-left"
-                      title={t("task.renameHint")}
+                      title={canWrite ? t("task.renameHint") : undefined}
                       aria-current={active ? "page" : undefined}
                     >
                       <div dir="auto" className="truncate text-[14px] leading-[18px] text-ink">{localizedTaskTitle(task.title)}</div>
@@ -366,6 +374,7 @@ function ConversationTaskPicker({
                       </div>
                     </button>
                   )}
+                  {canWrite && <>
                   {onPin && renaming !== task.threadId && (
                     <button
                       type="button"
@@ -400,20 +409,21 @@ function ConversationTaskPicker({
                   <button
                     type="button"
                     onClick={() => onDelete(task.threadId)}
-                    disabled={Boolean(task.busy) || busy && active}
+                    disabled={Boolean(task.busy || task.activity === "working" || task.activity === "waiting-on-you" || task.waitingForTeammates) || busy && active}
                     aria-label={t("task.deleteAria")}
                     title={t("task.deleteTitle")}
                     className="rounded-md p-1 text-ink-secondary opacity-0 hover:bg-menu-hover hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-20 touch:opacity-70 touch:disabled:opacity-20"
                   >
                     <Trash2 size={14} />
                   </button>
+                  </>}
                 </div>
-                </Fragment>
+                </Fragment>}</ThreadWriteAccess>
               );
             })}
           </div>
           <div role="separator" className={MENU_ITEM_SEPARATOR} />
-          {bot ? <NewThreadButton bot={bot} onCreated={closeMenu} className="min-h-[30px] w-full rounded-md px-2 text-[14px] text-ink hover:bg-menu-hover" /> : <button
+          {bot ? bot.yourAccess === "view" ? null : <NewThreadButton bot={bot} onCreated={closeMenu} className="min-h-[30px] w-full rounded-md px-2 text-[14px] text-ink hover:bg-menu-hover" /> : <button
             type="button"
             onClick={() => {
               onNew();
@@ -456,7 +466,10 @@ export function TaskPicker({ bot, compact = false }: { bot: Bot; compact?: boole
       showCurrent
       compact={compact}
       openRequest={openRequest}
-      tasks={orderedThreadList((bot.tasks ?? []).filter((task) => !task.routineRunId || task.threadId === bot.threadId).map(task => ({ ...task, queued: Boolean(state.pendingQueued[task.threadId]?.length) })))}
+      tasks={orderedThreadList((bot.tasks ?? []).filter(task => !task.routineRunId || task.threadId === bot.threadId || runningRoutineRun(task)).map(task => {
+        const projected = task.threadId === bot.threadId ? currentTaskBot(bot, task.threadId) : task;
+        return { ...task, busy: projected.busy, activity: projected.activity, waitingForTeammates: projected.waitingForTeammates, queued: Boolean(state.pendingQueued[task.threadId]?.length) };
+      }))}
       busy={false}
       bot={bot}
       onNew={() => dispatch({ type: "newTask", botId: bot.id })}

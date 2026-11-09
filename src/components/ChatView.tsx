@@ -1010,8 +1010,8 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           simpleHead ? "px-5 pt-2.5 pb-2.5 max-md:pl-14 max-md:pr-3" : "px-5 py-3 pl-11 md:pl-5 max-md:pl-14 max-md:pr-3",
         )}
       >
-        <div data-chathead-row className="flex min-w-0 items-center justify-between gap-3">
-        <div data-chathead-identity className="flex min-w-0 flex-1 items-center gap-1" style={headerNoDragStyle}>
+        <div data-chathead-row className="flex min-w-0 items-center justify-between gap-3 @max-[36rem]/chathead:flex-wrap @max-[36rem]/chathead:gap-y-1">
+        <div data-chathead-identity className="flex min-w-0 flex-1 items-center gap-1 @max-[36rem]/chathead:basis-full" style={headerNoDragStyle}>
           <ChatHeadPill
             bot={bot}
             identityOnly
@@ -1024,7 +1024,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         </div>
         <div
           data-chathead-controls
-          className="flex shrink-0 items-center gap-1.5"
+          className="flex shrink-0 items-center gap-1.5 @max-[36rem]/chathead:w-full @max-[36rem]/chathead:flex-wrap @max-[36rem]/chathead:justify-end"
         >
           <ThreadActivityStatus bot={bot} />
           {(bot.busy || bot.waitingForTeammates) && (

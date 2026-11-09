@@ -29,7 +29,7 @@ switching and Stop can be exercised without a real provider or account.
 6. Expand Launch team and select its separate histories. Group collaboration
    retains the existing serialized behavior; this does not enable concurrent
    group member turns.
-7. Check the model selector in the header opens downward and Ask/Auto sits
+7. Check **More → Model** in the header opens downward and Ask/Auto sits
    inside the composer beside attachments. Both menus must stay visible.
    Selecting a thread must not scroll the whole document or hide the header.
    Test keyboard access to row menus too.
@@ -57,7 +57,15 @@ switching and Stop can be exercised without a real provider or account.
     expanding the thread tree. Its separate chevron controls the tree. Repeat
     in Comfortable, Compact, and the Icons view (history is in the header in
     Icons view).
-12. Turn Advanced mode off in Settings → General. Each bot stays a single
+12. Before switching modes, use the idle **Website ideas** thread's row menu
+    to archive it. Switch to Miso, create a thread named **Miso isolation check**
+    and return to Pepper before sending. In a second terminal, send to Miso
+    with `node --experimental-strip-types scripts/control-omb.ts send --bot
+    <MISO_ID> --task <MISO_THREAD_ID> --text "Isolation check" --url <FIXTURE_URL>`.
+    Keep Pepper selected until Miso's reply appears and its row shows Unread;
+    confirm that unread marker before opening Pepper's picker.
+    These fixture-only states make both the Completed and isolation checks
+    meaningful. Turn Advanced mode off in Settings → General. Each bot stays a single
     sidebar row, with its activity and unread indicator; no bot thread list
     appears beneath it. The chat header shows the current thread title as a
     dropdown. Open it and switch between Gmail and iCloud: each must keep its

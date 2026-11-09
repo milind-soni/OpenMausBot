@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useSearchDisclosure } from "@/lib/search-disclosure";
+import { useEffect } from "react";
 import { ChevronRight, Check } from "lucide-react";
 import { currentTaskBot, type Action, type Bot } from "@/state/store";
 import type { Dispatch } from "react";
@@ -6,14 +7,19 @@ import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { useThreadListRequest } from "@/lib/thread-list-navigation";
 import { cn } from "@/lib/cn";
-import { orderedThreadList } from "./SidebarThreadRow";
+import { isSnoozed, orderedThreadList, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
 import { ThreadStatus } from "./ThreadStatus";
 
-export function CompactBotThreads({ bot, selected, pendingQueued, dispatch }: { bot: Bot; selected: boolean; pendingQueued: Record<string, unknown[]>; dispatch: Dispatch<Action> }) {
-  const [open, setOpen] = useState(selected);
+export function CompactBotThreads({ bot, selected, query, pendingQueued, dispatch }: { bot: Bot; selected: boolean; query: string; pendingQueued: Record<string, unknown[]>; dispatch: Dispatch<Action> }) {
   const request = useThreadListRequest(bot.id);
+  const listed = (bot.tasks ?? []).filter(task => task.threadId === bot.threadId || (!task.routineRunId || task.busy || task.activity === "working"))
+    .map(task => ({ ...task, queued: Boolean(pendingQueued[task.threadId]?.length) }));
+  useSnoozeExpiry(listed);
+  const tasks = orderedThreadList(query.trim()
+    ? visibleSidebarThreads(listed, bot.threadId, query, bot.projects ?? [])
+    : listed.filter(task => !isSnoozed(task) || task.threadId === bot.threadId || task.pinned === true || task.unread || task.queued || task.busy || task.activity === "working" || task.activity === "waiting-on-you" || task.waitingForTeammates));
+  const [open, setOpen] = useSearchDisclosure(`compact:${bot.id}`, query, tasks.length > 0, selected);
   useEffect(() => { if (selected || request) setOpen(true); }, [selected, request]);
-  const tasks = orderedThreadList((bot.tasks ?? []).filter(task => task.threadId === bot.threadId || (!task.routineRunId || task.busy || task.activity === "working")));
   const listId = `bot-thread-list-${bot.id}`;
   return <div className="mb-1 ml-6" data-bot-thread-navigation={bot.id}>
     <button type="button" aria-expanded={open} aria-controls={listId} aria-label={t("thread.toggleNamed", { name: bot.name, count: tasks.length })}

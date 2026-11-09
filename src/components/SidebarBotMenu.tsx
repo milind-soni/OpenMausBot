@@ -265,7 +265,7 @@ export function BotContextMenu({
     ];
     const newThread = bot.yourAccess === "view" ? null : item(<SquarePen size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }));
     const viewThreads = item(<MessagesSquare size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.viewThreads"), () => {
-      if (state.selectedId !== bot.id) dispatch({ type: "select", id: bot.id });
+      if (state.selectedId !== bot.id || state.activeView !== "chat") dispatch({ type: "select", id: bot.id });
       requestThreadList(bot.id);
     });
     const openTask = state.selectedId === bot.id ? bot.tasks?.find((task) => task.threadId === bot.threadId) : undefined;

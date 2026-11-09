@@ -18,9 +18,11 @@ import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_OPEN } from "./elevated";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
+import { runningRoutineRun } from "./SidebarBotActivity";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
 import { ModelPicker } from "./ModelPicker";
+import { lockedWhileBusy } from "./model-picker-reasoning";
 import { UsageBars } from "./EngineUsage";
 
 /** One item list for the chat's ⋯ menu wherever it sits; it lists the threads whenever the sidebar hides them. The
@@ -37,7 +39,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false, onModel?: ()
   const usage = usageSummary(bot, state.instances);
   const hasMessages = messages.length > 0;
   const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
-  const threads = orderedThreadList((profile.tasks ?? []).filter((task) => !task.routineRunId));
+  const threads = orderedThreadList((profile.tasks ?? []).filter((task) => !task.routineRunId || runningRoutineRun(task) || task.threadId === bot.threadId));
   const selection = profile.modelSelection;
   const modelName = selection
     ? state.instances.find((candidate) => candidate.instanceId === selection.instanceId)?.models?.options.find((option) => option.id === selection.model)?.label ?? selection.model
@@ -51,7 +53,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false, onModel?: ()
   const modelItem: SidebarMenuItem = {
     key: "model", label: t("model.simple.model"), icon: <Cpu size={16} />, value: modelName,
     trailing: <UsageBars engine={selection?.instanceId} hover={false} />,
-    disabled: Boolean(bot.busy || bot.waitingForTeammates),
+    disabled: Boolean(bot.waitingForTeammates) || lockedWhileBusy(state, bot, false, bot.threadId),
     onSelect: onModel ?? (() => openBotSettings(dispatch, "model")),
   };
   const phoneScreen: SidebarMenuItem[] = phoneHeader ? [{

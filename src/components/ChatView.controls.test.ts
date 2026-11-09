@@ -1,4 +1,4 @@
-import { createElement, type ComponentProps } from "react";
+import { Children, createElement, isValidElement, type ReactNode, type ReactElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
@@ -110,6 +110,23 @@ describe("the single-bar conversation header", () => {
     fixture.advanced = true;
   });
 
+  it("dispatches Stop for exactly the selected thread even while a sibling works", () => {
+    const profile = { ...bot, tasks: [{ ...bot.tasks![0], busy: true, activity: "working" as const }, { threadId: "sibling", title: "Sibling", createdAt: 2, busy: true }] };
+    let tree: ReactNode;
+    function Capture() { tree = ChatView({ bot: profile }); return tree; }
+    renderToStaticMarkup(createElement(Capture));
+    const find = (node: ReactNode): ReactElement<{ onClick: () => void }> | undefined => {
+      for (const child of Children.toArray(node)) {
+        if (!isValidElement<{ children?: ReactNode; "data-header-thread-stop"?: boolean; onClick: () => void }>(child)) continue;
+        if (child.props["data-header-thread-stop"]) return child;
+        const nested = find(child.props.children); if (nested) return nested;
+      }
+    };
+    fixture.dispatch.mockClear();
+    find(tree)!.props.onClick();
+    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "interrupt", botId: "bot", threadId: "selected" });
+  });
+
   it("does not show Stop for an idle selected thread while a sibling works", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, tasks: [...bot.tasks!, { threadId: "other", title: "Other", createdAt: 2, busy: true }] } }));
     const header = markup.slice(markup.indexOf("data-chathead-controls"), markup.indexOf('role="log"'));
@@ -155,7 +172,7 @@ describe("the single-bar conversation header", () => {
     const row = markup.match(/data-chathead-row="true" class="([^"]*)"/)![1];
     expect(row).toContain("min-w-0");
     expect(row).not.toContain("grid");
-    expect(row).not.toContain("flex-wrap");
+    expect(row).toContain("@max-[36rem]/chathead:flex-wrap");
   });});
 
 describe("glass header", () => {
@@ -492,10 +509,10 @@ describe("thread control placement", () => {
     expect(markup).not.toMatch(/class="[^"]*chat-text[^"\n]*bg-bubble-user/);
   });
 
-  it("truncates the identity instead of adding a second header row", () => {
+  it("keeps a full-width thread picker and wrapping controls on narrow headers", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     const row = markup.match(/data-chathead-row="true" class="([^"]*)"/)![1];
-    expect(row).not.toContain("flex-wrap");
+    expect(row).toContain("@max-[36rem]/chathead:flex-wrap");
     expect(markup).toContain("@max-[30rem]/chathead:hidden");
   });
   it("leaves the Chief's role and badge in the profile instead of repeating them in the header", () => {
