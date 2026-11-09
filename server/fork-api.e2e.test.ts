@@ -25,8 +25,10 @@ it("forks bot and room conversations through the public API and keeps a fork aft
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Plan the release", threadId: sourceThreadId })).status).toBe(202);
     await expect.poll(async () => (await messages(sourceThreadId)).some((message) => message.role === "bot" && message.kind === "text" && message.text?.includes("hello from fake claude")), { timeout: 20_000 }).toBe(true);
     const anchor = (await messages(sourceThreadId)).find((message) => message.role === "user" && message.text === "Plan the release")!;
+    const notificationsBeforeFork = (await api("GET", "/api/notifications")).body.notifications.map((entry: { id: string }) => entry.id);
     const forked = await api("POST", `/api/bots/${bot.id}/tasks/${sourceThreadId}/forks`, { messageId: anchor.id });
     expect(forked.status).toBe(201);
+    expect((await api("GET", "/api/notifications")).body.notifications.map((entry: { id: string }) => entry.id)).toEqual(notificationsBeforeFork);
     const forkThreadId = forked.body.task.threadId as string;
     expect(forked.body.task.origin).toEqual({ threadId: sourceThreadId, messageId: anchor.id });
     expect(forked.body.task.unread).toBe(false);
