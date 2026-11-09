@@ -273,3 +273,25 @@ describe("custom Claude endpoint", () => {
     expect(rows(menu([endpoint]), 0)).toEqual(["deepseek-chat", "deepseek-reasoner"]);
   });
 });
+
+describe("custom ACP engine", () => {
+  const devin = engine("devin", "customAcp", "Devin", "custom", [
+    { id: "swe-2", label: "SWE-2", variants: [{ id: "high", label: "High" }] },
+    { id: "deepseek-v4-1-flash", label: "DeepSeek V4.1 Flash" },
+    { id: "agent-default", label: "Agent default", custom: true },
+  ]);
+
+  it("lists the engine's discovered catalog alongside hand-added models", () => {
+    const built = menu([devin]);
+    expect(rows(built)).toEqual(expect.arrayContaining(["SWE-2", "DeepSeek V4.1 Flash", "Agent default"]));
+    expect(body(built)).toMatchObject({ kind: "models", total: 3 });
+  });
+
+  it("finds an engine model by search", () => {
+    const catalog = engine("devin", "customAcp", "Devin", "custom",
+      Array.from({ length: SIMPLE_SEARCH_AFTER + 1 }, (_, index) => ({ id: `m-${index}`, label: `Model ${index}` })),
+    );
+    const found = menu([catalog], { query: "Model 7" });
+    expect(rows(found)).toEqual(["Model 7"]);
+  });
+});
