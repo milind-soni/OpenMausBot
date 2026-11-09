@@ -1,6 +1,6 @@
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { readThreadEvents } from "./thread-events.ts";
@@ -71,6 +71,8 @@ describe("readThreadEvents", () => {
       cap,
       { ...cap, eventId: "missing-path", handoffPath: undefined },
       { ...cap, eventId: "bad-path", handoffPath: 42 },
+      { ...cap, eventId: "empty-path", handoffPath: "" },
+      { ...cap, eventId: "blank-path", handoffPath: "   " },
       { ...cap, eventId: "missing-reason", reason: undefined },
       { ...cap, eventId: "bad-reason", reason: "timeout" },
     ].map(line).join(""));
@@ -79,6 +81,17 @@ describe("readThreadEvents", () => {
 
     expect(page.entries).toHaveLength(1);
     expect(page.entries[0]).toMatchObject({ kind: "runtime", data: cap });
+  });
+
+  it("replays legacy relative handoff paths as absolute paths without dropping the event", () => {
+    const eventsDir = tmp();
+    const nativeDir = tmp();
+    const handoffPath = "legacy-data/handoffs/cap-old.md";
+    const cap = runtime({ eventId: "legacy-cap", type: "cap.exhausted", createdAt: "1", handoffPath, reason: "cap" });
+    writeFileSync(join(eventsDir, "t1.ndjson"), line(cap));
+    const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1" });
+    expect(page.entries).toHaveLength(1);
+    expect(page.entries[0]).toMatchObject({ kind: "runtime", data: { ...cap, handoffPath: resolve(handoffPath) } });
   });
 
   it("caps each log to its most recent `limit` lines and reports what it skipped", () => {
