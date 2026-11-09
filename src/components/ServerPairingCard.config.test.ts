@@ -57,6 +57,22 @@ const pairingScopes = () => {
   return JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")).scopes as string[];
 };
 
+const device = { id: "d1", label: "MacBook", scopes: ["admin"], lastSeenAt: Date.now(), expiresAt: Date.now() + 3_600_000 };
+const signOutButton = () => [...host.querySelectorAll("button")].find((button) => button.textContent?.includes("Sign out")) as HTMLButtonElement | undefined;
+const installSessionsMock = (failOnCall: number | null) => {
+  let sessionsCalls = 0;
+  fixture.api.mockImplementation(async (path: string, init?: { signal?: AbortSignal }) => {
+    if (path === "/api/auth/sessions") {
+      sessionsCalls++;
+      if (failOnCall !== null && sessionsCalls === failOnCall) throw new Error("sessions down");
+      return { sessions: [device], current: null };
+    }
+    if (path === "/api/config") return new Promise((resolve, reject) => { resolveConfig = resolve; rejectConfig = reject; init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")), { once: true }); });
+    if (path === "/api/auth/pairing") return { id: "offer-1", code: "ABCD-EFGH-IJKL", expiresAt: Date.now() + 300_000, url: "https://example.test/pair?code=ABCD-EFGH-IJKL", hint: null };
+    return {};
+  });
+};
+
 describe("ServerPairingCard waits for the pairing configuration", () => {
   it("keeps creation disabled until the config loads, then offers it", async () => {
     await renderCard();
@@ -121,16 +137,60 @@ describe("ServerPairingCard waits for the pairing configuration", () => {
 
   it("moves focus to the create button once it is enabled", async () => {
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 0; });
+    const opener = document.createElement("button");
+    document.body.append(opener);
     try {
+      act(() => { opener.focus(); });
       await renderCard({ focusRequest: 1 });
       expect(createButton().disabled).toBe(true);
-      expect(document.activeElement).not.toBe(createButton());
+      expect(document.activeElement).toBe(opener);
       await act(async () => {
         resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
         await new Promise((r) => setTimeout(r, 0));
       });
       await flush();
       expect(document.activeElement).toBe(createButton());
+    } finally {
+      opener.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("cancels a focus request recorded with no focused element", async () => {
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 0; });
+    try {
+      await renderCard({ focusRequest: 1 });
+      expect(document.activeElement).toBe(document.body);
+      await act(async () => {
+        resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flush();
+      expect(createButton().disabled).toBe(false);
+      expect(document.activeElement).toBe(document.body);
+      expect(document.activeElement).not.toBe(createButton());
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not reveal a body-origin request after focus moved away and back", async () => {
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 0; });
+    try {
+      await renderCard({ focusRequest: 1 });
+      const scope = host.querySelector<HTMLInputElement>('input[name="server-pairing-scope"]');
+      expect(scope).not.toBeNull();
+      await act(async () => { scope!.focus(); });
+      expect(document.activeElement).toBe(scope);
+      await act(async () => { (document.activeElement as HTMLElement).blur(); });
+      expect(document.activeElement).toBe(document.body);
+      await act(async () => {
+        resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flush();
+      expect(document.activeElement).toBe(document.body);
+      expect(document.activeElement).not.toBe(createButton());
     } finally {
       vi.unstubAllGlobals();
     }
@@ -260,6 +320,75 @@ describe("ServerPairingCard waits for the pairing configuration", () => {
     await act(async () => { createButton().click(); });
     await flush();
     expect(pairingScopes()).toEqual(["client"]);
+    expect(host.textContent).toContain("ABCD-EFGH-IJKL");
+  });
+
+  it("keeps a config error visible when a device signs out", async () => {
+    installSessionsMock(null);
+    await renderCard();
+    await act(async () => {
+      rejectConfig(new Error("config down"));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    expect(host.textContent).toContain("config down");
+    const signOut = signOutButton();
+    expect(signOut).not.toBeUndefined();
+    await act(async () => { signOut!.click(); });
+    await flush();
+    expect(host.textContent).toContain("config down");
+  });
+
+  it("keeps a sessions error visible when a code is created", async () => {
+    installSessionsMock(1);
+    await renderCard();
+    await act(async () => {
+      resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    expect(host.textContent).toContain("sessions down");
+    expect(createButton().disabled).toBe(false);
+    await act(async () => { createButton().click(); });
+    await flush();
+    expect(host.textContent).toContain("ABCD-EFGH-IJKL");
+    expect(host.textContent).toContain("sessions down");
+  });
+
+  it("clears a sessions error when a session reload succeeds", async () => {
+    installSessionsMock(2);
+    await renderCard();
+    await act(async () => {
+      resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    const firstSignOut = signOutButton();
+    expect(firstSignOut).not.toBeUndefined();
+    await act(async () => { firstSignOut!.click(); });
+    await flush();
+    expect(host.textContent).toContain("sessions down");
+    const secondSignOut = signOutButton();
+    expect(secondSignOut).not.toBeUndefined();
+    await act(async () => { secondSignOut!.click(); });
+    await flush();
+    expect(host.textContent).not.toContain("sessions down");
+  });
+
+  it("clears an action error when a later create succeeds", async () => {
+    await renderCard();
+    await act(async () => {
+      resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    fixture.api.mockImplementationOnce(async () => { throw new Error("create down"); });
+    await act(async () => { createButton().click(); });
+    await flush();
+    expect(host.textContent).toContain("create down");
+    await act(async () => { createButton().click(); });
+    await flush();
+    expect(host.textContent).not.toContain("create down");
     expect(host.textContent).toContain("ABCD-EFGH-IJKL");
   });
 });

@@ -61,7 +61,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   const [configLoading, setConfigLoading] = useState(false);
   const configRequest = useRef(0);
   const configPending = useRef(false);
-  const errorSource = useRef<"config" | "sessions" | null>(null);
+  const errorSource = useRef<"config" | "sessions" | "action" | null>(null);
   const focusOrigin = useRef<{ request: number; element: Element | null } | null>(null);
   const [computerName, setComputerName] = useState<string | null>(null);
   const [scope, setScope] = useState<"admin" | "client">("admin");
@@ -142,8 +142,15 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     } else if (revealed.current !== focusRequest) {
       // Without a document there is no focus to steal, so the request stands.
       const activeElement = typeof document === "undefined" ? null : document.activeElement;
-      if (focusOrigin.current?.request !== focusRequest) focusOrigin.current = { request: focusRequest, element: activeElement };
-      if (codesLoaded && activeElement === focusOrigin.current.element && revealPhonePairing(root.current)) {
+      if (focusOrigin.current?.request !== focusRequest) {
+        focusOrigin.current = { request: focusRequest, element: activeElement };
+        if (typeof document !== "undefined" && activeElement === document.body) {
+          // document.body cannot tell whether the user moved focus while the request waited, so the request is dropped.
+          revealed.current = focusRequest;
+          focusOrigin.current = null;
+        }
+      }
+      if (focusOrigin.current && codesLoaded && activeElement === focusOrigin.current.element && revealPhonePairing(root.current)) {
         revealed.current = focusRequest;
         if (canPairDevices(session) && takePairOnOpen()) void create();
       }
@@ -184,13 +191,17 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
 
   async function create() {
     setBusy(true);
-    setError(null);
+    if (errorSource.current === "action") {
+      errorSource.current = null;
+      setError(null);
+    }
     setCopied("idle");
     try {
       const body: PairingOffer = await api("/api/auth/pairing", { method: "POST", body: JSON.stringify({ scopes: scope === "admin" || cloudHome ? ["admin", "client"] : ["client"] }) });
       setOffer(body);
       setNow(Date.now());
     } catch (e) {
+      errorSource.current = "action";
       setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusy(false);
@@ -198,11 +209,15 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   }
 
   async function signOut(id: string) {
-    setError(null);
+    if (errorSource.current === "action") {
+      errorSource.current = null;
+      setError(null);
+    }
     try {
       await api(`/api/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
       await loadDevices();
     } catch (e) {
+      errorSource.current = "action";
       setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
     }
   }
