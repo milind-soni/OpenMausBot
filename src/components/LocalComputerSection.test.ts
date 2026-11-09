@@ -14,11 +14,16 @@ import {
   CloudComputersCard,
   LocalComputerSection,
   LocalVmIdleTimeoutSetting,
+  LocalVmIsolationSetting,
+  LocalVmBotSelection,
   LocalVmInventoryCard,
   cloudComputerActionPlan,
   cloudComputerInventoryState,
   confirmComputerAction,
   localVmInventoryState,
+  localVmModeIsReady,
+  localVmSetupRunCommand,
+  localVmBotComputerPatch,
   parseLocalVmIdleTimeoutMinutes,
   reconcileCloudInventoryPayload,
   perBotLocalVmDeletePlan,
@@ -599,5 +604,94 @@ describe("Local VM idle timeout setting", () => {
     expect(markup).toContain('max="1440"');
     expect(markup).toContain('value="30"');
     expect(markup).toContain("minutes");
+  });
+});
+
+describe("Local VM isolation settings", () => {
+  it("offers the existing shared, per-bot, and pool modes", () => {
+    const markup = renderToStaticMarkup(createElement(LocalVmIsolationSetting, {
+      mode: "shared",
+      maxInstances: 2,
+      disabled: false,
+      onModeChange: vi.fn(),
+      onMaxInstancesChange: vi.fn(),
+    }));
+
+    expect([...markup.matchAll(/data-local-vm-mode="(shared|per-bot|pool)"/g)].map((match) => match[1]))
+      .toEqual(["shared", "per-bot", "pool"]);
+    expect(markup).not.toContain("Maximum concurrent VM seats");
+  });
+
+  it("labels the pool capacity as a bounded concurrent seat limit and explains shared seat files", () => {
+    const markup = renderToStaticMarkup(createElement(LocalVmIsolationSetting, {
+      mode: "pool",
+      maxInstances: 3,
+      disabled: false,
+      onModeChange: vi.fn(),
+      onMaxInstancesChange: vi.fn(),
+    }));
+
+    expect(markup).toContain('data-local-vm-mode="pool"');
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain('aria-label="Maximum concurrent Local VM seats"');
+    expect(markup).toContain('value="3"');
+    expect(markup).toContain("Up to 3 Local VM turns can run at once.");
+    expect(markup).toContain("Pool does not isolate desktop files per bot.");
+    expect(markup.match(/<option /g)).toHaveLength(8);
+  });
+
+  it("activates a bot's Local VM destination with a checkbox and returns it to Auto when unchecked", () => {
+    const markup = renderToStaticMarkup(createElement(LocalVmBotSelection, {
+      bots: [
+        { id: "research", name: "Research", computer: "vm" },
+        { id: "scribe", name: "Scribe" },
+      ],
+      onChange: vi.fn(),
+    }));
+
+    expect(markup).toMatch(/<input[^>]*type="checkbox"[^>]*checked=""/);
+    expect(markup).toContain("Use a Local VM for Research");
+    expect(markup).toContain("Use a Local VM for Scribe");
+    expect(markup).toContain("Current destination: Auto");
+    expect(localVmBotComputerPatch(true)).toEqual({ computer: "vm" });
+    expect(localVmBotComputerPatch(false)).toEqual({ computer: null });
+  });
+
+  it("keeps Pool unavailable on Apple Container and never reports its seats ready", () => {
+    const markup = renderToStaticMarkup(createElement(LocalVmIsolationSetting, {
+      mode: "shared",
+      maxInstances: 2,
+      disabled: false,
+      poolUnsupported: true,
+      onModeChange: vi.fn(),
+      onMaxInstancesChange: vi.fn(),
+    }));
+    const modeButton = (mode: string) => new RegExp(`<button[^>]*data-local-vm-mode="${mode}"[^>]*>`).exec(markup)?.[0] ?? "";
+
+    expect(/\sdisabled(?:=|\s|>)/.test(modeButton("shared"))).toBe(false);
+    expect(/\sdisabled(?:=|\s|>)/.test(modeButton("per-bot"))).toBe(false);
+    expect(/\sdisabled(?:=|\s|>)/.test(modeButton("pool"))).toBe(true);
+    expect(modeButton("pool")).toContain('aria-describedby="local-vm-pool-unavailable"');
+    expect(markup).toContain("Apple Container supports only one shared desktop.");
+    const selectedPoolMarkup = renderToStaticMarkup(createElement(LocalVmIsolationSetting, {
+      mode: "pool",
+      maxInstances: 2,
+      disabled: false,
+      poolUnsupported: true,
+      onModeChange: vi.fn(),
+      onMaxInstancesChange: vi.fn(),
+    }));
+    const seatSelect = /<select[^>]*aria-label="Maximum concurrent Local VM seats"[^>]*>/.exec(selectedPoolMarkup)?.[0] ?? "";
+    expect(/\sdisabled(?:=|\s|>)/.test(seatSelect)).toBe(true);
+    expect(localVmModeIsReady({ mode: "pool", runtime: "container", daemonUp: true, image: true, ready: true })).toBe(false);
+    expect(localVmModeIsReady({ mode: "pool", runtime: "docker", daemonUp: true, image: true, ready: false })).toBe(true);
+    expect(localVmModeIsReady({ mode: "shared", runtime: "container", daemonUp: true, image: true, ready: true })).toBe(true);
+  });
+
+  it("shows only the shared desktop's manual run command", () => {
+    expect(localVmSetupRunCommand("shared", "docker run shared-vm")).toBe("docker run shared-vm");
+    expect(localVmSetupRunCommand("per-bot", "docker run shared-vm")).toBeNull();
+    expect(localVmSetupRunCommand("pool", "docker run shared-vm")).toBeNull();
+    expect(localVmSetupRunCommand("pool", undefined)).toBeNull();
   });
 });
