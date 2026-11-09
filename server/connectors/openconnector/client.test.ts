@@ -193,9 +193,9 @@ describe("endpoint shapes", () => {
 
   it("POST /v1/connections/:service/connect starts a request and reads its id and url", async () => {
     nextResponse = { status: 200, body: { success: true, data: { connectionRequestId: "cr_1", authorizationUrl: "https://github.com/login/oauth/authorize?x=1" } } };
-    const begun = await client().beginConnect("github", "work");
+    const begun = await client().beginConnect("github");
     expect(begun).toEqual({ connectionRequestId: "cr_1", authorizationUrl: "https://github.com/login/oauth/authorize?x=1" });
-    expect(lastCall()).toMatchObject({ method: "POST", path: "/v1/connections/github/connect", body: { connectionName: "work" } });
+    expect(lastCall()).toMatchObject({ method: "POST", path: "/v1/connections/github/connect", body: {} });
   });
 
   it("DELETE /api/connections/:service drops the credential", async () => {

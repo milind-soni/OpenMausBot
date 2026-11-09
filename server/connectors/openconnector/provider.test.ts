@@ -342,7 +342,7 @@ describe("authorize", () => {
     const result = await provider(state).authorize(cfg, "github", "work");
     expect(result.url).toBe("https://provider.example.test/authorize");
     expect(result.connectionRequestId).toBe("cr_9");
-    expect(lastCall()).toMatchObject({ method: "POST", path: "/v1/connections/github/connect", body: { connectionName: "work" } });
+    expect(lastCall()).toMatchObject({ method: "POST", path: "/v1/connections/github/connect", body: {} });
     expect(state.listConnections()).toEqual([{
       accountId: "oc:github:work",
       service: "github",

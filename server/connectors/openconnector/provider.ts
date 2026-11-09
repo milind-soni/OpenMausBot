@@ -335,7 +335,7 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
       const alias = normalizeAccountAlias(requestedAlias);
       const accountId = accountIdForConnection(service, alias);
       const expectedUpdatedAt = state.findConnectionByAccountId(accountId)?.updatedAt ?? null;
-      const begun = await client().beginConnect(service, alias);
+      const begun = await client().beginConnect(service);
       if (!begun.authorizationUrl) {
         throw new Error(`OpenConnector returned no authorization link for ${service}`);
       }

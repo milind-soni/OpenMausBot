@@ -220,11 +220,13 @@ export class OpenConnectorClient {
     });
   }
 
-  /** POST /v1/connections/:service/connect — start an authorization request. */
-  async beginConnect(service: string, alias?: string): Promise<{ connectionRequestId?: string; authorizationUrl?: string }> {
+  /** POST /v1/connections/:service/connect — start an authorization request. The runtime takes no body
+   * fields (it rejected "connectionName" and every other candidate key with "Unrecognized key"); an
+   * account alias is the caller's local bookkeeping, never part of this request. */
+  async beginConnect(service: string): Promise<{ connectionRequestId?: string; authorizationUrl?: string }> {
     const { data } = await this.request(`/v1/connections/${encodeURIComponent(service)}/connect`, {
       method: "POST",
-      body: JSON.stringify(alias ? { connectionName: alias } : {}),
+      body: JSON.stringify({}),
     });
     const doc = data && typeof data === "object" ? data as Record<string, unknown> : {};
     return {
