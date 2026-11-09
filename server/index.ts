@@ -326,6 +326,7 @@ import { createLiveSession, liveAttachUrl, liveHistoryFrom, LiveSessionError, ty
 import { LiveCallController, LiveCallSignedOutError, openLiveSocket } from "./live-call-controller.ts";
 import { liveCallSettings, liveSettingsFor, liveSettingsForClient, saveLiveSettings } from "./live-settings.ts"; import { azureLiveCallRefusal, liveScopeRefusal } from "./live-access.ts";
 import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-record.ts";
+import { noteGroupTurn, turnsSince } from "./room-round-turns.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { createTtsRoutes } from "./routes/tts.ts";
 import { turnStartLogLine } from "./turn-log.ts";
@@ -9689,7 +9690,7 @@ async function runClaimedGroupMemberTurn(
     return true;
   }
   revokeEarlierTurnCapabilities(threadId);
-  spoken.add(botId);
+  noteGroupTurn(spoken, botId);
   // The same resolver as the readiness re-check below, or a Chief's delegated level makes every such turn retry and settle busy.
   const preparedApprovalMode = roomTurnApprovalMode(bot, threadId, orchestration);
   const preparedSelection = { ...bot.modelSelection };
@@ -10551,16 +10552,17 @@ async function runClaimedGroupMemberTurn(
         },
       });
     }
-    // A bot that spoke earlier answers this direct mention again; one that already answered since this reply does not.
-    const spokeBeforeReply = new Set(spoken);
+    // A bot that spoke earlier answers a mention by its own name (not @everyone) again, unless it took a turn since this reply.
+    const spokeBeforeReply = new Set(spoken), answeredSince = turnsSince(spoken);
+    const named = new Set(mentionedBots(replyText, members).map((member) => member.id));
     for (const next of roomResponders(replyText, members, { kind: "mentions" })) {
       if (isCancelled?.()) return false;
-      if (spoken.has(next.id) && !spokeBeforeReply.has(next.id)) continue;
+      if (spokeBeforeReply.has(next.id) ? answeredSince(next.id) > 0 || !named.has(next.id) : spoken.has(next.id)) continue;
       if (operation) {
         const verdict = await waitForChatRoomMember(operation, threadId, next);
         if (verdict === "stop") return false;
         if (verdict === "skip") {
-          spoken.add(next.id);
+          noteGroupTurn(spoken, next.id);
           continue;
         }
       }
