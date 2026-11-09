@@ -5743,7 +5743,7 @@
   "skills.learned.hintOff": "スキルの作成はオフですが、すでに有効にしたスキルは引き続きここで管理できます。",
   "skills.origin.imported": "このコンピューター",
   "skills.origin.native": "AI",
-  "skills.origin.nativeHint": "ボットの AI が、Source に表示されているフォルダーから読み込みます。編集や削除はそのフォルダーで行ってください。",
+  "skills.origin.nativeHint": "ボットの AI が、Source に表示されているフォルダーから読み込みます。ここでオフにすると、このボットでのみ無効になります。ファイルは元の場所に残ります。",
   "skills.write.title": "コマンドを作成",
   "skills.write.hint": "よく頼む作業をボットの短いコマンドにできます。チャットで /name と入力すると実行できます。名前の後のテキストが {input} に入ります。",
   "skills.write.name": "コマンド名",
