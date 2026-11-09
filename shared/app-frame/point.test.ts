@@ -104,6 +104,20 @@ describe("the page's point script", () => {
     expect(posted.at(-1)).toMatchObject({ params: { tag: "div", text: "SAVE shown One" } });
   });
 
+  it("capitalizes a word once when it spans inline tags, and never picks a hovered part the page removed", () => {
+    const { say } = boot();
+    document.body.innerHTML = `<p class="cap" style="text-transform:capitalize"><b>w</b>ord <i>two</i>words</p><div id="gone">Gone</div>`;
+    say(pointMessage(true));
+    click(document.querySelector(".cap")!);
+    expect(posted.at(-1)).toMatchObject({ params: { tag: "p", text: "Word Twowords" } });
+    say(pointMessage(true));
+    const gone = document.querySelector("#gone")!;
+    gone.dispatchEvent(new PointerEvent("pointermove", { bubbles: true }));
+    gone.remove();
+    window.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(posted).toHaveLength(1);
+  });
+
   it("names a keyed part by its key, and Escape ends point mode with word to the parent", () => {
     const { say } = boot();
     say(pointMessage(true));

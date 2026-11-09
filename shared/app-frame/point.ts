@@ -121,13 +121,21 @@ export const APP_POINT_SOURCE = `(function () {
     }
     return parts.join(" > ");
   };
-  var cased = function (text, transform) {
-    return transform === "uppercase" ? text.toUpperCase() : transform === "lowercase" ? text.toLowerCase()
-      : transform === "capitalize" ? text.replace(/(^|\\s)(\\S)/g, function (all, gap, letter) { return gap + letter.toUpperCase(); }) : text;
+  // state.last is the last character written, so a capitalized word that spans inline tags keeps one capital.
+  var cased = function (text, transform, state) {
+    var prev = state.last;
+    var out = transform === "uppercase" ? text.toUpperCase() : transform === "lowercase" ? text.toLowerCase()
+      : transform === "capitalize" ? text.replace(/[\\s\\S]/g, function (letter) {
+        var start = /\\s/.test(prev) && /\\S/.test(letter);
+        prev = letter;
+        return start ? letter.toUpperCase() : letter;
+      }) : text;
+    if (text) state.last = text.slice(-1);
+    return out;
   };
   // innerText runs a badge (an inline-block span) into the next word ("CloudRestore"): any box that is not plain inline
   // is a word break on screen, so it is one here too.
-  var wordsOf = function (node) {
+  var wordsOf = function (node, state) {
     if (node.nodeType !== 1 || /^(script|style|noscript|template)$/i.test(node.tagName)) return "";
     var style = window.getComputedStyle(node);
     var display = style.display;
@@ -137,14 +145,17 @@ export const APP_POINT_SOURCE = `(function () {
     var closed = node.tagName === "DETAILS" && !node.open;
     var summary = closed && Array.prototype.find.call(node.children, function (child) { return child.tagName === "SUMMARY"; });
     var shown = style.contentVisibility === "hidden" ? [] : closed ? (summary ? [summary] : []) : node.childNodes;
+    var block = !/^(inline|contents)?$/.test(display) || node.tagName === "BR";
+    if (block) state.last = " ";
     var words = Array.prototype.map.call(shown, function (child) {
-      return child.nodeType === 3 ? (hidden ? "" : cased(child.data, style.textTransform)) : wordsOf(child);
+      return child.nodeType === 3 ? (hidden ? "" : cased(child.data, style.textTransform, state)) : wordsOf(child, state);
     }).join("");
-    return /^(inline|contents)?$/.test(display) && node.tagName !== "BR" ? words : " " + words + " ";
+    if (block) state.last = " ";
+    return block ? " " + words + " " : words;
   };
   var describe = function (element) {
     var tag = element.tagName.toLowerCase();
-    var text = wordsOf(element).trim() || element.getAttribute("aria-label") || element.getAttribute("alt") ||
+    var text = wordsOf(element, { last: " " }).trim() || element.getAttribute("aria-label") || element.getAttribute("alt") ||
       element.getAttribute("placeholder") || element.getAttribute("title") || "";
     return { tag: tag, role: element.getAttribute("role") || ROLES[tag] || "", text: clip(text, 200), selector: clip(selectorOf(element), 300),
       html: clip(element.outerHTML, 600) };
@@ -199,7 +210,8 @@ export const APP_POINT_SOURCE = `(function () {
   window.addEventListener("click", function (event) {
     if (!on) return;
     swallow(event);
-    var element = pickable(event.target) || current;
+    // A hovered part the page has since removed is not on screen any more, so it is not what the person picked.
+    var element = pickable(event.target) || (current && current.isConnected ? current : null);
     if (!element) return;
     post("${POINTED_METHOD}", describe(element));
     set(false);
