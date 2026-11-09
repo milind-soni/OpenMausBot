@@ -49,8 +49,10 @@ real Chrome whenever this machine has one, chosen once per machine
 
 Servers and the Docker image name their browser with
 `AGENT_BROWSER_EXECUTABLE_PATH` (the image's Chrome for Testing), or use the
-Chrome for Testing `agent-browser install` put in place; with neither, a
-server downloads its own as in step 2. `OMB_CHROME_PATH`
+Chrome for Testing `agent-browser install` put in place. A Linux server where
+agent-browser already finds a browser (Chrome, Chromium or Brave on `PATH`, or a
+complete Puppeteer or Playwright Chromium in their caches) keeps it; with none,
+it downloads its own as in step 2. `OMB_CHROME_PATH`
 names one explicitly. An `OMB_AGENT_BROWSER_PATH` engine keeps its own choice
 unless a Chrome is named too.
 

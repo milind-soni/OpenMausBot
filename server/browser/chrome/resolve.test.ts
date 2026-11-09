@@ -97,9 +97,12 @@ describe("which Chrome the bots' browser runs", () => {
     const withPath = (files: string[], env: NodeJS.ProcessEnv = {}) => host("linux", files, { env: { PATH: "/usr/local/bin:/usr/bin", ...env } });
     expect(resolveChromePlan(withPath(["/usr/bin/chromium"]), managed)).toEqual(found);
     expect(resolveChromePlan(withPath(["/usr/local/bin/google-chrome-stable"]), managed)).toEqual(found);
-    expect(resolveChromePlan(withPath(["/home/ada/.cache/puppeteer/chrome/linux-153.0.8010.47"]), managed)).toEqual(found);
-    expect(resolveChromePlan(withPath(["/home/ada/.cache/ms-playwright/chromium-1200"]), managed)).toEqual(found);
-    expect(resolveChromePlan(withPath(["/pw/chromium-1200"], { PLAYWRIGHT_BROWSERS_PATH: "/pw" }), managed)).toEqual(found);
+    expect(resolveChromePlan(withPath(["/home/ada/.cache/puppeteer/chrome/linux-153.0.8010.47/chrome-linux64/chrome"]), managed)).toEqual(found);
+    expect(resolveChromePlan(withPath(["/home/ada/.cache/ms-playwright/chromium-1200/chrome-linux/chrome"]), managed)).toEqual(found);
+    expect(resolveChromePlan(withPath(["/pw/chromium-1200/chrome-linux64/chrome"], { PLAYWRIGHT_BROWSERS_PATH: "/pw" }), managed)).toEqual(found);
+    // A cache entry without its browser executable is incomplete: the server still downloads.
+    expect(resolveChromePlan(withPath(["/home/ada/.cache/puppeteer/chrome/linux-153.0.8010.47/README"]), managed)).toMatchObject({ kind: "download" });
+    expect(resolveChromePlan(withPath(["/home/ada/.cache/ms-playwright/chromium-1200/INSTALLATION_COMPLETE"]), managed)).toMatchObject({ kind: "download" });
     expect(resolveChromePlan(withPath(["/home/ada/.cache/ms-playwright/firefox-1500", "/opt/firefox/firefox"]), managed)).toMatchObject({ kind: "download" });
     const downloaded = chromeForTestingExecutable("/data", chromeForTestingPin("linux", "arm64")!);
     expect(resolveChromePlan(withPath(["/usr/bin/chromium", downloaded]), managed)).toMatchObject({ kind: "chrome", chrome: { source: "downloaded" } });

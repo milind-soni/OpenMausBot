@@ -105,7 +105,10 @@ export const extractZip: Extract = (archive, directory) => new Promise((resolve,
     ? [win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe"), ["-xf", archive, "-C", directory]]
     : ["unzip", ["-q", archive, "-d", directory]];
   execFile(file, args, { timeout: EXTRACT_TIMEOUT_MS, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error) => {
-    if (error) reject(new Error(`the Chrome archive could not be unpacked: ${error.message}`));
+    if (error) {
+      const noUnzip = file === "unzip" && (error as NodeJS.ErrnoException).code === "ENOENT";
+      reject(new Error(noUnzip ? "the Chrome archive could not be unpacked: unzip is not installed here (Debian/Ubuntu: sudo apt-get install unzip)" : `the Chrome archive could not be unpacked: ${error.message}`));
+    }
     else resolve();
   });
 });

@@ -103,13 +103,18 @@ export function agentBrowserChrome(host: ChromeHost): string | null {
 /** agent-browser's own search on Linux: these browsers on PATH, then Puppeteer's and Playwright's caches. */
 const LINUX_ENGINE_BROWSERS = ["google-chrome", "google-chrome-stable", "google-chrome-unstable", "chromium", "chromium-browser", "brave-browser", "brave-browser-stable"];
 
+/** Where Puppeteer and Playwright unpack Chrome inside a cache entry; an entry without one is incomplete. */
+const LINUX_CACHE_EXECUTABLES = ["chrome-linux64/chrome", "chrome-linux/chrome"];
+
 /** A Linux server where agent-browser already finds a browser keeps it rather than downloading another. */
 export function engineFindsLinuxBrowser(host: ChromeHost): boolean {
   const { join } = posix;
   const onPath = (host.env.PATH ?? "").split(":").filter(Boolean);
   if (onPath.some((directory) => LINUX_ENGINE_BROWSERS.some((name) => host.exists(join(directory, name))))) return true;
-  if (host.list(join(host.env.PUPPETEER_CACHE_DIR || join(host.home, ".cache", "puppeteer"), "chrome")).length) return true;
-  return host.list(host.env.PLAYWRIGHT_BROWSERS_PATH || join(host.home, ".cache", "ms-playwright")).some((name) => name.startsWith("chromium"));
+  const cached = (directory: string, prefix: string) => host.list(directory)
+    .some((name) => name.startsWith(prefix) && LINUX_CACHE_EXECUTABLES.some((executable) => host.exists(join(directory, name, executable))));
+  return cached(join(host.env.PUPPETEER_CACHE_DIR || join(host.home, ".cache", "puppeteer"), "chrome"), "linux")
+    || cached(host.env.PLAYWRIGHT_BROWSERS_PATH || join(host.home, ".cache", "ms-playwright"), "chromium-");
 }
 
 export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null): ChromePlan {
