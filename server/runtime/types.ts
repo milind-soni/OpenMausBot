@@ -77,6 +77,14 @@ export type Outcome =
 export type Level = ApprovalMode;
 export type LevelSource = "own" | "chief" | "engine_cap";
 
+export interface BackgroundCommand {
+  boxId: string;
+  processId: string;
+  expiresAt: number;
+  result?: string;
+  delivered?: boolean;
+}
+
 export interface Assignment {
   id: string;
   rootId: string;
@@ -148,6 +156,7 @@ export interface Assignment {
   /** While a turn runs: the awaited children whose open questions its input carries. A restart that cuts the turn
    * reruns it with them once more; no other turn carries them again. */
   carrying?: string[];
+  backgroundCommands?: BackgroundCommand[];
   /** A peer-review card allowed this before it was sent. */
   approved?: boolean;
   /** A room brief shown once per call: every recipient of that call shares it. */
@@ -244,6 +253,7 @@ export interface RunInput {
   /** For a continued turn: why it continues and, after a step cap, where
    * the steps so far are listed. */
   continuation?: { note: string; handoffPath?: string };
+  backgroundResults?: string[];
   level: Level;
   mode: Mode;
 }

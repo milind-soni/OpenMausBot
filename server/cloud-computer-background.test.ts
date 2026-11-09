@@ -384,6 +384,22 @@ describe.each([
       expect(calls).toEqual([]);
     });
 
+    it("restores a recovered command's idle pin without extending its original deadline", async () => {
+      const processId = background.processIdOn(BOX, 700);
+      processes.set(`${BOX}:700`, { polls: 0, runningFor: Infinity, exitCode: null, stdout: "", stderr: "" });
+      const at = Date.now();
+      const now = vi.spyOn(Date, "now").mockReturnValue(at);
+      const command = { boxId: BOX, processId, expiresAt: at + 1_000 };
+      expect(await tools.commandResult(cfg, command, new AbortController().signal)).toBeUndefined();
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(true);
+      now.mockReturnValue(at + 500);
+      expect(await tools.commandResult(cfg, command, new AbortController().signal)).toBeUndefined();
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(true);
+      now.mockReturnValue(at + 1_001); calls.length = 0;
+      expect(await background.backgroundCommandRunning(cfg, BOX)).toBe(false);
+      expect(calls).toEqual([]);
+    });
+
     it("while the computer cannot say, but never past the cap", async () => {
       await start();
       statusReply = { status: 503, body: { ok: false, message: "unavailable" } };
