@@ -9907,5 +9907,6 @@
   "phone.code.typeIntro": "Abra o app do {app} e digite este código de pareamento.",
   "phone.signIn.emailCode": "Código de login do seu e-mail",
   "settings.simple.account.noNameHint": "Ainda não definido",
-  "settings.simple.account.yourName": "Seu nome"
+  "settings.simple.account.yourName": "Seu nome",
+  "activity.tool.team.operatorSettings": "Configurações do operador"
 }

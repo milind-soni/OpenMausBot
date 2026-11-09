@@ -5,6 +5,7 @@ import { addSentChats, type SentConversation } from "./cloud-chat-merge.ts";
 import { chatHeads, chatIds, chatPage, cloudSendChatsRoute, CHAT_PAGE_BYTES, CHAT_ROWS_PAGE, CHATS_BODY_MAX, inOrder, threadRowsAfter, verifyChats, VERIFY_IDS } from "./cloud-send-chats.ts";
 import { DATA_DIR } from "./config.ts";
 import { deleteThread, threadHeads } from "./message-db.ts";
+import { personKey } from "./person-key.ts";
 import { Store, type Message } from "./store.ts";
 
 const fresh = () => new Store(() => ({ instanceId: "fixture", model: "fixture-model" }));
@@ -434,12 +435,12 @@ describe("over the owner's own session", () => {
     ({ v: 1, dataDir: "/desk/.openmausbot", conversations: [{ bot, threadId, task: null, rows, leaf: rows.at(-1)!.id, sent: false, ...extra }] });
   const typed = (id: string, at: number, parentId: string | null): Message => ({ id, at, parentId, role: "user", kind: "text", text: id });
 
-  it("a bot conversation's lines its owner wrote, and the cards it answered, arrive as My Cloud's owner's", async () => {
+  it.each([undefined, { name: "Desktop owner", id: personKey({ id: "local-owner" }) }])("a bot conversation's own lines and answers arrive as My Cloud's owner: %j", async sender => {
     const store = fresh();
     const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
     const card: Message = { id: "c1", at: 2, parentId: "u1", role: "bot", kind: "options", card: { title: "Run it?", subtitle: "", options: ["Allow"], requestId: "q1", answered: "Allow", answeredBy: { kind: "loopback" } } };
     const peer: Message = { id: "p1", at: 3, parentId: "c1", role: "user", kind: "text", text: "From Chief", peerAsk: { botId: "chief", name: "Chief" } };
-    expect((await route(store, sent(ava.id, ava.threadId, [typed("u1", 1, null), card, peer]), true)).accepted).toEqual([ava.threadId]);
+    expect((await route(store, sent(ava.id, ava.threadId, [{ ...typed("u1", 1, null), sender }, card, peer]), true)).accepted).toEqual([ava.threadId]);
     const there = new Map(store.messagesFor(ava.threadId).map((row) => [row.id, row]));
     expect(there.get("u1")!.sender).toEqual({ name: "Amit", id: OWNER.person });
     expect(there.get("c1")!.card!.answeredBy).toEqual({ kind: "session", name: "Amit", person: OWNER.person });
@@ -474,11 +475,11 @@ describe("over the owner's own session", () => {
     }).then(() => answered!);
   };
 
-  it("lines My Cloud already held from that computer, named by id, become the owner's as arriving ones do, in a room too; nobody else's and no automation's ever", async () => {
+  it.each([undefined, { name: "Desktop owner", id: personKey({ id: "local-owner" }) }])("held desktop lines become the Cloud owner's, without changing anyone else's: %j", async sender => {
     const store = fresh();
     const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
-    // As an earlier send or a Bring left them on My Cloud: every line names nobody.
     const mine = say(store, ava.threadId, "Book the flight.", 1);
+    if (sender) store.patchMessage(ava.threadId, mine.id, { sender });
     const peer = store.appendMessage(ava.threadId, { role: "user", kind: "text", text: "From Chief", peerAsk: { botId: "chief", name: "Chief" }, at: 2 });
     const routine = say(store, ava.threadId, "[Routine \"Inbox\" — do this now:]\nRead my inbox.", 3);
     const card = store.appendMessage(ava.threadId, { role: "bot", kind: "options", at: 4,
@@ -489,7 +490,7 @@ describe("over the owner's own session", () => {
     const body = { v: 1, conversations: [{ threadId: ava.threadId, ids: [mine.id, peer.id, routine.id, card.id] }, { threadId: room.threadId, ids: [roomLine.id] }] };
     const stamped: string[] = [];
     expect((await own(store, body, false, stamped)).status, "only My Cloud's owner's own session may say").toBe(403);
-    expect(store.messagesFor(ava.threadId).map((row) => row.sender ?? null)).toEqual([null, null, null, null, null]);
+    expect(store.messagesFor(ava.threadId).map((row) => row.sender ?? null)).toEqual([sender ?? null, null, null, null, null]);
 
     expect(await own(store, body, true, stamped)).toEqual({ status: 200, body: { v: 1, stamped: 3 } });
     const there = new Map(store.messagesFor(ava.threadId).map((row) => [row.id, row]));
@@ -511,10 +512,11 @@ describe("over the owner's own session", () => {
     expect((await own(store, { v: 1, conversations: Array.from({ length: 3 }, () => ({ threadId: ava.threadId, ids: many(VERIFY_IDS) })) }, true)).status).toBe(400);
   });
 
-  it("My Cloud's chats check counts the owner's lines it holds that do not carry the owner yet", async () => {
+  it.each([undefined, { name: "Desktop owner", id: personKey({ id: "local-owner" }) }])("counts held desktop lines until they carry the Cloud owner: %j", async sender => {
     const store = fresh();
     const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
     const rows = [say(store, ava.threadId, "Book the flight.", 1), answer(store, ava.threadId, "Booked.", 2)];
+    if (sender) store.patchMessage(ava.threadId, rows[0]!.id, { sender });
     const room = store.createGroup("Launch", [ava.id]);
     const roomLine = say(store, room.threadId, "In the room.", 3);
     const ask = () => verifyChats(store, [{ threadId: ava.threadId, ids: ids(rows) }, { threadId: room.threadId, ids: [roomLine.id] }]).map((entry) => entry.unstamped);

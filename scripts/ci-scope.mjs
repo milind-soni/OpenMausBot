@@ -62,6 +62,7 @@ export const VITEST_SUBSETS = {
       "scripts/testing/team-own-chat.e2e.test.ts",
       "server/body-thread-guards.e2e.test.ts",
       "server/chief-operator-authority.e2e.test.ts",
+      "server/chief-operator-body-race.e2e.test.ts",
       "server/client-notifications.e2e.test.ts",
       "server/cloud-connections.e2e.test.ts",
       "server/cloud-lending-browser.e2e.test.ts",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { composeExecutionPrompt } from "./routine-execution.ts";
 import { ownersOwnLine, stampOwner } from "./cloud-owner-lines.ts";
+import { personKey } from "./person-key.ts";
 import type { Message } from "./store.ts";
 
 const OWNER = { person: "p_owner0000000000000000", name: "Amit" };
@@ -11,7 +12,7 @@ describe("a line its owner wrote on the computer it came from", () => {
     for (const mine of [line(), line({ via: "call" }), line({ steered: true }), line({ queued: true })]) expect(ownersOwnLine(mine), JSON.stringify(mine)).toBe(true);
   });
 
-  it("is never another's words or an automation's, however it arrives", () => {
+  it.each([undefined, { name: "Desktop owner", id: personKey({ id: "local-owner" }) }])("never grants another's words or automation the owner's authority: %j", sender => {
     const routine = composeExecutionPrompt({ id: "routine-id", name: "Morning brief", trigger: "schedule", runOn: "maus" }, "Read my inbox.", []);
     const byHand = composeExecutionPrompt({ id: "routine-id", name: "Morning brief", trigger: "manual", runOn: "maus" }, "Read my inbox.", []);
     const hook = composeExecutionPrompt({ id: "routine-id", name: "Inbox", trigger: "webhook", runOn: "maus" }, "[USER-CONFIGURED WEBHOOK INSTRUCTIONS]\nHandle it.\n[/USER-CONFIGURED WEBHOOK INSTRUCTIONS]\n\n[UNTRUSTED WEBHOOK EVENT DATA]\n{}\n[/UNTRUSTED WEBHOOK EVENT DATA]", []);
@@ -25,7 +26,17 @@ describe("a line its owner wrote on the computer it came from", () => {
       line({ role: "bot" }),
       line({ role: "bot", webhookPost: true }),
       line({ text: routine }), line({ text: byHand }), line({ text: hook }), line({ text: event }),
-    ]) expect(ownersOwnLine(other), JSON.stringify(other).slice(0, 120)).toBe(false);
+    ]) expect(ownersOwnLine({ sender, ...other }), JSON.stringify(other).slice(0, 120)).toBe(false);
+  });
+
+  it("maps the proven desktop owner to the Cloud owner without granting a guest or relayed line their authority", () => {
+    const desktop = { name: "Desktop owner", id: personKey({ id: "local-owner" }) };
+    const guest = { name: "Guest", id: personKey({ id: "guest" }) };
+    const rows = [line({ sender: desktop }), line({ sender: guest }), line({ sender: desktop, relayed: true }),
+      line({ sender: desktop, peerAsk: { botId: "chief", name: "Chief" } })];
+    expect(rows.map(ownersOwnLine)).toEqual([true, false, false, false]);
+    expect(stampOwner(rows, OWNER).map(row => row.sender?.id)).toEqual([OWNER.person, guest.id, desktop.id, desktop.id]);
+    expect(rows[0]!.sender).toEqual(desktop);
   });
 
   it("is stamped with My Cloud's owner, and so is a card answered in that window; nothing else changes", () => {

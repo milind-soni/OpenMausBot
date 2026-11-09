@@ -15,6 +15,7 @@ import { itemKey } from "../electron/cloud-send-parts.mjs";
 import { launchCloudSendFixture, type CloudSendFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { startBrokerFake, type BrokerFake } from "./testing/broker-fake.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { personKey } from "./person-key.ts";
 
 // Obvious fakes only.
 const hex = (bytes: number) => randomBytes(bytes).toString("hex");
@@ -333,10 +334,12 @@ it("lines the owner wrote on this computer arrive as the same owner as the lines
   expect(before.length).toBeGreaterThan(0);
   const [here, there] = [await history(fx.local, cleo.threadId), await history(fx.onCloud, cleo.threadId)];
   const typedHere = new Set(here.rows.filter((row) => row.role === "user").map((row) => row.id));
-  expect(here.rows.filter((row) => row.role === "user").every((row) => row.sender === undefined), "this computer's own lines name nobody").toBe(true);
+  const desktopOwner = personKey({ id: "local-owner" });
+  expect(new Set(here.rows.filter((row) => row.role === "user").map((row) => row.sender?.id)), "the desktop records its proven owner").toEqual(new Set([desktopOwner]));
   const owners = there.rows.filter((row) => row.role === "user").map((row) => [typedHere.has(row.id), row.sender?.id]);
   expect(owners.filter(([mine]) => mine)).toHaveLength(typedHere.size);
   expect(new Set(owners.map(([, owner]) => owner)), "this computer's lines and My Cloud's own carry one owner").toEqual(new Set([owners[0]![1]]));
   expect(owners[0]![1]).toMatch(/^p_/u);
+  expect(owners[0]![1], "the move maps the desktop key to My Cloud's owner").not.toBe(desktopOwner);
   expect(new Set(before), "and so do the lines My Cloud held from before").toEqual(new Set([owners[0]![1]]));
 });

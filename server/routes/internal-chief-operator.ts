@@ -22,6 +22,11 @@ export function createInternalChiefOperatorRoutes(deps: {
   const ownerStarted = (owner: string) => deps.team ? deps.requester === personKey({ id: "", email: owner })
     : deps.cloudHome ? deps.provenCloudOwner(deps.requester ?? undefined)
       : (owner !== "local-owner" || deps.desktopManaged) && deps.requester === personKey(owner.includes("@") ? { id: "", email: owner } : { id: owner });
+  const active = () => {
+    if (!ownerStarted(deps.operator.ownerOf(deps.botId))) throw new OperatorRefusal(403, "Only the appointing owner can request Chief Operator settings.");
+    if (!deps.active()) throw new OperatorRefusal(409, "The initiating turn ended. Preview the change in a new turn.");
+    return true;
+  };
   return async ({ res, path, method, json }) => {
     if (path !== "/api/internal/chief-operator") return PASS;
     if (method !== "POST") return json(res, 405, { error: "Use POST for Chief Operator settings." });
@@ -29,9 +34,9 @@ export function createInternalChiefOperatorRoutes(deps: {
       return json(res, 403, { error: "Chief Operator settings require a direct turn started by the owner." });
     }
     try {
-      const owner = deps.operator.ownerOf(deps.botId);
-      if (!ownerStarted(owner)) return json(res, 403, { error: "Only the appointing owner can request Chief Operator settings." });
+      active();
       const body = await deps.readBody();
+      active();
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "Use action read, preview, apply or rollback." });
       const action = (body as Record<string, unknown>).action;
       if (action === "read" && Object.keys(body).length === 1) return json(res, 200, deps.operator.describe(deps.botId));
@@ -43,12 +48,12 @@ export function createInternalChiefOperatorRoutes(deps: {
       if (action === "apply") {
         const parsed = operatorApplySchema.safeParse(body);
         if (!parsed.success) return json(res, 400, { error: "Apply needs previewId and expectedRevision from the preview." });
-        return json(res, 200, deps.operator.apply({ botId: deps.botId, threadId: deps.threadId, generation: deps.generation, previewId: parsed.data.previewId, expectedRevision: parsed.data.expectedRevision, active: deps.active }));
+        return json(res, 200, deps.operator.apply({ botId: deps.botId, threadId: deps.threadId, generation: deps.generation, previewId: parsed.data.previewId, expectedRevision: parsed.data.expectedRevision, active }));
       }
       if (action === "rollback") {
         const parsed = operatorRollbackSchema.safeParse(body);
         if (!parsed.success) return json(res, 400, { error: "Rollback needs an applied receiptId and current expectedRevision." });
-        return json(res, 200, deps.operator.rollback({ botId: deps.botId, receiptId: parsed.data.receiptId, expectedRevision: parsed.data.expectedRevision, active: deps.active }));
+        return json(res, 200, deps.operator.rollback({ botId: deps.botId, receiptId: parsed.data.receiptId, expectedRevision: parsed.data.expectedRevision, active }));
       }
       return json(res, 400, { error: "Use action read, preview, apply or rollback." });
     } catch (error) {
