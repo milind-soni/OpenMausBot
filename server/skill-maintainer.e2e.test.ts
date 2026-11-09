@@ -32,7 +32,8 @@ it("manages single shared-skill assignments and responsibility through a live Ch
   const snapshot = () => ["config.json", "bots.json"].map((file) => createHash("sha256").update(readFileSync(join(fixture.info.dataDir, file))).digest("hex")).concat(libraryDigest());
   try {
     expect((await request("PATCH", "/api/config", { features: { skillsLibrary: true } })).status).toBe(200);
-    const author = (await request("POST", "/api/bots", { name: "Author", section: "Skill fixture", chiefOfStaff: true })).body.bot;
+    const author = (await request("POST", "/api/bots", { name: "Author", section: "Skill fixture", settings: { chiefOfStaff: true } })).body.bot;
+    expect(author.chiefOfStaff).toBe(true);
     const target = (await request("POST", "/api/bots", { name: "Target", section: "Skill fixture" })).body.bot;
     const text = "---\nname: fixture-audit\ndescription: Audits a fixture.\n---\n\nReview it.\n";
     expect(installLibrarySkill({ name: "fixture-audit", instructions: text, source: "fixture-provenance", root: libraryRoot,
@@ -47,7 +48,15 @@ it("manages single shared-skill assignments and responsibility through a live Ch
     expect((await request("POST", `/api/bots/${author.id}/messages`, { threadId: author.threadId, sendId: "maintainer-fixture-0001", text: "Start fixture" })).status).toBeLessThan(300);
     await expect.poll(() => dump().mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN, { timeout: hostTimeout(30_000) }).toBeTruthy();
     const token: string = dump().mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
-    const targetListing = async () => (await request("GET", `/api/internal/skills?targetBotId=${target.id}`, undefined, token)).body;
+    const targetListing = async () => {
+      const result = await request("GET", `/api/internal/skills?targetBotId=${target.id}`, undefined, token);
+      expect(result, "target skill listing failed").toMatchObject({ status: 200 });
+      const persisted = JSON.parse(readFileSync(join(fixture.info.dataDir, "bots.json"), "utf8"))
+        .find((bot: { id: string }) => bot.id === target.id)?.assignedSkills;
+      expect(persisted).toEqual(result.body.assignedSkills);
+      evidence.push({ target_bot_id: target.id, persistedAssignedSkills: persisted });
+      return result.body;
+    };
     const targetState = async (name = "fixture-audit") => (await targetListing()).library.find((skill: { name: string }) => skill.name === name);
     const manage = async (action: string, name = "fixture-audit", revision?: string) => request("POST", "/api/internal/skills/stage", {
       action, skill_name: name, target_bot_id: target.id, base_revision: revision ?? (await targetState(name)).management_revision,
@@ -76,7 +85,11 @@ it("manages single shared-skill assignments and responsibility through a live Ch
     expect((await request("PATCH", `/api/bots/${target.id}`, { visibility: "admins" })).status).toBe(200);
     await rejected(revision, 403);
     expect((await request("PATCH", `/api/bots/${target.id}`, { visibility: "everyone" })).status).toBe(200);
-    const listing = async () => (await request("GET", `/api/internal/skills?fromBotId=${author.id}&fromThreadId=${author.threadId}`, undefined, token)).body.skills.find((skill: { name: string }) => skill.name === "fixture-audit");
+    const listing = async () => {
+      const result = await request("GET", `/api/internal/skills?fromBotId=${author.id}&fromThreadId=${author.threadId}`, undefined, token);
+      expect(result, "author skill listing failed").toMatchObject({ status: 200 });
+      return result.body.skills.find((skill: { name: string }) => skill.name === "fixture-audit");
+    };
     const before = await listing();
     expect(before.shared).toMatchObject({ scope: "selected_bots", enabled: true, maintainer_status: "unassigned" });
     const transfer = { action: "transfer_maintainer", skill_name: "fixture-audit", target_bot_id: target.id, base_revision: before.shared.management_revision };
