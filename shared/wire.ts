@@ -90,9 +90,7 @@ export interface TaskOpenedBy {
   /** What kind of conversation the opener made this: "pair" is the one
    * durable conversation between two bots; "work" closes itself once its
    * result has been reported. */
-  kind?: "pair" | "work";
-  /** The burst this thread is one part of: it is listed under that burst's card, not on its own. */
-  burstId?: string;
+  kind?: "pair" | "work"; /** The burst this thread is one part of: it is listed under that burst's card, not on its own. */ burstId?: string;
   /** The opener's own conversation this "work" thread was opened from.
    * Everything that conversation later sends this bot continues here. */
   threadId?: string;
@@ -500,9 +498,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** signin rows: the bot asked the person to sign in to a site themselves. */
   signIn?: SignInRequestCardData;
   /** One idempotently updated status card for a routine run. */
-  routineRun?: RoutineRunCardData;
-  /** The card a burst shows in its parent chat: first a preview, then its progress. */
-  burst?: BurstCardData;
+  routineRun?: RoutineRunCardData; /** The card a burst shows in its parent chat: first a preview, then its progress. */ burst?: BurstCardData;
   automation?: AutomationLine;
   /** Terminal receipt for a bounded multi-bot channel goal. */
   goalRun?: GroupGoalRunCardData;
