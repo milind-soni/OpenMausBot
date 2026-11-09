@@ -73,10 +73,12 @@ export function createSharedVmControl(deps: SharedVmControlDeps) {
     return snapshots.find(snapshot => snapshot.held) ?? snapshots.find(snapshot => snapshot.helpReason !== null) ?? snapshots[0]!;
   };
 
-  /** A hold taken without a conversation pauses every conversation of the bot, as a hold on its own key does. */
+  /** A hold taken without a conversation pauses every conversation of the bot, as a hold on its own key does; a turn still
+   * on the shared VM waits for its hold whatever its bot is set to now. */
   const snapshot = (botId: string, threadId?: string): ControlSnapshot => {
     const bot = threadId ? deps.botForThread(botId, threadId) : store.bot(botId);
-    return merged(bot ? [...new Set([botId, keyFor(bot, threadId), keyFor(bot)])] : [botId]);
+    const mounted = threadId && sharedDesk() && deps.turnVmTargets.get(threadId)?.key === SHARED_LOCAL_VM_TARGET.key ? [SHARED_VM_CONTROL_KEY] : [];
+    return merged([...new Set([botId, ...(bot ? [keyFor(bot, threadId), keyFor(bot)] : []), ...mounted])]);
   };
 
   /** What a bot's panels and the bot list are told: the first of its keys held, else the first pleading, else its own. */

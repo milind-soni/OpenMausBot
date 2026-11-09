@@ -104,6 +104,13 @@ describe("what a hold on the shared desktop reaches", () => {
     expect(vm.snapshot("bea").held).toBe(true);
   });
 
+  it.each(["cloud", "off"] as const)("a turn still on the shared VM after its bot moved to %s waits for a hold on the desktop", (computer) => {
+    const { control, vm } = fixture({ bots: [{ id: "ada", computer }], vmTurns: { r: SHARED_LOCAL_VM_TARGET } });
+    control.take(DESK);
+    expect(vm.snapshot("ada", "r").held).toBe(true);
+    expect(vm.snapshot("ada").held).toBe(false);
+  });
+
   it("tells every bot with a conversation on the desktop, and each its merged state", () => {
     const { control, vm } = fixture({ bots: [{ id: "ada" }, { id: "books", computer: "cloud" }, { id: "cy", computer: "cloud" }], tasks: { t: ["books", "vm"] } });
     expect(vm.membersOf(DESK)).toEqual(["ada", "books"]);
