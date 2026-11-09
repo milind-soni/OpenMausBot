@@ -20,12 +20,13 @@ export function localVmBotComputerPatch(checked: boolean): { computer: "vm" | nu
 
 export function LocalVmBotSelection() {
   const { state, dispatch } = useStore();
-  if (state.bots.length === 0) return null;
+  const bots = state.bots.filter((bot) => !bot.hidden);
+  if (bots.length === 0) return null;
 
   return (
     <Card title={t("vm.bots.title")} subtitle={t("vm.bots.subtitle")}>
       <div className="overflow-hidden rounded-xl border border-hairline/40">
-        {state.bots.map((bot, index) => (
+        {bots.map((bot, index) => (
           <label
             key={bot.id}
             htmlFor={`local-vm-bot-${bot.id}`}

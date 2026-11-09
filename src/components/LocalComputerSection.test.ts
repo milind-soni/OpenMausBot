@@ -601,6 +601,7 @@ describe("Local VM bot selection", () => {
       { id: "research", name: "Research", computer: "vm" } as Bot,
       { id: "writer", name: "Writer", computer: "cloud" } as Bot,
       { id: "planner", name: "Planner" } as Bot,
+      { id: "archived", name: "Archived", computer: "vm", hidden: true } as Bot,
     ];
     const markup = renderToStaticMarkup(createElement(LocalVmBotSelection));
     const checkbox = (botId: string) => new RegExp(`<input[^>]*data-local-vm-bot="${botId}"[^>]*>`).exec(markup)?.[0] ?? "";
@@ -612,6 +613,8 @@ describe("Local VM bot selection", () => {
     expect(checkbox("research")).toContain('checked=""');
     expect(checkbox("writer")).not.toContain("checked");
     expect(checkbox("planner")).not.toContain("checked");
+    expect(markup).not.toContain("Use a Local VM for Archived");
+    expect(checkbox("archived")).toBe("");
     expect(localVmBotComputerPatch(true)).toEqual({ computer: "vm" });
     expect(localVmBotComputerPatch(false)).toEqual({ computer: null });
   });
