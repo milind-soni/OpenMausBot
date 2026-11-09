@@ -1054,6 +1054,53 @@
       "malformed": true
     },
     {
+      "name": "a date that would roll over into the next month",
+      "fields": {
+        "due_date": {
+          "type": "date"
+        }
+      },
+      "body": {
+        "values": {
+          "due_date": "2026-02-30"
+        },
+        "model": "clairic"
+      },
+      "malformed": true
+    },
+    {
+      "name": "a leap day in a non-leap century",
+      "fields": {
+        "due_date": {
+          "type": "date"
+        }
+      },
+      "body": {
+        "values": {
+          "due_date": "1900-02-29"
+        },
+        "model": "clairic"
+      },
+      "malformed": true
+    },
+    {
+      "name": "a leap day in a leap century",
+      "fields": {
+        "due_date": {
+          "type": "date"
+        }
+      },
+      "body": {
+        "values": {
+          "due_date": "2000-02-29"
+        },
+        "model": "clairic"
+      },
+      "values": {
+        "due_date": "2000-02-29"
+      }
+    },
+    {
       "name": "a number sent as text",
       "fields": {
         "total": {

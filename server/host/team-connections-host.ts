@@ -50,7 +50,7 @@ export interface TeamConnectionsHostDeps {
   onSettled?(name: string, phase: McpSignInPhase, owner: string): void;
   /** The connected-apps service a member's own installation is made on; null: none here. */
   brokerUrl(): string | null;
-  composio: Pick<typeof Composio, "configured" | "mcpIntegration" | "connectedServices" | "connectedServiceSlugs" | "authorizeService" | "removeService">;
+  composio: Pick<typeof Composio, "configured" | "mcpIntegration" | "connectedServices" | "verifiedConnectedServiceSlugs" | "authorizeService" | "removeService">;
 }
 
 const list = (names: readonly string[]) => names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
@@ -158,6 +158,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
         + `Reply with this one line and nothing more about it: "${name} is connected for the whole team by ${who ? who : "the team's owner or an admin"}: ask ${who ? (who.includes(" and ") ? "one of them" : "them") : "one of them"} to connect it."`;
     },
     opaque: (names: string[]) => `Code that calls apps can't run here while ${list(names)} ${names.length === 1 ? "is" : "are"} connected by each person. Call the app's tools directly.`,
+    opaqueUnverified: "Code that calls apps can't run here because the team's connected-app inventory could not be verified, and it may hold apps connected by each person. Nothing was run. Call the app's tools directly, or try again when the inventory is back.",
   };
 
   /** What a `person` app the team's bridge was asked for says: in a turn that acts for someone, where theirs is; else no. */
@@ -251,7 +252,12 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       for (const call of calls) {
         if (call.slug === "COMPOSIO_PROXY_EXECUTE") {
           if (own) continue;
-          const held = await deps.composio.connectedServiceSlugs(deps.cfg()).catch(() => [] as readonly string[]);
+          let held: readonly string[];
+          try {
+            held = await deps.composio.verifiedConnectedServiceSlugs(deps.cfg());
+          } catch {
+            return lines.opaqueUnverified;
+          }
           const kept = apps.filter((slug) => held.includes(slug));
           if (kept.length) return lines.opaque(kept.map(appLabel));
           continue;

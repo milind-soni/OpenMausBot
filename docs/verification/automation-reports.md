@@ -31,9 +31,10 @@ Only a run working in a conversation of its own is told that only its last
 reply leaves it (`NOTHING NEW`, `NEEDS INPUT:`). A "when my limit resets"
 continuation works in the person's own chat and is not.
 
-On a Cloud home, every run of a webhook or app-event automation reports into
-one "<name> · Results" chat of its own, and a routine someone other than the
-owner wrote keeps its own results chat, so no outside words reach the owner's
+Every run of a webhook or app-event automation reports into one
+"<name> · Results" chat of its own, on every home, so outside events never pile
+into a chat a person works in. On a Cloud home, a routine someone other than the
+owner wrote keeps its own results chat too, so no outside words reach the owner's
 other chats or a lent Mac.
 
 ## The concurrency rule

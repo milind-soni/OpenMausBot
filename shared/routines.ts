@@ -109,6 +109,9 @@ export type RoutineRetryCause = "stalled" | "restarted" | "rate_limited" | "prov
  * not been acknowledged. */
 export const ROUTINE_PROBLEM_STATUSES: readonly RoutineRunStatus[] = ["failed", "missed"];
 
+/** A run's `attention` while it waits only on work it handed to teammates: nothing is asked of the person. */
+export const ROUTINE_HANDOFF_WAIT = "Waiting for work it handed on to finish";
+
 export function isRoutineProblemRun(run: { status: RoutineRunStatus }): boolean {
   return ROUTINE_PROBLEM_STATUSES.includes(run.status);
 }
