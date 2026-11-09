@@ -92,6 +92,24 @@ const messageOf = (err: FailureInput): string => {
   return [err.stderr ?? "", ""].join(" ").trim();
 };
 
+/** The three status-carrying forms the drivers' errors use (the STATUS pattern in engine-errors.ts):
+ * Grok Build's "(status 409 …)", the chat drivers' "xAI HTTP 409: …" and Claude Code's "API Error: 409 …".
+ * A bare number is not a status. */
+const HTTP_STATUS = /\(status (\d{3})\b[^)]*\)|\bHTTP (\d{3})\b|^API Error:? (\d{3})\b/i;
+
+/** A failure line that names its HTTP status is decided by the status, not by numbers in its body: a 409
+ * whose body says "max 500 tokens" is a request the provider will refuse again, not a server failure.
+ * 429 stays a rate limit and 408 stays a timeout; 5xx stays with the body patterns (so 529 still reads
+ * as overloaded). Any other 4xx is terminal. */
+function httpStatusVerdict(text: string): ErrorClassification | undefined {
+  const match = HTTP_STATUS.exec(text);
+  const status = Number(match?.[1] ?? match?.[2] ?? match?.[3]);
+  if (status === 429) return { transient: true, reason: "rate_limited" };
+  if (status === 408) return { transient: true, reason: "timeout" };
+  if (status >= 400 && status < 500) return { transient: false, reason: "invalid_request" };
+  return undefined;
+}
+
 /** A nonzero exit with no error text is terminal (`terminal_exit`): the CLI already reported its own
  * failure. A signal kill (negative code) is never retried. */
 export function classifyError(err: FailureInput): ErrorClassification {
@@ -104,6 +122,8 @@ export function classifyError(err: FailureInput): ErrorClassification {
     for (const { pattern, reason } of TERMINAL_PATTERNS) {
       if (pattern.test(text)) return { transient: false, reason };
     }
+    const statusVerdict = httpStatusVerdict(text);
+    if (statusVerdict) return statusVerdict;
     for (const { pattern, reason } of TRANSIENT_PATTERNS) {
       if (pattern.test(text)) return { transient: true, reason };
     }
@@ -112,6 +132,8 @@ export function classifyError(err: FailureInput): ErrorClassification {
   for (const { pattern, reason } of TERMINAL_PATTERNS) {
     if (pattern.test(text)) return { transient: false, reason };
   }
+  const statusVerdict = httpStatusVerdict(text);
+  if (statusVerdict) return statusVerdict;
   for (const { pattern, reason } of TRANSIENT_PATTERNS) {
     if (pattern.test(text)) return { transient: true, reason };
   }

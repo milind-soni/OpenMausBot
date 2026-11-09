@@ -716,7 +716,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               }
               // Once a call has been handled, never replay it through a turn retry.
               if (abort.signal.aborted || streamed || seenCalls.size ||
-                  error instanceof ChatProtocolError || !verdict.transient || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
+                  error instanceof ChatProtocolError || error instanceof RuntimeNoticeError || !verdict.transient || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
               const delayMs = computeBackoff(attempt++);
               emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt, delayMs, reason: verdict.reason });
               await interruptibleDelay(delayMs * (options.retryScale ?? 1), abort.signal).promise;
