@@ -97,6 +97,7 @@ export const VOICE_FIRST_BLOCK_MAX_CHARS = 90;
 
 const BOUNDARY = /(?<!\b(?:e\.g|i\.e|etc|vs|Dr|Mr|Mrs|Ms|No|approx))(?<![.\d])([.!?])(["')\]]*)\s+/g;
 const WORD_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "word" });
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 export function toUtterances(
   input: string,
@@ -146,10 +147,7 @@ function splitLong(text: string, maxChars: number): string[] {
     const at = Math.max(window.lastIndexOf(", "), window.lastIndexOf("; "), window.lastIndexOf(" — "));
     let cut = at > maxChars / 2 ? at + 1 : window.lastIndexOf(" ");
     if (cut <= 0) {
-      for (const { index } of WORD_SEGMENTER.segment(rest)) {
-        if (index > maxChars) break;
-        if (index > 0) cut = index;
-      }
+      cut = unspacedCut(rest, maxChars);
     }
     if (cut <= 0) break;
     out.push(rest.slice(0, cut).trim());
@@ -157,6 +155,24 @@ function splitLong(text: string, maxChars: number): string[] {
   }
   if (rest) out.push(rest);
   return out;
+}
+
+function unspacedCut(text: string, maxChars: number): number {
+  let firstWord: Intl.SegmentData | undefined;
+  let cut = -1;
+  for (const segment of WORD_SEGMENTER.segment(text)) {
+    if (segment.index > maxChars) break;
+    if (!segment.isWordLike) continue;
+    if (firstWord) cut = segment.index;
+    else firstWord = segment;
+  }
+  if (cut > 0 || !firstWord || !/^[\p{Script_Extensions=Katakana}\p{M}]+$/u.test(firstWord.segment)) return cut;
+  for (const { index } of GRAPHEME_SEGMENTER.segment(firstWord.segment)) {
+    const boundary = firstWord.index + index;
+    if (boundary > maxChars) break;
+    if (index > 0) cut = boundary;
+  }
+  return cut;
 }
 
 export function narrateTool(toolName: string): string | null {

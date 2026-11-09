@@ -162,6 +162,32 @@ describe("toUtterances", () => {
     expect(out.every((piece) => Buffer.from(piece).toString("utf8") === piece)).toBe(true);
     expect(out.join("")).toBe(text);
   });
+  it("keeps a terminal period attached to a word at either speech cap", () => {
+    const long = `${"a".repeat(320)}.`;
+    expect(toUtterances(long)).toEqual([long]);
+    const first = `${"a".repeat(90)}.`;
+    expect(toUtterances(first, { firstBlockMaxChars: 90 })).toEqual([first]);
+  });
+
+  it("does not turn punctuation around an indivisible word into an utterance", () => {
+    const text = `(${"a".repeat(320)}).`;
+    expect(toUtterances(text)).toEqual([text]);
+  });
+
+  it("caps a decomposed Katakana word without splitting its graphemes", () => {
+    const text = "カ\u3099".repeat(321);
+    const out = toUtterances(text, { maxChars: 320, firstBlockMaxChars: 91 });
+    expect(out.length).toBeGreaterThan(1);
+    expect(out[0]!.length).toBeLessThanOrEqual(91);
+    expect(out.every((piece) => piece.length > 0 && piece.length <= 320 && /^(?:カ\u3099)+$/u.test(piece))).toBe(true);
+    expect(out.join("")).toBe(speakable(text));
+  });
+
+  it("keeps Latin words with combining marks indivisible", () => {
+    const text = `${"e\u0301".repeat(200)}.`;
+    expect(toUtterances(text, { firstBlockMaxChars: 91 })).toEqual([text]);
+  });
+
 });
 
 describe("narrateTool", () => {
