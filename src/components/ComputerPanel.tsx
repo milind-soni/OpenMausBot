@@ -630,10 +630,13 @@ export function ComputerPanel({
   }, [phase, threadPath, profileBot.busy, livePlace]);
 
   const control = state.computerControl[bot.id] ?? { held: false, helpReason: null };
+  const liveTarget = !computerStatusCurrent ? null
+    : phase === "vm" && vmStatus?.viewer_url && vmStatus.target_key ? viewerTargetId({ key: vmStatus.target_key })
+      : cloudPreviewReady && cloudBackend === "vps" ? `vps/${bot.id}` : null;
   const requestControl = useCallback(async (action: ComputerControlAction, controlLeaseId?: string) => {
-    const snap = computerControlSnapshotSchema.parse(await api(`/api/bots/${bot.id}/computer/control`, {
+    const snap = computerControlSnapshotSchema.parse(await api(threadPath("computer/control"), {
       method: "POST",
-      body: JSON.stringify({ action, ...(controlLeaseId ? { controlLeaseId } : {}) }),
+      body: JSON.stringify({ action, ...(controlLeaseId ? { controlLeaseId } : {}), ...(liveTarget ? { target: liveTarget } : {}) }),
     }));
     dispatch({
       type: "computerControl",
@@ -643,10 +646,7 @@ export function ComputerPanel({
       help: snap.help,
     });
     return snap;
-  }, [bot.id, dispatch]);
-  const liveTarget = !computerStatusCurrent ? null
-    : phase === "vm" && vmStatus?.viewer_url && vmStatus.target_key ? viewerTargetId({ key: vmStatus.target_key })
-      : cloudPreviewReady && cloudBackend === "vps" ? `vps/${bot.id}` : null;
+  }, [bot.id, dispatch, threadPath, liveTarget]);
   const takeover = useComputerTakeover({
     botId: bot.id, session: `${viewerConnectionKey}:${panelView}`, held: control.held, request: requestControl,
     viewerClose: liveTarget?.startsWith("vps/") ? threadPath("computer/viewer-close") : null,
@@ -805,7 +805,7 @@ export function ComputerPanel({
   const signInAsker = signInHelp ? state.bots.find((candidate) => candidate.id === signInHelp.botId)?.name ?? bot.name : bot.name;
   useEffect(() => {
     let alive = true;
-    api(`/api/bots/${bot.id}/computer/control`)
+    api(threadPath("computer/control"))
       .then((raw) => {
         if (!alive) return;
         const snap = computerControlSnapshotSchema.parse(raw);
@@ -822,7 +822,7 @@ export function ComputerPanel({
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bot.id]);
+  }, [bot.id, threadPath]);
 
   const setNativeBrowserControl = useCallback(async (): Promise<boolean> => true, []);
 
@@ -871,7 +871,7 @@ export function ComputerPanel({
     setError(null);
     try {
       await openProviderDesktop({
-        botId: bot.id, title: t("computer.viewerTitle", { name: bot.name }), held: control.held, request: requestControl,
+        botId: bot.id, title: t("computer.viewerTitle", { name: bot.name }), request: requestControl,
         join: (signal) => api(threadPath("computer/join"), { method: "POST", signal: AbortSignal.any([controller.signal, signal]) }),
         current: ownsConnection,
       });
@@ -1557,7 +1557,7 @@ export function ComputerPanel({
         {(cloudPreviewReady || phase === "vm" || currentTeamComputer) && control.held && (
           <div className="mt-3 rounded-xl border border-accent/25 bg-accent/10 p-4">
             <div className="text-[13px] leading-relaxed text-ink">
-              {t("computer.youHaveWheel")}
+              {t(phase === "vm" && !takeover.here ? "canvasComputers.inUseTitle" : "computer.youHaveWheel")}
               {cloudPreviewReady && !liveTarget && ` ${t(advanced ? "computer.useOpenDesktop" : "computer.simple.useFullScreen")}`}
             </div>
             <button

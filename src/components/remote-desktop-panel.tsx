@@ -14,7 +14,8 @@ import { releaseComputerPanelFocus, takeComputerPanelBrowserView, useComputerPan
 import { RoutineEditor } from "./RoutinesPage";
 import { BrowserPanel, type BrowserSignIn } from "./BrowserPanel";
 import { SignInBanner } from "./SignInRequestCard";
-import { productName } from "@/lib/brand";
+import { openProviderDesktop } from "./computer-takeover";
+import { panelErrorText } from "@/lib/computer-messages";
 
 function viewerAddress(raw: unknown): string {
   if (typeof raw !== "string" || !raw) throw new Error(t("remoteDesktop.noLink"));
@@ -175,36 +176,19 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   const open = async () => {
     setPending(true);
     setError(null);
-    let tookControl = false;
     try {
       if (!window.ogb?.desktopViewer) throw new Error(t("remoteDesktop.viewerUnavailable"));
-      await api(`/api/bots/${bot.id}/computer/control`, {
-        method: "POST",
-        body: JSON.stringify({ action: "take" }),
+      await openProviderDesktop({
+        botId: bot.id, title: t("computer.viewerTitle", { name: bot.name }), current: () => true,
+        request: (action, controlLeaseId) => api(`/api/bots/${bot.id}/computer/control`, { method: "POST", body: JSON.stringify({ action, controlLeaseId }) }),
+        join: async (signal) => ({ joinUrl: viewerAddress((await api(`/api/bots/${bot.id}/computer/join`, { method: "POST", body: "{}", signal })).joinUrl) }),
       });
-      tookControl = true;
-      const joined = await api(`/api/bots/${bot.id}/computer/join`, {
-        method: "POST",
-        body: "{}",
-      });
-      const opened = await window.ogb.desktopViewer.open(
-        viewerAddress(joined.joinUrl),
-        t("computer.viewerTitle", { name: bot.name }),
-        bot.id,
-      );
-      if (!opened) throw new Error(t("computer.err.openDesktop", { app: productName() }));
     } catch (cause) {
-      if (tookControl) {
-        await api(`/api/bots/${bot.id}/computer/control`, {
-          method: "POST",
-          body: JSON.stringify({ action: "release" }),
-        }).catch(() => {});
-      }
       await api(`/api/bots/${bot.id}/computer/viewer-close`, {
         method: "POST",
         body: "{}",
       }).catch(() => {});
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(panelErrorText(cause instanceof Error ? cause : String(cause)));
     } finally {
       setPending(false);
     }
