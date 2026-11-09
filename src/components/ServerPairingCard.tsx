@@ -51,6 +51,7 @@ export function shownDevices(devices: PairedDevice[], cloudHome: boolean): Paire
   return cloudHome ? devices.filter((device) => device.scopes.includes("admin")) : devices;
 }
 
+const CONFIG_TIMEOUT_MS = 10_000;
 
 export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, teamPhoneBlocked = null, simple = false, reveal = true, placeName = "" }: { placeName?: string; initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; teamPhoneBlocked?: string | null; simple?: boolean; /** False where another pairing flow owns the page's focus. */ reveal?: boolean }) {
   const [session, setSession] = useState<SessionState | null>(initialSession);
@@ -60,6 +61,8 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   const [configLoading, setConfigLoading] = useState(false);
   const configRequest = useRef(0);
   const configPending = useRef(false);
+  const errorSource = useRef<"config" | "sessions" | null>(null);
+  const focusOrigin = useRef<{ request: number; element: Element | null } | null>(null);
   const [computerName, setComputerName] = useState<string | null>(null);
   const [scope, setScope] = useState<"admin" | "client">("admin");
   const [offer, setOffer] = useState<PairingOffer | null>(null);
@@ -77,7 +80,12 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       const body = await api("/api/auth/sessions");
       setDevices(Array.isArray(body?.sessions) ? body.sessions : []);
       setCurrent(typeof body?.current === "string" ? body.current : null);
+      if (errorSource.current === "sessions") {
+        errorSource.current = null;
+        setError(null);
+      }
     } catch (e) {
+      errorSource.current = "sessions";
       setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
     }
   }
@@ -86,19 +94,27 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     if (configPending.current) return;
     configPending.current = true;
     const request = ++configRequest.current;
+    const controller = new AbortController();
+    const deadline = setTimeout(() => controller.abort(), CONFIG_TIMEOUT_MS);
     setConfigLoading(true);
     try {
-      const config = await api("/api/config");
+      const config = await api("/api/config", { signal: controller.signal });
       if (request !== configRequest.current) return;
       setPairingCodes(readMembership(config).pairingCodes);
       setCodesLoaded(true);
       setConfigFailed(false);
+      if (errorSource.current === "config") {
+        errorSource.current = null;
+        setError(null);
+      }
       if (canPairDevices(state)) setComputerName(typeof config?.computerName === "string" ? config.computerName : "");
     } catch (e) {
       if (request !== configRequest.current) return;
+      errorSource.current = "config";
       setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
       setConfigFailed(true);
     } finally {
+      clearTimeout(deadline);
       if (request === configRequest.current) {
         configPending.current = false;
         setConfigLoading(false);
@@ -108,7 +124,6 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
 
   function retryConfig() {
     if (!session || configPending.current) return;
-    setError(null);
     void loadConfig(session);
   }
 
@@ -121,12 +136,17 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   }, []);
 
   useEffect(() => {
-    if (!focusRequest) revealed.current = 0;
-    else if (revealed.current !== focusRequest && revealPhonePairing(root.current)) {
-      revealed.current = focusRequest;
-      if (canPairDevices(session) && takePairOnOpen()) void create();
+    if (!focusRequest) {
+      revealed.current = 0;
+      focusOrigin.current = null;
+    } else if (revealed.current !== focusRequest) {
+      if (focusOrigin.current?.request !== focusRequest) focusOrigin.current = { request: focusRequest, element: document.activeElement };
+      if (codesLoaded && document.activeElement === focusOrigin.current.element && revealPhonePairing(root.current)) {
+        revealed.current = focusRequest;
+        if (canPairDevices(session) && takePairOnOpen()) void create();
+      }
     }
-  }, [focusRequest, session]);
+  }, [focusRequest, session, codesLoaded]);
 
   useEffect(() => {
     if (!offer) return;

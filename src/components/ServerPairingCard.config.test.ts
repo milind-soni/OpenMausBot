@@ -29,9 +29,9 @@ const flush = async () => {
 beforeEach(() => {
   setLocale("en");
   fixture.api.mockReset();
-  fixture.api.mockImplementation(async (path: string) => {
+  fixture.api.mockImplementation(async (path: string, init?: { signal?: AbortSignal }) => {
     if (path === "/api/auth/sessions") return { sessions: [], current: null };
-    if (path === "/api/config") return new Promise((resolve, reject) => { resolveConfig = resolve; rejectConfig = reject; });
+    if (path === "/api/config") return new Promise((resolve, reject) => { resolveConfig = resolve; rejectConfig = reject; init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")), { once: true }); });
     if (path === "/api/auth/pairing") return { id: "offer-1", code: "ABCD-EFGH-IJKL", expiresAt: Date.now() + 300_000, url: "https://example.test/pair?code=ABCD-EFGH-IJKL", hint: null };
     return {};
   });
@@ -69,6 +69,93 @@ describe("ServerPairingCard waits for the pairing configuration", () => {
     expect(createButton().disabled).toBe(false);
   });
 
+  it("keeps a sessions error visible when a config retry succeeds", async () => {
+    let rejectSessions: (error: unknown) => void;
+    fixture.api.mockImplementationOnce(async () => new Promise((_, reject) => { rejectSessions = reject; }));
+    await renderCard();
+    await act(async () => {
+      rejectConfig(new Error("config down"));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => {
+      rejectSessions(new Error("sessions down"));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    expect(host.textContent).toContain("sessions down");
+    const retry = host.querySelector<HTMLButtonElement>("[data-server-pairing-retry]");
+    expect(retry).not.toBeNull();
+    await act(async () => { retry!.click(); });
+    await act(async () => {
+      resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    expect(createButton().disabled).toBe(false);
+    expect(host.querySelector("[data-server-pairing-retry]")).toBeNull();
+    expect(host.textContent).toContain("sessions down");
+  });
+
+  it("makes Retry available when the config request stalls", async () => {
+    vi.useFakeTimers();
+    try {
+      act(() => root.render(createElement(ServerPairingCard, { initialSession: { kind: "loopback" } })));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+      expect(fixture.api.mock.calls.some(([path]) => path === "/api/config")).toBe(true);
+      expect(createButton().disabled).toBe(true);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(createButton().disabled).toBe(true);
+      const retry = host.querySelector<HTMLButtonElement>("[data-server-pairing-retry]");
+      expect(retry).not.toBeNull();
+      await act(async () => { retry!.click(); });
+      await act(async () => {
+        resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(createButton().disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("moves focus to the create button once it is enabled", async () => {
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 0; });
+    try {
+      await renderCard({ focusRequest: 1 });
+      expect(createButton().disabled).toBe(true);
+      expect(document.activeElement).not.toBe(createButton());
+      await act(async () => {
+        resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flush();
+      expect(document.activeElement).toBe(createButton());
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not steal focus when the user moved focus while config loaded", async () => {
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 0; });
+    try {
+      await renderCard({ focusRequest: 1 });
+      const scope = host.querySelector<HTMLInputElement>('input[name="server-pairing-scope"]');
+      expect(scope).not.toBeNull();
+      await act(async () => { scope!.focus(); });
+      expect(document.activeElement).toBe(scope);
+      await act(async () => {
+        resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flush();
+      expect(document.activeElement).toBe(scope);
+      expect(document.activeElement).not.toBe(createButton());
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps creation disabled when the config request fails", async () => {
     await renderCard();
     expect(createButton().disabled).toBe(true);
@@ -99,6 +186,8 @@ describe("ServerPairingCard waits for the pairing configuration", () => {
     });
     await flush();
     expect(createButton().disabled).toBe(false);
+    expect(host.querySelector("[data-server-pairing-retry]")).toBeNull();
+    expect(host.textContent).not.toContain("config down");
   });
 
   it("issues one config request for rapid retries and disables Retry while it runs", async () => {
