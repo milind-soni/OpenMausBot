@@ -9916,5 +9916,8 @@
   "thread.current": "Current thread",
   "thread.currentNamed": "Current thread: {title}",
   "thread.stop": "Stop this thread",
-  "thread.otherWorking": "Working in other threads: {count}"
+  "thread.otherWorking": "Working in other threads: {count}",
+  "thread.listNamed": "{name}'s threads",
+  "thread.section.open": "Open",
+  "thread.section.completed": "Completed"
 }

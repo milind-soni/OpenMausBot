@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Check, ChevronDown, FolderInput, Pin, PinOff, Search, SquarePen, Trash2 } from "lucide-react";
+import { Check, ChevronDown, FolderInput, Pin, PinOff, Search, SquarePen, Trash2 } from "lucide-react";
 import { useStore, type Bot, type BotProject, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
@@ -12,9 +12,8 @@ import { formatTaskTokens, headlineTokens, usageDetail } from "@/lib/usage";
 import { nextRename } from "@/lib/rename";
 import { imeComposing } from "@/lib/send-key";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
-import { attentionJumpAction, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, type AttentionThread } from "./SidebarBotActivity";
 import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency, threadUpdatedLabel, useRelativeNow } from "./SidebarThreadRow";
-import { ThreadStatus } from "./ThreadStatus";
+import { threadStatus, ThreadStatus } from "./ThreadStatus";
 import { consumeThreadListRequest, useThreadListRequest } from "@/lib/thread-list-navigation";
 
 export const TASK_PICKER_DISMISS_MS = 500;
@@ -86,8 +85,6 @@ function ConversationTaskPicker({
   onDelete,
   onMove,
   onPin,
-  attention,
-  onAttentionJump,
   workingElsewhere = 0,
   showCurrent = false,
   compact = false,
@@ -107,8 +104,6 @@ function ConversationTaskPicker({
   onDelete: (threadId: string) => void;
   onMove?: (threadId: string, projectId: string | null) => void;
   onPin?: (threadId: string, pinned: boolean) => void;
-  attention?: AttentionThread[];
-  onAttentionJump?: (entry: AttentionThread) => void;
 }) {
   const [open, setOpen] = useState(false);
   const motion = useMenuMotion(open);
@@ -221,13 +216,13 @@ function ConversationTaskPicker({
           detail: usageDetail(u),
         })
       : t("task.switch");
-  const grouped = bot ? groupThreadTasks(tasks, bot.projects ?? [], query) : null;
-  const visible = grouped ? grouped.flatMap((group) => group.tasks) : filterTasks(tasks, query);
-  const attentionNeedle = query.trim().toLowerCase();
-  const attentionRows = (attention ?? []).filter((entry) =>
-    !attentionNeedle || entry.task.title.toLowerCase().includes(attentionNeedle) || attentionOwnerName(entry).toLowerCase().includes(attentionNeedle));
+  const sections = bot ? [false, true].map(completed => ({
+    completed,
+    groups: groupThreadTasks(tasks.filter(task => (threadStatus(task, task.queued) === "completed") === completed), bot.projects ?? [], query),
+  })) : [];
+  const visible = bot ? sections.flatMap(section => section.groups.flatMap(group => group.tasks)) : filterTasks(tasks, query);
   const looking = query.trim();
-  const results = [...attentionRows.map((entry) => ({ kind: "attention" as const, entry })), ...visible.map((task) => ({ kind: "task" as const, task }))];
+  const listLabel = bot ? t("thread.listNamed", { name: bot.name }) : t("task.list");
 
   return (
     <div className="relative min-w-0" ref={ref}>
@@ -261,9 +256,9 @@ function ConversationTaskPicker({
       </button>
 
       {motion.shown && (
-        <div role="dialog" aria-label={t("task.list")} className={cn("absolute top-full z-40 mt-1 w-[min(360px,calc(100vw-3rem))] overflow-hidden", showCurrent ? "left-0" : "right-0", MENU_SHEET, motion.className)} {...motion.exitProps}>
+        <div role="dialog" aria-label={listLabel} className={cn("absolute top-full z-40 mt-1 w-[min(360px,calc(100vw-3rem))] overflow-hidden", showCurrent ? "left-0" : "right-0", MENU_SHEET, motion.className)} {...motion.exitProps}>
           <div>
-            <div className="px-2 pb-2 text-[12px] text-ink-secondary">{t("task.list")} ({tasks.length})</div>
+            <div className="px-2 pb-2 text-[12px] text-ink-secondary">{listLabel} ({tasks.length})</div>
             <div className="flex items-center gap-2 rounded-md bg-ink/[0.05] px-2 py-1.5 focus-within:ring-2 focus-within:ring-focus/60">
               <Search size={14} className="shrink-0 text-ink-secondary" />
               <input
@@ -283,10 +278,9 @@ function ConversationTaskPicker({
                   }
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    const first = results[0];
+                    const first = visible[0];
                     if (!first) return;
-                    if (first.kind === "attention") onAttentionJump?.(first.entry);
-                    else if (first.task.threadId !== threadId) onSwitch(first.task.threadId);
+                    if (first.threadId !== threadId) onSwitch(first.threadId);
                     closeMenu();
                   }
                 }}
@@ -296,21 +290,20 @@ function ConversationTaskPicker({
               />
             </div>
           </div>
-          <div className="max-h-[320px] overflow-y-auto" role="group" aria-label={looking ? t("task.matching", { count: results.length }) : t("task.list")}>
-            {attentionRows.length > 0 && <div className="pb-1">
-              <div className="flex items-center gap-1.5 px-2 pb-1 pt-1.5 text-[12px] font-medium text-ink-secondary"><Activity size={14} />{t("attention.title")}</div>
-              <AttentionThreadRows inset entries={attentionRows} onJump={(entry) => { onAttentionJump?.(entry); closeMenu(); }} />
-            </div>}
-            {results.length === 0 ? (
+          <div className="max-h-[320px] overflow-y-auto" role="group" aria-label={looking ? t("task.matching", { count: visible.length }) : t("task.list")}>
+            {visible.length === 0 ? (
               <div className="px-2 py-6 text-center text-[13px] text-ink-secondary">
                 {t("task.noMatch", { query: looking })}
               </div>
             ) : visible.map((task, index) => {
               const active = task.threadId === threadId;
               const opener = threadByline(task);
-              const heading = grouped?.find((group) => group.tasks[0]?.threadId === task.threadId)?.project;
+              const section = sections.find(section => section.groups.some(group => group.tasks.some(candidate => candidate.threadId === task.threadId)));
+              const sectionStart = section?.groups[0]?.tasks[0]?.threadId === task.threadId;
+              const heading = section?.groups.find(group => group.tasks[0]?.threadId === task.threadId)?.project;
               return (
                 <Fragment key={task.threadId}>
+                {sectionStart && <div data-thread-section={section?.completed ? "completed" : "open"} className="px-2 pb-1 pt-2 text-[12px] font-semibold text-ink-secondary">{t(section?.completed ? "thread.section.completed" : "thread.section.open")}</div>}
                 {bot?.projects?.length && heading ? <div className={cn("flex items-center gap-1.5 px-2 pb-1 pt-2 text-[12px] font-medium text-ink-secondary", index > 0 && "border-t border-hairline/30")}>{heading.id && <FolderIcon emoji={heading.emoji} size={12} />}{heading.name}</div> : null}
                 <div
                   className={cn("group flex items-center gap-2 rounded-md px-2 py-1.5", active ? "bg-menu-active" : "hover:bg-menu-hover")}
@@ -466,14 +459,12 @@ export function TaskPicker({ bot, compact = false }: { bot: Bot; compact?: boole
       tasks={orderedThreadList((bot.tasks ?? []).filter((task) => !task.routineRunId || task.threadId === bot.threadId).map(task => ({ ...task, queued: Boolean(state.pendingQueued[task.threadId]?.length) })))}
       busy={false}
       bot={bot}
-      attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id, state.groups)}
       onNew={() => dispatch({ type: "newTask", botId: bot.id })}
       onSwitch={(threadId) => dispatch({ type: "switchTask", botId: bot.id, threadId })}
       onRename={(threadId, title) => dispatch({ type: "renameTask", botId: bot.id, threadId, title })}
       onDelete={(threadId) => dispatch({ type: "deleteTask", botId: bot.id, threadId })}
       onMove={(threadId, projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { projectId } })}
       onPin={(threadId, pinned) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { pinned } })}
-      onAttentionJump={(entry) => dispatch(attentionJumpAction(entry))}
     />
   );
 }

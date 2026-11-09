@@ -64,6 +64,10 @@ switching and Stop can be exercised without a real provider or account.
     own messages, selection and Working/Idle state. Use the bot row menu's
     **View threads** and the header's **All threads** to open the same picker.
     Check waiting, queued, unread and completed entries as well as idle work.
+    The picker names the current bot and includes only its conversations,
+    divided into **Open** and **Completed**. A closed or archived conversation
+    remains searchable and selectable in Completed; other bots' waiting/unread
+    conversations must not appear. The count must match this bot's rows.
 13. Stop iCloud using **Stop this thread** in the header. Gmail must remain
     Working in the dropdown and the header must show one working sibling.
     Switch back to Gmail and reload: its messages and status must survive.
