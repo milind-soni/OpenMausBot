@@ -117,10 +117,10 @@ describe("recordMcpAppCall", () => {
 
   it("arrives through the internal card route's createAgentCard", async () => {
     const { apps, bot } = setup();
-    const result = await createAgentCard({ store: { groupByThread: () => undefined, taskByThread: () => undefined, messagesFor: () => [], appendMessage: () => { throw new Error("unused"); }, patchMessage: () => null },
+    const result = await createAgentCard({ store: { groupByThread: () => undefined, taskByThread: () => undefined, bot: () => null, messagesFor: () => [], appendMessage: () => { throw new Error("unused"); }, patchMessage: () => null },
       bot: { id: bot.id, name: bot.name, color: "blue" }, threadId: THREAD, input: { ...REPORT, tool: "mcp_app" }, apps });
     expect(result).toEqual({ ok: true, messageId: "m1" });
-    expect(await createAgentCard({ store: { groupByThread: () => undefined, taskByThread: () => undefined, messagesFor: () => [], appendMessage: () => { throw new Error("unused"); }, patchMessage: () => null },
+    expect(await createAgentCard({ store: { groupByThread: () => undefined, taskByThread: () => undefined, bot: () => null, messagesFor: () => [], appendMessage: () => { throw new Error("unused"); }, patchMessage: () => null },
       bot: { id: bot.id, name: bot.name, color: "blue" }, threadId: THREAD, input: { tool: "mcp_app" } })).toEqual({ ok: false, status: 400, error: "MCP apps are not available on this computer." });
   }, 30_000);
 

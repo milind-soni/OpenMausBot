@@ -63,12 +63,6 @@ export function threadActionTarget(action: WidgetAction): { botId?: string; grou
 
 export const isThreadAction = (action: WidgetAction): boolean => threadActionTarget(action) !== undefined;
 
-/** `open_url` is handled on the device. The url was checked as http(s) when the widget was stored. */
-export function urlActionTarget(action: WidgetAction): string | undefined {
-  if (action.type !== "open_url" || !isRecord(action.payload)) return undefined;
-  return isWebUrl(action.payload.url, ["http:", "https:"]) ? action.payload.url : undefined;
-}
-
 /** `open_phone_pairing` opens the app's own phone pairing (the QR code and link) on the device. */
 export const PHONE_PAIRING_ACTION = "open_phone_pairing";
 const CLIENT_ACTION = (action: WidgetAction): boolean => action.type === "open_url" || action.type === "open_thread" || action.type === PHONE_PAIRING_ACTION;
@@ -142,7 +136,7 @@ function fail(path: string, message: string): never {
   throw new WidgetInputError(`${path}: ${message}`);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -334,7 +328,7 @@ const action: Reader = (raw, path) => {
 /** The longest url a widget action or image may carry. */
 export const WEB_URL_MAX = 2_000;
 
-function isWebUrl(value: unknown, protocols: string[]): value is string {
+export function isWebUrl(value: unknown, protocols: string[]): value is string {
   if (typeof value !== "string" || value.length > WEB_URL_MAX) return false;
   try {
     return protocols.includes(new URL(value).protocol);
@@ -738,12 +732,6 @@ function collectActions(root: WidgetRoot, strict: boolean): WidgetActionEntry[] 
 /** Every pressable thing in a canonical widget, in document order. */
 export function widgetActions(root: WidgetRoot): WidgetActionEntry[] {
   return collectActions(root, false);
-}
-
-/** The device-handled entry a ref names, if it names one. */
-export function clientWidgetAction(payload: WidgetPayload, ref: string): WidgetActionEntry | undefined {
-  const entry = widgetActions(payload.root).find((candidate) => candidate.ref === ref);
-  return entry?.client ? entry : undefined;
 }
 
 /** The action a recorded label stands for, for the model's reading of a press. */

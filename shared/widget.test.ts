@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { clientWidgetAction } from "./widget-client.ts";
 import { WIDGET_SAMPLES } from "./widget-samples.ts";
 import {
-  clientWidgetAction, dayList, parseWidgetInput, resolveWidgetAction, widgetAdvice, widgetActionByLabel, widgetActions, widgetFieldOptions, widgetFields, widgetInitialValues, widgetScope, widgetToText,
+  dayList, parseWidgetInput, resolveWidgetAction, widgetAdvice, widgetActionByLabel, widgetActions, widgetFieldOptions, widgetFields, widgetInitialValues, widgetScope, widgetToText,
   WIDGET_LIMITS, WIDGET_NODE_TYPES, type WidgetNode, type WidgetPayload, type WidgetRoot,
 } from "./widget.ts";
 

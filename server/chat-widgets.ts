@@ -1,7 +1,8 @@
 // A bot's widget tree is normalised, scrubbed of secrets and given its text fallback here, once; everything after reads the stored message.
 import { tagsDevs } from "../shared/devs-mention.ts";
+import { clientWidgetAction, urlActionTarget } from "../shared/widget-client.ts";
 import {
-  clientWidgetAction, parseWidgetInput, resolveWidgetAction, threadActionTarget, urlActionTarget, widgetActions, widgetFieldOptions, widgetFields, widgetToText, WIDGET_LIMITS,
+  parseWidgetInput, resolveWidgetAction, threadActionTarget, widgetActions, widgetFieldOptions, widgetFields, widgetToText, WIDGET_LIMITS,
   type WidgetAction, type WidgetActionEntry, type WidgetNode, type WidgetPayload, type WidgetRoot, type WidgetSettled,
 } from "../shared/widget.ts";
 import type { MausColor } from "../shared/wire.ts";
@@ -14,6 +15,8 @@ import type { Message } from "./store.ts";
 export interface AgentCardStore {
   groupByThread(threadId: string): unknown;
   taskByThread(botId: string, threadId: string): unknown;
+  /** Null when no such bot. */
+  bot(botId: string): { id: string; hidden?: boolean } | null | undefined;
   messagesFor(threadId: string): Message[];
   appendMessage(threadId: string, message: Omit<Message, "id" | "at">): Message;
   patchMessage(threadId: string, messageId: string, patch: Partial<Message>): Message | null;
@@ -217,9 +220,9 @@ function isRevision(value: unknown): value is number | undefined | null {
   return value === undefined || value === null || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
 }
 
-/** A press on a device-handled action: where the device goes, or a refusal when that conversation is gone. */
+/** A press on a device-handled action: where the device goes, or a refusal when that conversation is gone or hidden. */
 function devicePress(
-  store: Pick<AgentCardStore, "groupByThread" | "taskByThread">,
+  store: Pick<AgentCardStore, "bot" | "groupByThread" | "taskByThread">,
   messageId: string,
   entry: WidgetActionEntry,
 ): DevicePress | undefined {
@@ -230,7 +233,7 @@ function devicePress(
     if (target.groupId !== undefined) {
       const group = store.groupByThread(target.threadId) as { id: string } | undefined;
       if (group?.id === target.groupId) open = { groupId: target.groupId, threadId: target.threadId };
-    } else if (target.botId !== undefined && store.taskByThread(target.botId, target.threadId)) {
+    } else if (target.botId !== undefined && store.bot(target.botId)?.hidden !== true && store.taskByThread(target.botId, target.threadId)) {
       open = { botId: target.botId, threadId: target.threadId };
     }
     return open
@@ -247,7 +250,7 @@ function devicePress(
 /** A press on a device-handled action: where the device goes, or a refusal when that conversation is gone or the widget changed.
  * Returns undefined when the press is not a device-handled action, so the caller answers it as a press that sends. */
 export function prepareDevicePress(
-  store: Pick<AgentCardStore, "groupByThread" | "messagesFor" | "taskByThread">,
+  store: Pick<AgentCardStore, "bot" | "groupByThread" | "messagesFor" | "taskByThread">,
   threadId: string,
   widgetAction: unknown,
   sendId: string | undefined,
@@ -260,7 +263,7 @@ export function prepareDevicePress(
   const client = clientWidgetAction(payload, ref);
   if (!client) return undefined;
   const retry = sendId !== undefined && payload.settled?.sendId === sendId;
-  if (!retry && !payload.settled && (rev ?? 0) !== (payload.rev ?? 0)) return { ok: false, status: 409, error: STALE_PRESS };
+  if (!retry && (rev ?? 0) !== (payload.rev ?? 0)) return { ok: false, status: 409, error: STALE_PRESS };
   return devicePress(store, messageId, client);
 }
 
