@@ -96,7 +96,8 @@ export function createBurstHost(deps: BurstHostDeps): BurstManager & { model(bot
       if (child.threadId) deps.stop(burst.botId, child.threadId, "The person cancelled this burst.");
     },
     async startMerge(burst, text, done) {
-      if (!store.bot(burst.botId) || deps.threadBusy(burst.botId, burst.threadId)) return false;
+      if (!store.bot(burst.botId)) throw new Error("The bot is no longer here.");
+      if (deps.threadBusy(burst.botId, burst.threadId)) return false;
       await deps.startTurn(burst.botId, text(), { threadId: burst.threadId, cardContinuation: true, ...(burst.cardMessageId ? { requestMessageId: burst.cardMessageId } : {}), origin: deps.origin(burst), allowRoomTurnElsewhere: true,
         onSettled: (result) => { done(outcomeOf(result)); }, onDispatchError: (message) => { done({ ok: false, text: message }); } });
       return true;
