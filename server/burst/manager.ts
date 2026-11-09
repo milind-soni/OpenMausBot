@@ -11,6 +11,7 @@ import { burstRow, type BurstChild, type BurstRecord, type BurstStore } from "./
 const MINUTES_PER_TASK = 3;
 const TICK_MS = 3_000;
 const START_ATTEMPTS = 5;
+const PRUNE_AFTER_MS = 30 * 24 * 60 * 60_000;
 const REASON_MAX = 200;
 const RESULT_MAX = 20_000;
 const FAILURES_SHOWN = 10;
@@ -216,10 +217,15 @@ export function createBurstManager(deps: BurstManagerDeps) {
   }
 
   function finish(burst: BurstRecord, done: BurstChild[], failed: BurstChild[], outcome: BurstTurnOutcome): void {
-    const text = outcome.ok && outcome.text.trim() ? outcome.text.trim() : deps.postParts(burst, [...done, ...failed]);
+    // Settled whatever happens to the chat around it: a burst must never sit in "merging" and keep the timer alive.
     const current = store.update(burst.id, { phase: "done" }) ?? burst;
-    draw(current, failed);
-    deps.deliver(current, text);
+    try {
+      const text = outcome.ok && outcome.text.trim() ? outcome.text.trim() : deps.postParts(burst, [...done, ...failed]);
+      draw(current, failed);
+      deps.deliver(current, text);
+    } catch (error) {
+      log(`${burst.id} could not post its result: ${error instanceof Error ? error.message : String(error)}`);
+    }
     stopIfIdle();
   }
 
@@ -328,6 +334,7 @@ export function createBurstManager(deps: BurstManagerDeps) {
     },
     /** After a restart: a running turn is gone, so its part goes back in line, and a merge waiting on its turn tries again. */
     recover(): void {
+      store.prune(now() - PRUNE_AFTER_MS);
       for (const burst of store.active()) {
         if (burst.phase === "running") { store.requeueRunning(burst.id); enlist(burst.id); }
         ensureTimer();

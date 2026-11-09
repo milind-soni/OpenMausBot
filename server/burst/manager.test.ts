@@ -16,6 +16,7 @@ function harness(input: { limits?: BurstLimits; hasRoom?: () => boolean; store?:
   const posted: BurstChild[][] = [];
   const drawn: BurstCardData[] = [];
   let thread = 0, limits = input.limits ?? { parallel: 3, maxTasks: 50, smallPlan: false }, mergeBusy = false, room = input.hasRoom ?? (() => true);
+  let postParts = (parts: BurstChild[]) => { posted.push(parts); return "parts as they came"; };
   const deps: BurstManagerDeps = {
     store,
     limits: () => limits,
@@ -25,7 +26,7 @@ function harness(input: { limits?: BurstLimits; hasRoom?: () => boolean; store?:
     stopChild: (_burst, child) => { stopped.push(child.threadId!); },
     startMerge: async (burst, text, done) => { if (mergeBusy) return false; merges.push({ burst, text: text(), done }); return true; },
     draw: (burst, card) => { drawn.push(card); return burst.cardMessageId ?? "card-1"; },
-    postParts: (_burst, parts) => { posted.push(parts); return "parts as they came"; },
+    postParts: (_burst, parts) => postParts(parts),
     deliver: (_burst, text) => { delivered.push(text); },
     now: () => 1_700_000_000_000,
     log: () => {},
@@ -33,7 +34,7 @@ function harness(input: { limits?: BurstLimits; hasRoom?: () => boolean; store?:
   const manager = createBurstManager(deps);
   return {
     store, manager, started, stopped, merges, delivered, posted, drawn,
-    setLimits(next: BurstLimits) { limits = next; }, setRoom(next: () => boolean) { room = next; }, setMergeBusy(next: boolean) { mergeBusy = next; },
+    setLimits(next: BurstLimits) { limits = next; }, setRoom(next: () => boolean) { room = next; }, setMergeBusy(next: boolean) { mergeBusy = next; }, setPostParts(next: typeof postParts) { postParts = next; },
     propose(items: readonly string[]) {
       const proposal = manager.propose({ botId: "bot", threadId: "parent", task: "Research companies", instructions: "Find founders and funding.", items, model: { instanceId: "i", model: "fast-1" }, modelName: "fast-1" });
       if ("refused" in proposal) throw new Error(proposal.refused);
@@ -280,6 +281,17 @@ describe("the merged result", () => {
     merges[0]!.done({ ok: false, text: "" });
     expect(posted[0]!.map((child) => child.item)).toEqual(items(2));
     expect(delivered).toEqual(["parts as they came"]);
+  });
+
+  it("ends even when the chat it was written for is gone", () => {
+    const one = fresh({ limits: { parallel: 2, maxTasks: 50, smallPlan: false } });
+    const { manager, started, merges, store } = one;
+    const { burstId } = one.propose(items(2));
+    manager.run(burstId);
+    started.forEach((run) => { run.done(ok("result")); });
+    one.setPostParts(() => { throw new Error("thread is gone"); });
+    merges[0]!.done({ ok: false, text: "" });
+    expect(store.get(burstId)!.phase).toBe("done");
   });
 
   it("keeps the merge prompt within budget for a large burst", () => {
