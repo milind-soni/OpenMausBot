@@ -169,7 +169,7 @@ export interface CodeBlockProps {
   initialWrap?: boolean;
 }
 
-const PLATE_BUTTON = "inline-flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
+const PLATE_BUTTON = "inline-flex size-7 touch:size-11 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
 
 /** Simple mode's hover plate on a code block or diagram: Copy, and a ⋯ menu for the rest. It shows on hover, on
  * keyboard focus and always on touch screens, and stays while its menu is open. */
@@ -189,7 +189,8 @@ export function CodePlate({ copied, onCopy, copyLabel, items }: {
             : <Copy size={14} aria-hidden="true" />}
       </button>
       {copied !== "idle" && <span role="status" className="sr-only">{copied === "failed" ? t("common.copyFailed") : t("code.copiedTitle")}</span>}
-      <SidebarPopoverMenu items={items} ariaLabel={t("chat.more")} placement="below" triggerClassName="rounded-full" triggerTitle={t("chat.more")}
+      <SidebarPopoverMenu items={items} ariaLabel={t("chat.more")} placement="above" align="end" triggerTitle={t("chat.more")}
+        triggerClassName="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
         renderTrigger={() => <span className={PLATE_BUTTON}><MoreHorizontal size={14} aria-hidden="true" /></span>} />
     </div>
   );

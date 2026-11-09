@@ -225,11 +225,12 @@ describe("Settings in Simple mode", () => {
       "Keep prompt cache warm", "Repeat computer tasks without AI"]);
   });
 
-  it("holds the defaults for new bots on AI as one row: the effort they start with, and Edit for the rest", () => {
+  it("holds the defaults for new bots on AI as one row: the effort they start with, sharing them as a preset, and Edit for the rest", () => {
     const html = open("engines");
     const row = html.slice(html.indexOf(">Defaults for new bots<"));
     expect(row).toContain(">Effort for new bots<");
     expect(row).toMatch(/<select[^>]*aria-label="Effort for new bots"/);
+    expect(row).toMatch(/data-new-bot-share="true"[^>]*>Share as preset…<\/button>/);
     expect(row).toMatch(/data-new-bot-defaults="true"[^>]*>Edit<\/button>/);
     expect(html.indexOf("MARKER:engines;")).toBeLessThan(html.indexOf(">Defaults for new bots<"));
     expect(html.indexOf(">Defaults for new bots<")).toBeLessThan(html.indexOf(">API keys<"));

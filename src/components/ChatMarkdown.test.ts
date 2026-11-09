@@ -1421,6 +1421,9 @@ describe("Simple mode's code block", () => {
     expect(plate.split(" ")).toEqual(expect.arrayContaining(["opacity-0", "group-hover/code:opacity-100", "focus-within:opacity-100", "touch:opacity-100"]));
     expect(html).toContain('aria-label="Copy code"');
     expect(html).toContain('aria-label="More"');
+    // A finger-sized target on touch screens, and a ring on the menu's button for the keyboard.
+    expect(html.match(/<button[^>]*aria-label="Copy code"[^>]*>/)?.[0]).toContain("touch:size-11");
+    expect(html.match(/<button[^>]*aria-label="More"[^>]*>/)?.[0]).toContain("focus-visible:ring-2");
     expect(html).toMatch(/<pre class="[^"]*leading-5 px-3 py-2 text-ink-secondary/);
   });
 

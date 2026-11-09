@@ -17,6 +17,7 @@ import { ServiceIcon } from "../ServiceIcon";
 import { RoutineEditor } from "../RoutinesPage";
 import { useWorkingFolder } from "../bot-settings/AccessSection";
 import { useBotEditor } from "../bot-settings/BotEditorContext";
+import { OrgSkillsCard } from "../bot-settings/OrgSkillsCard";
 import { SkillReviewDialog, skillSwitchOn, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
 import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
 import { useChoosesVisibility, VisibilitySection } from "../bot-settings/VisibilitySection";
@@ -323,6 +324,7 @@ export function SkillsPage({ bot }: PageContext) {
         ))}
         {skills.error && !skills.reviewing && <NoteRow tone="warn">{skills.error}</NoteRow>}
       </Card>
+      <OrgSkillsCard bot={bot} onAdded={() => void skills.refresh()} />
       <Card>
         <TextRow
           data-panel-form="skill-import"
