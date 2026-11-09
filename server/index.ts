@@ -530,7 +530,7 @@ import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceR
 import { repairMovedWorkspacePaths } from "./moved-paths-repair.ts";
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
 import { allowedScopes, createEmailSignIn, parseAllowList } from "./account-signin.ts";
-import { pairingLinkBase, signInMailTarget } from "./pairing-base.ts"; import { lanUrl, listenHost } from "./lan-address.ts";
+import { pairingLinkBase, signInMailTarget } from "./pairing-base.ts"; import { lanUrl, listenHost } from "./lan-address.ts"; import { createTailnetShare } from "./tailnet-listener.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts";
 import {
   clearSessionCookie,
@@ -777,7 +777,7 @@ delete process.env.OMB_CLI_OWNER_STDIN;
 // Empty is a deny-all bootstrap state; only Electron's private utility-process port replaces it.
 let desktopMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
 let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
-const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
+const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null; const tailnetShare = createTailnetShare({ port: PORT, handle: (req, res) => handleRequest(req, res), attach: (listener, handle) => upgrades.attach(listener, handle), log: (line) => console.log(line) });
 const cfg = loadConfig();
 const hostedModels = hostedModelPolicy(DATA_DIR);
 const providerConfigs = () => hostedModels ? hostedModels.configs() : instanceConfigs(cfg);
@@ -801,7 +801,7 @@ function savedCustomDomain(): string | null {
   try { return normalizeCustomDomain(cfg.customDomain); }
   catch { return null; }
 }
-function publicUrl(): string | null { return savedCustomDomain() ?? FALLBACK_PUBLIC_URL ?? lanUrl(PORT); }
+function publicUrl(): string | null { return savedCustomDomain() ?? FALLBACK_PUBLIC_URL ?? tailnetShare.origin() ?? lanUrl(PORT); }
 function customDomainStatus() {
   return {
     customDomain: savedCustomDomain(), publicUrl: publicUrl(), fallbackUrl: FALLBACK_PUBLIC_URL,
@@ -1418,7 +1418,7 @@ type UtilityParentPort = {
   postMessage(message: object): void;
 };
 // Only Electron's utility process supplies parentPort, private to the desktop main process; plain Node leaves it absent.
-const utilityParentPort = (process as NodeJS.Process & { parentPort?: UtilityParentPort }).parentPort;
+const utilityParentPort = (process as NodeJS.Process & { parentPort?: UtilityParentPort }).parentPort; utilityParentPort?.on("message", (event) => void tailnetShare.receive(event.data, (answer) => utilityParentPort.postMessage(answer)));
 type DesktopPrivateMessage = BrowserCleanupWireRequest | import("./login-handoff.ts").LoginHandoffResult | {
   type: "openmausbot:browser-control";
   botId: string;
@@ -15496,7 +15496,7 @@ if (CLOUD_HOME) registerCloudPower(cloudPower = createCloudPower({ dataDir: DATA
   maintenance: () => workspaceMaintenance.active || providerFleetReloading || providerAuthSessions.active || browserEngineInstall !== null } }));
 
 server.listen(PORT, listenHost(server), async () => {
-  companyRuntimeReady();
+  companyRuntimeReady(); void tailnetShare.start(process.env);
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
   personWaits.boot(); browserSweep.start(); startCloudTeamPolicy({ cloudHome: CLOUD_HOME, dataDir: DATA_DIR, managed: managedPolicy, sessions }); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
   void afterFirstEngineRead().then(() => { if (builtInBrowserEnabled(cfg)) chromeLauncher.start(); });
@@ -15577,7 +15577,7 @@ const gracefulShutdown = createGracefulShutdown({
       cacheKeepWarm.dispose(); warmSummaries.dispose();
       skillReview.stop();
       webhookIngress?.server.close();
-      tunnelListener?.close(); stopCloudHomeConnectedApps();
+      tunnelListener?.close(); void tailnetShare.close(); stopCloudHomeConnectedApps();
     },
     async () => { await managedDesktop.close(); await registry.disposeAll(); },
     async () => { await dataEngine.closeAll().catch((error) => console.warn("data: close failed", error)); },

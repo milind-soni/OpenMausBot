@@ -34,7 +34,7 @@ import { runSentinelCli } from "./sentinel/cli.ts";
 import { runFleetCommand, type FleetInput } from "./fleet-cli.ts";
 import { startFleetAgent } from "./fleet-agent.ts";
 import { fleetLayout } from "./fleet.ts";
-import { clearLeftoverTailscaleServe, explainTailscaleFailure, tailscaleServe, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
+import { clearLeftoverTailscaleServe, explainTailscaleFailure, tailnetListenFallback, tailscaleServe, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { HEADLESS_VERB_NAMES, usage } from "./cli-usage.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
@@ -755,11 +755,11 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     }
     if (tailscale) {
       const served = await tailscaleServe(tailscale, options.port, { dataDir: options.dataDir, otherServer: answersAsMausBot });
-      if (!("failure" in served)) tailscaleShare = served;
-      if (startupCancelled) throw new SetupCancelled();
-      if ("failure" in served) throw new Error(`--tailscale: ${explainTailscaleFailure(served.failure)}`);
-      publicUrl = served.origin;
-      log(`tailscale: serving https://${tailscale.dnsName} → http://127.0.0.1:${options.port} (only your tailnet can reach it)`);
+      const listening = "failure" in served ? tailnetListenFallback(served.failure, tailscale, options.port) : null;
+      tailscaleShare = "failure" in served ? listening && { origin: listening.origin, stop: async () => {} } : served;
+      if (startupCancelled || !tailscaleShare) throw startupCancelled ? new SetupCancelled() : new Error(`--tailscale: ${explainTailscaleFailure("failure" in served ? served.failure : "unknown")}`);
+      Object.assign(env, listening?.env); publicUrl = tailscaleShare.origin;
+      log(listening?.line ?? `tailscale: serving https://${tailscale.dnsName} → http://127.0.0.1:${options.port} (only your tailnet can reach it)`);
     }
     if (startupCancelled) throw new SetupCancelled();
     if (publicUrl) env.OMB_PUBLIC_URL = publicUrl;
