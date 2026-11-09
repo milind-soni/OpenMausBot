@@ -129,6 +129,13 @@ describe("status: Working, Paused, Needs you", () => {
       .toMatchObject({ state: "needs-you", fix: "run", reason: "It didn't finish the last 2 times." });
   });
 
+  it("is still working, not asking the person, while its last run waits only on work it handed to teammates", () => {
+    const handedOn = run("waiting", at(0, 9), { attention: "Waiting for work it handed on to finish" });
+    expect(automationStatus(automation([handedOn]))).toEqual({ state: "working" });
+    expect(runLine(handedOn, NOW)).toMatchObject({ mark: "…", text: "Waiting for work it handed on to finish" });
+    expect(runLine(run("waiting", at(0, 9), { attention: "Approve the reply?" }), NOW)).toMatchObject({ mark: "!", text: "It's waiting for your answer." });
+  });
+
   it("ignores runs still waiting to start and runs a person stopped when judging the last run", () => {
     expect(automationStatus(automation([run("queued", at(0, 11)), run("cancelled", at(0, 10)), run("completed", at(0, 9))])).state).toBe("working");
     expect(automationStatus(automation([run("queued", at(0, 11)), run("cancelled", at(0, 10)), run("failed", at(0, 9)), run("failed", at(-1, 9))])).state).toBe("needs-you");

@@ -5147,6 +5147,7 @@
   "automations.toggle": "開啟或關閉「{name}」",
   "automations.run.done": "已完成",
   "automations.run.nothingNew": "沒有新內容",
+  "automations.run.waitingOnTeam": "正在等待交給其他助手的工作完成",
   "automations.run.stopped": "已停止",
   "automations.run.stoppedBecause": "已停止：{reason}",
   "automations.run.failed": "未完成",
