@@ -1819,6 +1819,17 @@ the desktop's version check, `sync`, `lending`, `phone`, `presence`, `session`,
 was a background one; `null` otherwise. The Admin counts it for a wake by
 Fly's proxy, to tell which app reaches a sleeping home.
 
+**`POST /api/cloud/machines/woke`** on the Admin (additive, sent by the home,
+signed with its machine secret over `{"v":1,"wokeAt":<ms>}`, as
+`omb-power-woke-v1\n<machine id>\n<timestamp>\n<nonce>\n<hash of the body>`;
+sent at each wake (a resume, or a boot from a sleep it was stopped for), never
+retried; an Admin without it answers `404` and nothing changes). It says the
+home is awake now, so the Admin can move `cloud.power` on at the desktops' next
+session read instead of at its next power read. The lent computers also get a
+grace window: for about 90 s after a wake, a bot's `shared_computer` call and
+`list_shared_computers` wait for a computer lent to this home instead of
+failing at once (`server/shared-computers.ts`).
+
 **`POST /api/cloud/power/sleep`**, signed over its JSON body
 `{"v":1,"idleMinutes":10}`. `409 {"ok":false,"busy":[…]}` while not idle;
 `200 {"ok":true,"nextDueAt":…}` once the home agreed. From then on, until a
