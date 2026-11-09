@@ -25,7 +25,7 @@ import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
 import type { WidgetPayload } from "./widget.ts";
 import type { AppFromRef, AppPayload, AppPointedRef } from "./app.ts";
-import type { GroupGoalRunCardData } from "./group-goal-run.ts";
+import type { GroupGoalRunCardData } from "./group-goal-run.ts"; import type { BurstCardData } from "./burst.ts";
 import type { RuntimeEvent } from "./runtime-events.ts";
 import type { NotificationLogEntry } from "./notification.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
@@ -457,7 +457,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "burst" | "digest" | "compaction" | "call" | "widget" | "app";
   text?: string;
   digest?: TurnDigest;
   compaction?: {
@@ -501,6 +501,8 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   signIn?: SignInRequestCardData;
   /** One idempotently updated status card for a routine run. */
   routineRun?: RoutineRunCardData;
+  /** The card a burst shows in its parent chat: first a preview, then its progress. */
+  burst?: BurstCardData;
   automation?: AutomationLine;
   /** Terminal receipt for a bounded multi-bot channel goal. */
   goalRun?: GroupGoalRunCardData;
