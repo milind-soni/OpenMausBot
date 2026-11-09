@@ -11,6 +11,10 @@ export interface FakeItem {
   password?: string;
   /** The one-time-password field's value (an otpauth:// address or secret). */
   totp?: string;
+  /** A Secure Note's text. */
+  notes?: string;
+  /** Any other fields, such as an API Credential's credential. */
+  fields?: Array<{ id: string; title: string; fieldType: string; value: string }>;
 }
 
 export function fakeOnePasswordSdk(options: { token: string; vaults: Record<string, { title: string; items: FakeItem[] }>; fail?: () => Error | null }) {
@@ -37,7 +41,8 @@ export function fakeOnePasswordSdk(options: { token: string; vaults: Record<stri
                 ...field("username", "username", "Text", item.username),
                 ...field("password", "password", "Concealed", item.password),
                 ...field("otp-1", "one-time password", "Totp", item.totp),
-              ] } };
+                ...(item.fields ?? []),
+              ], ...(item.notes === undefined ? {} : { notes: item.notes }) } };
             }) };
           },
         },
