@@ -974,19 +974,13 @@ the public address. `serve` checks the address answers as this server and
 says so on its Reach line. [`deploy/Caddyfile`](../deploy/Caddyfile)
 is the reference implementation.
 
-## Local VM isolation and concurrency
+## Choosing which bots use a Local VM
 
-In **App Settings → Computers**, choose **Shared**, **Per bot** or **Pool**, then
-check the bots that should use a Local VM. Unchecking a bot returns its
-computer destination to Auto. Shared uses one desktop, while Per bot keeps a
-separate desktop and durable folder for each bot.
-
-Pool creates a bounded set of desktop seats for the checked bots. Set the
-maximum concurrent seats from 1 to 8; extra turns wait until a seat is released.
-A seat has its own durable folder but can be reused by another bot later, so
-Pool does not isolate desktop files per bot. Choose Per bot when bots need
-separate desktops and folders. Idle seats stop after the configured idle time
-and retain their files and installed apps.
+In **App Settings → Computers**, check a bot under **Bots using Local VM** to
+set its destination to Local VM. Unchecking a selected bot returns it to Auto.
+Shared bots use one desktop; Per bot gives each selected bot a separate
+desktop. The existing maximum per-bot desktop setting (default 2, range 1–8)
+still applies in Per bot mode and is not changed by the checklist.
 
 ## Opening a desktop from another device
 

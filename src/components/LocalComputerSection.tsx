@@ -21,8 +21,8 @@ import { Select } from "./Select";
 import { cn } from "@/lib/cn";
 import { localizeComputerProblem } from "@/lib/computer-messages";
 import { computerInventoryRequest, jsonPostRequest, type ComputerApiRequest } from "@/lib/computer-requests";
-import { useStore, type Bot } from "@/state/store";
-import { VpsComputersCard } from "./VpsComputersCard"; import { KeysLink } from "./keys/KeysLink";
+import { useStore } from "@/state/store";
+import { VpsComputersCard } from "./VpsComputersCard"; import { KeysLink } from "./keys/KeysLink"; import { LocalVmBotSelection } from "./LocalVmBotSelection";
 
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
 
@@ -180,16 +180,6 @@ export function localVmInventoryStateKind(instance: LocalVmInventoryInstance): C
 
 export function localVmInventoryState(instance: LocalVmInventoryInstance): string {
   return computerStateLabel(localVmInventoryStateKind(instance));
-}
-
-export function localVmModeIsReady(status: Pick<Status, "mode" | "runtime" | "daemonUp" | "image" | "ready">): boolean {
-  if (status.mode === "shared") return status.ready;
-  if (status.runtime === "container") return false;
-  return status.daemonUp && status.image;
-}
-
-export function localVmSetupRunCommand(mode: Status["mode"] | undefined, command: string | null | undefined): string | null {
-  return mode === "shared" ? command ?? null : null;
 }
 
 export function cloudComputerInventoryStateKind(
@@ -684,12 +674,10 @@ export function parseLocalVmIdleTimeoutMinutes(value: string): number | null {
 export function LocalVmIdleTimeoutSetting({
   minutes,
   disabled,
-  detailKey = "vm.idle.detail",
   onSave,
 }: {
   minutes: number;
   disabled: boolean;
-  detailKey?: LocaleKey;
   onSave: (minutes: number) => Promise<void>;
 }) {
   const [value, setValue] = useState(String(minutes));
@@ -726,7 +714,7 @@ export function LocalVmIdleTimeoutSetting({
       <div className="flex items-center justify-between gap-3">
         <div>
           <label htmlFor="local-vm-idle-timeout" className="text-[13px] text-ink">{t("vm.idle.label")}</label>
-          <div id="local-vm-idle-timeout-help" className="text-[12px] text-ink-secondary">{t(detailKey)}</div>
+          <div id="local-vm-idle-timeout-help" className="text-[12px] text-ink-secondary">{t("vm.idle.detail")}</div>
         </div>
         <div
           className={cn(
@@ -768,145 +756,8 @@ export function LocalVmIdleTimeoutSetting({
   );
 }
 
-const LOCAL_VM_MODES = ["shared", "per-bot", "pool"] as const;
-type LocalVmMode = (typeof LOCAL_VM_MODES)[number];
-const LOCAL_VM_MODE_LABELS: Record<LocalVmMode, LocaleKey> = {
-  shared: "vm.isolation.shared",
-  "per-bot": "vm.isolation.perBot",
-  pool: "vm.isolation.pool",
-};
-const LOCAL_VM_CAPACITY_LABELS = {
-  "per-bot": {
-    title: "vm.isolation.max",
-    detail: "vm.isolation.maxDetail",
-    aria: "vm.isolation.maxAria",
-  },
-  pool: {
-    title: "vm.isolation.poolMax",
-    detail: "vm.isolation.poolMaxDetail",
-    aria: "vm.isolation.poolMaxAria",
-  },
-} as const satisfies Record<Exclude<LocalVmMode, "shared">, { title: LocaleKey; detail: LocaleKey; aria: LocaleKey }>;
-
-export function LocalVmIsolationSetting({
-  mode,
-  maxInstances,
-  disabled,
-  poolUnsupported = false,
-  onModeChange,
-  onMaxInstancesChange,
-}: {
-  mode: LocalVmMode | null;
-  maxInstances: number;
-  disabled: boolean;
-  poolUnsupported?: boolean;
-  onModeChange: (mode: LocalVmMode) => void;
-  onMaxInstancesChange: (maxInstances: number) => void;
-}) {
-  const capacityLabels = mode === "pool" ? LOCAL_VM_CAPACITY_LABELS.pool : LOCAL_VM_CAPACITY_LABELS["per-bot"];
-  return (
-    <>
-      <div role="group" aria-label={t("vm.isolation.title")} className="flex overflow-hidden rounded-lg border border-hairline/40">
-        {LOCAL_VM_MODES.map((nextMode, index) => (
-          <button
-            key={nextMode}
-            type="button"
-            aria-pressed={mode === nextMode}
-            data-local-vm-mode={nextMode}
-            disabled={disabled || (nextMode === "pool" && poolUnsupported)}
-            aria-describedby={nextMode === "pool" && poolUnsupported ? "local-vm-pool-unavailable" : undefined}
-            onClick={() => onModeChange(nextMode)}
-            className={cn(
-              "flex-1 px-3 py-2 text-[13px] disabled:opacity-50",
-              index > 0 && "border-l border-hairline/40",
-              mode === nextMode ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
-            )}
-          >
-            {t(LOCAL_VM_MODE_LABELS[nextMode])}
-          </button>
-        ))}
-      </div>
-      {poolUnsupported && <p id="local-vm-pool-unavailable" role="note" className="mt-2 text-[12px] leading-relaxed text-warning">{t("vm.isolation.poolUnsupported")}</p>}
-      {mode === "pool" && <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("vm.isolation.poolDetail")}</p>}
-      {mode && mode !== "shared" && (
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[13px] text-ink">{t(capacityLabels.title)}</div>
-            <div className="text-[12px] text-ink-secondary">
-              {t(capacityLabels.detail, mode === "pool" ? { count: maxInstances } : undefined)}
-            </div>
-          </div>
-          <Select
-            size="sm"
-            aria-label={t(capacityLabels.aria)}
-            value={maxInstances}
-            disabled={disabled || (mode === "pool" && poolUnsupported)}
-            onChange={(event) => onMaxInstancesChange(Number(event.target.value))}
-          >
-            {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => <option key={value} value={value}>{value}</option>)}
-          </Select>
-        </div>
-      )}
-    </>
-  );
-}
-
-export function localVmBotComputerPatch(checked: boolean): { computer: "vm" | null } {
-  return { computer: checked ? "vm" : null };
-}
-
-const localVmBotDestinationKeys: Record<NonNullable<Bot["computer"]> | "auto", LocaleKey> = {
-  auto: "vm.dest.auto",
-  cloud: "place.cloud",
-  vm: "vm.dest.vm",
-  local: "vm.dest.local",
-  browser: "vm.dest.browser",
-  off: "vm.dest.off",
-};
-
-export function LocalVmBotSelection({
-  bots,
-  onChange,
-}: {
-  bots: readonly Pick<Bot, "id" | "name" | "computer">[];
-  onChange: (botId: string, checked: boolean) => void;
-}) {
-  if (bots.length === 0) return null;
-  return (
-    <Card title={t("vm.bots.title")} subtitle={t("vm.bots.subtitle")}>
-      <div className="overflow-hidden rounded-xl border border-hairline/40">
-        {bots.map((bot, index) => (
-          <label
-            key={bot.id}
-            htmlFor={`local-vm-bot-${bot.id}`}
-            className={cn(
-              "flex cursor-pointer items-center justify-between gap-3 px-3 py-2.5",
-              index > 0 && "border-t border-hairline/35",
-            )}
-          >
-            <span className="min-w-0">
-              <span className="block truncate text-[13px] font-medium text-ink">{t("vm.bots.use", { name: bot.name })}</span>
-              <span className="mt-0.5 block text-[12px] text-ink-secondary">
-                {t("vm.bots.current", { destination: t(localVmBotDestinationKeys[bot.computer ?? "auto"]) })}
-              </span>
-            </span>
-            <input
-              id={`local-vm-bot-${bot.id}`}
-              type="checkbox"
-              className="size-4 shrink-0 accent-accent"
-              checked={bot.computer === "vm"}
-              onChange={(event) => onChange(bot.id, event.target.checked)}
-            />
-          </label>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
 export function LocalComputerSection() {
-  const { state, dispatch } = useStore();
-  const cloudHome = state.config?.cloudHome === true;
+  const cloudHome = useStore().state.config?.cloudHome === true;
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<Action | null>(null);
@@ -1314,10 +1165,7 @@ export function LocalComputerSection() {
   };
 
   const c = status?.commands;
-  const setupRunCommand = localVmSetupRunCommand(status?.mode, c?.run);
   const ready = status?.ready === true;
-  const pool = status?.mode === "pool";
-  const poolRuntimeUnsupported = pool && status?.runtime === "container";
   const existing = status?.container !== "missing";
   const needsRecreate = Boolean(
     status?.mode === "shared" && existing &&
@@ -1331,9 +1179,7 @@ export function LocalComputerSection() {
   const host = status?.platform === "darwin" ? t("vm.host.mac") : t("vm.host.computer");
   const perBot = status?.mode === "per-bot";
   const perBotRuntimeUnsupported = perBot && status?.runtime === "container";
-  const modeReady = status ? localVmModeIsReady(status) : false;
-  const poolReady = pool && modeReady;
-  const headerReady = modeReady;
+  const headerReady = perBot ? Boolean(status?.daemonUp && status?.image && !perBotRuntimeUnsupported) : ready;
 
   return (
     <>
@@ -1366,12 +1212,10 @@ export function LocalComputerSection() {
 
       {!cloudHome && <>
       <Card
-        title={t(pool ? "vm.main.poolTitle" : "vm.main.title")}
+        title={t("vm.main.title")}
         subtitle={perBot
           ? t("vm.main.perBotSubtitle", { host })
-          : pool
-            ? t("vm.main.poolSubtitle", { host })
-            : t("vm.main.sharedSubtitle", { host })}
+          : t("vm.main.sharedSubtitle", { host })}
       >
         <div className="flex flex-wrap items-center gap-2">
           <span
@@ -1388,12 +1232,8 @@ export function LocalComputerSection() {
                 ? t("vm.main.statusUnavailable")
                 : perBot && headerReady
                   ? t("vm.main.readyPerBot")
-                : pool && poolReady
-                  ? t("vm.main.readyPool")
                   : perBotRuntimeUnsupported
                     ? t("vm.main.perBotUnsupported")
-                  : poolRuntimeUnsupported
-                    ? t("vm.main.poolUnsupported")
                   : ready
                     ? t("vm.main.ready")
                     : (status?.problem ?? t("vm.main.notReady"))}
@@ -1409,7 +1249,7 @@ export function LocalComputerSection() {
           >
             <RefreshCw size={12} /> {t("vm.main.recheck")}
           </button>
-          {ready && !perBot && !pool && (
+          {ready && !perBot && (
             <a
               href={status?.viewer_url ?? c?.view}
               target="_blank"
@@ -1423,30 +1263,52 @@ export function LocalComputerSection() {
         {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
       </Card>
 
-      <Card title={t("vm.isolation.title")} subtitle={t("vm.isolation.subtitle")}>
-        <LocalVmIsolationSetting
-          mode={status?.mode ?? null}
-          maxInstances={status?.max_instances ?? 2}
-          disabled={!status || policyPending}
-          poolUnsupported={status?.runtime === "container"}
-          onModeChange={(mode) => void savePolicy(mode, status?.max_instances ?? 2)}
-          onMaxInstancesChange={(maxInstances) => void savePolicy(status?.mode ?? "shared", maxInstances)}
-        />
+      <Card
+        title={t("vm.isolation.title")}
+        subtitle={t("vm.isolation.subtitle")}
+      >
+        <div role="group" aria-label={t("vm.isolation.title")} className="flex overflow-hidden rounded-lg border border-hairline/40">
+          {(["shared", "per-bot"] as const).map((mode, index) => (
+            <button
+              key={mode}
+              type="button" aria-pressed={status?.mode === mode}
+              disabled={!status || policyPending}
+              onClick={() => void savePolicy(mode, status?.max_instances ?? 2)}
+              className={cn(
+                "flex-1 px-3 py-2 text-[13px] disabled:opacity-50",
+                index > 0 && "border-l border-hairline/40",
+                status?.mode === mode ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
+              )}
+            >
+              {mode === "shared" ? t("vm.isolation.shared") : t("vm.isolation.perBot")}
+            </button>
+          ))}
+        </div>
+        {perBot && (
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[13px] text-ink">{t("vm.isolation.max")}</div>
+              <div className="text-[12px] text-ink-secondary">{t("vm.isolation.maxDetail")}</div>
+            </div>
+            <Select size="sm"
+              aria-label={t("vm.isolation.maxAria")}
+              value={status?.max_instances ?? 2}
+              disabled={!status || policyPending}
+              onChange={(event) => void savePolicy(status?.mode ?? "shared", Number(event.target.value))}
+            >
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => <option key={value} value={value}>{value}</option>)}
+            </Select>
+          </div>
+        )}
         <LocalVmIdleTimeoutSetting
           minutes={status ? Math.round(status.idle_timeout_ms / 60_000) : DEFAULT_LOCAL_VM_IDLE_TIMEOUT_MINUTES}
           disabled={!status || policyPending}
-          detailKey={pool ? "vm.idle.poolDetail" : "vm.idle.detail"}
           onSave={saveIdleTimeout}
         />
         {policyPending && <div className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-secondary"><Loader2 size={12} className="animate-spin" /> {t("vm.saving")}</div>}
       </Card>
-
-      <LocalVmBotSelection
-        bots={state.bots}
-        onChange={(botId, checked) => dispatch({ type: "updateBot", botId, patch: localVmBotComputerPatch(checked) })}
-      />
-
-      <Card title={t("vm.setup.title")} subtitle={t(pool ? "vm.setup.poolSubtitle" : "vm.setup.subtitle")}>
+      <LocalVmBotSelection />
+      <Card title={t("vm.setup.title")} subtitle={t("vm.setup.subtitle")}>
         <div className="flex flex-col gap-4">
           <Step n={1} title={t("vm.setup.step1")} done={Boolean(status?.runtime)}>
             <div className="text-[13px] leading-relaxed text-ink-secondary">
@@ -1489,25 +1351,17 @@ export function LocalComputerSection() {
             title={
               perBot
                 ? t("vm.setup.step4PerBot")
-                : pool
-                  ? t("vm.setup.step4Pool")
                 : needsRecreate
                   ? t("vm.setup.step4Recreate")
                   : t("vm.setup.step4")
             }
-            done={pool ? poolReady : !perBot && ready}
+            done={!perBot && ready}
           >
             {perBot ? (
               <div className="text-[13px] leading-relaxed text-ink-secondary">
                 {perBotRuntimeUnsupported
                   ? t("vm.setup.applePort")
                   : t("vm.setup.perBotHint")}
-              </div>
-            ) : pool ? (
-              <div className="text-[13px] leading-relaxed text-ink-secondary">
-                {poolRuntimeUnsupported
-                  ? t("vm.setup.poolAppleContainer")
-                  : t("vm.setup.poolHint", { count: status?.max_instances ?? 2 })}
               </div>
             ) : needsRecreate ? (
               <>
@@ -1536,7 +1390,7 @@ export function LocalComputerSection() {
                 <p className="text-[13px] leading-relaxed text-ink-secondary">{t("vm.setup.idleHint")}</p>
               </>
             ) : null}
-            {setupRunCommand && <details className="text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("vm.setup.showCommand")}</summary><div className="mt-2"><CommandLine command={setupRunCommand} /></div></details>}
+            {status?.mode === "shared" && c?.run && <details className="text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("vm.setup.showCommand")}</summary><div className="mt-2"><CommandLine command={c.run} /></div></details>}
           </Step>
         </div>
       </Card>
@@ -1563,7 +1417,7 @@ export function LocalComputerSection() {
         </Card>
       )}
 
-      {pool ? null : <Card
+      <Card
         title={t("vm.safety.title")}
         subtitle={
           perBot
@@ -1591,7 +1445,7 @@ export function LocalComputerSection() {
           })}
           {status?.base_image_ref ? <> · {t("vm.safety.baseImage", { image: status.base_image_ref })}</> : null}
         </div>
-      </Card>}
+      </Card>
       </>}
     </>
   );
