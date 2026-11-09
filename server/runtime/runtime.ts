@@ -647,7 +647,7 @@ export class Runtime {
     for (const child of this.store.children(n.id)) {
       if (isTerminal(child)) continue;
       const fresh = this.store.get(child.id);
-      if (fresh && !isTerminal(fresh)) this.cancelTree(fresh, reason, status, outcome);
+      if (fresh && !isTerminal(fresh)) this.cancelTree(fresh, STOPPED_WITH_REQUEST, status, outcome);
     }
     const fresh = this.store.get(n.id);
     if (fresh && !isTerminal(fresh)) this.settle(fresh, status, outcome, reason);

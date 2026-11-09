@@ -397,6 +397,22 @@ describe("Runtime: one tree, one lane", () => {
     store.close();
   });
 
+  it("records an expired question's reason on the node that asked it, never on the work under it", async () => {
+    const w = world(() => "hold", { inputWaitMs: 5_000 });
+    const root = w.runtime.begin(beginReq());
+    const lead = ok(w.runtime.enqueue(toBot("lead", root.id)));
+    w.runtime.tick();
+    const helper = ok(w.runtime.enqueue({ ...toBot("helper", lead.id), requester: { kind: "bot_turn", botId: "lead", threadId: "lead-work" } }));
+    w.runtime.tick();
+    await w.runner.release(lead.id, { kind: "needs_input", question: "Which bucket?" });
+    expect(w.store.get(lead.id)?.status).toBe("needs_input");
+    w.clock.advance(5_001);
+    w.runtime.tick();
+    expect(w.store.get(lead.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "the person did not answer" });
+    expect(w.store.get(helper.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "Stopped with the request it was for" });
+    expect(w.runner.reports.filter(r => r.a.outcomeDetail === "the person did not answer").map(r => r.a.id)).toEqual([lead.id]);
+  });
+
   it("cancels down the tree, aborts running turns and reports each stop", async () => {
     const w = world(() => "hold");
     const root = w.runtime.begin(beginReq());
@@ -406,8 +422,8 @@ describe("Runtime: one tree, one lane", () => {
     w.runtime.tick();
     const signals = w.runner.runs.map(r => r.signal);
     w.runtime.cancel(lead.id);
-    expect(w.store.get(helper.id)).toMatchObject({ status: "cancelled", outcome: "stopped", outcomeDetail: "Stopped by user" });
-    expect(w.store.get(lead.id)).toMatchObject({ status: "cancelled", outcome: "stopped" });
+    expect(w.store.get(helper.id)).toMatchObject({ status: "cancelled", outcome: "stopped", outcomeDetail: "Stopped with the request it was for" });
+    expect(w.store.get(lead.id)).toMatchObject({ status: "cancelled", outcome: "stopped", outcomeDetail: "Stopped by user" });
     expect(signals.every(s => s.aborted)).toBe(true);
     expect(w.runner.reports.map(r => r.a.id)).toEqual([helper.id, lead.id]);
     expect(w.runtime.liveEdges()).toEqual([]);
