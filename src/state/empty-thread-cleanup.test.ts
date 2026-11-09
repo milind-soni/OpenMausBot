@@ -104,6 +104,16 @@ describe("a new thread the person leaves without writing anything", () => {
     expect(state.error).toBeFalsy();
   });
 
+  it("is kept when it was created with a working folder", async () => {
+    created.push(json({ bot: bot("c", []) }, 201));
+    flushSync(() => dispatch({ type: "newTask", botId: "bot", cwd: "/tmp/work" }));
+    await vi.waitFor(() => expect(shown().threadId).toBe("c"));
+    flushSync(() => dispatch({ type: "switchTask", botId: "bot", threadId: "a" }));
+    await vi.waitFor(() => expect(shown().threadId).toBe("a"));
+    await tick();
+    expect(deletes).toEqual([]);
+  });
+
   it("is kept while it is still the selected thread", async () => {
     await open();
     flushSync(() => dispatch({ type: "showChat" }));

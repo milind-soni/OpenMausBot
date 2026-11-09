@@ -2831,7 +2831,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ? `/api/bots/${action.botId}/tasks`
             : `/api/bots/${action.botId}/tasks/${action.threadId}${action.whole ? "" : `?messages=${SWITCH_MESSAGE_COUNT}`}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId, cwd: action.cwd } : {}) }))
             .then((r) => {
-              if (action.type === "newTask") { settle(null); action.onCreated?.(); if (r?.bot) emptyThreads.created(r.bot); }
+              if (action.type === "newTask") { settle(null); action.onCreated?.(); if (r?.bot && action.cwd === undefined) emptyThreads.created(r.bot); }
               if (navigation.get(action.botId) !== revision) return;
               if (!r?.bot) { if (action.type === "switchTask") rawDispatch({ type: "switchTaskFailed", botId: action.botId, threadId: action.threadId }); return; }
               const selectsAfterCreation = action.type === "newTask" && action.cwd !== undefined;
