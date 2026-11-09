@@ -40,7 +40,7 @@ export interface KeyTarget {
 
 export type KeyId =
   | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
-  | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
+  | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "box" | "mola" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
   | "jev" | "openrouterHelper" | "workersAi" | "imageOpenai" | "imageGemini" | "imageCustom";
 
 export type KeyMark = { driverKind: string; preset?: ProviderIconPreset } | { icon: LucideIcon };
@@ -148,6 +148,11 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     target: { patch: (value) => ({ box: { token: value } }), slot: "boxToken", verifiedOnSave: true,
       saved: (config) => ({ ...flag(config.box?.included ? undefined : config.box), ...(config.box?.included ? { included: true } : {}) }),
       placeholder: "boat_…", href: "https://docs.boat.dev/api-keys", analytics: "boat", shape: /^(boat|box)_/, warningKey: "keys.boat.warning" } },
+  { id: "mola", section: "computers", labelKey: "keys.mola.label", purposeKey: "keys.purpose.mola", name: "Mola", env: ["MOLA_API_KEY"],
+    words: ["mola", "cloud desktop", "cloud computer", "computer", "sandbox", "ubuntu", "omarchy"], mark: { icon: Monitor }, kind: "key",
+    target: { patch: (value) => ({ mola: { token: value } }), slot: "molaApiKey", verifiedOnSave: true,
+      saved: (config) => ({ ...flag(config.mola?.included ? undefined : config.mola), ...(config.mola?.included ? { included: true } : {}) }),
+      placeholder: "…", placeholderKey: "keys.mola.placeholder", href: "https://mola.sh", analytics: "mola" } },
   { id: "vps", section: "computers", labelKey: "keys.vps.label", purposeKey: "keys.purpose.vps", name: "VPS", env: [],
     words: ["vps", "ssh", "server", "self-hosted", "computer", "docker"], mark: { icon: Server }, kind: "panel",
     status: (config) => ({ configured: config.vps?.configured === true }) },
