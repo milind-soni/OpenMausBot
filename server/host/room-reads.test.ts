@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
-import { createRoomReads, roomUnreadFor } from "./room-reads.ts";
+import { personKey } from "../person-key.ts";
+import { createPersonRooms, createRoomReads, roomUnreadFor } from "./room-reads.ts";
 
 const path = [{ id: "m1", role: "user" }, { id: "m2", role: "bot" }, { id: "m3", role: "user" }];
 
@@ -48,4 +49,32 @@ it("forgets a person's lines in every room, and one person's line in one room", 
   reads.forgetPerson("p_ada");
   const reloaded = createRoomReads(dir);
   expect([reloaded.readUpTo("a", "p_ada"), reloaded.readUpTo("b", "p_ada")]).toEqual([undefined, undefined]);
+});
+
+it("reads a bot's shared chat per person, leaves a private chat's one mark alone, and marks unread before the newest reply", () => {
+  const dir = mkdtempSync(join(tmpdir(), "room-reads-"));
+  const thread = [{ id: "m1", role: "user" }, { id: "m2", role: "bot" }, { id: "m3", role: "user" }, { id: "m4", role: "bot" }];
+  const frames: Array<{ person: string }> = [];
+  const rooms = createPersonRooms({
+    reads: createRoomReads(dir),
+    store: () => ({ activePath: () => thread, messagesFor: () => thread, botByThread: () => ({ id: "scout" }) }),
+    shared: (threadId) => threadId === "main",
+    wireBot: (id) => ({ id }),
+    newestMessageId: () => "m4",
+    publicGroupState: (room) => room as never,
+    broadcast: (_payload, options) => frames.push(options),
+  });
+  const ada = { kind: "session", session: { id: "s1", email: "ada@acme.test" } } as never;
+  const adaKey = personKey({ id: "", email: "ada@acme.test" }), cleoKey = personKey({ id: "", email: "cleo@acme.test" });
+  const main = { threadId: "main", unread: true, lastReadMessageId: "m2" };
+  expect(rooms.taskForPerson(main, cleoKey), "never read: the chat's own mark, without anyone's read line").toEqual({ threadId: "main", unread: true });
+  expect(rooms.personMarkThread!(ada, "main", false)).toBe(true);
+  expect(rooms.taskForPerson(main, adaKey)).toEqual({ threadId: "main", unread: false, lastReadMessageId: "m4" });
+  expect(rooms.taskForPerson(main, cleoKey).unread).toBe(true);
+  expect(frames, "told to Ada's streams alone").toEqual([{ person: adaKey }]);
+  expect(rooms.personMarkThread!(ada, "main", true)).toBe(true);
+  expect(rooms.taskForPerson(main, adaKey)).toEqual({ threadId: "main", unread: true, lastReadMessageId: "m3" });
+  const own = { threadId: "mine", unread: true, lastReadMessageId: "m2" };
+  expect(rooms.personMarkThread!(ada, "mine", false), "a private chat keeps its one mark").toBe(false);
+  expect(rooms.taskForPerson(own, adaKey)).toBe(own);
 });
