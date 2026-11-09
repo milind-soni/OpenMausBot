@@ -41,7 +41,7 @@ export type MessagePage = { messages: Array<Message | Record<string, unknown>>; 
 export interface ChannelRouteDeps {
   store: Pick<Store,
     | "group" | "groupTaskByThread" | "bot" | "switchGroupTask" | "patchGroupTask" | "patchGroup" | "messagesFor" | "groupTasks" | "deleteGroupTasks" | "deleteGroup"
-    | "createGroupTask" | "appendMessage">;
+    | "createGroupTask" | "forkGroupTask" | "appendMessage">;
   cfg: Pick<AppConfig, "budgets">;
   /** What people's lines are called in this conversation (replies.ts PersonName). */
   userName(threadId: string): PersonName;
@@ -136,6 +136,24 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
     const own = (group: WireGroup) => deps.groupFor?.(auth, group) ?? group;
     let m: RegExpMatchArray | null = null;
     const routines = deps.routines();
+
+    m = path.match(/^\/api\/groups\/([\w-]+)\/tasks\/([\w-]+)\/forks$/);
+    if (m && method === "POST") {
+      const group = store.group(m[1]);
+      if (!group || group.dm || !store.groupTaskByThread(group.id, m[2])) return json(res, 404, { error: "no such conversation" });
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+        Object.keys(body).some((key) => key !== "messageId") || typeof body.messageId !== "string") {
+        return json(res, 400, { error: "messageId must be a string" });
+      }
+      const notYours = cloudThreadRefusal(auth, m[2]);
+      if (notYours) return json(res, 403, { error: notYours });
+      if (groupThreadIsWorking(group.id, m[2])) return json(res, 409, { error: "this conversation is running — wait for it to finish" });
+      const task = store.forkGroupTask(group.id, m[2], body.messageId);
+      if (!task) return json(res, 404, { error: "no such completed message in this conversation" });
+      if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
+      return json(res, 201, { group: own(groupWithThread(store.group(group.id)!)), task });
+    }
 
     m = path.match(/^\/api\/groups\/([\w-]+)\/tasks$/);
     if (m && method === "POST") {
@@ -278,15 +296,20 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
     if (m && method === "POST") {
       const room = store.group(m[1]);
       if (!room) return json(res, 404, { error: "no such room" });
-      sawThread(room.threadId);
-      deps.threadRead?.(auth, room.threadId);
+      const body = await readBody(req);
+      const threadId = body?.threadId ?? room.threadId;
+      if (typeof threadId !== "string" || !store.groupTaskByThread(room.id, threadId)) {
+        return json(res, 404, { error: "no such channel task" });
+      }
+      sawThread(threadId);
+      deps.threadRead?.(auth, threadId);
       const personal = deps.personMarkRoom?.(auth, room, false);
       if (personal) {
-        readThreadNotifications(room.threadId, broadcast, notificationListed(auth));
+        readThreadNotifications(threadId, broadcast, notificationListed(auth));
         return json(res, 200, { group: personal });
       }
-      const group = store.patchGroup(room.id, { unread: false, ...readCursor(room.threadId) })!;
-      readThreadNotifications(room.threadId, broadcast, notificationListed(auth));
+      const group = store.patchGroup(room.id, { unread: false, ...(threadId === room.threadId ? readCursor(threadId) : {}) })!;
+      readThreadNotifications(threadId, broadcast, notificationListed(auth));
       broadcast({ kind: "group", group: publicGroupState(group) });
       return json(res, 200, { group: own(publicGroupState(group)) });
     }

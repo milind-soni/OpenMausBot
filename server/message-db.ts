@@ -447,7 +447,7 @@ export function insertMessage(threadId: string, message: Message): void {
 }
 
 /** `relinked`: adds `messages` to a conversation that has rows; each row it names changes only its parentId, and an id it already has fails the whole import. */
-export function importThread(threadId: string, messages: Message[], activeLeafId: string | null, relinked?: ReadonlyArray<{ id: string; parentId: string | null }>): void {
+export function importThread(threadId: string, messages: Message[], activeLeafId: string | null, relinked?: ReadonlyArray<{ id: string; parentId: string | null }>, beforeCommit?: () => void): void {
   transaction((database) => {
     if (!relinked && (database.prepare("SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1").get(threadId) ||
         database.prepare("SELECT 1 FROM thread_state WHERE thread_id = ?").get(threadId))) {
@@ -461,6 +461,7 @@ export function importThread(threadId: string, messages: Message[], activeLeafId
     const link = database.prepare("UPDATE messages SET json = json_set(json, '$.parentId', ?) WHERE thread_id = ? AND id = ?");
     for (const row of relinked ?? []) link.run(row.parentId, threadId, row.id);
     setActiveLeaf(threadId, activeLeafId);
+    beforeCommit?.();
   });
 }
 

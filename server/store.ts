@@ -1015,6 +1015,28 @@ export class Store {
     return task;
   }
 
+  forkGroupTask(groupId: string, sourceThreadId: string, messageId: string): GroupTaskRecord | null {
+    const group = this.group(groupId);
+    const source = this.groupTaskByThread(groupId, sourceThreadId);
+    if (!group || !source) return null;
+    const history = this.forkHistory(sourceThreadId, messageId);
+    if (!history) return null;
+    const createdAt = Date.now();
+    const task: GroupTaskRecord = {
+      threadId: newId(),
+      title: titleFromMessage(history.at(-1)?.text ?? ""),
+      createdAt,
+      updatedAt: createdAt,
+      origin: { threadId: sourceThreadId, messageId },
+      ...(source.pinnedCwd !== undefined ? { pinnedCwd: source.pinnedCwd } : {}),
+    };
+    mdb.importThread(task.threadId, history, messageId, undefined, () => this.commitGroupChange(group, "the forked thread", () => {
+      group.tasks = [task, ...(group.tasks ?? [])];
+    }));
+    this.emit({ type: "group", groupId });
+    return task;
+  }
+
   switchGroupTask(groupId: string, threadId: string): GroupRecord | null {
     const group = this.group(groupId);
     const task = group?.tasks?.find((candidate) => candidate.threadId === threadId);
@@ -1152,6 +1174,13 @@ export class Store {
       cur = cur.parentId ? byId.get(cur.parentId) : undefined;
     }
     return path.reverse();
+  }
+
+  private forkHistory(threadId: string, messageId: string): Message[] | null {
+    const path = this.activePath(threadId);
+    const anchor = path.findIndex((message) => message.id === messageId);
+    if (anchor < 0 || path[anchor]?.kind !== "text" || !["user", "bot"].includes(path[anchor]!.role)) return null;
+    return structuredClone(path.slice(0, anchor + 1));
   }
 
   markTerminalAssistantMessage(threadId: string, turnId: string): Message | null {
@@ -2177,6 +2206,23 @@ export class Store {
       bot.tasks = [task, ...(bot.tasks ?? [])];
       if (activate) this.mirrorActiveTask(bot, task);
     });
+    this.emit({ type: "bot", botId });
+    return task;
+  }
+
+  forkTask(botId: string, sourceThreadId: string, messageId: string): TaskRecord | null {
+    const bot = this.bot(botId);
+    const source = this.taskByThread(botId, sourceThreadId);
+    if (!bot || !source) return null;
+    const history = this.forkHistory(sourceThreadId, messageId);
+    if (!history) return null;
+    const task = this.buildTask(bot, titleFromMessage(history.at(-1)?.text ?? ""), source.projectId, undefined,
+      undefined, source.modelSelection, source.cwd ?? undefined);
+    task.origin = { threadId: sourceThreadId, messageId };
+    task.lastReadMessageId = messageId;
+    mdb.importThread(task.threadId, history, messageId, undefined, () => this.commitBotChange(bot, "the forked thread", () => {
+      bot.tasks = [task, ...(bot.tasks ?? [])];
+    }));
     this.emit({ type: "bot", botId });
     return task;
   }
