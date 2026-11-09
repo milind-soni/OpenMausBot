@@ -381,6 +381,21 @@ describe("a person's hold on the shared Local VM", () => {
     expect(framesFor(witness, since).at(-1)?.held).toBe(false);
   }, 30_000);
 
+  it.each(["stopped", "in a deleted conversation"] as const)("a sign-in card %s no longer keeps the shared desktop from going back on Done on another bot's card", async (how) => {
+    const [a, b] = [await newBot("Ada", { computer: "vm" }), await newBot("Bea", { computer: "vm" })];
+    const side = how === "stopped" ? a.threadId : await newTask(a.id);
+    await askSignIn((await startTurn(a.id, side)).comms, "a.example");
+    await finishTurns([a.id, side]);
+    if (how === "stopped") await ok("POST", `/api/bots/${a.id}/interrupt`, { threadId: side });
+    else await ok("DELETE", `/api/bots/${a.id}/tasks/${side}`);
+    const asked = await startTurn(b.id, b.threadId);
+    const card = await askSignIn(asked.comms, "b.example");
+    await finishTurns([b.id, b.threadId]);
+    await control(api, b.id, { action: "take" }, b.threadId);
+    await ok("POST", `/api/bots/${b.id}/sign-in-cards/${card}/done`, { threadId: b.threadId });
+    expect(await held(witness)).toBe(false);
+  }, 60_000);
+
   it("only a person's Done on the shared desktop's last open sign-in card hands it back", async () => {
     const [a, b] = [await newBot("Ada", { computer: "vm" }), await newBot("Bea", { computer: "vm" })];
     const asked = await startTurn(b.id, b.threadId);
