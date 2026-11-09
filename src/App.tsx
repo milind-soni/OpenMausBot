@@ -16,6 +16,7 @@ import { parseComputerHelp } from "@/lib/computer-control";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
+import { ShareReplayHost } from "@/components/ShareReplayDialog";
 import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
 import { preloadConnectedApps } from "@/lib/connected-apps";
 import {
@@ -441,6 +442,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           onClose={() => dispatch({ type: "toggleShortcuts", open: false })}
         />
       )}
+      <ShareReplayHost />
       {/* After the modals: same z-50 tier, so DOM order keeps the palette on top. */}
       <CommandPalette onOpenChange={setPaletteOpen} />
       {/* Blink resolves -webkit-app-region in DOM order, so this no-drag twin after the headers cuts the drawer button back out. */}

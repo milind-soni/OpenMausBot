@@ -599,7 +599,7 @@ import { createBrowserSiteRoutes } from "./routes/browser-sites.ts";
 import { createInternalSignInRoutes } from "./routes/sign-in.ts";
 import { createInternalMcpRoutes } from "./routes/internal-mcp.ts";
 import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
-import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
+import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts"; import { createReplayRoutes } from "./routes/replay.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
 import { createInternalEscalateRoutes } from "./routes/internal-escalate.ts";
 import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts"; import { createInternalModelRoutes } from "./routes/internal-models.ts"; import { createOwnThreads } from "./host/own-threads.ts";
@@ -12340,7 +12340,7 @@ ROUTES.push(createBrowserSiteRoutes({
   list: (target) => listSignedInSites(target),
   signOut: (target, site) => signOutOfSites(target, site),
 }));
-ROUTES.push(createBrowserEvidenceRoutes({ evidence: browserEvidence.attach({ onChange: (listener) => store.onChange(listener), threadExists: (id) => Boolean(threadOwner(id)) }), threadExists: (id) => Boolean(threadOwner(id)) }));
+ROUTES.push(createBrowserEvidenceRoutes({ evidence: browserEvidence.attach({ onChange: (listener) => store.onChange(listener), threadExists: (id) => Boolean(threadOwner(id)) }), threadExists: (id) => Boolean(threadOwner(id)) }), createReplayRoutes({ bot: (threadId) => (store.groupByThread(threadId) ? null : store.botByThread(threadId) ?? null), messages: (threadId) => store.activePath(threadId), steps: (threadId) => { const all = []; for (let after = 0, page; (page = browserEvidence.list(threadId, { after, limit: 500 })).steps.length;) { all.push(...page.steps); if (page.nextAfter === null) break; after = page.nextAfter; } return all; }, imageFile: (threadId, generation, file) => browserEvidence.imageFile(threadId, generation, file), publisher: publishedPages.publisher, post: (threadId, text, publishedPage) => (store.botByThread(threadId) ? store.appendMessage(threadId, { role: "bot", kind: "text", text, publishedPage }).id : null) }));
 const loginRoutes = botLogins.routes((id) => Boolean(store.bot(id))); ROUTES.push(createLoginRoutes(loginRoutes), createVaultRoutes({ logins: loginRoutes, secrets: logins }));
 ROUTES.push(createUsageRoutes({
   dataDir: DATA_DIR, prices: operatorPrices,

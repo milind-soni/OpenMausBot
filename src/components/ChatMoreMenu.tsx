@@ -1,5 +1,5 @@
 import { useMemo, useState, type JSX } from "react";
-import { Bug, Copy, Cpu, Download, Gauge, ListChecks, MessagesSquare, Monitor, MoreHorizontal, Search, Share, SquarePen, UserRound } from "lucide-react";
+import { Bug, Copy, Cpu, Download, Film, Gauge, ListChecks, MessagesSquare, Monitor, MoreHorizontal, Search, Share, SquarePen, UserRound } from "lucide-react";
 import { currentTaskBot, openBotThread, useStore, visibleMessages, type Bot } from "@/state/store";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -12,6 +12,7 @@ import {
   slugifyTranscriptFilename,
 } from "@/lib/export-transcript";
 import { cn } from "@/lib/cn";
+import { openShareReplay } from "@/lib/share-replay";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_OPEN } from "./elevated";
@@ -118,6 +119,13 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       disabled: !hasMessages,
       onSelect: () => downloadMarkdownTranscript(slugifyTranscriptFilename(bot.name), transcript()),
     },
+    {
+      key: "replay",
+      label: t("replay.menu"),
+      icon: <Film size={16} />,
+      disabled: !messages.some((message) => message.role === "bot"),
+      onSelect: () => openShareReplay({ threadId: bot.threadId, botId: bot.id }),
+    },
     ...(usage ? [{
       key: "usage",
       label: t("chat.usage.menu"),
@@ -181,7 +189,7 @@ export function ChatMoreMenu({ bot, phoneHeader = false }: { bot: Bot; phoneHead
   return <RoundChatMoreMenu key={bot.threadId} bot={bot} phoneHeader={phoneHeader} />;
 }
 
-export const EXPORT_ITEMS = ["copy", "download"];
+export const EXPORT_ITEMS = ["copy", "download", "replay"];
 
 /** The bot panel's round Share button: on a team who has access, with copying or downloading this conversation under
  * the ⋯ of its header; anywhere else a menu of those two. */
@@ -191,7 +199,8 @@ export function ChatShareMenu({ bot, className }: { bot: Bot; className: string 
 }
 
 const exportItems = (items: SidebarMenuItem[]): SidebarMenuItem[] => items.filter((item) => EXPORT_ITEMS.includes(item.key)).map((item) => ({
-  ...item, heading: undefined, separatorBefore: false, label: t(item.key === "copy" ? "chat.export.copyConversation" : "chat.export.downloadConversation"),
+  ...item, heading: undefined, separatorBefore: false,
+  label: item.key === "replay" ? item.label : t(item.key === "copy" ? "chat.export.copyConversation" : "chat.export.downloadConversation"),
 }));
 
 function ExportMore({ bot }: { bot: Bot }) {
