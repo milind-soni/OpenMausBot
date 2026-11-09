@@ -25,6 +25,7 @@ vi.mock("@/state/store", async (original) => ({
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 
 import { SecretRequestCard } from "./SecretRequestCard";
+import { VaultChoices } from "./VaultChoices";
 import { setLocale } from "@/lib/i18n";
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request";
 
@@ -397,5 +398,22 @@ describe("SecretRequestCard custom secrets", () => {
     expect(file).not.toContain("Where to get this key");
     const ref = view({ target: "customSecret", label: "Notion key", reason: "For Notion.", helpUrl: "", delivery: "ref" });
     expect(ref).toContain("MausBot keeps it for one use by its own tools. Your bot never sees it");
+  });
+});
+
+describe("SecretRequestCard saved secrets", () => {
+  type Props = { children?: ReactNode };
+  const nodes = (tree: ReactNode): Array<ReactElement<Props>> =>
+    Children.toArray(tree).flatMap((child) => isValidElement<Props>(child) ? [child, ...nodes(child.props.children)] : []);
+  const offered = (secret: Record<string, unknown>) => {
+    Object.assign(fixture, { counting: true, index: 0, values: [] });
+    try { return nodes(SecretRequestCard({ botId: "bot-1", threadId: "thread-1", message: secretCard(secret) })).some((node) => node.type === VaultChoices); }
+    finally { fixture.counting = false; }
+  };
+
+  it("offers the Vault's secrets on a card for any other secret, never for a key the app keeps or a mailbox", () => {
+    expect(offered({ target: "customSecret", label: "Stripe secret key", delivery: "ref", helpUrl: "" })).toBe(true);
+    expect(offered({})).toBe(false);
+    expect(offered({ target: "customSecret", label: "Connect your mailbox", delivery: "email", helpUrl: "" })).toBe(false);
   });
 });
