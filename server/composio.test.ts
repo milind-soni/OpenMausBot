@@ -1026,7 +1026,7 @@ describe.sequential("Composio Sessions", () => {
   });
 
   it("reads a broker that sends no complete field as complete, and an explicit false as incomplete", async () => {
-    setManagedBrokerAccess({ url: origin + "/broker", token: "7".repeat(64) });
+    setManagedBrokerAccess({ url: origin + "/broker", token: "a".repeat(64) });
     try {
       brokerConnectedServicesBody = { services: { gmail: { connected: true, status: "ACTIVE" } } };
       await expect(connectedServicesInventory({})).resolves.toMatchObject({ complete: true });

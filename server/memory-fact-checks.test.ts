@@ -8,7 +8,7 @@ const chats = [
   person("Anna likes short replies too."),
 ];
 const quotes = [chats[0]!.lines[0]!.text, chats[1]!.lines[0]!.text];
-const check = (text: string, evidence: readonly string[] | undefined = quotes) => checkDreamFacts(text, [1, 2], evidence, chats);
+const check = (text: string, evidence: readonly string[] = quotes) => checkDreamFacts(text, [1, 2], evidence, chats);
 
 describe("the checks before a dream saves a fact", () => {
   it("keeps an entry whose numbers, paths and URLs all come from the quotes", () => {
@@ -30,7 +30,7 @@ describe("the checks before a dream saves a fact", () => {
   it("needs one real statement by the person in each cited conversation", () => {
     expect(check("Anna likes short replies", ["Invented quotation", quotes[1]!])).toBe(false);
     expect(check("Anna likes short replies", [])).toBe(false);
-    expect(check("Anna likes short replies", undefined)).toBe(false);
+    expect(checkDreamFacts("Anna likes short replies", [1, 2], undefined, chats)).toBe(false);
     expect(checkDreamFacts("Anna likes tea", [1], ["Anna likes tea"], [{ threadId: "q", lines: [{ by: "bot", text: "Anna likes tea" }] }])).toBe(false);
     expect(checkDreamFacts("Anna likes tea", [1], ["Anna likes tea"], [person("Suppose Anna likes tea?")])).toBe(false);
   });

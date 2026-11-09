@@ -4,7 +4,7 @@ import { redactSecretsInText } from "./redact.ts";
 
 const LOCATION = /https?:\/\/[^\s<>[\]()]+|(?:~\/|(?<![\p{L}\p{N}])\/[\p{L}_.]|[A-Za-z]:\\)[^\s<>[\](),;]*/gu;
 const NUMBER = /\p{N}+(?:[.,:/-]\p{N}+)*%?/gu;
-const matches = (text: string, pattern: RegExp) => [...text.matchAll(pattern)].map((m) => m[0].toLowerCase());
+const matches = (text: string, pattern: RegExp) => [...text.matchAll(pattern)].map((m) => m[0].toLowerCase().replace(/[.,:;!?'"]+$/u, ""));
 
 export function checkDreamFacts(text: string, from: readonly number[], evidence: readonly string[] | undefined, chats: readonly DreamConversation[]): boolean {
   if (!evidence || evidence.length !== from.length || redactSecretsInText(text) !== text) return false;
