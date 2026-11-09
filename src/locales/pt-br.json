@@ -4759,6 +4759,8 @@
   "computer.tab.computer": "Tela",
   "computer.tab.routines": "Rotinas",
   "routines.list": "Lista de rotinas",
+  "routines.botPaused": "O bot desta rotina está pausado neste plano, então ela não será executada.",
+  "routines.botPausedSwap": "Trocar bots ativos",
   "routines.logs": "Registros",
   "routines.results.label": "Publicar resultados em",
   "routines.results.keep": "Manter o destino atual",
