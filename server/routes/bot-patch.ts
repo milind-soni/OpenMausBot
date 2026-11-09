@@ -79,6 +79,8 @@ export interface BotPatchRouteDeps {
   team: boolean;
   /** The bot's conversations the main-thread resolver may pick: a Team Cloud keeps only team-visible ones. */
   mainThreadTasks(botId: string): readonly TaskRecord[];
+  /** The Chief of Staff of a scope changed: these bots' flags did. */
+  chiefChanged?(changed: readonly BotRecord[]): void;
 }
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
@@ -741,6 +743,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           ? store.setChiefOfStaff(bot.id)
           : [];
       if (chiefChanges === null) return json(res, 404, { error: "no such bot" });
+      if (chiefChanges.length) deps.chiefChanged?.(chiefChanges);
       if (beforeProfile) {
         const now = store.bot(bot.id)!;
         recordProfileChange(bot.id, "user", "api", beforeProfile, profileSnapshot(now));
