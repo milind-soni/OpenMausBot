@@ -8,7 +8,7 @@ export function installCloudSend(deps: {
   ipcMain: { handle(channel: string, handler: (...args: any[]) => unknown): void };
   cloudPage(event: unknown): "local" | "cloud" | null;
   server(): { postMessage(message: unknown): void } | null | undefined;
-  local(route: string, init?: { method?: string }): Promise<Response>;
+  local(route: string, init?: { method?: string; timeoutMs?: number }): Promise<Response>;
   home(): CloudTarget | null;
   cookieFetch: typeof fetch;
   reconnect(origin: string): Promise<boolean>;

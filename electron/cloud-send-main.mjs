@@ -11,9 +11,15 @@ const MOVE_LABEL = "Move to My Cloud";
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null);
 
+/** The most of an answer main reads: a big workspace's manifest of a Cloud, which holds every computer's bots that moved
+ * there, runs to tens of megabytes. */
+const ANSWER_MAX = 64 * 1024 * 1024;
+/** How long a request to My Cloud may take unless its caller sized it to its work. */
+const REQUEST_MS = 120_000;
+
 async function answer(response) {
   const text = await response.text();
-  if (text.length > 8 * 1024 * 1024) return { status: response.status, ok: false, body: null };
+  if (text.length > ANSWER_MAX) return { status: response.status, ok: false, body: null };
   try { return { status: response.status, ok: response.ok, body: text ? JSON.parse(text) : null }; }
   catch { return { status: response.status, ok: response.ok, body: null }; }
 }
@@ -32,13 +38,14 @@ export async function openOwnerSession(target, fetchImpl, { label = SESSION_LABE
   }));
   if (!paired.ok || typeof paired.body?.token !== "string" || !paired.body.token.startsWith("omb_sess_")) throw Object.assign(new Error("This app could not sign in to My Cloud. Try again."), { status: paired.status });
   const token = paired.body.token;
-  const request = (method, route, init) => fetchImpl(`${target.origin}${route}`, {
-    method, redirect: "error", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(120_000), ...init,
+  const request = (method, route, { timeoutMs = REQUEST_MS, ...init }) => fetchImpl(`${target.origin}${route}`, {
+    method, redirect: "error", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(timeoutMs), ...init,
     headers: { accept: "application/json", authorization: `Bearer ${token}`, ...quiet, ...init.headers },
   });
   return {
-    call: async (method, route, body) => answer(await request(method, route, body === undefined ? { headers: {} }
-      : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) })),
+    /** `timeoutMs`: how long this request may take, sized to the work it asks for; REQUEST_MS otherwise. */
+    call: async (method, route, body, options) => answer(await request(method, route, { ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}), ...(body === undefined ? { headers: {} }
+      : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) })),
     upload: async (route, bytes, type) => answer(await request("POST", route, { headers: { "content-type": type }, body: bytes })),
     /** The answer as it came, for a download. */
     fetch: (route, init = {}) => request(init.method ?? "GET", route, { ...init, headers: init.headers ?? {} }),

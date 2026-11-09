@@ -445,10 +445,10 @@ test("a check that finds things missing names, for what may stay behind, each sh
     conversations: [{ threadId: "t-b1", bot: "b1", rows: 1, newest: "t-b1-1", settings: {} }, { threadId: "t-b2", bot: "b2", rows: 1, newest: "t-b2-1", settings: {} }],
     attachments: side === "here" ? ["0b6c9f2e-1d4a.mp3"] : [], files: [], automations: [], runs: [] });
   const s = sides({ here: [bot("b1", { soul: "s" }), bot("b2", { soul: "s" })], there: [bot("b1", { soul: "s" }), bot("b2", { soul: "s" })], onCall: (method, route, body) => {
-    if (route === "/api/cloud-send/manifest") return reply(200, { ...manifest("there"), rooms: [{ id: "r1", name: "Launch room", members: ["b1"], threads: ["t-r1"] }] });
+    if (route.startsWith("/api/cloud-send/manifest")) return reply(200, { ...manifest("there"), rooms: [{ id: "r1", name: "Launch room", members: ["b1"], threads: ["t-r1"] }] });
     if (route === "/api/cloud-send/chats/verify") {
-      const threadId = body.conversations[0].threadId;
-      return reply(200, { v: 1, conversations: [{ threadId, missing: threadId === "t-b1" ? body.conversations[0].ids : [], unstamped: 0, path: { holds: true, at: null, leaf: `${threadId}-1`, length: 1 } }] });
+      return reply(200, { v: 1, conversations: body.conversations.map(({ threadId, ids }) => ({ threadId, missing: threadId === "t-b1" ? ids : [], unstamped: 0,
+        path: { holds: true, at: null, leaf: `${threadId}-1`, length: 1 } })) });
     }
     if (route === "/api/cloud-send/chats/attachments") return reply(200, { missing: body.names });
     if (route === "/api/cloud-send/verify-secrets") return reply(200, { v: 1, secrets: {} });

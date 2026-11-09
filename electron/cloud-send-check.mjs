@@ -10,8 +10,69 @@ const record = (value) => value !== null && typeof value === "object" && !Array.
 const list = (value) => (Array.isArray(value) ? value : []);
 /** As many of a conversation's row ids, and of its path, as My Cloud checks at once. */
 const IDS = 5_000;
+/** My Cloud checks at most this many conversations, and row and path ids together, a request. */
+const VERIFY_CONVERSATIONS = 200;
+const VERIFY_IDS = 2 * IDS;
 const ATTACHMENT_NAMES = 2_000;
 const THREAD = /^[\w-]{1,200}$/u;
+
+/** The waits between tries of a request nothing answered, and how long a check goes on while none of its requests gets an
+ * answer: a slow Cloud that keeps answering is waited for however long its work takes. */
+export const PATIENCE_MS = Object.freeze([15_000, 30_000, 60_000, 120_000, 300_000]);
+export const STALL_MS = 15 * 60_000;
+
+/** Nothing answered on the way to My Cloud (no network, a timeout, a gateway error, the Admin's or My Cloud's), as
+ * against a refusal: trying again soon may well work. */
+export function unanswered(error, depth = 0) {
+  if (!error || depth > 4) return false;
+  if ((error.name === "TypeError" && /fetch/iu.test(error.message ?? "")) || error.name === "TimeoutError" || error.name === "AbortError") return true;
+  if (Number.isInteger(error.status) && error.status >= 500) return true;
+  return unanswered(error.cause, depth + 1);
+}
+
+/** An answer of My Cloud's, or the error it is: a gateway error (5xx) stays one that trying again may get past, and any
+ * other is what `refuse(answer, message)` makes of it. */
+export function answered(answer, message, refuse = null) {
+  if (answer.ok) return answer;
+  if (refuse && !(answer.status >= 500)) throw refuse(answer, message);
+  throw Object.assign(new Error(message), { status: answer.status });
+}
+
+/**
+ * A check's patience with a slow Cloud: a request nothing answered is asked again after PATIENCE_MS, for as long as some
+ * request got an answer in the last STALL_MS (`moved`). Then it gives up with an error that still reads as unanswered and
+ * says whether anything got done (`progressed`), which the next check does not do again. `onWait(until)` while it waits,
+ * `onWait(null)` once it asks again.
+ */
+export function createPatience({ now = Date.now, sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }), onWait = () => {}, stallMs = STALL_MS, waits = PATIENCE_MS } = {}) {
+  let movedAt = now(), progressed = false, tries = 0;
+  const patience = {
+    moved() { movedAt = now(); progressed = true; tries = 0; },
+    get progressed() { return progressed; },
+    /** Waits before asking again after `error`, or throws once the check has stood still too long. */
+    async wait(error) {
+      if (!unanswered(error)) throw error;
+      const ms = waits[Math.min(tries++, waits.length - 1)];
+      if (now() + ms - movedAt > stallMs) {
+        throw Object.assign(new Error(`My Cloud did not answer for ${Math.round((now() - movedAt) / 60_000)} min (${error?.message ?? "no answer"}).`), { cause: error, code: "slow", progressed });
+      }
+      onWait(now() + ms);
+      await sleep(ms);
+      onWait(null);
+    },
+    /** `work()` until it is answered. */
+    async run(work) {
+      for (;;) {
+        try { const value = await work(); patience.moved(); return value; }
+        catch (error) { await patience.wait(error); }
+      }
+    },
+  };
+  return patience;
+}
+
+/** Asks once: what a check without patience does. */
+const IMPATIENT = { moved() {}, progressed: false, wait: async (error) => { throw error; }, run: (work) => work() };
 
 /** My Cloud's journal shows at most this many of a bot's latest changes. */
 const JOURNAL_ROWS = 500;
@@ -119,34 +180,91 @@ export async function* rowIdChunks(localJson, threadId) {
 }
 
 /**
- * Each conversation's rows and visible path checked on My Cloud, a chunk at a time, ids only: `missing`, the rows My
- * Cloud lacks; `unstamped`, the lines of its owner's it holds that do not carry the owner yet; `path`: "equal" when My
- * Cloud shows exactly this computer's path, "inside" when this computer's path appears in order inside a longer one of
- * My Cloud's (both sides added to it), "broken" otherwise.
+ * Each conversation's rows and visible path checked on My Cloud, ids only: `missing`, the rows My Cloud lacks;
+ * `unstamped`, the lines of its owner's it holds that do not carry the owner yet; `path`: "equal" when My Cloud shows
+ * exactly this computer's path, "inside" when this computer's path appears in order inside a longer one of My Cloud's
+ * (both sides added to it), "broken" otherwise. Conversations of up to IDS rows go many to a request; a longer one goes a
+ * chunk at a time, each after the one before it, as its path is checked in order. A request nothing answered is split in
+ * two, and the rest of the check asks for less at a time, until one conversation's chunk waits for My Cloud (`patience`).
+ * `skip(threadId)`: checked before and unchanged since, left out; `checked(threadId)`: nothing missing; `onProgress(done,
+ * total)` as conversations are checked.
  */
-export async function checkChats({ localJson, session, threads }) {
+export async function checkChats({ localJson, session, threads, skip = () => false, checked = () => {}, onProgress = () => {}, patience = IMPATIENT, timeoutMs }) {
   const out = [];
-  for (const threadId of threads.filter((id) => THREAD.test(id))) {
+  const todo = threads.filter((id) => THREAD.test(id));
+  const total = todo.length;
+  let done = 0, most = VERIFY_CONVERSATIONS, budget = VERIFY_IDS, batch = [], ids = 0;
+  const verify = async (conversations) => {
+    const answer = answered(await session.call("POST", "/api/cloud-send/chats/verify", { v: 1, conversations }, timeoutMs ? { timeoutMs } : undefined), "My Cloud did not check the chats.");
+    const byThread = new Map(list(answer.body?.conversations).filter(record).map((entry) => [entry.threadId, entry]));
+    if (conversations.some((entry) => !byThread.has(entry.threadId))) throw Object.assign(new Error("My Cloud did not check the chats."), { status: answer.status });
+    return byThread;
+  };
+  const finish = (result) => {
+    out.push(result);
+    if (!result.missing && !result.unstamped && result.path !== "broken") checked(result.threadId);
+    onProgress(++done, total);
+  };
+  const flush = async () => {
+    const queue = batch.length ? [batch] : [];
+    batch = []; ids = 0;
+    while (queue.length) {
+      const part = queue.shift();
+      let answers;
+      try { answers = await verify(part.map(({ asked }) => asked)); }
+      catch (error) {
+        if (!unanswered(error)) throw error;
+        if (part.length > 1) {
+          const half = Math.ceil(part.length / 2);
+          most = Math.max(1, Math.min(most, half));
+          budget = Math.max(IDS, Math.floor(budget / 2));
+          queue.unshift(part.slice(0, half), part.slice(half));
+        } else {
+          await patience.wait(error);
+          queue.unshift(part);
+        }
+        continue;
+      }
+      patience.moved();
+      for (const { asked, leaf } of part) {
+        const answer = answers.get(asked.threadId);
+        const holds = answer.path?.holds === true;
+        finish({ threadId: asked.threadId, missing: list(answer.missing).length, unstamped: Number.isSafeInteger(answer.unstamped) ? answer.unstamped : 0,
+          path: !holds ? "broken" : answer.path.leaf === leaf && answer.path.length === asked.path.ids.length ? "equal" : "inside" });
+      }
+    }
+  };
+  for (const threadId of todo) {
+    if (skip(threadId)) { onProgress(++done, total); continue; }
+    const first = await localJson(`/api/cloud-send/chats/ids?thread=${threadId}&from=0`);
+    if (!record(first)) throw new Error("OpenMausBot on this computer did not list a conversation's rows.");
+    if (first.more === true) { finish(await checkLong(threadId)); continue; }
+    const asked = { threadId, ids: list(first.ids), path: { after: null, ids: list(first.path), last: true } };
+    const size = asked.ids.length + asked.path.ids.length;
+    if (batch.length && (batch.length >= most || ids + size > budget)) await flush();
+    batch.push({ asked, leaf: first.leaf ?? null });
+    ids += size;
+  }
+  await flush();
+  return out;
+
+  async function checkLong(threadId) {
     let missing = 0, unstamped = 0, after = null, holds = true, cloud = null, localLeaf = null, length = 0;
     for await (const chunk of rowIdChunks(localJson, threadId)) {
       localLeaf = chunk.leaf ?? localLeaf;
       length += chunk.path.length;
       const asked = { threadId, ids: chunk.ids, ...(holds ? { path: { after, ids: chunk.path, last: !chunk.more } } : {}) };
-      const answer = await session.call("POST", "/api/cloud-send/chats/verify", { v: 1, conversations: [asked] });
-      const checked = answer.ok ? list(answer.body?.conversations).find((entry) => entry?.threadId === threadId) : null;
-      if (!checked) throw Object.assign(new Error("My Cloud did not check the chats."), { status: answer.status });
-      missing += list(checked.missing).length;
-      unstamped += Number.isSafeInteger(checked.unstamped) ? checked.unstamped : 0;
+      const answer = await patience.run(() => verify([asked])).then((answers) => answers.get(threadId));
+      missing += list(answer.missing).length;
+      unstamped += Number.isSafeInteger(answer.unstamped) ? answer.unstamped : 0;
       if (asked.path) {
-        holds = checked.path?.holds === true;
-        after = checked.path?.at ?? null;
-        if (!chunk.more) cloud = checked.path;
+        holds = answer.path?.holds === true;
+        after = answer.path?.at ?? null;
+        if (!chunk.more) cloud = answer.path;
       }
     }
-    const path = !holds ? "broken" : cloud && cloud.leaf === localLeaf && cloud.length === length ? "equal" : "inside";
-    out.push({ threadId, missing, unstamped, path });
+    return { threadId, missing, unstamped, path: !holds ? "broken" : cloud && cloud.leaf === localLeaf && cloud.length === length ? "equal" : "inside" };
   }
-  return out;
 }
 
 /** A move's check passes when nothing is missing: no gap, every conversation's rows there on a path that holds with
@@ -155,14 +273,15 @@ export const checkPassed = ({ gaps, chats, attachments, secrets }) => noGaps(gap
   && chats.every((thread) => !thread.missing && !thread.unstamped && thread.path !== "broken")
   && !attachments.length && !secrets.differs.length && !secrets.missing.length;
 
-/** The attachments of `names` My Cloud lacks. */
-export async function missingAttachments(session, names) {
+/** The attachments of `names` My Cloud lacks; `onProgress(done, total)` as they are checked. */
+export async function missingAttachments(session, names, { patience = IMPATIENT, onProgress = () => {} } = {}) {
   const missing = [];
   for (let i = 0; i < names.length; i += ATTACHMENT_NAMES) {
     const asked = names.slice(i, i + ATTACHMENT_NAMES);
-    const answer = await session.call("POST", "/api/cloud-send/chats/attachments", { names: asked });
-    if (!answer.ok) throw Object.assign(new Error("My Cloud did not check the attachments."), { status: answer.status });
-    missing.push(...list(answer.body?.missing).filter((name) => asked.includes(name)));
+    const answer = await patience.run(async () => answered(await session.call("POST", "/api/cloud-send/chats/attachments", { names: asked }), "My Cloud did not check the attachments."));
+    const named = new Set(asked);
+    missing.push(...list(answer.body?.missing).filter((name) => named.has(name)));
+    onProgress(Math.min(names.length, i + ATTACHMENT_NAMES), names.length);
   }
   return missing;
 }
@@ -178,6 +297,104 @@ export async function checkSecrets({ handoff, session, skip = new Set(), nonce =
   for (const [id, value] of Object.entries(here)) {
     if (skip.has(id)) continue;
     out[typeof there[id] !== "string" ? "missing" : there[id] === value ? "equal" : "differs"].push(id);
+  }
+  return out;
+}
+
+/** How long a request that lists much may take: My Cloud's, a little longer for each conversation it heads or byte of a
+ * bot's files it may hash; this computer's own, frozen while the check reads it. */
+const LISTING_MS = 2 * 60_000;
+const LISTING_MAX_MS = 30 * 60_000;
+export const LOCAL_LISTING_MS = 10 * 60_000;
+const listingMs = (work) => Math.min(LISTING_MAX_MS, LISTING_MS + Math.round(work));
+const BOT_FILE = /^(?:workspaces|task-workspaces)\/([\w-]{1,128})\//u;
+
+/**
+ * What did not arrive of what a move carried, from both sides' own answers: `gaps`, the manifests compared; `chats`, each
+ * conversation's rows, its owner's lines and its visible path; `attachments`, the stored ones My Cloud lacks; `secrets`,
+ * each credential by its fingerprint (none without `handoff`, as for a bot moving into a team). Left out: what was removed
+ * on My Cloud, and a 1Password token 1Password itself refused. `ok` when nothing is missing.
+ *
+ * Every request is a bounded piece of the work, so a Cloud with thousands of conversations answers each in time: My
+ * Cloud's manifest without the attachments and files it never needs to list for this, its files a bot at a time, the
+ * chats many conversations to a request. A conversation found whole before (`kept.verified`) and unchanged on both sides
+ * since is not asked about again, so a check cut short goes on where it was. A slow Cloud is waited for while it keeps
+ * answering (createPatience). `onStep({ step, done, total, bots, until? })`: which step it is at, how far, and until when
+ * it waits for My Cloud. `refuse(answer, message)`: the error a refusal of My Cloud's is.
+ */
+export async function moveCheck({ session, kept, persist, localJson, handoff, scoped = (route) => route, now = Date.now, sleep, takesMove, refuse = null, onStep = () => {} }) {
+  let bots = 0, at = null;
+  const step = (name, done = 0, total = 0) => { at = { step: name, done, total, bots }; onStep(at); };
+  const patience = createPatience({ now, ...(sleep ? { sleep } : {}), onWait: (until) => {
+    if (!at) return;
+    const { until: _, ...rest } = at;
+    at = until ? { ...rest, until } : rest;
+    onStep(at);
+  } });
+  const ask = (method, route, timeoutMs, message = "My Cloud did not answer. Try again.") =>
+    patience.run(async () => answered(await session.call(method, route, undefined, { timeoutMs }), message, refuse));
+  step("manifest");
+  await patience.run(takesMove);
+  const here = await localJson(scoped("/api/cloud-send/manifest"), { timeoutMs: LOCAL_LISTING_MS });
+  const heads = new Map(list(here?.conversations).filter(record).map((head) => [head.threadId, head]));
+  const there = (await ask("GET", scoped("/api/cloud-send/manifest?attachments=0&files=0"), listingMs(heads.size * 20))).body;
+  if (!record(here) || !record(there)) throw new Error("My Cloud did not say what it has. Try again.");
+  const removed = new Set([...Object.entries(kept.off).filter(([, why]) => why === "removed").map(([key]) => key),
+    ...Object.entries(kept.chats).filter(([, cursor]) => cursor === "removed").map(([threadId]) => threadId),
+    ...roomsRemovedThere(here, there, kept.chats)]);
+  const refused = new Set(list(kept.whole?.result.failed).filter((failure) => failure.final === true).map((failure) => failure.key));
+  const going = new Set(list(here.items).filter((item) => item.kind === "bot" && !removed.has(item.key) && !refused.has(item.key)).map((item) => item.id));
+  bots = going.size;
+  if (!Array.isArray(there.files)) there.files = await cloudFiles(list(here.files), going, ask, step, scoped);
+  const gaps = manifestGaps(here, there, { sent: kept.sent, removed, skip: refused });
+  const rooms = roomsThatGo(here, going);
+  const threads = list(here.conversations).filter((head) => !removed.has(head.threadId)
+    && (head.room ? rooms.has(head.room) && !removed.has(`room:${head.room}`) : going.has(head.bot))).map((head) => head.threadId);
+  const theirRows = new Map(list(there.conversations).filter(record).map((head) => [head.threadId, Number.isSafeInteger(head.rows) ? head.rows : 0]));
+  const whole = (threadId) => {
+    const seen = kept.verified?.[threadId], head = heads.get(threadId);
+    return Boolean(seen && head && seen.newest === head.newest && seen.rows === head.rows && (theirRows.get(threadId) ?? -1) >= seen.there);
+  };
+  step("chats", 0, threads.length);
+  const chats = await checkChats({ localJson, session, threads, patience, timeoutMs: LISTING_MS, skip: whole,
+    checked: (threadId) => {
+      const head = heads.get(threadId);
+      if (kept.verified && head && typeof head.newest === "string" && Number.isSafeInteger(head.rows)) kept.verified[threadId] = { newest: head.newest, rows: head.rows, there: theirRows.get(threadId) ?? 0 };
+    },
+    onProgress: (done, total) => { if (done % 50 === 0) persist(); step("chats", done, total); } });
+  for (const entry of chats) if (entry.unstamped && kept.stamped) delete kept.stamped[entry.threadId];
+  persist();
+  const names = list(here.attachments);
+  step("attachments", 0, names.length);
+  const attachments = await missingAttachments(session, names, { patience, onProgress: (done, total) => step("attachments", done, total) });
+  step("credentials");
+  const secrets = handoff ? await patience.run(() => checkSecrets({ handoff, session, skip: new Set([...removed, ...refused]) })) : { equal: [], differs: [], missing: [] };
+  const ok = checkPassed({ gaps, chats, attachments, secrets });
+  // What the person knows things by, for what stayed behind (move-gaps.mjs): bots and rooms by name, and the bot or room
+  // each conversation the check found short belongs to.
+  const short = new Set([...gaps.conversations, ...gaps.settings, ...chats.filter((entry) => entry.missing || entry.unstamped || entry.path === "broken").map((entry) => entry.threadId)]);
+  const named = ok ? {} : Object.fromEntries([...list(here.items).filter((item) => item.kind === "bot" && item.id).map((item) => [item.id, item.label]),
+    ...list(here.rooms).map((room) => [`room:${room.id}`, room.name])]);
+  const owners = ok ? {} : Object.fromEntries(list(here.conversations).filter((head) => short.has(head.threadId)).map((head) => [head.threadId, head.bot ?? `room:${head.room}`]));
+  return { ok, gaps, chats, attachments, secrets, names: named, owners };
+}
+
+/** My Cloud's files of the bots that go, a bot at a time, each given as long as hashing that bot's files here could take
+ * there; only bots with files here are asked about. */
+async function cloudFiles(here, going, ask, step, scoped) {
+  const bytes = new Map();
+  for (const file of here) {
+    const bot = BOT_FILE.exec(typeof file?.path === "string" ? file.path : "")?.[1];
+    if (bot && going.has(bot)) bytes.set(bot, (bytes.get(bot) ?? 0) + (Number.isSafeInteger(file.size) ? file.size : 0));
+  }
+  const out = [];
+  let done = 0;
+  for (const [bot, size] of bytes) {
+    step("files", done, bytes.size);
+    const route = scoped("/api/cloud-send/files").includes("bot=") ? scoped("/api/cloud-send/files") : `/api/cloud-send/files?bot=${bot}`;
+    const listed = await ask("GET", route, listingMs(size / 20_000), "My Cloud did not list its files.");
+    out.push(...list(listed.body?.files));
+    step("files", ++done, bytes.size);
   }
   return out;
 }

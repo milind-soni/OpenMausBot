@@ -68,6 +68,26 @@ const stayedHere = (items: OneHomeStayed[] | undefined) => (items ?? []).map((it
   ? t("cloudSend.move.stayedNeeds", { name: item.name, program: item.needs })
   : t("cloudSend.move.stayedHere", { name: item.name })));
 
+const atTime = (at: number) => new Intl.DateTimeFormat(activeLocale(), { timeStyle: "short" }).format(at);
+const percent = (done: number, total: number) => Math.min(100, Math.floor((done / Math.max(1, total)) * 100));
+
+/** What a move that is under way waits for or checks now, when it says: My Cloud slow to answer, another computer moving
+ * into it first, or how far the check of what arrived is; null when it says none of that. */
+function underWayLine(move: OneHomeView, place?: string): string | null {
+  const slow = "slow" in move ? move.slow : undefined;
+  if (slow) return place ? t("cloudSend.move.slowNamed", { place, time: atTime(slow.until) }) : t("cloudSend.move.slow", { time: atTime(slow.until) });
+  const queued = "queued" in move ? move.queued : undefined;
+  if (queued && !place) return queued.name ? t("cloudSend.move.queued", { name: queued.name }) : t("cloudSend.move.queuedAny");
+  const checking = move.phase === "finishing" ? move.checking : undefined;
+  if (!checking) return null;
+  const share = percent(checking.done, checking.total);
+  if (place) return checking.step === "chats" && checking.total ? t("cloudSend.move.checkingChatsNamed", { place, bots: checking.bots, percent: share }) : t("cloudSend.move.checkingNamed", { place });
+  if (checking.step === "chats" && checking.total) return checking.bots === 1 ? t("cloudSend.move.checkingChatsOne", { percent: share }) : t("cloudSend.move.checkingChats", { bots: checking.bots, percent: share });
+  if (checking.step === "files" && checking.total) return t("cloudSend.move.checkingFiles", { percent: share });
+  if (checking.step === "attachments" && checking.total) return t("cloudSend.move.checkingAttachments", { percent: share });
+  return t("cloudSend.move.checking");
+}
+
 /** The one-time move's line on either page: on its way (with progress, or who it waits for), almost done, failing for a
  * day (with Try again), what arrived (on My Cloud's page, once), coming home, where the bots came home instead, or this
  * computer's bots on their way home and home because the person keeps them here.
@@ -100,6 +120,8 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
     return failing.error ? { kind: "failed", text: t("cloudSend.move.failing", { error: serverErrorText(failing, failing.error) }), extra, retry: true, reason: serverErrorText(failing, failing.error) }
       : { kind: "failed", text: t("cloudSend.move.failingPlain"), extra, retry: true };
   }
+  const underWay = underWayLine(move);
+  if (underWay) return { kind: "sending", text: underWay, extra: [] };
   if (move.phase === "finishing") return { kind: "sending", text: t("cloudSend.move.finishing"), extra: [] };
   // Who holds the move, by name, or what it is; nothing is claimed while it only waits for a quiet moment.
   if (move.phase === "wait" && move.waitingFor !== undefined) {
@@ -127,6 +149,8 @@ function ownMoveLine(move: OneHomeView, place: string, page: "local" | "cloud"):
       : line("failed", t("cloudSend.move.failingPlainNamed", { place }), { retry: true, extra });
   }
   if (move.phase === "copy" && move.updating) return line("sending", t("cloudSend.move.updatingNamed", { place }));
+  const underWay = underWayLine(move, place);
+  if (underWay) return line("sending", underWay);
   if (move.phase === "finishing") return line("sending", t("cloudSend.move.finishingNamed", { place }));
   if (move.phase === "wait" && move.waitingFor !== undefined) {
     return line("sending", move.waitingFor ? t("cloudSend.move.waitingNamed", { place, name: move.waitingFor })

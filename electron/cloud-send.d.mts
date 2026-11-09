@@ -55,6 +55,9 @@ export interface CloudSendSnapshot {
   arrived: CloudSendArrived;
   cloudVersion: string | null;
   localVersion: string | null;
+  /** A move's check under way: its step, `done` of `total` there, the bots it checks, and until when it waits for a My
+   * Cloud that did not answer. */
+  checking?: { step: string; done: number; total: number; bots: number; until?: number } | null;
 }
 
 /** What My Cloud's own page is told: names of this computer's bots that wait, and counts, never logins' sites. */
@@ -126,7 +129,8 @@ export interface CloudSendPageBridge {
 export interface KeepHereState { shown: boolean; on: boolean; moved: boolean; coming: boolean }
 
 export interface CloudSendSession {
-  call(method: string, route: string, body?: unknown): Promise<{ status: number; ok: boolean; body: any }>;
+  /** `timeoutMs`: how long this request may take, sized to the work it asks for. */
+  call(method: string, route: string, body?: unknown, options?: { timeoutMs?: number }): Promise<{ status: number; ok: boolean; body: any }>;
   upload(route: string, bytes: Uint8Array, type: string): Promise<{ status: number; ok: boolean; body: any }>;
   /** The answer as it came, for a download; only the owner sessions main opens have it. */
   fetch?(route: string, init?: RequestInit): Promise<Response>;
@@ -176,7 +180,8 @@ export interface CloudMoveCheck {
 }
 
 export function createCloudSend(deps: {
-  local(route: string, init?: { method?: string }): Promise<Response>;
+  /** `timeoutMs`: how long a request that lists much may take on this computer's own server. */
+  local(route: string, init?: { method?: string; timeoutMs?: number }): Promise<Response>;
   cloud: {
     origin(): string | null;
     asleep(): boolean;
@@ -190,6 +195,8 @@ export function createCloudSend(deps: {
   onChange?(snapshot: CloudSendSnapshot): void;
   t?(key: string, params?: Record<string, string | number>): string;
   now?(): number;
+  /** How a check waits before it asks a slow Cloud again; setTimeout's by default. */
+  sleep?(ms: number): Promise<void>;
   /** How long a move waits for My Cloud to run the engines whose keys it just took. */
   engineWaitMs?: number;
   /** My Cloud's plan disk and the Admin's grow, so a move makes room for the files it carries. */
