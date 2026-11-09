@@ -80,6 +80,8 @@ export interface BotMessageRouteDeps {
   messageSender(auth: RequestAuth): ResolvedSender | undefined;
   cloudGuestSendRefusal(auth: RequestAuth, threadId: string): string | null;
   cloudThreadRefusal(auth: RequestAuth, threadId: string): string | null;
+  /** Whether the requesting viewer may see a conversation: a press naming a thread they cannot see answers as if it were gone. */
+  threadVisible(auth: RequestAuth, threadId: string): boolean;
   cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null;
   commandRememberRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null;
   requestBehavior(value: unknown): Behavior | null;
@@ -264,6 +266,10 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const device = pressed ? prepareDevicePress(store, threadId, body.widgetAction, sendId) : null;
       if (device) {
         if (!device.ok) return json(res, device.status, { error: device.error });
+        // Security invariant: a press naming a conversation the viewer cannot see answers like a missing one, never confirming it exists.
+        if ("openThread" in device.device && !deps.threadVisible(auth, device.device.openThread.threadId)) {
+          return json(res, 404, { error: "That conversation is no longer here." });
+        }
         return json(res, 202, { ok: true, threadId, ...device.device });
       }
       const press = pressed ? prepareWidgetPress(store, threadId, body.widgetAction, sendId) : null;
