@@ -72,7 +72,7 @@ import {
 } from "./message-file.ts";
 import { avatarImageStatus } from "./avatar-image.ts";
 import { imageGenerationReady } from "./image-generation.ts";
-import { createImageToolRoutes } from "./routes/image-tools.ts"; import { createMeetingsHost } from "./host/meetings-host.ts";
+import { createImageToolRoutes } from "./routes/image-tools.ts"; import { createMeetingsHost } from "./host/meetings-host.ts"; import { meetingsUnavailablePrompt } from "./meetings/prompt.ts";
 import { createImageSettingsRoutes } from "./routes/image-settings.ts";
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
 import { routeDirectTurn } from "./turn-route.ts"; import { QuickModelFallback } from "./quick-model-fallback.ts"; import { COMPUTER_JOURNAL_PATH, createSavedSteps, personRequest, savedStepsEnabled } from "./saved-steps/saved-steps.ts";
@@ -2983,7 +2983,7 @@ function previewSystemPrompt(bot: BotRecord) {
     }, { note: previewPlan.note, cloudHome: Boolean(CLOUD_HOME), ownComputer: CLOUD_HOME && agentsMounted && lendingEnabled() ? sharedComputers.known(CLOUD_HOME_LENDER) : undefined }) },
     { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(agentsMounted && lendingEnabled(), syncedFolders(DATA_DIR), sharedComputers.known(CLOUD_HOME_LENDER), CLOUD_PERSONAL) + firstHourHooks.prompt(bot.id, bot.threadId) : "" },
     { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? composioSystemPrompt(bot.connectorTools) + describeConnectorScopes(bot.connectorScopes) : "" },
-    { id: "email", label: "Email", text: caps?.emailMcp === true ? emailHost.prompt(bot) : "" },
+    { id: "email", label: "Email", text: caps?.emailMcp === true ? emailHost.prompt(bot) : "" }, { id: "meetings", label: "Meetings", text: meetingsUnavailablePrompt({ agentsTools: agentsMounted, cloudComputer: boat.boatConfigured(cfg) }) },
     ...phones.previewParts(bot, caps?.deviceMcp === true),
     { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(engineMcpServers(bot)), mcpServersHost.off(bot)) : "" }, { id: "to-connect", label: "Connections to make", text: cloudConnections.prompt(bot) },
     { id: "browser", label: "Browser", text: previewPlan.browser ? browserPromptFor(bot, agentsMounted) : "" },
@@ -8386,7 +8386,7 @@ async function beginTurn(
         { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {}), mcpServersHost.off(bot)) }, { id: "to-connect", label: "Connections to make", text: cloudConnections.prompt(liveBot ?? bot, lentMcp.lines(liveBot ?? bot, { botId: bot.id, threadId, generation: dispatchClaimId })) + teamConnections.prompt(threadId, dispatchClaimId, integrations) },
         { id: "browser", label: "Browser", text: integrations.browser ? browserPromptFor(bot, Boolean(integrations.agents)) : "" },
         { id: "data", label: "Data", text: integrations.data ? BUILT_IN_DATA_SYSTEM_PROMPT : "" },
-        { id: "email", label: "Email", text: instance.adapter.capabilities.emailMcp === true ? emailHost.prompt(liveBot ?? bot) : "" },
+        { id: "email", label: "Email", text: instance.adapter.capabilities.emailMcp === true ? emailHost.prompt(liveBot ?? bot) : "" }, { id: "meetings", label: "Meetings", text: meetingsUnavailablePrompt({ agentsTools: Boolean(integrations.agents), cloudComputer: boat.boatConfigured(cfg) }) },
         ...phones.promptParts(liveBot ?? bot, {
           mounted: Boolean(integrations.device), offered: instance.adapter.capabilities.deviceMcp === true, turn: { botId: bot.id, threadId, generation: dispatchClaimId },
           place: phones.place(threadId, !(commsDepth > 0 || opts?.automationSource !== undefined || opts?.unattended || opts?.peerAsk || opts?.coordination)),
