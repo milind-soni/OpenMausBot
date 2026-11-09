@@ -408,10 +408,13 @@ export function describeQuiet(name: string, state: QuietState, quietMs: number, 
       return `${name}'s model request failed: "${state.message}" ${name} may retry or stop; no reply for ${quiet} so far.`;
     case "compressing":
       return `${name} is compressing its conversation history to make room. This can take a few minutes; it is still working.`;
-    case "waiting-model":
-      return state.nearFullContext
-        ? `${name} is waiting on its model: no reply for ${quiet}, but its request is still open. Its history is nearly full, so it may be compressing it.`
-        : `${name} is waiting on its model: no reply for ${quiet}, but its request is still open. Slow models and rate limits look like this.`;
+    case "waiting-model": {
+      if (state.nearFullContext) {
+        return `${name} is waiting on its model: no reply for ${quiet}, but its request is still open. Its history is nearly full, so it may be compressing it.`;
+      }
+      const ownStop = stopAfterMs > 0 ? `; this turn stops on its own after ${minutes(stopAfterMs)}` : "";
+      return `${name} is waiting on its model: no reply for ${quiet}, but its request is still open. Its model provider may be slow or busy${ownStop}.`;
+    }
     case "busy":
       return `${name} is busy on this computer but has sent nothing for ${quiet}.`;
     case "between-requests":

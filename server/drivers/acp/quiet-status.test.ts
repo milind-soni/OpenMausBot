@@ -103,6 +103,17 @@ describe("describeQuiet", () => {
       .toBe('OpenCode\'s model request failed: "Rate limit exceeded. Please try again later." OpenCode may retry or stop; no reply for 75 s so far.');
   });
 
+  it("does not blame a rate limit while the request is still open", () => {
+    const text = describeQuiet("OpenCode", { kind: "waiting-model", nearFullContext: false }, 60_000, 900_000);
+    expect(text).toBe("OpenCode is waiting on its model: no reply for 60 s, but its request is still open. Its model provider may be slow or busy; this turn stops on its own after 15 min.");
+    expect(text).not.toContain("rate limit");
+  });
+
+  it("leaves out the stop time when the prompt silence guard is off", () => {
+    expect(describeQuiet("OpenCode", { kind: "waiting-model", nearFullContext: false }, 60_000, 0))
+      .toBe("OpenCode is waiting on its model: no reply for 60 s, but its request is still open. Its model provider may be slow or busy.");
+  });
+
   it("a new retry attempt is news; the same state is not", () => {
     expect(quietKey({ kind: "retrying", status: 429, delayMs: 1, attempt: 1 }))
       .not.toBe(quietKey({ kind: "retrying", status: 429, delayMs: 1, attempt: 2 }));
