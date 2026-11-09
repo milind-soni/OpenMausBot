@@ -49,8 +49,8 @@ export function onOllamaPort(url: string): boolean {
 const EMBEDDING = /embed|(?:^|[/:-])bge-|minilm/i;
 const text = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : undefined;
 
-/** The chat models in an /api/tags answer, or null when the answer is not one. Embedding models answer no chat, and
- * a name that carries a context window is the model it was made from. */
+/** The chat models in an /api/tags answer, or null when the answer is not one. An embedding model answers no chat (its
+ * name only counts where Ollama gives no family), and a name that carries a context window is the model it was made from. */
 export function ollamaTags(payload: unknown): OllamaModel[] | null {
   const rows = payload && typeof payload === "object" ? (payload as { models?: unknown }).models : undefined;
   if (!Array.isArray(rows)) return null;
@@ -62,7 +62,7 @@ export function ollamaTags(payload: unknown): OllamaModel[] | null {
     const name = text(entry.name) ?? text(entry.model);
     const details = (entry.details && typeof entry.details === "object" ? entry.details : {}) as { family?: unknown; families?: unknown; parameter_size?: unknown; quantization_level?: unknown };
     const families = [details.family, ...(Array.isArray(details.families) ? details.families : [])].filter((family): family is string => typeof family === "string");
-    if (!name || seen.has(name) || isContextName(name) || EMBEDDING.test(name) || families.some((family) => /bert$/i.test(family))) continue;
+    if (!name || seen.has(name) || isContextName(name) || families.some((family) => /bert$/i.test(family)) || (!families.length && EMBEDDING.test(name))) continue;
     seen.add(name);
     const parameters = text(details.parameter_size), quantization = text(details.quantization_level);
     models.push({
@@ -82,6 +82,12 @@ export function showCapabilities(show: unknown): Pick<OllamaModel, "tools" | "vi
   return { tools: capabilities.includes("tools"), vision: capabilities.includes("vision") };
 }
 
+/** False only for a model /api/show says cannot chat. */
+function answersChats(show: unknown): boolean {
+  const capabilities = show && typeof show === "object" ? (show as { capabilities?: unknown }).capabilities : undefined;
+  return !Array.isArray(capabilities) || capabilities.includes("completion");
+}
+
 function nobodyListening(error: unknown): boolean {
   const cause = (error as { cause?: { code?: unknown; errors?: unknown } } | undefined)?.cause;
   if (cause?.code === "ECONNREFUSED") return true;
@@ -92,8 +98,8 @@ const timedOut = (error: unknown) => (error as { name?: unknown } | undefined)?.
 
 const answered = new Map<string, boolean>();
 
-/** Whether this server answered as Ollama when last asked: /api/tags with a list and /api/version with a version
- * (some other servers imitate /api/tags alone). Undefined until asked. */
+/** Whether this server has answered as Ollama: /api/tags with a list and /api/version with a version (some other servers
+ * imitate /api/tags alone). Undefined until asked; a failed version request alone doesn't undo a yes. */
 export function answeredAsOllama(url: string): boolean | undefined {
   return answered.get(ollamaOrigin(url));
 }
@@ -130,17 +136,22 @@ export async function probeOllama(url: string, options: ProbeOptions = {}): Prom
     if (nobodyListening(error)) return { state: "not-running", url: origin, models: [] };
     return { state: "unreachable", url: origin, models: [], problem: timedOut(error) ? "timeout" : "network" };
   }
-  answered.set(origin, models !== null && version !== undefined);
+  if (models === null) answered.set(origin, false);
+  else if (version) answered.set(origin, true);
+  else if (!answered.has(origin)) answered.set(origin, false);
   if (!models) return { state: "unreachable", url: origin, models: [], problem: "not-ollama" };
   if (options.capabilities) {
-    models = await Promise.all(models.map(async (model) => {
+    const asked = await Promise.all(models.map(async (model) => {
       try {
         const response = await ask("/api/show", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: model.name }) });
-        return response.ok ? { ...model, ...showCapabilities(await response.json()) } : model;
+        if (!response.ok) return model;
+        const show: unknown = await response.json();
+        return answersChats(show) ? { ...model, ...showCapabilities(show) } : null;
       } catch {
         return model;
       }
     }));
+    models = asked.filter((model) => model !== null);
   }
   return { state: models.length ? "ready" : "no-models", url: origin, ...(version ? { version } : {}), models };
 }
@@ -158,19 +169,21 @@ export function ollamaUnavailable(status: OllamaStatus): string | null {
 
 const RANK: Record<OllamaState, number> = { ready: 0, "no-models": 1, unreachable: 2, "not-running": 3 };
 
-/** Ollama on this computer, or at an address someone set: the first that runs, else what the first address said. */
+/** Ollama on this computer, or at an address someone set: the first that runs, else the most telling answer. */
 export async function findOllama(urls: readonly string[] = [], options: ProbeOptions = {}): Promise<OllamaStatus> {
   const origins = [...new Set([...urls, ...(options.localUrls ?? OLLAMA_LOCAL_URLS)].map(ollamaOrigin))];
   const found = await Promise.all(origins.map((origin) => probeOllama(origin, options)));
   return found.reduce((best, status) => RANK[status.state] < RANK[best.state] ? status : best);
 }
 
-/** An OpenAI-compatible instance that is really Ollama: added as Ollama, on Ollama's port, or it answered as Ollama. */
+/** An OpenAI-compatible instance that is really Ollama: added as Ollama, it answered as Ollama, or it is on Ollama's port
+ * and nothing there has answered otherwise. */
 export function isOllamaServer(config: unknown): boolean {
   const { url, catalog } = (config && typeof config === "object" ? config : {}) as { url?: unknown; catalog?: unknown };
   if (catalog === "ollama") return true;
   if (catalog !== undefined || typeof url !== "string") return false;
-  return onOllamaPort(url) || answeredAsOllama(url) === true;
+  const answer = answeredAsOllama(url);
+  return answer === true || (answer === undefined && onOllamaPort(url));
 }
 
 export function forgetOllamaAnswers(): void {

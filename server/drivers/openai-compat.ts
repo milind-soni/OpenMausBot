@@ -228,6 +228,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       if (!isOllamaServer(config) || (status.state !== "ready" && status.state !== "no-models")) return false;
       facts.clear();
       for (const model of status.models) facts.set(model.name, model);
+      if (config.managedModels) return true;
       const options: ModelCatalog["options"] = status.models.map((model) => ({ id: model.name, label: model.name, custom: true, local: localFacts(model) }));
       if (config.model && !options.some((model) => model.id === config.model)) options.unshift({ id: config.model, label: config.model, custom: true });
       catalog = { default: config.model ?? options[0]?.id ?? "", options };
@@ -235,9 +236,9 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     };
 
     const fetchModels = async () => {
-      if (config.managedModels) return;
       if (!apiKey) return;
       if (ollamaCandidate && await listOllama()) return;
+      if (config.managedModels) return;
       try {
         // Only a server added as LM Studio: any other local server would get a request it never serves.
         const nativeUrl = config.catalog === "lmstudio" ? loopbackLmStudioV1Url(config.url) : null;

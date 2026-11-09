@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { recordEvents } from "../testing/events.ts";
 import { instanceLook } from "../provider-icon.ts";
@@ -29,6 +29,7 @@ interface FakeModel { name: string; size?: number; details?: Record<string, unkn
 
 /** A server speaking Ollama's own routes and its OpenAI-compatible chat, recording each chat request. */
 async function fakeOllama(options: { models?: FakeModel[]; version?: string | null; tags?: boolean } = {}) {
+  // Read per request, so a test can change what the server answers.
   const models = options.models ?? [];
   const chats: Array<{ model: string; tools?: unknown[] }> = [];
   const asked: string[] = [];
@@ -133,6 +134,13 @@ describe("finding Ollama", () => {
     expect(answeredAsOllama(url)).toBe(true);
   });
 
+  it("goes by what a model can do over what it is called, once the server says", async () => {
+    const assistant: FakeModel = { name: "embedded-assistant:latest", details: { family: "llama" }, capabilities: ["completion"] };
+    const vectors: FakeModel = { name: "search-vectors:latest", details: { family: "custom" }, capabilities: ["embedding"] };
+    const { url } = await fakeOllama({ models: [assistant, vectors] });
+    expect((await probeOllama(url, { capabilities: true })).models.map((model) => model.name)).toEqual(["embedded-assistant:latest"]);
+  });
+
   it("says when nothing is pulled yet, with the command that pulls a model", async () => {
     const { url } = await fakeOllama({ models: [EMBED] });
     const status = await probeOllama(url);
@@ -170,6 +178,18 @@ describe("finding Ollama", () => {
     expect(answeredAsOllama(imitation.url)).toBe(false);
   });
 
+  it("keeps a yes through a failed version request, but not through a server that stops answering as Ollama", async () => {
+    const options: Parameters<typeof fakeOllama>[0] = { models: [LLAMA] };
+    const { url } = await fakeOllama(options);
+    await probeOllama(url);
+    options.version = null;
+    await probeOllama(url);
+    expect(answeredAsOllama(url)).toBe(true);
+    options.tags = false;
+    await probeOllama(url);
+    expect(answeredAsOllama(url)).toBe(false);
+  });
+
   it("takes the first address that runs, else what the first address said", async () => {
     const { url } = await fakeOllama({ models: [LLAMA] });
     const closed = await closedPort();
@@ -189,6 +209,14 @@ describe("an OpenAI-compatible server that is really Ollama", () => {
     expect(isOllamaServer({ url: `${url}/v1` })).toBe(false);
     await probeOllama(url);
     expect(isOllamaServer({ url: `${url}/v1` })).toBe(true);
+  });
+
+  it("stops being one on Ollama's port once something else has answered there", async () => {
+    const config = { url: "http://127.0.0.1:11434/v1" };
+    expect(isOllamaServer(config)).toBe(true);
+    await probeOllama(config.url, { fetchImpl: (async () => new Response("{}", { status: 404 })) as typeof fetch });
+    expect(isOllamaServer(config)).toBe(false);
+    expect(instanceLook({ driver: "openai-compat", config })).toEqual({});
   });
 
   it("shows as Ollama: its mark, and its name unless someone named it", () => {
@@ -257,6 +285,51 @@ describe("the chat engine on Ollama", () => {
       expect(await instance.snapshot()).toMatchObject({ state: "available" });
       expect(instanceLook({ driver: "openai-compat", displayName: "Local", config: { url: `${url}/v1` } })).toEqual({});
     } finally { await instance.dispose(); }
+  });
+
+  it("keeps a fixed model list on Ollama, and still knows which of them can call tools", async () => {
+    const { url, chats } = await fakeOllama({ models: [LLAMA, GEMMA] });
+    const instance = await create({ url: `${url}/v1`, catalog: "ollama", managedModels: ["gemma2:2b"] });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.refreshModels?.();
+      expect(instance.models).toEqual({ default: "gemma2:2b", options: [{ id: "gemma2:2b", label: "gemma2:2b" }] });
+      const threadId = randomUUID();
+      await instance.adapter.sendTurn({ threadId, text: "hi", model: "gemma2:2b" });
+      await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId);
+      expect(chats[0]!.tools).toBeUndefined();
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
+  it("tells a text-only model on the network about an attachment instead of refusing the turn", async () => {
+    const replies: Record<string, unknown> = {
+      "/api/tags": { models: [GEMMA] }, "/api/version": { version: "0.12.6" }, "/api/show": { capabilities: ["completion"] }, "/api/ps": { models: [] }, "/api/create": { status: "success" },
+    };
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (url, init) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/v1/chat/completions") {
+        bodies.push(String(init!.body));
+        return new Response(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "Hi." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
+      }
+      return new Response(JSON.stringify(replies[path] ?? {}), { status: replies[path] ? 200 : 404 });
+    }));
+    const instance = await create({ url: "http://192.168.1.20:11434/v1", catalog: "ollama" });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.refreshModels?.();
+      const threadId = randomUUID();
+      await instance.adapter.sendTurn({ threadId, text: "what is this?", model: "gemma2:2b", images: [{ path: "/not-read.png", mime: "image/png", bytes: 1 }] });
+      await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId);
+      expect(bodies[0]).toContain("this model cannot see images");
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("never asks another server on this network for Ollama's model list", async () => {

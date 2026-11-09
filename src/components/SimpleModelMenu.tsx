@@ -60,8 +60,8 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
       data-org-blocked={row.blocked || undefined}
       disabled={row.blocked}
       aria-pressed={row.current}
-      aria-label={[modelOptionLabel(option), option.provider, reason].filter(Boolean).join(" · ")}
-      title={[modelOptionLabel(option), option.provider, reason].filter(Boolean).join(" · ")}
+      aria-label={[modelOptionLabel(option), option.provider, row.detail, reason].filter(Boolean).join(" · ")}
+      title={[modelOptionLabel(option), option.provider, row.detail, reason].filter(Boolean).join(" · ")}
       tabIndex={-1}
       onClick={() => onPick(instance, row.model ?? option.id, row.variant)}
       className={SIMPLE_MENU_ROW}

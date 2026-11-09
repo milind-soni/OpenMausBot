@@ -22,7 +22,7 @@ export function withInstanceIcon(cfg: AppConfig, instanceId: string, icon: Provi
 }
 
 /** Who runs a server, by its host. `*` is one DNS label, or the rest of one. Only providers we have a mark for:
- * Groq, Together, Fireworks and LM Studio servers keep the driver's own mark; Ollama is told by its answers. */
+ * Groq, Together, Fireworks and LM Studio servers keep the driver's own mark; Ollama isn't told by its host. */
 const SERVER_HOSTS: Record<string, ProviderIconPreset> = {
   "api.openai.com": "openai", "*.api.openai.com": "openai",
   "*.openai.azure.com": "azure", "*.services.ai.azure.com": "azure", "*.cognitiveservices.azure.com": "azure",

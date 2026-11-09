@@ -143,7 +143,8 @@ function currentRow(input: SimpleMenuInput): MenuCurrent {
   const active = instances.find((instance) => instance.instanceId === selection.instanceId);
   const option = active?.models.options.find((candidate) => candidate.id === selection.model);
   const name = option ? modelOptionLabel(option) : selection.model;
-  const row = { instance: active, label: modelName(active, selection.model, selection.variant), title: active ? `${engineDisplayName(active)} · ${name}${variantSuffix(active, selection.model, selection.variant)}` : name, warning: false, pending: false };
+  const detail = localModelDetail(option?.local);
+  const row = { instance: active, label: modelName(active, selection.model, selection.variant), title: `${active ? `${engineDisplayName(active)} · ${name}${variantSuffix(active, selection.model, selection.variant)}` : name}${detail ? ` · ${detail}` : ""}`, warning: false, pending: false };
   if (!active) return loading ? { ...row, pending: true } : { ...row, meta: t("model.simple.unavailable"), warning: true };
   if (!option && input.refreshing === active.instanceId) return { ...row, pending: true };
   if (option?.orgBlocked) return { ...row, meta: t("model.orgBlocked"), warning: true, blocked: true };
@@ -154,7 +155,7 @@ function currentRow(input: SimpleMenuInput): MenuCurrent {
   const family = signInFamily(active);
   const accounts = family ? instances.filter((instance) => signInFamily(instance) === family).length : 0;
   if (accounts > 1 || active.snapshot.chatgptPlan) return { ...row, meta: engineDisplayName(active) };
-  return option?.provider ? { ...row, meta: option.provider } : row;
+  return option?.provider || detail ? { ...row, meta: option?.provider ?? detail } : row;
 }
 
 export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {

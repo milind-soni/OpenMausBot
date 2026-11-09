@@ -67,6 +67,11 @@ describe("Ollama in the Simple model menu", () => {
     ]);
   });
 
+  it("says what the selected model is too", () => {
+    const built = menu([ollama], { selection: { instanceId: "openaiCompat", model: "gemma2:2b" } });
+    expect(built.current).toMatchObject({ label: "gemma2:2b", meta: "2.6B · 912 MB · No tools", title: "Ollama · gemma2:2b · 2.6B · 912 MB · No tools" });
+  });
+
   it("keeps the API key heading for another OpenAI-compatible server", () => {
     expect(menu([openaiKey]).groups.map((group) => group.label)).toEqual(["OpenAI · API key"]);
   });
