@@ -384,9 +384,9 @@ export class DeviceAuthController {
   private async stopSpawned(current: ChildProcess | null): Promise<boolean> {
     const gone = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null || cliProcessStopped(child);
     if (current && !gone(current)) this.spawned.add(current);
-    for (const child of [...this.spawned]) if (gone(child)) this.spawned.delete(child);
+    for (const child of this.spawned) if (gone(child)) this.spawned.delete(child);
     for (let pass = 0; pass < 4 && this.spawned.size > 0; pass++) {
-      for (const child of [...this.spawned]) {
+      for (const child of this.spawned) {
         await this.stopChild(child).catch(() => false);
         if (gone(child)) this.spawned.delete(child);
       }
