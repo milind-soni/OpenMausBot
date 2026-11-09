@@ -30,7 +30,7 @@ export interface BurstTurnOutcome {
 
 /** The server's refusal to start a turn now, for a reason that passes (the thread is busy, the account is settling). */
 export const startsLater = (error: unknown): boolean => (error as { status?: number })?.status === 409
-  && ["thread_busy", "settling", "thread_limit"].includes((error as { code?: string }).code ?? "");
+  && ["thread_busy", "settling", "thread_limit", "moved"].includes((error as { code?: string }).code ?? "");
 
 export interface BurstManagerDeps {
   store: BurstStore;
