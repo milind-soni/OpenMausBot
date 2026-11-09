@@ -397,6 +397,17 @@ describe("Runtime: one tree, one lane", () => {
     store.close();
   });
 
+  it("charges the request budget once per fan-out, and still refuses the next call", () => {
+    const w = world(() => "hold", { requests: 1 });
+    const root = w.runtime.begin(beginReq());
+    ok(w.runtime.enqueue({ ...toBot("builder", root.id), fanOut: "call-1" }));
+    ok(w.runtime.enqueue({ ...toBot("tester", root.id), fanOut: "call-1" }));
+    expect(w.store.get(root.id)?.budgets?.requests).toBe(1);
+    expect(w.store.children(root.id).map(c => c.fanOut)).toEqual(["call-1", "call-1"]);
+    expect(w.runtime.enqueue({ ...toBot("scout", root.id), fanOut: "call-2" })).toMatchObject({ ok: false, outcome: "budget" });
+    expect(w.runtime.enqueue(toBot("scout", root.id))).toMatchObject({ ok: false, outcome: "budget" });
+  });
+
   it("cancels down the tree, aborts running turns and reports each stop", async () => {
     const w = world(() => "hold");
     const root = w.runtime.begin(beginReq());

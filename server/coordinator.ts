@@ -107,6 +107,8 @@ export interface HandoffOptions {
   approvalGranted?: boolean;
   rework?: boolean;
   requestBatchKey?: string;
+  /** One call handing the same work to several teammates: it counts once against the request budget. */
+  fanOut?: string;
   doneWhen?: string;
   /** The target is a new thread of the requester's own bot (start_thread with report_back). */
   ownThread?: boolean;

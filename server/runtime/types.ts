@@ -152,6 +152,8 @@ export interface Assignment {
   approved?: boolean;
   /** A room brief shown once per call: every recipient of that call shares it. */
   batchKey?: string;
+  /** The call that handed this out, when one call reached several teammates. */
+  fanOut?: string;
   version: 1;
 }
 
@@ -217,6 +219,8 @@ export interface EnqueueRequest {
   driverKind?: string;
   approved?: boolean;
   batchKey?: string;
+  /** One call that hands the same work to several teammates: it counts once against the request budget. */
+  fanOut?: string;
   /** A new thread of the requester's own bot (tree.ts ownThread): the requesting turn is not an ancestor it refuses. */
   ownThread?: boolean;
 }

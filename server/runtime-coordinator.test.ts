@@ -91,10 +91,10 @@ const begun = (w: World, source: RoomAddress, generation: string, sourceText = "
 };
 
 const send = (w: World, source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,
-  opts: { approved?: boolean; rework?: boolean; batchKey?: string; sourceText?: string } = {}) => {
+  opts: { approved?: boolean; rework?: boolean; batchKey?: string; fanOut?: string; sourceText?: string } = {}) => {
   if (!parentId) begun(w, source, generation, opts.sourceText);
   return w.coordinator.enqueue(source, generation, parentId, target, text, { approvalGranted: opts.approved ?? false, rework: opts.rework ?? false,
-    requestBatchKey: opts.batchKey });
+    requestBatchKey: opts.batchKey, ...(opts.fanOut ? { fanOut: opts.fanOut } : {}) });
 };
 
 const ended = (w: World, generation: string, ok = true) =>
@@ -453,7 +453,15 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
     await deep.host.release(node.id, { ok: true, text: "done" });
     const tight = world(undefined, { requests: 1 });
     send(tight, chief, "gen-1", undefined, builder, "Build it");
-    expect(() => send(tight, chief, "gen-1", undefined, tester, "Test it")).toThrow("Room handoff budget exhausted");
+    expect(() => send(tight, chief, "gen-1", undefined, tester, "Test it")).toThrow(/limit of 1 hand-offs.*nobody can reset it, the person included/s);
+  });
+
+  it("counts one call to several teammates as one request against the budget", () => {
+    const w = world(undefined, { requests: 1 });
+    const { node: first } = send(w, chief, "gen-1", undefined, builder, "Review it", { fanOut: "call-1" });
+    const { node: second } = send(w, chief, "gen-1", undefined, tester, "Review it", { fanOut: "call-1" });
+    expect([first.status, second.status]).toEqual(["queued", "queued"]);
+    expect(() => send(w, chief, "gen-1", undefined, { botId: "scout", threadId: "scout-work" }, "Review it", { fanOut: "call-2" })).toThrow(/limit of 1 hand-offs/);
   });
 
   it("lets one Chief turn brief a room of 25 visitors and starts every one of them", async () => {
