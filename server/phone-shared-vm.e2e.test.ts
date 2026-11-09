@@ -214,7 +214,8 @@ describe("a person's hold on the shared Local VM", () => {
   afterEach(async () => {
     holdBoatList = null;
     releaseBoat();
-    await boatCall;
+    await boatCall?.catch(() => {});
+    boatCall = undefined;
     writeFileSync(finishFile, "finish");
     // A bot a person's hold reaches cannot be deleted, so every hold a test left goes first.
     await control(api, witness, { action: "release" });
@@ -265,11 +266,11 @@ describe("a person's hold on the shared Local VM", () => {
     await sleep(GRACE_MS / 2);
     const beatAt = Date.now();
     expect((await control(phone, a.id, { action: "check", controlLeaseId: id })).body.owned).toBe(true);
-    await sleep(1_000);
-    expect((await control(phone, a.id, { action: "check", controlLeaseId: lease() })).body.owned).toBe(false);
     await sleep(takenAt + GRACE_MS + 600 - Date.now());
     expect(await held(a.id)).toBe(true);
-    await until(() => held(a.id), value => !value, beatAt + GRACE_MS + 800 - Date.now());
+    expect((await control(phone, a.id, { action: "check", controlLeaseId: lease() })).body).toMatchObject({ owned: false, held: true });
+    await sleep(beatAt + GRACE_MS + 1_500 - Date.now());
+    expect(await held(a.id), "a wrong lease's check must not keep the hold").toBe(false);
     await until(() => framesFor(a.id, since).at(-1)?.held, value => value === false);
     if (mode === "per-bot") expect(await held(desk.id)).toBe(true);
     expect(await held(cloud.id)).toBe(true);
@@ -788,6 +789,18 @@ describe("a person's hold on the shared Local VM", () => {
     await until(() => existsSync(frame), Boolean, 10_000);
     await finishTurns([worker.id, worker.threadId]);
   }, 45_000);
+
+  it("a bot moved to the cloud while its turn asks a sign-in hands back, on Done, the computer the person took once the turn ended", async () => {
+    const worker = await newBot("Worker", { computer: "vm" });
+    const turn = await startTurn(worker.id, worker.threadId);
+    await ok("PATCH", `/api/bots/${worker.id}`, { computer: "cloud" });
+    const card = await askSignIn(turn.comms, "w.example");
+    await finishTurns([worker.id, worker.threadId]);
+    expect((await control(api, worker.id, { action: "take" }, worker.threadId)).body.held).toBe(true);
+    await ok("POST", `/api/bots/${worker.id}/sign-in-cards/${card}/done`, { threadId: worker.threadId });
+    expect({ desk: await held(witness), conversation: await held(worker.id, worker.threadId), bot: await held(worker.id) })
+      .toEqual({ desk: false, conversation: false, bot: false });
+  }, 60_000);
 
   it("a bot moved to the cloud while its turn still works on the shared desktop is told about a hold taken on that conversation", async () => {
     const worker = await newBot("Worker", { computer: "vm" });

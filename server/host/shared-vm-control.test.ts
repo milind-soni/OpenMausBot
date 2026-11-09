@@ -114,6 +114,13 @@ describe("what a hold on the shared desktop reaches", () => {
     expect(vm.botSnapshot("gone").held).toBe(false);
   });
 
+  it.each(["per-bot", "pool"] as const)("outside shared mode tells a change on the desktop to every bot, and one on a bot's own key to that bot: %s", (mode) => {
+    const { vm, setMode } = fixture({ bots: [{ id: "ada" }, { id: "books", computer: "cloud" }, { id: "cy", computer: "cloud" }], tasks: { t: ["books", "vm"] } });
+    setMode(mode);
+    expect(vm.membersOf(DESK)).toEqual(["ada", "books", "cy"]);
+    expect(vm.membersOf("cy")).toEqual(["cy"]);
+  });
+
   it("tells a change on a team's cloud computer to the bots that inherit it or run a turn on it", () => {
     const { vm } = fixture({ bots: [{ id: "ada" }, { id: "bea" }, { id: "cy" }], team: { ada: "c1" }, teamTurns: { r: { computerId: "c1", botId: "bea" } } });
     expect(vm.membersOf(teamComputerOwner("c1"))).toEqual(["ada", "bea"]);
