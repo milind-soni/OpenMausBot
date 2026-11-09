@@ -6,6 +6,12 @@ OpenMausBot can provision and manage cloud computers through [Mola](https://gith
 
 Mola provides instant computers powered by Omarchy. Each machine runs in its own virtual machine. You can use Mola Cloud (hosted) or run your own Mola Core (self-hosted). Machines start in about one second and become usable in under ten seconds.
 
+**API Compatibility**: OpenMausBot supports both APIs:
+- **Cloud API** (`https://cloud.mola.sh/api/v1`): uses `/computers` endpoints, viewer grants for desktop access
+- **Self-hosted API** (`http://127.0.0.1:4141/v1`): uses `/machines` endpoints, direct desktop links
+
+The provider automatically detects which API to use based on the configured `MOLA_API_URL`.
+
 ### Default Configuration
 
 - **Operating System**: Ubuntu 24.04 XFCE Desktop (`ubuntu-xfce:24.04-4`)

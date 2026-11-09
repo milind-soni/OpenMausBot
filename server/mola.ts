@@ -1,6 +1,13 @@
 // Changes: Created Mola provider implementation following Boat pattern.
-// Mola (mola.sh) public API v1: https://mola.sh/docs/api
-// Mola creates instant Linux computers (Ubuntu/Omarchy) that agents can see, control, and operate.
+// Mola Cloud API v1 (https://cloud.mola.sh/api/v1): uses /computers endpoints, viewer grants for desktop
+//   Source: obaid/mola-cp (private repo) - StoreApiComputerRequest.php, ComputerController.php, ViewerGrantController.php
+// mola-core self-hosted API v1 (http://127.0.0.1:4141/v1): uses /machines endpoints, direct desktop links
+//   Source: https://github.com/obaid/mola-core/blob/main/docs/api.md
+//
+// Uncertain/Not Confirmed:
+// - Cloud API response shape for computer status fields (assumed same as self-hosted: data.status, data.id)
+// - Cloud API error response shapes (using same handling as self-hosted)
+// - Whether Cloud API auto-stop behavior differs from self-hosted
 import { createHash } from "node:crypto";
 
 import { DATA_DIR, type AppConfig } from "./config.ts";
@@ -8,6 +15,19 @@ import { loadEnvironmentId } from "./environment.ts";
 import { molaCredential, molaProviderApi, type ServiceCredential } from "./included-services.ts";
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
+
+// API detection: Cloud uses /computers, self-hosted uses /machines
+function isCloudApi(apiUrl: string): boolean {
+  return apiUrl.includes("cloud.mola.sh");
+}
+
+function resourcePath(apiUrl: string): "computers" | "machines" {
+  return isCloudApi(apiUrl) ? "computers" : "machines";
+}
+
+function getMolaApiUrl(cfg: AppConfig): string {
+  return cfg.mola?.apiUrl || molaProviderApi();
+}
 
 export const MAX_REMOTE_COMMAND_LENGTH = 4_000;
 
@@ -139,7 +159,9 @@ export async function molaNameMatchesBot(botId: string, name: string): Promise<b
 }
 
 export async function runCommand(cfg: AppConfig, machineId: string, command: string, { timeoutMs = 120_000, signal }: { timeoutMs?: number; signal?: AbortSignal } = {}) {
-  const res = await molaFetch(cfg, `/machines/${machineId}/actions`, {
+  const apiUrl = getMolaApiUrl(cfg);
+  const resource = resourcePath(apiUrl);
+  const res = await molaFetch(cfg, `/${resource}/${machineId}/actions`, {
     method: "POST",
     body: JSON.stringify({ action: "exec", command, timeout: Math.floor(timeoutMs / 1000) }),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs + 5_000)]) : AbortSignal.timeout(timeoutMs + 5_000),
@@ -155,8 +177,30 @@ export async function runCommand(cfg: AppConfig, machineId: string, command: str
 }
 
 async function mintDesktopUrl(cfg: AppConfig, machineId: string, { requestMs = 30_000 } = {}) {
-  const { body } = await molaJson(cfg, `/machines/${machineId}/desktop`, { method: "POST", signal: AbortSignal.timeout(requestMs) });
-  return body?.data?.desktop_url ?? null;
+  const apiUrl = getMolaApiUrl(cfg);
+  const resource = resourcePath(apiUrl);
+  
+  if (isCloudApi(apiUrl)) {
+    // Cloud API: create viewer grant (obaid/mola-cp: app/Http/Controllers/Api/V1/ViewerGrantController.php)
+    const { body } = await molaJson(cfg, `/${resource}/${machineId}/viewers`, { 
+      method: "POST", 
+      body: JSON.stringify({ 
+        origin: "https://openmausbot.local", // Required HTTPS origin
+        mode: "desktop", // Required: desktop, window, or browser
+        expires_in_minutes: 60 // Default 60, max 1440
+      }),
+      signal: AbortSignal.timeout(requestMs) 
+    });
+    // Response includes embed_url which has the viewer URL
+    return body?.data?.embed_url ?? body?.data?.url ?? null;
+  } else {
+    // Self-hosted API: direct desktop link
+    const { body } = await molaJson(cfg, `/${resource}/${machineId}/desktop`, { 
+      method: "POST", 
+      signal: AbortSignal.timeout(requestMs) 
+    });
+    return body?.data?.desktop_url ?? null;
+  }
 }
 
 async function waitReady(cfg: AppConfig, machineId: string, budgetMs = MOLA_WAIT_READY_MS) {
@@ -166,13 +210,17 @@ async function waitReady(cfg: AppConfig, machineId: string, budgetMs = MOLA_WAIT
   
   try {
     while (Date.now() < deadline) {
-      const { body } = await molaJson(cfg, `/machines/${machineId}`, { signal: untilDeadline() });
+      const apiUrl = getMolaApiUrl(cfg);
+      const resource = resourcePath(apiUrl);
+      const { body } = await molaJson(cfg, `/${resource}/${machineId}`, { signal: untilDeadline() });
       const status = body?.data?.status;
       if (READY.has(status)) return body.data;
       if (TERMINAL.has(status)) return null;
       
       if (status === "stopped") {
-        const started = await molaJson(cfg, `/machines/${machineId}/start`, { method: "POST", signal: untilDeadline() });
+        const apiUrl = getMolaApiUrl(cfg);
+        const resource = resourcePath(apiUrl);
+        const started = await molaJson(cfg, `/${resource}/${machineId}/start`, { method: "POST", signal: untilDeadline() });
         if (!started.ok && started.status !== 409) {
           const refusal = molaRefusal(started.status, "starting the cloud computer", started.body, usesIncludedMola(cfg));
           if (started.status < 500) throw refusal;
@@ -214,7 +262,9 @@ function safeMolaStatus(value: unknown): string {
 async function listMolaPages(cfg: AppConfig): Promise<{ ok: true; machines: any[] } | { ok: false; problem: string; credentialRejected?: boolean; unreachable?: boolean }> {
   let listed: Awaited<ReturnType<typeof molaJson>>;
   try {
-    listed = await molaRead(cfg, "/machines");
+    const apiUrl = getMolaApiUrl(cfg);
+    const resource = resourcePath(apiUrl);
+    listed = await molaRead(cfg, `/${resource}`);
   } catch {
     return { ok: false, unreachable: true, problem: `Could not reach ${molaServiceName(usesIncludedMola(cfg))} to list cloud computers — check your connection and refresh` };
   }
@@ -325,7 +375,9 @@ export async function inspectMolaIdentity(cfg: AppConfig, machineId: string): Pr
   
   let inspected: Awaited<ReturnType<typeof molaJson>>;
   try {
-    inspected = await molaJson(cfg, `/machines/${machineId}`, { signal: AbortSignal.timeout(20_000) });
+    const apiUrl = getMolaApiUrl(cfg);
+    const resource = resourcePath(apiUrl);
+    inspected = await molaJson(cfg, `/${resource}/${machineId}`, { signal: AbortSignal.timeout(20_000) });
   } catch {
     return {
       available: false,
@@ -353,7 +405,9 @@ export async function inspectMolaIdentity(cfg: AppConfig, machineId: string): Pr
 }
 
 async function stopMola(cfg: AppConfig, machineId: string): Promise<void> {
-  const stopped = await molaJson(cfg, `/machines/${machineId}/stop`, { method: "POST" });
+  const apiUrl = getMolaApiUrl(cfg);
+  const resource = resourcePath(apiUrl);
+  const stopped = await molaJson(cfg, `/${resource}/${machineId}/stop`, { method: "POST" });
   if (!stopped.ok) {
     throw Object.assign(new Error(molaErrorMessage(stopped.status, "mola sleep", stopped.body, usesIncludedMola(cfg))), { status: stopped.status });
   }
@@ -420,7 +474,9 @@ export async function deleteManagedMola(
   
   const release = claim?.(instance);
   try {
-    const removed = await molaJson(cfg, `/machines/${machineId}`, { method: "DELETE" });
+    const apiUrl = getMolaApiUrl(cfg);
+    const resource = resourcePath(apiUrl);
+    const removed = await molaJson(cfg, `/${resource}/${machineId}`, { method: "DELETE" });
     if (!removed.ok && removed.status !== 404 && removed.status !== 410) {
       throw Object.assign(new Error(molaErrorMessage(removed.status, "mola delete", removed.body, usesIncludedMola(cfg))), { status: removed.status });
     }
@@ -438,7 +494,9 @@ export async function findMola(cfg: AppConfig, botId: string) {
   if (cachedId) {
     let direct: Awaited<ReturnType<typeof molaJson>> | null = null;
     try {
-      direct = await molaJson(cfg, `/machines/${cachedId}`, { signal: AbortSignal.timeout(20_000) });
+      const apiUrl = getMolaApiUrl(cfg);
+      const resource = resourcePath(apiUrl);
+      direct = await molaJson(cfg, `/${resource}/${cachedId}`, { signal: AbortSignal.timeout(20_000) });
     } catch {
     }
     const directMola = direct?.body?.data;
@@ -499,9 +557,11 @@ export function describeMolaAccount(cfg: AppConfig): { configured: boolean } {
   return { configured: molaConfigured(cfg) };
 }
 
-export async function verifyToken(token: string): Promise<{ ok: true } | { ok: false; message: string; rejected?: true }> {
+export async function verifyToken(token: string, apiUrl?: string): Promise<{ ok: true } | { ok: false; message: string; rejected?: true }> {
   try {
-    const res = await fetch(`${molaProviderApi()}/machines`, {
+    const baseUrl = apiUrl || molaProviderApi();
+    const resource = resourcePath(baseUrl);
+    const res = await fetch(`${baseUrl}/${resource}`, {
       headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(20_000),
     });
@@ -562,15 +622,33 @@ export async function provisionMola(cfg: AppConfig, botId: string, _botName: str
   
   try {
     if (!mola) {
-      const createRes = await molaJson(cfg, "/machines", {
-        method: "POST",
-        body: JSON.stringify({
+      const apiUrl = getMolaApiUrl(cfg);
+      const resource = resourcePath(apiUrl);
+      
+      // Different payload shapes for Cloud vs self-hosted
+      // See obaid/mola-cp: app/Http/Requests/Api/StoreApiComputerRequest.php
+      let createPayload: any;
+      if (isCloudApi(apiUrl)) {
+        // Cloud API: image slug, omit profile to use image default (e.g. "lite" for ubuntu)
+        createPayload = {
+          name: vmName,
+          image: "ubuntu", // Ubuntu image slug (mola-cp docs/ubuntu.md)
+          // Omit profile: Cloud auto-fills from image.default_profile_slug
+        };
+      } else {
+        // Self-hosted uses image_ref and explicit resources
+        createPayload = {
           name: vmName,
           vcpus: DEFAULT_MOLA_VCPUS,
           memory_mb: DEFAULT_MOLA_MEMORY_MB,
           disk_gb: DEFAULT_MOLA_DISK_GB,
           image_ref: "ubuntu-xfce:24.04-4", // Ubuntu 24.04 XFCE desktop
-        }),
+        };
+      }
+      
+      const createRes = await molaJson(cfg, `/${resource}`, {
+        method: "POST",
+        body: JSON.stringify(createPayload),
         signal: AbortSignal.timeout(45_000),
       });
       
@@ -593,7 +671,9 @@ export async function provisionMola(cfg: AppConfig, botId: string, _botName: str
     if (!created || !mola?.id) throw error;
     
     try {
-      await molaJson(cfg, `/machines/${mola.id}`, { method: "DELETE" });
+      const apiUrl = getMolaApiUrl(cfg);
+      const resource = resourcePath(apiUrl);
+      await molaJson(cfg, `/${resource}/${mola.id}`, { method: "DELETE" });
     } catch {
       // Cleanup failed, but throw original error
     }
@@ -659,7 +739,9 @@ export async function screenshotMola(cfg: AppConfig, botId: string, knownMolaId?
     machineId = mola.id as string;
   }
   
-  const res = await molaFetch(cfg, `/machines/${machineId}/actions`, {
+  const apiUrl = getMolaApiUrl(cfg);
+  const resource = resourcePath(apiUrl);
+  const res = await molaFetch(cfg, `/${resource}/${machineId}/actions`, {
     method: "POST",
     body: JSON.stringify({ action: "screenshot" }),
     signal: options?.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
