@@ -86,7 +86,7 @@ describe("which Chrome the bots' browser runs", () => {
     expect(resolveChromePlan(host("linux", []), managed)).toEqual({ kind: "download", pin: chromeForTestingPin("linux", "arm64") });
     expect(resolveChromePlan({ ...host("linux", []), arch: "x64" }, managed)).toEqual({ kind: "download", pin: chromeForTestingPin("linux", "x64") });
     const downloaded = chromeForTestingExecutable("/data", chromeForTestingPin("linux", "arm64")!);
-    expect(downloaded).toBe("/data/tools/chrome/153.0.8010.47/linux-arm64/chrome-linux-arm64/chrome");
+    expect(downloaded.replaceAll("\\", "/")).toBe("/data/tools/chrome/153.0.8010.47/linux-arm64/chrome-linux-arm64/chrome");
     expect(resolveChromePlan(host("linux", [downloaded]), managed)).toEqual({ kind: "chrome", chrome: { path: downloaded, source: "downloaded" }, fallback: null });
     expect(resolveChromePlan(host("linux", ["/opt/google/chrome/chrome"]), managed)).toEqual({ kind: "chrome", chrome: { path: "/opt/google/chrome/chrome", source: "installed" }, fallback: chromeForTestingPin("linux", "arm64") });
     expect(resolveChromePlan({ ...host("linux", []), arch: "ia32" }, managed)).toEqual({ kind: "legacy", reason: "no Chrome is installed and none is pinned for this platform" });
