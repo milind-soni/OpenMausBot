@@ -251,6 +251,20 @@ describe("a new Cloud's first hour", () => {
     expect(fh.tally()).toEqual({ sorted: 40, drafted: 6, prepped: 4, routines: 0 });
   });
 
+  it("holds the recap while the person's newest message is still unanswered, so it never reads as the answer", () => {
+    const s = setup({ start: "2026-10-27T09:00:00Z" });
+    const fh = s.make();
+    fh.begin();
+    s.ledger.add("sorted", 29);
+    s.set("2026-10-28T09:00:00Z");
+    s.write("Every couple in both movies and Friends");
+    fh.tick();
+    expect(s.texts().filter((text) => text?.startsWith("So far"))).toEqual([]);
+    s.reply("Here they are.");
+    fh.tick();
+    expect(s.texts().at(-1)).toBe("So far I've sorted 29 emails: about 30 minutes back.");
+  });
+
   it("counts a routine's posted results in the recap, and says nothing at all when nothing was done", () => {
     const s = setup({ start: "2026-10-27T09:00:00Z" });
     const fh = s.make();
