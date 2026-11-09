@@ -333,8 +333,11 @@ export class FakeChrome implements CdpTransport {
         return { root: { backendNodeId: 1000 } };
       case "DOM.resolveNode":
         return { object: { objectId: `node-${String(params.backendNodeId)}` } };
-      case "DOM.describeNode":
-        return { node: { backendNodeId: Number(String(params.objectId ?? "").replace("node-", "")) || 1000, nodeName: "DIV" } };
+      case "DOM.describeNode": {
+        const backendNodeId = Number(params.backendNodeId ?? String(params.objectId ?? "").replace("node-", "")) || 1000;
+        const item = page.elements[backendNodeId - 1];
+        return { node: { backendNodeId, nodeName: item?.editable ? "INPUT" : "DIV", attributes: item?.editable ? ["type", "text"] : [] } };
+      }
       case "DOM.getContentQuads": {
         const box = page.elements[Number(params.backendNodeId) - 1]?.box;
         if (!box) throw new Error("Could not compute content quads.");
@@ -370,7 +373,7 @@ export class FakeChrome implements CdpTransport {
       }
       case "Input.dispatchKeyEvent": {
         const element = page.focused === null ? undefined : page.elements[page.focused];
-        if (element?.editable && params.type === "keyDown" && params.key === "Backspace") element.value = "";
+        if (element?.editable && (params.type === "keyDown" || params.type === "rawKeyDown") && params.key === "Backspace") element.value = "";
         if (element?.editable && params.type === "keyDown" && typeof params.text === "string" && params.text.length === 1 && params.text !== "\r") element.value = `${element.value ?? ""}${params.text}`;
         return {};
       }

@@ -12,7 +12,7 @@ import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import { intervalAllowsOccurrence, intervalHasRestrictions, isSameLocalDay, latestIntervalOccurrence } from "./routine-intervals.ts";
-import { cloneSchedule, limitResetOccurrence, mergeScheduleUpdate, nextOccurrence, RoutineScheduleError, type RoutineSchedule, type RoutineScheduleInput } from "./routine-schedules.ts";
+import { limitResetOccurrence, mergeScheduleUpdate, nextOccurrence, RoutineScheduleError, type RoutineSchedule, type RoutineScheduleInput } from "./routine-schedules.ts";
 import { runsOnce } from "../shared/limit-reset.ts";
 import {
   isRoutineProblemRun, type RoutineAccess, type RoutineCheck, type RoutineContextAttachment, type RoutineDelivery, type RoutineIntervalWindow, type RoutineRetryCause,
@@ -29,13 +29,13 @@ import {
 import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./routine-waits.ts";
 import { failsLikeLastOutcome, outcomesNewestFirst } from "./routine-outcomes.ts";
 import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts";
-import { attachmentPathsOf, attachmentsMalformed, cloneAttachments } from "./routine-attachments.ts";
+import { attachmentPathsOf, attachmentsMalformed } from "./routine-attachments.ts";
 import { loadInstalledPackage, loadRequestReceipts, loadRoutine, loadRun } from "./routine-load.ts";
 import { applyHolds, holdCauses, type AppliedHolds } from "./routine-holds.ts";
 import { sanitizeInput } from "./routine-input.ts";
 import { applyCheckResult, routineLine, runLineFields, type RoutineLineCodes, type RoutineTroubleCode } from "./routine-lines.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
-import { resolveRoutineResultsThread, routineRunDefinition, type ResultsThreadAllocation } from "./routine-run-definition.ts";
+import { cloneRoutine, cloneRun, pauseFailedWorkflow, resolveRoutineResultsThread, routineRequestOwnerKey, routineRunDefinition, type ResultsThreadAllocation } from "./routine-run-definition.ts";
 
 export type { RoutineContextAttachment, RoutineIntervalWindow, RoutineRunStatus, RoutineRunTrigger };
 export { intervalHasRestrictions } from "./routine-intervals.ts";
@@ -47,8 +47,8 @@ export type RoutineRunOn = "maus" | "cloud";
 export type RoutineTarget = "bot" | "room-goal";
 export type RoutineGoalStatus = Exclude<GroupGoalRunStatus, "working">;
 
-
 export interface Routine extends RoutineTroubleCode {
+  executionMode?: "minimum-ai";
   id: string;
   name: string;
   prompt: string;
@@ -92,6 +92,7 @@ export interface RoutinePackageStamp {
 }
 
 export interface RoutineRun extends RoutineLineCodes {
+  executionMode?: "minimum-ai";
   id: string;
   routineId: string;
   routineName: string;
@@ -166,6 +167,7 @@ type RoutineRequestCommitFor<Action extends RoutineRequestOperation["action"]> =
   Omit<RoutineRequestCommit, "action"> & { action: Action };
 
 export interface RoutineInput {
+  executionMode?: "minimum-ai" | null;
   name: string;
   prompt: string;
   target?: RoutineTarget;
@@ -202,10 +204,6 @@ interface RoutineFile {
 
 export type RoutineRequestOwner = Pick<RoutineRequestReceipt, "requestId" | "messageId" | "botId" | "threadId">;
 
-function routineRequestOwnerKey(owner: RoutineRequestOwner): string {
-  return JSON.stringify([owner.requestId, owner.messageId, owner.botId, owner.threadId]);
-}
-
 /** What a routine's checks found: items for one AI run, a sentence while an app cannot be read, and the next time they
  * have something to do on time. */
 export interface RoutineCheckResult { run?: { prompt: string; key: string }; trouble?: string; troubleCode?: string; wakeAt?: number }
@@ -224,6 +222,7 @@ export interface RoutineManagerOptions {
   now?: () => number;
   /** Every payload must be `{ kind, … }`: the server numbers and replays frames by it. */
   emit?: (payload: Record<string, unknown>) => void;
+  runWorkflow?: (run: RoutineRun, signal: AbortSignal) => Promise<{ status: "completed"; output?: string } | { status: "failed"; error: string; partial?: boolean }>;
   botState: (botId: string) => "ready" | "busy" | "missing";
   goalState?: (groupId: string | undefined, coordinatorBotId: string) => "ready" | "busy" | "missing";
   createTask: (botId: string, title: string, run?: RoutineRun) => { threadId: string } | null;
@@ -281,22 +280,6 @@ const WAKE_HORIZON_MS = 60 * 60_000;
 
 export const ROUTINE_RESTARTED = "OpenMausBot restarted while this routine was running";
 const MAX_RUNS = 2_000;
-function cloneRoutine(routine: Routine): Routine {
-  return {
-    ...routine,
-    schedule: cloneSchedule(routine.schedule),
-    attachments: cloneAttachments(routine.attachments),
-  };
-}
-
-function cloneRun(run: RoutineRun): RoutineRun {
-  return {
-    ...run,
-    attachments: cloneAttachments(run.attachments),
-    denials: run.denials ? [...run.denials] : undefined,
-  };
-}
-
 export class RoutineManager {
   private readonly file: string; private readonly disk: OwnedFile;
   private readonly now: () => number;
@@ -305,6 +288,7 @@ export class RoutineManager {
   /** Written back unchanged on every save, so unrelated work never deletes a repairable row. */
   private unloadedRoutines: Routine[] = [];
   private runs: RoutineRun[] = [];
+  private workflowSignals = new Map<string, AbortController>();
   private routineRequestReceipts: RoutineRequestReceipt[] = [];
   private webhookRunReceipts: EventRunReceipt[] = [];
   private timer: DueTimer | null = null;
@@ -365,8 +349,9 @@ export class RoutineManager {
         this.wait(run, "Waiting for work it handed on to finish");
         continue;
       }
-      if (!requeueOnce(run, "restarted", ROUTINE_RESTARTED, this.now())) {
+      if (run.executionMode === "minimum-ai" || !requeueOnce(run, "restarted", ROUTINE_RESTARTED, this.now())) {
         Object.assign(run, { status: "failed", error: ROUTINE_RESTARTED, attention: undefined, finishedAt: this.now() } satisfies Partial<RoutineRun>);
+        if (run.executionMode === "minimum-ai") { run.partial = true; pauseFailedWorkflow(run, this.routines); }
         if (run.target === "room-goal") run.goalStatus = "failed";
       }
       cut.push(cloneRun(run));
@@ -574,6 +559,7 @@ export class RoutineManager {
     if (!routine) return null;
     const now = this.now();
     const clean = sanitizeInput({
+      executionMode: Object.hasOwn(patch, "executionMode") ? patch.executionMode : routine.executionMode,
       name: patch.name ?? routine.name,
       prompt: patch.prompt ?? routine.prompt,
       target: patch.target ?? routine.target,
@@ -616,7 +602,7 @@ export class RoutineManager {
         updatedAt: Math.max(now, routine.updatedAt + 1),
       });
       if (patch.enabled !== undefined) delete routine.heldFor;
-      for (const key of ["continuity", "modelSelection", "overlap", "runOnStartup", "access", "deliver"] as const) if (!clean[key]) delete routine[key];
+      for (const key of ["executionMode", "continuity", "modelSelection", "overlap", "runOnStartup", "access", "deliver"] as const) if (!clean[key]) delete routine[key];
       if (!clean.checks) for (const key of ["checks", "checkedAt", "checkTrouble", "checkTroubleCode", "wakeAt"] as const) delete routine[key];
       if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
         delete routine.timeoutMinutes;
@@ -829,7 +815,8 @@ export class RoutineManager {
   async cancelRun(id: string, reason?: string): Promise<RoutineRun | null> {
     const run = this.runs.find((r) => r.id === id);
     if (!run || !["queued", "running", "waiting"].includes(run.status)) return null;
-    run.status = "cancelled";
+    if (run.executionMode === "minimum-ai" && run.status !== "queued") { run.partial = true; const paused = pauseFailedWorkflow(run, this.routines); if (paused) this.emitRoutine(paused); } run.status = "cancelled";
+    this.workflowSignals.get(run.id)?.abort();
     if (run.target === "room-goal") run.goalStatus = "stopped";
     run.attention = undefined;
     run.finishedAt = this.now();
@@ -953,7 +940,7 @@ export class RoutineManager {
 
   /** At shutdown: a run whose turn the shutdown cuts stays running on disk, for the next start to pick up once. */
   close() {
-    this.closing = true; this.progress.atOnce();
+    this.closing = true; for (const signal of this.workflowSignals.values()) signal.abort(); this.progress.atOnce();
     this.stop();
   }
 
@@ -1153,7 +1140,17 @@ export class RoutineManager {
             continue;
           }
           const triggerSource = run.triggerSource ?? (run.manual ? "manual" : "schedule");
-          if (run.target === "room-goal") {
+          if (run.executionMode === "minimum-ai") {
+            const execute = this.options.runWorkflow;
+            if (!execute) { this.failRun(run, "Minimum AI is not available on this server"); continue; }
+            const controller = new AbortController(); this.workflowSignals.set(run.id, controller);
+            void execute(cloneRun(run), controller.signal).then((result) => {
+              if (run.status !== "running") return;
+              if (result.status === "failed") this.failRun(Object.assign(run, { partial: result.partial || undefined }), result.error);
+              else { Object.assign(run, { status: "completed", output: result.output ? redactSecretsInText(result.output).trim().slice(0, 2_000) : undefined, finishedAt: this.now() }); this.saveLater(); this.emitRun(run); }
+              queueMicrotask(() => this.tickInBackground());
+            }).catch((error: unknown) => { if (run.status === "running") { this.failRun(run, error instanceof Error ? error.message : "Workflow failed"); queueMicrotask(() => this.tickInBackground()); } }).finally(() => this.workflowSignals.delete(run.id));
+          } else if (run.target === "room-goal") {
             if (!this.options.startGoal) {
               this.failThread(task.threadId, "Room goal routines are unavailable");
               continue;
@@ -1358,13 +1355,14 @@ export class RoutineManager {
 
   private async stopRun(run: RoutineRun, detail: string, status: "stopped" | "limit-reached") {
     if (run.target === "room-goal") run.goalStatus = status;
-    this.failRun(run, detail);
+    if (run.executionMode === "minimum-ai") run.partial = true; this.workflowSignals.get(run.id)?.abort(); this.failRun(run, detail);
     if (!run.threadId) return;
     if (run.target === "room-goal") await this.options.interruptGoal?.(run.groupId, run.threadId, { status, detail }).catch(() => {});
     else await this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
   }
 
   private failRun(run: RoutineRun, message: string, status: "failed" | "missed" = "failed", alert?: RoutineAlert | null) {
+    const paused = pauseFailedWorkflow(run, this.routines); if (paused) this.emitRoutine(paused);
     Object.assign(run, { status, attention: undefined, error: redactSecretsInText(message).slice(0, 500), finishedAt: this.now() } satisfies Partial<RoutineRun>);
     this.saveLater();
     this.emitRun(run);

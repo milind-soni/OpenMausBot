@@ -128,6 +128,21 @@ describe("the refs a bot holds", () => {
     refs.clear();
     expect(refs.get("@e4")).toBeUndefined();
   });
+  it("resolves a saved target only when its current name and role uniquely identify a top-level element", () => {
+    const refs = new RefIndex();
+    refs.replace(['- button "Move Alpha to trash" [ref=e1]\n- button "Move Beta to trash" [ref=e2]']);
+    expect(refs.uniqueTarget("button", "Move Alpha to trash", true)).toBe("@e1");
+    expect(refs.uniqueTarget("button", "Move Alpha to trash", false)).toBeNull();
+    refs.replace(['- button "Move Alpha to trash" [ref=e9]\n- button "Move Beta to trash" [ref=e7]']);
+    expect(refs.uniqueTarget("button", "Move Alpha to trash", true)).toBe("@e9");
+    refs.replace(['- button "Move Alpha to trash" [ref=e9]\n- button "Move Alpha to trash" [ref=e10]']);
+    expect(refs.uniqueTarget("button", "Move Alpha to trash", true)).toBeNull();
+    refs.replace(['- Iframe [ref=e1]\n  - button "Move Alpha to trash" [ref=e2]']);
+    expect(refs.uniqueTarget("button", "Move Alpha to trash", true)).toBeNull();
+    refs.replace([], { e4: { role: "button", name: "Move Alpha to trash" } });
+    expect(refs.uniqueTarget("button", "Move Alpha to trash", true)).toBeNull();
+    expect(refs.uniqueTarget("button", "Missing", true)).toBeNull();
+  });
 });
 
 /** `clock`: time moves only when the steps wait, or when a test moves it. */

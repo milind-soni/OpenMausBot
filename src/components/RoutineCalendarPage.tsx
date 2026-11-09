@@ -1,3 +1,5 @@
+import { MinimumAiMode } from "./routines/MinimumAiMode";
+import { MinimumAiReview } from "./routines/MinimumAiReview";
 import { boatCapableEngine } from "@/lib/remote-desktop";
 import {
   useEffect,
@@ -49,20 +51,22 @@ import { isDone } from "@/lib/automations";
 import { cn } from "@/lib/cn";
 import {
   imageAttachmentFromFile,
-  type Attachment,
 } from "@/lib/composer-attachments";
 import {
   addDays,
   atLocalTime,
   CALENDAR_SLOT_MINUTES,
+  endOfLocalDate,
   formatGmtOffset,
   fromLocalDateAndTime,
   intervalAnchorForSave,
+  nextHour,
   nextIntervalForSave,
   packCalendarCollisions,
   slotAt,
   startOfDay,
   toLocalDateInput,
+  toContextAttachments,
   toLocalTimeInput,
   type CallOccurrence,
   type RoutineCalendarItem,
@@ -148,11 +152,7 @@ function preferredRoomLead(group: Group | undefined, bots: Bot[], preferredId?: 
     ?? members[0];
 }
 
-export function nextHour(): number {
-  const date = new Date(Date.now() + 60 * 60_000);
-  date.setMinutes(0, 0, 0);
-  return date.getTime();
-}
+export { nextHour } from "@/lib/routine-calendar";
 
 function sameDays(left: readonly number[] | undefined, right: readonly number[]): boolean {
   return Boolean(left && left.length === right.length && left.every((day, index) => day === right[index]));
@@ -163,11 +163,6 @@ function intervalDayChoice(schedule: RoutineSchedule | CalendarCall["schedule"])
   return sameDays(schedule.weekdays, WEEKDAYS) ? "weekdays" : "custom";
 }
 
-function endOfLocalDate(dateInput: string): number {
-  const date = new Date(`${dateInput}T00:00`);
-  date.setHours(23, 59, 59, 999);
-  return date.getTime();
-}
 function recurrenceFor(schedule: RoutineSchedule | CalendarCall["schedule"], at: number): RecurrenceChoice {
   if (schedule.type === "once") return "none";
   if (schedule.type === "limit_reset") return "limit_reset";
@@ -273,16 +268,6 @@ function BotPicker({
   );
 }
 
-function toContextAttachments(attachments: Attachment[]): Array<RoutineContextAttachment | CalendarCallAttachment> {
-  return attachments.flatMap((attachment) => attachment.kind === "paste" || attachment.kind === "citation" ? [] : [{
-    id: attachment.id,
-    kind: attachment.kind,
-    name: attachment.name,
-    path: attachment.path,
-    size: attachment.size,
-  }]);
-}
-
 export function EventEditor({
   seed,
   bots,
@@ -308,6 +293,9 @@ export function EventEditor({
   const [editorOpenedAt] = useState(() => Date.now());
   const [name, setName] = useState(existingRoutine?.name ?? existingCall?.name ?? seed.name ?? "");
   const [description, setDescription] = useState(existingRoutine?.prompt ?? existingCall?.description ?? seed.description ?? "");
+  const [minimumAi, setMinimumAi] = useState(existingRoutine?.executionMode === "minimum-ai");
+  const [reviewRoutineId, setReviewRoutineId] = useState<string | null>(null);
+  const [reviewExisting, setReviewExisting] = useState(false);
   const initialAt = existingRoutine?.schedule.type === "once"
     ? existingRoutine.schedule.at
     : existingRoutine?.schedule.type === "daily"
@@ -490,14 +478,19 @@ export function EventEditor({
           endsAt: intervalEndsAt,
         });
         if (!nextSchedule) throw new Error(cron?.error || t("routines.error.invalidSchedule"));
+        const unchanged = minimumAi && existingRoutine?.executionMode === "minimum-ai" && existingRoutine.prompt === description.trim().slice(0, 20_000) && existingRoutine.botId === (lockedBotId ?? botIds[0]) && routineTarget === "bot" && runOn === "maus";
+        const savedWorkflow = unchanged ? await editorRequest<{ workflow?: { approved?: boolean }; interrupted?: boolean }>(`/api/routines/${existingRoutine.id}/minimum-ai`).catch(() => null) : null;
+        const keepPlan = savedWorkflow?.workflow != null;
+        const keepApproved = savedWorkflow?.workflow?.approved === true && !savedWorkflow?.interrupted;
         const input: RoutineInput = {
+          executionMode: keepPlan ? undefined : minimumAi ? "minimum-ai" : null,
           name,
           prompt: description,
           target: routineTarget,
           botId: lockedBotId ?? botIds[0] ?? "",
           groupId: routineTarget === "room-goal" && groupId ? groupId : null,
           runOn: routineTarget === "room-goal" ? "maus" : runOn,
-          enabled: existingRoutine && (existingRoutine.enabled || !isDone(existingRoutine, savedAt)) ? undefined : true,
+          enabled: minimumAi && !keepApproved ? false : existingRoutine && (existingRoutine.enabled || !isDone(existingRoutine, savedAt)) ? undefined : true,
           schedule: nextSchedule,
           durationMinutes,
           timeoutMinutes,
@@ -509,6 +502,7 @@ export function EventEditor({
         };
         const response = await editorRequest(existingRoutine ? `/api/routines/${existingRoutine.id}` : "/api/routines", { method: existingRoutine ? "PATCH" : "POST", body: JSON.stringify(input) });
         dispatch({ type: "routinePatched", routine: response.routine });
+        if (minimumAi && !keepApproved) { setReviewExisting(Boolean(unchanged)); setReviewRoutineId(response.routine.id); return; }
       } else {
         if (recurrence === "interval" || recurrence === "limit_reset" || isCronChoice(recurrence)) throw new Error(t("routines.error.callSchedule"));
         const nextSchedule = makeCalendarSchedule(recurrence, at, weekdays);
@@ -861,6 +855,7 @@ export function EventEditor({
     ["weekly", "routines.repeat.weekly"],
   ] as const;
 
+  if (reviewRoutineId) return <MinimumAiReview routineId={reviewRoutineId} loadExisting={reviewExisting} request={editorRequest} onClose={onClose} onDone={(routine) => { dispatch({ type: "routinePatched", routine }); onClose(); }} />;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-3" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t(existingRoutine || existingCall ? "routines.event.editLabel" : "routines.event.createLabel")} tabIndex={-1} className="max-h-[94vh] w-full max-w-[760px] overflow-y-auto rounded-2xl border border-hairline/60 bg-panel shadow-2xl">
@@ -962,6 +957,7 @@ export function EventEditor({
             <FileText size={18} className="mt-2.5 shrink-0 text-ink-secondary" />
             <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={5} aria-label={t("routines.editor.descriptionLabel")} placeholder={isRoomGoal ? t("routines.goal.instructionsPlaceholder") : kind === "routine" ? (advanced ? t("routines.event.instructionsPlaceholder") : t("routines.editor.instructionsPlaceholder")) : t("routines.event.agendaPlaceholder")} className="min-w-0 flex-1 resize-y rounded-xl border border-hairline/50 bg-inset px-3.5 py-3 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent" />
           </div>
+          {kind === "routine" && (state.config?.features?.minimumAi || existingRoutine?.executionMode === "minimum-ai") && <MinimumAiMode enabled={minimumAi} onChange={setMinimumAi} />}
           {continuityControl}
 
           {advanced && attachmentsRow}
@@ -1000,7 +996,6 @@ export function EventEditor({
 
           {error && <div className="ml-10 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2.5 text-[13px] text-danger"><CircleAlert size={15} className="mt-0.5 shrink-0" />{error}</div>}
         </div>
-
 
         <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-hairline/40 bg-panel/95 px-5 py-3.5 backdrop-blur">
           <button onClick={onClose} className="rounded-lg px-4 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">{t("common.cancel")}</button>

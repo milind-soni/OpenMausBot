@@ -19,6 +19,7 @@ import { BrowserControlInterrupted } from "./session-control.ts";
 import { errorResult, pageLabel, snapshotText, textResult, withParts, type ToolResult } from "./shape.ts";
 import type { Tab, TabRegistry } from "./tabs.ts";
 import { targetOf, type ToolCall, type ToolInput } from "./tools.ts";
+import { browserPeerNames, captureBrowserClick, safeBrowserFillTarget, type BrowserFillStep, type BrowserRecording } from "../minimum-ai/browser-replay.ts";
 
 export const DEFAULT_ACTION_MS = 15_000;
 /** Kept back from a call's budget for the reads after its action. */
@@ -45,6 +46,8 @@ export interface BrowserStatus {
 }
 
 export interface ToolContext {
+  recording?: BrowserRecording;
+  beforeRecordedAction?: () => void;
   readonly control: ProfileControl;
   readonly tabs: TabRegistry;
   readonly browser: CdpBrowser;
@@ -298,7 +301,20 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
       const tab = tabOf(context, call.input.tab);
       const target = element(call.input);
       return act(context, tab, async () => {
+        let captured, peers: string[] | undefined;
+        if (context.recording) {
+          if (!("ref" in target) || (call.input.button !== undefined && call.input.button !== "left") || (call.input.clickCount !== undefined && call.input.clickCount !== 1) || context.tabs.list().length !== 1) context.recording.unsupported("The click cannot be recorded reliably");
+          else {
+            try { const snapshot = await tab.page.snapshot(); captured = captureBrowserClick(snapshot, target.ref); peers = browserPeerNames(snapshot, captured.role); }
+            catch { context.recording.unsupported("The click target could not be recorded reliably"); }
+          }
+        }
+        if (context.recording) {
+          context.beforeRecordedAction?.();
+          if (Date.now() >= context.deadline) throw new Error("The browser action timed out before the click");
+        }
         const clicked = await tab.page.click(target, { button: call.input.button ?? "left", clickCount: call.input.clickCount ?? 1, timeoutMs: remaining(context), pointer: context.pointer(tab) });
+        if (captured) context.recording?.record(captured, peers);
         return textResult(`Clicked ${"ref" in target ? target.ref : "selector" in target ? JSON.stringify(target.selector) : `${Math.round(clicked.x)},${Math.round(clicked.y)}`}${clicked.dialog ? "; it opened a dialog" : ""}.`);
       }, { observeChange: true });
     }
@@ -306,8 +322,23 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
       const tab = tabOf(context, call.input.tab);
       const target = element(call.input, false) as { ref: string } | { selector: string };
       return act(context, tab, async () => {
+        let captured: BrowserFillStep | undefined, peers: string[] | undefined;
+        if (context.recording) {
+          if (!("ref" in target) || call.input.submit || context.tabs.list().length !== 1) context.recording.unsupported("The form action cannot be recorded reliably");
+          else {
+            try {
+              const snapshot = await tab.page.snapshot();
+              const candidate: BrowserFillStep = { kind: "fill", ...captureBrowserClick(snapshot, target.ref), value: call.input.text };
+              if (!await safeBrowserFillTarget(tab.page, target.ref, candidate)) throw new Error("Sensitive or unsupported field");
+              captured = candidate; peers = browserPeerNames(snapshot, captured.role);
+            } catch { context.recording.unsupported("The form field cannot be recorded safely"); }
+          }
+          context.beforeRecordedAction?.();
+          if (Date.now() >= context.deadline) throw new Error("The browser action timed out before filling the field");
+        }
         await tab.page.fill(target, call.input.text);
         if (call.input.submit) await tab.page.press("Enter");
+        if (captured) context.recording?.record(captured, peers);
         return textResult(`Filled the field${call.input.submit ? " and pressed Enter" : ""}.`);
       }, { observeChange: true });
     }

@@ -8,6 +8,7 @@ import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime, BrowserSpawnSpec } from "../browser-runtime.ts";
 import type { StepContext } from "../browser-steps.ts";
 import type { FillLoginDeps } from "../login-fill.ts";
+import type { BrowserClickStep, BrowserFillStep, BrowserListQuery, BrowserStep } from "../minimum-ai/browser-replay.ts";
 import { LocalBackend } from "./backends.ts";
 import { sandboxDisabled } from "./chrome/host-setup.ts";
 import type { HostKind } from "./chrome/flags.ts";
@@ -215,9 +216,62 @@ export class RuntimeRouter {
     this.#afterCall = options.afterCall;
   }
 
+  /** Saved actions must meet the same host policy and resource-claim checks as bot calls. */
+  async listTargets(session: string, spec: BrowserSpawnSpec, query: BrowserListQuery, signal: AbortSignal, beforeDispatch: () => void): Promise<BrowserClickStep[]> {
+    const target = chromeTarget(session, spec);
+    if (!target) throw new Error("Saved browser actions are unsupported by this browser engine");
+    const refusal = this.#refusal?.(session, spec, { name: "agent_browser_snapshot", arguments: {} });
+    if (refusal) throw new Error(refusal);
+    return this.#chrome.service.listTargets(target, query, signal, () => {
+      beforeDispatch();
+      const refusalAfterClaim = this.#afterClaim?.(session, spec);
+      if (refusalAfterClaim) throw new Error(refusalAfterClaim);
+    });
+  }
+
+  async replayClick(session: string, spec: BrowserSpawnSpec, step: BrowserClickStep, signal: AbortSignal, beforeDispatch: () => void): Promise<void> {
+    const target = chromeTarget(session, spec);
+    if (!target) throw new Error("Saved browser actions are unsupported by this browser engine");
+    const refusal = this.#refusal?.(session, spec, { name: "agent_browser_click", arguments: {} });
+    if (refusal) throw new Error(refusal);
+    await this.#chrome.service.replayClick(target, step, signal, () => {
+      beforeDispatch();
+      const refusalAfterClaim = this.#afterClaim?.(session, spec);
+      if (refusalAfterClaim) throw new Error(refusalAfterClaim);
+    });
+  }
+
+  async replayFill(session: string, spec: BrowserSpawnSpec, step: BrowserFillStep, signal: AbortSignal, beforeDispatch: () => void): Promise<void> {
+    const target = chromeTarget(session, spec);
+    if (!target) throw new Error("Saved browser actions are unsupported by this browser engine");
+    const refusal = this.#refusal?.(session, spec, { name: "agent_browser_fill", arguments: {} });
+    if (refusal) throw new Error(refusal);
+    await this.#chrome.service.replayFill(target, step, signal, () => {
+      beforeDispatch();
+      const refusalAfterClaim = this.#afterClaim?.(session, spec);
+      if (refusalAfterClaim) throw new Error(refusalAfterClaim);
+    });
+  }
+
+  async replaySteps(session: string, spec: BrowserSpawnSpec, steps: readonly BrowserStep[], signal: AbortSignal, beforeDispatch: () => void): Promise<void> {
+    if (!chromeTarget(session, spec) || !steps.length || steps.length > 100) throw new Error("Saved browser actions are unsupported or incomplete");
+    for (const step of steps) {
+      signal.throwIfAborted();
+      if (!("kind" in step)) { await this.replayClick(session, spec, step, signal, beforeDispatch); continue; }
+      if (step.kind === "fill") { await this.replayFill(session, spec, step, signal, beforeDispatch); continue; }
+      const url = new URL(step.url);
+      if (step.kind !== "open" || !["https:", "http:"].includes(url.protocol) || url.username || url.password || url.href !== step.url) throw new Error("Invalid saved browser address");
+      const result = await this.agentRpc(session, spec, "tools/call", { name: "agent_browser_open", arguments: { url: step.url } }, () => { signal.throwIfAborted(); beforeDispatch(); });
+      const answer = result as { isError?: boolean; content?: Array<{ type?: string; text?: string }> } | null;
+      const text = answer?.content?.filter((part) => part.type === "text").map((part) => part.text ?? "").join(" ") ?? "";
+      if (answer?.isError || /site answered HTTP [45]\d\d|waiting at .*sign-in|HTTP sign-in/i.test(text)) throw new Error("The saved browser navigation failed");
+      signal.throwIfAborted();
+    }
+  }
+
   async agentRpc(session: string, spec: BrowserSpawnSpec, method: "tools/list" | "tools/call", params: unknown, beforeDispatch?: () => void, ctx?: StepContext): Promise<unknown> {
     const refusal = method === "tools/call" ? this.#refusal?.(session, spec, params) : null;
-    if (refusal) return { isError: true, content: [{ type: "text", text: refusal }] };
+    if (refusal) { ctx?.minimumAiRecording?.unsupported("Browser policy refused an action"); return { isError: true, content: [{ type: "text", text: refusal }] }; }
     const afterClaim = method === "tools/call" ? this.#afterClaim : undefined;
     const dispatch = afterClaim ? () => {
       beforeDispatch?.();
@@ -225,16 +279,20 @@ export class RuntimeRouter {
       if (text) throw new ClaimRefused(text);
     } : beforeDispatch;
     const target = chromeTarget(session, spec);
+    if (!target && method === "tools/call") ctx?.minimumAiRecording?.unsupported("This browser engine cannot record saved actions");
     let result: unknown;
     try {
-      result = await (target ? this.#chrome.service.agentRpc(target, method, params, dispatch) : this.#old.agentRpc(session, spec, method, params, dispatch, ctx));
+      result = await (target ? ctx?.minimumAiRecording ? this.#chrome.service.agentRpc(target, method, params, dispatch, ctx.minimumAiRecording) : this.#chrome.service.agentRpc(target, method, params, dispatch) : this.#old.agentRpc(session, spec, method, params, dispatch, ctx));
     } catch (error) {
+      ctx?.minimumAiRecording?.unsupported("A browser action did not complete reliably");
       if (error instanceof ClaimRefused) return { isError: true, content: [{ type: "text", text: error.message }] };
       throw error;
     }
     if (method !== "tools/call") return result;
     const annotated = this.#annotate ? this.#annotate(spec, result) : result;
-    return this.#afterCall ? this.#afterCall(session, spec, annotated) : annotated;
+    const final = this.#afterCall ? this.#afterCall(session, spec, annotated) : annotated;
+    if ((final as { isError?: boolean } | null)?.isError) ctx?.minimumAiRecording?.unsupported("A browser action did not complete reliably");
+    return final;
   }
 
   previewFrame<T>(session: string, capture: () => Promise<T>, spec: { command: string; args?: readonly string[] }): Promise<T | { png: string; format: "jpeg" }> {
