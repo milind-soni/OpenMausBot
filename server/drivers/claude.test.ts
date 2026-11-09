@@ -2027,6 +2027,33 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }
   });
 
+  it("keeps --autocompact off for a CLI version that refused it, even after another version and a rollback", async () => {
+    const dump = join(scratch, "rollback-autocompact.json");
+    const refused = join(scratch, "rollback-refused.jsonl");
+    const saved = { ...process.env };
+    const turn = async (threadId: string, version: string) => {
+      process.env.FAKE_CLAUDE_VERSION = version;
+      await instance.snapshot();
+      await instance.adapter.sendTurn({ threadId, text: "hi" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId)).toMatchObject({ ok: true });
+    };
+    try {
+      process.env.FAKE_CLAUDE_REJECT_AUTOCOMPACT = refused;
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump });
+      await turn("t-rollback-a", "2.1.232");
+      await turn("t-rollback-b", "2.1.240");
+      expect(readFileSync(refused, "utf8").trim().split("\n")).toHaveLength(2);
+      // Rolling back to the first version must not pass the flag it already refused.
+      await turn("t-rollback-a-again", "2.1.232");
+      expect(readFileSync(refused, "utf8").trim().split("\n")).toHaveLength(2);
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
+    } finally {
+      for (const key of ["FAKE_CLAUDE_REJECT_AUTOCOMPACT", "FAKE_CLAUDE_VERSION"]) {
+        if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
+      }
+    }
+  });
+
   it("keeps only the isolation flag a very old CLI accepts", async () => {
     // 1.0.100: --strict-mcp-config exists (1.0.60), --setting-sources not yet (1.0.122).
     const dump = join(scratch, "very-old-cli.json");

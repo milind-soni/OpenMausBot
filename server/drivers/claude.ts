@@ -801,8 +801,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
     let cliVersion: ClaudeCliVersion | null = null;
     let cliVersionChecked = false;
-    // Whether `claude --help` lists --autocompact (2.1.129 rejects it despite the floor); a launch refusing it keeps it off for that version.
-    let [cliHasAutocompact, cliHelpVersion, autocompactRefusedBy]: [boolean | null, string | null, string | null] = [null, null, null];
+    // Whether `claude --help` lists --autocompact (2.1.129 rejects it despite the floor); a launch refusing it keeps it off for that version (every refusing version is remembered).
+    let [cliHasAutocompact, cliHelpVersion]: [boolean | null, string | null] = [null, null], autocompactRefusedBy = new Set<string>();
     const readCliVersion = cliVersionProbe(config.cli);
     const ensureCliVersion = async (env: NodeJS.ProcessEnv): Promise<void> => {
       if (cliVersionChecked) return;
@@ -817,7 +817,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         done: new Promise<string | null>((resolve) => {
           execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) => resolve(err ? null : stdout));
         }).then((help) => {
-          cliHasAutocompact = help === null ? null : version !== autocompactRefusedBy && /^\s*--autocompact\b/m.test(help);
+          cliHasAutocompact = help === null ? null : !autocompactRefusedBy.has(version) && /^\s*--autocompact\b/m.test(help);
           cliHelpVersion = version;
           if (helpRead === read) helpRead = null;
         }),
@@ -1716,7 +1716,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           const { turnId, input: turn, retryAbort } = session.turn;
           // Commander prints this last before exiting; only a launch that passed the flag counts, so the flag-less relaunch can't loop.
           const refusedAutocompact = session.passedAutocompact && /unknown option '--autocompact'/.test(session.stderr);
-          if (refusedAutocompact) [cliHasAutocompact, autocompactRefusedBy] = [session.cliVersion === cliHelpVersion ? false : cliHasAutocompact, session.cliVersion];
+          if (refusedAutocompact) { if (session.cliVersion !== null) autocompactRefusedBy.add(session.cliVersion); if (session.cliVersion === cliHelpVersion) cliHasAutocompact = false; }
           const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
