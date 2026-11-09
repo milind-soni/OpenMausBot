@@ -31,6 +31,14 @@ describe("why an MCP step failed", () => {
     expect(mcpFailureKind(output)).toBe(kind);
   });
 
+  it.each([
+    ["the chat runtime's result", JSON.stringify({ ok: false, result: "MCP request timed out; execution outcome may be uncertain" }, null, 2), "timeout"],
+    ["MCP's own content list", JSON.stringify([{ type: "text", text: 'MCP server "mail" needs authentication' }], null, 2), "sign-in"],
+    ["a chat-runtime tool's own error", JSON.stringify({ ok: false, result: "Thread not found" }, null, 2), null],
+  ])("reads through %s", (_label, output, kind) => {
+    expect(mcpFailureKind(output)).toBe(kind);
+  });
+
   it.each(["Thread not found", "Invalid query: HTTP 401 from example.com", "The page answered 404", "Request failed because the mailbox is full"])("leaves the tool's own error alone: %s", (output) => {
     expect(mcpFailureKind(output)).toBeNull();
   });

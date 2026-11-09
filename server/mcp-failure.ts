@@ -42,9 +42,20 @@ const FAILURES: ReadonlyArray<readonly [RegExp, McpFailureKind]> = [
   [/^MCP (?:server could not start|server exited|server input closed|session closed)\b/, "cant-connect"],
 ];
 
+/** What the engine said, out of the JSON a step's output may be: the chat runtime's `{ ok, result }`, or MCP's own content list. */
+function reportedText(output: string): string {
+  try {
+    const parsed = JSON.parse(output) as { result?: unknown } | Array<{ text?: unknown }>;
+    const text = Array.isArray(parsed) ? parsed[0]?.text : parsed?.result;
+    return typeof text === "string" ? text : output;
+  } catch {
+    return output;
+  }
+}
+
 /** Why an MCP step failed, from the first line of what the engine reported; null when it is the tool's own error. */
 export function mcpFailureKind(output: string): McpFailureKind | null {
-  const first = output.replace(/^\s*<tool_use_error>\s*/, "").split("\n", 1)[0]!.trim().replace(/^(?:Error: )?(?:MCP error -?\d+: )/, "");
+  const first = reportedText(output).replace(/^\s*<tool_use_error>\s*/, "").split("\n", 1)[0]!.trim().replace(/^(?:Error: )?(?:MCP error -?\d+: )/, "");
   return FAILURES.find(([pattern]) => pattern.test(first))?.[1] ?? null;
 }
 
