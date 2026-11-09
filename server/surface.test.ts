@@ -204,12 +204,12 @@ describe("surfacePrompt", () => {
     expect(text).toMatch(/say which surface — the Browser tab or the cloud computer/);
   });
 
-  it("keeps a task on the computer where the bot already saw the site signed in, without a check that would start it", () => {
+  it("starts a new task on the computer where the bot already saw its site signed in, without a check that would start it", () => {
     for (const computer of ["vm", "cloud"] as const) {
       const text = surfacePrompt({ computer, browser: true });
       const label = computer === "vm" ? "the Local VM" : "the cloud computer";
       expect(text).toContain(`The built-in browser and ${label} may not share sign-ins.`);
-      expect(text).toContain(`If you already saw the site signed in on ${label} with the account this task needs, keep the task on ${label} instead of asking the user to sign in again in the Browser tab, unless they asked for the Browser tab.`);
+      expect(text).toContain(`When you pick the surface for a new task, if you already saw its site signed in on ${label} with the account it needs, pick ${label} instead of the Browser tab, unless the user asked for the Browser tab.`);
       expect(text).not.toMatch(/check whether the site is already signed in/);
     }
     expect(surfacePrompt({ computer: "vm", browser: false })).not.toContain("share sign-ins");
