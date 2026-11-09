@@ -49,7 +49,7 @@ export type {
 export type { GroupTask as GroupTaskRecord, BotProject as BotProjectRecord } from "../shared/wire.ts";
 export type { InstalledPlaybook, InstalledPackageMetadata, MausColor, MausExpression } from "../shared/wire.ts";
 
-export type Message = WireMessage;
+export type Message = WireMessage & { /** The turn an attach_file line was sent in; never makes it that turn's reply. */ sentInTurn?: string };
 
 export interface GroupPackageStamp {
   installId: string;
