@@ -434,6 +434,23 @@ describe("Chat MCP session", () => {
     warn.mockRestore();
   });
 
+  it.each([
+    ["a duplicate tool name", `reply(message, {tools:[{name:"a",inputSchema:schema},{name:"a",inputSchema:schema}]});`, /invalid or duplicate tool name/],
+    ["an input schema that is not an object", `reply(message, {tools:[{name:"a",inputSchema:{type:"string"}}]});`, /object input schema/],
+  ])("skips a built-in server whose tools have %s, closes it, and keeps the other servers", async (_what, listing, reason) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const bad = fixture(`if(message.method === "tools/list") { ${listing} continue; }`);
+    const session = await mountChatTools({ agents: bad.server, custom: { ready: ready.server } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
+    expect(session.skipped).toEqual([{ server: "agents", reason: expect.stringMatching(reason), builtIn: true }]);
+    expect(alive(bad.read().pid)).toBe(false);
+    expect(alive(ready.read().pid)).toBe(true);
+    await expect(session.execute("ready_write", { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true });
+    warn.mockRestore();
+  });
+
   it("skips a connected-apps mount that fails, and keeps the turn alive", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const ready = fixture();

@@ -610,14 +610,13 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         await skip(name, index < builtIns, mount.reason, startedAt[index]);
         continue;
       }
-      const { failure } = mount.value.origin.client;
-      if (failure) { await skip(name, index < builtIns, failure, mount.value.origin.client); continue; }
-      if (index < builtIns) {
-        offeredTools.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) });
-        continue;
-      }
-      try { configured.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) }); }
-      catch (error) { await skip(mount.value.origin.server, false, error, mount.value.origin.client); }
+      const { origin, tools } = mount.value;
+      const builtIn = index < builtIns;
+      if (origin.client.failure) { await skip(name, builtIn, origin.client.failure, origin.client); continue; }
+      try {
+        const checked = checkedTools(tools, origin.server);
+        if (builtIn) offeredTools.push({ origin, tools: checked }); else configured.push({ origin, tools: checked });
+      } catch (error) { await skip(name, builtIn, error, origin.client); }
     }
     await layout(toolLimit);
     if (signal.aborted || closed) throw aborted();
