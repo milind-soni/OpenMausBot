@@ -96,7 +96,7 @@ export interface TaskOpenedBy {
   threadId?: string;
   /** A parallel room job's thread: `threadId` is the room thread it came from, and the member must stay in that room. */
   roomLane?: true;
-  at: number;
+  /** Security invariant: harness-set only, when a turn that could itself use the owner's lent computer opened this thread (server/cloud-lending.ts); any other hand-in clears it for good. */ forOwner?: true; at: number;
 }
 
 /** The bot that closed a thread it opened (or one of its own). */
