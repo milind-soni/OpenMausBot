@@ -1487,7 +1487,7 @@ const lendingActivity = createActivityWindow({ BrowserWindow, icon: APP_ICON, ba
 let lendingTray = null;
 function lendingIndicator() {
   lendingTray ??= createLendingIndicator({
-    Tray, Menu, nativeImage, iconPath: APP_ICON, t: nativeT, onPause: () => sharingController().pause(), onActivity: () => lendingActivity.show(),
+    Tray, Menu, nativeImage, Notification, iconPath: APP_ICON, t: nativeT, onPause: () => sharingController().pause(), onActivity: () => lendingActivity.show(),
     onResume: () => void sharingController().resume()?.catch(error => slog(`lending resume: ${error?.message ?? error}`)), onStartScreen: () => void screenControl.start(),
     onTerminal: on => void lendingDialogs.lendTerminal(on, () => sharingController().lendTerminal(on)).catch(error => slog(`lending terminal: ${error?.message ?? error}`)),
   });
