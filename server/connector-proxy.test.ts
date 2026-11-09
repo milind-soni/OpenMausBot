@@ -590,4 +590,47 @@ describe("connected-app tools by name", () => {
     expect(refused.result.content[1].text).toContain('Call it again with the arguments its schema names, for example {"code_to_execute":"…"} with your own values.');
     expect(refused.result.content[1].text).toContain("it says nothing about which apps or tools exist, so do not tell the person a tool is missing. Connected apps you can use: gemini, gmail.");
   });
+
+  it("preserves unsafe numeric text on the upstream wire and still fits safe numeric arguments", async () => {
+    const calls: Array<{ params?: { arguments?: unknown } }> = [];
+    const upstream = await listen((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const rpc = JSON.parse(body);
+        calls.push(rpc);
+        response.writeHead(200, { "content-type": "application/json" });
+        if (rpc.method === "tools/list") {
+          response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { tools: [
+            { name: "FIXTURE_NUMBER", inputSchema: { type: "object", properties: { value: { type: "number" }, payload: { type: "object" }, numbers: { type: "array", items: { type: "number" } } } } },
+            { name: "FIXTURE_INTEGER", inputSchema: { type: "object", properties: { value: { type: "integer" } } } },
+          ] } }));
+          return;
+        }
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: "fixture reply" }] } }));
+      });
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    const listReply = nextJson(lines);
+    child!.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) + "\n");
+    await listReply;
+
+    const tiny = "0." + "0".repeat(323) + "1";
+    const cases: Array<{ name: string; args: unknown; expected: unknown }> = [
+      { name: "FIXTURE_NUMBER", args: { value: tiny }, expected: { value: tiny } },
+      { name: "FIXTURE_INTEGER", args: { value: "1.0000000000000001" }, expected: { value: "1.0000000000000001" } },
+      { name: "FIXTURE_NUMBER", args: '{"value":9007199254740993}', expected: '{"value":9007199254740993}' },
+      { name: "FIXTURE_NUMBER", args: { payload: '{"value":1e400}' }, expected: { payload: '{"value":1e400}' } },
+      { name: "FIXTURE_NUMBER", args: { numbers: "[9007199254740993]" }, expected: { numbers: "[9007199254740993]" } },
+      { name: "FIXTURE_NUMBER", args: '{"value":4.2e1}', expected: { value: 42 } },
+      { name: "FIXTURE_INTEGER", args: { value: "42.0" }, expected: { value: 42 } },
+    ];
+    for (const [index, sample] of cases.entries()) {
+      const reply = nextJson(lines);
+      child!.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: index + 2, method: "tools/call", params: { name: sample.name, arguments: sample.args } }) + "\n");
+      expect((await reply).id).toBe(index + 2);
+      expect(calls.at(-1)?.params?.arguments).toEqual(sample.expected);
+    }
+  });
+
 });

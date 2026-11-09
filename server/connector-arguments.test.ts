@@ -106,3 +106,108 @@ describe("what a bot is told", () => {
     expect(ARGUMENT_REFUSAL.test("The calendar has no events that day.")).toBe(false);
   });
 });
+
+describe("numeric text preservation", () => {
+  it.each(["number", "integer"])("keeps nonzero decimal text that underflows for %s", (type) => {
+    const schema = { type: "object", properties: { value: { type } } };
+    const tiny = "0." + "0".repeat(323) + "1";
+    for (const value of [tiny, "-" + tiny]) {
+      const args = { value };
+      expect(fitArguments(args, schema)).toEqual({ args, changed: [] });
+      expect(fitArguments(args, schema).args).toBe(args);
+    }
+  });
+
+  it("keeps fractional text that rounds to an integer", () => {
+    const schema = { type: "object", properties: { value: { type: "integer" } } };
+    for (const value of ["1.0000000000000001", "-1.0000000000000001", "9007199254740991.1"]) {
+      const args = { value };
+      expect(fitArguments(args, schema)).toEqual({ args, changed: [] });
+    }
+  });
+
+  it("keeps decimal text whose significant digits would be rounded", () => {
+    const schema = { type: "object", properties: { value: { type: "number" } } };
+    for (const value of ["0.10000000000000001", "1.234567890123456789", "-1.234567890123456789"]) {
+      const args = { value };
+      expect(fitArguments(args, schema)).toEqual({ args, changed: [] });
+    }
+  });
+
+  it.each([
+    "9007199254740993", "-9007199254740993", "1e400", "-1e400",
+    "1e-400", "-1e-400", "1.0000000000000001", "9007199254740993e-1",
+  ])("keeps root JSON text containing the unsafe numeric token %s", (token) => {
+    const args = '{"value":' + token + "}";
+    const schema = { type: "object", properties: { value: { type: "number" } } };
+    expect(fitArguments(args, schema)).toEqual({ args, changed: [] });
+  });
+
+  it.each([
+    { type: "object", properties: { value: { type: "number" } } },
+    { type: "object" },
+  ])("keeps unsafe nested object text for schema %j", (objectSchema) => {
+    const args = { payload: '{"value":9007199254740993}' };
+    const schema = { type: "object", properties: { payload: objectSchema } };
+    expect(fitArguments(args, schema)).toEqual({ args, changed: [] });
+  });
+
+  it.each([
+    { name: "numeric items", items: { type: "number" }, value: "[9007199254740993]" },
+    { name: "string items", items: { type: "string" }, value: "[9007199254740993]" },
+    { name: "one-field objects", items: { type: "object", properties: { use_case: { type: "string" } }, required: ["use_case"] }, value: '[{"use_case":"x","limit":9007199254740993}]' },
+  ])("keeps unsafe array text without a fallback wrapper for $name", ({ items, value }) => {
+    const args = { values: value };
+    const schema = { type: "object", properties: { values: { type: "array", items } } };
+    expect(fitArguments(args, schema)).toEqual({ args, changed: [] });
+    expect(fitArguments(args, schema).args).toBe(args);
+  });
+
+  it("keeps unsafe nested text when a separate safe field is fitted", () => {
+    const payload = '{"limit":1e400}';
+    const schema = { type: "object", properties: { payload: { type: "object" }, timeout: { type: "number" } } };
+    expect(fitArguments({ payload, timeout: "42" }, schema)).toEqual({
+      args: { payload, timeout: 42 },
+      changed: ["timeout as a number"],
+    });
+  });
+
+  it("still fits exact numeric text including zero-only fractional digits", () => {
+    for (const type of ["number", "integer"]) {
+      const schema = { type: "object", properties: { value: { type } } };
+      for (const value of [" 42 ", "-12", "42.000", "00042.000", "-0.000", "9007199254740991"]) {
+        expect(fitArguments({ value }, schema)).toEqual({ args: { value: Number(value) }, changed: ["value as a number"] });
+      }
+    }
+  });
+
+  it("still parses equivalent decimal and exponent JSON spellings", () => {
+    const schema = { type: "object", properties: { value: { type: "number" } } };
+    for (const token of ["0.1", "1.50", "4.2e1", "1e-7", "0e400", "-0.000e-400", "9007199254740991.0"]) {
+      const args = '{"value":' + token + "}";
+      expect(fitArguments(args, schema)).toEqual({
+        args: { value: Number(token) },
+        changed: ["the arguments from text to an object"],
+      });
+    }
+  });
+
+  it("does not interpret numeric-looking quoted strings as numeric tokens", () => {
+    const value = '9007199254740993 and 1e400, with "quoted" text';
+    const schema = { type: "object", properties: { value: { type: "string" }, enabled: { type: "boolean" }, extra: {} } };
+    const args = { value, enabled: false, extra: null };
+    expect(fitArguments(JSON.stringify(args), schema)).toEqual({
+      args,
+      changed: ["the arguments from text to an object"],
+    });
+  });
+
+  it("keeps ordinary text fallback and malformed JSON behavior", () => {
+    expect(fitArguments({ queries: "read my calendar" }, SEARCH)).toEqual({
+      args: { queries: [{ use_case: "read my calendar" }] },
+      changed: ['queries as [{"use_case": …}]'],
+    });
+    const args = '{"value": 12,}';
+    expect(fitArguments(args, { type: "object", properties: { value: { type: "number" } } })).toEqual({ args, changed: [] });
+  });
+});
