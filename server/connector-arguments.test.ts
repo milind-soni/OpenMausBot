@@ -49,6 +49,28 @@ describe("fitting a call's arguments to the tool's schema", () => {
     });
   });
 
+  it.each(["number", "integer"])("preserves unsafe numeric text for a %s argument", (type) => {
+    const schema = { type: "object", properties: { value: { type } } };
+    for (const value of ["9007199254740993", "-9007199254740993", "9".repeat(400)]) {
+      const args = { value };
+      const fitted = fitArguments(args, schema);
+      expect(fitted).toEqual({ args, changed: [] });
+      expect(fitted.args).toBe(args);
+      expect(JSON.stringify(fitted.args)).toBe(JSON.stringify(args));
+    }
+  });
+
+  it("fits only integral text to an integer schema", () => {
+    const schema = { type: "object", properties: { value: { type: "integer" } } };
+    expect(fitArguments({ value: "1.5" }, schema)).toEqual({ args: { value: "1.5" }, changed: [] });
+    for (const value of [" 42 ", "-12", "9007199254740991", "42.0"]) {
+      expect(fitArguments({ value }, schema)).toEqual({ args: { value: Number(value) }, changed: ["value as a number"] });
+    }
+    expect(fitArguments({ value: "1.5" }, { type: "object", properties: { value: { type: "number" } } })).toEqual({
+      args: { value: 1.5 }, changed: ["value as a number"],
+    });
+  });
+
   it("leaves a well-formed call as it is, and never guesses which of two sent fields was meant", () => {
     const fine = { queries: [{ use_case: "x" }], session: { id: "s" } };
     expect(fitArguments(fine, SEARCH)).toEqual({ args: fine, changed: [] });
