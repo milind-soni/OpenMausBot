@@ -135,12 +135,12 @@ export async function probeOllama(url: string, options: ProbeOptions = {}): Prom
 }
 
 /** What stops an Ollama from answering, for the engine list; null when it can, or when something else answers there. */
-export function ollamaUnavailable(status: OllamaStatus): string | null {
+export function ollamaUnavailable(status: OllamaStatus, addedAsOllama = false): string | null {
   switch (status.state) {
     case "ready": return null;
     case "no-models": return `Ollama has no models yet. Run \`${OLLAMA_PULL_COMMAND}\`, then check again.`;
     case "not-running": return `Ollama isn't running at ${status.url}. Open the Ollama app or run \`ollama serve\`.`;
-    case "unreachable": return status.problem === "not-ollama" ? null
+    case "unreachable": return status.problem === "not-ollama" ? addedAsOllama ? `Something answers at ${status.url}, but it isn't Ollama.` : null
       : `Can't reach Ollama at ${status.url}${status.problem === "timeout" ? ": it did not answer in time" : ""}. Check the address and that this computer can reach it.`;
   }
 }

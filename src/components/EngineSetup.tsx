@@ -498,6 +498,17 @@ function ApiKeyEngineSetup({ instance, className, unframed, configured = false }
   );
 }
 
+function CheckEnginesAgain() {
+  const { refreshInstances } = useStore();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button type="button" disabled={busy} className="ui-button" onClick={() => { setBusy(true); void refreshInstances().finally(() => setBusy(false)); }}>
+      {busy && <Loader2 size={12} className="animate-spin" aria-hidden="true" />}
+      {t("common.checkAgain")}
+    </button>
+  );
+}
+
 export function ApiKeyEngineManage({ instance, className }: { instance: InstanceInfo; className?: string }) {
   if (!hasSavedApiKey(instance)) return null;
   return <ApiKeyEngineSetup instance={instance} className={className} unframed={false} configured />;
@@ -582,7 +593,7 @@ export function EngineSetup({
       <div className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
         <div className="text-[13px] font-semibold text-ink">{t("engineSetup.notReady", { name: engineDisplayName(instance) })}</div>
         {instance.snapshot.ollama
-          ? <div className="mt-1"><OllamaStatusLine status={instance.snapshot.ollama} /></div>
+          ? <div className="mt-1 flex flex-col items-start gap-2"><OllamaStatusLine status={instance.snapshot.ollama} /><CheckEnginesAgain /></div>
           : <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
               {instance.snapshot.authenticationUnavailableReason ?? instance.snapshot.reason ?? t("engineSetup.noReason")}
             </p>}

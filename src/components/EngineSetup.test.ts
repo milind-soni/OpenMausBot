@@ -375,6 +375,7 @@ describe("Ollama setup", () => {
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: ollama })));
     expect(markup).toContain('data-ollama-state="no-models"');
     expect(markup).toContain("ollama pull llama3.2");
+    expect(markup).toContain("Check again");
     expect(markup).not.toContain("Ollama has no models yet.");
   });
 });

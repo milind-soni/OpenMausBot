@@ -362,7 +362,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         serverUnavailable: async () => {
           if (!isOllamaServer(config)) return null;
           const status = await checkOllama();
-          const reason = ollamaUnavailable(status);
+          const reason = ollamaUnavailable(status, config.catalog === "ollama");
           return reason ? { reason, ollama: { state: status.state, url: status.url, ...(status.problem ? { problem: status.problem } : {}) } } : null;
         },
       } : {}),
@@ -397,6 +397,10 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         }),
       },
     });
+    if (loading && isOllamaServer(config)) {
+      const send = runtime.adapter.sendTurn;
+      runtime.adapter.sendTurn = async (turn) => { await loading; return send(turn); };
+    }
     return openRouter && loading ? withOpenRouterTurns(runtime, loading) : runtime;
   },
 };
