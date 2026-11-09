@@ -105,7 +105,7 @@ import { cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createClou
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
 import { createLendingTarget } from "./lending-target.mjs"; import { createOpenAtLogin, installOpenAtLogin } from "./open-at-login.mjs";
-import { cleanWorkspaceDir, createCleanWorkspace, profilesDir } from "./clean-workspace.mjs"; import { createLocalProfiles, createProfileRegistry } from "./local-profiles.mjs"; import { installOneHome } from "./one-home-main.mjs"; import { handSaved, installOwnHome } from "./own-home-main.mjs"; import { reopenSavedServer, serverOpens } from "./saved-server.mjs"; import { installTwoPlacesMain } from "./two-places-main.mjs";
+import { cleanWorkspaceDir, createCleanWorkspace, profilesDir } from "./clean-workspace.mjs"; import { createLocalProfiles, createProfileRegistry } from "./local-profiles.mjs"; import { createPlaceSwitch } from "./place-switch.mjs"; import { installOneHome } from "./one-home-main.mjs"; import { handSaved, installOwnHome } from "./own-home-main.mjs"; import { reopenSavedServer, serverOpens } from "./saved-server.mjs"; import { installTwoPlacesMain } from "./two-places-main.mjs";
 import { askForMicrophone, openPrivacySettings } from "./privacy-settings.mjs";
 import { createHomeWindow, installHomeWindowIpc } from "./home-window.mjs";
 import { createTeamProfileSeeds } from "./team-profile-seed.mjs";
@@ -1562,7 +1562,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId, quiet = false) {
   if (!app.isPackaged) return { ok: false, error: "dev" };
   // A second switch would be un-paused by the first's finally mid-handoff.
   if (localSwitchInFlight) return { ok: false, error: "busy" };
-  const previousDir = runningDataDir ?? startupEnvironmentDir(environmentsState, desktopDataDir());
+  const previousDir = runningDataDir ?? startupEnvironmentDir(environmentsState, desktopDataDir()), asked = placeSwitch.turn(), windowFollows = () => placeSwitch.turn() === asked || (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents }));
   let startedProc = null;
   let switchSucceeded = false;
   const failedSwitch = () => {
@@ -1620,7 +1620,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId, quiet = false) {
             throw error;
           }
         },
-        persistActive: (id) => persistEnvironments(withActive(environmentsState, id)),
+        persistActive: (id) => { if (windowFollows()) persistEnvironments(withActive(environmentsState, id)); },
         log: slog,
       },
     });
@@ -1629,7 +1629,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId, quiet = false) {
       return failedSwitch();
     }
     switchSucceeded = true;
-    navigateMainWindow(rendererOrigin());
+    if (windowFollows()) navigateMainWindow(rendererOrigin());
     return { ok: true };
   } catch (error) {
     slog(`environment switch to ${targetDir} failed (${error?.message ?? error})`);
@@ -1649,25 +1649,25 @@ async function switchLocalEnvironmentTo(targetDir, targetId, quiet = false) {
   }
 }
 
-async function switchEnvironment(id) {
-  if (id === LOCAL_ID && cleanWorkspace.profile()) return void await (homeWindow.cloudOrigin() ? localProfiles.open(cleanWorkspace.profile()) : localProfiles.computer()); if ((id === environmentsState.activeId && !homeWindow.asking()) || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
-  homeWindow.cancel();
+async function switchEnvironment(id, stale = () => false) {
+  if (id === LOCAL_ID && cleanWorkspace.profile()) return void await (homeWindow.cloudOrigin() ? localProfiles.open(cleanWorkspace.profile()) : localProfiles.computer()); if (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id)) return; if (id === environmentsState.activeId && !homeWindow.asking()) { if (placeSwitch.replacing()) { homeWindow.stay(); homePlaces.remember(placeSwitch.before()); } return; }
   const entry = environmentsState.environments.find((candidate) => candidate.id === id);
   if (entry?.team || entry?.cloud) return void await showHome({ place: entry.team ? { team: entry.team.id, name: entry.name } : { cloud: entry.cloud.id, name: entry.name } });
   homePlaces.remember(null);
+  if (entry && entry.origin === homeWindow.cloudOrigin()) return void await showHome({ place: "cloud" });
+  homeWindow.cancel();
   if (entry?.kind === "local") return await switchLocalEnvironmentTo(entry.dataDir, entry.id);
   if (id === LOCAL_ID && (runningDataDir ?? desktopDataDir()) !== desktopDataDir() && !cleanWorkspace.active()) {
     return await switchLocalEnvironmentTo(desktopDataDir(), LOCAL_ID);
   }
-  if (entry && entry.origin === homeWindow.cloudOrigin()) return void await showHome({ place: "cloud" });
   if (entry && cloudAccount && isCloudHomeEntry(entry, { homeOrigin: cloudAccount.homeTarget()?.origin ?? cloudAccount.state().machine?.origin, remembered: rememberedHome })) {
     try { await connectCloudHome(); return; } catch (error) {
       slog(`cloud home: could not connect from the Server menu (${error?.message ?? error})`);
       if (!(await cloudHomeSignedIn(entry.origin))) { await openCloudSettings(); return; }
     }
   }
-  if (entry && handSaved(entry) && !(await serverOpens(entry, { t: nativeT, fetch: (...args) => session.defaultSession.fetch(...args), dialog, forget: (gone) => forgetEnvironment(gone, false, true) }))) return;
-  persistEnvironments(withActive(environmentsState, id)); navigateMainWindow(activeOrigin()); if (entry && handSaved(entry) && homeWindow.cloudOrigin()) homePlaces.remember({ server: id });
+  if ((entry && handSaved(entry) && !(await serverOpens(entry, { t: nativeT, fetch: (...args) => session.defaultSession.fetch(...args), dialog, forget: (gone) => forgetEnvironment(gone, false, true) }))) || stale()) return;
+  persistEnvironments(withActive(environmentsState, id)); await navigateMainWindow(activeOrigin()); if (entry && handSaved(entry) && homeWindow.cloudOrigin()) homePlaces.remember({ server: id });
 }
 
 function createLocalEnvironment(name, dataDir) {
@@ -2621,7 +2621,7 @@ const homeWindow = createHomeWindow({ clean: cleanWorkspace, journal: oneHome.jo
   localOrigin: rendererOrigin, cookieFetch: (...args) => session.defaultSession.fetch(...args), power: cloudPower, splash: () => startupScreen, lastInput: oneHome.lastInput, rehomed: () => talk.homeChanged(), log: slog, t: nativeT,
   hosts: () => session.defaultSession, readyStore: jsonFile(path.join(app.getPath("userData"), "cloud-ready.json")), ownMove: () => ownHome?.underWay() ?? null,
   remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left, drop: homePlaces.drop,
-  publish: view => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("home:state-changed", view); },
+  publish: view => { placeSwitch.waking(view?.screen === "waking"); if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("home:state-changed", view); },
   go: (url, origin, place) => { if (place?.kind === "team" || place?.kind === "own") { activatePlace(place); if (place.kind === "team") teamProfileSeeds.opened(place.origin); } else if (origin) activateCloud(origin); else if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(url, true); },
   reopen: (place, still) => reopenSavedServer(place, { still, saved: () => environmentsState.environments.filter(handSaved), fetch: (...args) => session.defaultSession.fetch(...args), opened: async (entry) => { homePlaces.remember(null); persistEnvironments(withActive(environmentsState, entry.id)); return navigateMainWindow(activeOrigin(), true); } }),
   showLocal: leaving => { if (!mainWindow || mainWindow.isDestroyed()) return createWindow(); if (!leaving) return; persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(rendererOrigin()); } });
@@ -2634,9 +2634,9 @@ const showStartPlace = () => openStartPlace({ home: homeWindow, places: homePlac
 const placeInbox = createPlaceInboxWatch({ places: () => [{ id: LOCAL_ID, local: true }, ...environmentsState.environments.filter(entry => entry.kind !== "local" && entry.origin)], activeId: () => environmentsState.activeId, local: localServerRequest, cloudFetch: (...args) => session.defaultSession.fetch(...args), asleep: origin => homeWindow.asleepAt(origin), shown: () => !desktopRemoteAccess && serverReady && Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()), changed: () => railChanged() });
 const localProfiles = createLocalProfiles({ registry: createProfileRegistry({ dataDir: desktopDataDir }), clean: cleanWorkspace, dataDir: desktopDataDir, allowed: () => app.isPackaged && !desktopRemoteAccess, home: () => (homeWindow.cloudOrigin() ? "cloud" : ownHome?.origin() || cleanWorkspace.marker().frozen ? null : "local"), window: { openProfile: id => homeWindow.openProfile(id), profile: () => homeWindow.profile(), showCloud: () => showHome({ place: "cloud" }) }, showLocal: () => { homeWindow.cancel(); persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(rendererOrigin()); }, onLocal: () => Boolean(mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })), busy: async () => { const said = await (await localServerRequest("/api/move/freeze", { signal: AbortSignal.timeout(5_000) })).json(); return typeof said?.busy === "string" ? { name: said.busy, what: said.what } : null; }, trash: dir => shell.trashItem(dir), reserved: () => nativeT(process.platform === "darwin" ? "rail.thisMac" : "rail.thisPc"), remember: homePlaces.remember, changed: () => railChanged(), log: slog }); const railList = () => { ownHome?.refresh(); const settling = localProfiles.settling(); return railPlaces({ saved: environmentsState, waiting: placeInbox.waiting, home: homeWindow.cloudOrigin() ?? ownHome?.origin() ?? null, mine: myCloud(), state: desktopRemoteAccess ? null : cloudAccount?.state(), offers: entry => !desktopRemoteAccess && ownHome?.offers(entry) === true, accounts: accountRing.waiting(), profiles: localProfiles.places({ activeLocal: environmentsState.activeId === LOCAL_ID }), computerSettling: settling && settling.id === null ? settling.name : null }); };
 // The rail as the window's own chrome (chrome-rail.mjs): this app's page beside every place's page, the one that lists.
-const chromeRail = createChromeRail({ createView: options => new WebContentsView(options), preload: path.join(__dirname, "preload.cjs"), log: slog, prefs: () => desktopPrefs, changed: () => rail.changed(),
+const placeSwitch = createPlaceSwitch({ changed: () => railChanged(), stop: () => homeWindow.stopOpening(), kept: () => homePlaces.remembered(), pageSettled: () => { const page = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null; if (page?.isLoadingMainFrame()) return new Promise(done => { page.once("did-stop-loading", done); page.once("destroyed", done); }); } }); const chromeRail = createChromeRail({ createView: options => new WebContentsView(options), preload: path.join(__dirname, "preload.cjs"), log: slog, prefs: () => desktopPrefs, changed: () => rail.changed(),
   args: () => [...desktopCompanionRendererArguments(rendererOrigin(), desktopRemoteAccess), ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : []), `--omb-app-version=${app.getVersion()}`],
-  url: () => `${rendererOrigin()}${CHROME_RAIL_PATH}`, wanted: () => !desktopRemoteAccess && serverReady && railList().length > 0 });
+  url: () => `${rendererOrigin()}${CHROME_RAIL_PATH}`, wanted: () => !desktopRemoteAccess && (serverReady || placeSwitch.target() !== null) && railList().length > 0 });
 chromeRail.install(ipcMain);
 function railChanged() { chromeRail.refresh(); rail.changed(); }
 const accountPages = [() => (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents }) ? mainWindow.webContents : null), () => ({ send: channel => chromeRail.send(channel) })];
@@ -2645,7 +2645,7 @@ const rail = installCloudRail({ t: nativeT, ipcMain, clipboard, openCloud: openO
   guard: handler => (event, ...args) => (chromeRail.owns(event) ? handler(event, ...args) : workspaceOnly(handler)(event, ...args)),
   lists: event => chromeRail.owns(event), trusted: event => chromeRail.owns(event) || senderIsLocal(event), beside: () => chromeRail.shown(),
   targets: () => [mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null, { send: channel => chromeRail.send(channel), isDestroyed: () => false }],
-  places: railList, open: id => workspaceMenuAction(() => switchEnvironment(id)), makeHome: id => ownHome.start(id), forget: id => forgetEnvironment(id, false, true), openProfile: id => workspaceMenuAction(async () => { const opened = await localProfiles.open(id); railChanged(); if (opened === false) throw new Error(nativeT("native.places.profileFailed")); }), local: localProfiles,
+  places: railList, ask: placeSwitch.ask, switching: placeSwitch.target, open: (id, stale) => workspaceMenuAction(async () => { if (id === LOCAL_ID) await cleanWorkspace.settled(); if (!stale()) await switchEnvironment(id, stale); }), makeHome: id => ownHome.start(id), forget: id => forgetEnvironment(id, false, true), openProfile: (id, stale = () => false) => workspaceMenuAction(async () => { await cleanWorkspace.settled(); if (stale()) return; const opened = await localProfiles.open(id); railChanged(); if (opened === false) throw new Error(nativeT("native.places.profileFailed")); }), local: localProfiles,
   add: { choices: () => ({ cloud: cloudOffersAllowed(), link: !desktopRemoteAccess, address: !desktopRemoteAccess && !homeWindow.cloudOrigin(), account: !desktopRemoteAccess && Boolean(accounts.view().active) }),
     probe: serverConnect.probe, run: (choice, link, code) => (choice === "link" ? (link ? (code === null ? connectHostedWorkspace(link) : serverConnect.connect(link, code)) : addServerFromClipboard()) : choice === "address" ? openWorkspaceSettings() : homeWindow.cloudOrigin() ? undefined : openCloudAdd("app_menu")) } });
 const announceAddedCloud = createAddedCloudNotice({ t: nativeT, Notification, focused: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()), sheetOpen: rail.sheetOpen,
