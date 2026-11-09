@@ -276,6 +276,17 @@ describe("a person's hold on the shared Local VM", () => {
     expect(await held(cloud.id)).toBe(true);
   }, 30_000);
 
+  it.each(["shared", "per-bot"] as const)("a take naming a VM bot's VPS desktop holds the bot's own key and never lapses, in %s mode", async (mode) => {
+    await setMode(mode);
+    const a = await newBot("Ada", { computer: "vm", cloudBackend: "vps" });
+    const id = lease();
+    expect((await control(phone, a.id, { action: "take", controlLeaseId: id, target: `vps/${a.id}` })).body.owned).toBe(true);
+    expect(await held(witness)).toBe(false);
+    await sleep(GRACE_MS + 1_000);
+    expect(await held(a.id)).toBe(true);
+    expect((await control(phone, a.id, { action: "release", controlLeaseId: id })).body.released).toBe(true);
+  }, 20_000);
+
   it("a desktop take of the shared desktop never lapses", async () => {
     const id = lease();
     expect((await control(api, witness, { action: "take", controlLeaseId: id })).body.owned).toBe(true);

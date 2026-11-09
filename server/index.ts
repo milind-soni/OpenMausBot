@@ -15259,7 +15259,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const refusal = sharedVm.takeRefusal(controlKey);
         if (refusal) return json(res, 409, { error: refusal });
         if (!controlLeaseId) return json(res, 200, computerControl.take(controlKey));
-        const result = computerControl.acquireLease(controlKey, controlLeaseId, { armed: sharedVm.armed(auth, bot, threadId, controlKey) });
+        const result = computerControl.acquireLease(controlKey, controlLeaseId, { armed: sharedVm.armed(auth, bot, threadId, controlKey, body.target) });
         return json(res, 200, { ...result.snapshot, owned: result.owned, acquired: result.acquired });
       }
       return json(res, 405, { error: "method not allowed" });

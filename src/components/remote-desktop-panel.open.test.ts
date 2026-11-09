@@ -60,7 +60,8 @@ it.each([
   { row: "its open fails", owned: true, opened: false, releases: true, closes: false },
   { row: "its take found another device's hold", owned: false, opened: true, releases: false, closes: false },
   { row: "its take owned the hold", owned: true, opened: true, releases: false, closes: true },
-])("the remote panel's Take control gives back only a hold its own take owned, by that take's lease: $row", async ({ owned, opened, releases, closes }) => {
+  { row: "its take names the VPS its bot works on", owned: true, opened: true, releases: false, closes: true, vps: true },
+])("the remote panel's Take control gives back only a hold its own take owned, by that take's lease: $row", async ({ owned, opened, releases, closes, vps }) => {
   fixture.owned = owned;
   vi.stubGlobal("ogb", { desktopViewer: { open: vi.fn(async () => opened), close: vi.fn(async () => true), onState: () => () => {}, currentState: async () => ({ open: false, contextId: null }) } });
   const container = document.createElement("div");
@@ -69,7 +70,7 @@ it.each([
   flushSync(() => root!.render(createElement(BotEditorStore, { value: {
     state: { ...initialState, instances: [engine], config: { box: { configured: true } } as AppState["config"] } as AppState,
     dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {},
-  }, children: createElement(RemoteDesktopPanel, { bot }) })));
+  }, children: createElement(RemoteDesktopPanel, { bot: vps ? { ...bot, cloudBackend: "vps" } : bot }) })));
   const take = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Take control");
   expect(take, document.body.textContent ?? "").toBeDefined();
   flushSync(() => take!.click());
@@ -77,7 +78,7 @@ it.each([
   for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
   const lease = fixture.controls[0]!.controlLeaseId;
   expect(fixture.controls).toEqual([
-    { action: "take", controlLeaseId: expect.stringMatching(/^[0-9a-f]{36}$/) },
+    { action: "take", controlLeaseId: expect.stringMatching(/^[0-9a-f]{36}$/), ...(vps ? { target: "vps/scout" } : {}) },
     ...(releases ? [{ action: "release", controlLeaseId: lease }] : []),
   ]);
   expect(viewerClosedRelease("scout")).toEqual(closes ? { action: "release", controlLeaseId: lease } : null);

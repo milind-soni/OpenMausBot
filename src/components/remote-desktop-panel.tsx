@@ -180,7 +180,9 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
       if (!window.ogb?.desktopViewer) throw new Error(t("remoteDesktop.viewerUnavailable"));
       await openProviderDesktop({
         botId: bot.id, title: t("computer.viewerTitle", { name: bot.name }), current: () => true,
-        request: (action, controlLeaseId) => api(`/api/bots/${bot.id}/computer/control`, { method: "POST", body: JSON.stringify({ action, controlLeaseId }) }),
+        request: (action, controlLeaseId) => api(`/api/bots/${bot.id}/computer/control`, {
+          method: "POST", body: JSON.stringify({ action, controlLeaseId, ...(bot.cloudBackend === "vps" ? { target: `vps/${bot.id}` } : {}) }),
+        }),
         join: async (signal) => ({ joinUrl: viewerAddress((await api(`/api/bots/${bot.id}/computer/join`, { method: "POST", body: "{}", signal })).joinUrl) }),
       });
     } catch (cause) {

@@ -292,6 +292,20 @@ describe("what a hold on the shared desktop reaches", () => {
     }
   });
 
+  it.each(["shared", "per-bot"] as const)("a phone's take naming a VM bot's VPS holds the bot's own key and never lapses, in %s mode", (mode) => {
+    vi.useFakeTimers();
+    try {
+      const { control, vm, bot } = fixture({ mode, bots: [{ id: "ada", computer: "vm", cloudBackend: "vps" }] });
+      const key = vm.holdKey(bot("ada"), undefined, "vps/ada");
+      expect(key).toBe("ada");
+      control.acquireLease("ada", "lease-0123456789abcdef", { armed: vm.armed(phone, bot("ada"), undefined, "ada", "vps/ada") });
+      vi.advanceTimersByTime(2 * 60 * 60_000);
+      expect(control.snapshot("ada").held).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("refuses a desktop take while the shared VM is being changed", () => {
     expect(fixture({ busy: true }).vm.takeRefusal(DESK)).toMatch(/being updated or changed/);
     expect(fixture({ busy: true }).vm.takeRefusal("ada")).toBeNull();
