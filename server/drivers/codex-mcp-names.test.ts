@@ -64,6 +64,28 @@ describe("codexConfigRunsServer", () => {
     return codexConfigMcp({ CODEX_HOME: home });
   };
 
+  it.each([
+    'mcp_servers = { notes = { url = "https://notes.example/mcp" } }',
+    'mcp_servers.notes.url = "https://notes.example/mcp"',
+    '[mcp_servers."not\\u0065s"]\nurl = "https://notes.example/mcp"',
+  ])("reserves the parsed server name in %s", (toml) => {
+    const config = configFor(toml);
+    expect([...config.names]).toEqual(["notes"]);
+    expect(mountedMcpServerName("notes", config.names)).toBe("notes_openmausbot");
+    expect(codexConfigRunsServer(config, "notes", { type: "http", url: "https://notes.example/mcp", headers: {} })).toBe(true);
+  });
+
+  it("ignores table-looking text inside strings when the file parses", () => {
+    const config = configFor('instructions = """\n[mcp_servers.decoy]\n"""\n');
+    expect([...config.names]).toEqual([]);
+  });
+
+  it("still reserves header names if an unrelated setting cannot be parsed", () => {
+    const config = configFor('[mcp_servers.notes]\nurl = "https://notes.example/mcp"\nunfinished = [');
+    expect([...config.names]).toEqual(["notes"]);
+    expect(config.tables).toEqual({});
+  });
+
   it("knows a server config.toml already starts, as one brought in from there, and nothing else", () => {
     const config = configFor([
       "[mcp_servers.sentry]", 'command = "npx"', 'args = ["-y", "@sentry/mcp-server", 8080]', "[mcp_servers.sentry.env]", 'SENTRY_TOKEN = "t"',
