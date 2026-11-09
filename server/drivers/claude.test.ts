@@ -655,6 +655,13 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }, { timeout: 7_000 }).toBe(true);
   });
 
+  it("reads an error result saying the OAuth session expired as a sign-out", async () => {
+    await create("oauth-expired-result");
+    await instance.adapter.sendTurn({ threadId: "t-oauth", text: "hi" });
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false, stopReason: "auth_required" });
+    expect(recorder.events.find((e: any) => e.type === "runtime.error")).toMatchObject({ message: "OAuth session expired. Please sign in again.", setup: true });
+  });
+
   it("reports a synthetic sign-out refusal for recovery only after its process has stopped", async () => {
     const dump = join(scratch, "recover-signed-out-session.json");
     process.env.FAKE_CLAUDE_DUMP = dump;

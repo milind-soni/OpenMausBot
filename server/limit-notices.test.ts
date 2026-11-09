@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { LimitNotices, UNNAMED_STRETCH_MS, limitNoticeText } from "./limit-notices.ts";
+import { LimitNotices, UNNAMED_STRETCH_MS, limitNoticeText, signedOutNoticeText } from "./limit-notices.ts";
 import { UNNAMED_LIMIT_MS } from "./limit-resets.ts";
 
 const dirs: string[] = [];
@@ -45,6 +45,33 @@ describe("one notice per bot for each stretch of a limit", () => {
 });
 
 describe("the notice", () => {
+  it("says a scheduled line again only once its interval has passed, whatever was refused in between", () => {
+    const now = { at: 1_000 };
+    const ledger = notices(now).make();
+    expect(ledger.due("every", "signed-out", 1_000)).toBe(true);
+    expect(ledger.due("every", "signed-out", 1_000)).toBe(false);
+    now.at += 999;
+    expect(ledger.due("every", "signed-out", 1_000)).toBe(false);
+    now.at += 1;
+    expect(ledger.due("every", "signed-out", 1_000)).toBe(true);
+  });
+
+  it("does not let an older, longer mark silence a scheduled line", () => {
+    const now = { at: 1_000 };
+    const ledger = notices(now).make();
+    expect(ledger.first("every", "signed-out", now.at + 30 * 24 * 60 * 60_000)).toBe(true);
+    expect(ledger.due("every", "signed-out", 1_000), "a thirty-day mark is no schedule").toBe(true);
+    expect(ledger.due("every", "signed-out", 1_000)).toBe(false);
+  });
+
+  it("names up to three bots a signed-out AI leaves stuck, and none when a backup carries on", () => {
+    const base = { engine: "Claude", bot: "Kai", where: "on the Cloud" };
+    expect(signedOutNoticeText({ ...base, stuck: ["Kai"] })).toBe("Claude is signed out on the Cloud. Sign in again in Settings → AI to keep using it. Until then Kai can't run: it has no backup.");
+    expect(signedOutNoticeText({ ...base, stuck: ["Kai", "Rosa", "Lin", "Ada", "Bo"] })).toContain("Until then Kai, Rosa, Lin and 2 more can't run: they have no backup.");
+    expect(signedOutNoticeText({ ...base, stuck: [] })).toBe("Claude is signed out on the Cloud. Sign in again in Settings → AI to keep using it.");
+    expect(signedOutNoticeText({ ...base, backup: "Codex", stuck: ["Kai"] })).not.toContain("Until then");
+  });
+
   it("says in one line what carries on meanwhile, or that the bot waits", () => {
     const resetsAt = new Date(2026, 9, 27, 14, 0).getTime();
     expect(limitNoticeText({ engine: "Codex", bot: "Kai", resetsAt, backup: "Claude" }, "UTC").replace(/\d{1,2}:\d{2}\s?[AP]M/, "14:00"))
