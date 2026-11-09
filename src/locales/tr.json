@@ -5583,5 +5583,9 @@
   "botPanel.heavy": "Bu bot her turda çok şey yüklüyor.",
   "botPanel.tidyMemory": "Belleği düzenle",
   "memory.journal.instructions": "talimatlar",
-  "memory.journal.actor.teamSetup": "Ekip kurulumu"
+  "memory.journal.actor.teamSetup": "Ekip kurulumu",
+  "settings.simple.more.title": "Diğer ayarlar",
+  "settings.simple.more.subtitle": "Yedekler, sınırlar ve nadiren değiştirdiğiniz ayarlar.",
+  "settings.simple.more.limits": "Sınırlar",
+  "settings.simple.more.open": "Aç"
 }

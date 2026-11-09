@@ -6707,5 +6707,9 @@
   "phone.code.pairingCode": "Codice di abbinamento",
   "phone.code.typeIntro": "Apri l'app {app} e inserisci questo codice di abbinamento.",
   "phone.signIn.emailCode": "Codice di accesso dalla tua email",
-  "computer.linux.metaOmarchy": "Sperimentale · Omarchy (Hyprland) · Wayland"
+  "computer.linux.metaOmarchy": "Sperimentale · Omarchy (Hyprland) · Wayland",
+  "settings.simple.more.title": "Altre impostazioni",
+  "settings.simple.more.subtitle": "Backup, limiti e impostazioni che cambi di rado.",
+  "settings.simple.more.limits": "Limiti",
+  "settings.simple.more.open": "Apri"
 }

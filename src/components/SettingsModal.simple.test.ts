@@ -5,7 +5,7 @@ import { setLocale, t } from "@/lib/i18n";
 import type { AppSettingsSection } from "@/state/store";
 import type { Switch } from "./SettingsPrimitives";
 import { SECTIONS, SIMPLE_FOLDED, SIMPLE_HIDDEN_SECTIONS, SIMPLE_PAGES, SettingsModal, revealSettingsBlock } from "./SettingsModal";
-import { SIMPLE_ADVANCED_ONLY, SimpleLooksPage } from "./SettingsSimplePages";
+import { SIMPLE_ADVANCED_ONLY, SIMPLE_MORE_LIMITS, SimpleLooksPage } from "./SettingsSimplePages";
 
 const fixture = vi.hoisted(() => ({
   section: "general" as AppSettingsSection,
@@ -163,11 +163,12 @@ describe("Settings in Simple mode", () => {
     for (const id of hidden) expect(SIMPLE_HIDDEN_SECTIONS).toContain(id);
   });
 
-  it("opens General on Account, then Appearance, Language and typing, Notifications, System and Import, with Advanced mode last as a plain row", () => {
+  it("opens General on Account, then Appearance, Language and typing, Notifications, System and Import, with More settings and Advanced mode last as plain rows", () => {
     const html = render();
     expect(currentPage(html)).toBe("general");
     expect(groupLabels(html)).toEqual(["Account", "Appearance", "Language and typing", "Notifications", "System", "Import", "Organization"]);
-    expect(blocks(html).at(-1)).toBe("advanced-mode");
+    expect(blocks(html).slice(-2)).toEqual(["more", "advanced-mode"]);
+    expect(html).toContain(">More settings<");
     expect([...html.matchAll(/<button[^>]*role="switch"[^>]*>/g)].at(-1)?.[0]).toContain('aria-label="Advanced mode"');
     expect(html).toContain("Show every control, including tools for builders. Nothing is deleted either way.");
     expect(html).not.toContain("border-accent-border/40");
@@ -192,6 +193,8 @@ describe("Settings in Simple mode", () => {
     const looks = renderToStaticMarkup(createElement(SimpleLooksPage, { onBack: () => {} }));
     expect(looks).toContain('data-settings-block="looks"');
     expect(looks).not.toContain("data-place-picture");
+    expect(looks.indexOf('aria-label="Show tool calls in chat"')).toBeGreaterThan(looks.indexOf('data-settings-block="looks"'));
+    expect(renderToStaticMarkup(createElement(SimpleLooksPage, { onBack: () => {}, toolCalls: false }))).not.toContain("Show tool calls");
   });
 
   it("shows the rail's switch only where this window has a rail to hide", () => {
@@ -204,7 +207,7 @@ describe("Settings in Simple mode", () => {
     expect(fixture.switches.find((props) => props["aria-label"] === "Show your computers")?.checked).toBe(false);
   });
 
-  it("keeps the everyday rows and leaves the fourteen builder controls to Advanced, where search still points", () => {
+  it("keeps the everyday rows, puts limits behind More settings, and leaves the six other builder controls to Advanced, where search still points", () => {
     const general = open("general");
     for (const shown of ['aria-label="Send usage analytics"', 'aria-label="Color my messages with the bot&#x27;s color"', 'aria-label="Send messages with"',
       'aria-label="Notification sounds"', 'aria-label="Show the notification feed"', 'aria-label="App language"', 'role="radiogroup" aria-label="Light or dark"']) {
@@ -212,12 +215,24 @@ describe("Settings in Simple mode", () => {
     }
     expect(placement(open("updates"), "MARKER:updatesConsent;")).toBe("shown");
     const everyPage = ["general", "engines", "companion", "usage", "updates"].map((section) => open(section as AppSettingsSection)).join("");
-    for (const gone of ["Effort for new bots", "Defaults for new bots", "Group turns", "MCP calls", "Parallel threads", "Automatic recovery", "Event log cleanup",
+    for (const gone of ["Group turns", "Tool time limit", "Parallel threads", "Automatic recovery", "Event log cleanup",
       "Interface font", "Chat width", "Pinned bots as circles", "Universal pins", "Tool calls", "This run", "Keep prompt cache warm"]) {
       expect(everyPage, gone).not.toContain(`>${gone}<`);
     }
-    expect(SIMPLE_ADVANCED_ONLY).toHaveLength(14);
-    expect(SIMPLE_ADVANCED_ONLY.map((key) => t(key))).toEqual(expect.arrayContaining(["Effort for new bots", "Interface font", "Keep prompt cache warm"]));
+    expect(SIMPLE_ADVANCED_ONLY.map((key) => t(key))).toEqual(["Automatic recovery", "Interface font", "Chat width", "Pinned bots as circles", "Universal pins", "This run"]);
+    expect(SIMPLE_MORE_LIMITS.map((key) => t(key))).toEqual(["Group turns", "Tool time limit", "Parallel threads", "Event log cleanup", "Keep prompt cache warm", "Repeat computer tasks without AI"]);
+  });
+
+  it("holds the defaults for new bots on AI as one row: the effort they start with, and Edit for the rest", () => {
+    const html = open("engines");
+    const row = html.slice(html.indexOf(">Defaults for new bots<"));
+    expect(row).toContain(">Effort for new bots<");
+    expect(row).toMatch(/<select[^>]*aria-label="Effort for new bots"/);
+    expect(row).toMatch(/data-new-bot-defaults="true"[^>]*>Edit<\/button>/);
+    expect(html.indexOf("MARKER:engines;")).toBeLessThan(html.indexOf(">Defaults for new bots<"));
+    expect(html.indexOf(">Defaults for new bots<")).toBeLessThan(html.indexOf(">API keys<"));
+    fixture.ownerOrAdmin = false;
+    expect(open("engines")).not.toContain("Defaults for new bots");
   });
 
   it("names this app and its version on Updates, then product updates, the welcome tour and diagnostics", () => {

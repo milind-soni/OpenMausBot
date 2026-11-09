@@ -19,6 +19,7 @@ import { useWorkingFolder } from "../bot-settings/AccessSection";
 import { useBotEditor } from "../bot-settings/BotEditorContext";
 import { SkillReviewDialog, skillSwitchOn, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
 import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
+import { useChoosesVisibility, VisibilitySection } from "../bot-settings/VisibilitySection";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { RoutineList } from "../routines/RoutineList";
 import { BrowserLogins } from "./browser-logins";
@@ -432,6 +433,10 @@ export function BrowserPage({ bot, derived }: PageContext) {
   return <BrowserLogins bot={bot} browserEnabled={derived.browserEnabled} onOpenBrowser={() => openComputer("browser")} />;
 }
 
+function VisibilityPage({ bot }: PageContext) {
+  return useChoosesVisibility() ? <VisibilitySection bot={bot} /> : null;
+}
+
 export function PageBody({ page, onOpen, editingInstructions, onEditInstructions, ...context }: PageContext & {
   page: SimplePageId;
   onOpen?: (page: SimplePageId) => void;
@@ -447,6 +452,8 @@ export function PageBody({ page, onOpen, editingInstructions, onEditInstructions
       return <AppsPage {...context} />;
     case "routines":
       return <RoutinesPage {...context} />;
+    case "visibility":
+      return <VisibilityPage {...context} />;
     case "memory":
       return <MemoryPage {...context} />;
     case "skills":

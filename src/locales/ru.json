@@ -6907,5 +6907,9 @@
   "remote.client.endsDec7": "Этот тип подключения перестанет работать 7 декабря. После этого снова сопрягите этот компьютер из раздела «Телефон и устройства» на другом компьютере.",
   "phone.code.pairingCode": "Код сопряжения",
   "phone.code.typeIntro": "Откройте приложение {app} и введите этот код сопряжения.",
-  "phone.signIn.emailCode": "Код входа из письма"
+  "phone.signIn.emailCode": "Код входа из письма",
+  "settings.simple.more.title": "Другие настройки",
+  "settings.simple.more.subtitle": "Резервные копии, ограничения и настройки, которые вы меняете редко.",
+  "settings.simple.more.limits": "Ограничения",
+  "settings.simple.more.open": "Открыть"
 }

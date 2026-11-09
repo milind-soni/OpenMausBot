@@ -18,7 +18,7 @@ import { cloudSendSummary, partHash, type CloudSendSources } from "../cloud-send
 import { cloudSendChatsRoute, type CloudSendChatsDeps } from "../cloud-send-chats.ts";
 import { loginFingerprints, VERIFY_NONCE } from "../cloud-send-verify.ts";
 import type { AppConfig } from "../config.ts";
-import type { LoginStore } from "../login-store.ts";
+import type { VaultStore } from "../vault-store.ts";
 import type { MoveAutomations } from "../move-freeze.ts";
 import { threadHeads } from "../message-db.ts";
 import type { LineLanguage } from "../server-lines.ts";
@@ -29,7 +29,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 
 export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" | "bots" | "skills"> {
   messagesTail(threadId: string, limit: number): { messages: ReadonlyArray<{ role: string; text?: string }>; hasMore: boolean };
-  logins: Pick<LoginStore, "changes" | "get" | "onePasswordConnectedAt" | "onePasswordGrants" | "onePasswordToken">;
+  logins: Pick<VaultStore, "changes" | "get" | "onePasswordConnectedAt" | "onePasswordGrants" | "onePasswordToken">;
   config(): Pick<AppConfig, "profile" | "language">;
   lineLanguage?: LineLanguage;
   chats?: CloudSendChatsDeps;

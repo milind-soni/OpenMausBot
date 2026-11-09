@@ -13,7 +13,7 @@ export const STATUS_WAIT_MAX_SECONDS = 60;
 export const STDOUT_TAIL_CHARS = 4_000;
 export const STDERR_TAIL_CHARS = 2_000;
 const POLL_MS = 2_000;
-const LAST_READ_WINDOW_MS = 250;
+const MAX_LAST_READ_WINDOW_MS = 1_000;
 /** Bounds what a forgotten background server can cost: Boat bills while a computer is on. */
 export const BACKGROUND_KEEPS_AWAKE_MS = 2 * 60 * 60_000;
 const MAX_TRACKED_PER_COMPUTER = 20;
@@ -32,7 +32,7 @@ const UNKNOWN_PROCESS = "This cloud computer has no background command with that
   + "Look at the files the command writes to see how far it got.";
 const LOST = "The cloud computer restarted or lost track of this command, so its exit code may be unknown. Look at the files it writes to see how far it got.";
 const CUT = "Only the end of the output is shown. Write long output to a file and read the part you need with exec.";
-const STALE = "The follow-up status read timed out. This is the last observed status; it may have changed. Call exec_status again.";
+const STALE = "No newer status was confirmed before the wait ended. This is the last observed status; it may have changed. Call exec_status again.";
 
 type StatusClock = {
   now: () => number;
@@ -143,6 +143,19 @@ function describeStatus(processId: string, body: any, observedAt?: number): Clou
   }));
 }
 
+function statusError(message: string, processId: string, last?: { body: any; observedAt: number }): CloudComputerResult {
+  if (!last) return text(message, true);
+  const stdout = tail(last.body.stdout, STDOUT_TAIL_CHARS), stderr = tail(last.body.stderr, STDERR_TAIL_CHARS);
+  return text(JSON.stringify({
+    error: message,
+    lastObserved: {
+      processId, status: "running", observedAt: new Date(last.observedAt).toISOString(), stdout: stdout.text, stderr: stderr.text,
+      ...(stdout.cut || stderr.cut || last.body.stdoutTruncated === true || last.body.stderrTruncated === true ? { outputCut: CUT } : {}),
+      note: "This status and output were last observed at this time and may have changed.",
+    },
+  }), true);
+}
+
 export async function backgroundStatus(
   cfg: AppConfig,
   boxId: string,
@@ -154,9 +167,13 @@ export async function backgroundStatus(
   if (processId === null) return text(OTHER_COMPUTER, true);
   const waitMs = Math.min(args.wait_seconds ?? 0, STATUS_WAIT_MAX_SECONDS) * 1_000;
   const until = clock.now() + waitMs;
+  const lastReadWindow = Math.min(MAX_LAST_READ_WINDOW_MS, waitMs / 2);
   let last: { body: any; observedAt: number } | undefined;
+  let finalRead = false;
   for (;;) {
+    signal.throwIfAborted();
     assertBoatNotDeleting(boxId);
+    if (last && clock.now() >= until) return describeStatus(args.process_id, last.body, last.observedAt);
     const deadline = waitMs && last ? clock.timeout(Math.max(1, until - clock.now())) : null;
     const readSignal = deadline ? AbortSignal.any([signal, deadline]) : signal;
     let response: Response, body: any;
@@ -169,15 +186,19 @@ export async function backgroundStatus(
       if (deadline?.aborted) return last ? describeStatus(args.process_id, last.body, last.observedAt) : text(STATUS_LATE, true);
       throw error;
     }
-    if (response.status === 404) return text(UNKNOWN_PROCESS, true);
-    if (!response.ok) return text(boatErrorMessage(response.status, "Reading the command's status", body, included(cfg)), true);
-    if (typeof body?.running !== "boolean") return text("The cloud computer gave an unreadable answer about this command. Call exec_status again.", true);
+    if (response.status === 404) return statusError(UNKNOWN_PROCESS, args.process_id, last);
+    if (!response.ok) return statusError(boatErrorMessage(response.status, "Reading the command's status", body, included(cfg)), args.process_id, last);
+    if (typeof body?.running !== "boolean") return statusError("The cloud computer gave an unreadable answer about this command. Call exec_status again.", args.process_id, last);
     if (!body.running) untrack(boxId, processId);
     const observedAt = clock.now();
     last = { body, observedAt };
     const remaining = until - observedAt;
-    if (!body.running || remaining <= LAST_READ_WINDOW_MS) return describeStatus(args.process_id, body);
-    await clock.sleep(Math.min(POLL_MS, remaining - LAST_READ_WINDOW_MS), signal);
+    if (!body.running || remaining <= 0 || finalRead) return describeStatus(args.process_id, body);
+    const inLastWindow = remaining <= lastReadWindow;
+    finalRead = inLastWindow;
+    await clock.sleep(inLastWindow ? Math.max(1, Math.floor(remaining / 2)) : Math.min(POLL_MS, remaining - lastReadWindow), signal);
+    signal.throwIfAborted();
+    if (clock.now() >= until) return describeStatus(args.process_id, body, observedAt);
   }
 }
 

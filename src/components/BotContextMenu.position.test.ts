@@ -111,6 +111,13 @@ describe("bot actions menu viewport placement", () => {
     expect(negative.style).toEqual({ top: "8px", left: "8px" });
   });
 
+  it("lets Simple pin or unpin a bot first, and offers no folders", () => {
+    const html = render();
+    expect(html.indexOf(t("sidebar.bot.pin"))).toBeGreaterThan(-1);
+    expect(html.indexOf(t("sidebar.bot.pin"))).toBeLessThan(html.indexOf(t("sidebar.copyConversationId")));
+    for (const key of ["folder.new", "task.folder.new"] as const) expect(html, key).not.toContain(`>${t(key)}<`);
+  });
+
   it("keeps Advanced's flat list of bot actions, drawn on the shared menu sheet", () => {
     fixture.advanced = true;
     const html = render();

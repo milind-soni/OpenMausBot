@@ -1,7 +1,7 @@
 import { browserMatesOf, loginPageCheck, loginPlace, loginSite, type LoginPlace } from "../shared/logins.ts";
 import type { FillCandidate } from "./login-fill.ts";
 import { receiveLoginHandoff, type ConnectionHandoffAnswer, type ConnectionHandoffWhat, type LoginHandoffResult } from "./login-handoff.ts";
-import type { LoginStore } from "./login-store.ts";
+import type { VaultStore } from "./vault-store.ts";
 import type { OnePasswordLogins } from "./onepassword.ts";
 import type { LoginRouteDeps } from "./routes/logins.ts";
 
@@ -44,11 +44,11 @@ export function cardLoginPlace(cardHost: string, observed: ObservedPage | null, 
 /** Saved logins and 1Password items, as each bot may use them. A login kept to some bots is filled only where every bot
  * sharing that browser may use it: a sign-in stays in the browser, so a bot sharing it would be signed in as well. */
 export class BotLogins {
-  readonly store: LoginStore;
+  readonly store: VaultStore;
   readonly onePassword: OnePasswordLogins;
   private readonly bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }>;
 
-  constructor(store: LoginStore, onePassword: OnePasswordLogins, bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }> = () => []) {
+  constructor(store: VaultStore, onePassword: OnePasswordLogins, bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }> = () => []) {
     this.store = store;
     this.onePassword = onePassword;
     this.bots = bots;

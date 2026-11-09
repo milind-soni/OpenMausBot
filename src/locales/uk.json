@@ -3593,5 +3593,9 @@
   "botPanel.heavy": "Цей бот завантажує багато на кожному ході.",
   "botPanel.tidyMemory": "Упорядкувати пам'ять",
   "memory.journal.instructions": "інструкції",
-  "memory.journal.actor.teamSetup": "Налаштування команди"
+  "memory.journal.actor.teamSetup": "Налаштування команди",
+  "settings.simple.more.title": "Інші налаштування",
+  "settings.simple.more.subtitle": "Резервні копії, обмеження та налаштування, які ви змінюєте рідко.",
+  "settings.simple.more.limits": "Обмеження",
+  "settings.simple.more.open": "Відкрити"
 }

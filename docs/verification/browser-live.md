@@ -139,7 +139,7 @@ pnpm exec vitest run server/browser-engine.test.ts server/browser-runtime.test.t
   src/lib/browser-profiles.test.ts src/components/BrowserProfilesManager.test.ts \
   src/components/browser/StreamSurface.test.ts server/routes/browser-viewers.test.ts \
   src/components/BrowserPanel.test.ts src/components/SignInRequestCard.test.ts \
-  server/sign-in-request.e2e.test.ts server/login-fill.test.ts server/login-store.test.ts \
+  server/sign-in-request.e2e.test.ts server/login-fill.test.ts server/vault-store.test.ts \
   server/totp.test.ts server/routes/logins.test.ts src/components/LoginsSettings.test.ts \
   server/saved-login.e2e.test.ts server/onepassword.test.ts scripts/prepare-duckdb.test.mjs
 ```

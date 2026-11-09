@@ -194,8 +194,9 @@ export function createOneHome(deps) {
   const log = deps.log ?? (() => {});
   const t = deps.t ?? nativeText.englishText.t;
   let running = null, again = false, timer = null, closed = false, waitingFor = null, waitingWhat = null, wasReady = null, reportFailedAt = -Infinity, keptFailedAt = -Infinity;
-  /** What the last run found holding the move that only a run can find out. */
-  let noted = null;
+  /** What the last run found holding the move that only a run can find out; `heldOff`, a first move waits for this
+   * computer's own copy, said once in the log. */
+  let noted = null, heldOff = false;
 
   const read = () => parseJournal(deps.journal.read());
   const kept = () => { try { return parseKeep(deps.keep?.read()).on; } catch { return false; } };
@@ -658,6 +659,10 @@ export function createOneHome(deps) {
       // A frozen server with no move under way is one this app no longer knows about: it is never lifted blindly.
       noted = await deps.local.frozen().then((frozen) => (frozen ? "frozen_without_move" : null), () => "local_unavailable");
       if (noted) { log(`one home: ${noted === "frozen_without_move" ? "this computer is frozen with no move under way" : "this computer's server did not say whether it is frozen"}`); return; }
+      // Only from this computer's own copy: while another folder's server runs (the clean workspace, a profile, a named
+      // local environment) nothing starts or counts as failing, and it looks again in a minute.
+      if (deps.ownCopy?.() === false) { noted = "local_unavailable"; if (!heldOff) log("one home: the move waits until this computer's own copy runs"); heldOff = true; later(MINUTE); return; }
+      heldOff = false;
       journal = write({ v: 1, phase: "copy", cloud: { origin: cloud.origin, account: cloud.account, machine: cloud.machine, ...(cloud.name ? { name: cloud.name } : {}) }, startedAt: now() });
     }
     if (journal.thaw && !(await thaw(journal))) return;

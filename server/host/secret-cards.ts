@@ -37,6 +37,7 @@ import {
   type PhoneSecretSubmissionRegistry,
 } from "../phone-secret.ts";
 import type { BotLogins } from "../bot-logins.ts";
+import type { VaultStore } from "../vault-store.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { serverLine } from "../server-lines.ts";
 
@@ -55,6 +56,8 @@ export interface SecretCardsDeps {
   store: Pick<Store, "activePath" | "appendMessage" | "patchMessage" | "messagesFor" | "botByThread" | "groupByThread" | "onChange">;
   cfg: AppConfig;
   botLogins: Pick<BotLogins, "credentialConfig">;
+  /** Where a custom card's value is saved, and found again the next time the same bot asks for it by name. */
+  vaultStore: Pick<VaultStore, "saveSecret" | "usableSecret" | "markUsed">;
   phoneSecrets: Pick<PhoneSecretBridge, "provide" | "open">;
   phoneSecretSubmissions: PhoneSecretSubmissionRegistry;
   connectorThread(botId: string, threadId: string): { bot: BotRecord; group: GroupRecord | undefined } | null;
@@ -106,7 +109,7 @@ export function savedSecretText(label: string, saved: SavedSecret | null): strin
 }
 
 function deliveryNote(botName: string, delivery: SecretDelivery, language: string | undefined): string {
-  return serverLine(language, delivery === "file" ? "server.connect.secretFile" : "server.connect.secretRef", { bot: botName });
+  return `${serverLine(language, delivery === "file" ? "server.connect.secretFile" : "server.connect.secretRef", { bot: botName })} ${serverLine(language, "server.connect.secretKept", { bot: botName })}`;
 }
 
 /** Where a file secret goes: the Local VM workspace its card names, else the bot's own folder. */
@@ -154,7 +157,7 @@ function outgoingFields(fields: Record<string, unknown>): EmailOutgoingFields {
   return Object.fromEntries(OUTGOING_FIELDS.flatMap((name) => (server[name] === undefined ? [] : [[name, server[name]]]))) as EmailOutgoingFields;
 }
 
-function customRequest(body: Record<string, unknown>): { label: string; reason: string; placeholder: string; delivery: SecretDelivery } | { error: string } {
+function customRequest(body: Record<string, unknown>): { label: string; reason: string; placeholder: string; delivery: SecretDelivery; replace: boolean } | { error: string } {
   const text = (value: unknown, max: number) => typeof value === "string"
     ? [...value].map((ch) => (ch.charCodeAt(0) < 0x20 || ch === "\u007f" ? " " : ch)).join("").trim().slice(0, max)
     : "";
@@ -165,11 +168,11 @@ function customRequest(body: Record<string, unknown>): { label: string; reason: 
   if (!SECRET_DELIVERIES.includes(body.delivery as SecretDelivery)) {
     return { error: "request_credential needs delivery: ref for OpenMausBot's own tools such as mcp_server, or file for your own commands." };
   }
-  return { label, reason, placeholder: text(body.placeholder, CUSTOM_SECRET_LABEL_MAX), delivery: body.delivery as SecretDelivery };
+  return { label, reason, placeholder: text(body.placeholder, CUSTOM_SECRET_LABEL_MAX), delivery: body.delivery as SecretDelivery, replace: body.replace === true };
 }
 
 export function createSecretCards(deps: SecretCardsDeps) {
-  const { store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode } = deps;
+  const { store, cfg, botLogins, vaultStore, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode } = deps;
   const vault = new SecretVault();
   addHeldSecretScrubber((text) => vault.scrub(text));
 
@@ -213,13 +216,17 @@ export function createSecretCards(deps: SecretCardsDeps) {
     if (change.type === "thread.deleted" || change.type === "bot.deleted" || change.type === "group.deleted") sweep();
   });
 
-  /** Keeps a custom card's value where its delivery says, and marks when; never touches the card's other fields. */
+  const fileHome = (botId: string, threadId: string, vm: string | undefined): SecretFileHome =>
+    (vm ? vmFileHome(botId, vm) : null) ?? { host: deps.layerFolder(botId, threadId), shown: deps.layerFolder(botId, threadId) };
+
+  /** Saves a custom card's value to the Vault for the asking bot, hands it over as its delivery says, and marks when;
+   * never touches the card's other fields. */
   function storeCustomSecret(message: Message, botId: string, threadId: string, value: string): void {
     const secret = message.secret!;
     const owner = { botId, threadId };
+    vaultStore.saveSecret({ name: secret.label, value, source: "card", bots: [botId], refOnly: secret.delivery !== "file" });
     if (secret.delivery === "file") {
-      const home = (secret.vm ? vmFileHome(botId, secret.vm) : null) ?? { host: deps.layerFolder(botId, threadId), shown: deps.layerFolder(botId, threadId) };
-      vault.saveFile(owner, message.id, value, home);
+      vault.saveFile(owner, message.id, value, fileHome(botId, threadId, secret.vm));
     } else {
       vault.saveRef(owner, message.id, secret.label, value);
     }
@@ -554,19 +561,25 @@ export function createSecretCards(deps: SecretCardsDeps) {
     return { messageId: message.id, label: card.label };
   }
 
-  /** A secret OpenMausBot does not keep: the same bot asking again for one already saved here gets it back, and a newer
-   * card replaces its pending one with the same name. */
+  /** A secret the Vault holds for the bot by this name is handed over at once, with no card; otherwise a card asks for it,
+   * replacing the bot's pending card with the same name. */
   function requestCustomSecret(from: BotRecord, threadId: string, room: boolean, body: Record<string, unknown>): { status: number; body: Record<string, unknown> } {
     const asked = customRequest(body);
     if ("error" in asked) return { status: 400, body: asked };
-    const path = store.activePath(threadId);
-    const earlier = [...path].reverse().find((message) => message.kind === "secret" && message.secret && custom(message.secret) &&
-      message.secret.savedAt !== undefined && !message.secret.superseded && message.secret.label.toLowerCase() === asked.label.toLowerCase() &&
-      (!room || message.from?.botId === from.id));
-    const kept = earlier ? vault.savedFor(earlier.id) : null;
-    if (earlier && kept && earlier.secret!.delivery === asked.delivery) return { status: 200, body: { label: asked.label, text: savedSecretText(asked.label, kept) } };
-    const mismatch = earlier && kept ? earlier.secret!.delivery : undefined;
     const vm = asked.delivery === "file" ? deps.turnVm(threadId) : undefined;
+    const item = asked.replace ? null : vaultStore.usableSecret(asked.label, from.id, asked.delivery);
+    if (item) {
+      const owner = { botId: from.id, threadId };
+      try {
+        const saved = asked.delivery === "file" ? { file: vault.mintFile(owner, item.id, item.value, fileHome(from.id, threadId, vm)) } : { ref: vault.mintRef(owner, item.name, item.value) };
+        vaultStore.markUsed(item.id);
+        return { status: 200, body: { label: asked.label, text: savedSecretText(asked.label, saved) } };
+      } catch (error) {
+        console.warn(`secret card: could not hand over a saved secret: ${error instanceof Error ? error.message : String(error)}`);
+        return { status: 500, body: userError("serverError.secret.notKeptSafely") };
+      }
+    }
+    const path = store.activePath(threadId);
     const language = deps.threadLanguage?.(threadId);
     const message = store.appendMessage(threadId, {
       role: "bot",
@@ -590,7 +603,8 @@ export function createSecretCards(deps: SecretCardsDeps) {
       store.patchMessage(threadId, prior.id, { secret: { ...prior.secret, superseded: true } });
       deps.followCard(threadId, prior.id, message.id);
     }
-    return { status: 201, body: { messageId: message.id, label: asked.label, delivery: asked.delivery, ...(mismatch ? { savedAs: mismatch } : {}) } };
+    const savedAs = asked.delivery === "file" && !asked.replace && vaultStore.usableSecret(asked.label, from.id, "ref") ? { savedAs: "ref" } : {};
+    return { status: 201, body: { messageId: message.id, label: asked.label, delivery: asked.delivery, ...savedAs } };
   }
 
   return {
