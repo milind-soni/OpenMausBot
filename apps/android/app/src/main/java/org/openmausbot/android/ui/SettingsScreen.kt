@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.openmausbot.android.BuildConfig
 import org.openmausbot.android.data.ConnectionState
+import org.openmausbot.android.data.currentBaseUrl
 import org.openmausbot.android.data.Repo
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -115,7 +116,7 @@ fun SettingsScreen(onClose: () -> Unit) {
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
-                computer?.baseUrl ?: "",
+                computer?.currentBaseUrl() ?: "",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

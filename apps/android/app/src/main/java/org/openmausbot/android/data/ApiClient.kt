@@ -2,7 +2,6 @@ package org.openmausbot.android.data
 
 import org.json.JSONArray
 import org.json.JSONObject
-import org.openmausbot.android.e2e.E2EDescriptor
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -17,13 +16,12 @@ class ApiException(val status: Int, message: String, val body: String? = null) :
 class ApiClient(
     baseUrl: String,
     private val token: String?,
-    private val loopbackHeaderName: String? = null,
-    private val loopbackHeaderValue: String? = null,
     private val connectTimeoutMs: Int = TimeUnit.SECONDS.toMillis(12).toInt(),
     private val readTimeoutMs: Int = TimeUnit.SECONDS.toMillis(30).toInt(),
 ) {
     val baseUrl: String = baseUrl.trimEnd('/')
-    private val deviceName = android.os.Build.MODEL ?: "Android"
+    private val deviceName: String =
+        runCatching { android.os.Build.MODEL }.getOrNull()?.takeIf { it.isNotBlank() } ?: "Android"
 
     fun get(path: String): JSONObject = JSONObject(request("GET", path, null) ?: "{}")
 
@@ -80,23 +78,27 @@ class ApiClient(
         }
     }
 
-    /** Redeems a pairing credential. Returns the long-lived device token. */
-    fun pair(credential: String, serverNameHint: String?): PairResult {
+    /** Redeems a one-time pairing credential for a device token. The only
+     *  call made without a device token. New QR credentials use the explicit
+     *  `credential` field; a six-digit legacy code keeps its `code` field. */
+    fun pair(
+        credential: String,
+        serverNameHint: String?,
+        pairRequestId: String? = null,
+    ): PairResult {
         val body = JSONObject().apply {
-            put("credential", credential)
+            put(if (credential.length == 6 && credential.all(Char::isDigit)) "code" else "credential", credential)
             put("deviceName", deviceName)
+            pairRequestId?.let { put("pairRequestId", it) }
         }
         val answer = post("/api/pair", body)
         val deviceToken = answer.optString("token").takeIf { it.isNotBlank() }
             ?: throw ApiException(401, "电脑没有返回设备令牌")
         val device = answer.optJSONObject("device")
-        val endpoints = answer.optJSONArray("endpoints")?.let { array ->
+        val endpoints = parseEndpoints(answer.optJSONArray("endpoints"))
+        val hosts = answer.optJSONArray("hosts")?.let { array ->
             (0 until array.length()).mapNotNull { index ->
-                when (val item = array.opt(index)) {
-                    is String -> item.takeIf { it.isNotBlank() }
-                    is JSONObject -> item.optString("url").takeIf { it.isNotBlank() }
-                    else -> null
-                }
+                array.optString(index).takeIf { it.isNotBlank() }
             }
         } ?: emptyList()
         return PairResult(
@@ -104,25 +106,44 @@ class ApiClient(
             deviceId = device?.optString("id")?.takeIf { it.isNotBlank() } ?: (serverNameHint ?: baseUrl),
             serverName = answer.optString("serverName").takeIf { it.isNotBlank() }
                 ?: serverNameHint ?: PairingInvite.hostOf(baseUrl),
+            hosts = hosts,
             endpoints = endpoints,
-            e2e = E2EDescriptor.from(answer.opt("e2e")),
         )
     }
 
     fun health(): JSONObject = JSONObject(request("GET", "/api/health", null) ?: "{}")
 
-    /** Shared by ordinary requests and the SSE stream. The loopback header is
-     *  the proxy's only admission check; Connection: close keeps one HTTP head
-     *  per yamux stream. */
-    internal fun applyHeaders(connection: HttpURLConnection) {
+    /** The sidecar-owned route snapshot. It contains no account or pairing
+     *  credential and is how a paired phone learns about a new hosted URL. */
+    fun connectionMetadata(): ConnectionMetadata {
+        val answer = get("/api/companion/endpoints")
+        return ConnectionMetadata(
+            serverName = answer.optString("serverName"),
+            hosts = answer.optJSONArray("hosts")?.let { array ->
+                (0 until array.length()).mapNotNull { index ->
+                    array.optString(index).takeIf { it.isNotBlank() }
+                }
+            },
+            endpoints = parseEndpoints(answer.optJSONArray("endpoints")),
+        )
+    }
+
+    private fun parseEndpoints(array: JSONArray?): List<CompanionEndpoint> {
+        array ?: return emptyList()
+        return (0 until array.length()).mapNotNull { index ->
+            when (val item = array.opt(index)) {
+                is JSONObject -> CompanionEndpoint.fromJson(item)
+                is String -> item.takeIf { it.isNotBlank() }?.let { url ->
+                    CompanionEndpoint.create(url, CompanionEndpoint.kindForOrigin(url), index)
+                }
+                else -> null
+            }
+        }.distinctBy { it.url }
+    }
+
+    private fun applyHeaders(connection: HttpURLConnection) {
         connection.setRequestProperty("User-Agent", "OpenMausBot-Android/1.0")
         token?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
-        val name = loopbackHeaderName
-        val value = loopbackHeaderValue
-        if (name != null && value != null) {
-            connection.setRequestProperty(name, value)
-            connection.setRequestProperty("Connection", "close")
-        }
     }
 
     private fun open(method: String, path: String): HttpURLConnection {
@@ -167,12 +188,15 @@ class ApiClient(
         val token: String,
         val deviceId: String,
         val serverName: String,
-        val endpoints: List<String>,
-        val e2e: E2EDescriptor? = null,
+        val hosts: List<String> = emptyList(),
+        val endpoints: List<CompanionEndpoint> = emptyList(),
     )
 
-    /** Server-sent events. `onFrame` receives each JSON payload; `onCursor`
-     *  gets the `id:` line so a reconnect resumes exactly where it stopped. */
+    /** One attempt at the event stream. Reconnection and route failover belong
+     *  to the caller, which knows whether the app is on screen and which
+     *  other routes are allowed. A stream that ends before `hello` throws
+     *  `MissingStreamHelloException` so a captive page or proxy cannot look
+     *  healthy forever. */
     class Stream(
         private val client: ApiClient,
         private val lastEventId: String?,
@@ -191,83 +215,64 @@ class ApiClient(
             onCursor: (String) -> Unit,
             onOpen: () -> Unit,
         ) {
-            var attempt = 0
-            while (!closed) {
-                try {
-                    attempt = 0
-                    openOnce(onFrame, onCursor, onOpen)
-                    if (closed) return
-                } catch (e: IOException) {
-                    if (closed) return
-                    attempt++
-                    // 1s, 2s, 4s, 8s, capped at 15s, with jitter so a fleet of
-                    // phones does not reconnect in lockstep after a network blip.
-                    val delay = (minOf(15_000L, 1_000L shl minOf(attempt, 4)) + (0..700L).random())
-                    try {
-                        Thread.sleep(delay)
-                    } catch (interrupted: InterruptedException) {
-                        return
-                    }
-                } catch (e: Exception) {
-                    if (closed) return
-                    try {
-                        Thread.sleep(3_000)
-                    } catch (interrupted: InterruptedException) {
-                        return
-                    }
-                }
-            }
-        }
-
-        private fun openOnce(
-            onFrame: (JSONObject) -> Unit,
-            onCursor: (String) -> Unit,
-            onOpen: () -> Unit,
-        ) {
-            val url = URL(client.baseUrl + "/api/events")
-            val conn = url.openConnection() as HttpURLConnection
+            var helloSeen = false
+            var opened = false
+            val conn = URL(client.baseUrl + "/api/events").openConnection() as HttpURLConnection
             connection = conn
-            conn.requestMethod = "GET"
-            conn.connectTimeout = 15_000
-            // No read timeout: an idle SSE stream is healthy and must not be
-            // torn down and re-established every half minute.
-            conn.readTimeout = 0
-            conn.setRequestProperty("Accept", "text/event-stream")
-            conn.setRequestProperty("Cache-Control", "no-cache")
-            client.applyHeaders(conn)
-            lastEventId?.let { conn.setRequestProperty("Last-Event-ID", it) }
-            val status = conn.responseCode
-            if (status !in 200..299) {
-                val text = conn.errorStream?.bufferedReader()?.use { it.readText() }
-                throw ApiException(status, text ?: "事件流被拒绝")
-            }
-            onOpen()
-            BufferedInputStream(conn.inputStream).bufferedReader().use { reader ->
-                val data = StringBuilder()
-                var eventId: String? = null
-                while (!closed) {
-                    val line = reader.readLine() ?: break
-                    when {
-                        line.isEmpty() -> {
-                            if (data.isNotEmpty()) {
-                                val payload = runCatching { JSONObject(data.toString()) }.getOrNull()
-                                data.setLength(0)
-                                if (payload != null) onFrame(payload)
-                                eventId?.let(onCursor)
-                                eventId = null
+            try {
+                conn.requestMethod = "GET"
+                conn.connectTimeout = 15_000
+                // The sidecar sends a keepalive comment every 25 seconds, so
+                // silence longer than this is a dead route, not an idle one.
+                conn.readTimeout = 90_000
+                conn.setRequestProperty("Accept", "text/event-stream")
+                conn.setRequestProperty("Cache-Control", "no-cache")
+                client.applyHeaders(conn)
+                lastEventId?.let { conn.setRequestProperty("Last-Event-ID", it) }
+                val status = conn.responseCode
+                if (status !in 200..299) {
+                    val text = conn.errorStream?.bufferedReader()?.use { it.readText() }
+                    throw ApiException(status, text ?: "事件流被拒绝", text)
+                }
+                BufferedInputStream(conn.inputStream).bufferedReader().use { reader ->
+                    val data = StringBuilder()
+                    var eventId: String? = null
+                    while (!closed) {
+                        val line = reader.readLine() ?: break
+                        when {
+                            line.isEmpty() -> {
+                                if (data.isNotEmpty()) {
+                                    val payload = runCatching { JSONObject(data.toString()) }.getOrNull()
+                                    data.setLength(0)
+                                    if (payload != null) {
+                                        if (!helloSeen && payload.optString("kind") == "hello") {
+                                            helloSeen = true
+                                            opened = true
+                                            onOpen()
+                                        }
+                                        onFrame(payload)
+                                    }
+                                    eventId?.let(onCursor)
+                                    eventId = null
+                                }
                             }
+                            line.startsWith(":") -> Unit
+                            line.startsWith("data:") -> {
+                                val chunk = line.removePrefix("data:").let {
+                                    if (it.startsWith(" ")) it.drop(1) else it
+                                }
+                                if (data.isNotEmpty()) data.append('\n')
+                                data.append(chunk)
+                            }
+                            line.startsWith("id:") -> eventId = line.removePrefix("id:").trim()
                         }
-                        line.startsWith("data:") -> {
-                            val chunk = line.removePrefix("data:").trimStart()
-                            if (data.isNotEmpty()) data.append('\n')
-                            data.append(chunk)
-                        }
-                        line.startsWith("id:") -> eventId = line.removePrefix("id:").trim()
-                        line.startsWith(":") -> Unit
                     }
                 }
+                if (!closed && !helloSeen && !opened) throw MissingStreamHelloException()
+            } finally {
+                connection = null
+                conn.disconnect()
             }
-            connection = null
         }
     }
 

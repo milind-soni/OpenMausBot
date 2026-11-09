@@ -45,6 +45,7 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.launch
 import org.openmausbot.android.data.PairingInvite
+import org.openmausbot.android.data.currentBaseUrl
 import org.openmausbot.android.data.Repo
 
 @Composable
@@ -257,7 +258,7 @@ fun PairScreen(invite: String?, onDismiss: () -> Unit) {
                             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                 Text(computer.serverName, style = MaterialTheme.typography.titleMedium)
                                 Text(
-                                    computer.baseUrl,
+                                    computer.currentBaseUrl(),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )

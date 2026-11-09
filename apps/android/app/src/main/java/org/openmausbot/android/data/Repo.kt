@@ -6,18 +6,17 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import org.openmausbot.android.e2e.E2EClient
-import org.openmausbot.android.e2e.E2EConnection
-import org.openmausbot.android.e2e.E2EDescriptor
-import java.util.concurrent.atomic.AtomicBoolean
+import java.io.IOException
 
 /** One process-wide state holder. The React app folds a single SSE stream into
  *  its store; this does the same with Compose snapshot state. */
@@ -48,8 +47,10 @@ object Repo {
     private val loadingThreads = mutableStateMapOf<String, Boolean>()
     private var client: ApiClient? = null
     private var stream: ApiClient.Stream? = null
-    @Volatile private var activeE2E: E2EConnection? = null
-    private val connecting = AtomicBoolean(false)
+    private var connectionJob: Job? = null
+    private var routeRotation: CandidateRotation? = null
+    private var currentCursor: String? = null
+    private var generation = 0
     private val notifiedIds = mutableSetOf<String>()
 
     var onNotification: ((NotificationPayload) -> Unit)? = null
@@ -72,82 +73,38 @@ object Repo {
     // ---------------------------------------------------------------- pairing
 
     suspend fun pairWith(invite: PairingInvite): Result<PairedComputer> = withContext(Dispatchers.IO) {
-        val credential = invite.token ?: invite.code
-            ?: return@withContext Result.failure(ApiException(400, "这个邀请没有配对码"))
-        val descriptor = invite.e2e
-        val pairingToken = invite.token
-        if (descriptor != null && pairingToken != null) {
-            return@withContext pairE2E(invite, pairingToken, descriptor)
-        }
-        val candidates = (listOf(invite.baseUrl) + invite.endpoints).distinct()
-        var lastError: Exception? = null
-        for (base in candidates) {
-            try {
-                val api = ApiClient(base, null)
-                val result = api.pair(credential, invite.serverName)
-                val computer = PairedComputer(
-                    id = result.deviceId,
-                    serverName = result.serverName,
-                    baseUrl = base,
-                    token = result.token,
-                    endpoints = (invite.endpoints + result.endpoints).filter { it != base }.distinct(),
-                    lastUsedAt = System.currentTimeMillis(),
-                    e2e = result.e2e ?: descriptor,
-                )
-                store.upsert(computer)
-                store.selectedId = computer.id
-                computers = store.computers
-                return@withContext Result.success(computer)
-            } catch (e: Exception) {
-                lastError = e
-            }
-        }
-        Result.failure(lastError ?: ApiException(500, "无法连接这台电脑"))
-    }
-
-    /** A pairing token is also a valid PSK, so the QR's redemption can happen
-     *  inside the encrypted session; the device token is used afterwards. */
-    private suspend fun pairE2E(
-        invite: PairingInvite,
-        pairingToken: String,
-        descriptor: E2EDescriptor,
-    ): Result<PairedComputer> {
-        return try {
-            val candidates = (listOf(invite.baseUrl) + invite.endpoints).distinct()
-            val connection = E2EClient(descriptor, pairingToken, candidates).connect()
-            try {
-                val api = ApiClient(
-                    connection.baseUrl,
-                    null,
-                    connection.headerName,
-                    connection.headerValue,
-                )
-                val result = api.pair(pairingToken, invite.serverName)
-                val computer = PairedComputer(
-                    id = result.deviceId,
-                    serverName = result.serverName,
-                    baseUrl = invite.baseUrl,
-                    token = result.token,
-                    endpoints = (invite.endpoints + result.endpoints)
-                        .filter { it != invite.baseUrl }
-                        .distinct(),
-                    lastUsedAt = System.currentTimeMillis(),
-                    e2e = result.e2e ?: descriptor,
-                )
-                store.upsert(computer)
-                store.selectedId = computer.id
-                computers = store.computers
-                Result.success(computer)
-            } finally {
-                connection.close()
-            }
+        try {
+            val outcome = PairingClient.pairFirstReachable(invite, deviceName())
+            val paired = outcome.connection
+            store.upsert(paired)
+            store.selectedId = paired.id
+            computers = store.computers
+            Result.success(paired)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    suspend fun pairWithCode(baseUrl: String, code: String, name: String?): Result<PairedComputer> =
-        pairWith(PairingInvite(baseUrl, null, code, name ?: PairingInvite.hostOf(baseUrl), emptyList(), null))
+    private fun deviceName(): String =
+        runCatching { android.os.Build.MODEL }.getOrNull()?.takeIf { it.isNotBlank() } ?: "Android"
+
+    suspend fun pairWithCode(baseUrl: String, code: String, name: String?): Result<PairedComputer> {
+        val origin = PairingInvite.clampOrigin(baseUrl)
+            ?: return Result.failure(ApiException(400, "电脑地址无效"))
+        val endpoint = CompanionEndpoint.create(origin, CompanionEndpoint.kindForOrigin(origin), 0)
+            ?: return Result.failure(ApiException(400, "电脑地址无效"))
+        return pairWith(
+            PairingInvite(
+                baseUrl = endpoint.url,
+                token = null,
+                code = code,
+                serverName = name?.takeIf { it.isNotBlank() } ?: endpoint.host,
+                endpoints = listOf(endpoint),
+            )
+        )
+    }
 
     fun forget(computerId: String) {
         store.remove(computerId)
@@ -171,114 +128,149 @@ object Repo {
             connection = ConnectionState(ConnectionState.Phase.IDLE)
             return
         }
-        if (connecting.get()) return
-        connecting.set(true)
+        connectionJob?.cancel()
+        generation++
+        val token = generation
         computer = target
+        currentCursor = target.lastCursor
+        routeRotation = null
         connection = ConnectionState(ConnectionState.Phase.CONNECTING, "正在连接 ${target.serverName}…", target.serverName)
         lastError = null
-        val descriptor = target.e2e
-        scope.launch {
-            var established: E2EConnection? = null
-            var plainHealth: JSONObject? = null
+        connectionJob = scope.launch {
             try {
-                val api = if (descriptor != null) {
-                    connection = connection.copy(detail = "正在建立端到端加密…")
-                    val live = withContext(Dispatchers.IO) {
-                        E2EClient(
-                            descriptor = descriptor,
-                            credential = target.token,
-                            origins = (target.endpoints + target.baseUrl).distinct(),
-                        ).connect()
-                    }
-                    established = live
-                    activeE2E = live
-                    ApiClient(live.baseUrl, target.token, live.headerName, live.headerValue)
-                } else {
-                    val link = withContext(Dispatchers.IO) { openPlain(target) }
-                    plainHealth = link.health
-                    link.api
-                }
-                client = api
-                val health = plainHealth ?: withContext(Dispatchers.IO) { api.health() }
-                connection = connection.copy(
-                    phase = ConnectionState.Phase.CONNECTING,
-                    detail = health.optString("name", target.serverName),
-                )
-                refreshAll()
-                startStream(api, target.lastCursor)
-                val live = established
-                if (live != null) {
-                    scope.launch {
-                        val ended = runCatching {
-                            withContext(Dispatchers.IO) { live.session.closed.get() }
-                        }.isSuccess
-                        if (!ended) return@launch
-                        if (activeE2E !== live || computer?.id != target.id) return@launch
-                        delay(1_500)
-                        if (activeE2E !== live || computer?.id != target.id) return@launch
-                        disconnect()
-                        connect(target)
-                    }
-                }
+                runConnection(target, token)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                established?.close()
-                activeE2E = null
+                if (token != generation) return@launch
                 client = null
                 connection = ConnectionState(ConnectionState.Phase.ERROR, e.message ?: "Could not reach the computer")
                 lastError = e.message
-            } finally {
-                connecting.set(false)
             }
         }
     }
 
-    private data class PlainLink(val api: ApiClient, val health: JSONObject)
-
-    /** Saved LAN endpoints win over the pairing URL: a phone that comes back
-     *  to the same network must not keep retrying an expired public tunnel. */
-    private fun openPlain(target: PairedComputer): PlainLink {
-        val candidates = (target.endpoints + target.baseUrl)
-            .filter { it.isNotBlank() }
-            .distinct()
-        var last: Exception? = null
-        for (url in candidates) {
+    private suspend fun runConnection(target: PairedComputer, token: Int) {
+        val routes = target.automaticEndpoints()
+        if (routes.isEmpty()) throw IOException("这台电脑没有可用的地址")
+        val rotation = CandidateRotation(routes)
+        routeRotation = rotation
+        var current = target
+        while (token == generation) {
+            val endpoint = rotation.currentEndpoint ?: break
+            connection = ConnectionState(ConnectionState.Phase.CONNECTING, "正在连接 ${endpoint.displayAddress}…", current.serverName)
             try {
-                val probe = ApiClient(url, target.token, connectTimeoutMs = 4_000, readTimeoutMs = 5_000)
-                val health = probe.health()
-                if (health.optString("app") != "openmausbot") throw java.io.IOException("不是 OpenMausBot")
-                return PlainLink(ApiClient(url, target.token), health)
+                val api = ApiClient(endpoint.url, current.token)
+                val health = withContext(Dispatchers.IO) { api.health() }
+                if (health.optString("app") != "openmausbot") throw IOException("不是 OpenMausBot")
+                client = api
+                connection = ConnectionState(
+                    ConnectionState.Phase.CONNECTING,
+                    health.optString("name", current.serverName),
+                    current.serverName,
+                )
+                refreshAll()
+                val promoted = (computer ?: current).promote(endpoint)
+                current = promoted
+                persist(promoted)
+                try {
+                    syncEndpoints(api, token)?.let { current = it }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // A route snapshot is an optimization; the live stream is authoritative.
+                }
+                runStream(api, token)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                last = e
+                if (token != generation) return
+                if (ConnectionAdvice.isAuthenticationFailure(e)) throw e
+                if (!ConnectionAdvice.shouldTryAnotherRoute(e)) throw e
+                if (rotation.advanceAfter(e) == null) {
+                    connection = ConnectionState(
+                        ConnectionState.Phase.OFFLINE,
+                        e.message ?: "连接断开，正在重试…",
+                        current.serverName,
+                    )
+                    delay(2_000)
+                }
             }
         }
-        throw last ?: java.io.IOException("没有可用的电脑地址")
     }
 
-    private fun startStream(api: ApiClient, cursor: String?) {
-        stream?.close()
-        val next = api.stream(cursor)
-        stream = next
-        scope.launch(Dispatchers.IO) {
-            next.run(
-                onFrame = { frame -> scope.launch { handleFrame(frame) } },
-                onCursor = { id -> computer?.let { store.cursor(it.id, id) } },
-                onOpen = {
+    private suspend fun runStream(api: ApiClient, token: Int) {
+        while (token == generation) {
+            val next = api.stream(currentCursor)
+            stream = next
+            var hello = false
+            try {
+                next.run(
+                    onFrame = { frame ->
+                        if (frame.optString("kind") == "hello") hello = true
+                        scope.launch { handleFrame(frame) }
+                    },
+                    onCursor = { id ->
+                        currentCursor = id
+                        computer?.let { store.cursor(it.id, id) }
+                    },
+                    onOpen = {
+                        hello = true
+                        connection = ConnectionState(ConnectionState.Phase.ONLINE, "", computer?.serverName ?: "")
+                    },
+                )
+                if (!hello) throw MissingStreamHelloException()
+                // A live stream that closes is the computer going away. Reopen
+                // the same route; only a stream that never said hello rotates.
+                delay(1_500)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: MissingStreamHelloException) {
+                throw e
+            } catch (e: ApiException) {
+                throw e
+            } catch (e: IOException) {
+                if (hello) {
                     connection = ConnectionState(
-                        ConnectionState.Phase.ONLINE,
-                        "",
+                        ConnectionState.Phase.OFFLINE,
+                        "连接断开，正在重连…",
                         computer?.serverName ?: "",
                     )
-                },
-            )
+                    delay(1_500)
+                } else {
+                    throw e
+                }
+            } finally {
+                next.close()
+                if (stream === next) stream = null
+            }
         }
+    }
+
+    private suspend fun syncEndpoints(api: ApiClient, token: Int): PairedComputer? {
+        val metadata = withContext(Dispatchers.IO) { api.connectionMetadata() }
+        if (token != generation) return null
+        val current = computer ?: return null
+        val updated = current.reconcile(metadata)
+        persist(updated)
+        return updated
+    }
+
+    private fun persist(next: PairedComputer) {
+        store.upsert(next)
+        computers = store.computers
+        computer = next
     }
 
     fun disconnect() {
+        generation++
+        connectionJob?.cancel()
+        connectionJob = null
         stream?.close()
         stream = null
-        activeE2E?.close()
-        activeE2E = null
         client = null
+        routeRotation = null
+        currentCursor = null
         computer = null
         bots.clear()
         groups.clear()
@@ -680,8 +672,8 @@ object Repo {
 
     fun imageUrl(path: String): String = when {
         path.startsWith("http://") || path.startsWith("https://") -> path
-        path.startsWith("/") -> (computer?.baseUrl ?: "") + path
-        else -> (computer?.baseUrl ?: "") + "/api/attachments/" + path
+        path.startsWith("/") -> (computer?.currentBaseUrl() ?: "") + path
+        else -> (computer?.currentBaseUrl() ?: "") + "/api/attachments/" + path
     }
 
     fun clearError() {

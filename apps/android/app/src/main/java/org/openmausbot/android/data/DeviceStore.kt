@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
-import org.openmausbot.android.e2e.E2EDescriptor
 
 /** Saved pairing trust. The device token is a revocable bearer credential and
  *  lives in app-private storage, never in the transcript or in a backup. */
@@ -67,19 +66,50 @@ class DeviceStore(context: Context) {
                     val json = array.optJSONObject(index) ?: return@mapNotNull null
                     val base = json.optString("baseUrl").takeIf { it.isNotBlank() } ?: return@mapNotNull null
                     val token = json.optString("token").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    val legacyEndpoints = json.optJSONArray("endpoints")?.let { endpoints ->
+                        (0 until endpoints.length()).mapNotNull { i ->
+                            when (val item = endpoints.opt(i)) {
+                                is JSONObject -> item.optString("url").takeIf { it.isNotBlank() }
+                                is String -> item.takeIf { it.isNotBlank() }
+                                else -> null
+                            }
+                        }
+                    } ?: emptyList()
+                    val routes = json.optJSONArray("routes")?.let { array ->
+                        (0 until array.length()).mapNotNull { i ->
+                            array.optJSONObject(i)?.let(CompanionEndpoint::fromJson)
+                        }
+                    } ?: emptyList()
+                    val active = json.optJSONObject("activeEndpoint")?.let(CompanionEndpoint::fromJson)
+                    val kinds = json.optJSONArray("allowedRouteKinds")?.let { array ->
+                        (0 until array.length())
+                            .mapNotNull { i -> EndpointKind.fromWire(array.optString(i)) }
+                            .toSet()
+                    }
+                    val localUrls = json.optJSONArray("allowedLocalRouteUrls")?.let { array ->
+                        (0 until array.length()).mapNotNull { i ->
+                            array.optString(i).takeIf { it.isNotBlank() }
+                        }.toSet()
+                    }
                     PairedComputer(
                         id = json.optString("id", base),
                         serverName = json.optString("serverName", PairingInvite.hostOf(base)),
                         baseUrl = base,
                         token = token,
-                        endpoints = json.optJSONArray("endpoints")?.let { endpoints ->
-                            (0 until endpoints.length()).mapNotNull { endpoints.optString(it).takeIf(String::isNotBlank) }
-                        } ?: emptyList(),
+                        endpoints = legacyEndpoints,
                         lastCursor = json.optString("lastCursor").takeIf { it.isNotBlank() },
                         lastUsedAt = json.optLong("lastUsedAt"),
-                        e2e = json.optJSONObject("e2e")?.let { E2EDescriptor.parse(it) }
-                            ?: json.optString("e2e").takeIf { it.isNotBlank() }
-                                ?.let { E2EDescriptor.parse(it) },
+                        hosts = json.optJSONArray("hosts")?.let { hosts ->
+                            (0 until hosts.length()).mapNotNull { i ->
+                                hosts.optString(i).takeIf { it.isNotBlank() }
+                            }
+                        } ?: emptyList(),
+                        endpointRoutes = routes,
+                        activeEndpoint = active ?: routes.firstOrNull(),
+                        allowedRouteKinds = kinds,
+                        allowedLocalRouteUrls = localUrls,
+                        secretPublicKey = json.optString("secretPublicKey").takeIf { it.isNotBlank() },
+                        companionDeviceId = json.optString("companionDeviceId").takeIf { it.isNotBlank() },
                     )
                 }
             }
@@ -96,9 +126,21 @@ class DeviceStore(context: Context) {
                     put("baseUrl", computer.baseUrl)
                     put("token", computer.token)
                     put("endpoints", JSONArray(computer.endpoints))
+                    put("hosts", JSONArray(computer.hosts))
+                    put("routes", JSONArray().apply {
+                        computer.endpointRoutes.forEach { put(it.toJson()) }
+                    })
+                    computer.activeEndpoint?.let { put("activeEndpoint", it.toJson()) }
+                    computer.allowedRouteKinds?.let { kinds ->
+                        put("allowedRouteKinds", JSONArray(kinds.map { it.wire }))
+                    }
+                    computer.allowedLocalRouteUrls?.let { urls ->
+                        put("allowedLocalRouteUrls", JSONArray(urls.toList()))
+                    }
+                    computer.secretPublicKey?.let { put("secretPublicKey", it) }
+                    computer.companionDeviceId?.let { put("companionDeviceId", it) }
                     put("lastCursor", computer.lastCursor ?: "")
                     put("lastUsedAt", computer.lastUsedAt)
-                    computer.e2e?.let { put("e2e", it.toJson()) }
                 }
             )
         }

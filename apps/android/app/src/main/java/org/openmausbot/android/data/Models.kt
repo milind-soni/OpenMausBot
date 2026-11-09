@@ -313,8 +313,25 @@ data class PairedComputer(
     val serverName: String,
     val baseUrl: String,
     val token: String,
+    /** Legacy comma-free URL list kept for older builds and display. New
+     *  pairings also persist `endpointRoutes`, which carries kind/priority. */
     val endpoints: List<String> = emptyList(),
     val lastCursor: String? = null,
     val lastUsedAt: Long = 0,
-    val e2e: org.openmausbot.android.e2e.E2EDescriptor? = null,
+    val hosts: List<String> = emptyList(),
+    val endpointRoutes: List<CompanionEndpoint> = emptyList(),
+    val activeEndpoint: CompanionEndpoint? = null,
+    /** `null` is the compatibility policy for connections saved before route
+     *  consent existed. New pairings always persist a non-nil set. */
+    val allowedRouteKinds: Set<EndpointKind>? = null,
+    val allowedLocalRouteUrls: Set<String>? = null,
+    val secretPublicKey: String? = null,
+    val companionDeviceId: String? = null,
+)
+
+/** The sidecar-owned endpoint snapshot; no account or pairing credential. */
+data class ConnectionMetadata(
+    val serverName: String,
+    val hosts: List<String>? = null,
+    val endpoints: List<CompanionEndpoint> = emptyList(),
 )

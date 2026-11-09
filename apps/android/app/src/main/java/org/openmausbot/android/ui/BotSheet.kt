@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.openmausbot.android.data.ApiClient
+import org.openmausbot.android.data.currentBaseUrl
 import org.openmausbot.android.data.Bot
 import org.openmausbot.android.data.Repo
 
@@ -228,7 +229,7 @@ fun SettingSwitch(
 object ApiAccess {
     private fun api(): ApiClient? = Repo.let { repo ->
         val computer = repo.computer ?: return null
-        ApiClient(computer.baseUrl, computer.token)
+        ApiClient(computer.currentBaseUrl(), computer.token)
     }
 
     fun get(path: String): JSONObject = api()?.get(path) ?: JSONObject()
