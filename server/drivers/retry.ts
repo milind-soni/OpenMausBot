@@ -98,25 +98,40 @@ const messageOf = (err: FailureInput): string => {
  * it appears: a status quoted inside the provider's message never wins over it.
  * A status quoted from a nested backend error still must not shadow a transient failure the same string
  * reports in a later clause: a CLI stderr tail, or a chained cause (messageOf joins it after "Error: ").
- * Such a later status only decides when it opens its own report: the start of a line, or right after the
- * cause marker. A status quoted mid-clause ("proxy said HTTP 409") stays nested. */
+ * Such a later status only decides when it opens its own report: the start of a line (a provider name
+ * may precede it), or right after the cause marker. A status quoted mid-clause ("proxy said HTTP 409")
+ * stays nested. */
 const HTTP_STATUS = /\(status (\d{3})\b[^)]*\)|\bHTTP (\d{3})\b|\bAPI Error:? (\d{3})\b/i;
 
-/** Whether a status-form match opens its own error report instead of quoting one inside the current clause:
- * it starts a line (a CLI stderr tail), or follows the "Error: " prefix messageOf adds for a chained cause. */
-function opensOwnReport(text: string, match: RegExpExecArray, gapStart: number): boolean {
-  if (text.slice(gapStart, match.index).includes("Error: ")) return true;
-  const lineStart = text.lastIndexOf("\n", match.index - 1) + 1;
-  return text.slice(lineStart, match.index).trim() === "";
+function opensOwnReport(
+  text: string,
+  match: RegExpExecArray,
+  gapStart: number,
+  lineStart: number,
+  lineHasMatch: boolean,
+): boolean {
+  const gap = text.slice(gapStart, match.index);
+  const causeAt = gap.lastIndexOf("Error: ");
+  if (causeAt !== -1 && /^[\w-]*\s*$/.test(gap.slice(causeAt + "Error: ".length))) return true;
+  if (lineHasMatch) return false;
+  const prefix = text.slice(lineStart, match.index).trim();
+  return prefix === "" || /^[A-Za-z][\w.-]*$/.test(prefix);
 }
 
 /** The transient verdict a status carries on its own, if any: 5xx reads server_error here because this runs
- * before the body patterns, which would read the same number the same way. */
-function transientStatusVerdict(status: number, provider: { openAi?: boolean }): ErrorClassification | undefined {
+ * before the body patterns, which would read the same number the same way — unless the report body says
+ * overloaded, which keeps that reason, matching the report on its own. */
+function transientStatusVerdict(
+  status: number,
+  provider: { openAi?: boolean },
+  body = "",
+): ErrorClassification | undefined {
   if (status === 429) return { transient: true, reason: "rate_limited" };
   if (status === 408) return { transient: true, reason: "timeout" };
   if (status === 409 && provider.openAi) return { transient: true, reason: "server_error" };
-  if (status >= 500 && status < 600) return { transient: true, reason: "server_error" };
+  if (status >= 500 && status < 600) {
+    return { transient: true, reason: /\boverloaded\b|\bcapacity\b/i.test(body) ? "overloaded" : "server_error" };
+  }
   return undefined;
 }
 
@@ -136,13 +151,27 @@ function httpStatusVerdict(text: string, provider: { openAi?: boolean }): ErrorC
     const rest = new RegExp(HTTP_STATUS.source, "gi");
     rest.lastIndex = match!.index + match![0].length;
     let prevEnd = rest.lastIndex;
+    let lineStart = text.lastIndexOf("\n", match!.index - 1) + 1;
+    let lineHasMatch = true;
     let later: RegExpExecArray | null;
     while ((later = rest.exec(text)) !== null) {
-      if (opensOwnReport(text, later, prevEnd)) {
-        const verdict = transientStatusVerdict(Number(later[1] ?? later[2] ?? later[3]), provider);
+      let newline = text.indexOf("\n", prevEnd);
+      while (newline !== -1 && newline < later.index) {
+        lineStart = newline + 1;
+        lineHasMatch = false;
+        newline = text.indexOf("\n", lineStart);
+      }
+      if (opensOwnReport(text, later, prevEnd, lineStart, lineHasMatch)) {
+        const lineEnd = text.indexOf("\n", later.index);
+        const verdict = transientStatusVerdict(
+          Number(later[1] ?? later[2] ?? later[3]),
+          provider,
+          text.slice(later.index + later[0].length, lineEnd === -1 ? undefined : lineEnd),
+        );
         if (verdict) return verdict;
       }
       prevEnd = later.index + later[0].length;
+      lineHasMatch = true;
     }
     return { transient: false, reason: "invalid_request" };
   }

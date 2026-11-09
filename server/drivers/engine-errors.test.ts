@@ -285,8 +285,11 @@ describe("classifyError reads an explicit HTTP status before body text", () => {
     ["API Error: 410: resource gone\nHTTP 503 Service Unavailable", { transient: true, reason: "server_error" }],
     ["API Error: 410: resource gone\nHTTP 429: too many requests", { transient: true, reason: "rate_limited" }],
     ["API Error: 410: resource gone Error: HTTP 503 Service Unavailable", { transient: true, reason: "server_error" }],
+    ["API Error: 410: resource gone\nxAI HTTP 503 Service Unavailable", { transient: true, reason: "server_error" }],
+    ["API Error: 410: resource gone\nHTTP 529: overloaded", { transient: true, reason: "overloaded" }],
     // ...but a status quoted inside the same clause stays nested, even on a later line.
     ["API Error: 410: resource gone\nDetails: the backend returned HTTP 503", { transient: false, reason: "invalid_request" }],
+    ["API Error: 410: resource gone Error: proxy said HTTP 503", { transient: false, reason: "invalid_request" }],
     ["API Error: 410: resource gone\nOpenAI HTTP 409: conflict", { transient: false, reason: "invalid_request" }],
     ["xAI HTTP 429: too many requests", { transient: true, reason: "rate_limited" }],
     ["(status 503 Service Unavailable)", { transient: true, reason: "server_error" }],
@@ -302,6 +305,10 @@ describe("classifyError reads an explicit HTTP status before body text", () => {
     expect(classifyError({ text: "API Error: 409 Conflict" }, { openAi: true }))
       .toEqual({ transient: true, reason: "server_error" });
     expect(classifyError({ text: "OpenAI HTTP 409: conflict with the current resource state" }, { openAi: true }))
+      .toEqual({ transient: true, reason: "server_error" });
+    expect(classifyError({ text: "API Error: 410: resource gone\nOpenAI HTTP 409: conflict" }, { openAi: true }))
+      .toEqual({ transient: true, reason: "server_error" });
+    expect(classifyError({ text: "API Error: 410: resource gone\nxAI HTTP 409: conflict" }, { openAi: true }))
       .toEqual({ transient: true, reason: "server_error" });
     expect(classifyError({ text: "API Error: 409 Conflict" }))
       .toEqual({ transient: false, reason: "invalid_request" });
