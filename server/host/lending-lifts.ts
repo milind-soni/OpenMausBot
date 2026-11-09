@@ -13,6 +13,7 @@ import { buildNotification, type Notification } from "../notify.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { serverLine } from "../server-lines.ts";
 import type { Message, Store } from "../store.ts";
+import { turnWaitedOnPerson } from "../waiting-on-person.ts";
 import { workspaceDir } from "../workspace.ts";
 
 const TOOL = "lending_lift";
@@ -181,7 +182,7 @@ export function createLendingLifts(deps: LendingLiftDeps) {
       // When they allowed it: work handed in after this shuts it again.
       store.patchMessage(threadId, message.id, { card: { ...card, answered: allowed ? "allow" : "deny", ...(allowed ? { lendingLift: { ...lift, allowedAt: now() } } : {}) } });
       deps.decide({ threadId, requestId, botId, botName: bot?.name, tool: TOOL, summary: card.title, decision: allowed ? "user-approved" : "user-denied", source: "user" });
-      if (store.projectBotForTask(botId, threadId)?.activity === "waiting-on-you") store.setTaskActivity(botId, threadId, "working");
+      if (turnWaitedOnPerson(store.taskByThread(botId, threadId))) store.setTaskActivity(botId, threadId, "working");
       if (allowed && store.groupByThread(threadId)) {
         store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(deps.language(threadId), "server.lendingLift.askAgain"), ok: true } });
       } else if (allowed) carryOn(botId, threadId, lift.requestMessageId, now());

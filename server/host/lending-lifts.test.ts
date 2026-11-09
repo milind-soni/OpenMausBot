@@ -1,8 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { rmSync } from "node:fs";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CUSTOM_SECRET_TARGET } from "../../shared/credential-request.ts";
 import { parseOptionsCardInput } from "../../shared/options-card.ts";
 import { liveDecisionRefusal } from "../../shared/live-approval.ts";
+import { CARRY_ON_MS } from "../computer-asks.ts";
+import { DATA_DIR } from "../config.ts";
 import "../server-line-packs.ts";
+import { Store } from "../store.ts";
 import { createLendingLifts, handedInSince, type LendingLiftDeps } from "./lending-lifts.ts";
+import { createPersonWaits } from "./person-waits.ts";
 
 const OWNER = "p_owner";
 
@@ -260,5 +266,103 @@ describe("the card that lifts a lock on the lent computer (server/host/lending-l
   });
   it("answers only its own cards", () => {
     expect(world().answer("something-else", "allow")).toBeNull();
+  });
+});
+
+describe("Allow on the card, in a conversation whose waiting state follows its open cards", () => {
+  beforeEach(() => rmSync(DATA_DIR, { recursive: true, force: true }));
+
+  function conversation({ stopped = false, rejects = false } = {}) {
+    const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
+    createPersonWaits({ store, notify: () => {}, threadsWithCards: () => [] });
+    const bot = store.createBot({ name: "Postmeister" });
+    const thread = bot.threadId;
+    const request = store.appendMessage(thread, { role: "user", kind: "text", text: "Save it into my folder" });
+    const task = () => store.taskByThread(bot.id, thread)!;
+    const continued: unknown[] = [];
+    const timers: Array<() => void> = [];
+    let at = 0;
+    const lifts = createLendingLifts({
+      store,
+      memory: { info: () => ({ token: "t1", changed: [] }), accept: () => true },
+      words: () => undefined, ownersAnswer: () => true, stopped: () => stopped,
+      // As index.ts's threadBusy reads a thread with no dispatch claim.
+      threadBusy: (botId, threadId) => store.taskByThread(botId, threadId)?.busy === true,
+      queued: () => false,
+      continueRequest: async (...args) => { continued.push(args); if (rejects) throw new Error("the engine is gone"); },
+      language: () => undefined, device: () => "PC", notify: () => {}, decide: () => {},
+      setTimer: ((run: () => void) => { timers.push(run); return {}; }) as never,
+      now: () => at,
+    });
+    /** The turn answering the request asks for a password, then for the PC, and leaves both cards open. */
+    const turnRaisesCards = () => {
+      store.setTaskActivity(bot.id, thread, "working");
+      store.appendMessage(thread, { role: "bot", kind: "secret", text: "enter it", secret: { target: CUSTOM_SECRET_TARGET, label: "Share password", description: "", reason: "To open the share.", placeholder: "", helpUrl: "", requestKey: "k", delivery: "ref" } });
+      expect(lifts.raise({ botId: bot.id, threadId: thread, requestMessageId: request.id, memoryChanged: false, outside: true })).toBe("open");
+    };
+    const allow = () => lifts.resolve(thread, store.messagesFor(thread).find((line) => line.card?.lendingLift)!.card!.requestId!, "allow");
+    const runTimers = () => { while (timers.length) { at += 5_000; timers.shift()!(); } };
+    return { store, bot, thread, task, continued, timers, turnRaisesCards, allow, runTimers, later: (ms: number) => { at += ms; } };
+  }
+
+  it("never shows a conversation resting on its cards working: the request goes on at once", () => {
+    const { store, bot, thread, task, continued, turnRaisesCards, allow } = conversation();
+    turnRaisesCards();
+    store.setTaskActivity(bot.id, thread, "idle");
+    expect(task()).toMatchObject({ activity: "waiting-on-you", busy: false });
+    expect(allow()).toEqual({ status: 200, body: { ok: true, outcome: "allowed-once" } });
+    expect(task()).toMatchObject({ activity: "waiting-on-you", busy: false });
+    expect(continued).toEqual([[bot.id, expect.stringContaining("Carry on"), expect.objectContaining({ threadId: thread, cardContinuation: true })]]);
+  });
+
+  it.each([
+    ["the person stopped the conversation", { stopped: true }],
+    ["the continuation can't start", { rejects: true }],
+  ])("leaves nothing working when the request doesn't go on: %s", async (_why, options) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { store, bot, thread, task, turnRaisesCards, allow } = conversation(options);
+      turnRaisesCards();
+      store.setTaskActivity(bot.id, thread, "idle");
+      allow();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(task()).toMatchObject({ busy: false });
+      expect(store.bot(bot.id)).toMatchObject({ busy: false });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("leaves nothing working when someone wrote since", () => {
+    const { store, bot, thread, task, continued, turnRaisesCards, allow } = conversation();
+    turnRaisesCards();
+    store.setTaskActivity(bot.id, thread, "idle");
+    store.appendMessage(thread, { role: "user", kind: "text", text: "Never mind" });
+    allow();
+    expect(task()).toMatchObject({ busy: false });
+    expect(continued).toEqual([]);
+  });
+
+  it("a turn still running when they allow it goes back to working, and the request goes on once it ends", () => {
+    const { store, bot, thread, task, continued, timers, turnRaisesCards, allow } = conversation();
+    turnRaisesCards();
+    expect(task()).toMatchObject({ activity: "waiting-on-you", busy: true });
+    allow();
+    expect(task()).toMatchObject({ activity: "working", busy: true });
+    expect(continued).toEqual([]);
+    store.setTaskActivity(bot.id, thread, "idle");
+    timers.shift()!();
+    expect(continued).toHaveLength(1);
+  });
+
+  it("gives up on a conversation that stays busy, which its own turn then frees", () => {
+    const { store, bot, thread, task, continued, turnRaisesCards, allow, runTimers, later } = conversation();
+    turnRaisesCards();
+    allow();
+    later(CARRY_ON_MS);
+    runTimers();
+    expect(continued).toEqual([]);
+    store.setTaskActivity(bot.id, thread, "idle");
+    expect(task()).toMatchObject({ activity: "waiting-on-you", busy: false });
   });
 });
