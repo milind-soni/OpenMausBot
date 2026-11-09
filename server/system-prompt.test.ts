@@ -375,6 +375,18 @@ describe("composioSystemPrompt", () => {
 });
 
 describe("cloudHomePrompt", () => {
+  it("says the Cloud is off their network, whatever memory says, and sends ssh through the lent computer", () => {
+    const lent = cloudHomePrompt(true, [], [{ name: "ASH-PC", platform: "win32" }]);
+    expect(lent).toContain("This Cloud is not on their network");
+    expect(lent).toContain("100.x.x.x, *.ts.net");
+    expect(lent).toContain("even when your memory or notes give the address");
+    expect(lent).toContain("run the command (ssh too) on their PC (ASH-PC) with shared_computer's run_command, and never from a shell here");
+    expect(lent).toContain("without their SSH agent");
+    const none = cloudHomePrompt(false, [], [{ name: "ASH-PC", platform: "win32" }]);
+    expect(none).toContain("This Cloud is not on their network");
+    expect(none).toContain("say so in one sentence");
+    expect(none).not.toMatch(/run_command|shared_computer/u);
+  });
   it("says the bot runs in the cloud, offers what works there, and never asks for a place that cannot exist", () => {
     for (const tools of [true, false]) {
       const text = cloudHomePrompt(tools);
