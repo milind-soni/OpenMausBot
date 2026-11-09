@@ -1,47 +1,43 @@
 # Mola Cloud Computer Integration
 
-OpenMausBot can provision and manage cloud computers through [Mola](https://mola.sh), giving your AI agents instant Linux desktops they can see, control, and operate.
+OpenMausBot can provision and manage cloud computers through [Mola](https://github.com/obaid/mola-core), giving your AI agents instant Linux desktops they can see, control, and operate.
 
 ## What is Mola?
 
-Mola provides instant computers powered by Omarchy. Each machine runs in its own virtual machine on hardware you control (self-hosted) or in the cloud (managed service). Machines start in about one second and become usable in under ten seconds.
+Mola provides instant computers powered by Omarchy. Each machine runs in its own virtual machine on hardware you control. Machines start in about one second and become usable in under ten seconds.
 
 ### Default Configuration
 
-- **Operating System**: Ubuntu 24.04 XFCE Desktop (default)
-- **Alternative**: Omarchy (Arch Linux + Hyprland)
+- **Operating System**: Ubuntu 24.04 XFCE Desktop (`ubuntu-xfce:24.04-4`)
+- **Alternative**: Omarchy (Arch Linux + Hyprland) - default in Mola Core
 - **Resources**: 4 vCPU, 4096 MB RAM, 40 GB disk (configurable)
 
 ## Setup
 
-### Self-Hosted Mola
+### Install Mola Core
 
-1. Install Mola Core locally:
+1. Install and start Mola Core locally:
    ```bash
    npx mola-core
    ```
 
-2. Copy the API token and URL from the startup banner
+2. Copy the API token and URL from the startup banner:
+   ```
+   API    http://127.0.0.1:4141/v1
+   Token  7_NmOSph4PWtcZP5QpVW4rJJ-9VIlIx3
+   ```
 
 3. In OpenMausBot Settings → API keys, add:
-   - **Mola API Key**: Your token
-   - **Mola API URL**: `http://127.0.0.1:4141/v1` (or your custom URL)
-
-### Cloud-Managed Mola (cloud.mola.sh)
-
-1. Sign up at [cloud.mola.sh](https://cloud.mola.sh)
-2. Generate an API key from your account dashboard
-3. In OpenMausBot Settings → API keys, add:
-   - **Mola API Key**: Your API key
-   - **Mola API URL**: `https://api.mola.sh/v1` (or leave empty for default)
+   - **Mola API Key**: Your token from the banner
+   - **Mola API URL**: `http://127.0.0.1:4141/v1` (or your custom host/port)
 
 ## Configuration
 
 ### Environment Variables
 
 ```bash
-export MOLA_API_KEY="your-api-key-here"
-export MOLA_API_URL="https://api.mola.sh/v1"  # Optional, defaults to cloud
+export MOLA_API_KEY="your-token-from-mola-startup"
+export MOLA_API_URL="http://127.0.0.1:4141/v1"  # Optional, defaults to localhost:4141
 ```
 
 ### Config File (~/.openmausbot/config.json)
@@ -49,16 +45,16 @@ export MOLA_API_URL="https://api.mola.sh/v1"  # Optional, defaults to cloud
 ```json
 {
   "mola": {
-    "token": "your-api-key-here",
-    "apiUrl": "https://api.mola.sh/v1"
+    "token": "your-token-from-mola-startup",
+    "apiUrl": "http://127.0.0.1:4141/v1"
   }
 }
 ```
 
 The `apiUrl` field is optional:
-- Omit it to use the default cloud service (`https://api.mola.sh/v1`)
-- Set it to `http://127.0.0.1:4141/v1` for local self-hosted Mola
-- Set it to your custom URL for private deployments
+- Omit it to use the default (`http://127.0.0.1:4141/v1`)
+- Set it to your custom host/port if Mola runs elsewhere
+- For remote hosts, use SSH tunneling to keep the connection secure
 
 ## Features
 
@@ -113,6 +109,12 @@ Assign a Mola-backed cloud computer to a bot in OpenMausBot:
 3. Select Mola as the provider
 4. The bot will automatically provision a machine on first use
 
+### Ubuntu Desktop Setup
+
+To use Ubuntu desktops (recommended), you'll need to install the Ubuntu image in Mola Core. See the [Ubuntu desktops documentation](https://github.com/obaid/mola-core/blob/main/docs/ubuntu-desktops.md) for build and installation instructions.
+
+OpenMausBot defaults to `image_ref: "ubuntu-xfce:24.04-4"`. If you're using the default Omarchy image instead, you can override the image reference in your Mola host configuration.
+
 ### Machine Naming
 
 OpenMausBot automatically manages machine names to prevent conflicts:
@@ -128,7 +130,7 @@ Default machine resources:
 - Memory: 4096 MB
 - Disk: 40 GB
 
-These defaults match Mola's standard configuration and can be adjusted by environment variables on the Mola host (`MOLA_DEFAULT_VCPUS`, `MOLA_DEFAULT_MEMORY_MB`, `MOLA_DEFAULT_DISK_GB`).
+These match Mola Core's defaults and can be adjusted with environment variables on the Mola host (`MOLA_DEFAULT_VCPUS`, `MOLA_DEFAULT_MEMORY_MB`, `MOLA_DEFAULT_DISK_GB`).
 
 ## API Compatibility
 
@@ -150,21 +152,22 @@ Mola uses a REST API (v1) over HTTPS. All requests require a bearer token in the
 
 Check that `MOLA_API_KEY` is set or `mola.token` exists in `~/.openmausbot/config.json`.
 
-### "mola.sh rejected the Mola API key"
+### "Mola API key rejected"
 
 Your API key may be:
-- Invalid or expired
-- Revoked
-- For the wrong environment (local vs cloud)
+- Invalid (check the token from Mola's startup banner)
+- From a different Mola instance
+- Stale after Mola was restarted (tokens regenerate on each start)
 
-Generate a fresh key from your Mola dashboard or local instance.
+Copy the current token from the Mola Core startup output.
 
-### "Could not reach mola.sh"
+### "Could not reach Mola"
 
 Check your network connection and verify:
-- The API URL is correct
-- Firewall allows outbound HTTPS (port 443)
-- For self-hosted: Mola Core is running on the specified port
+- The API URL is correct (default: `http://127.0.0.1:4141/v1`)
+- Mola Core is running (`npx mola-core` in a terminal)
+- The port isn't blocked by a firewall
+- For remote hosts: SSH tunnel is active
 
 ### Machine stuck in "booting"
 
@@ -190,7 +193,8 @@ Machines should reach `ready` state within 90 seconds. If not:
 
 ## References
 
-- [Mola Documentation](https://mola.sh)
 - [Mola Core GitHub](https://github.com/obaid/mola-core)
-- [API Reference](https://mola.sh/docs/api)
-- [Mola MCP Integration](https://mola.sh/docs/mcp)
+- [API Reference](https://github.com/obaid/mola-core/blob/main/docs/api.md)
+- [Ubuntu Desktops](https://github.com/obaid/mola-core/blob/main/docs/ubuntu-desktops.md)
+- [MCP Integration](https://github.com/obaid/mola-core/blob/main/docs/mcp.md)
+- [Getting Started](https://github.com/obaid/mola-core/blob/main/docs/getting-started.md)

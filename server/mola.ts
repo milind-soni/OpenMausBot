@@ -491,13 +491,12 @@ export function molaConfigured(cfg: AppConfig) {
   return Boolean(molaAccount(cfg));
 }
 
-function usesIncludedMola(cfg: AppConfig): boolean {
-  return molaAccount(cfg)?.included === true;
+function usesIncludedMola(_cfg: AppConfig): boolean {
+  return false;
 }
 
-export function describeMolaAccount(cfg: AppConfig): { configured: boolean; included?: true } {
-  const account = molaAccount(cfg);
-  return { configured: Boolean(account), ...(account?.included ? { included: true as const } : {}) };
+export function describeMolaAccount(cfg: AppConfig): { configured: boolean } {
+  return { configured: molaConfigured(cfg) };
 }
 
 export async function verifyToken(token: string): Promise<{ ok: true } | { ok: false; message: string; rejected?: true }> {
@@ -570,7 +569,7 @@ export async function provisionMola(cfg: AppConfig, botId: string, _botName: str
           vcpus: DEFAULT_MOLA_VCPUS,
           memory_mb: DEFAULT_MOLA_MEMORY_MB,
           disk_gb: DEFAULT_MOLA_DISK_GB,
-          image_ref: "ubuntu-desktop:2024.10", // Default to Ubuntu
+          image_ref: "ubuntu-xfce:24.04-4", // Ubuntu 24.04 XFCE desktop
         }),
         signal: AbortSignal.timeout(45_000),
       });

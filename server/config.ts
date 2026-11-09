@@ -379,6 +379,7 @@ const appConfigSchema = z.object({
   /** Composio project key; `userId`/`sessionId` reuse one Composio Session. */
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
   box: z.object({ token: optionalText }).optional(),
+  mola: z.object({ token: optionalText, apiUrl: optionalText }).optional(),
   vps: vpsConfigSchema.optional(),
   /** OpenCode key, plus `providerKeys` for its other providers by the env name OpenCode reads; both write-only and only for its child. */
   opencodeGo: z.object({ apiKey: optionalText, providerKeys: z.record(z.string(), z.string()).optional() }).optional(),
