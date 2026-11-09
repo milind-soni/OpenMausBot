@@ -262,7 +262,7 @@ describe("computerPrompt", () => {
     // A company SSO into a work app needs a Microsoft or Google browser sign-in; the bot must not refuse it.
     expect(SIGN_IN_PROMPT).not.toContain("use connected apps, not a browser sign-in");
     expect(SIGN_IN_PROMPT).toContain("For Gmail, Calendar, Drive, Outlook or OneDrive data, use connected apps rather than a browser sign-in");
-    expect(SIGN_IN_PROMPT).toContain("when the person asks you to sign in to a site with a Google or Microsoft account, or a site needs one (such as a company single sign-on), sign in as for any other site, through that provider's own sign-in button and login page rather than a saved login for the site's own form");
+    expect(SIGN_IN_PROMPT).toContain("when the person asks you to sign in to a site that uses a Google or Microsoft account (such as a company single sign-on), sign in as for any other site, through that provider's own sign-in button and login page rather than a saved login for the site's own form");
   });
 
   it("prefers a saved login through fill_login, which submits the form, before asking the person", () => {

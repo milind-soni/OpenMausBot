@@ -6675,9 +6675,7 @@ bus.subscribe((event: RuntimeEvent) => {
       });
       break;
     case "context.compacted": pushMessage({ role: "bot", kind: "compaction", engineCompaction: true }); break;
-    case "runtime.notice":
-      pushMessage({ role: "bot", kind: "activity", tool: { ...runtimeNoticeTool(event), name: `notice: ${event.message.slice(0, 400)}` } });
-      break;
+    case "runtime.notice": pushMessage({ role: "bot", kind: "activity", tool: { ...runtimeNoticeTool(event), name: `notice: ${event.message.slice(0, 400)}` } }); break;
     case "runtime.error":
       // A turn the person stopped ends quietly, whatever error the stop cut it short with.
       if (errorTranscript(event.message).kind === "stopped" || personStops.stopped(event.threadId, event.turnId)) {

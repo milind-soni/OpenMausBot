@@ -1481,8 +1481,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               if (retry.rebuilt) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: rebuiltSessionNotice("Claude Code") });
               retry.rebuilt = false;
             } else if (o.subtype === "compact_boundary") {
-              session.volatile = null; // only the system prompt survives a compaction: the next turn re-sends the volatile half
-              if (!o.parent_tool_use_id) emit({ ...base(threadId, currentTurnId()), type: "context.compacted" }); // a subagent's own compaction is not the chat's
+              session.volatile = null; if (!o.parent_tool_use_id) emit({ ...base(threadId, currentTurnId()), type: "context.compacted" }); // only the system prompt survives a compaction, so the next turn re-sends the volatile half; a subagent's own compaction is not the chat's
             } else if (o.subtype === "thinking_tokens") {
               emit({ ...base(threadId, currentTurnId()), type: "item.updated", itemType: "reasoning", tokens: o.estimated_tokens });
             }
