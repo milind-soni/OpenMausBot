@@ -283,6 +283,11 @@ export class VaultStore {
     }
   }
 
+  /** One saved secret with its value, for handing to a bot. */
+  secret(id: string): StoredSecret | null {
+    return this.read().secrets?.find((secret) => secret.id === id) ?? null;
+  }
+
   listSecrets(): VaultSecret[] {
     return (this.read().secrets ?? []).map(summarizeSecret).sort((a, b) => a.name.localeCompare(b.name));
   }
