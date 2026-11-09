@@ -511,6 +511,8 @@ async function act(serial: string, args: PhoneStep): Promise<string> {
 }
 
 const reason = (problem: unknown) => (problem instanceof Error ? problem.message : String(problem)).replace(/\.$/, "");
+// Mid-batch, earlier steps did run, so a claim text's "This call was not performed" sentence would be false.
+const midBatchClaimReason = (message: string) => reason(message.replace(/ This call was not performed[^.]*\./, ""));
 const EARLIER_AND_LATER_STEPS = "Steps before it were done; do not repeat them. Later steps were not performed.";
 
 export async function runSteps(
@@ -525,7 +527,7 @@ export async function runSteps(
     // Stopping the turn revokes its phone claim while this process lives on, so each later step rechecks it.
     if (n > 1) {
       const claim = await ensureClaim();
-      if (!claim.ok) return textResult([...lines, `Stopped before step ${n}: ${reason(claim.message)}. ${EARLIER_AND_LATER_STEPS}`].join("\n"));
+      if (!claim.ok) return textResult([...lines, `Stopped before step ${n}: ${midBatchClaimReason(claim.message)}. ${EARLIER_AND_LATER_STEPS}`].join("\n"));
     }
     let output: string;
     try {

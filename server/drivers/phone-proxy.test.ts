@@ -225,12 +225,12 @@ describe("phone batch runs", () => {
   const TAP_TEXT: PhoneStep = { action: "tap_text", text: "Search" };
   const PRESS: PhoneStep = { action: "press", key: "enter" };
   const READ: PhoneStep = { action: "read_screen" };
-  const run = async (steps: PhoneStep[], failAt = 0, refuseBefore = 0) => {
+  const run = async (steps: PhoneStep[], failAt = 0, refuseBefore = 0, refusal = "This turn no longer has phone access. Start a new turn to use the phone.") => {
     const performed: string[] = [];
     let claims = 0;
     const result = await runSteps("FAKE123", steps, async () => {
       claims += 1;
-      return claims + 1 === refuseBefore ? { ok: false, message: "This turn no longer has phone access. Start a new turn to use the phone." } : { ok: true };
+      return claims + 1 === refuseBefore ? { ok: false, message: refusal } : { ok: true };
     }, async (serial, step) => {
       performed.push(`${serial} ${step.action}`);
       if (performed.length === failAt) throw new Error('No visible Android text matches "Buy"');
@@ -248,6 +248,14 @@ describe("phone batch runs", () => {
     { case: "rechecks the claim before every later step", steps: [TAP, PRESS, READ], refuseBefore: 3, performed: ["FAKE123 tap", "FAKE123 press"], claims: 2, text: `1. tap: Tapped 540,1200\n2. press: Pressed enter\nStopped before step 3: This turn no longer has phone access. Start a new turn to use the phone. ${EARLIER_AND_LATER}` },
   ])("$case", async ({ steps, failAt, refuseBefore, performed, claims, text, isError }) => {
     expect(await run(steps, failAt, refuseBefore)).toEqual({ performed, claims, text, isError });
+  });
+
+  it.each([
+    { refusal: "Another thread is using the phone. This call was not performed. Pause phone work until that thread finishes, then read the screen again before acting.", said: "Another thread is using the phone. Pause phone work until that thread finishes, then read the screen again before acting" },
+    { refusal: "OpenMausBot could not be reached to reserve the phone. This call was not performed; try again.", said: "OpenMausBot could not be reached to reserve the phone" },
+  ])("does not call a half-done batch unperformed when the claim is refused: $said", async ({ refusal, said }) => {
+    const { text } = await run([TAP, PRESS], 0, 2, refusal);
+    expect(text).toBe(`1. tap: Tapped 540,1200\nStopped before step 2: ${said}. ${EARLIER_AND_LATER}`);
   });
 
   it("waits 2 s by default, and at most 60 s", async () => {
