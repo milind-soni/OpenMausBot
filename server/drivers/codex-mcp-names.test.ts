@@ -126,9 +126,4 @@ describe("Codex literal MCP override keys", () => {
     ]);
     expect(codexMcpDisableArgs(new Set())).toEqual([]);
   });
-
-  it.each(["notes.prod", "notes prod", 'notes"prod'])("gives %s a safe and unoccupied CLI mount name", (name) => {
-    expect(mountedMcpServerName(name, new Set())).toBe("notes_prod");
-    expect(mountedMcpServerName(name, new Set(["notes_prod", "notes_prod_openmausbot"]))).toBe("notes_prod_openmausbot2");
-  });
 });

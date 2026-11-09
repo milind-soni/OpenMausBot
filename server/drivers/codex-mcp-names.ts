@@ -81,9 +81,8 @@ export function codexConfigRunsServer(config: CodexConfigMcp, name: string, serv
 }
 
 export function mountedMcpServerName(name: string, taken: ReadonlySet<string>): string {
-  const safeName = name.replace(/[^A-Za-z0-9_-]/g, "_") || "mcp";
-  if (!taken.has(safeName)) return safeName;
-  let candidate = `${safeName}_openmausbot`;
-  for (let i = 2; taken.has(candidate); i++) candidate = `${safeName}_openmausbot${i}`;
+  if (!taken.has(name)) return name;
+  let candidate = `${name}_openmausbot`;
+  for (let i = 2; taken.has(candidate); i++) candidate = `${name}_openmausbot${i}`;
   return candidate;
 }

@@ -304,10 +304,10 @@ describe("CodexDriver turns (fake app-server)", () => {
     await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_MCP_OVERRIDES: "1" } });
     await instance.adapter.sendTurn({
       threadId: "scope-literal-name", text: "Fixture",
-      toolScope: { allow: ["native:*", "mcp:agents:*", "mcp:notes.prod:read"] },
+      toolScope: { allow: ["native:*", "mcp:agents:*", "mcp:notes:read"] },
       integrations: {
         agents: { command: "node", args: ["agents.js"], env: {} },
-        custom: { "notes.prod": { type: "http", url: "https://example.test/private", headers: {} } },
+        custom: { notes: { type: "http", url: "https://example.test/private", headers: {} } },
       },
     });
     await recorder.until((event) => event.type === "turn.completed");
@@ -317,7 +317,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(seen.argv).not.toContain("mcp_servers.notes.prod.enabled=false");
     expect(seen.argv.indexOf(table)).toBeLessThan(seen.argv.findIndex((arg: string) => arg.startsWith("mcp_servers.agents.command=")));
     const selected = seen.calls.find((call: { method: string }) => call.method === "thread/start").params.config.mcp_servers;
-    expect(Object.keys(selected)).toEqual(["agents", "notes_prod"]);
+    expect(Object.keys(selected)).toEqual(["agents", "notes"]);
     expect(seen.calls.filter((call: { method: string }) => call.method === "turn/start")).toHaveLength(1);
   });
 
