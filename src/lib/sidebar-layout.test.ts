@@ -117,6 +117,13 @@ describe("sidebar virtual sections", () => {
     expect(home.section).toBe("Home");
   });
 
+  it("finds the viewer's own hidden MausBot in a search, never someone else's", () => {
+    const mine = { id: "nova", defaultBot: {}, sidebarHidden: true, section: "C Suite" };
+    const theirs = { id: "theirs", defaultBot: { person: "sam@example.com" }, section: "C Suite" };
+    expect(partitionSidebarBots([mine, theirs], { viewerEmail: null }).sectionedBots).toEqual([]);
+    expect(partitionSidebarBots([mine, theirs], { viewerEmail: null, searching: true }).sectionedBots).toEqual([mine]);
+  });
+
   it("lists a group's pinned Chief with the pinned bots on every client; the main Chief keeps its own top slot", () => {
     const bots = [
       { id: "work-chief", chiefOfStaff: true, section: "Work", pinned: true },

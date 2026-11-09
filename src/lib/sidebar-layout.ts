@@ -3,7 +3,7 @@ import type { ConnectorCardData } from "../../shared/connector-card";
 import { t } from "./i18n";
 import type { LocaleKey } from "@/locales";
 import type { DefaultBotFields } from "../../shared/default-bot";
-import { hiddenFromSidebar } from "./default-bot";
+import { hiddenFromSidebar, someoneElsesDefaultBot } from "./default-bot";
 
 export const PINNED_SECTION_ID = "builtin:pinned";
 export const CHANNELS_SECTION_ID = "builtin:channels";
@@ -109,10 +109,12 @@ export function pinnedCircleThreadListVisible(
 
 export function partitionSidebarBots<T extends SidebarBot>(
   bots: T[],
-  options?: { universalPins?: boolean; viewerEmail?: string | null; welcoming?: string | null },
+  options?: { universalPins?: boolean; viewerEmail?: string | null; welcoming?: string | null; searching?: boolean },
 ) {
   const universalPins = options?.universalPins === true;
-  const visible = bots.filter((bot) => !bot.hidden && !hiddenFromSidebar(bot, options?.viewerEmail) && bot.id !== options?.welcoming);
+  // A search also finds the viewer's own MausBot when it is hidden from the sidebar, so it can always be reached.
+  const listed = (bot: T) => !hiddenFromSidebar(bot, options?.viewerEmail) || (options?.searching === true && !someoneElsesDefaultBot(bot, options.viewerEmail));
+  const visible = bots.filter((bot) => !bot.hidden && listed(bot) && bot.id !== options?.welcoming);
   // The pin flag is the server's, the same on every client. Only the main Chief keeps its own top slot when pins are
   // not universal (a device's layout choice); a pinned Chief of a group is listed with the other pinned bots.
   const pinnedBots = visible.filter((bot) => Boolean(bot.pinned) && (universalPins || !bot.chiefOfStaff || Boolean(bot.section)));
