@@ -118,13 +118,13 @@ describe("the page's point script", () => {
     expect(posted).toHaveLength(1);
   });
 
-  it("keeps a capital after leading punctuation, and names a closed select by its chosen option", () => {
+  it("keeps a capital after leading punctuation and a hyphen, and names a closed select by its chosen option", () => {
     const { say } = boot();
-    document.body.innerHTML = `<p class="cap" style="text-transform:capitalize">(note) <b>"</b>two</p>
+    document.body.innerHTML = `<p class="cap" style="text-transform:capitalize">(note) <b>"</b>two foo-bar</p>
       <select id="plan"><option>Free</option><option selected>Pro</option></select>`;
     say(pointMessage(true));
     click(document.querySelector(".cap")!);
-    expect(posted.at(-1)).toMatchObject({ params: { tag: "p", text: '(Note) "Two' } });
+    expect(posted.at(-1)).toMatchObject({ params: { tag: "p", text: '(Note) "Two Foo-Bar' } });
     say(pointMessage(true));
     click(document.querySelector("#plan")!);
     expect(posted.at(-1)).toMatchObject({ params: { tag: "select", text: "Pro" } });

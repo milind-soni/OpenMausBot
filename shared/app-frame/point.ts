@@ -121,13 +121,13 @@ export const APP_POINT_SOURCE = `(function () {
     }
     return parts.join(" > ");
   };
-  // state.start is true at a word start; punctuation before the first letter keeps it, as CSS capitalize does ("(Note)"),
+  // state.start is true at a word start (after a space or hyphen: "Foo-Bar"); punctuation before the first letter keeps it, as CSS capitalize does ("(Note)"),
   // and it carries across inline tags so a word split by them gets one capital.
   var cased = function (text, transform, state) {
     if (transform === "uppercase") return text.toUpperCase();
     if (transform === "lowercase") return text.toLowerCase();
     return text.replace(/[\\s\\S]/g, function (letter) {
-      if (/\\s/.test(letter)) { state.start = true; return letter; }
+      if (/\\s/.test(letter) || letter === "-") { state.start = true; return letter; }
       if (!/[\\p{L}\\p{N}]/u.test(letter)) return letter;
       var start = state.start;
       state.start = false;
