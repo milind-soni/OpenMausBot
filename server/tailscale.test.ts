@@ -40,7 +40,8 @@ describe("serve --tailscale without HTTPS", () => {
   it("listens on this machine's own tailnet addresses at http://<name>:<port>, and says how to get https", () => {
     const fallback = tailnetListenFallback("https-not-enabled", status, 8799, interfaces);
     expect(fallback?.origin).toBe("http://nuc.tail1234.ts.net:8799");
-    expect(fallback?.env).toEqual({ OMB_TAILNET_NAME: "nuc.tail1234.ts.net", OMB_TAILNET_ADDRESSES: "100.70.0.9,fd7a:115c:a1e0::9" });
+    // The name alone: the server follows Tailscale's interface, so a restart of Tailscale needs no restart here.
+    expect(fallback?.env).toEqual({ OMB_TAILNET_NAME: "nuc.tail1234.ts.net" });
     expect(fallback?.line).toContain("login.tailscale.com/admin/dns");
     expect(tailnetListenFallback("needs-operator", status, 8799, interfaces)?.line).toContain("--operator=$USER");
   });

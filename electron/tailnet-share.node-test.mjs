@@ -2,22 +2,27 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { createTailnetShare, servePortTaken } from "./tailnet-share.mjs";
+import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { createTailnetShare, remotePolicyAllows, servePortTaken } from "./tailnet-share.mjs";
 
 const NAME = "macmini.tail1234.ts.net";
 const route = (over = {}) => ({ on: true, since: 1, name: NAME, computers: true, ...over });
 
-function world({ status = { state: "ready", name: NAME, addresses: ["100.101.102.103"], https: false, cli: "/usr/bin/tailscale" }, serveStatus = ["{}", '{"TCP":{"443":{"HTTPS":true}}}'], serveExits = false, allowed = () => true } = {}) {
+function world({ status = { state: "ready", name: NAME, addresses: ["100.101.102.103"], https: false, cli: "/usr/bin/tailscale" }, serveStatus = ["{}", '{"TCP":{"443":{"HTTPS":true}}}'], serveExits = false, allowed = () => true, settleMs = 5, ...extra } = {}) {
   const w = { posted: [], spawned: [], children: [], checks: 0, statuses: 0 };
   w.share = createTailnetShare({
     check: async () => { w.checks++; return status; },
     allowed,
-    settleMs: 5,
+    settleMs,
     answerMs: 50,
+    ...extra,
     serveStatus: async () => serveStatus[Math.min(w.statuses++, serveStatus.length - 1)],
     spawn: (cli, args) => {
       w.spawned.push([cli, ...args]);
-      const child = Object.assign(new EventEmitter(), { killed: [], kill(signal) { child.killed.push(signal); setImmediate(() => child.emit("exit", null)); } });
+      const child = Object.assign(new EventEmitter(), { pid: 4242, killed: [], kill(signal) { child.killed.push(signal); setImmediate(() => child.emit("exit", null)); } });
       w.children.push(child);
       if (serveExits) setImmediate(() => child.emit("exit", 1));
       return child;
@@ -121,4 +126,73 @@ test("a new server port moves the serve; turning off stops it and clears the ser
   assert.deepEqual(w.children[1].killed, ["SIGTERM"]);
   assert.equal(w.posted.at(-1), null);
   assert.equal(w.share.state().on, false);
+});
+
+const HTTPS = { state: "ready", name: NAME, addresses: [], https: true, cli: "/usr/bin/tailscale" };
+
+test("the policy check fails closed until the saved policy has been read", () => {
+  const client = (known, policy) => ({ policyKnown: () => known, policy: () => policy });
+  assert.equal(remotePolicyAllows({ managed: false, client: null }), true, "a development build or a client of another computer has no policy of its own");
+  assert.equal(remotePolicyAllows({ managed: true, client: null }), false, "packaged, before the managed client exists");
+  assert.equal(remotePolicyAllows({ managed: true, client: client(false, null) }), false, "created, nothing read yet");
+  assert.equal(remotePolicyAllows({ managed: true, client: client(true, null) }), true);
+  assert.equal(remotePolicyAllows({ managed: true, client: client(true, { remoteAccess: true }) }), true);
+  assert.equal(remotePolicyAllows({ managed: true, client: client(true, { remoteAccess: false }) }), false);
+});
+
+test("the share waits for the policy at launch, and closes and reopens when it changes", async () => {
+  let open = false;
+  const w = world({ status: HTTPS, allowed: () => open, serveStatus: ["{}", '{"TCP":{"443":{}}}', "{}", '{"TCP":{"443":{}}}'] });
+  await w.share.attach(w.proc, 8799, route());
+  assert.deepEqual([w.checks, w.spawned.length, w.posted.length], [0, 0, 0], "nothing before the policy is known");
+  await w.share.recheck();
+  assert.equal(w.checks, 0, "no change, no work");
+  open = true;
+  assert.equal((await w.share.recheck()).https, true);
+  assert.equal(w.spawned.length, 1);
+  open = false;
+  assert.equal((await w.share.recheck()).on, false);
+  assert.deepEqual(w.children[0].killed, ["SIGTERM"]);
+  assert.equal(w.posted.at(-1), null, "the server closes its side too");
+  open = true;
+  assert.equal((await w.share.recheck()).on, true);
+  assert.equal(w.spawned.length, 2);
+});
+
+test("quitting while serve is still settling ends it and tells the server nothing", async () => {
+  const w = world({ status: HTTPS, settleMs: 5_000 });
+  const attached = w.share.attach(w.proc, 8799, route());
+  for (let i = 0; i < 100 && w.spawned.length === 0; i++) await new Promise((resolve) => setImmediate(resolve));
+  await w.share.stop();
+  await attached;
+  assert.deepEqual(w.children[0].killed, ["SIGTERM"]);
+  assert.deepEqual(w.posted, []);
+});
+
+test("a serve a crash left behind is ended at the next launch, even with the share off, and a reused pid is left alone", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "omb-tailnet-marker-"));
+  const file = path.join(dir, "marker");
+  try {
+    const ours = "/usr/bin/tailscale serve --https=443 http://127.0.0.1:8799";
+    const killed = [];
+    let running = ours;
+    writeFileSync(file, JSON.stringify({ pid: 777, port: 8799 }));
+    const left = world({ markerFile: () => file, commandLine: async () => running, kill: (pid, signal) => { killed.push([pid, signal]); running = ""; } });
+    await left.share.attach(left.proc, 8799, route({ computers: false }));
+    assert.deepEqual(killed, [[777, "SIGTERM"]]);
+    assert.equal(existsSync(file), false);
+
+    writeFileSync(file, JSON.stringify({ pid: 778, port: 8799 }));
+    const reused = world({ markerFile: () => file, commandLine: async () => "/usr/bin/vim notes.txt", kill: () => assert.fail("not ours") });
+    await reused.share.attach(reused.proc, 8799, route({ computers: false }));
+    assert.equal(existsSync(file), false);
+
+    const noted = world({ status: HTTPS, markerFile: () => file });
+    await noted.share.attach(noted.proc, 8799, route());
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { pid: 4242, port: 8799 });
+    await noted.share.stop();
+    assert.equal(existsSync(file), false, "a clean stop leaves nothing to clean up");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

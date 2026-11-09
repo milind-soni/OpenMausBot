@@ -36,7 +36,7 @@ async function untilShared(port: number, host: string) {
 
 describe.skipIf(!standIn)("a server shared on the tailnet", () => {
   it("answers its tailnet name on the tailnet address, pairs another computer there, and gives that computer no owner trust", async () => {
-    const fixture = await launchVerificationServer({ OMB_DEV_TRUST_LOCAL_BROWSER: "0", OMB_TAILNET_NAME: NAME, OMB_TAILNET_ADDRESSES: standIn! });
+    const fixture = await launchVerificationServer({ OMB_DEV_TRUST_LOCAL_BROWSER: "0", OMB_TAILNET_NAME: NAME, OMB_TAILNET_ADDRESSES: standIn!, OMB_TEST_TAILNET_STAND_IN: standIn! });
     const port = Number(new URL(fixture.info.url).port);
     const host = `${NAME}:${port}`;
     const origin = `http://${host}`;
@@ -86,7 +86,7 @@ describe.skipIf(!standIn)("a server shared on the tailnet", () => {
     const owner = "o".repeat(43);
     const realFetch = globalThis.fetch;
     globalThis.fetch = (input, init = {}) => realFetch(input, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": owner } });
-    const fixture = await launchVerificationServer({ OMB_TEST_DESKTOP_OWNER_TOKEN: owner, OMB_TEST_DESKTOP_TAILNET_SHARE: JSON.stringify({ name: NAME, addresses: [standIn] }) });
+    const fixture = await launchVerificationServer({ OMB_TEST_DESKTOP_OWNER_TOKEN: owner, OMB_TEST_TAILNET_STAND_IN: standIn!, OMB_TEST_DESKTOP_TAILNET_SHARE: JSON.stringify({ name: NAME, addresses: [standIn] }) });
     const port = Number(new URL(fixture.info.url).port);
     const host = `${NAME}:${port}`;
     try {

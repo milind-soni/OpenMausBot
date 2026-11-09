@@ -87,7 +87,7 @@ import {
 } from "./companion-account-service.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
-import { pairingPageUrl } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { createTailnetShare } from "./tailnet-share.mjs"; import { checkTailscale } from "./tailscale-check.mjs"; import { onTailnet } from "./tailnet.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs";
+import { pairingPageUrl } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { createTailnetShare, remotePolicyAllows } from "./tailnet-share.mjs"; import { checkTailscale } from "./tailscale-check.mjs"; import { onTailnet } from "./tailnet.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
 import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs"; import { installServerLending } from "./server-lending.mjs"; import { ownEnvironmentIds } from "./lent-mcp.mjs";
@@ -689,7 +689,7 @@ async function stopDesktopCompanion({ remember = true } = {}) {
   return desktopCompanionState();
 }
 
-const tailnetShare = createTailnetShare({ check: checkTailscale, allowed: () => !managedRemoteAccessRefusal(), log: slog }); const phoneLinkRoutes = createPhoneLinkRoutes({ shareChanged: () => tailnetShare.apply(companionSettings().routes.tailscale), rememberRoute: rememberCompanionRoute, routeOn: companionRouteOn, dismissNotice: dismissCompanionNotice, state: () => desktopCompanionState(), running: companionRunning, log: slog, changed: (route, on) => (route !== "https" ? companionE2E?.reconcile() : on ? startManagedCompanionConnection({ waitForVerification: false }) : stopManagedCompanionEndpointLocally()),
+const tailnetShare = createTailnetShare({ check: checkTailscale, allowed: () => remotePolicyAllows({ managed: app.isPackaged && !desktopRemoteAccess, client: managedDesktop }), markerFile: () => path.join(app.getPath("userData"), "tailnet-serve.marker"), log: slog }); const phoneLinkRoutes = createPhoneLinkRoutes({ shareChanged: () => tailnetShare.apply(companionSettings().routes.tailscale), rememberRoute: rememberCompanionRoute, routeOn: companionRouteOn, dismissNotice: dismissCompanionNotice, state: () => desktopCompanionState(), running: companionRunning, log: slog, changed: (route, on) => (route !== "https" ? companionE2E?.reconcile() : on ? startManagedCompanionConnection({ waitForVerification: false }) : stopManagedCompanionEndpointLocally()),
   wake: () => (!companionRunning() && companionStartsAtLaunch({ remoteClient: Boolean(desktopRemoteAccess), serverReady }) ? startDesktopCompanion({ waitForHosted: false, remember: false }) : null), sleep: () => stopDesktopCompanion({ remember: false }) });
 setCompanionMigrationFacts(() => ({ managedAddress: Boolean(managedCompanionTunnelAccess(secureCredentials)) }));
 
@@ -914,7 +914,7 @@ function ensureManagedDesktop() {
     appVersion: app.getVersion(),
     openBrowser: url => shell.openExternal(url),
     onState: state => {
-      if (state.status === "license-expired") companyBackupController?.abort();
+      if (state.status === "license-expired") companyBackupController?.abort(); void tailnetShare.recheck();
       const lost = ["signed-out", "reauth-required"].includes(state.status), withoutStorage = state.status === "connected" && !state.cloudBackups;
       if (lost || withoutStorage) {
         companyBackupConfigurationRevision++;
@@ -3028,7 +3028,7 @@ app.whenReady().then(async () => {
     }
   }
   if (desktopShutdownStarted) return;
-  if (app.isPackaged && !desktopRemoteAccess) void ensureManagedDesktop().start().then(() => companyBackupSchedule.start()).catch(() => {});
+  if (app.isPackaged && !desktopRemoteAccess) { void ensureManagedDesktop().start().then(() => companyBackupSchedule.start()).catch(() => {}); void managedDesktop.whenRestored().then(() => tailnetShare.recheck()); }
   // Fresh local use never makes a Cloud request; start only restores an existing grant.
   if (app.isPackaged && !desktopRemoteAccess) {
     cloudAccountRestoring = true;

@@ -1,7 +1,9 @@
 import { request, type Server } from "node:http";
+import { connect, type Socket } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createTailnetShare, hostAllowed, readTailnetShare, tailnetPeerAllowed, tailnetShareFromEnv } from "./tailnet-listener.ts";
+import { createUpgrades } from "./routes/upgrades.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
 const NAME = "macmini.tail1234.ts.net";
@@ -19,7 +21,13 @@ describe("a tailnet share's configuration", () => {
       null, "x", { name: "macmini.example.com" }, { name: NAME, served: "https://evil.example.com" }, { name: NAME, served: "http://macmini.tail1234.ts.net" },
       { name: NAME, served: "https://macmini.tail1234.ts.net/pair" }, { name: NAME, addresses: ["0.0.0.0"] }, { name: NAME, addresses: ["::"] },
       { name: NAME, addresses: ["127.0.0.1"] }, { name: NAME, addresses: ["macmini.local"] }, { name: NAME, addresses: [] },
+      { name: NAME, addresses: ["::0"] }, { name: NAME, addresses: ["0::"] }, { name: NAME, addresses: ["0:0::0"] }, { name: NAME, addresses: ["192.168.1.20"] }, { name: NAME, addresses: ["fd00::1"] },
     ]) expect(readTailnetShare(input), JSON.stringify(input)).toBeNull();
+  });
+
+  it("takes a test rig's stand-in address only when named exactly", () => {
+    expect(readTailnetShare({ name: NAME, addresses: ["192.168.1.20"] }, "192.168.1.20")).toEqual({ name: NAME, addresses: ["192.168.1.20"] });
+    expect(readTailnetShare({ name: NAME, addresses: ["192.168.1.21"] }, "192.168.1.20")).toBeNull();
   });
 
   it("reads the environment openmausbot serve --tailscale sets", () => {
@@ -84,6 +92,39 @@ describe("the listeners", () => {
     await share.apply(null);
     expect(share.origin()).toBeNull();
     await expect(ask(port, `${NAME}:${port}`)).rejects.toThrow();
+  });
+
+  it("ends an open WebSocket when the share closes, and the next change isn't held up by it", async () => {
+    const port = await freePortBlock([0]);
+    const upgrades = createUpgrades();
+    upgrades.route(() => true);
+    const accepted: Socket[] = [];
+    share = createTailnetShare({ port, attach: (server, handle) => upgrades.attach(server, handle), handle: async (req) => {
+      const upgrade = upgrades.pending(req)!;
+      upgrade.release();
+      upgrade.socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+      accepted.push(upgrade.socket);
+    } });
+    await share.start();
+    await share.apply({ name: NAME, addresses: ["127.0.0.1"] });
+    const open = () => new Promise<{ client: Socket; line: string }>((resolve, reject) => {
+      const client = connect(port, "127.0.0.1", () => client.write(`GET /socket HTTP/1.1\r\nHost: ${NAME}:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`));
+      client.once("data", (data) => resolve({ client, line: String(data).split("\r\n")[0]! }));
+      client.once("error", reject);
+    });
+    const held = await open();
+    expect(held.line).toContain("101");
+    const ended = new Promise<void>((resolve) => held.client.once("close", () => resolve()));
+
+    await share.apply(null);
+    await ended;
+    expect(accepted[0]!.destroyed).toBe(true);
+
+    await share.apply({ name: NAME, addresses: ["127.0.0.1"] });
+    expect(share.state().listening).toEqual(["127.0.0.1"]);
+    const again = await open();
+    expect(again.line).toContain("101");
+    again.client.destroy();
   });
 
   it("says why nothing listens, and links to the served HTTPS origin without binding", async () => {

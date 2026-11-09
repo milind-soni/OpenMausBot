@@ -1,7 +1,7 @@
 // This server on the tailnet: either `tailscale serve` fronts it with HTTPS (nothing is bound here, the origin goes into
 // links), or it listens on each tailnet address itself.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { isIP } from "node:net";
+import { isIP, type Socket } from "node:net";
 import { networkInterfaces } from "node:os";
 
 import { IDLE_HTTP_SERVER } from "./due-timer.ts";
@@ -17,8 +17,7 @@ export interface TailnetShareState {
 }
 
 const FOLLOW_MS = 15_000;
-
-const notShareable = (address: string) => /^(?:0\.0\.0\.0|::|0:0:0:0:0:0:0:0)$/.test(address) || address.startsWith("127.") || address === "::1";
+const CLOSE_MS = 1_000;
 
 /** A served origin must be `https://<name>[:port]` and nothing more. */
 function servedOrigin(name: string, value: unknown): string | null {
@@ -32,8 +31,9 @@ function servedOrigin(name: string, value: unknown): string | null {
   }
 }
 
-/** Fails closed: anything malformed is no share at all. */
-export function readTailnetShare(input: unknown): TailnetShareConfig | null {
+/** Fails closed: anything malformed is no share at all, and an address must be Tailscale's. `standIn` is a test rig's own
+ * address playing a tailnet one, where CI has no Tailscale. */
+export function readTailnetShare(input: unknown, standIn = process.env.OMB_TEST_TAILNET_STAND_IN): TailnetShareConfig | null {
   if (!input || typeof input !== "object") return null;
   const raw = input as Record<string, unknown>;
   const name = typeof raw.name === "string" ? raw.name.trim().toLowerCase().replace(/\.$/, "") : "";
@@ -45,11 +45,11 @@ export function readTailnetShare(input: unknown): TailnetShareConfig | null {
   if (raw.addresses === undefined || raw.addresses === "interface") return { name, addresses: "interface" };
   if (!Array.isArray(raw.addresses) || raw.addresses.length === 0 || raw.addresses.length > 8) return null;
   const addresses = raw.addresses.map((address) => bareAddress(String(address)));
-  return addresses.every((address) => isIP(address) !== 0 && !notShareable(address)) ? { name, addresses: [...new Set(addresses)] } : null;
+  return addresses.every((address) => isIP(address) !== 0 && (inTailscaleRange(address) || address === standIn)) ? { name, addresses: [...new Set(addresses)] } : null;
 }
 
-/** `OMB_TAILNET_NAME` with `OMB_TAILNET_SERVED` (the HTTPS origin `tailscale serve` gives it) or `OMB_TAILNET_ADDRESSES`
- * (a comma list; unset follows Tailscale's interface). `openmausbot serve --tailscale` sets them. */
+/** `OMB_TAILNET_NAME`, set by `openmausbot serve --tailscale`, follows Tailscale's interface. With `OMB_TAILNET_SERVED`
+ * (the HTTPS origin `tailscale serve` gives it) nothing is bound; `OMB_TAILNET_ADDRESSES` (a comma list) pins the addresses. */
 export function tailnetShareFromEnv(env: NodeJS.ProcessEnv): TailnetShareConfig | null {
   if (!env.OMB_TAILNET_NAME) return null;
   const addresses = env.OMB_TAILNET_ADDRESSES?.split(",").map((part) => part.trim()).filter(Boolean);
@@ -87,6 +87,7 @@ export function createTailnetShare(options: TailnetShareOptions) {
   let started = false;
   let desired: TailnetShareConfig | null = null;
   let listeners = new Map<string, Server>();
+  const connections = new WeakMap<Server, Set<Socket>>();
   let allowed: ReadonlySet<string> = new Set();
   let error: string | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -111,16 +112,25 @@ export function createTailnetShare(options: TailnetShareOptions) {
     return options.handle(req, res);
   };
 
-  const close = (server: Server) => new Promise<void>((resolve) => {
-    server.closeAllConnections?.();
-    server.close(() => resolve());
-  });
+  /** Node's closeAllConnections skips upgraded sockets and close() waits for them, so an open WebSocket would outlive the
+   * share and hold up every later change. */
+  const close = (server: Server) => {
+    for (const socket of connections.get(server) ?? []) socket.destroy();
+    return Promise.race([
+      new Promise<void>((resolve) => server.close(() => resolve())),
+      new Promise<void>((resolve) => setTimeout(resolve, CLOSE_MS).unref()),
+    ]);
+  };
 
   function open(address: string): Promise<Server> {
     const server = createServer(IDLE_HTTP_SERVER, guarded);
     options.attach(server, guarded);
+    const held = new Set<Socket>();
+    connections.set(server, held);
     server.on("connection", (socket) => {
-      if (!tailnetPeerAllowed(socket.remoteAddress, [...listeners.keys()])) socket.destroy();
+      if (!tailnetPeerAllowed(socket.remoteAddress, [...listeners.keys()])) return void socket.destroy();
+      held.add(socket);
+      socket.once("close", () => held.delete(socket));
     });
     return new Promise((resolve, reject) => {
       server.once("error", reject);

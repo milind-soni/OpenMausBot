@@ -132,12 +132,12 @@ describe("CLI startup lifecycle", () => {
 
   it("starts the server on the tailnet when tailscale serve can't front it, with nothing of Tailscale's to stop", async () => {
     mocks.tailscaleServe.mockResolvedValue({ failure: "https-not-enabled" });
-    mocks.tailnetListenFallback.mockReturnValue({ origin: "http://fixture.tail.ts.net:18451", env: { OMB_TAILNET_NAME: "fixture.tail.ts.net", OMB_TAILNET_ADDRESSES: "100.64.0.7" }, line: "tailscale: listening" });
+    mocks.tailnetListenFallback.mockReturnValue({ origin: "http://fixture.tail.ts.net:18451", env: { OMB_TAILNET_NAME: "fixture.tail.ts.net" }, line: "tailscale: listening" });
     let started: NodeJS.ProcessEnv = {};
     mocks.spawn.mockImplementation((_command: string, _args: string[], spawned: { env: NodeJS.ProcessEnv }) => { started = spawned.env; throw new Error("Fixture spawn failure"); });
     const log = vi.fn();
     await expect(runServe({ ...options, tailscale: true }, log)).rejects.toThrow("Fixture spawn failure");
-    expect(started).toMatchObject({ OMB_TAILNET_NAME: "fixture.tail.ts.net", OMB_TAILNET_ADDRESSES: "100.64.0.7", OMB_PUBLIC_URL: "http://fixture.tail.ts.net:18451" });
+    expect(started).toMatchObject({ OMB_TAILNET_NAME: "fixture.tail.ts.net", OMB_PUBLIC_URL: "http://fixture.tail.ts.net:18451" });
     expect(log).toHaveBeenCalledWith("tailscale: listening");
     expect(mocks.tailscaleStop).not.toHaveBeenCalled();
   });

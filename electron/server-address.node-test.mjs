@@ -89,7 +89,8 @@ test("each transport is named for the line under a saved server", () => {
   assert.equal(serverTransport("https://box.tail1234.ts.net"), "tailscale");
   // Inside WireGuard: encrypted although the scheme is http.
   assert.equal(serverTransport("http://box.tail1234.ts.net:8799"), "tailscale");
-  assert.equal(serverTransport("http://100.101.102.103:8799"), "tailscale");
+  // A bare 100.64/10 address may be carrier NAT or another VPN.
+  assert.equal(serverTransport("http://100.101.102.103:8799"), "private-http");
   assert.equal(serverTransport("http://192.168.1.20:8799"), "private-http");
   assert.equal(serverTransport("http://127.0.0.1:8799"), "loopback");
 });

@@ -67,6 +67,9 @@ test("a tailnet address that doesn't answer says whose Tailscale to fix", async 
   assert.equal((await probe(fakeFetch({}).fetch)).problem, "tailnetSilent");
   // A bare tailnet address and an https name are tailnet addresses too.
   assert.equal((await probeServer({ address: "http://100.101.102.103:8799", fetch: fakeFetch({ "http://100.101.102.103:8799": blocked() }).fetch, platform: "darwin", tailnet: () => true })).problem, "tailnetBlocked");
+  // Off a tailnet a bare 100.64/10 address is just a private one: carrier NAT or another VPN keeps the Local Network hint.
+  const bare = await probeServer({ address: "http://100.101.102.103:8799", fetch: fakeFetch({ "http://100.101.102.103:8799": blocked() }).fetch, platform: "darwin", tailnet: () => false });
+  assert.deepEqual(bare, { outcome: "problem", problem: "localNetwork", host: "100.101.102.103:8799" });
   // Typed alone, the name is tried three ways; the one that named a cause is the one shown.
   const typed = fakeFetch({ "https://macmini.tail1234.ts.net": new Error("net::ERR_CERT_COMMON_NAME_INVALID"), "http://macmini.tail1234.ts.net": refused(), "http://macmini.tail1234.ts.net:8799": refused() });
   assert.equal((await probeServer({ address: "macmini.tail1234.ts.net", fetch: typed.fetch, tailnet: () => true })).problem, "certificate");

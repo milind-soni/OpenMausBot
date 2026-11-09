@@ -121,7 +121,7 @@ const LISTEN_INSTEAD: Partial<Record<TailscaleFailure, [why: string, fix: string
  * name, or no Tailscale interface here (userspace networking, as in most containers).
  */
 export function tailnetListenFallback(failure: TailscaleFailure, status: TailscaleStatus, port: number, interfaces: NodeJS.Dict<Array<{ address: string }>> = networkInterfaces()):
-  { origin: string; env: { OMB_TAILNET_NAME: string; OMB_TAILNET_ADDRESSES: string }; line: string } | null {
+  { origin: string; env: { OMB_TAILNET_NAME: string }; line: string } | null {
   const reason = LISTEN_INSTEAD[failure];
   const local = tailnetInterfaceAddresses(interfaces);
   const addresses = status.addresses.filter((address) => local.includes(address.toLowerCase()));
@@ -129,7 +129,7 @@ export function tailnetListenFallback(failure: TailscaleFailure, status: Tailsca
   const origin = tailnetOrigin(status.dnsName, port);
   return {
     origin,
-    env: { OMB_TAILNET_NAME: status.dnsName, OMB_TAILNET_ADDRESSES: addresses.join(",") },
+    env: { OMB_TAILNET_NAME: status.dnsName },
     line: `tailscale: ${reason[0]}, so this server listens on ${origin} itself (only your tailnet can reach it, and WireGuard encrypts it). For an https:// address, ${reason[1]}.`,
   };
 }

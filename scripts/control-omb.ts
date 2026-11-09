@@ -175,7 +175,7 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   // One log line per browser call and preview frame.
   if (parentEnv.OMB_BROWSER_TIMING === "1") childEnv.OMB_BROWSER_TIMING = "1";
   // A share on the tailnet (server/tailnet-listener.ts): a test names one of this machine's own addresses as its stand-in.
-  for (const key of ["OMB_TAILNET_NAME", "OMB_TAILNET_ADDRESSES"]) if (parentEnv[key]) childEnv[key] = parentEnv[key];
+  for (const key of ["OMB_TAILNET_NAME", "OMB_TAILNET_ADDRESSES", "OMB_TEST_TAILNET_STAND_IN"]) if (parentEnv[key]) childEnv[key] = parentEnv[key];
   // Warm summaries' minutes as seconds (server/warm-summary.ts), and the switch that turns them off.
   for (const key of ["OMB_WARM_SUMMARY_TIME_SCALE", "OMB_WARM_SUMMARY"]) if (parentEnv[key]) childEnv[key] = parentEnv[key];
   // A loopback fake only: the key never reaches a real provider.

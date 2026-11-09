@@ -1,7 +1,7 @@
 // Before connecting, the Connect sheet asks the address who it is: the server's public descriptor names it, and a
 // failure is sorted into one thing the person can fix.
 import { EXAMPLE_ADDRESS, isLoopbackHost, parseServerInput, serverTransport } from "./server-address.mjs";
-import { isTailnetHost } from "./tailnet.mjs";
+import { inTailscaleRange, isTailnetName } from "./tailnet.mjs";
 
 const DESCRIPTOR = "/.well-known/openmausbot/environment";
 /** A MausBot desktop app's Remote access (companion/src/routes.ts) refuses the descriptor with this until a phone pairs. */
@@ -127,7 +127,9 @@ export async function probeServer({ address, code = "", fetch: fetchImpl, ownEnv
       const blockedOnMac = platform === "darwin" && serverTransport(origin) === "private-http" && (kind === "unreachable" || kind === "timeout");
       // Once a candidate turned out to be another computer's desktop app, that's the problem to report.
       if (failure?.problem === "desktopApp") continue;
-      const tailnetHost = isTailnetHost(hostname.replace(/^\[|\]$/g, "")) && !["certificate", "notMausBot", "desktopApp"].includes(found.kind);
+      // A bare 100.64/10 address counts only on a computer that is on a tailnet: carrier NAT and other VPNs use that range.
+      const bare = hostname.replace(/^\[|\]$/g, "");
+      const tailnetHost = (isTailnetName(bare) || (inTailscaleRange(bare) && tailnet())) && found.kind !== "certificate" && found.kind !== "notMausBot";
       const problem = loopback ? { problem: "loopback", host } : tailnetHost ? { problem: tailnetProblem(found.kind, platform, tailnet()), host } : blockedOnMac ? { problem: "localNetwork", host }
         : { problem: kind === "refused" || kind === "timeout" ? "unreachable" : kind, host, ...(kind === "refused" || kind === "timeout" ? { reason: kind } : {}) };
       // A later guess at a tailnet name that just didn't answer says less than whatever an earlier one said.

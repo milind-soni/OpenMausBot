@@ -1,6 +1,6 @@
 // What a person types or pastes to reach a MausBot server: a pairing link, an address, an address and a code typed
 // apart, or a code on its own. One reader for the desktop's Connect sheet, `openmausbot connect` and the MCP bridge.
-import { isTailnetHost } from "./tailnet.mjs";
+import { isTailnetHost, isTailnetName } from "./tailnet.mjs";
 
 export const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 export const PAIRING_CODE_LENGTH = 12;
@@ -43,11 +43,11 @@ export function isPrivateHost(host) {
   return !name.includes(".") && /^[a-z0-9-]+$/.test(name);
 }
 
-/** How a saved server is reached, for the line under its name. A tailnet address is Tailscale over http too: WireGuard
- * encrypts it. */
+/** How a saved server is reached, for the line under its name. A MagicDNS name is Tailscale over http too: WireGuard
+ * encrypts it. A bare 100.64/10 address may be carrier NAT or another VPN, so it is only a private address. */
 export function serverTransport(origin) {
   const url = new URL(origin);
-  if (isTailnetHost(bareHost(url.hostname))) return "tailscale";
+  if (isTailnetName(bareHost(url.hostname))) return "tailscale";
   if (url.protocol === "https:") return "https";
   return isLoopbackHost(url.hostname) ? "loopback" : "private-http";
 }
