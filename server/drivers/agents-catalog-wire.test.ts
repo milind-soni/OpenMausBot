@@ -83,35 +83,35 @@ const FULL = "skills+shared+voice+escalations+x+team+images";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 60451,
-  "voice": 61232,
-  "shared": 62716,
-  "shared+voice": 63497,
-  "skills": 63527,
-  "skills+voice": 64308,
-  "skills+shared": 65792,
-  "skills+shared+voice": 66573,
-  "non-chief": 51235,
-  "voice+non-chief": 52016,
-  "shared+non-chief": 53500,
-  "shared+voice+non-chief": 54281,
-  "skills+non-chief": 54311,
-  "skills+voice+non-chief": 55092,
-  "skills+shared+non-chief": 56576,
-  "skills+shared+voice+non-chief": 57357,
+  "default": 60965,
+  "voice": 61746,
+  "shared": 63230,
+  "shared+voice": 64011,
+  "skills": 64041,
+  "skills+voice": 64822,
+  "skills+shared": 66306,
+  "skills+shared+voice": 67087,
+  "non-chief": 51749,
+  "voice+non-chief": 52530,
+  "shared+non-chief": 54014,
+  "shared+voice+non-chief": 54795,
+  "skills+non-chief": 54825,
+  "skills+voice+non-chief": 55606,
+  "skills+shared+non-chief": 57090,
+  "skills+shared+voice+non-chief": 57871,
   "skills+shared+voice+cloud-home": 66339,
   "skills+shared+voice+non-chief+cloud-home": 57123,
-  "default+legacy-switches": 60451,
-  "default+mausbot": 61102,
-  "skills+shared+voice+mausbot": 67224,
-  "skills+shared+voice+escalations": 67403,
-  "skills+shared+voice+escalations+x": 71242,
-  "skills+shared+voice+escalations+x+team": 71242,
-  "default+no-computer-pick": 59239,
-  "default+room": 57595,
-  "non-chief+room": 48379,
-  "skills+shared+voice+escalations+x+team+images": 72015,
-  "default+images": 61224,
+  "default+legacy-switches": 60965,
+  "default+mausbot": 61616,
+  "skills+shared+voice+mausbot": 67738,
+  "skills+shared+voice+escalations": 67917,
+  "skills+shared+voice+escalations+x": 71756,
+  "skills+shared+voice+escalations+x+team": 71756,
+  "default+no-computer-pick": 59753,
+  "default+room": 58109,
+  "non-chief+room": 48893,
+  "skills+shared+voice+escalations+x+team+images": 72529,
+  "default+images": 61738,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -296,7 +296,7 @@ describe("agents proxy tools/list golden", () => {
       const desktop = wires[name.slice(0, -"+cloud-home".length)]!;
       const names = toolsOf(wires[name]!).map((tool) => tool.name);
       expect(names).toEqual(expect.arrayContaining(OWN_CLOUD_TOOLS));
-      expect(names.filter((tool) => !OWN_CLOUD_TOOLS.includes(tool))).toEqual(toolsOf(desktop).map((tool) => tool.name).filter((tool) => tool !== "vm_exec"));
+      expect(names.filter((tool) => !OWN_CLOUD_TOOLS.includes(tool))).toEqual(toolsOf(desktop).map((tool) => tool.name).filter((tool) => tool !== "vm_exec" && tool !== "start_external_agent"));
       expect(select(desktop).inputSchema.properties.surface.enum).toEqual(["auto", "cloud", "vm", "local", "browser"]);
       expect(toolsOf(desktop).map((tool) => tool.name)).toContain("vm_exec");
       const surface = select(wires[name]!).inputSchema.properties.surface;

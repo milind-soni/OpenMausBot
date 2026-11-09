@@ -243,8 +243,10 @@ export function composeResume(a: Assignment, names: EnvelopeNames, reports: read
 }
 
 export function composeBackgroundResults(results: readonly string[]): string {
+  const unknown = results.some(result => { try { return JSON.parse(result)?.status === "unknown"; } catch { return false; } });
   return [
-    "A background command for this task ended. Check its exit code and output, validate the artifacts, and continue only the original request with your current permissions.",
+    unknown ? "A background command for this task has an unknown status. Do not assume it ended or succeeded; inspect the work and report uncertainty before retrying."
+      : "A background command for this task ended. Check its exit code and output, validate the artifacts, and continue only the original request with your current permissions.",
     fromNote("a background command", "terminal result", AUTHORITY.info),
     ...results.map(result => JSON.stringify(escapeEnvelope(result))),
     CONSENT_RULE,

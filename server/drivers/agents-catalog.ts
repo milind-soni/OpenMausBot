@@ -326,6 +326,15 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "start_external_agent",
+    description: "Start a tracked local agent CLI for this task, without a shell. Only local Claude turns with Full access, unrestricted tools and no custom or managed Claude policy. End your turn; the exit code and bounded, untrusted output return here for validation. Do not restart blindly.",
+    inputSchema: {
+      type: "object", additionalProperties: false,
+      properties: { executable: { type: "string", minLength: 1, maxLength: 1024 }, args: { type: "array", items: { type: "string", maxLength: 4000 }, maxItems: 64 } },
+      required: ["executable", "args"],
+    },
+  },
+  {
     name: "vm_exec",
     description:
       "Run a shell command inside your own Local VM (as the desktop user, starting in /home/cua/workspace) and get its exit code, stdout and stderr back as text. Use this for all command-line work in the VM: pip install --user, running a script, generating or converting a file, checking that a file exists. Do not type commands into a terminal window and read screenshots: that is slow and unreliable. GUI programs you start appear on the VM desktop. For a long job raise timeout_seconds (default 60, at most 300). Only available while you have a Local VM desktop.",
@@ -901,7 +910,7 @@ const CHIEF_ONLY_TOOL_NAMES = new Set([
 const CHIEF_TARGET_TOOL_NAMES = new Set(["propose_profile", "propose_model"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 
-const LOCAL_VM_TOOL_NAMES = new Set(["vm_exec"]);
+const LOCAL_ONLY_TOOL_NAMES = new Set(["vm_exec", "start_external_agent"]);
 /** Refused in a room's thread (routes/waits.ts), and list_waits, since a room holds no wait. */
 const ROOM_REFUSED_TOOL_NAMES = WAIT_TOOL_NAMES;
 const CLOUD_HOME_SURFACE = {
@@ -912,7 +921,7 @@ const CLOUD_HOME_SURFACE = {
 export function availableTools(profile: CatalogProfile) {
   const tools = catalogTools(profile);
   const placed = profile.cloudHome
-    ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name)).map(tool => tool.name === "select_computer"
+    ? tools.filter(tool => !LOCAL_ONLY_TOOL_NAMES.has(tool.name)).map(tool => tool.name === "select_computer"
       ? { ...tool, inputSchema: { ...tool.inputSchema, properties: { surface: CLOUD_HOME_SURFACE } } }
       : tool)
     : tools;

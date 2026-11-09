@@ -173,7 +173,8 @@ export class Runtime {
 
   trackBackground(id: string, command: Pick<BackgroundCommand, "boxId" | "processId" | "expiresAt">): boolean {
     const n = this.store.get(id);
-    if (!n || n.status !== "running" || n.origin.kind !== "person" || n.mode !== "work" || this.store.get(n.rootId)?.goalRunId) return false;
+    if (!n || n.status !== "running" || n.origin.kind !== "person" || n.mode !== "work" || this.store.get(n.rootId)?.goalRunId ||
+        (command.boxId === "local-agent" && n.level !== "full")) return false;
     const commands = n.backgroundCommands ?? [];
     if (commands.some(c => c.boxId === command.boxId && c.processId === command.processId)) return true;
     if (commands.length >= 20) return false;

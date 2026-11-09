@@ -71,6 +71,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("shows an external agent waiting until the conversation resumes", () => {
+  const task = bot.tasks![0]!;
+  render({ ...bot, tasks: [{ ...task, waitingForExternalAgent: true }] });
+  expect([...host.querySelectorAll('[role="status"]')].some((status) => status.textContent?.includes("Waiting for an external agent"))).toBe(true);
+  expect(host.querySelector('button[title="Stop this turn"]')).toBeTruthy();
+  render({ ...bot, tasks: [{ ...task, busy: true, activity: "working" }] });
+  expect(host.textContent).not.toContain("Waiting for an external agent");
+  render(bot);
+  expect(host.textContent).not.toContain("Waiting for an external agent");
+});
+
 describe("a cancelled turn", () => {
   const ask = { id: "ask", role: "user" as const, kind: "text" as const, at: 1, text: "Try the new model" };
 

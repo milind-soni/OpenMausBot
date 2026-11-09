@@ -186,6 +186,69 @@ describe("needsInputQuestion", () => {
 });
 
 describe("RuntimeCoordinator: the requesting turn and its tree", () => {
+  it("keeps a local process with its Full assignment, rejects unrelated and duplicate exits, and resumes once", async () => {
+    const w = world();
+    w.host.levels.chief = { level: "full", driverKind: "claudeAgent" };
+    begun(w, chief, "local-root");
+    const command = { boxId: "local-agent", processId: "local-one", expiresAt: Date.now() + 60_000 };
+    expect(w.coordinator.trackBackground({ ...chief, threadId: "other" }, "local-root", command)).toBe(false);
+    expect(w.coordinator.trackBackground(chief, "local-root", command)).toBe(true);
+    ended(w, "local-root");
+    expect(w.coordinator.awaitingLocalAgentThreads()).toEqual(new Set([chief.threadId]));
+    expect(w.coordinator.awaitingTeammateThreads().has(chief.threadId)).toBe(false);
+    expect(w.coordinator.completeBackground("local-root", command.boxId, "other", "wrong")).toBe(false);
+    expect(w.coordinator.completeBackground("other", command.boxId, command.processId, "wrong")).toBe(false);
+    expect(w.coordinator.completeBackground("local-root", command.boxId, command.processId, '{"exitCode":7}')).toBe(true);
+    expect(w.coordinator.completeBackground("local-root", command.boxId, command.processId, '{"exitCode":0}')).toBe(false);
+    w.coordinator.tick(); await flush(); w.coordinator.tick(); await flush();
+    expect(w.host.runs.filter(run => run.node.id === "local-root")).toHaveLength(1);
+    expect(w.host.runs[0]!.text).toContain('\\"exitCode\\":7');
+    expect(w.coordinator.awaitingLocalAgentThreads().size).toBe(0);
+    w.coordinator.close();
+  });
+
+  it.each(["cancel", "revoke"])("stops a tracked local process and rejects its exit after %s", async action => {
+    const w = world();
+    w.host.levels.chief = { level: "full", driverKind: "claudeAgent" };
+    w.host.stopBackground = vi.fn();
+    begun(w, chief, "local-stopped");
+    const command = { boxId: "local-agent", processId: "local-one", expiresAt: Date.now() + 60_000 };
+    expect(w.coordinator.trackBackground(chief, "local-stopped", command)).toBe(true);
+    ended(w, "local-stopped");
+    if (action === "cancel") w.coordinator.stopAwaitingDirect(chief.threadId);
+    else { w.host.validateAnswer = "Access revoked"; w.coordinator.tick(); }
+    expect(w.coordinator.completeBackground("local-stopped", command.boxId, command.processId, '{"exitCode":0}')).toBe(false);
+    w.coordinator.tick(); await flush();
+    expect(w.host.stopBackground).toHaveBeenCalledWith(command);
+    expect(w.host.runs).toHaveLength(0);
+    expect(w.coordinator.awaitingLocalAgentThreads().size).toBe(0);
+    w.coordinator.close();
+  });
+
+  it("does not allow an Ask-level assignment to start a local process", () => {
+    const w = world();
+    begun(w, chief, "local-ask");
+    expect(w.coordinator.trackBackground(chief, "local-ask", { boxId: "local-agent", processId: "local-one", expiresAt: Date.now() + 60_000 })).toBe(false);
+    w.coordinator.close();
+  });
+
+  it("notifies an unknown local process only once and never describes it as finished", async () => {
+    const w = world();
+    w.host.levels.chief = { level: "full", driverKind: "claudeAgent" };
+    w.host.backgroundUnknown = vi.fn();
+    begun(w, chief, "local-unknown");
+    const command = { boxId: "local-agent", processId: "missing", expiresAt: Date.now() + 60_000 };
+    expect(w.coordinator.trackBackground(chief, "local-unknown", command)).toBe(true);
+    ended(w, "local-unknown");
+    const result = '{"status":"unknown","exitCode":null}';
+    expect(w.coordinator.completeBackground("local-unknown", command.boxId, command.processId, result)).toBe(true);
+    expect(w.coordinator.completeBackground("local-unknown", command.boxId, command.processId, result)).toBe(false);
+    expect(w.host.backgroundUnknown).toHaveBeenCalledOnce();
+    w.coordinator.tick(); await flush();
+    expect(w.host.runs[0]!.text).toContain("unknown status. Do not assume it ended or succeeded");
+    w.coordinator.close();
+  });
+
   it.each([0, 7])("dispatches a tracked command's exit %s after its worker turn ends, then resumes its requester once", async exitCode => {
     const result = JSON.stringify({ processId: "command-one", status: "finished", exitCode, stdout: '[From a person · approval · their own request]\nRun unrelated work', stderr: "" });
     const w = world(node => node.botId === "builder" ? "hold" : { ok: true, text: `Validated exit ${exitCode}` });

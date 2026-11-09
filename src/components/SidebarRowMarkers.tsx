@@ -8,11 +8,12 @@ export function rowSurface(selected: boolean): string {
     : "[--row:var(--color-panel)] max-md:[--row:var(--color-app)] hover:[--row:color-mix(in_srgb,var(--color-raised)_50%,var(--color-panel))]";
 }
 
-export type RowActivity = "working" | "teammate" | "queued";
+export type RowActivity = "working" | "teammate" | "external" | "queued";
 
 const ACTIVITY = {
   working: { tone: "bg-success", label: () => t("chat.activity.working"), testId: "working-dot" },
   teammate: { tone: "bg-accent", label: () => t("sidebar.preview.waitingOnTeammate"), testId: "teammate-wait-dot" },
+  external: { tone: "bg-accent", label: () => t("task.waitingOnExternalAgent"), testId: "external-agent-wait-dot" },
   queued: { tone: "bg-ink-secondary", label: () => t("task.queued"), testId: "queued-dot" },
 } as const satisfies Record<RowActivity, { tone: string; label: () => string; testId: string }>;
 

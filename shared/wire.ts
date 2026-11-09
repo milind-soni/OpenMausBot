@@ -3,7 +3,7 @@
  * the shape. */
 import type { DataBroadcast } from "./data-surface.ts";
 import type { ApprovalMode } from "./approval-mode.ts";
-import type { ToolScope } from "./tool-scope.ts";
+import type { ToolScope } from "./tool-scope.ts"; import type { ExternalAgentActivity } from "./external-agent-activity.ts";
 import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
 import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop, MascotFaceColor } from "./bot-avatar.ts";
@@ -134,7 +134,7 @@ export interface BotMovedTo {
 
 /** One task = one conversation with its own context, thread and provider
  * session. */
-export interface WireTask extends InboxTask {
+export interface WireTask extends InboxTask, ExternalAgentActivity {
   /** Outstanding handoffs, not an active provider turn. */
   waitingForTeammates?: boolean;
   threadId: string;
@@ -274,7 +274,7 @@ export const helperModelAllowed = (bot: { helperModel?: unknown }): boolean => b
 
 /** A bot as a client may see it. avatarUrl is always present (null when the
  * bot has none). */
-export interface WireBot extends DefaultBotFields, BotAccessFields {
+export interface WireBot extends DefaultBotFields, BotAccessFields, ExternalAgentActivity {
   waitingForTeammates?: boolean;
   id: string;
   /** The task selected in the UI; running turns keep their own thread id. */
@@ -815,7 +815,7 @@ export type GroupDefaultResponder =
   | { kind: "auto"; fallbackBotId?: string };
 
 /** One independent conversation inside a user-created channel. */
-export interface GroupTask {
+export interface GroupTask extends ExternalAgentActivity {
   threadId: string;
   title: string;
   createdAt: number;
@@ -841,7 +841,7 @@ export interface GroupTask {
 }
 
 /** A room as a client may see it: the record plus the computed working flag. */
-export interface WireGroup {
+export interface WireGroup extends ExternalAgentActivity {
   /** Computed from the usage ledger, not stored in groups.json. */
   usage?: GroupThreadUsage | null;
   /** transient: each member's context in the active thread, from its last

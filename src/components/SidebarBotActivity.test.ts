@@ -58,6 +58,17 @@ describe("header activity", () => {
     expect(attentionHasRunningWork([entry({ busy: true })])).toBe(true);
     expect(attentionHasRunningWork([entry({ queued: true })])).toBe(true);
   });
+
+  it("shows an outstanding external agent without describing a model turn", () => {
+    const waiting = entry({ waitingForExternalAgent: true });
+    expect(attentionHasRunningWork([waiting])).toBe(true);
+    expect(attentionRowStatus(waiting.task)).toMatchObject({ active: true, Icon: Clock3, label: t("task.waitingOnExternalAgent") });
+    expect(attentionHasRunningWork([entry({ waitingForExternalAgent: false })])).toBe(false);
+    const room = group("g", "Room", "room-1", { tasks: [{ threadId: "room-1", title: "Room work", createdAt: 0, waitingForExternalAgent: true, working: false }] });
+    const roomTasks = sidebarGroupActivityTasks(room, [], {});
+    expect(roomTasks).toHaveLength(1);
+    expect(attentionRowStatus(roomTasks[0]!).label).toBe(t("task.waitingOnExternalAgent"));
+  });
 });
 
 describe("cross-bot attention", () => {

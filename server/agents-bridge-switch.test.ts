@@ -25,6 +25,7 @@ import {
   bridgedToolTitle,
   claudeManagedPolicyFiles,
   engineBridgeRefusal,
+  localAgentExecutionAllowed,
   turnEngine,
   type BridgeEngine,
   type EngineHost,
@@ -92,6 +93,21 @@ describe("the agents tool bridge switch", () => {
 });
 
 describe("which engines a turn is bridged on", () => {
+  it("refuses local CLI execution if engine policy could restrict a native shell", () => {
+    const cwd = folder();
+    const home = folder();
+    const policy = join(folder(), "managed-settings.json");
+    const botSettings = join(folder(), ".claude", "settings.json");
+    const engine = { ...CLAUDE, cwd };
+    const host = { home, managedPolicyFiles: [policy] };
+    expect(localAgentExecutionAllowed({}, engine, botSettings, {}, host)).toBe(true);
+    expect(localAgentExecutionAllowed({}, { driverKind: "codex" }, botSettings, {}, host)).toBe(false);
+    settings(join(cwd, ".claude", "settings.json"), { permissions: { deny: ["Bash(rm *)"] } });
+    expect(localAgentExecutionAllowed({}, engine, botSettings, {}, host)).toBe(false);
+    expect(localAgentExecutionAllowed({}, { ...engine, cwd: folder() }, botSettings, {}, host)).toBe(true);
+    settings(botSettings, { hooks: { PreToolUse: [] } });
+    expect(localAgentExecutionAllowed({}, { ...engine, cwd: folder() }, botSettings, {}, host)).toBe(false);
+  });
   // The default is no bridge: an engine is bridged only where the harness
   // pre-approves the whole agents server, passes no pattern that names it,
   // and everything else the engine reads about a tool's name can be read too.

@@ -101,6 +101,7 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   if (a.cards !== undefined) node.cards = a.cards;
   if (a.continuation !== undefined) node.continuation = { ...a.continuation };
   if (a.goalRunId !== undefined) node.goalRunId = a.goalRunId;
+  if (a.backgroundCommands?.some(c => c.boxId === "local-agent")) node.localAgent = true;
   if (a.parentId !== undefined) node.parentId = a.parentId;
   if (groupId !== undefined) node.groupId = groupId;
   if (a.batchKey !== undefined) node.requestBatchKey = a.batchKey;
@@ -207,6 +208,24 @@ export class RuntimeCoordinator implements Coordinator {
     this.ready();
     const n = this.store.get(id);
     return Boolean(n && sameSpeaker(n, source) && n.status === "running" && this.runtime.backgroundResult(id, boxId, processId, result, true));
+  }
+
+  completeBackground(id: string, boxId: string, processId: string, result: string): boolean {
+    if (this.closed) return false;
+    this.ready();
+    return this.recordBackground(id, boxId, processId, result);
+  }
+
+  private recordBackground(id: string, boxId: string, processId: string, result: string): boolean {
+    if (!this.runtime.backgroundResult(id, boxId, processId, result)) return false;
+    if (boxId === "local-agent") {
+      let unknown = false;
+      try { unknown = JSON.parse(result)?.status === "unknown"; } catch {}
+      const node = this.store.get(id);
+      if (unknown && node) try { this.host.backgroundUnknown?.(this.project(node)); }
+      catch (error) { this.log(`background unknown notice failed: ${String(error)}`); }
+    }
+    return true;
   }
 
   answersTo(id: string): { botId: string; threadId: string } | undefined {
@@ -493,11 +512,17 @@ export class RuntimeCoordinator implements Coordinator {
       const parent = n.parentId && n.reply !== "none" ? this.store.get(n.parentId) : undefined;
       if (parent && !isTerminal(parent) && parent.assignee.destination.groupId === undefined) threads.add(parent.assignee.destination.threadId);
       const root = view(n);
-      if (!root.parentId && !root.groupId && (root.status === "resume" || (root.status === "waiting" && root.question === undefined && !root.cards?.length))) {
+      if (!root.parentId && !root.groupId && !n.backgroundCommands?.some(c => c.boxId === "local-agent" && !c.delivered) && (root.status === "resume" || (root.status === "waiting" && root.question === undefined && !root.cards?.length))) {
         threads.add(root.threadId);
       }
     }
     return threads;
+  }
+
+  awaitingLocalAgentThreads(): Set<string> {
+    this.ready();
+    return new Set(this.live().filter(n => n.status !== "running" && n.backgroundCommands?.some(c => c.boxId === "local-agent" && !c.delivered))
+      .map(n => n.assignee.destination.threadId));
   }
 
   liveEdges(): LiveHandoffEdge[] {
@@ -541,7 +566,8 @@ export class RuntimeCoordinator implements Coordinator {
       const read = this.commandReads.get(key);
       if (now >= command.expiresAt) {
         read?.controller.abort();
-        this.runtime.backgroundResult(n.id, command.boxId, command.processId,
+        this.host.stopBackground?.(command);
+        this.recordBackground(n.id, command.boxId, command.processId,
           JSON.stringify({ processId: command.processId, status: "unknown", exitCode: null, error: "Completion tracking expired after two hours. Check the command and its artifacts before continuing; do not start another copy blindly." }));
         continue;
       }
@@ -550,7 +576,7 @@ export class RuntimeCoordinator implements Coordinator {
       const reading = { controller, nextAt: Number.POSITIVE_INFINITY };
       this.commandReads.set(key, reading);
       void Promise.resolve().then(() => this.host.backgroundStatus!(command, controller.signal)).then(result => {
-        if (!this.closed && !controller.signal.aborted && result !== undefined) this.runtime.backgroundResult(n.id, command.boxId, command.processId, result);
+        if (!this.closed && !controller.signal.aborted && result !== undefined) this.recordBackground(n.id, command.boxId, command.processId, result);
       }).catch(error => {
         if (!controller.signal.aborted) this.log(`background status failed: ${String(error)}`);
       }).finally(() => { reading.nextAt = this.now() + 10_000; });
@@ -622,6 +648,7 @@ export class RuntimeCoordinator implements Coordinator {
         const groups = new Set<string>();
         const threads = new Set<string>();
         for (const row of rows) {
+          if (isTerminal(row)) for (const command of row.backgroundCommands ?? []) this.host.stopBackground?.(command);
           const groupId = row.assignee.destination.groupId;
           if (groupId) groups.add(groupId); else threads.add(row.assignee.destination.threadId);
         }

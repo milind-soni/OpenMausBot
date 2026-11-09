@@ -79,6 +79,7 @@ Use only mapped, tested commands:
 - [Channels](channels.md)
 - [In-chat team coordination](room-coordination.md)
 - [Tracked background command completion](background-commands.md)
+- [Tracked local agent CLI completion](local-agent-cli.md)
 - [Question cards: a teammate's question, in its chat and the person's inbox](question-cards.md)
 - [Chief authority over additional departments](team-access.md)
 - [Engines and Doctor](engines.md)

@@ -163,7 +163,7 @@ export interface Message extends Pick<import("../../shared/wire").WireMessage, "
 
 export type GroupDefaultResponder = import("../../shared/wire").GroupDefaultResponder;
 
-export interface Group extends Pick<WireGroup, "memberContext" | "queue"> {
+export interface Group extends Pick<WireGroup, "memberContext" | "queue" | "waitingForExternalAgent"> {
   usage?: GroupThreadUsage | null;
   id: string;
   threadId: string;
@@ -193,7 +193,7 @@ export interface Group extends Pick<WireGroup, "memberContext" | "queue"> {
   hasMore?: boolean;
 }
 
-export interface GroupTask {
+export interface GroupTask extends Pick<import("../../shared/wire").GroupTask, "waitingForExternalAgent"> {
   threadId: string;
   title: string;
   createdAt: number;
@@ -216,7 +216,7 @@ export interface ModelSelection {
 }
 
 export interface Task extends Pick<WireTask, "private" | "setupRequest" | "inbox" | "openAsks"> {
-  waitingForTeammates?: boolean; sharedChat?: true;
+  waitingForTeammates?: boolean; waitingForExternalAgent?: boolean; sharedChat?: true;
   threadId: string;
   routineRunId?: string;
   projectId?: string;
@@ -273,7 +273,7 @@ export interface TaskUsage {
 
 export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "access" | "yourAccess" | "onlyPeopleAdded"> {
   toolScope?: ToolScope;
-  waitingForTeammates?: boolean;
+  waitingForTeammates?: boolean; waitingForExternalAgent?: boolean;
   id: string;
   threadId: string;
   mainThreadId?: string;
@@ -372,7 +372,7 @@ export function currentTaskBot(bot: Bot, threadId = bot.threadId): Bot {
     unread: task.unread ?? bot.unread,
     pinnedMessageId: task.pinnedMessageId,
     turnStartedAt: task.turnStartedAt ?? null,
-    waitingForTeammates: task.waitingForTeammates ?? false,
+    waitingForTeammates: task.waitingForTeammates ?? false, waitingForExternalAgent: task.waitingForExternalAgent ?? false,
   };
 }
 

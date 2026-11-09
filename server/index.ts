@@ -2,6 +2,10 @@
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
 import { startFailureText } from "./start-failure-text.ts";
 import { reserveGmailDrafts } from "./gmail-draft-policy.ts";
+import { LOCAL_AGENT_BOX, LocalAgentJobs } from "./local-agent-jobs.ts";
+import { createExternalAgentRoutes } from "./routes/external-agent.ts";
+import { createBotWire } from "./host/bot-wire.ts";
+import { createLocalAgentAccess } from "./host/local-agent-access.ts";
 import { createGmailDrafts } from "./host/gmail-drafts.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -107,9 +111,8 @@ import { createDataRoutes } from "./data/routes.ts";
 import { DataSheetRegistry } from "./data/sheet.ts";
 import { DataFailure } from "./data/types.ts";
 import { TeamComputers, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
-import { isEffortLevel, type CardAnswerer, type ResolvedSender, type SignInRequestCardData, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
+import { isEffortLevel, type CardAnswerer, type ResolvedSender, type SignInRequestCardData, type WireGroup } from "../shared/wire.ts";
 import { isPersistentQuestionCard, shouldSettleRequestCard } from "../shared/ask-question.ts";
-import { parseToolScope } from "../shared/tool-scope.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boatCreateRecoverySnapshot } from "./boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "./boat-delete-journal.ts";
@@ -315,8 +318,6 @@ import {
   type GroupDefaultResponder,
   type GroupRecord,
   type Message,
-  type TaskRecord,
-  toWireTask,
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
 import { voiceNoteFailure } from "./tts/errors.ts";
@@ -2902,42 +2903,18 @@ try {
 if (browserCleanupReferencesReconciled) browserCleanup.startPending();
 
 let threadsAwaitingTeammates = (): ReadonlySet<string> => new Set<string>();
+let threadsAwaitingLocalAgents = (): ReadonlySet<string> => new Set<string>();
 let cacheKeepWarmStatus = (_threadId: string): KeepWarmStatus | undefined => undefined;
-const wireTask = (task: TaskRecord, botModel: ModelSelection, awaiting = threadsAwaitingTeammates()): WireTask => {
-  // Snoozes heal on read against the server clock; the 0 sentinel ("until new activity") survives reads.
-  const { snoozedUntil, ...base } = toWireTask(task, botModel);
-  const keepWarm = cacheKeepWarmStatus(task.threadId);
-  const coordinated = { ...base, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(teamHost.ownTurn(task.threadId) ? { private: true as const } : {}), ...teamMessages.inbox.wire(task.threadId) };
-  const asleep = snoozedUntil === 0 || (snoozedUntil !== undefined && snoozedUntil > Date.now());
-  return asleep ? { ...coordinated, snoozedUntil } : coordinated;
-};
+const { wireTask, wireBot, wireTrustedApprovalBot } = createBotWire({
+  teammates: () => threadsAwaitingTeammates(), localAgents: () => threadsAwaitingLocalAgents(), keepWarm: threadId => cacheKeepWarmStatus(threadId),
+  ownTurn: threadId => teamHost.ownTurn(threadId), inbox: threadId => teamMessages.inbox.wire(threadId), threadBusy, mainThread: botMainThread,
+});
 
-/** Strips provider session ids (resumeCursors) here, not at call sites, so no broadcast or paired phone ever gets them. */
-const wireBot = (bot: BotRecord): WireBot => {
-  const { resumeCursors: _resumeCursors, tasks, approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, assignedSkills: _assignedSkills, mainThreadChoice: _mainThreadChoice, ...rest } = bot;
-  // Clients see Ask while an elevated grant awaits the desktop's confirmation, never a grant that may still roll back.
-  const visible = approvalGrant && !approvalGrant.threadOnly
-    ? { ...rest, approvalMode: "ask" as const, autoApprove: false }
-    : { ...rest, approvalMode: approvalModeFor(rest) };
-  const awaiting = threadsAwaitingTeammates();
-  return { ...visible, waitingForTeammates: awaiting.has(bot.threadId) && !threadBusy(bot.id, bot.threadId),
-    mainThreadId: botMainThread(bot.id),
-    avatarUrl: visible.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot.modelSelection, awaiting)) } : {}) };
-};
-
-function toolScopeForTurn(botId: string) {
-  const bot = store.bot(botId);
-  if (!bot) throw Object.assign(new Error("no such bot"), { status: 404 });
-  const parsed = parseToolScope(bot.toolScope);
-  if (!parsed.ok) throw Object.assign(new Error("This bot's tool selection is invalid. Open Access settings and save a valid selection before starting a turn."), { status: 409, code: "tool_scope" });
-  return parsed.scope;
-}
-
-const wireTrustedApprovalBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
-  const { resumeCursors: _resumeCursors, tasks, approvalGrant: _approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, assignedSkills: _assignedSkills, mainThreadChoice: _mainThreadChoice, ...rest } = bot;
-  const awaiting = threadsAwaitingTeammates();
-  return { ...rest, approvalMode: approvalModeFor(rest), mainThreadId: botMainThread(bot.id), avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot.modelSelection, awaiting)) } : {}) };
-};
+const { toolScopeForTurn, localAgentAllowed, externalAgentNotice } = createLocalAgentAccess({
+  store, cfg, blocked: Boolean(CLOUD_HOME || HOSTED_WORKSPACE || CLOUD_TEAM), botForThread, connectorThread, fullAccess: fullAccessForSource,
+  shuttingDown: () => companyShutdown, configs: providerConfigs, instance: id => registry.get(id), snapshot: id => registry.lastSnapshot(id),
+  cwd: (botId, threadId) => messageFileRootsForThread(botId, threadId).find(root => root !== ATTACHMENTS_DIR), settings: botSettingsFile,
+});
 
 function previewSystemPrompt(bot: BotRecord) {
   const persona = botPersona(bot);
@@ -3904,6 +3881,7 @@ const questionRouting = createQuestionRouting({ store, active: () => coordinator
   answerLive: async (threadId, requestId, text) => await answerRequest(threadId, botForThread(store.botByThread(threadId)?.id ?? "", threadId)?.modelSelection.instanceId ?? "", requestId, "answer", text) === "answered", settleSignIns: (node) => signInSettle.answeredElsewhere(node),
   keptPrivate: (node, requester) => keptPrivate({ child: teamHost.privateTo(node.threadId), parent: teamHost.privateTo(requester.threadId) }),
   steer: async (threadId, text) => canSteerThread(threadId) && (await steerThread(threadId, text)) !== "refused", mayReach: outsideLineage.mayReach });
+const localAgentJobs = new LocalAgentJobs();
 const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoordinator({
   dataDir: DATA_DIR,
   now: Date.now, wrote: handoffTicks.kick, handoffLimit: starterCaps.handoffs,
@@ -3912,8 +3890,12 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
     standingThreadOf: botId => botMainThread(botId) ?? store.bot(botId)?.threadId,
     botOfThread: threadId => store.botByThread(threadId)?.id,
   },
-  host: { backgroundStatus: (command, signal) => commandResult(cfg, command, signal), holdReason: (node) => queuedStatus(node), statusReply: (requester, prompt, signal) => sideJobs.text("status-reply", requester)?.generateText(prompt, { signal, timeoutMs: STATUS_REPLY_TIMEOUT_MS }) ?? Promise.resolve(undefined),
+  host: { backgroundStatus: (command, signal) => command.boxId === LOCAL_AGENT_BOX ? Promise.resolve(localAgentJobs.result(command.processId)) : commandResult(cfg, command, signal),
+    stopBackground: command => { if (command.boxId === LOCAL_AGENT_BOX) localAgentJobs.stop(command.processId); },
+    backgroundUnknown: node => externalAgentNotice(node.botId, node.threadId, "External agent status is unknown. Check its work before retrying."),
+    holdReason: (node) => queuedStatus(node), statusReply: (requester, prompt, signal) => sideJobs.text("status-reply", requester)?.generateText(prompt, { signal, timeoutMs: STATUS_REPLY_TIMEOUT_MS }) ?? Promise.resolve(undefined),
     validate: (node, parent) => node.mode === "notify" && node.status !== "queued" ? undefined
+      : node.localAgent && !localAgentAllowed(node.botId, node.threadId) ? "Local agent access changed while this task was running"
       : !node.parentId && node.groupId ? roomRootProblem(node)
       : roomHandoffProblem(node, parent) ??
       (parent && !ownThreads.own(parent, node) && store.bot(parent.botId)?.approvePeerComms && !fullAccessForSource(parent.botId, parent.threadId) && !node.approvalGranted ? "Sender now requires peer approval; submit a new approved request" : undefined),
@@ -4103,6 +4085,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
   },
 });
 threadsAwaitingTeammates = () => coordinator.awaitingTeammateThreads();
+threadsAwaitingLocalAgents = () => coordinator.awaitingLocalAgentThreads();
 const groupUsageReader = new GroupUsageReader(DATA_DIR);
 try { groupUsageReader.refresh(); } catch {}
 function readCursor(threadId: string): { lastReadMessageId?: string } {
@@ -4116,12 +4099,14 @@ function publicGroupState(record: GroupRecord): WireGroup {
   let usage: WireGroup["usage"];
   try { usage = groupUsageReader.forThread(group.threadId); } catch {}
   const openHandoffs = coordinator.active().filter(n => n.groupId === group.id && !ENDED.has(n.status) && !(n.status === "waiting" && n.cards?.length));
+  const awaitingLocal = threadsAwaitingLocalAgents();
   const tasks = store.groupTasks(record.id).map((task) => {
-    const working = groupThreadIsWorking(record.id, task.threadId) || openHandoffs.some(n => n.threadId === task.threadId);
+    const working = groupThreadIsWorking(record.id, task.threadId) || openHandoffs.some(n => n.threadId === task.threadId && (!n.localAgent || !awaitingLocal.has(n.threadId)));
     const speaker = groupSpeakers.get(task.threadId);
     return {
       ...task,
       working,
+      waitingForExternalAgent: !working && awaitingLocal.has(task.threadId),
       busyBotId: speaker?.botId ?? null,
     };
   });
@@ -4137,7 +4122,8 @@ function publicGroupState(record: GroupRecord): WireGroup {
     memberContext: roomMemberContexts.forThread(group.threadId) ?? null,
     busyBotId: currentSpeaker?.botId ?? (activeWorking ? record.busyBotId : null),
     ...(currentSpeaker?.since ? { turnStartedAt: currentSpeaker.since } : {}),
-    working: groupIsWorking(record) || openHandoffs.length > 0,
+    working: groupIsWorking(record) || openHandoffs.some(n => !n.localAgent || !awaitingLocal.has(n.threadId)),
+    waitingForExternalAgent: !activeWorking && awaitingLocal.has(group.threadId),
     // Always present, so a frame with nobody waiting clears the last one.
     queue: roomJobs.roomLineOf(record),
   };
@@ -13150,7 +13136,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         requireActiveInternalCapability(); if (body.method === "tools/call") browserSeats.used(internalCapability, browser.session);
         return json(res, 200, { result });
       }
-      if (await dispatchRoutes([savedSteps.journalRoutes({ capability: internalCapability, readBody: readInternalBody })], { req, res, url, path, method, auth, json, readBody })) return; if (method === "POST" && path === "/api/internal/computer/mcp") {
+      if (await dispatchRoutes([savedSteps.journalRoutes({ capability: internalCapability, readBody: readInternalBody }), createExternalAgentRoutes({
+        readBody: readInternalBody, allowed: () => localAgentAllowed(internalSender.id, internalCapability.threadId),
+        cwd: () => messageFileRootsForThread(internalSender.id, internalCapability.threadId).find(root => root !== ATTACHMENTS_DIR),
+        source: internalCapability, nodeId: directCoordinationSettlers.get(internalCapability.generation)?.nodeId ?? internalCapability.generation,
+        assertActive: requireActiveInternalCapability, coordinator, jobs: localAgentJobs,
+        stopFailed: () => externalAgentNotice(internalSender.id, internalCapability.threadId, "Could not confirm the external agent stopped. Check the process before retrying."),
+      })], { req, res, url, path, method, auth, json, readBody })) return; if (method === "POST" && path === "/api/internal/computer/mcp") {
         const body = await readInternalBody();
         if (internalCapability.boxId === undefined) return json(res, 403, { error: "this turn has no cloud computer" });
         const abort = new AbortController();
@@ -15559,6 +15551,7 @@ const gracefulShutdown = createGracefulShutdown({
       companyShutdown = true;
       // Before any provider is torn down, so what the teardown fails stays cut for the next start.
       coordinator.close();
+      localAgentJobs.stopAll();
       noteTurnsCutByShutdown();
       if (workspaceAccessTimer) clearInterval(workspaceAccessTimer);
       // Invalidate turn bearers before any cleanup reaches an await: child MCP processes and the listener may outlive it.

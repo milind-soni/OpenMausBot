@@ -271,6 +271,19 @@ export function engineBridgeRefusal(
   return "this engine keeps its own tool permissions";
 }
 
+export function localAgentExecutionAllowed(cfg: BridgeConfig, engine: BridgeEngine | undefined, botSettings: string,
+  env: NodeJS.ProcessEnv = process.env, host: EngineHost = { home: homedir(), managedPolicyFiles: claudeManagedPolicyFiles() }): boolean {
+  if (!engine || engine.driverKind !== "claudeAgent" || claudeRefusal(cfg, engine, env, host)) return false;
+  const folder = join(engine.cwd ?? host.home, ".claude");
+  const files = [botSettings, join(folder, "settings.json"), join(folder, "settings.local.json")];
+  for (const policy of host.managedPolicyFiles) {
+    const dropIns = managedDropIns(policy);
+    if (dropIns === "unreadable") return false;
+    files.push(policy, ...dropIns);
+  }
+  return files.every(file => textOf(file) === null);
+}
+
 /** Why a turn of `bot` on `engine` is not bridged, or null: the one decision. Security: anything thrown
  * means no bridge, and the log names only the error's class and code, never its message (it may hold a
  * path or file content). */

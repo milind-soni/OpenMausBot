@@ -3158,6 +3158,7 @@
   "task.actions": "Actions for {title}",
   "task.waiting": "Waiting",
   "task.waitingOnTeammate": "Waiting on teammate",
+  "task.waitingOnExternalAgent": "Waiting for an external agent",
   "task.openedBy": "opened by {name}",
   "task.helperGroup": "Opened by bots",
   "task.closedBy": "closed by {name}",
