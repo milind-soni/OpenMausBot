@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { createCloudSend } from "./cloud-send.mjs";
 import { STALL_MS } from "./cloud-send-check.mjs";
+import { createOneHome } from "./one-home.mjs";
 
 const CLOUD = "https://omb-u-1.fly.dev";
 const BOTS = 100, CHATS_PER_BOT = 30, ROWS = 40, LONG = 12_000, ATTACHMENTS = 6_000, FILES_PER_BOT = 20, FILE_BYTES = 5 * 1024 ** 2;
@@ -188,4 +189,131 @@ test("a check My Cloud stops answering for longer fails as unanswered, says it g
   const later = slowCloud(changed);
   await mover(changed, later, store).send.check();
   assert.deepEqual([...new Set(later.conversationsAsked)], ["t-b0-0"]);
+});
+
+/** The whole workspace as this computer's server answers a move, and an empty My Cloud that keeps what it is sent, each
+ * request taking the time its work takes there. Rows and files are small here: what they cost is the model's. */
+function wholeMove() {
+  const { bots, conversations, manifest: full } = bigWorkspace();
+  const data = new TextEncoder().encode("data");
+  const sha = "a".repeat(64);
+  const manifest = { ...full, files: full.files.map((file) => ({ ...file, size: data.length, sha256: sha })) };
+  const rowsOf = new Map(conversations.map((head) => [head.threadId, head.rows]));
+  const attachmentsOf = new Map(conversations.map((head) => [head.threadId, []]));
+  manifest.attachments.forEach((name, i) => attachmentsOf.get(conversations[i % conversations.length].threadId).push(name));
+  const local = async (route) => {
+    if (route === "/api/cloud-send?move=1" || route === "/api/cloud-send") return json({ v: 1, appVersion: "0.1.151", items: manifest.items, chats: 1 });
+    if (route === "/api/cloud-send/manifest") return json(manifest);
+    if (route === "/api/cloud-connections") return json({ computer: { environmentId: "env-desk", label: "Desk" }, connections: [], engines: [], commands: [] });
+    if (route === "/api/bots?messages=0") return json({ bots: bots.map((id) => ({ id, threadId: `t-${id}-0`, name: `Bot ${id}`, soul: "s" })) });
+    if (/^\/api\/bots\/[\w-]+\/skills$/u.test(route)) return json({ skills: [] });
+    if (route.startsWith("/api/cloud-send/kind?key=")) return json({ v: 1, dataDir: "/desk", record: {} });
+    if (route.startsWith("/api/cloud-send/memory?bot=")) return json({ v: 1, files: [], journal: [] });
+    if (route === "/api/cloud-send/memory") return json({ v: 1, about: { learned: [], removed: [] }, teams: [] });
+    if (route === "/api/cloud-send/files") return json({ v: 1, files: manifest.files });
+    if (route.startsWith("/api/cloud-send/files?path=")) return new Response(data);
+    if (route.startsWith("/api/cloud-send/chats/attachment/")) return new Response(data);
+    if (route === "/api/cloud-send/chats?attachments=1") return json({ v: 1, attachments: manifest.attachments.map((name) => ({ name, size: data.length })) });
+    if (route === "/api/cloud-send/chats") return json({ v: 1, dataDir: "/desk", rooms: [], conversations: conversations.map((head) => ({ bot: head.bot, threadId: head.threadId, last: head.rows, lastId: head.newest, busy: false, settings: {} })) });
+    const rows = /^\/api\/cloud-send\/chats\/rows\?thread=([\w-]+)&after=(\d+)/u.exec(route);
+    if (rows) {
+      const after = Number(rows[2]), end = Math.min(rowsOf.get(rows[1]), after + 300);
+      return json({ rows: Array.from({ length: end - after }, (_, i) => ({ id: `${rows[1]}-${after + i}`, at: after + i })), leaf: `${rows[1]}-${end - 1}`, task: null, last: end, lastId: `${rows[1]}-${end - 1}`,
+        more: end < rowsOf.get(rows[1]), restarted: false, attachments: after === 0 ? attachmentsOf.get(rows[1]) : [] });
+    }
+    const ids = /^\/api\/cloud-send\/chats\/ids\?thread=([\w-]+)&from=(\d+)$/u.exec(route);
+    if (ids) {
+      const count = rowsOf.get(ids[1]) ?? 0, from = Number(ids[2]);
+      const listed = Array.from({ length: Math.max(0, Math.min(5_000, count - from)) }, (_, i) => `${ids[1]}-${from + i}`);
+      return json({ v: 1, ids: listed, path: listed, leaf: `${ids[1]}-${count - 1}`, more: from + 5_000 < count });
+    }
+    return json({}, 404);
+  };
+
+  let clock = 1_000_000;
+  const asked = [], items = new Map(), chats = new Map(), attachments = new Set(), files = new Set();
+  const summaryMs = () => 400 + 30 * BOTS;
+  const cost = (method, route, body) => {
+    if (route.startsWith("/api/cloud-send/manifest") || route.startsWith("/api/cloud-send?")) return summaryMs();
+    if (route === "/api/cloud-send/chats" && method === "POST") return body.conversations.reduce((sum, page) => sum + 2 + 0.25 * page.rows.length, 0);
+    if (route === "/api/cloud-send/chats/owner" || route === "/api/cloud-send/chats/verify") return body.conversations.reduce((sum, entry) => sum + 1 + 0.25 * (entry.ids?.length ?? 0), 0);
+    if (route === "/api/cloud-send/chats/attachments") return 0.05 * body.names.length;
+    return 0;
+  };
+  const answer = (method, route, body) => {
+    if (route === "/.well-known/openmausbot/environment") return reply(200, { capabilities: { cloudHome: true, move: 1 } });
+    if (route === "/api/cloud-send?move=1") return reply(200, { v: 1, appVersion: "0.1.151", items: [...items.values()], chats: 1 });
+    const item = /^\/api\/cloud-send\?item=([^&]+)/u.exec(route);
+    if (item) return reply(200, { v: 1, appVersion: "0.1.151", items: [...items.values()].filter((entry) => entry.key === decodeURIComponent(item[1])), chats: 1 });
+    if (route === "/api/cloud-connections") return reply(200, { computer: { environmentId: "env-cloud", label: "My Cloud" }, connections: [], engines: ["claude"], commands: ["node"] });
+    if (method === "POST" && route === "/api/bots") { items.set(`bot:${body.id}`, manifest.items.find((entry) => entry.id === body.id)); return reply(201, { bot: { id: body.id } }); }
+    const listed = /^\/api\/cloud-send\/files\?bot=([\w-]+)$/u.exec(route);
+    if (listed) return reply(200, { v: 1, files: manifest.files.filter((file) => files.has(file.path) && file.path.startsWith(`workspaces/${listed[1]}/`)), space: { freeBytes: 1e12, volumeBytes: 1e12 } });
+    if (route === "/api/cloud-send/chats/attachments") return reply(200, { missing: body.names.filter((name) => !attachments.has(name)) });
+    if (route === "/api/cloud-send/chats" && method === "POST") {
+      for (const page of body.conversations) chats.set(page.threadId, (chats.get(page.threadId) ?? 0) + page.rows.length);
+      return reply(200, { conversations: body.conversations.length, messages: 0, accepted: body.conversations.map((page) => page.threadId), waiting: [], removed: [] });
+    }
+    if (route === "/api/cloud-send/chats" && method === "GET") return reply(200, { v: 1, conversations: conversations.filter((head) => chats.has(head.threadId)).map((head) => ({ threadId: head.threadId, settings: {} })) });
+    if (route.startsWith("/api/cloud-send/manifest")) {
+      const { attachments: _a, files: _f, ...rest } = manifest;
+      return reply(200, { ...rest, items: [...items.values()], conversations: conversations.filter((head) => chats.get(head.threadId) === head.rows) });
+    }
+    if (route === "/api/cloud-send/chats/verify") {
+      return reply(200, { v: 1, conversations: body.conversations.map(({ threadId, ids = [], path }) => ({ threadId, missing: ids.filter((id) => Number(id.slice(id.lastIndexOf("-") + 1)) >= (chats.get(threadId) ?? 0)), unstamped: 0,
+        ...(path ? { path: { holds: true, at: path.ids.at(-1) ?? path.after, ...(path.last ? { leaf: `${threadId}-${rowsOf.get(threadId) - 1}`, length: rowsOf.get(threadId) } : {}) } } : {}) })) });
+    }
+    if (route === "/api/cloud-send/verify-secrets") return reply(200, { v: 1, secrets: {} });
+    return reply(200, { v: 1 });
+  };
+  const session = {
+    async call(method, route, body, options) {
+      const limit = options?.timeoutMs ?? 120_000, takes = 400 + cost(method, route, body);
+      asked.push({ method, route, takes, limit });
+      if (takes > limit) { clock += limit; throw timeout(); }
+      clock += takes;
+      return answer(method, route, body);
+    },
+    async upload(route) {
+      clock += 400;
+      asked.push({ method: "POST", route, takes: 400, limit: 120_000 });
+      const file = /^\/api\/cloud-send\/files\?(.*)$/u.exec(route);
+      if (file) files.add(new URLSearchParams(file[1]).get("path"));
+      else attachments.add(route.slice(route.lastIndexOf("/") + 1));
+      return reply(201, { stored: true });
+    },
+    close: async () => {},
+  };
+  return { local, session, asked, conversations, manifest, now: () => clock, sleep: async (ms) => { clock += ms; } };
+}
+
+test("the whole move of 100 bots and 3,000 conversations, copy to switch, finishes by itself on a slow Cloud, says how far it is, and never starts over", async () => {
+  const cloud = wholeMove();
+  const store = stored(), lines = [];
+  let journal = null, frozen = false, freezes = 0;
+  const send = createCloudSend({ local: cloud.local, cloud: { origin: () => CLOUD, asleep: () => false, read: async () => json({}), open: async () => cloud.session },
+    handoff: async (what) => (what.kind === "verify-secrets" ? { secrets: {} } : {}), store, now: cloud.now, sleep: cloud.sleep, engineWaitMs: 0, onChange: () => { const seen = home?.view(); if (seen) lines.push(seen); } });
+  const timers = [];
+  const home = createOneHome({
+    journal: { read: () => structuredClone(journal), write: (value) => { journal = structuredClone(value); } },
+    cloud: () => ({ origin: CLOUD, account: "acct-1", machine: CLOUD, ready: true, moves: true, ended: false, paid: false }),
+    send: { move: (options) => send.send({ reason: "move", final: options?.final === true }), check: () => send.check(), switches: () => send.switches(), snapshot: () => send.snapshot() },
+    local: {
+      freeze: async () => { frozen = true; freezes++; return { frozen: true }; }, unfreeze: async () => { frozen = false; }, frozen: async () => frozen,
+      json: async (route) => (await cloud.local(route)).json(), call: async () => reply(200),
+    },
+    session: async () => cloud.session,
+    lastInput: () => 0, now: cloud.now,
+    timers: { set: (work, ms) => { timers.push({ work, ms }); return timers.at(-1); }, clear: () => {} },
+  });
+  const started = cloud.now();
+  await home.kick();
+  assert.equal(journal.phase, "done", JSON.stringify({ phase: journal.phase, error: journal.error }));
+  assert.equal(journal.failure, undefined, "no pass failed");
+  assert.equal(freezes, 1, "one freeze, and nothing started over");
+  assert.deepEqual(cloud.asked.filter((entry) => entry.takes > entry.limit), [], "no request took longer than it may");
+  assert.ok(lines.some((line) => line.phase === "copy" && line.chats?.total === BOTS * CHATS_PER_BOT && line.chats.done > 0), "the copy counts the chats");
+  assert.ok(lines.some((line) => line.phase === "finishing" && line.checking?.step === "chats" && line.checking.done > 0 && line.checking.bots === BOTS), "the check counts them too");
+  const hours = (cloud.now() - started) / 3_600_000;
+  assert.ok(hours < 4, `${hours.toFixed(1)} h on the slow Cloud`);
 });

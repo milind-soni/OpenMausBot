@@ -19,7 +19,7 @@ import { AUTOMATION_KINDS, BOT_PARTS, EMPTY, MOVE_BOT_PARTS, MOVE_KINDS, PICTURE
 import { collectConnections, releaseConnections, sendConnections } from "./cloud-connections.mjs";
 import { createMoveKinds, mergeRoutines } from "./cloud-send-kinds.mjs";
 import { botsOnCloud } from "./cloud-logins.mjs";
-import { moveCheck, rowIdChunks, unanswered } from "./cloud-send-check.mjs";
+import { moveCheck, patientSession, rowIdChunks, unanswered } from "./cloud-send-check.mjs";
 import nativeText from "./native-text.cjs";
 
 const LOCAL_ROUTE = /^\/api\/(?:cloud-send|cloud-send\?move=1|cloud-send\/manifest|cloud-send\/chats|cloud-send\/chats\?attachments=1|cloud-send\/kind\?key=[\w%.-]{1,300}|cloud-send\/memory|cloud-send\/memory\?bot=[\w-]{1,128}|cloud-send\/files|cloud-send\/files\?path=[\w%.()~!*'-]{1,12000}&offset=\d{1,16}&length=\d{1,9}|cloud-send\/chats\/rows\?thread=[\w-]{1,200}&after=\d{1,16}&id=[\w%.-]{0,600}|cloud-send\/chats\/ids\?thread=[\w-]{1,200}&from=\d{1,9}|cloud-send\/chats\/attachment\/[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}|cloud-connections|connectors\/connected|config|bots\?messages=0|bots\/[\w-]{1,128}\/(?:skills|skills\/[a-z0-9-]{1,64}|memory|memory\/file\?path=[\w%.-]{1,200})|attachments\/[A-Za-z0-9-]{1,80}\.(?:png|jpg|gif|webp))$/u;
@@ -202,14 +202,15 @@ const movedResult = () => ({ moved: 0, memory: 0, files: { sent: 0, kept: 0 }, c
  *   engineWaitMs?: number,
  *   space?: { disk(): unknown, grow(sizeGb: number): Promise<unknown> },
  *   team?: { bot: string, name: string, label: string },
- * }} deps `open({ move: true })`: the move's session, which counts as someone using My Cloud. `engineWaitMs`: how long a
+ *   patience?: { stallMs?: number, waits?: number[], blips?: number[] },
+ * }} deps `patience`: how long a move waits for a Cloud that does not answer (cloud-send-check.mjs). `open({ move: true })`: the move's session, which counts as someone using My Cloud. `engineWaitMs`: how long a
  * move waits for My Cloud to run the engines whose keys it just took. `local(route, { method })`: a change on this
  * computer's server (an app event My Cloud now collects). `space`: My Cloud's plan disk and the Admin's grow. `team`: a
  * move of this one bot into a team (team-move.mjs): only the bot, its skills, files, chats and routines go, under the
  * name the team gave it; never apps, keys, logins, settings or its notes about the person. `local` is then the bot's
  * own Cloud, and `label` names the person beside a file or bot of the same name.
  */
-export function createCloudSend({ local, cloud, handoff, store, onChange = () => {}, now = Date.now, sleep, engineWaitMs, space, team = null, t = nativeText.englishText.t }) {
+export function createCloudSend({ local, cloud, handoff, store, onChange = () => {}, now = Date.now, sleep, patience = {}, engineWaitMs, space, team = null, t = nativeText.englishText.t }) {
   let saved = parseSendState(safeRead(store));
   let view = { cloud: "none", plan: null, local: null, theirs: null, chats: null };
   let running = null, progress = null, checking = null;
@@ -383,7 +384,8 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   async function sendItems(origin, mine, result, { keys, force, job, withChats }) {
     const move = job.reason === "move";
     const summaryRoute = move ? scoped("/api/cloud-send?move=1") : "/api/cloud-send";
-    const session = await cloud.open(move ? { move: true } : undefined).catch((error) => { throw new CloudSendError("session", sentence(error?.message) ?? "This app could not sign in to My Cloud. Try again.", { cause: error }); });
+    const opened = await cloud.open(move ? { move: true } : undefined).catch((error) => { throw new CloudSendError("session", sentence(error?.message) ?? "This app could not sign in to My Cloud. Try again.", { cause: error }); });
+    const session = move && !team ? patientSession(opened, { ...(sleep ? { sleep } : {}), ...(patience.blips ? { blips: patience.blips } : {}) }) : opened;
     try {
       const before = await session.call("GET", summaryRoute);
       if (before.status === 404) throw new CloudSendError("outdated", move ? OUTDATED_FOR_MOVE : "My Cloud needs an update before it can receive bots from this computer. It updates by itself; try again later.");
@@ -896,7 +898,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     if (!origin) throw new CloudSendError("no_cloud", "This computer has no My Cloud yet.");
     const session = await cloud.open({ move: true }).catch((error) => { throw new CloudSendError("session", sentence(error?.message) ?? "This app could not sign in to My Cloud. Try again.", { cause: error }); });
     try {
-      return await moveCheck({ session, kept: entry(origin), persist, localJson, handoff: team ? null : handoff, scoped, now, sleep, takesMove: () => assertTakesMove(session),
+      return await moveCheck({ session, kept: entry(origin), persist, localJson, handoff: team ? null : handoff, scoped, now, sleep, patience, takesMove: () => assertTakesMove(session),
         refuse: (answer, message) => refusedError("unreachable", answer, message), onStep: (value) => { checking = value; publish(); } });
     } catch (error) {
       if (error?.code === "slow") throw Object.assign(new CloudSendError("unreachable", sentence(error.message) ?? "My Cloud did not answer.", { cause: error.cause }), { progressed: error.progressed === true });

@@ -19,7 +19,9 @@ const THREAD = /^[\w-]{1,200}$/u;
 /** The waits between tries of a request nothing answered, and how long a check goes on while none of its requests gets an
  * answer: a slow Cloud that keeps answering is waited for however long its work takes. */
 export const PATIENCE_MS = Object.freeze([15_000, 30_000, 60_000, 120_000, 300_000]);
-export const STALL_MS = 15 * 60_000;
+export const STALL_MS = 10 * 60_000;
+/** The waits before a move's pass gives up on a request it can safely ask again: as long as a Cloud takes to start again. */
+export const BLIP_MS = Object.freeze([5_000, 15_000, 30_000, 60_000]);
 
 /** Nothing answered on the way to My Cloud (no network, a timeout, a gateway error, the Admin's or My Cloud's), as
  * against a refusal: trying again soon may well work. */
@@ -38,16 +40,19 @@ export function answered(answer, message, refuse = null) {
   throw Object.assign(new Error(message), { status: answer.status });
 }
 
+const nap = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
 /**
  * A check's patience with a slow Cloud: a request nothing answered is asked again after PATIENCE_MS, for as long as some
  * request got an answer in the last STALL_MS (`moved`). Then it gives up with an error that still reads as unanswered and
- * says whether anything got done (`progressed`), which the next check does not do again. `onWait(until)` while it waits,
- * `onWait(null)` once it asks again.
+ * says whether any of the work got done (`progressed`), which the next check does not do again; an answer that only
+ * opens the work (`run(work, { counts: false })`) keeps it waiting without counting as work done. `onWait(until)` while it
+ * waits, `onWait(null)` once it asks again.
  */
-export function createPatience({ now = Date.now, sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }), onWait = () => {}, stallMs = STALL_MS, waits = PATIENCE_MS } = {}) {
+export function createPatience({ now = Date.now, sleep = nap, onWait = () => {}, stallMs = STALL_MS, waits = PATIENCE_MS } = {}) {
   let movedAt = now(), progressed = false, tries = 0;
   const patience = {
-    moved() { movedAt = now(); progressed = true; tries = 0; },
+    moved({ counts = true } = {}) { movedAt = now(); tries = 0; if (counts) progressed = true; },
     get progressed() { return progressed; },
     /** Waits before asking again after `error`, or throws once the check has stood still too long. */
     async wait(error) {
@@ -61,14 +66,44 @@ export function createPatience({ now = Date.now, sleep = (ms) => new Promise((re
       onWait(null);
     },
     /** `work()` until it is answered. */
-    async run(work) {
+    async run(work, { counts = true } = {}) {
       for (;;) {
-        try { const value = await work(); patience.moved(); return value; }
+        try { const value = await work(); patience.moved({ counts }); return value; }
         catch (error) { await patience.wait(error); }
       }
     },
   };
   return patience;
+}
+
+const GATEWAY = new Set([502, 503, 504]);
+const REPEATABLE = /^\/api\/cloud-send\/chats(?:[/?]|$)/u;
+
+/**
+ * A move's session for its passes: a read, or a chats request My Cloud adds by id, is asked again through a blip (BLIP_MS)
+ * instead of ending the pass. What still has no answer after that throws as it did, or comes back as the gateway answered,
+ * and says whether anything was answered before it (`progressed`).
+ */
+export function patientSession(session, { sleep = nap, blips = BLIP_MS } = {}) {
+  let answeredOnce = false;
+  return {
+    ...session,
+    async call(method, route, body, options) {
+      if (method !== "GET" && !REPEATABLE.test(route)) return session.call(method, route, body, options);
+      for (let waited = 0; ; waited++) {
+        try {
+          const answer = await session.call(method, route, body, options);
+          if (!GATEWAY.has(answer.status) || waited >= blips.length) {
+            if (!GATEWAY.has(answer.status)) answeredOnce = true;
+            return answer;
+          }
+        } catch (error) {
+          if (!unanswered(error) || waited >= blips.length) throw Object.assign(error, { progressed: answeredOnce });
+        }
+        await sleep(blips[waited]);
+      }
+    },
+  };
 }
 
 /** Asks once: what a check without patience does. */
@@ -322,22 +357,22 @@ const BOT_FILE = /^(?:workspaces|task-workspaces)\/([\w-]{1,128})\//u;
  * answering (createPatience). `onStep({ step, done, total, bots, until? })`: which step it is at, how far, and until when
  * it waits for My Cloud. `refuse(answer, message)`: the error a refusal of My Cloud's is.
  */
-export async function moveCheck({ session, kept, persist, localJson, handoff, scoped = (route) => route, now = Date.now, sleep, takesMove, refuse = null, onStep = () => {} }) {
+export async function moveCheck({ session, kept, persist, localJson, handoff, scoped = (route) => route, now = Date.now, sleep, patience: pace = {}, takesMove, refuse = null, onStep = () => {} }) {
   let bots = 0, at = null;
   const step = (name, done = 0, total = 0) => { at = { step: name, done, total, bots }; onStep(at); };
-  const patience = createPatience({ now, ...(sleep ? { sleep } : {}), onWait: (until) => {
+  const patience = createPatience({ now, ...(sleep ? { sleep } : {}), ...(pace.stallMs !== undefined ? { stallMs: pace.stallMs } : {}), ...(pace.waits ? { waits: pace.waits } : {}), onWait: (until) => {
     if (!at) return;
     const { until: _, ...rest } = at;
     at = until ? { ...rest, until } : rest;
     onStep(at);
   } });
-  const ask = (method, route, timeoutMs, message = "My Cloud did not answer. Try again.") =>
-    patience.run(async () => answered(await session.call(method, route, undefined, { timeoutMs }), message, refuse));
+  const ask = (method, route, timeoutMs, message = "My Cloud did not answer. Try again.", counts = true) =>
+    patience.run(async () => answered(await session.call(method, route, undefined, { timeoutMs }), message, refuse), { counts });
   step("manifest");
-  await patience.run(takesMove);
+  await patience.run(takesMove, { counts: false });
   const here = await localJson(scoped("/api/cloud-send/manifest"), { timeoutMs: LOCAL_LISTING_MS });
   const heads = new Map(list(here?.conversations).filter(record).map((head) => [head.threadId, head]));
-  const there = (await ask("GET", scoped("/api/cloud-send/manifest?attachments=0&files=0"), listingMs(heads.size * 20))).body;
+  const there = (await ask("GET", scoped("/api/cloud-send/manifest?attachments=0&files=0"), listingMs(heads.size * 20), undefined, false)).body;
   if (!record(here) || !record(there)) throw new Error("My Cloud did not say what it has. Try again.");
   const removed = new Set([...Object.entries(kept.off).filter(([, why]) => why === "removed").map(([key]) => key),
     ...Object.entries(kept.chats).filter(([, cursor]) => cursor === "removed").map(([threadId]) => threadId),
@@ -368,7 +403,7 @@ export async function moveCheck({ session, kept, persist, localJson, handoff, sc
   step("attachments", 0, names.length);
   const attachments = await missingAttachments(session, names, { patience, onProgress: (done, total) => step("attachments", done, total) });
   step("credentials");
-  const secrets = handoff ? await patience.run(() => checkSecrets({ handoff, session, skip: new Set([...removed, ...refused]) })) : { equal: [], differs: [], missing: [] };
+  const secrets = handoff ? await patience.run(() => checkSecrets({ handoff, session, skip: new Set([...removed, ...refused]) }), { counts: false }) : { equal: [], differs: [], missing: [] };
   const ok = checkPassed({ gaps, chats, attachments, secrets });
   // What the person knows things by, for what stayed behind (move-gaps.mjs): bots and rooms by name, and the bot or room
   // each conversation the check found short belongs to.

@@ -19,6 +19,7 @@ export function installCloudSend(deps: {
   fetch?: typeof fetch;
   t?(key: string, params?: Record<string, string | number>): string;
   engineWaitMs?: number;
+  patience?: { stallMs?: number; waits?: number[]; blips?: number[] };
   space?: { disk(): unknown; grow(sizeGb: number): Promise<unknown> };
   move?: () => { view(): unknown; seen(): unknown; retry(): Promise<unknown> } | null;
   /** The one session every pass of the move uses (move-session.mjs). */

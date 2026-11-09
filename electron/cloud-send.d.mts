@@ -197,6 +197,8 @@ export function createCloudSend(deps: {
   now?(): number;
   /** How a check waits before it asks a slow Cloud again; setTimeout's by default. */
   sleep?(ms: number): Promise<void>;
+  /** How long a move waits for a Cloud that does not answer: `stallMs` and `waits` in a check, `blips` in a pass. */
+  patience?: { stallMs?: number; waits?: number[]; blips?: number[] };
   /** How long a move waits for My Cloud to run the engines whose keys it just took. */
   engineWaitMs?: number;
   /** My Cloud's plan disk and the Admin's grow, so a move makes room for the files it carries. */

@@ -88,6 +88,7 @@ function sides({ here = [], bots = {}, there = [], connections = [], secrets = {
     },
     store: stored(),
     engineWaitMs: 0,
+    patience: { stallMs: 0, waits: [0], blips: [] },
   };
   return { calls, cloud, deps, opened, asked };
 }
