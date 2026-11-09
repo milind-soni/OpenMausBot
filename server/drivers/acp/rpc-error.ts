@@ -16,8 +16,9 @@ export function acpRpcError(value: any, method: string): Error {
     typeof data?.errorName === "string" ? data.errorName : "",
   ].filter(Boolean).join(", ");
   const diagnostic = `${detail && detail !== message ? `${message}: ${detail}` : message} (${context})`;
-  const error = new Error(redactSecretsInText(diagnostic).slice(0, 1500));
-  return Object.assign(error, { code: value?.code, data,
+  const shown = redactSecretsInText(diagnostic);
+  const error = new Error(shown.slice(0, 1500));
+  return Object.assign(error, { code: value?.code, data, acpDiagnostic: shown,
     // -32603 is JSON-RPC's internal error; invalid params, unsupported methods and auth refusals keep the session.
     acpSessionFailure: value?.code === -32603,
   });
@@ -25,11 +26,16 @@ export function acpRpcError(value: any, method: string): Error {
 
 /** The provider rejected this resume id. A bare invalidParams (a bad model or config) is not this. */
 export function acpMissingSession(error: unknown, cursor: string): boolean {
-  const data = error && typeof error === "object" ? (error as { data?: unknown }).data : undefined;
+  const record = error && typeof error === "object" ? error as { data?: unknown; acpDiagnostic?: unknown } : undefined;
+  const data = record?.data;
   if (data && typeof data === "object" && !Array.isArray(data)) {
-    const record = data as Record<string, unknown>;
-    if (record.sessionId === cursor && Object.keys(record).length === 1) return true;
+    const fields = data as Record<string, unknown>;
+    if (fields.sessionId === cursor && Object.keys(fields).length === 1) return true;
   }
-  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  return message.includes(cursor) && /\bnot found\b/i.test(message) && /\bsession\/(?:load|resume)\b/.test(message);
+  const message = typeof record?.acpDiagnostic === "string" ? record.acpDiagnostic
+    : error instanceof Error ? error.message
+    : typeof error === "string" ? error : "";
+  const id = cursor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`Session\\s+"${id}"\\s+not found\\b`, "i").test(message)
+    && /\bsession\/(?:load|resume)\b/.test(message);
 }
