@@ -581,6 +581,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     }
     budget.listed = definitions.length;
   };
+  const cleanups: Array<Promise<void>> = [];
   try {
     if (signal.aborted) throw aborted();
     // Concurrent starts, consumed in config order so names and collision suffixes stay stable.
@@ -602,25 +603,30 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer", searched: searchable.has(name) };
       return { origin, tools };
     }));
+    const dropped = (index: number, name: string, error: unknown, client?: ChatMcpClient) => {
+      const cleanup = skip(name, index < builtIns, error, client);
+      if (index < builtIns) { cleanups.push(cleanup); return undefined; }
+      return cleanup;
+    };
     for (const [index, mount] of mounts.entries()) {
       if (signal.aborted || closed) throw aborted();
       const name = servers[index]![0];
       if (mount.status === "rejected") {
         if (mount.reason instanceof Error && mount.reason.message === EMPTY_LOCAL_VM_TOOLS) throw mount.reason;
-        await skip(name, index < builtIns, mount.reason, startedAt[index]);
+        await dropped(index, name, mount.reason, startedAt[index]);
         continue;
       }
       const { origin, tools } = mount.value;
-      const builtIn = index < builtIns;
-      if (origin.client.failure) { await skip(name, builtIn, origin.client.failure, origin.client); continue; }
+      if (origin.client.failure) { await dropped(index, name, origin.client.failure, origin.client); continue; }
       try {
         const checked = checkedTools(tools, origin.server);
-        if (builtIn) offeredTools.push({ origin, tools: checked }); else configured.push({ origin, tools: checked });
-      } catch (error) { await skip(name, builtIn, error, origin.client); }
+        if (index < builtIns) offeredTools.push({ origin, tools: checked }); else configured.push({ origin, tools: checked });
+      } catch (error) { await dropped(index, name, error, origin.client); }
     }
+    await Promise.all(cleanups);
     await layout(toolLimit);
     if (signal.aborted || closed) throw aborted();
-  } catch (error) { await close(); throw error; }
+  } catch (error) { await Promise.allSettled(cleanups); await close(); throw error; }
   const target = (tool: { name: string; searched: boolean }, args: unknown) => tool.searched ? directoryCallTarget(tool.name, args) : tool.name;
   const excludes = (server: string, runs: string | undefined, runArgs: unknown) => scope !== undefined && runs !== undefined
     && !allowsTool(scope, { kind: "mcp", server, name: runs }, runArgs);

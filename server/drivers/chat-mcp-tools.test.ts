@@ -16,7 +16,7 @@ import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { wideSchema } from "../testing/oversized-tool-schema.ts";
 import { schemaBytes, toolSchemaProfile } from "../tool-schema-profile.ts";
 
-const killProbe = vi.hoisted(() => ({ override: false, stopped: false, budgets: [] as number[] }));
+const killProbe = vi.hoisted(() => ({ override: false, stopped: false, budgets: [] as number[], holdMs: 0, active: 0, peak: 0 }));
 const spawned = vi.hoisted(() => [] as Array<{ owner?: string; opts: { env?: NodeJS.ProcessEnv; box?: unknown } }>);
 vi.mock("../procs.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../procs.ts")>();
@@ -29,7 +29,9 @@ vi.mock("../procs.ts", async (importOriginal) => {
     },
     killCliTree: (child: Parameters<typeof actual.killCliTree>[0], budget = 5_000) => {
       killProbe.budgets.push(budget);
-      const run = actual.killCliTree(child, budget);
+      killProbe.peak = Math.max(killProbe.peak, ++killProbe.active);
+      const run = (killProbe.holdMs ? new Promise((resolve) => setTimeout(resolve, killProbe.holdMs)).then(() => actual.killCliTree(child, budget)) : actual.killCliTree(child, budget))
+        .finally(() => { killProbe.active -= 1; });
       return killProbe.override ? run.then(() => killProbe.stopped) : run;
     },
   };
@@ -340,6 +342,20 @@ describe("Chat MCP session", () => {
     expect(() => session.validate(builtIn ? "agents_write" : "leaves_write", { value: "x" })).toThrow("not advertised");
     await expect(session.execute("slow_write", { value: "still works" }, slow.controller.signal)).resolves.toMatchObject({ ok: true });
     warn.mockRestore();
+  });
+
+  it("cleans up several built-in servers that fail together at once, not one after another", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const bad = ["agents", "data", "email"].map(() => fixture(`if(message.method === "tools/list") { reply(message, {tools:[{name:"a",inputSchema:{type:"string"}}]}); continue; }`));
+    killProbe.holdMs = 100;
+    killProbe.peak = killProbe.active = 0;
+    try {
+      const session = await mountChatTools({ agents: bad[0]!.server, data: bad[1]!.server, email: bad[2]!.server }, bad[0]!.controller.signal);
+      sessions.push(session);
+      expect(session.skipped.map((entry) => entry.server)).toEqual(["agents", "data", "email"]);
+      expect(killProbe.peak).toBe(3);
+      for (const f of bad) expect(alive(f.read().pid)).toBe(false);
+    } finally { killProbe.holdMs = 0; warn.mockRestore(); }
   });
 
   it("rejects untrusted transport error text without leaking it", async () => {
