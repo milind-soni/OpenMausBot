@@ -358,6 +358,18 @@ describe("Chat MCP session", () => {
     } finally { killProbe.holdMs = 0; warn.mockRestore(); }
   });
 
+  it("names the signal, not an exit code, when a built-in server is terminated during startup", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const killed = fixture(`if (message.method === "initialize") process.kill(process.pid, "SIGTERM");`);
+    const session = await mountChatTools({ localComputer: killed.server, agents: ready.server }, ready.controller.signal, true);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["agents_write"]);
+    expect(session.skipped).toEqual([{ server: "computer", reason: "MCP server exited before the session closed (signal SIGTERM)", builtIn: true }]);
+    expect(session.skipped[0]!.reason).not.toMatch(/exit code/);
+    warn.mockRestore();
+  });
+
   it("rejects untrusted transport error text without leaking it", async () => {
     const f = fixture(`if (message.method === "tools/call") { send({jsonrpc:"2.0",id:message.id,error:{code:-1,message:"secret-fixture-key"}}); continue; }`);
     const session = await f.mount();
