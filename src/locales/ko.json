@@ -1643,6 +1643,8 @@
   "simpleModePrompt.switch": "간단 모드",
   "simpleModePrompt.switchHint": "켜 보면 바로 차이를 볼 수 있어요.",
   "simpleModePrompt.where": "설정 → 일반에서 언제든 바꿀 수 있어요.",
+  "newLook.title": "{app} 화면이 더 단순해졌어요",
+  "newLook.body": "필요한 기능은 모두 그대로예요. 자주 쓰지 않는 설정은 설정 → 기타 설정에 있어요.",
   "settings.openAtLogin.title": "로그인할 때 열기",
   "settings.openAtLogin.subtitle": "이 컴퓨터에 로그인하면 {app}을 열어요. 직접 열지 않아도 봇과 루틴이 준비돼요.",
   "settings.openAtLogin.failed": "변경하지 못했어요. 다시 시도하거나 시스템 설정의 로그인 항목을 확인하세요.",

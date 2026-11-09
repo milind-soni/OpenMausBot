@@ -1752,6 +1752,8 @@
   "simpleModePrompt.switch": "Modo simples",
   "simpleModePrompt.switchHint": "Mude para ver a diferença na hora.",
   "simpleModePrompt.where": "Mude quando quiser em Configurações → Geral.",
+  "newLook.title": "{app} agora tem um visual mais simples",
+  "newLook.body": "Tudo de que você precisa continua aqui; as configurações menos usadas ficam em Configurações → Mais configurações.",
   "settings.openAtLogin.title": "Abrir ao iniciar sessão",
   "settings.openAtLogin.subtitle": "Abrir o app {app} quando você entrar neste computador, para que os bots e as rotinas fiquem prontos sem você precisar abrir o app.",
   "settings.openAtLogin.failed": "Não foi possível alterar esta opção. Tente novamente ou confira as opções de início automático nas configurações do sistema.",

@@ -360,7 +360,7 @@ export function DefaultBotSettings({ simple = false }: { simple?: boolean }) {
     {open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />}
     {sharing && <SharePresetDialog onClose={() => setSharing(false)} />}
   </>;
-  if (simple) return <><NewBotDefaultsRow onEdit={() => setOpen(true)} />{dialogs}</>;
+  if (simple) return <><NewBotDefaultsRow onEdit={() => setOpen(true)} onShare={() => setSharing(true)} />{dialogs}</>;
 
   const content = <>
     <div className="flex shrink-0 gap-2">

@@ -1105,6 +1105,8 @@
   "settings.diagnostics.elsewhere": "Nhật ký được lưu ở nơi {app} chạy. Để mở hoặc xuất nhật ký của máy tính này, hãy dùng Cài đặt trong ứng dụng desktop trên máy đó. Bộ phận hỗ trợ MausBot Cloud có thể đọc nhật ký của Cloud.",
   "settings.analytics.title": "Phân tích sử dụng",
   "settings.analytics.aria": "Gửi dữ liệu phân tích sử dụng",
+  "newLook.title": "{app} giờ có giao diện đơn giản hơn",
+  "newLook.body": "Mọi thứ bạn cần vẫn ở đây; các cài đặt ít dùng nằm trong Cài đặt → Cài đặt khác.",
   "settings.updates.startingDownload": "Đang bắt đầu tải xuống…",
   "settings.updates.preparing": "Tải xuống hoàn tất. macOS đang chuẩn bị bản cập nhật.",
   "settings.updates.readyInstall": "{app} {version} đã sẵn sàng — hãy cài đặt trong terminal",

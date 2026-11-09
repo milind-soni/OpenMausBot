@@ -64,6 +64,7 @@ import { scrollWithin } from "@/lib/scroll-within";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { NotificationRows } from "./NotificationSettingsRows";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { Select } from "./Select";
 import { SavedStepsRow } from "./SavedStepsRow";
 import { BrowserProfilesRow, ColorUserBubblesRow, AdvancedModeRow, ExperimentalFeaturesRow, LanguageRow, NewBotEffortRow, PinnedCirclesRow, ReplayTourRow, RunCardRow, FollowUpRow, SendKeyRow, ShowThreadsRow, ToolCallsRow, UniversalPinsRow, UpdatesRow } from "./AppSettingsRows";
@@ -243,7 +244,7 @@ export function SettingsModal() {
   const setSubPage = (view: "looks" | "more" | null, at: AppSettingsSection = requested) => setOpenSubPage(view && { view, for: at });
   useEffect(() => { setOpenSubPage((current) => current?.for === requested ? current : null); }, [requested]);
   const [reveal, setReveal] = useState<string | null>(null);
-  const advancedMatches = advanced || !q ? [] : SIMPLE_ADVANCED_ONLY.filter((key) => t(key).toLowerCase().includes(q));
+  const advancedMatches = advanced || SIMPLE_ONLY || !q ? [] : SIMPLE_ADVANCED_ONLY.filter((key) => t(key).toLowerCase().includes(q));
   const moreSections = availableSections.filter((entry) => SIMPLE_HIDDEN_SECTIONS.includes(entry.id));
   const keyResults = remoteActive || !availableSections.some((entry) => entry.id === "connections") ? [] : keySearchResults(q);
   const keyResultButtons = (className: string) => keyResults.map((entry) => (

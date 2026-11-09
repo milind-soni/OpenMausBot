@@ -8,6 +8,7 @@ import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
 import { CalendarClock, ChevronRight, Columns2, Globe, Hand, Loader2, Maximize2, Monitor, Moon, Power, Settings, X } from "lucide-react";
 import { api, ApiError, currentTaskBot, useStore, type Bot, type ConfigStatus } from "@/state/store";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
+import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { ComputerFilesPane } from "./ComputerFilesPane";
 import { effectivePlace, isComputerPlace, personPin, placeLabelKey, placeOffered } from "@/lib/place";
 import type { CloudBackend } from "../../shared/wire";
@@ -1467,12 +1468,11 @@ export function ComputerPanel({
               {!advanced && vpsPhase && (
                 <>
                   <p className="text-[12px]">{t("computer.simple.needsSetup", { name: bot.name })}</p>
-                  {!canProvisionVps && !canReplaceVps && <button
-                    type="button"
-                    onClick={() => setAdvancedMode(true)}
+                  {!canProvisionVps && !canReplaceVps && <button type="button"
+                    onClick={SIMPLE_ONLY ? openConnectionSettings : () => setAdvancedMode(true)}
                     className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
                   >
-                    {t("computer.simple.showAdvanced")}
+                    {t(SIMPLE_ONLY ? "computer.openVpsSettings" : "computer.simple.showAdvanced")}
                   </button>}
                 </>
               )}

@@ -39,7 +39,7 @@ import { TwoPlacesCard } from "./TwoPlacesCard";
 import { BOAT_OFFER_NOTICE, CLOUD_INTRO, GROK_MOVE_NOTICE, launchNotice, localDay, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { BOAT_OFFER, boatClaimMailto } from "@/lib/boat-offer";
 import { track } from "@/lib/analytics";
-import { ADVANCED_MODE_KEY, setAdvancedMode } from "@/lib/interface-mode";
+import { NEW_LOOK_KEY } from "@/lib/new-look";
 import { SIMPLE_MODE_PROMPT_KEY } from "@/lib/simple-mode-prompt";
 import { api } from "@/state/store";
 
@@ -992,15 +992,15 @@ describe("the Move from Grok Bot popup", () => {
   });
 
   it("goes first in the queue, one a launch: What's new, then the rest, wait for later launches", async () => {
-    returning(); desk.saved = null; storage.delete(SIMPLE_MODE_PROMPT_KEY); storage.delete(BOAT_OFFER_NOTICE); storage.delete(STAR_NOTICE);
+    returning(); desk.saved = null; storage.set(NEW_LOOK_KEY, "due"); storage.delete(BOAT_OFFER_NOTICE); storage.delete(STAR_NOTICE);
     const first = await launch();
     expect(first).toContain(TITLE);
-    for (const other of ["data-simple-mode-prompt", WHATS_NEW, STAR]) expect(first).not.toContain(other);
+    for (const other of ["data-new-look-notice", WHATS_NEW, STAR]) expect(first).not.toContain(other);
     press("Not now"); await flush();
     expect(render(), "nothing else after it in this launch").toBe("");
     expect(await launch(), "a reload is the same launch").toBe("");
     const second = await relaunch();
-    expect(second).toContain("data-simple-mode-prompt"); expect(second).not.toContain(TITLE);
+    expect(second).toContain("data-new-look-notice"); expect(second).not.toContain(TITLE);
     expect(launchNotice()).not.toBe(GROK_MOVE_NOTICE);
   });
 
@@ -1092,57 +1092,51 @@ describe("the Move from Grok Bot popup", () => {
   });
 });
 
-describe("the Simple mode popup after the update", () => {
-  const TITLE = "Try the new Simple mode", ON = "You&#x27;re on Simple mode", POPUP = "Meet the new MausBot Cloud";
+describe("the new look, in the Simple mode popup's place", () => {
+  const TITLE = "MausBot has a simpler look", POPUP = "Meet the new MausBot Cloud";
+  const BODY = "Everything you need is still here; rarer settings are under Settings → More settings.";
   let modal: boolean;
-  const prompts = () => vi.mocked(track).mock.calls.filter(([event]) => event === "simple_mode_prompt").map(([, props]) => props);
+  const events = () => vi.mocked(track).mock.calls.filter(([event]) => event === "new_look_notice").map(([, props]) => props);
 
   beforeEach(() => {
     modal = false;
     vi.stubGlobal("document", { activeElement: null, body: null, documentElement: { dataset: {} }, getElementById: () => null, querySelector: () => null,
       querySelectorAll: () => modal ? [{ closest: () => null, checkVisibility: () => true }] : [] });
-    setAdvancedMode(true);
-    storage.delete(SIMPLE_MODE_PROMPT_KEY);
+    // main.tsx's settleInterfaceMode found this browser on Advanced mode.
+    storage.set(NEW_LOOK_KEY, "due");
   });
 
-  it("shows once in each browser, claims the launch, and never comes back once it is closed", async () => {
+  it("shows once where Advanced mode was on, with no switch, claims the launch, and never comes back once it is closed", async () => {
     const html = await launch();
-    expect(html).toContain(TITLE);
-    for (const part of ['role="dialog"', 'aria-modal="true"', 'role="switch"', 'aria-checked="false"', "Switch any time in Settings → General."]) expect(html).toContain(part);
-    expect(prompts()).toEqual([{ action: "shown", mode: "advanced" }]);
+    expect(html).toContain(TITLE); expect(html).toContain(BODY);
+    for (const part of ['role="dialog"', 'aria-modal="true"', "data-new-look-notice"]) expect(html).toContain(part);
+    for (const gone of ['role="switch"', "data-simple-mode-prompt", "Advanced"]) expect(html).not.toContain(gone);
+    expect(events()).toEqual([{ action: "shown" }]);
     expect(launchDialogShown()).toBe("notices");
     expect(await settle(), "shown is counted once").toContain(TITLE);
-    expect(prompts()).toHaveLength(1);
+    expect(events()).toHaveLength(1);
     press("Done"); await flush();
     expect(render(), "nothing else in this launch after it").toBe("");
-    expect(storage.get(SIMPLE_MODE_PROMPT_KEY)).toBe("1");
-    expect(prompts()).toEqual([{ action: "shown", mode: "advanced" }, { action: "closed", mode: "advanced" }]);
+    expect(storage.get(NEW_LOOK_KEY)).toBe("seen");
+    expect(events()).toEqual([{ action: "shown" }, { action: "closed" }]);
     session.clear();
     expect(await launch()).not.toContain(TITLE);
-    expect(prompts()).toHaveLength(2);
+    expect(events()).toHaveLength(2);
   });
 
-  it("changes the mode live from the popup, both ways, while its words stay", async () => {
-    await launch();
-    press("Simple mode"); await flush();
-    expect(storage.get(ADVANCED_MODE_KEY)).toBe("0");
-    const on = render();
-    expect(on).toContain('aria-checked="true"'); expect(on).toContain(TITLE);
-    press("Simple mode"); await flush();
-    expect(storage.get(ADVANCED_MODE_KEY)).toBe("1");
-    expect(render()).toContain('aria-checked="false"');
-    expect(prompts().slice(1)).toEqual([{ action: "toggled", mode: "simple" }, { action: "toggled", mode: "advanced" }]);
-    expect(storage.has(SIMPLE_MODE_PROMPT_KEY), "flipping never closes it").toBe(false);
+  it("never shows to a browser that was on Simple mode, nor to a new install, and the old popup is gone for them too", async () => {
+    storage.delete(SIMPLE_MODE_PROMPT_KEY);
+    for (const look of ["none", undefined, "seen"]) {
+      if (look) storage.set(NEW_LOOK_KEY, look); else storage.delete(NEW_LOOK_KEY);
+      session.clear();
+      const html = await launch();
+      expect(html, String(look)).not.toContain(TITLE);
+      expect(html, String(look)).not.toContain("data-simple-mode-prompt");
+    }
+    expect(events()).toEqual([]);
   });
 
-  it("tells someone already on Simple mode so, with the switch on", async () => {
-    setAdvancedMode(false);
-    const html = await launch();
-    expect(html).toContain(ON); expect(html).toContain('aria-checked="true"');
-    expect(prompts()).toEqual([{ action: "shown", mode: "simple" }]);
-  });
-
-  it("asks on the Cloud's own page and in a plain browser too, not only on this computer's", async () => {
+  it("shows on the Cloud's own page and in a plain browser too, not only on this computer's", async () => {
     snapshot = { status: "none" }; viewer = { hosted: false, canSave: true, cloudHome: true }; f.state.config.cloudHome = true;
     f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"]; showWindow(MY_CLOUD);
     expect(await launch()).toContain(TITLE);
@@ -1162,12 +1156,12 @@ describe("the Simple mode popup after the update", () => {
       expect(await launch(), wait.toString()).not.toContain(TITLE);
       f.state = saved; modal = false;
     }
-    expect(prompts()).toEqual([]);
+    expect(events()).toEqual([]);
     markWelcomeFinished();
     expect(await launch(), "the launch the welcome finished in").not.toContain(TITLE);
     session.clear();
     expect(await launch()).toContain(TITLE);
-    expect(storage.has(SIMPLE_MODE_PROMPT_KEY)).toBe(false);
+    expect(storage.get(NEW_LOOK_KEY)).toBe("due");
   });
 
   it("is one popup at a time: it comes before What's new, which waits for a later launch", async () => {

@@ -605,6 +605,8 @@
   "settings.diagnostics.elsewhere": "लॉग वहीं रखे जाते हैं जहाँ {app} चलता है। इस कंप्यूटर के लॉग खोलने या निर्यात करने के लिए, उस पर डेस्कटॉप ऐप की सेटिंग्स इस्तेमाल करें। MausBot Cloud सहायता Cloud के लॉग पढ़ सकती है।",
   "settings.analytics.title": "उपयोग विश्लेषण",
   "settings.analytics.aria": "उपयोग विश्लेषण भेजें",
+  "newLook.title": "{app} अब और सरल दिखता है",
+  "newLook.body": "आपकी ज़रूरत की हर चीज़ अब भी यहीं है; कम इस्तेमाल होने वाली सेटिंग्स सेटिंग्स → और सेटिंग्स में हैं।",
   "settings.updates.startingDownload": "डाउनलोड शुरू हो रहा है…",
   "settings.updates.preparing": "डाउनलोड पूरा। macOS अपडेट तैयार कर रहा है।",
   "settings.updates.readyInstall": "{app} {version} तैयार है — टर्मिनल में इंस्टॉल करें",

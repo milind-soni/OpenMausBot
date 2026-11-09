@@ -735,6 +735,8 @@
   "settings.diagnostics.elsewhere": "Logs liegen dort, wo {app} läuft. Um die dieses Computers zu öffnen oder zu exportieren, nutze die Einstellungen in der Desktop-App darauf. Der Support von MausBot Cloud kann die der Cloud lesen.",
   "settings.analytics.title": "Nutzungsstatistik",
   "settings.analytics.aria": "Nutzungsstatistik senden",
+  "newLook.title": "{app} sieht jetzt einfacher aus",
+  "newLook.body": "Alles, was du brauchst, ist noch da; seltener genutzte Einstellungen findest du unter Einstellungen → Weitere Einstellungen.",
   "settings.updates.startingDownload": "Download startet…",
   "settings.updates.preparing": "Download abgeschlossen. macOS bereitet das Update vor.",
   "settings.updates.readyInstall": "{app} {version} ist bereit — im Terminal installieren",
