@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  acceptLegacyOrigins,
   BROWSER_SIGN_IN,
   clearSessionCookie,
   fromBrowser,
@@ -443,6 +444,41 @@ describe("resolveRequestAuth", () => {
     expect(csrf.auth).toBeNull();
     expect(csrf.status).toBe(403);
     expect(csrf.error).toBe("forbidden: cross-origin request");
+  });
+
+  it("takes a moved Cloud home's configured former address as its own, and no other, whatever X-Forwarded-Host says", () => {
+    const token = pairedToken();
+    const { credential } = sessions.openPairing({ browser: true, owner: "ada@example.test" });
+    const browser = sessions.exchange({ code: credential, label: "Chrome on Mac", source: "1.2.3.4", browser: true });
+    if (!browser.ok) throw new Error(browser.error);
+    // What the old address's forwarder sends: Host rewritten to this home's name, the page's own Origin kept.
+    const forwarded = (origin: string, cookie = token, extra: Record<string, string> = {}) => ({
+      host: "omb-u-1.homes.example", "x-forwarded-proto": "https", "x-forwarded-for": "203.0.113.9", "x-forwarded-host": "omb-u-1.fly.dev",
+      cookie: `${cookieName}=${cookie}`, origin, ...extra,
+    });
+    const page = { "sec-fetch-site": "same-origin", "sec-fetch-dest": "empty" };
+    try {
+      acceptLegacyOrigins(["https://omb-u-1.fly.dev"]);
+      expect(resolve(forwarded("https://omb-u-1.fly.dev"), "/api/bots", "POST").auth?.kind).toBe("session");
+      expect(resolve(forwarded("https://OMB-U-1.fly.dev "), "/api/bots", "POST").auth?.kind).toBe("session");
+      expect(resolve(forwarded("https://omb-u-1.fly.dev", browser.token, page), "/api/bots", "POST").auth?.kind).toBe("session");
+      expect(resolve(forwarded("https://omb-u-1.fly.dev"), "/api/events").auth?.kind).toBe("session");
+      expect(isSameOrigin(request({ host: "omb-u-1.homes.example", "x-forwarded-proto": "https", origin: "https://omb-u-1.fly.dev", upgrade: "websocket" }))).toBe(true);
+      expect(provesSameOrigin(request({ host: "omb-u-1.homes.example", "x-forwarded-proto": "https", origin: "https://omb-u-1.fly.dev" }))).toBe(true);
+      // Only the exact origin: not another app on the same provider, its http twin, a port, or a name X-Forwarded-Host gives.
+      for (const origin of ["https://omb-u-2.fly.dev", "http://omb-u-1.fly.dev", "https://omb-u-1.fly.dev:8443", "https://evil.example"]) {
+        const refused = resolve(forwarded(origin), "/api/bots", "POST");
+        expect(refused, origin).toMatchObject({ auth: null, status: 403, error: "forbidden: cross-origin request" });
+      }
+      expect(isSameOrigin(request({ host: "omb-u-1.homes.example", "x-forwarded-proto": "https", "x-forwarded-host": "evil.example", origin: "https://evil.example" }))).toBe(false);
+      // Never loopback trust: the former address is a remote page's, so a request with no session is still refused.
+      expect(resolve({ host: "127.0.0.1:8799", origin: "https://omb-u-1.fly.dev" }).auth).toBeNull();
+    } finally {
+      acceptLegacyOrigins([]);
+    }
+    const unconfigured = resolve(forwarded("https://omb-u-1.fly.dev"), "/api/bots", "POST");
+    expect(unconfigured).toMatchObject({ auth: null, status: 403, error: "forbidden: cross-origin request" });
+    expect(isSameOrigin(request({ host: "omb-u-1.homes.example", "x-forwarded-proto": "https", "x-forwarded-host": "omb-u-1.fly.dev", origin: "https://omb-u-1.fly.dev" }))).toBe(false);
   });
 
   it("lets a browser sign-in's session make changes only when the browser says the request is its own page's", () => {

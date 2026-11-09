@@ -1259,6 +1259,21 @@ feeds the pairing lockout, never authorization. Apart from `/api/health`,
 Caddy answers only for the machine's own name (`OMB_PUBLIC_URL`) and refuses
 any other `Host`.
 
+**A home that moved to another provider.** Its old address (say
+`<app>.fly.dev`) is served by a forwarder that proxies to the new one and
+rewrites `Host` to the new name, so the edge's host matcher, and in
+`OMB_CLOUD_EDGE_TLS` mode the certificate it serves for that name, already
+match: the edge is not widened for the old name. What still names the old
+address is the `Origin` of a page or client on it (a browser tab, a device
+paired by code straight to it), which the server's same-origin checks would
+refuse. `OMB_CLOUD_LEGACY_ORIGINS` lists those old origins, and the server
+counts exactly those as its own besides its `Host`'s: for cookie sessions,
+a browser sign-in's changes, WebSockets, the event stream and the viewers.
+`X-Forwarded-Host` is never read. Requests through the forwarder reach the
+edge from the forwarder's address, so in `OMB_CLOUD_EDGE_TLS` mode they share
+one pairing lockout unless the forwarder is named in
+`OMB_CLOUD_TRUSTED_PROXIES`. New pairing links name the new address.
+
 ### On your own server: how people reach it
 
 A home on a server of its owner's (Team on your own server) runs the same
@@ -1357,6 +1372,7 @@ never echoes a secret.
 | `OMB_CLOUD_ADMIN_URL` | secret | The Cloud origin, exact `https://`, e.g. `https://cloud.openmausbot.com`. |
 | `OMB_CLOUD_BOOTSTRAP_SECRET` | secret | 43 base64url characters (256 bits): the key the Admin signs pairing requests with. |
 | `OMB_PUBLIC_URL` | env | The machine's exact `https://` origin, `https://<app>.fly.dev`. |
+| `OMB_CLOUD_LEGACY_ORIGINS` | env | Optional, only for a home that moved to another provider: the exact `https://` origins it answered at before, comma-separated (at most 8, never a loopback name), e.g. `https://<app>.fly.dev`. |
 
 - The machine must not also carry `OMB_ADMIN_URL`, `OMB_ADMIN_WORKSPACE` or
   `OMB_ADMIN_MEMBERSHIP`: a Cloud home is a personal server with pairing codes
@@ -1888,6 +1904,14 @@ token (`Authorization: Bearer omc_…`). Contract version 1 adds:
 Optional, additive fields the app reads when the Admin sends them (an Admin
 without them works as before; a malformed one is dropped, never the machine):
 
+- `cloud.formerOrigins: string[]`, and the same beside each `clouds[].origin`
+  and each `teams[].machine.origin`: the addresses that Cloud answered at
+  before it moved to another provider (`electron/cloud-home.mjs`
+  `parseFormerOrigins`; each a valid `https://` origin, never its `origin`
+  now; anything else is left out). The desktop knows My Cloud again by them
+  and by its id in `clouds[]`, so a computer whose bots moved to it follows it
+  to its new address instead of reading the move as My Cloud ending; see
+  [This computer's bots move to your Cloud](#this-computers-bots-move-to-your-cloud).
 - `cloud.setup: {step, slow}` while `setting_up` (`step` is `reserving`,
   `storage`, `starting` or `checking`): the app shows the same four steps as
   the Cloud page, and says when setup is slow.
@@ -2341,6 +2365,16 @@ all arrived, and freezes this computer's copy so nothing runs in two places
 (`server/cloud-move-http.ts`); a backup file still restores from Settings →
 Backups. [docs/verification/cloud-send.md](verification/cloud-send.md) has the
 tests.
+
+The move's journal names the Cloud by its address and, once the session lists
+it, by its id (the person's own Cloud in `clouds[]` at My Cloud's address).
+When My Cloud moves to another provider, the verified session gives it a new
+`origin` and lists the old one in `formerOrigins`: the same id, or the
+journal's address among those, is the same Cloud, so the journal follows it
+to the new address and the move goes on, or stays done, there. The window
+opens it there, and its saved place moves with it. A Cloud with another id
+whose former addresses don't include the journal's is another Cloud, and
+ends the move as before.
 
 ## Security summary
 
