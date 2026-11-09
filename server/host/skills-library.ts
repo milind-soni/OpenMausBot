@@ -11,7 +11,7 @@ import {
   importedSkillListings, importedSkillsFor, importedSkillsPrompt, listedImportedSkills, nativeSkillFolders, readImportedSkillFile,
   readImportedSkills, type ImportedSkillView, type SkillTurnEngine,
 } from "../imported-skills.ts";
-import { nativeSkillListing, nativeSkills, readNativeSkillFile } from "../native-skills.ts";
+import { nativeSkillListing, nativeSkills, projectSkillListing, projectSkills, projectSkillsPrompt, readNativeSkillFile, type NativeSkill } from "../native-skills.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { readSectionContext } from "../section-context.ts";
 import { listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
@@ -28,9 +28,9 @@ import {
 } from "../skill-share.ts";
 import { enabledSkillFiles, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
-import { claudeUserSkillsEnabled } from "../turn-settings.ts";
+import { claudeUserSkillsEnabled, projectSkillsEnabled } from "../turn-settings.ts";
 import { typedWords } from "../typed-sends.ts";
-import { TASK_WORKSPACES_DIR } from "../workspace.ts";
+import { supportsWorkspaceFiles, TASK_WORKSPACES_DIR } from "../workspace.ts";
 
 type ReceiptArgs = {
   botId: string;
@@ -92,7 +92,10 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     const own = ownSkills(bot);
     const listed = [...own, ...importedSkillListings(bot.id, new Set(own.map((skill) => skill.name)), aboutBot(bot))];
     const names = new Set(listed.map((skill) => skill.name));
-    return [...listed, ...nativesFor(bot, threadId).filter((skill) => !names.has(skill.name)).map(nativeSkillListing)];
+    const natives = nativesFor(bot, threadId).filter((skill) => !names.has(skill.name));
+    for (const skill of natives) names.add(skill.name);
+    const project = projectFor(bot, threadId).filter((skill) => !names.has(skill.name));
+    return [...listed, ...natives.map(nativeSkillListing), ...project.map((skill) => projectSkillListing(skill, projectSkillsEnabled(cfg)))];
   };
   const readBotSkillFile = (bot: BotRecord, name: string): string | null => {
     const own = readSkillFile(bot.id, name);
@@ -102,7 +105,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     // The library fallback is by assignment only, never by name alone.
     if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (skill.everyBot || bot.assignedSkills?.includes(name)))) return readLibrarySkillFile(name);
     if (readImportedSkills()[name]) return readImportedSkillFile(name);
-    const native = nativesFor(bot).find((skill) => skill.name === name);
+    const native = nativesFor(bot).find((skill) => skill.name === name) ?? projectFor(bot, bot.threadId).find((skill) => skill.name === name);
     return native ? readNativeSkillFile(native) : null;
   };
 
@@ -154,6 +157,25 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   const nativesFor = (bot: BotRecord, threadId = bot.threadId, instance = deps.instanceOf?.(bot.modelSelection.instanceId)) => {
     const engine = engineOf(instance);
     return engine ? nativeSkills(engine, { claudeUserSkills: claudeUserSkillsEnabled(cfg), cwd: threadFolder(bot, threadId) }) : [];
+  };
+
+  /** What the project a turn works in ships for any agent; none for an engine that cannot read files. `cwd` undefined:
+   * the thread's own folder. */
+  const projectFor = (bot: BotRecord, threadId: string, cwd?: string | null, instance = deps.instanceOf?.(bot.modelSelection.instanceId)): NativeSkill[] => {
+    const engine = engineOf(instance);
+    if (!engine || !supportsWorkspaceFiles(engine.driverKind)) return [];
+    const folder = cwd === undefined ? threadFolder(bot, threadId) : cwd;
+    return folder ? projectSkills(engine, { cwd: folder, dataDir: DATA_DIR }) : [];
+  };
+  /** The project's skills a turn's prompt and `/` menu use: none until the owner turns them on, and none of a name the
+   * bot already has or its engine loads by itself. */
+  const projectInUse = (bot: BotRecord, threadId: string, cwd: string | null | undefined, instance: TurnInstance | undefined, assigned: readonly string[] | undefined): NativeSkill[] => {
+    if (!projectSkillsEnabled(cfg)) return [];
+    const names = new Set([
+      ...resolveBotSkills(bot.id, assigned).map((skill) => skill.name), ...Object.keys(readImportedSkills()),
+      ...nativesFor(bot, threadId, instance).map((skill) => skill.name),
+    ]);
+    return projectFor(bot, threadId, cwd, instance).filter((skill) => !names.has(skill.name));
   };
 
   const editable = (botId: string, name: string): boolean =>
@@ -252,13 +274,14 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     conversationSkills,
 
     /** A turn's skills index, or the preview's without a thread: the bot's own and library skills, then the ones from
-     * this computer, each with a budget of its own. */
-    skillsIndex(bot: BotRecord, threadId: string | undefined, instance?: TurnInstance): string {
+     * this computer, then the ones the project in `cwd` ships, each with a budget of its own. */
+    skillsIndex(bot: BotRecord, threadId: string | undefined, instance?: TurnInstance, cwd?: string | null): string {
       const assigned = threadId === undefined ? (skillsLibraryEnabled(cfg) ? bot.assignedSkills ?? [] : undefined) : conversationSkills(bot, threadId);
       const available = importsFor(bot, assigned, instance);
       const listed = listedImports(bot, available);
+      const project = projectInUse(bot, threadId ?? bot.threadId, cwd, instance, assigned);
       return skillsSystemPrompt(bot.id, assigned, threadId === undefined ? undefined : conversationStartedAt(threadId)) +
-        importedSkillsPrompt(listed, available.length - listed.length);
+        importedSkillsPrompt(listed, available.length - listed.length) + projectSkillsPrompt(project);
     },
 
     /** The imported skills a turn links into its task folder: the same ones its index lists, so an engine that loads
@@ -285,6 +308,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
           .filter((skill) => !skill.enabled).map((skill) => skill.name));
         add(nativesFor(bot, threadId, instance).filter((skill) => !switched.has(skill.name)));
       }
+      if (files.size < mentioned.length) add(projectInUse(bot, threadId, undefined, instance, assigned));
       return skillCommandTurnText(text, files, typed, ownStart);
     },
 

@@ -8,6 +8,10 @@ export function claudeUserSkillsEnabled(cfg: AppConfig): boolean {
   return cfg.features?.claudeUserSkills === true;
 }
 
+export function projectSkillsEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.projectSkills === true;
+}
+
 /** A folder whose `.claude/skills` links to the person's own `~/.claude/skills`, for Claude Code's `--add-dir`: each skill
  * loads as it is on disk, scripts and references included, and edits arrive live. Null when there is nothing to link. */
 export function claudeUserSkillsDir(dataDir: string, home = homedir()): string | null {

@@ -413,6 +413,17 @@ removed when the switch goes off; a skill brought in from `~/.claude/skills`
 is left out of a Claude turn while the switch is on, since Claude already has
 the original.
 
+A project can ship skills for any AI agent in `agents/skills`, `.agents/skills`
+or `.claude/skills`. When a bot works in such a folder (or one below it, up to
+the git root), its **Skills** page lists them under **In this project**, with
+the switch **Use the project's skills**. They stay out of every prompt until
+that switch is on, since they are the checkout's own instructions; it applies
+to every bot, and in `config.json` it is `"features": { "projectSkills": true }`.
+Once on, a bot's prompt lists each one with its SKILL.md path and `/name` runs
+it. The bot's own, library and brought-in skills keep their names, Claude Code
+keeps loading `.claude/skills` by itself, an engine without file tools gets
+none, and they never travel in a bot or team package.
+
 The switch drops the CLI flag `--strict-mcp-config` (Claude Code 1.0.60+)
 while keeping `--setting-sources project` (1.0.122+). The environment variable
 `OMB_CLAUDE_INHERIT_USER_CONFIG=1` on the OpenMausBot process remains the full
