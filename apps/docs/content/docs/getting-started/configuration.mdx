@@ -4,7 +4,7 @@ description: Understand engine paths, credentials, and the local configuration b
 icon: Settings
 ---
 
-Most users configure OpenMausBot from the app. The packaged desktop validates credentials before saving them and stores supported secrets with the operating system's secure storage.
+Most users configure MausBot from the app. The packaged desktop validates credentials before saving them and stores supported secrets with the operating system's secure storage.
 
 ## Shared user profile
 
@@ -16,14 +16,14 @@ This is workspace-wide context, not a private note for a single bot. It is store
 
 ## Engine discovery
 
-OpenMausBot checks the inherited process path, common install locations, and the login shell. If an engine is installed somewhere unusual, open **Settings → Engines** and choose its executable explicitly.
+MausBot checks the inherited process path, common install locations, and the login shell. If an engine is installed somewhere unusual, open **Settings → Engines** and choose its executable explicitly.
 
 Explicit paths are useful when you:
 
 - keep multiple CLI versions;
 - use a wrapper script;
 - installed an engine in a directory desktop apps cannot discover; or
-- launch OpenMausBot from a Windows shortcut or Linux application menu with a different environment from your terminal.
+- launch MausBot from a Windows shortcut or Linux application menu with a different environment from your terminal.
 
 ## Optional credentials
 
@@ -60,7 +60,7 @@ Source and headless installations can give separate Claude instances different b
 }
 ```
 
-`tools` selects Claude's available built-ins; an explicit empty array disables every built-in, while omitting it keeps Claude's default set. `disallowedTools` applies Claude tool-name patterns as an additional deny list. These settings do not grant or pre-approve MCP integrations, which remain controlled by the instance's mounted integrations and OpenMausBot permission flow.
+`tools` selects Claude's available built-ins; an explicit empty array disables every built-in, while omitting it keeps Claude's default set. `disallowedTools` applies Claude tool-name patterns as an additional deny list. These settings do not grant or pre-approve MCP integrations, which remain controlled by the instance's mounted integrations and MausBot permission flow.
 
 ### Claude Code isolation
 
@@ -82,7 +82,7 @@ so a follow-up re-establishes the native session over the wire (`session/load`)
 on the same process — the handshake is still paid only once.
 
 An agent that refuses `session/load` for a session already live in its own
-process gets exactly one replacement process for that turn: OpenMausBot closes
+process gets exactly one replacement process for that turn: MausBot closes
 the pooled child, starts a fresh one, pays the handshake again, and resumes the
 recorded session there. The conversation is never traded for a blank
 `session/new`; the one-time handshake cost is the price of continuity. Only if

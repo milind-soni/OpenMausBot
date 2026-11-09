@@ -1,6 +1,7 @@
-// Sealed under a key of its own (a 0600 file beside it), never the browser engine's, which every browser process gets in
-// its environment. Neither file is ever backed up, exported or moved: a saved password stays on its computer, unless the
-// person sends that one login to their own Cloud with Also use on My Cloud (login-handoff.ts).
+// The Vault: saved logins and saved secrets. Sealed under a key of its own (a 0600 file beside it), never the browser
+// engine's, which every browser process gets in its environment. Neither file is ever backed up, exported or moved: a
+// saved value stays on its computer, unless the person sends that one login to their own Cloud with Also use on My Cloud
+// (login-handoff.ts).
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import { z } from "zod";
 
 import { HELD_SECRET_MASK } from "../shared/redact.ts";
 import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginSite, loginUsableBy, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
+import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { decryptBrowserState, encryptBrowserState } from "./browser-sites.ts";
 import type { TotpKey } from "./totp.ts";
@@ -42,9 +44,23 @@ const diskLoginSchema = z.object({
   lastUsedAt: z.number().optional(),
 });
 
+const diskSecretSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(VAULT_SECRET_NAME_MAX),
+  value: z.string().min(1).max(SECRET_VALUE_MAX_BYTES),
+  source: z.enum(["card", "settings"]),
+  bots: botsSchema,
+  refOnly: z.literal(true).optional(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  lastUsedAt: z.number().optional(),
+});
+
+// The previous release parses this file with a non-strict object, so it reads its logins and skips `secrets`.
 const fileSchema = z.object({
   version: z.literal(1),
   logins: z.array(diskLoginSchema),
+  secrets: z.array(diskSecretSchema).optional(),
   onePassword: z.object({ token: z.string().min(1), connectedAt: z.number() }).optional(),
   /** Vault id → the bots that may use its logins; a vault not named here is for every bot. Kept across reconnects. */
   onePasswordGrants: z.record(z.string(), botsSchema).optional(),
@@ -56,6 +72,22 @@ type DiskFile = z.infer<typeof fileSchema>;
 /** One saved login with its secrets. Server-only: no route returns this. */
 export type StoredLogin = Omit<DiskLogin, "host" | "site" | "hosts" | "exactHost"> & LoginPlace;
 type StoreFile = Omit<DiskFile, "logins"> & { logins: StoredLogin[] };
+/** One saved secret with its value. Server-only: no route returns this. */
+export type StoredSecret = z.infer<typeof diskSecretSchema>;
+
+export interface NewSecret {
+  name: string;
+  value: string;
+  source: "card" | "settings";
+  bots: LoginBots;
+  refOnly?: boolean;
+}
+
+export interface SecretPatch {
+  name?: string;
+  value?: string;
+  bots?: LoginBots;
+}
 
 export interface NewLogin extends LoginPlace {
   username: string;
@@ -92,13 +124,22 @@ export function summarizeLogin(login: StoredLogin): LoginSummary {
   };
 }
 
+export function summarizeSecret({ value: _value, ...secret }: StoredSecret): VaultSecret {
+  return secret;
+}
+
+function sameBots(a: LoginBots, b: LoginBots): boolean {
+  if (a === "all" || b === "all") return a === b;
+  return a.length === b.length && a.every((id) => b.includes(id));
+}
+
 /** The same account: one username on one site, unless either is kept to hosts the other does not share. */
 function sameAccount(login: StoredLogin, input: NewLogin): boolean {
   if (login.username.toLowerCase() !== input.username.toLowerCase() || login.site !== input.site) return false;
   return (!login.exactHost && !input.exactHost) || login.hosts.some((host) => input.hosts.includes(host));
 }
 
-export class LoginStore {
+export class VaultStore {
   private readonly file: string;
   private readonly keyFile: string;
   private readonly now: () => number;
@@ -234,9 +275,66 @@ export class LoginStore {
 
   markUsed(id: string): void {
     const data = this.read();
-    if (!data.logins.some((login) => login.id === id)) return;
     const at = this.now();
-    this.write({ ...data, logins: data.logins.map((login) => login.id === id ? { ...login, lastUsedAt: at } : login) });
+    if (data.logins.some((login) => login.id === id)) {
+      this.write({ ...data, logins: data.logins.map((login) => login.id === id ? { ...login, lastUsedAt: at } : login) });
+    } else if (data.secrets?.some((secret) => secret.id === id)) {
+      this.write({ ...data, secrets: data.secrets.map((secret) => secret.id === id ? { ...secret, lastUsedAt: at } : secret) });
+    }
+  }
+
+  listSecrets(): VaultSecret[] {
+    return (this.read().secrets ?? []).map(summarizeSecret).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** The secret `botId` may use by this name, as a ref or a file: one kept to some bots before one for every bot, then
+   * the newest. */
+  usableSecret(name: string, botId: string, delivery: "ref" | "file"): StoredSecret | null {
+    const key = vaultNameKey(name);
+    const matches = (this.read().secrets ?? []).filter((secret) => vaultNameKey(secret.name) === key && loginUsableBy(secret, botId) &&
+      (delivery === "ref" || !secret.refOnly));
+    return matches.sort((a, b) => Number(b.bots !== "all") - Number(a.bots !== "all") || b.updatedAt - a.updatedAt)[0] ?? null;
+  }
+
+  /** The same name saved again for the same bots replaces its value; otherwise it is a new secret. */
+  saveSecret(input: NewSecret): VaultSecret {
+    const data = this.read();
+    const secrets = data.secrets ?? [];
+    const at = this.now();
+    const same = secrets.find((secret) => vaultNameKey(secret.name) === vaultNameKey(input.name) && sameBots(secret.bots, input.bots));
+    if (same) {
+      const { refOnly: _refOnly, ...rest } = same;
+      const updated: StoredSecret = { ...rest, value: input.value, updatedAt: at, ...(input.refOnly ? { refOnly: true } : {}) };
+      this.write({ ...data, secrets: secrets.map((secret) => secret.id === same.id ? updated : secret) });
+      return summarizeSecret(updated);
+    }
+    const secret: StoredSecret = {
+      id: randomUUID(), name: input.name, value: input.value, source: input.source, bots: input.bots, ...(input.refOnly ? { refOnly: true } : {}), createdAt: at, updatedAt: at,
+    };
+    this.write({ ...data, secrets: [...secrets, secret] });
+    return summarizeSecret(secret);
+  }
+
+  updateSecret(id: string, patch: SecretPatch): VaultSecret | null {
+    const data = this.read();
+    const current = data.secrets?.find((secret) => secret.id === id);
+    if (!data.secrets || !current) return null;
+    const next: StoredSecret = {
+      ...current,
+      ...(patch.name === undefined ? {} : { name: patch.name }),
+      ...(patch.value === undefined ? {} : { value: patch.value }),
+      ...(patch.bots === undefined ? {} : { bots: patch.bots }),
+      updatedAt: this.now(),
+    };
+    this.write({ ...data, secrets: data.secrets.map((secret) => secret.id === id ? next : secret) });
+    return summarizeSecret(next);
+  }
+
+  removeSecret(id: string): boolean {
+    const data = this.read();
+    if (!data.secrets?.some((secret) => secret.id === id)) return false;
+    this.write({ ...data, secrets: data.secrets.filter((secret) => secret.id !== id) });
+    return true;
   }
 
   onePasswordToken(): string | null {
@@ -267,6 +365,7 @@ export class LoginStore {
     return [
       ...data.logins.flatMap((login) => [login.password, ...(login.totp ? [login.totp.secret] : [])]),
       ...(data.onePassword ? [data.onePassword.token] : []),
+      ...(data.secrets ?? []).map((secret) => secret.value),
     ];
   }
 }

@@ -48,6 +48,7 @@ const {
   DEFAULT_ATTACHMENTS_MAX_BYTES,
   FILE_MAX_BYTES,
   IMAGE_MAX_BYTES,
+  PREVIEW_MAX_BYTES,
   __resetAttachmentAccountingForTests,
   attachmentStorageUsage,
   attachmentsMaxBytes,
@@ -200,7 +201,7 @@ describe("saveAudio", () => {
   it("rejects other audio mimes, empty bodies, and oversize bodies", () => {
     expect(() => saveAudio(Buffer.from("x"), "audio/ogg")).toThrow(/unsupported audio type/);
     expect(() => saveAudio(Buffer.alloc(0), "audio/mpeg")).toThrow(/empty/);
-    expect(() => saveAudio(Buffer.alloc(FILE_MAX_BYTES + 1), "audio/mpeg")).toThrow(/exceeds/);
+    expect(() => saveAudio(Buffer.alloc(PREVIEW_MAX_BYTES + 1), "audio/mpeg")).toThrow(/exceeds/);
   });
 
   it("rejects at the aggregate ceiling without leaving partials and releases its reservation", () => {
@@ -600,6 +601,18 @@ describe("shared files", () => {
     }
     await expect(saveFile(tooLarge(), "large.pdf", "application/pdf")).rejects.toMatchObject({ status: 413 });
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([]);
+  });
+
+  it("keeps a file larger than a preview: only what is read whole stays at the preview size", async () => {
+    const bytes = PREVIEW_MAX_BYTES + 1;
+    async function* reel() {
+      yield Buffer.alloc(PREVIEW_MAX_BYTES);
+      yield Buffer.from("x");
+    }
+    const saved = await saveFile(reel(), "reel.mp4", "video/mp4", { expectedBytes: bytes });
+    expect(saved).toMatchObject({ name: "reel.mp4", mime: "video/mp4", bytes });
+    expect(statSync(saved.path).size).toBe(bytes);
+    expect(FILE_MAX_BYTES).toBeGreaterThan(PREVIEW_MAX_BYTES);
   });
 
   it("deduplicates concurrent and later file retries by upload ID", async () => {

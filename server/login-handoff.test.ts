@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { loginFingerprints } from "./cloud-send-verify.ts";
 import { LOGIN_HANDOFF_REQUEST, LOGIN_HANDOFF_RESULT, ONE_PASSWORD_DEAD_HERE, receiveLoginHandoff, totpAddress, type ConnectionHandoffAnswer, type LoginHandoffResult } from "./login-handoff.ts";
-import { LoginStore } from "./login-store.ts";
+import { VaultStore } from "./vault-store.ts";
 import { ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED } from "./onepassword.ts";
 import { parseTotpKey } from "./totp.ts";
 
@@ -18,7 +18,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 function setup(onePasswordProblem?: () => string | undefined) {
   const dir = mkdtempSync(join(tmpdir(), "omb-login-handoff-"));
   dirs.push(dir);
-  const store = new LoginStore({ dataDir: dir });
+  const store = new VaultStore({ dataDir: dir });
   const posted: LoginHandoffResult[] = [];
   const ask = (message: unknown) => receiveLoginHandoff(message, store, (reply) => { posted.push(reply); return true; }, onePasswordProblem);
   return { store, posted, ask };

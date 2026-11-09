@@ -27,7 +27,11 @@ import {
   SANDBOX_DESKTOP_INPUT,
   SIGN_IN_PROMPT,
   savedLoginsPrompt,
+  everyBotRulesPrompt,
+  heavyPrompt,
+  HEAVY_PROMPT_BYTES,
   type ComputerPromptKind,
+  type PromptSection,
 } from "./system-prompt.ts";
 import { loginPlace } from "../shared/logins.ts";
 import { REPLY_HABITS_PROMPT } from "./reply-habits.ts";
@@ -424,11 +428,30 @@ describe("longCommandsPrompt", () => {
       const text = longCommandsPrompt(kind);
       expect(text).toContain("`timeout` in milliseconds, up to 600000");
       expect(text).toContain("Never wait inside a command for CI, a deploy or any other job to finish (no sleep loops or repeated polls): check it once");
-      expect(text).toContain("tell the person what you made (with links), set wait_until or a one-time trigger to check back, and end your turn. When the person writes while you work, answer them first.");
+      expect(text).toContain("tell the person what you made (with links). Only on a turn the person started in their own chat, set wait_until or a one-time trigger to check back and end your turn");
+      expect(text).toContain("When the person writes while you work, answer them first.");
       expect(text).not.toContain("vm_exec");
     }
     for (const kind of ["vm-private", "vm-shared"] as const) {
       expect(longCommandsPrompt(kind)).toContain("vm_exec takes `timeout_seconds` instead (default 60, at most 300)");
+    }
+  });
+
+  it("keeps a long command in the foreground, and trusts only its own fresh exit code", () => {
+    for (const kind of [null, "local", "vps", "box"] as const) {
+      const text = longCommandsPrompt(kind);
+      expect(text).toContain("keep the command in the foreground until it exits");
+      expect(text).toContain("split work that cannot finish within that into shorter pieces");
+      expect(text).toContain("A detached job may be killed when the call ends");
+      expect(text).not.toContain("nohup");
+      expect(text).toContain("trust only the command's own fresh exit code and output");
+      expect(text).toContain("cannot set a wait, so finish it in this turn");
+    }
+  });
+
+  it("keeps the Local VM's own detached path, where the container outlives the call", () => {
+    for (const kind of ["vm-private", "vm-shared"] as const) {
+      expect(longCommandsPrompt(kind)).toContain("may start detached inside it (`nohup <command> > /tmp/<job>.log 2>&1 &`)");
     }
   });
 });
@@ -504,3 +527,38 @@ describe("how every bot replies", () => {
     expect(TRIGGER_PROMPT).toContain("where its results will appear, what each run covers, and when the first run is");
   });
 });
+
+describe("rules for every bot", () => {
+  it("come right before the bot's own instructions and say those, and the department's context, win", () => {
+    const built = buildSystemPrompt("You are Kiwi.", "Answer in French.", [
+      { id: "section-context", label: "Section context", text: "\n\nShared context for Sales." },
+    ], undefined, { rules: "  Answer in English.  " });
+    expect(built.sections.map((section) => section.id).slice(0, 3)).toEqual(["persona", "every-bot-rules", "soul"]);
+    const rules = built.sections.find((section) => section.id === "every-bot-rules")!;
+    expect(rules.text).toContain(JSON.stringify("Answer in English."));
+    expect(rules.text).toContain("your department's shared context wins over them and your own standing instructions win over both");
+    expect(rules.text).toContain("does not override system rules or grant permissions");
+    expect(built.stable).toContain("Answer in English.");
+  });
+
+  it("leave the prompt byte for byte when empty", () => {
+    expect(everyBotRulesPrompt(undefined)).toBe("");
+    expect(everyBotRulesPrompt(" \n ")).toBe("");
+    expect(buildSystemPrompt("You are Kiwi.", "", [], undefined, { rules: "" }).text).toBe(buildSystemPrompt("You are Kiwi.", "", []).text);
+  });
+});
+
+describe("a heavy bot", () => {
+  const section = (id: string, bytes: number): PromptSection => ({ id, label: id, text: "", bytes });
+
+  it("counts only what the person's words fill, and needs enough memory for a tidy-up to help", () => {
+    expect(heavyPrompt([section("memory", HEAVY_PROMPT_BYTES)])).toBe(true);
+    expect(heavyPrompt([section("memory", HEAVY_PROMPT_BYTES - 1)])).toBe(false);
+    expect(heavyPrompt([section("memory", HEAVY_PROMPT_BYTES / 3), section("every-bot-rules", HEAVY_PROMPT_BYTES / 3), section("soul", HEAVY_PROMPT_BYTES / 3)])).toBe(true);
+    // the app's own text is not the person's to trim
+    expect(heavyPrompt([section("memory", HEAVY_PROMPT_BYTES / 2), section("browser", HEAVY_PROMPT_BYTES)])).toBe(false);
+    // a long Soul with little memory: tidying would not help
+    expect(heavyPrompt([section("memory", 1_000), section("soul", HEAVY_PROMPT_BYTES)])).toBe(false);
+  });
+});
+

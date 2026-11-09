@@ -144,7 +144,7 @@ describe("scopes", () => {
       ["POST", "/api/bots/x/sign-in-cards/m/done"], ["POST", "/api/bots/x/sign-in-cards/m/cancel"], ["POST", "/api/bots/x/sign-in-cards/m/save-login"],
       ["GET", "/api/bots/x/sign-in-cards/m/save-login"],
       ["GET", "/api/bots/x/browser/live"], ["POST", "/api/bots/x/browser/action"],
-      ["GET", "/api/threads/t/messages/m/app"], ["POST", "/api/bots/x/apps/m/rpc"], ["POST", "/api/bots/x/apps/m/context"],
+      ["GET", "/api/threads/t/messages/m/app"], ["GET", "/api/threads/t/messages/m/app/download"], ["POST", "/api/bots/x/apps/m/rpc"], ["POST", "/api/bots/x/apps/m/context"],
       ["POST", "/api/bots/x/queue/q/steer"], ["POST", "/api/groups/g/queue/q/steer"],
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
     for (const [method, path] of [
@@ -166,6 +166,7 @@ describe("scopes", () => {
       ["POST", "/api/bots/x/sign-in-cards/m/provide"], ["POST", "/api/browser-engine/install"],
       ["GET", "/api/logins"], ["POST", "/api/logins"], ["PATCH", "/api/logins/l1"], ["DELETE", "/api/logins/l1"],
       ["POST", "/api/logins/1password"], ["POST", "/api/logins/1password/refresh"], ["DELETE", "/api/logins/1password"],
+      ["GET", "/api/vault"], ["POST", "/api/vault/secrets"], ["PATCH", "/api/vault/secrets/s1"], ["DELETE", "/api/vault/secrets/s1"],
       ["POST", "/api/threads/t/messages/m/app"], ["GET", "/api/bots/x/apps/m/rpc"], ["POST", "/api/bots/x/apps/m/delete"],
       ["POST", "/api/bots/x/apps/m/rpc/extra"], ["DELETE", "/api/bots/x/apps/m/context"],
       ["PATCH", "/api/logins/1password/vaults/v1"], ["GET", "/api/bots/x/sign-in-cards/m/done"],

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, ChartNoAxesColumn, Cloud, CloudDownload, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Settings, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen, ImagePlus } from "lucide-react";
+import { Archive, Cloud, Gauge, CloudDownload, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Settings, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen, ImagePlus } from "lucide-react";
 import { useStore, type AppSettingsSection } from "@/state/store";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { type LocaleKey } from "@/locales";
@@ -67,7 +67,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { Select } from "./Select";
 import { SavedStepsRow } from "./SavedStepsRow";
 import { BrowserProfilesRow, ColorUserBubblesRow, AdvancedModeRow, ExperimentalFeaturesRow, LanguageRow, NewBotEffortRow, PinnedCirclesRow, ReplayTourRow, RunCardRow, FollowUpRow, SendKeyRow, ShowThreadsRow, ToolCallsRow, UniversalPinsRow, UpdatesRow } from "./AppSettingsRows";
-import { SIMPLE_ADVANCED_ONLY, SimpleAiPage, SimpleBillingPage, SimpleComputerPage, SimpleGeneralPage, SimpleLooksPage, SimpleUpdatesPage, type Disclose, type SimpleDisclosureId } from "./SettingsSimplePages";
+import { SIMPLE_ADVANCED_ONLY, SIMPLE_MORE_LIMITS, SimpleAiPage, SimpleBillingPage, SimpleComputerPage, SimpleGeneralPage, SimpleLooksPage, SimpleMorePage, SimpleUpdatesPage, type Disclose, type SimpleDisclosureId } from "./SettingsSimplePages";
 
 // labelKey, not a label: t() reads the active pack when called, so a label resolved at module scope would freeze the
 // boot language.
@@ -121,11 +121,11 @@ export type SimpleSettingsPage = {
 
 export const SIMPLE_PAGES: SimpleSettingsPage[] = [
   { id: "general", labelKey: "settings.section.general", icon: Settings, sections: ["general", "appearance", "people", "import", "organization", "activity"],
-    keywords: ["account", "theme", "looks", "open at login", "startup", "analytics", "advanced mode"] },
+    keywords: ["account", "theme", "looks", "open at login", "startup", "analytics", "advanced mode", "more settings", "limits", "timeout"] },
   { id: "botAccess", labelKey: "settings.section.botAccess", icon: Users, sections: ["botAccess"] },
-  { id: "ai", labelKey: "settings.group.ai", icon: Sparkles, sections: ["engines", "connections"] },
+  { id: "ai", labelKey: "settings.group.ai", icon: Sparkles, sections: ["engines", "connections"], keywords: ["new bots", "defaults", "effort"] },
   { id: "computer", labelKey: "settings.simple.page.computer", icon: Monitor, sections: ["companion", "desktopWorkspaces", "computer", "logins"] },
-  { id: "billing", labelKey: "settings.simple.page.billing", icon: ChartNoAxesColumn, sections: ["usage", "cloudAccount"], keywords: ["billing", "included", "allowance", "cloud hours", "voice"] },
+  { id: "billing", labelKey: "settings.simple.page.billing", icon: Gauge, sections: ["usage", "cloudAccount"], keywords: ["billing", "included", "allowance", "cloud hours", "voice"] },
   { id: "updates", labelKey: "settings.simple.page.updates", icon: CloudDownload, sections: ["updates"],
     keywords: ["update", "version", "release", "product updates", "newsletter", "email updates", "welcome", "tour", "diagnostics", "logs", "support"] },
 ];
@@ -238,13 +238,17 @@ export function SettingsModal() {
     const open = q !== "" || (folds[id] ?? SIMPLE_FOLDED[requested] === id);
     return { id, open, onToggle: () => setFolds((current) => ({ ...current, [id]: !open })) };
   };
-  const [looks, setLooks] = useState(false);
+  const [openSubPage, setOpenSubPage] = useState<{ view: "looks" | "more"; for: AppSettingsSection } | null>(null);
+  const subPage = openSubPage?.for === requested ? openSubPage.view : null;
+  const setSubPage = (view: "looks" | "more" | null, at: AppSettingsSection = requested) => setOpenSubPage(view && { view, for: at });
+  useEffect(() => { setOpenSubPage((current) => current?.for === requested ? current : null); }, [requested]);
   const [reveal, setReveal] = useState<string | null>(null);
   const advancedMatches = advanced || !q ? [] : SIMPLE_ADVANCED_ONLY.filter((key) => t(key).toLowerCase().includes(q));
+  const moreSections = availableSections.filter((entry) => SIMPLE_HIDDEN_SECTIONS.includes(entry.id));
   const keyResults = remoteActive || !availableSections.some((entry) => entry.id === "connections") ? [] : keySearchResults(q);
   const keyResultButtons = (className: string) => keyResults.map((entry) => (
     <button key={entry.id} type="button" data-settings-key-result={entry.id} className={className}
-      onClick={() => { setQuery(""); setLooks(false); dispatch(openKeyResult(entry)); }}>
+      onClick={() => { setQuery(""); setSubPage(null); dispatch(openKeyResult(entry)); }}>
       <span>{t(entry.labelKey)} <span className="text-ink-secondary">· {t(keySection(entry).titleKey)}</span></span>
     </button>
   ));
@@ -438,18 +442,26 @@ export function SettingsModal() {
     }
   };
 
+  const openMore = () => { openSection("general"); setSubPage("more", "general"); };
   const renderSimplePage = (page: SimpleSettingsPage) => {
     const has = (id: AppSettingsSection) => page.sections.includes(id);
     switch (page.id) {
-      case "general": return looks
-        ? <SimpleLooksPage onBack={() => { setLooks(false); setReveal("appearance"); }} />
-        : <SimpleGeneralPage has={has} peopleOpen={section === "people"} onLooks={() => setLooks(true)} />;
+      case "general": return subPage === "looks"
+        ? <SimpleLooksPage toolCalls={!remoteActive} onBack={() => { setSubPage(null); setReveal("appearance"); }} />
+        : subPage === "more"
+          ? <SimpleMorePage sections={moreSections} onOpen={(id) => { setSubPage(null); openSection(id); }} onBack={() => { setSubPage(null); setReveal("more"); }} />
+          : <SimpleGeneralPage has={has} peopleOpen={section === "people"} onLooks={() => setSubPage("looks")} onMore={has("general") ? () => setSubPage("more") : undefined} />;
       case "ai": return <SimpleAiPage has={has} disclose={disclose} connections={renderSection("connections")} />;
       case "computer": return <SimpleComputerPage has={has} remoteAccess={remoteAccess} servers={<ConnectedWorkspacesSettings />} disclose={disclose} />;
       case "billing": return <SimpleBillingPage has={has} disclose={disclose} cloudAccount={renderSection("cloudAccount")} />;
       case "updates": return <SimpleUpdatesPage remoteActive={remoteActive} />;
       default:
-        return page.sections.map((id) => <section key={id} data-settings-block={id} className="flex scroll-mt-4 flex-col gap-4">{renderSection(id)}</section>);
+        return <>
+          {SIMPLE_HIDDEN_SECTIONS.includes(page.sections[0]!) && simpleAvailable.has("general") && (
+            <div><button type="button" className="ui-button" onClick={openMore}>{t("settings.simple.looks.back")}</button></div>
+          )}
+          {page.sections.map((id) => <section key={id} data-settings-block={id} className="flex scroll-mt-4 flex-col gap-4">{renderSection(id)}</section>)}
+        </>;
     }
   };
 
@@ -475,8 +487,14 @@ export function SettingsModal() {
   );
 
   if (!advanced) {
-    const looksOpen = looks && currentPage?.id === "general";
-    const goTo = (id: AppSettingsSection) => { setLooks(false); openSection(id); };
+    const subOpen = currentPage?.id === "general" ? subPage : null;
+    const resultClass = "flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-left text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none";
+    const goTo = (id: AppSettingsSection) => { setSubPage(null); openSection(id); };
+    const moreMatches = !q ? [] : [
+      ...moreSections.filter((entry) => sectionMatches(entry, q)).map((entry) => ({ key: entry.id, labelKey: entry.labelKey, open: () => goTo(entry.id) })),
+      ...(simpleAvailable.has("general") ? SIMPLE_MORE_LIMITS : []).filter((key) => t(key).toLowerCase().includes(q))
+        .map((key) => ({ key, labelKey: key, open: () => { openMore(); setReveal("limits"); } })),
+    ];
     return (
       <div
         className="glass-popup-frame"
@@ -501,7 +519,7 @@ export function SettingsModal() {
               "mb-2 flex h-8 shrink-0 items-center gap-2 rounded-lg bg-ink/[0.05] px-[9px] text-[13px] focus-within:ring-2 focus-within:ring-focus/60",
               "w-full min-w-0 bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none",
             )}
-            {visiblePages.length === 0 && advancedMatches.length === 0 && keyResults.length === 0 && (
+            {visiblePages.length === 0 && advancedMatches.length === 0 && moreMatches.length === 0 && keyResults.length === 0 && (
               <div className="px-[9px] py-3 text-[13px] leading-[18px] text-ink-secondary">{t("settings.noMatch", { query: query.trim() })}</div>
             )}
             {visiblePages.map((page) => {
@@ -530,12 +548,23 @@ export function SettingsModal() {
                 type="button"
                 data-settings-advanced-only={key}
                 onClick={() => { setQuery(""); goTo("general"); setReveal("advanced-mode"); }}
-                className="flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-left text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none"
+                className={resultClass}
               >
                 <span>{t(key)} <span className="text-ink-secondary">· {t("settings.simple.advanced")}</span></span>
               </button>
             ))}
-            {keyResultButtons("flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-left text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none")}
+            {moreMatches.map((match) => (
+              <button
+                key={match.key}
+                type="button"
+                data-settings-more-result={match.key}
+                onClick={() => { setQuery(""); match.open(); }}
+                className={resultClass}
+              >
+                <span>{t(match.labelKey)} <span className="text-ink-secondary">· {t("settings.simple.more.title")}</span></span>
+              </button>
+            ))}
+            {keyResultButtons(resultClass)}
           </nav>
 
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -554,7 +583,7 @@ export function SettingsModal() {
                 ))}
               </Select>
               <h2 className="hidden truncate text-[17px] font-medium leading-6 tracking-[-0.008em] text-ink sm:block">
-                {looksOpen ? t("settings.simple.page.looks") : currentPage ? t(currentPage.labelKey) : null}
+                {subOpen === "looks" ? t("settings.simple.page.looks") : subOpen === "more" ? t("settings.simple.more.title") : currentPage ? t(currentPage.labelKey) : null}
               </h2>
             </header>
             <button
@@ -562,7 +591,7 @@ export function SettingsModal() {
               onClick={close}
               aria-label={t("settings.close")}
               title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
-              className="absolute right-3 top-3 flex size-8 cursor-pointer items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink motion-reduce:transition-none"
+              className="absolute right-5 top-[18px] flex size-8 cursor-pointer items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink motion-reduce:transition-none"
             >
               <X size={16} aria-hidden="true" />
             </button>
@@ -571,7 +600,7 @@ export function SettingsModal() {
               ref={scrollRef}
               data-settings-scroll
               className={cn(
-                "flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-4 pb-8 pt-4 sm:px-8 sm:pb-7 sm:pt-[22px]",
+                "settings-scroll flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-10 pt-4 sm:px-8 sm:pb-12 sm:pt-[22px]",
                 SIMPLE_BUTTONS,
                 "[&_.uppercase]:normal-case [&_.uppercase]:tracking-normal",
               )}

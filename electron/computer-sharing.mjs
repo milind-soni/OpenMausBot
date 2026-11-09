@@ -6,7 +6,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { allowedServerOrigin } from "./server-address.mjs";
 import { createSharedCua, executeSharedOperation, personalSecretPaths, sharedComputerError, validCommandSeconds } from "./shared-computer-access.mjs";
-import { createLentMcp, LENT_MCP_ACTIONS, validLentMcpServer } from "./lent-mcp.mjs";
+import { createLentMcp, LENT_MCP_ACTIONS, ownPorts, validLentMcpServer } from "./lent-mcp.mjs";
 import { sharedCuaConnection } from "./shared-cua-connection.mjs";
 export { sharedCuaConnection };
 import { createLendingActivity, describeSharedOperation } from "./lending-activity.mjs";
@@ -223,7 +223,7 @@ const BROWSE_NOTE_MS = 10 * 60_000;
  * own prompt, `startScreen()` starts computer control again (its state after), and `confirmTerminal()` turns on
  * running commands once the person confirms it here. */
 export function createComputerSharing({ file, fetch: fetchImpl, environments, localEnvironments = () => [], cuaConnection, hostControl, screenLocked = () => false, idleSeconds = () => null, protectedPaths = [], enabled = async () => false, home = os.homedir(), activityFile, cloud = () => null, onChange = () => {}, reconnect = null, now = Date.now, power = createCloudPowerGate(),
-  linkHeaders = () => ({}), WebSocket: linkSocket = globalThis.WebSocket, egress = {}, chrome = {}, myCloud = () => null, ownClouds = () => [], screen = () => false, askForScreen = () => {}, cloudPower = () => null,
+  linkHeaders = () => ({}), WebSocket: linkSocket = globalThis.WebSocket, egress = {}, chrome = {}, serverPorts = () => [], myCloud = () => null, ownClouds = () => [], screen = () => false, askForScreen = () => {}, cloudPower = () => null,
   prompt = async () => null, startScreen = async () => null, confirmTerminal = async () => false, log = () => {}, t = nativeText.englishText.t }) {
   const protectedRoots = [path.dirname(file), ...protectedPaths.filter(entry => typeof entry === "string" && entry), ...personalSecretPaths(home)];
   const activity = createLendingActivity(activityFile ?? path.join(path.dirname(file), "lending-activity.jsonl"));
@@ -232,6 +232,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   let screenNow = null;
   let records = {};
   let paused = false;
+  /** Set while the pause holds only in memory: its save failed, so a restart would lend again. Pause retries the save. */
+  let pauseError;
   /** The Cloud account that confirmed lending the terminal; another account signed in here gets none until it confirms. */
   let terminalAccount = null;
   try {
@@ -265,6 +267,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       waiting: lent.filter(env => !status.get(env.id)?.connected && status.get(env.id)?.problem !== "asleep").map(env => env.name),
       using: using.map(env => env.name),
       paused,
+      ...(pauseError ? { pauseError } : {}),
       terminal: terminalAccount !== null && terminalAccount === signedInAccount(),
       // The menu's terminal switch is the Clouds' one; a server of the person's own lends the terminal from Settings.
       terminalSwitch: ownClouds().length > 0,
@@ -333,6 +336,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     fs.writeFileSync(temporary, JSON.stringify({ version: 1, records: next, automatic: { paused, ...(terminalAccount ? { terminalAccount } : {}) } }), { mode: 0o600 });
     fs.chmodSync(temporary, 0o600);
     fs.renameSync(temporary, file); records = next;
+    if (paused) pauseError = undefined;
   };
   const sleepsHere = env => Boolean(records[env.id]?.cloud) || cloud()?.origin === env.origin;
   /** My Cloud sleeps by the Admin's word and its own, on the gate this app shares with Files (`power`); another Cloud of
@@ -553,7 +557,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
                   live.cua = createSharedCua(mcp, { t });
                 }
                 return live.cua;
-              }, () => (live.mcp ??= createLentMcp()));
+              }, () => (live.mcp ??= createLentMcp({ ports: () => ownPorts({ serverPorts: serverPorts() }) })));
             } catch (error) { result = sharedComputerError(error); live.cua?.close(); live.cua = null; }
             finally {
               clearInterval(heartbeat); ended = true;
@@ -705,8 +709,17 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   /** Every Cloud of the person's own may use this computer again. */
   const resumeLending = () => {
     if (!paused || closed) return;
-    paused = false;
-    try { store(records); } catch {}
+    try {
+      paused = false;
+      store(records);
+      pauseError = undefined;
+    } catch {
+      // Not saved: lending stays paused, here and after a restart.
+      paused = true;
+      pauseError = t("native.lendTray.pauseUnsaved");
+      changed();
+      return;
+    }
     const automatic = lentAutomatically();
     for (const env of environments()) {
       const grant = records[env.id];
@@ -720,6 +733,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   /** Turn on, from this app's prompt or the card: what the ask needs, done here. */
   const turnOn = async (env, ask) => {
     if (paused) await resumeLending();
+    if (paused) return { ok: false, reason: "paused" };
     if (ask.need === "screen") {
       let status = await Promise.resolve().then(screen).catch(() => null);
       if (status && typeof status === "object" && !status.ready) status = await startScreen();
@@ -861,16 +875,17 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     /** Lending's last requests have been answered or have timed out (10 s at most). Security: a Cloud re-issues its session
      * cookie in the answer to any request that carried one, so that answer must land before the window's session is cleared. */
     goodbyesDone: () => Promise.allSettled([...goodbyes, passing]),
-    /** Every Cloud of the person's own stops using this computer, across restarts too, until resume(). */
+    /** Every Cloud of the person's own stops using this computer, across restarts too, until resume(). Sharing stops
+     * first; a save that fails sets pauseError, and Pause again retries it. */
     pause() {
-      if (paused || closed) return;
+      if (closed || (paused && !pauseError)) return;
       paused = true;
-      try { store(records); } catch {}
       for (const env of environments()) {
         if (!records[env.id]?.cloud && !records[env.id]?.own) continue;
         if (running.has(env.id)) disconnect(env, records[env.id]);
         status.set(env.id, { connected: false, problem: "paused" });
       }
+      try { store(records); } catch { pauseError = t("native.lendTray.pauseUnsaved"); }
       changed();
       wakeAsking();
     },

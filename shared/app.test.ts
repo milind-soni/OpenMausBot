@@ -109,3 +109,14 @@ describe("appDoneOf", () => {
     expect(appDoneOf("Run", { content: [] }, 1)).toEqual({ tool: "Run", at: 1 });
   });
 });
+
+
+describe("htmlVisibleText numeric character references", () => {
+  it("leaves surrogate code points as written, like other unrepresentable code points", () => {
+    expect(htmlVisibleText("&#xD800;")).toBe("&#xD800;");
+    expect(htmlVisibleText("&#55296;")).toBe("&#55296;");
+    expect(htmlVisibleText("&#xDFFF;")).toBe("&#xDFFF;");
+    expect(htmlVisibleText("&#x110000;")).toBe("&#x110000;");
+    expect(htmlVisibleText("&#x1F600;")).toBe("😀");
+  });
+});

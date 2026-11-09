@@ -7,6 +7,7 @@ import { DATA_DIR, loadConfig } from "../../server/config.ts";
 import { createSecretCards } from "../../server/host/secret-cards.ts";
 import { PhoneSecretSubmissionRegistry } from "../../server/phone-secret.ts";
 import { Store } from "../../server/store.ts";
+import { VaultStore } from "../../server/vault-store.ts";
 import "../../server/server-line-packs.ts";
 import { SecretRequestCard } from "../../src/components/SecretRequestCard";
 import { setLocale } from "../../src/lib/i18n";
@@ -28,6 +29,7 @@ function producedCard(target: CredentialTargetId, reason: string, language?: str
     store,
     cfg: loadConfig(),
     botLogins: { credentialConfig: (config) => ({ ...config, onePassword: { connected: false } }) },
+    vaultStore: new VaultStore({ dataDir: DATA_DIR }),
     phoneSecrets: { provide: vi.fn(), open: vi.fn() },
     phoneSecretSubmissions: new PhoneSecretSubmissionRegistry(),
     connectorThread: () => ({ bot, group: undefined }),

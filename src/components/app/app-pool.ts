@@ -112,6 +112,8 @@ export function useAppPoolSlot(args: {
   auto: boolean;
   evict(): Promise<void>;
   pool?: AppPool;
+  /** Counts as in view wherever the row is, e.g. while its page is open in the chat's page pane. */
+  held?: boolean;
 }): { live: boolean; open(): void; close(): void } {
   const pool = args.pool ?? appPool;
   const { key, target, auto } = args;
@@ -125,6 +127,10 @@ export function useAppPoolSlot(args: {
     },
   });
   const request = useRef(0);
+  const held = Boolean(args.held);
+  const heldRef = useRef(held);
+  heldRef.current = held;
+  const inView = useRef(false);
 
   const open = useCallback(() => {
     const ask = ++request.current;
@@ -151,7 +157,8 @@ export function useAppPoolSlot(args: {
     let wasVisible = false;
     const observer = new IntersectionObserver((entries) => {
       const visible = entries.some((entry) => entry.isIntersecting);
-      pool.seen(key, visible);
+      inView.current = visible;
+      pool.seen(key, visible || heldRef.current);
       // Ask on the way in only: a frame torn down while in view (the pool
       // needed its slot) waits for the next time it is scrolled to.
       if (visible && !wasVisible && auto) open();
@@ -160,6 +167,14 @@ export function useAppPoolSlot(args: {
     observer.observe(element);
     return () => observer.disconnect();
   }, [pool, key, target, auto, open]);
+
+  // Untouched until first held, so rows that are never held keep the observer's word alone.
+  const wasHeld = useRef(false);
+  useEffect(() => {
+    if (held) pool.seen(key, true);
+    else if (wasHeld.current) pool.seen(key, inView.current);
+    wasHeld.current = held;
+  }, [pool, key, held]);
 
   useEffect(() => () => {
     request.current += 1;

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
+import { createConnection } from "node:net";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
@@ -1108,6 +1109,17 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     });
     expect(image && "data" in image ? image.data : "").toMatch(/^iVBOR/);
     expect(JSON.stringify(image)).not.toContain("provider-owned-path");
+    expect(image).not.toHaveProperty("fromTool");
+  });
+
+  it("marks an image an MCP tool's result returned as the tool's", async () => {
+    process.env.FAKE_CODEX_MODE = "mcp-image";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-mcp-image", text: "take a screenshot" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.filter((event) => event.type === "item.completed" && event.itemType === "assistant_image")).toEqual([
+      expect.objectContaining({ data: "iVBORw0KGgo=", fromTool: true }),
+    ]);
   });
 
   it("keeps the full command when a Windows interpreter prefix is long", async () => {
@@ -1461,6 +1473,47 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] });
     };
 
+    it("uses a task-scoped command for a supported Codex and excludes its capability from tools", async () => {
+      process.env.FAKE_CODEX_VERSION = "codex-cli 0.165.0";
+      plan();
+      await create({ authMode: "chatgpt-plan" });
+      const dump = join(scratch, "plan-command.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      await instance.adapter.sendTurn({ threadId: "plan-command", text: "go", model: "gpt-6.1-sol" });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv.join(" ")).toContain("model_providers.openai_chatgpt_plan.auth.command=");
+      expect(seen.argv.join(" ")).not.toContain("model_providers.openai_chatgpt_plan.env_key=");
+      expect(seen.env.OPENMAUSBOT_CHATGPT_TOKEN).toBeUndefined();
+      const thread = seen.calls.find((call: { method: string }) => call.method === "thread/start");
+      expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(expect.arrayContaining(["OMB_CODEX_AUTH_SECRET", "OMB_CODEX_AUTH_SOCKET"]));
+    });
+
+    it.each(["new login", "sign out"])("revokes a running task's token capability on %s", async (action) => {
+      process.env.FAKE_CODEX_VERSION = "codex-cli 0.165.0";
+      plan();
+      vi.spyOn(ChatGptPlanAuthController.prototype, "start").mockRejectedValue(new Error("synthetic login"));
+      vi.spyOn(ChatGptPlanAuthController.prototype, "signOut").mockResolvedValue();
+      const dump = join(scratch, "plan-revocation.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      await create({ authMode: "chatgpt-plan", mode: "approval" });
+      await instance.adapter.sendTurn({ threadId: "plan-revocation", text: "go", model: "gpt-6.1-sol" });
+      await recorder.until(event => event.type === "request.opened");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      const getToken = () => new Promise<string>((resolve) => {
+        const socket = createConnection(seen.env.OMB_CODEX_AUTH_SOCKET);
+        let data = "";
+        socket.on("connect", () => socket.write(`${seen.env.OMB_CODEX_AUTH_SECRET}\n`));
+        socket.on("data", chunk => { data += chunk.toString(); });
+        socket.on("error", () => resolve(""));
+        socket.on("close", () => resolve(data));
+      });
+      expect(await getToken()).toBe("synthetic-plan-token");
+      if (action === "new login") await expect(instance.startAuthentication!()).rejects.toThrow("synthetic login");
+      else await instance.signOut!();
+      expect(await getToken()).toBe("");
+    });
+
     it("searches each URL server through the remote proxy, its settings kept from the shell", async () => {
       plan();
       await create({ authMode: "chatgpt-plan" });
@@ -1732,6 +1785,28 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(seen.env.ELECTRON_RUN_AS_NODE).toBe("1");
     const thread = seen.calls.find((call: { method: string }) => call.method === "thread/start");
     expect(thread.params.config["shell_environment_policy.exclude"]).toContain("ELECTRON_RUN_AS_NODE");
+  });
+
+  it("runs a turn for a restarted custom server, leaving the host's restart count out of its environment", async () => {
+    vi.stubEnv("HEALTH_REGION", "inherited");
+    await create();
+    const dump = join(scratch, "custom-restarted.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: "t-custom-mcp-restarted",
+      text: "go",
+      integrations: {
+        custom: {
+          health: { command: "health-mcp", args: [], env: { OMB_MCP_RESTART: "1", HEALTH_REGION: "eu" } },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const envVars = JSON.parse(seen.argv.find((arg: string) => arg.startsWith("mcp_servers.health.env_vars=")).split("=").slice(1).join("="));
+    expect(envVars).toEqual(["HEALTH_REGION"]);
+    expect(seen.env.HEALTH_REGION).toBe("eu");
   });
 
   it.each(["ask", "auto"] as const)("pre-allows peer-agent comms without exposing its token in %s mode", async (approvalMode) => {
@@ -2011,6 +2086,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       if (plan) {
         expect(seen.env.CODEX_HOME.startsWith(join(DATA_DIR, "providers", "chatgpt-plan") + sep)).toBe(true);
         expect(seen.env.CODEX_HOME).not.toBe(join(scratch, ".codex"));
+        // The plan signs in on its own home; the person's Codex skills, settings and sessions are linked in.
+        expect(realpathSync(join(seen.env.CODEX_HOME, "skills"))).toBe(realpathSync(join(scratch, ".codex", "skills")));
         expect(seen.argv.some((arg: string) => arg.startsWith("shell_environment_policy.exclude="))).toBe(false);
       } else expect(seen.env.CODEX_HOME).toBe(join(scratch, ".codex"));
       const threadCalls = seen.calls.filter((call: { method: string }) => ["thread/start", "thread/resume"].includes(call.method));
@@ -2178,6 +2255,26 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(instance.models).toEqual({ default: "", options: [] });
     expect(spawn).not.toHaveBeenCalled();
     expect(recorder.events).toEqual([]);
+  });
+
+  it.each(["0.164.0", "0.166.0"])("rejects stale background generation after a pending %s version probe", async (version) => {
+    const catalog = { default: "gpt-6.1-sol", options: [{ id: "gpt-6.1-sol", label: "GPT-6.1 Sol" }] };
+    vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue(catalog);
+    vi.spyOn(ChatGptPlanAuthController.prototype, "accessToken").mockResolvedValue("old-synthetic-token");
+    vi.spyOn(ChatGptPlanAuthController.prototype, "signOut").mockResolvedValue();
+    vi.spyOn(ChatGptPlanAuthController.prototype, "start").mockRejectedValue(new Error("synthetic login"));
+    let release!: (err: Error | null, stdout: string) => void;
+    const probe = vi.spyOn(procs, "execCli").mockImplementation((_cli, _args, _opts, cb) => { release = cb; });
+    const spawn = vi.spyOn(procs, "spawnCli");
+    await create({ authMode: "chatgpt-plan" });
+    const result = instance.generateMemoryText!("synthetic background prompt");
+    const rejected = expect(result).rejects.toThrow("ChatGPT account changed");
+    await vi.waitFor(() => expect(probe).toHaveBeenCalled());
+    await instance.signOut!();
+    await expect(instance.startAuthentication!()).rejects.toThrow("synthetic login");
+    release(null, `codex-cli ${version}`);
+    await rejected;
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it("blocks new ChatGPT turns and sign-in while active tasks stop and credentials revoke", async () => {

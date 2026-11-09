@@ -170,6 +170,8 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   }
   // Enables POST /api/testing/org-library; the route does not exist without it.
   if (parentEnv.OMB_TEST_ORG_LIBRARY_KEY) childEnv.OMB_TEST_ORG_LIBRARY_KEY = parentEnv.OMB_TEST_ORG_LIBRARY_KEY;
+  // Enables POST /api/testing/internal-capability (a bot's own tool routes, such as publish_page); the route refuses without it.
+  if (parentEnv.OMB_TEST_INTERNAL_CAPABILITY_KEY) childEnv.OMB_TEST_INTERNAL_CAPABILITY_KEY = parentEnv.OMB_TEST_INTERNAL_CAPABILITY_KEY;
   // One log line per browser call and preview frame.
   if (parentEnv.OMB_BROWSER_TIMING === "1") childEnv.OMB_BROWSER_TIMING = "1";
   // Warm summaries' minutes as seconds (server/warm-summary.ts), and the switch that turns them off.

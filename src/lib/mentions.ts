@@ -3,6 +3,7 @@ import { MAUS_COLORS, type MausColor } from "./mascot";
 import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
 import { personTagAt, personTagNames } from "../../shared/person-mention";
 import { devsTagAt } from "../../shared/devs-mention";
+import { blankCode } from "../../shared/skill-command";
 
 /** A name the @ list offers: a bot's, or (`person`) a teammate's on a Team Cloud. */
 export type MentionPeer = { name: string; hidden?: boolean; color?: MausColor; person?: true };
@@ -17,7 +18,7 @@ export function mentionQueryAt(text: string, caret: number): { start: number; qu
   const upto = text.slice(0, caret);
   const at = upto.lastIndexOf("@");
   if (at === -1) return null;
-  if (at > 0 && !/\s/.test(upto[at - 1])) return null;
+  if (!isMentionBoundary(upto, at) || blankCode(text)[at] !== "@") return null;
   const query = upto.slice(at + 1);
   if (query.length > 24 || query.includes("@") || query.includes("\n")) return null;
   return { start: at, query };

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Inbox, Maximize2, Minimize2, Search, X } from "lucide-react";
 import type { InboxRow } from "../../../shared/inbox";
 import { cn } from "@/lib/cn";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { t } from "@/lib/i18n";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { closeInbox, readInboxLine, readInboxRow, useInboxPanel, useInboxView, widenInbox } from "@/state/inbox";
@@ -12,13 +13,14 @@ import { InboxRowItem } from "./InboxRow";
 import { matchesSearch, nextAfter } from "./inbox-answer";
 import { listedRows, waitingCount } from "./inbox-view";
 import { useInboxActions } from "./use-inbox-actions";
+import { roundButtonCls } from "../bot-panel/rows";
 
-const BAR_BUTTON = "flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink pointer-coarse:size-9";
 
 export function InboxPanel() {
   const view = useInboxView();
   const panel = useInboxPanel();
   const phone = useMediaQuery(PHONE_LAYOUT);
+  const simple = !useAdvancedMode();
   const { run } = useInboxActions(view);
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState("");
@@ -59,39 +61,44 @@ export function InboxPanel() {
   const count = waitingCount(view);
   const body = (
     <>
-      <div className="flex items-center gap-1 px-2 pb-1 pt-2">
-        <div data-inbox-tab-chip className="flex h-8 min-w-0 max-w-[15rem] flex-1 items-center gap-2 rounded-lg bg-raised ps-2.5 pe-1 text-[13px]">
-          <Inbox size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+      <div className="flex h-[50px] shrink-0 items-start gap-2.5 px-[13px] pt-[13px]">
+        <div data-inbox-tab-chip className="flex h-[34px] min-w-0 flex-1 items-center gap-2 ps-1 text-[14px]">
+          <Inbox size={16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
           <span className="min-w-0 truncate font-medium text-ink">{t("inbox.panel.title")}</span>
           {count > 0 && <span data-inbox-tab-count className="shrink-0 tabular-nums text-ink-tertiary">{count}</span>}
-          <span className="flex-1" />
-          <button type="button" onClick={closeInbox} aria-label={t("inbox.action.closePanel")} title={t("inbox.action.closePanel")} className={cn(BAR_BUTTON, "size-6")}>
-            <X size={14} aria-hidden="true" />
-          </button>
         </div>
-        <span className="flex-1" />
         {!phone && (
           <button type="button" onClick={() => widenInbox(!panel.wide)} aria-pressed={Boolean(panel.wide)} aria-label={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")}
-            title={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")} className={BAR_BUTTON}>
-            {panel.wide ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
+            title={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")} className={roundButtonCls}>
+            {panel.wide ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
           </button>
         )}
+        <button type="button" onClick={closeInbox} aria-label={t("inbox.action.closePanel")} title={t("inbox.action.closePanel")} className={roundButtonCls}>
+          <X size={16} aria-hidden="true" />
+        </button>
       </div>
-      <div className="mx-1.5 mb-1.5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-hairline/40 bg-app/40">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {reading && view ? (
           <InboxReading view={view} row={reading} now={now} position={at >= 0 ? { index: at, count: rows.length } : null} onStep={step} />
         ) : (
           <>
-            <h2 className="border-b border-hairline/40 px-3.5 py-2.5 text-[13px] font-medium text-ink">{t("inbox.panel.title")}</h2>
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <label className="m-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
+              {listedRows(view).length > 0 && <label className="mx-[13px] my-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
                 <Search size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
                 <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("inbox.search")} aria-label={t("inbox.search")}
                   className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary [&::-webkit-search-cancel-button]:hidden" />
-              </label>
+              </label>}
               <div role="list" data-inbox-list aria-label={t("inbox.panel.title")} className="space-y-0.5 px-1.5 pb-1.5">
                 {rows.length === 0
-                  ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t(query.trim() && listedRows(view).length ? "inbox.noMatch" : "inbox.empty")}</p>
+                  ? query.trim() && listedRows(view).length
+                    ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.noMatch")}</p>
+                    : (
+                      <div data-inbox-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
+                        <Inbox size={22} strokeWidth={1.5} aria-hidden="true" className="text-ink-tertiary" />
+                        <p className="mt-3 text-[14px] font-medium text-ink">{t("inbox.empty")}</p>
+                        <p className="mt-1 text-[13px] leading-[18px] text-ink-tertiary">{t("inbox.emptyHint")}</p>
+                      </div>
+                    )
                   : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
               </div>
               {!query.trim() && <InboxActive view={view} />}
@@ -114,8 +121,9 @@ export function InboxPanel() {
   }
   return (
     <aside aria-label={t("inbox.panel.title")} data-inbox-panel="side" data-wide={panel.wide ? "" : undefined} onKeyDown={onKeyDown}
-      className={cn("animate-panel-in motion-reduce:animate-none flex h-full max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30",
-        panel.wide ? "w-[min(640px,60vw)]" : "w-[380px]")}>
+      className={cn("animate-panel-in motion-reduce:animate-none flex h-full max-w-full shrink-0 flex-col max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30",
+        simple ? "border-l-[0.5px] border-ink/[0.06] bg-app" : "border-l border-hairline/40 bg-panel",
+        panel.wide ? "w-[min(640px,60vw)]" : simple ? "w-[320px]" : "w-[380px]")}>
       {body}
     </aside>
   );

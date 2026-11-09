@@ -83,5 +83,11 @@ export function useAutomationActions() {
     if (bot && run?.threadId) openBotThread(dispatch, bot, run.threadId, showThreads);
   };
 
-  return { busy, error, errorFor, setError, copied, toggle, runNow, remove, copyAddress, openRun };
+  /** Stops a run that waits on the person, for when the question it waits on was settled somewhere else. */
+  const cancelRun = (automation: Automation, run: RoutineRun) => attempt(`cancel:${automation.id}`, async () => {
+    const response = await api(`/api/routine-runs/${run.id}/cancel`, { method: "POST" });
+    if (response.run) dispatch({ type: "routineRunPatched", run: response.run });
+  });
+
+  return { busy, error, errorFor, setError, copied, toggle, runNow, remove, copyAddress, openRun, cancelRun };
 }

@@ -19,6 +19,7 @@ import { useWorkingFolder } from "../bot-settings/AccessSection";
 import { useBotEditor } from "../bot-settings/BotEditorContext";
 import { SkillReviewDialog, skillSwitchOn, useManagedSkills, type ManagedSkill } from "../bot-settings/SkillsSection";
 import { useBotApps, type BotApp } from "../bot-settings/useBotApps";
+import { useChoosesVisibility, VisibilitySection } from "../bot-settings/VisibilitySection";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { RoutineList } from "../routines/RoutineList";
 import { BrowserLogins } from "./browser-logins";
@@ -27,6 +28,7 @@ import { SettingsPage } from "./SettingsPage";
 import { panelMemoryNotes, withMemoryNote, withoutMemoryNote, type PanelMemoryNote } from "./memory-notes";
 import type { SimplePageId } from "./page-registry";
 import { BotSwitch, buttonCls, Card, LinkRow, NoteRow, RadioRow, RowIcon, rowCls, RowText, SwitchRow, TextRow, TrashButton } from "./rows";
+import { MemoryUpkeepCards } from "./MemoryUpkeepCards";
 import { useMemoryDoc } from "./use-memory-doc";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
@@ -129,7 +131,8 @@ export function AppsPage({ bot, derived }: PageContext) {
 
 export function RoutinesPage({ bot, derived }: PageContext) {
   const { state, dispatch } = useStore();
-  const [editing, setEditing] = useState<Routine | "new" | null>(null);
+  // Arriving with no routines means the person asked to add one, so the editor opens straight away.
+  const [editing, setEditing] = useState<Routine | "new" | null>(() => derived.botRoutines.length === 0 ? "new" : null);
   return (
     <>
       <RoutineList
@@ -240,6 +243,7 @@ export function MemoryPage({ bot }: PageContext) {
           />
         </Card>
       )}
+      {memoryOn && !memory.mine && <MemoryUpkeepCards bot={bot} onChanged={memory.reload} />}
     </>
   );
 }
@@ -429,6 +433,10 @@ export function BrowserPage({ bot, derived }: PageContext) {
   return <BrowserLogins bot={bot} browserEnabled={derived.browserEnabled} onOpenBrowser={() => openComputer("browser")} />;
 }
 
+function VisibilityPage({ bot }: PageContext) {
+  return useChoosesVisibility() ? <VisibilitySection bot={bot} /> : null;
+}
+
 export function PageBody({ page, onOpen, editingInstructions, onEditInstructions, ...context }: PageContext & {
   page: SimplePageId;
   onOpen?: (page: SimplePageId) => void;
@@ -444,6 +452,8 @@ export function PageBody({ page, onOpen, editingInstructions, onEditInstructions
       return <AppsPage {...context} />;
     case "routines":
       return <RoutinesPage {...context} />;
+    case "visibility":
+      return <VisibilityPage {...context} />;
     case "memory":
       return <MemoryPage {...context} />;
     case "skills":

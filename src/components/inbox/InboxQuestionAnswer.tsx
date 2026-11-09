@@ -78,7 +78,7 @@ export function InboxQuestionAnswer({ row, question, asker, onAnswer }: {
                   onClick={() => toggle(option.label)}
                   className={cn("flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-60",
                     on ? "bg-ink/[0.10]" : "bg-ink/[0.045] hover:bg-ink/[0.075]")}>
-                  <span aria-hidden="true" className={cn("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[5px] border",
+                  <span aria-hidden="true" className={cn("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[6px] border",
                     on ? "border-ink bg-ink text-app" : "border-ink/35")}>
                     {on && <Check size={11} strokeWidth={3} />}
                   </span>

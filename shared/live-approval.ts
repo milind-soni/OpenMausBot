@@ -119,8 +119,7 @@ export function spokenSignInPrompt(site: string): string {
 export function spokenQuestionPrompt(card: OptionCardData): string {
   const detail = brief(card.subtitle || card.title);
   const choices = card.options.length ? ` The options are ${card.options.join(", ")}.` : "";
-  // brief() drops the detail's own closing mark, so the "?" is never doubled
-  return `Ask the user, in your own words: ${detail}?${choices} Then delegate their answer.`;
+  return `Ask the user, in your own words: ${detail}${detail.endsWith("？") ? "" : "?"}${choices} Then delegate their answer.`;
 }
 
 export const LIVE_COPY = {

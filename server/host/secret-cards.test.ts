@@ -1,14 +1,16 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import "../server-line-packs.ts";
 import type { BotRecord, Message } from "../store.ts";
+import { EMAIL_CANT_SEND_TEXT } from "../email/instructions.ts";
 import { createSecretCards } from "./secret-cards.ts";
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
 import { redactBotAuthored } from "../message-redaction.ts";
 import { redactSecretsInText } from "../redact.ts";
+import { VaultStore } from "../vault-store.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -19,26 +21,28 @@ function fixture(language?: string) {
   const lines: Message[] = [];
   let ids = 0;
   const store = {
-    activePath: () => lines,
+    activePath: () => [...lines],
     messagesFor: () => lines,
     appendMessage: (_threadId: string, message: Omit<Message, "id" | "at">) => {
       const full = { id: `m${++ids}`, at: Date.now(), ...message } as Message;
       lines.push(full);
       return full;
     },
-    patchMessage: () => null,
+    patchMessage: (_threadId: string, id: string, patch: Partial<Message>) => Object.assign(lines.find((one) => one.id === id)!, patch),
     botByThread: () => null,
     groupByThread: () => undefined,
     onChange: () => () => {},
   };
   const bot = { id: "ledger", name: "Ledger" } as BotRecord;
+  const vaultStore = new VaultStore({ dataDir });
+  const resumed: string[] = [];
   const cards = createSecretCards({
-    store: store as never, cfg: {} as never, botLogins: { credentialConfig: (config) => ({ ...config, onePassword: { connected: false } }) },
-    phoneSecrets: { provide: async () => {}, open: () => {} } as never, phoneSecretSubmissions: {} as never,
-    connectorThread: () => ({ bot, group: undefined }), answerCardNode: () => true, followCard: () => {}, dataDir, providerKeysRefused: false,
+    store: store as never, cfg: {} as never, botLogins: { credentialConfig: (config) => ({ ...config, onePassword: { connected: false } }) }, vaultStore,
+    phoneSecrets: { provide: async () => {}, open: () => {} } as never, phoneSecretSubmissions: { has: () => false } as never,
+    connectorThread: () => ({ bot, group: undefined }), answerCardNode: (_thread, _id, text) => { resumed.push(text); return true; }, followCard: () => {}, dataDir, providerKeysRefused: false,
     layerFolder: () => dataDir, turnVm: () => undefined, ...(language ? { threadLanguage: () => language } : {}),
   });
-  return { cards, lines, bot };
+  return { cards, lines, bot, vaultStore, resumed, dataDir };
 }
 
 describe("the card a bot asks for a key or secret with", () => {
@@ -80,21 +84,79 @@ describe("the card a bot asks for a key or secret with", () => {
     ]);
     expect(lines[0]!.secret!.description).toBe("Used by the built-in Grok provider. Ledger kann es verwenden, aber nie auslesen.");
     expect(lines[1]!.secret!.description)
-      .toBe("Für Testzahlungen. Die Befehle von Ledger können es 24 Stunden lang aus einer privaten Datei lesen; es wird nie in den Chat übernommen.");
+      .toBe("Für Testzahlungen. Die Befehle von Ledger können es 24 Stunden lang aus einer privaten Datei lesen; es wird nie in den Chat übernommen. OpenMausBot bewahrt es sicher auf, damit Ledger es wieder nutzen kann, ohne dich erneut zu fragen.");
   });
 
   it("asks in English where no language is known", () => {
     const { cards, lines, bot } = fixture();
     cards.requestCredential(bot, "ledger-main", { label: "Notion token", reason: "For Notion's MCP server.", delivery: "ref" });
     expect(lines[0]!.text).toBe("Securely provide the Notion token from OpenMausBot on your phone or computer. It is never added to chat.");
-    expect(lines[0]!.secret!.description).toBe("For Notion's MCP server. Ledger gets a one-use reference for OpenMausBot's own tools and never sees it.");
+    expect(lines[0]!.secret!.description).toBe("For Notion's MCP server. Ledger gets a one-use reference for OpenMausBot's own tools and never sees it. OpenMausBot keeps it safely, so Ledger can use it again without asking you.");
+  });
+});
+
+describe("a secret a card saves to the Vault", () => {
+  const KEY = "sk_test_fake-card-vault-1";
+  const ask = (one: ReturnType<typeof fixture>, threadId: string, extra: Record<string, unknown> = {}) =>
+    one.cards.requestCredential(one.bot, threadId, { label: "Stripe secret key", reason: "For test charges.", delivery: "ref", ...extra });
+  const refIn = (text: unknown) => /secret-ref:[0-9a-f]{32}/u.exec(String(text))?.[0];
+
+  it("is kept for the asking bot, and its next ask, in any conversation and after any ref is spent, gets a fresh one with no card", () => {
+    const one = fixture();
+    const card = ask(one, "t1");
+    expect(card.status).toBe(201);
+    expect(one.cards.saveCustomSecret("ledger", "t1", String(card.body.messageId), `  ${KEY} `).status).toBe(200);
+    expect(one.vaultStore.listSecrets()).toMatchObject([{ name: "Stripe secret key", source: "card", bots: ["ledger"], refOnly: true }]);
+    const fromCard = refIn(one.resumed[0]);
+    expect(fromCard).toBeDefined();
+    const spent = one.cards.redeemMcpServer({ env: { STRIPE_SECRET_KEY: fromCard } }, "ledger", "t1");
+    if (spent.ok) spent.commit();
+    const again = ask(one, "t2", { label: "stripe-secret-key" });
+    expect(again.status).toBe(200);
+    const fresh = refIn(again.body.text);
+    expect(fresh).toBeDefined();
+    expect(fresh).not.toBe(fromCard);
+    expect(one.lines.filter((line) => line.kind === "secret")).toHaveLength(1);
+    const used = one.cards.redeemMcpServer({ env: { STRIPE_SECRET_KEY: fresh } }, "ledger", "t2");
+    expect(used.ok && used.value).toEqual({ env: { STRIPE_SECRET_KEY: KEY } });
+    expect(one.vaultStore.listSecrets()[0]!.lastUsedAt).toBeGreaterThan(0);
+    expect(JSON.stringify([one.lines, one.resumed, again, one.vaultStore.listSecrets()])).not.toContain(KEY);
+  });
+
+  it("is not another bot's, and a file for one saved for OpenMausBot's tools only needs its own card", () => {
+    const one = fixture();
+    one.vaultStore.saveSecret({ name: "Stripe secret key", value: KEY, source: "card", bots: ["ledger"], refOnly: true });
+    expect(one.cards.requestCredential({ ...one.bot, id: "quill", name: "Quill" }, "t9", { label: "Stripe secret key", reason: "r", delivery: "ref" }).status).toBe(201);
+    expect(ask(one, "t1", { delivery: "file" })).toMatchObject({ status: 201, body: { savedAs: "ref" } });
+  });
+
+  it("is written to a file for the bot's commands, which the Vault remakes when asked again", () => {
+    const one = fixture();
+    const item = one.vaultStore.saveSecret({ name: "Stripe secret key", value: KEY, source: "settings", bots: "all" });
+    const answer = ask(one, "t1", { delivery: "file" });
+    const file = join(one.dataDir, ".openmausbot-secrets", "t1", `vault-${item.id}`);
+    expect(answer).toMatchObject({ status: 200, body: { text: expect.stringContaining(`to the file ${file}`) } });
+    expect(readFileSync(file, "utf8")).toBe(KEY);
+    rmSync(file);
+    ask(one, "t1", { delivery: "file" });
+    expect(readFileSync(file, "utf8")).toBe(KEY);
+  });
+
+  it("is asked for again when the bot says the saved one is wrong, and the new value replaces it", () => {
+    const one = fixture();
+    one.vaultStore.saveSecret({ name: "Stripe secret key", value: KEY, source: "card", bots: ["ledger"], refOnly: true });
+    const card = ask(one, "t1", { replace: true });
+    expect(card.status).toBe(201);
+    one.cards.saveCustomSecret("ledger", "t1", String(card.body.messageId), "sk_test_fake-card-vault-2");
+    expect(one.vaultStore.secretValues()).toEqual(["sk_test_fake-card-vault-2"]);
   });
 });
 
 describe("the mailbox card", () => {
   const PASSWORD = "fake-mailbox-password";
   const ACCOUNT = { address: "me@shop.example", imapHost: "imap.shop.example", smtpHost: "smtp.shop.example", connectedAt: "2026-11-04T00:00:00.000Z" };
-  function mail(options: { refusal?: string; connected?: boolean; sendingProblem?: string; profile?: string; connect?: (request: Record<string, unknown>, reading?: (host: string) => void) => unknown } = {}) {
+  function mail(options: { refusal?: string; connected?: boolean; sendingProblem?: string; profile?: string; connect?: (request: Record<string, unknown>, reading?: (host: string) => void) => unknown;
+    account?: Record<string, unknown>; checkOutgoing?: (fields: Record<string, unknown>) => unknown } = {}) {
     const dataDir = mkdtempSync(join(tmpdir(), "omb-secret-cards-"));
     dirs.push(dataDir);
     const lines: Message[] = [];
@@ -107,19 +169,28 @@ describe("the mailbox card", () => {
       botByThread: () => null, groupByThread: () => undefined, onChange: () => () => {},
     };
     const connects: Array<Record<string, unknown>> = [];
+    const checks: Array<Record<string, unknown>> = [];
+    const state = { sendingProblem: options.sendingProblem };
     const resumed: string[] = [];
     const bot = { id: "ledger", name: "Ledger" } as BotRecord;
     const cards = createSecretCards({
-      store: store as never, cfg: {} as never, botLogins: { credentialConfig: (config) => ({ ...config, onePassword: { connected: false } }) },
+      store: store as never, cfg: {} as never, botLogins: { credentialConfig: (config) => ({ ...config, onePassword: { connected: false } }) }, vaultStore: new VaultStore({ dataDir }),
       phoneSecrets: { provide: async () => {}, open: async () => PASSWORD } as never, phoneSecretSubmissions: { has: () => false, run: async (_card: unknown, _op: unknown, work: () => Promise<void>) => work() } as never,
       connectorThread: () => ({ bot, group: undefined }), answerCardNode: (_thread, _id, text) => { resumed.push(text); return true; }, followCard: () => {}, dataDir, providerKeysRefused: false,
       layerFolder: () => dataDir, turnVm: () => undefined,
       email: {
         connect: async (request, reading) => { connects.push(request as never); return (options.connect?.(request as never, reading) ?? { ok: true, account: ACCOUNT, inbox: { messages: 3 }, sending: { ok: true } }) as never; },
-        refusal: () => options.refusal, connected: () => options.connected === true, sendingProblem: () => options.sendingProblem, profileAddress: () => options.profile,
+        refusal: () => options.refusal, connected: () => options.connected === true, sendingProblem: () => state.sendingProblem, profileAddress: () => options.profile,
+        account: () => options.account as never,
+        checkOutgoing: async (_address, fields) => {
+          checks.push(fields as never);
+          const answer = (options.checkOutgoing?.(fields as never) ?? { ok: true, account: ACCOUNT }) as { ok: boolean };
+          if (answer.ok) state.sendingProblem = undefined;
+          return answer as never;
+        },
       },
     });
-    return { cards, lines, bot, connects, resumed };
+    return { cards, lines, bot, connects, checks, resumed };
   }
   const ask = (fixture: ReturnType<typeof mail>, body: Record<string, unknown> = {}) => fixture.cards.requestCredential(fixture.bot, "t1", { credentialId: "email", ...body });
   const card = (fixture: ReturnType<typeof mail>) => fixture.lines.findLast((line) => line.kind === "secret")!;
@@ -197,14 +268,13 @@ describe("the mailbox card", () => {
     expect(fixture.connects).toEqual([]);
   });
 
-  it("a mailbox that reads but can't send isn't asked for again: the bot hears why, who fixes it, and not to retry", () => {
-    const reading = mail({ connected: true, sendingProblem: "The outgoing server smtp.shop.example:587 refused the password." });
-    const text = String(ask(reading, { address: "me@shop.example" }).body.text);
+  it("a send that can't go tells the bot why, to open the outgoing-server card, and not to retry or ask in chat", () => {
+    const text = EMAIL_CANT_SEND_TEXT("me@shop.example", "The outgoing server smtp.shop.example:587 refused the password.");
     expect(text).toContain("refused the password");
-    expect(text).toContain("Connected apps");
+    expect(text).toContain("request_credential with credential_id email and address me@shop.example");
     expect(text).toContain("Don't retry");
+    expect(text).toContain("never ask for the password in chat");
     expect(text).not.toMatch(/try again/iu);
-    expect(reading.lines).toEqual([]);
   });
 
   it("while connecting the card shows the incoming server that took the password, and a failure takes it away", async () => {
@@ -244,5 +314,53 @@ describe("the mailbox card", () => {
     const secret = card(fixture).secret!;
     expect(fixture.cards.updateText(card(fixture).id, secret, "provided")).toContain("EMAIL_LIST_MESSAGES");
     expect(fixture.cards.updateText(card(fixture).id, secret, "dismissed")).toContain("chose not to connect a mailbox");
+  });
+  describe("a mailbox that reads but can't send", () => {
+    const problem = "smtp.shop.example didn't answer on 465 or 587.";
+    const readOnly = { ...ACCOUNT, smtpHost: undefined, smtpTried: { smtpHost: "smtp.shop.example", smtpPort: 587 }, smtpUsername: "me", sendingProblem: problem };
+
+    it("gets a card for its outgoing server, started from the server it tried, never a password", () => {
+      const fixture = mail({ connected: true, sendingProblem: problem, account: readOnly });
+      expect(ask(fixture, { address: "me@shop.example", reason: "To send the invoice." })).toMatchObject({ status: 201, body: { delivery: "email", outgoing: true } });
+      const first = card(fixture);
+      const secret = first.secret!;
+      expect(secret).toMatchObject({ target: "customSecret", delivery: "email", address: "me@shop.example", label: "Outgoing server for me@shop.example", placeholder: "Password for sending" });
+      expect(secret.emailOutgoing).toEqual({ smtpHost: "smtp.shop.example", smtpPort: 587, smtpUsername: "me" });
+      expect(secret.description).toContain(problem);
+      expect(secret.description).toContain("To send the invoice.");
+      expect(secret.description).toContain("Ledger never sees the password.");
+      ask(fixture, { address: "me@shop.example" });
+      expect(first.secret!.superseded, "a newer one replaces it").toBe(true);
+    });
+
+    it("checks sending at the server typed, keeps the card open with why, and resumes the bot once it sends", async () => {
+      const answers = [
+        { ok: false, error: "smtp.easy.example didn't answer on 587.", account: { ...readOnly, smtpTried: { smtpHost: "smtp.easy.example", smtpPort: 587 } } },
+        { ok: true, account: { ...ACCOUNT, smtpHost: "smtp.easy.example", smtpPort: 587, smtpSecurity: "starttls" } },
+      ];
+      const fixture = mail({ connected: true, sendingProblem: problem, account: readOnly, checkOutgoing: () => answers.shift() });
+      ask(fixture, { address: "me@shop.example" });
+      const id = card(fixture).id;
+      const typed = { smtpHost: "smtp.easy.example", smtpPort: 587, smtpSecurity: "starttls", smtpPassword: PASSWORD, address: "other@shop.example", imapHost: "imap.other.example", value: "not this" };
+      expect(await fixture.cards.saveEmailSecret("ledger", "t1", id, typed)).toEqual({ status: 400, body: { error: "smtp.easy.example didn't answer on 587." } });
+      expect(fixture.checks[0], "only the outgoing fields go").toEqual({ smtpHost: "smtp.easy.example", smtpPort: 587, smtpSecurity: "starttls", smtpPassword: PASSWORD });
+      expect(card(fixture).secret).toMatchObject({ emailOutgoing: { smtpHost: "smtp.easy.example", smtpPort: 587 } });
+      expect(card(fixture).secret!.provided).toBeFalsy();
+      expect(fixture.connects, "reading is never signed in to again").toEqual([]);
+      expect(await fixture.cards.saveEmailSecret("ledger", "t1", id, typed)).toMatchObject({ status: 200, body: { provided: true, resumed: true } });
+      expect(card(fixture).secret!.emailOutgoing).toEqual({ smtpHost: "smtp.easy.example", smtpPort: 587, smtpSecurity: "starttls" });
+      expect(fixture.resumed[0]).toContain("sending from me@shop.example works now");
+      expect(fixture.resumed[0]).toContain("EMAIL_SEND_MESSAGE");
+      expect(JSON.stringify(fixture.resumed) + JSON.stringify(card(fixture))).not.toContain(PASSWORD);
+      expect(await fixture.cards.saveEmailSecret("ledger", "t1", id, typed), "only once").toMatchObject({ status: 409 });
+    });
+
+    it("the bot hears that the person declined, and still never a value", () => {
+      const fixture = mail({ connected: true, sendingProblem: problem, account: readOnly });
+      ask(fixture, { address: "me@shop.example" });
+      const secret = card(fixture).secret!;
+      expect(fixture.cards.updateText(card(fixture).id, secret, "dismissed")).toContain("chose not to set up sending for me@shop.example");
+      expect(fixture.cards.updateText(card(fixture).id, secret, "provided")).toContain(problem);
+    });
   });
 });

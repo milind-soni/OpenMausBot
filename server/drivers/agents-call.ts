@@ -208,8 +208,30 @@ function recallWhen(at: unknown, dateOnly: boolean): string {
   return dateOnly ? day : `${day} ${pad(said.getHours())}:${pad(said.getMinutes())}`;
 }
 
+/** The top-level arguments a model may fill with `""` (or spaces) when it means to leave them out, per tool. Only these:
+ * elsewhere a blank can be the value itself, such as a cleared room bulletin or a bot's private folder. */
+const BLANK_MEANS_LEFT_OUT: Readonly<Record<string, readonly string[]>> = {
+  coordinate_bots: ["group_id", "reason", "thread", "title", "reply", "done_when", "answers"],
+  session_search: ["thread_id", "message_id", "query", "since", "until", "scope"],
+  show_html: ["html", "jsx", "path"],
+  // A blank text or old_text is a mistake the schema names, not "not given".
+  memory_update: ["until"],
+};
+
+function dropBlankArguments(name: string, input: Json): Json {
+  const keys = Object.hasOwn(BLANK_MEANS_LEFT_OUT, name) ? BLANK_MEANS_LEFT_OUT[name] : undefined;
+  if (!keys || !input || typeof input !== "object" || Array.isArray(input)) return input;
+  const out: Json = { ...input };
+  for (const key of keys) {
+    const value = out[key];
+    if (typeof value === "string" && !value.trim()) delete out[key];
+  }
+  return out;
+}
+
 export async function callTool(called: string, input: Json, context: ToolCallContext): Promise<ToolCallResult> {
-  const { name, arguments: args } = resolveAgentsCall(called, input);
+  const { name, arguments: given } = resolveAgentsCall(called, input);
+  const args = dropBlankArguments(name, given);
   const refused = outOfBounds(name, fullInputSchema(name), args);
   if (refused) return { text: refused, isError: true };
   const member = agentsCallMember(name, args);
@@ -285,7 +307,12 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     delete canonical.groupId;
     delete canonical.doneWhen;
     if (canonical.bot_ids === undefined) canonical.bot_ids = args.botIds;
-    if (canonical.group_id === undefined) canonical.group_id = args.groupId;
+    // Both destination spellings are accepted and the documented group_id wins, but a blank group_id must not mask a
+    // nonblank groupId from an older tool list.
+    const snakeBlank = canonical.group_id === undefined || canonical.group_id === null
+      || (typeof canonical.group_id === "string" && canonical.group_id.trim() === "");
+    // A non-text groupId still fails the check below, as it always has.
+    if (snakeBlank && args.groupId != null && !(typeof args.groupId === "string" && args.groupId.trim() === "")) canonical.group_id = args.groupId;
     if (canonical.done_when === undefined) canonical.done_when = args.doneWhen;
     const ids = canonical.bot_ids;
     const optional = (key: string, type: "boolean" | "string") => canonical[key] === undefined || typeof canonical[key] === type;
@@ -294,7 +321,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       && (canonical.thread === undefined || (typeof canonical.thread === "string" && /^[\w-]{1,128}$/.test(canonical.thread)))
       && (canonical.reply === undefined || canonical.reply === "resume" || canonical.reply === "none")
       && optional("consult", "boolean") && optional("in_my_folder", "boolean")
-      && optional("done_when", "string") && optional("reason", "string") && optional("title", "string") && optional("answers", "string");
+      && optional("done_when", "string") && optional("reason", "string") && optional("title", "string") && optional("answers", "string")
+      && (canonical.group_id === undefined || canonical.group_id === null || typeof canonical.group_id === "string");
     if (!usable) {
       return {
         text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
@@ -302,7 +330,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       };
     }
     const r = await api("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
-      groupId: canonical.group_id, botIds: ids, message: canonical.message,
+      groupId: typeof canonical.group_id === "string" && canonical.group_id.trim() ? canonical.group_id.trim() : undefined, botIds: ids, message: canonical.message,
       reason: typeof canonical.reason === "string" && canonical.reason.trim() ? canonical.reason.trim() : undefined,
       rework: canonical.rework,
       thread: canonical.thread, reply: canonical.reply,
@@ -436,13 +464,18 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (folder) body.folder = folder;
     if (args.model_selection !== undefined) {
       const fields = jsonRecord(args.model_selection) ? args.model_selection : null;
-      if (!fields || typeof fields.instanceId !== "string" || !fields.instanceId.trim() || typeof fields.model !== "string" || !fields.model.trim()) {
-        return { text: "start_thread model_selection needs instanceId and model.", isError: true };
+      if (!fields || typeof fields.instanceId !== "string" || !fields.instanceId.trim() || typeof fields.model !== "string" || !fields.model.trim()
+        || (fields.effort !== undefined && (typeof fields.effort !== "string" || !fields.effort.trim()))) {
+        return { text: "start_thread model_selection needs instanceId and model, as list_models gives them, and effort only from that engine's efforts.", isError: true };
       }
-      body.modelSelection = { instanceId: fields.instanceId.trim(), model: fields.model.trim() };
+      body.modelSelection = { instanceId: fields.instanceId.trim(), model: fields.model.trim(), ...(typeof fields.effort === "string" ? { effort: fields.effort.trim() } : {}) };
     }
+    if (args.report_back === true) body.reportBack = true;
     const r = await api("/api/internal/threads", { method: "POST", body: JSON.stringify(body) });
     if (r.error && r.state !== "failed") return { text: `Couldn't open that thread: ${String(r.error)}`, isError: true };
+    if (r.reportBack === true) {
+      return { text: `Opened thread #${String(r.title ?? title)} on yourself [thread id: ${String(r.threadId ?? "")}]. It starts when this turn ends, and its result comes back to this conversation and resumes you automatically (assignment id: ${String(r.requestId ?? "unknown")}). Mention it to the person as #${String(r.title ?? title)} and finish your turn; do not check or wait for it in this turn.` };
+    }
     const receipt = r.self !== true && Array.isArray(r.receipts) && jsonRecord(r.receipts[0]) ? r.receipts[0] : undefined;
     const threadTitle = String(r.title ?? receipt?.title ?? title);
     const threadId = String(r.threadId ?? receipt?.threadId ?? "");
@@ -469,6 +502,12 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return {
       text: `${opened}${timing}${approval} Its result will be delivered to this conversation automatically (assignment id: ${assignmentId || "unknown"}). Acknowledge it, mention it to the person as #${threadTitle}, and finish your turn; do not check or wait for it in this turn.`,
     };
+  }
+  if (name === "list_models") {
+    const search = typeof args.search === "string" ? args.search.trim() : "";
+    const r = await api(`/api/internal/models${search ? `?search=${encodeURIComponent(search)}` : ""}`);
+    if (r.error) return { text: `Couldn't list models: ${String(r.error)}`, isError: true };
+    return { text: JSON.stringify(r) };
   }
   if (name === "list_team_setup") {
     return { text: JSON.stringify(await api("/api/internal/team-setup-catalog")) };
@@ -934,21 +973,20 @@ async function requestEmailCard(args: Json, context: ToolCallContext): Promise<T
   });
   if (!r.ok) return { text: String(r.body.error ?? `request_credential failed (HTTP ${r.status}).`), isError: true };
   if (r.body.alreadyConfigured === true) return { text: typeof r.body.text === "string" ? r.body.text : `${String(r.body.label)} is already connected. Use the email tools.` };
+  if (r.body.outgoing === true) return { text: "A secure card for the mailbox's outgoing server is ready in OpenMausBot, on the computer and on a freshly QR-paired phone. End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person saves it or declines, and says whether sending works." };
   return { text: "A secure card for the mailbox is ready in OpenMausBot, on the computer and on a freshly QR-paired phone. End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person connects it or declines." };
 }
 
-/** A secret OpenMausBot does not keep: the person agrees to one use, and the bot gets a secretRef or a file path back. */
+/** Any other secret: from the Vault at once, or from a card the person answers; the bot gets a secretRef or a file path back. */
 async function requestCustomSecret(args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const r = await context.client.apiResponse("/api/internal/request-credential", {
     method: "POST",
-    body: JSON.stringify({ fromBotId: context.botId, fromThreadId: context.threadId, label: args.label, reason: args.reason, placeholder: args.placeholder, delivery: args.delivery }),
+    body: JSON.stringify({ fromBotId: context.botId, fromThreadId: context.threadId, label: args.label, reason: args.reason, placeholder: args.placeholder, delivery: args.delivery, replace: args.replace === true }),
   });
   const label = typeof r.body.label === "string" ? r.body.label : "the secret";
   if (!r.ok) return { text: String(r.body.error ?? `request_credential failed (HTTP ${r.status}).`), isError: true };
   if (typeof r.body.text === "string") return { text: `${r.body.text} Continue the task.` };
-  const asked = r.body.savedAs === "ref"
-    ? ` ${label} was saved earlier for OpenMausBot's tools only, not as a file for your commands (not a file request), so this card asks for it again.`
-    : r.body.savedAs === "file" ? ` ${label} was saved earlier as a file for your commands, not as a secretRef, so this card asks for it again.` : "";
+  const asked = r.body.savedAs === "ref" ? ` ${label} was saved earlier for OpenMausBot's tools only, not as a file for your commands (not a file request), so this card asks for it again.` : "";
   return {
     text: `A secure card for ${label} is now in this conversation, in the app and on a QR-paired phone, and the person was notified. If they can't find it, tell them it is in this conversation, and the notification opens it.${asked} End this turn now and say in one line that you are waiting for it; OpenMausBot resumes you when the person saves or declines, and tells you how to use it. Never ask for it in chat.`,
   };

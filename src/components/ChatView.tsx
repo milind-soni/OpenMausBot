@@ -1,4 +1,4 @@
-import { createContext, memo, use, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch } from "react";
+import { createContext, memo, use, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
@@ -80,7 +80,7 @@ import { RichMessageRow, UserLineNote, richRowKind } from "./RichMessageRow"; im
 import { Composer } from "./Composer";
 import { ChatErrorBanner, ChatNotice } from "./ChatErrorBanner";
 import { ThreadContextWarning } from "./ContextWarning";
-import { UsageAlert, useLimitResetContinue } from "./EngineUsage";
+import { UsageAlert, useLimitResetContinue, usePastLimitNotice } from "./EngineUsage";
 import { ChatFindBar } from "./ChatFindBar";
 import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
@@ -117,6 +117,7 @@ import { webhookMessageView } from "@/lib/webhook-message";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
+import { PagePaneContext } from "./app/PageTools";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
 import { useUnreadDivider } from "@/hooks/use-unread-divider";
 import { NewMessagesDivider } from "./NewMessagesDivider";
@@ -273,19 +274,15 @@ function TrialCreditFailedRow({ kind, onRetry }: { kind: TrialCreditRefusal; onR
   return <ErrorRow message={t(TRIAL_CREDIT_LINE[kind])} action={{ label: t("chat.error.connectOwnAi"), onClick: () => dispatch({ type: "toggleAppSettings", open: true, section: "engines" }) }} />;
 }
 
-export function FailedTurnRow({ tool, engine, onRetry, botId, threadId }: {
-  tool: NonNullable<Message["tool"]>;
-  engine: InstanceInfo | undefined;
-  onRetry?: () => void;
-  botId?: string;
-  threadId?: string;
-}) {
+export function FailedTurnRow({ tool, engine, onRetry, botId, threadId, messageAt }: { tool: NonNullable<Message["tool"]>; engine: InstanceInfo | undefined; onRetry?: () => void; botId?: string; threadId?: string; messageAt?: number }) {
   const resume = useLimitResetContinue(botId, threadId, tool.limitResetsAt);
+  const past = usePastLimitNotice(tool, messageAt);
   if (tool.place && botId) return <PlaceFailedRow place={tool.place} botId={botId} threadId={threadId} onRetry={onRetry} />;
   const credit = trialCreditKind(failedTurnCause(tool.name) ?? "");
   if (credit) return <TrialCreditFailedRow kind={credit} onRetry={onRetry} />;
   const { cause, notice } = failedTurnNotice(tool);
   if (tool.partial) return <PartlyDoneRow cause={notice ?? cause} onRetry={onRetry} />;
+  if (past) return past;
   const signedOut = signedOutEngine(tool, engine);
   return (
     <ErrorRow
@@ -753,7 +750,7 @@ const MessagesList = memo(function MessagesList({
               if (m.tool && failedTurnCause(m.tool.name) !== null) {
                 return (
                   <FailedTurnRow
-                    tool={m.tool}
+                    tool={m.tool} messageAt={m.at}
                     engine={engine}
                     botId={botId}
                     threadId={threadId}
@@ -821,6 +818,8 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle } = useCaptionChrome();
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
+  // An opened page fills the messages area, between the header and the message box, which stays usable.
+  const [pagePane, setPagePane] = useState<HTMLDivElement | null>(null);
   const advanced = useAdvancedMode();
   const phone = useMediaQuery(PHONE_LAYOUT);
   const phoneMenu = phone && !remoteClient;
@@ -1120,12 +1119,12 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             onClick={(event) => { if (!state.computerOpen) rememberComputerPanelOpen({ botId: bot.id, opener: event.currentTarget, tabs: event.detail === 0 }); dispatch({ type: "toggleComputer" }); }}
             className={cn(
               "relative",
-              "flex size-8 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
+              "flex size-8 items-center justify-center rounded-full", ELEVATED_FLOAT, ELEVATED_HOVER,
               state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
             )}
             title={t("chat.computer")} aria-label={busy && place === "browser" ? `${t("chat.computer")}, ${t("place.live")}` : t("chat.computer")}
           >
-            <Monitor size={18} />{busy && place === "browser" && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 animate-pulse rounded-full bg-success" data-testid="computer-button-live" />}
+            <Monitor size={16} />{busy && place === "browser" && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 animate-pulse rounded-full bg-success" data-testid="computer-button-live" />}
           </button>}
           {phoneMenu ? <ChatMoreMenu bot={bot} phoneHeader /> : (advanced || remoteClient) && <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} />}
         </div>
@@ -1186,7 +1185,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             <div ref={topSentinelRef} className="h-2 w-full pointer-events-none" aria-hidden="true" />
           ) : null}
           {windowedMessages.length === 0 && !bot.busy && <EmptyChat bot={bot} />}
-          <ChatRowsContext.Provider value={rows}><LiveToolsContext value={liveTools}><ChatBusyContext value={busy}>
+          <ChatRowsContext.Provider value={rows}><LiveToolsContext value={liveTools}><ChatBusyContext value={busy}><PagePaneContext value={pagePane}>
             <MessagesList
               messages={windowedMessages}
               transcript={messages}
@@ -1207,7 +1206,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               onRegenerate={regenerate}
               onReply={selectReply}
             />
-          </ChatBusyContext></LiveToolsContext></ChatRowsContext.Provider>
+          </PagePaneContext></ChatBusyContext></LiveToolsContext></ChatRowsContext.Provider>
           {stopNoticeDue(messages, stoppedAt, busy) && <CancelledTurnRow name={PERSON_STOPPED_TURN_NAME} />}
           {laterCount > 0 && (
             <div className="flex justify-center">
@@ -1252,6 +1251,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       </div>
 
       <TranscriptAnnouncer threadKey={transcriptKey} snapshot={announcement} />
+      <div ref={setPagePane} data-page-pane-slot className="contents" style={{ "--page-pane-bottom": `${composerDock.height}px` } as CSSProperties} />
 
       <div ref={composerDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
       {advanced && lastRunStep && showRun(recordedRun) && showRunCard && runDismissed.get(transcriptKey) !== lastRunStep.id && (
