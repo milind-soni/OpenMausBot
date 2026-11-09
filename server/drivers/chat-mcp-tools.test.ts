@@ -403,10 +403,11 @@ describe("Chat MCP session", () => {
       expect(mcpStartupMs({})).toBe(8_000);
     });
 
-    it.each(["initialize", "tools/list"])("reports an overrun in %s as a startup timeout, not as a request whose outcome is uncertain", async (method) => {
+    // tools/list needs a budget that outlasts the child's own start, or the overrun would land in initialize.
+    it.each([["initialize", 150], ["tools/list", 2_500]] as const)("reports an overrun in %s as a startup timeout, not as a request whose outcome is uncertain", async (method, budget) => {
       const f = fixture(`if (message.method === "${method}") { return; }`);
       const client = new ChatMcpClient(f.server);
-      await expect(client.tools(f.controller.signal, undefined, 150)).rejects.toThrow(/^MCP startup timed out$/);
+      await expect(client.tools(f.controller.signal, undefined, budget)).rejects.toThrow(/^MCP startup timed out$/);
       await client.close();
     });
   });
