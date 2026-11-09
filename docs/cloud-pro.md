@@ -1019,7 +1019,11 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
     reaction or a process on the Cloud), and counted only while it records
     the owner as its answerer; the request goes on by itself once they allow
     it (in a group chat they ask again). **Not now** is
-    not asked again for that line. A webhook's or a routine's run, or a line a
+    not asked again for that line. The moment a bot's memory locks, a card like
+    it also goes to the bot's own main chat, so the owner hears about the lock
+    instead of finding out when something fails: **Allow** there accepts
+    exactly what it showed and starts no turn, and **Not now** holds until the
+    memory changes again. A webhook's or a routine's run, or a line a
     bot handed in, never raises one. The same card lets the owner's own line
     through the work a bot opened a conversation with, for that line alone:
     work a bot hands into it after they allowed it (made or run then) shuts it

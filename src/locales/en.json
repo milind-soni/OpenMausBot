@@ -418,6 +418,7 @@
   "server.teammates.backWithResultsRestart": "Back with the work it handed on after a restart, reviewing",
   "server.teammates.handedWork": "work it handed on",
   "server.lendingLift.title": "Let {bot} use your {device} for this?",
+  "server.lendingLift.wholeBotTitle": "{bot}'s notes changed in work you didn't write. Let it keep using your {device}?",
   "server.lendingLift.memory": "Its notes changed in work you didn't write:",
   "server.lendingLift.botOpened": "A bot opened this conversation with work for this bot. Allow lets only this message of yours use your {device}.",
   "server.lendingLift.outside": "A webhook or a routine you didn't write posted in this conversation. Allow lets only this message of yours use your {device}.",

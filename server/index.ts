@@ -715,7 +715,7 @@ const lendingMemory = CLOUD_PERSONAL ? createLendingMemory({
       { workspace: ensureWorkspace, taskWorkspaces: TASK_WORKSPACES_DIR, skillLinks: harnessSkillLinks });
   },
   knownBots: () => store.bots.map((bot) => bot.id),
-  log: (line) => console.warn(line),
+  log: (line) => console.warn(line), onLocked: (botId) => lendingLifts?.memoryLocked(botId),
 }) : null;
 if (CLOUD_HOME) readMemoryOnlyFromRegularFiles();
 if (CLOUD_HOME) {
