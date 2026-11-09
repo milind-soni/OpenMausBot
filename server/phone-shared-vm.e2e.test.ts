@@ -1,4 +1,4 @@
-// The real server with the Local VM's container boundary replaced (group-local-vm-hooks.mjs) and a stub Boat: a person
+// The real server with the Local VM's container boundary replaced and a stub Boat: a person
 // takes the one shared Local VM from a phone or the desktop, and every bot working on it waits until they hand it back.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -39,6 +39,8 @@ describe("a person's hold on the shared Local VM", () => {
   let boatRow: { id: string; name: string; state: string } | null = null;
   let holdBoatList: Promise<void> | null = null;
   let boatListHeld = false;
+  let releaseBoat = () => {};
+  let boatCall: Promise<unknown> | undefined;
   const boatCalls: string[] = [];
   let phoneToken = "";
   let witness = "";
@@ -211,6 +213,8 @@ describe("a person's hold on the shared Local VM", () => {
 
   afterEach(async () => {
     holdBoatList = null;
+    releaseBoat();
+    await boatCall;
     writeFileSync(finishFile, "finish");
     // A bot a person's hold reaches cannot be deleted, so every hold a test left goes first.
     await control(api, witness, { action: "release" });
@@ -219,7 +223,7 @@ describe("a person's hold on the shared Local VM", () => {
       const tasks: Array<{ threadId: string }> = bots.find((bot: any) => bot.id === botId)?.tasks ?? [];
       for (const threadId of [undefined, ...tasks.map(task => task.threadId)]) await control(api, botId, { action: "release" }, threadId);
       await api("POST", `/api/bots/${botId}/interrupt`, {});
-      await api("DELETE", `/api/bots/${botId}`);
+      await until(() => api("DELETE", `/api/bots/${botId}`).then(response => response.status), status => status === 200 || status === 404);
     }
     rmSync(finishFile, { force: true });
     rmSync(dumpFile, { force: true });
@@ -259,11 +263,13 @@ describe("a person's hold on the shared Local VM", () => {
     if (mode === "per-bot") expect((await control(api, desk.id, { action: "take", controlLeaseId: deskId })).body.owned).toBe(true);
     expect((await control(phone, cloud.id, { action: "take", controlLeaseId: cloudId })).body.owned).toBe(true);
     await sleep(GRACE_MS / 2);
-    expect((await control(phone, a.id, { action: "check", controlLeaseId: lease() })).body.owned).toBe(false);
+    const beatAt = Date.now();
     expect((await control(phone, a.id, { action: "check", controlLeaseId: id })).body.owned).toBe(true);
+    await sleep(1_000);
+    expect((await control(phone, a.id, { action: "check", controlLeaseId: lease() })).body.owned).toBe(false);
     await sleep(takenAt + GRACE_MS + 600 - Date.now());
     expect(await held(a.id)).toBe(true);
-    await until(() => held(a.id), value => !value, GRACE_MS * 2);
+    await until(() => held(a.id), value => !value, beatAt + GRACE_MS + 800 - Date.now());
     await until(() => framesFor(a.id, since).at(-1)?.held, value => value === false);
     if (mode === "per-bot") expect(await held(desk.id)).toBe(true);
     expect(await held(cloud.id)).toBe(true);
@@ -296,7 +302,7 @@ describe("a person's hold on the shared Local VM", () => {
     const waiting = gate(computer);
     await sleep(500);
     await control(api, witness, { action: "release" });
-    expect((await waiting).blockedReason).toBe(CONTROL_HANDED_BACK);
+    expect(await waiting).toMatchObject({ held: true, blockedReason: CONTROL_HANDED_BACK });
     expect(await gate(computer)).toEqual({ held: false, helpOpen: false });
     await finishTurns([worker.id, worker.threadId]);
   }, 30_000);
@@ -346,10 +352,9 @@ describe("a person's hold on the shared Local VM", () => {
     expect(moved.status).toBe(409);
     await control(api, a.id, { action: "release" });
 
-    let releaseBoat = () => {};
     holdBoatList = new Promise(resolve => { releaseBoat = resolve; });
     boatListHeld = false;
-    const changing = api("PATCH", "/api/config", { box: { token: "box_two" }, localVm: { mode: "per-bot" } });
+    const changing = boatCall = api("PATCH", "/api/config", { box: { token: "box_two" }, localVm: { mode: "per-bot" } });
     await until(() => boatListHeld, Boolean);
     const refused = await control(api, a.id, { action: "take" });
     holdBoatList = null;
@@ -495,7 +500,7 @@ describe("a person's hold on the shared Local VM", () => {
     }
   }, 30_000);
 
-  // One row per place a person's hold can land; `key` is where the design puts it.
+  // One row per place a person's hold can land; `key` is the control key it must land on.
   it.each([
     { row: "shared, Auto", mode: "shared", key: "desk" },
     { row: "shared, cloud, thread on the VM", mode: "shared", computer: "cloud", pin: "vm", inThread: true, key: "desk" },
@@ -526,17 +531,17 @@ describe("a person's hold on the shared Local VM", () => {
     expect(await held(witness)).toBe(desk);
     if (mate) expect(await held(mate)).toBe(true);
 
-    const target = row.mode === "per-bot" ? `local/bot-${createHash("sha256").update(subject.id).digest("hex")}`
-      : row.mode === "pool" ? "local/pool-0" : "local/shared";
+    const ownVm = createHash("sha256").update(subject.id).digest("hex");
+    if (row.mode === "per-bot") vmState({ containers: ["shared", `bot:${ownVm}`] });
+    const target = row.mode === "per-bot" ? `local/bot-${ownVm}` : row.mode === "pool" ? "local/pool-0" : "local/shared";
     const [joined, viewed] = [await joinVm(subject.id, id, threadId), await viewer(target, subject.id, id, threadId)];
-    if (desk) {
+    if (desk || row.mode === "per-bot") {
       expect(joined.status, JSON.stringify(joined.body)).toBe(200);
       expect(viewed.status, JSON.stringify(viewed.body)).toBe(200);
     } else {
       expect([joined.status, viewed.status]).toEqual([409, 409]);
       expect(joined.body.socketPath).toBeUndefined();
-      const refusal = row.mode === "pool" ? expect.stringContaining("pool mode")
-        : row.mode === "per-bot" ? expect.not.stringContaining("Take control") : "Take control of this computer first";
+      const refusal = row.mode === "pool" ? expect.stringContaining("pool mode") : "Take control of this computer first";
       expect(viewed.body.error).toEqual(refusal);
     }
 
@@ -612,10 +617,9 @@ describe("a person's hold on the shared Local VM", () => {
     const name = `ogb-${scope}-${a.id.slice(0, 8).replace(/[^a-z0-9]/g, "")}-${createHash("sha256").update(a.id).digest("hex").slice(0, 6)}`;
     boatRow = { id: "bx_keptbxat", name, state: "idle" };
     try {
-      let releaseBoat = () => {};
       holdBoatList = new Promise(resolve => { releaseBoat = resolve; });
       boatListHeld = false;
-      const deleting = api("DELETE", `/api/bots/${a.id}`);
+      const deleting = boatCall = api("DELETE", `/api/bots/${a.id}`);
       await until(() => boatListHeld, Boolean);
       await control(api, witness, { action: "take" });
       holdBoatList = null;
