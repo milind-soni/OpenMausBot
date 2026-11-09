@@ -36,6 +36,9 @@ test("a bare address tries https first, then http only when the host is private"
   assert.deepEqual(parseServerInput("maus.example.com").candidates, ["https://maus.example.com"]);
   assert.deepEqual(parseServerInput(" https://maus.example.com/ ").candidates, ["https://maus.example.com"]);
   assert.deepEqual(parseServerInput("hetzner-1:8799").candidates, ["https://hetzner-1:8799", "http://hetzner-1:8799"]);
+  // A tailnet name alone also tries the port a computer sharing itself on the tailnet listens on.
+  assert.deepEqual(parseServerInput("macmini.tail1234.ts.net").candidates, ["https://macmini.tail1234.ts.net", "http://macmini.tail1234.ts.net", "http://macmini.tail1234.ts.net:8799"]);
+  assert.deepEqual(parseServerInput("macmini.tail1234.ts.net:18799").candidates, ["https://macmini.tail1234.ts.net:18799", "http://macmini.tail1234.ts.net:18799"]);
 });
 
 test("an address and a code typed apart make one pairing", () => {
@@ -84,6 +87,9 @@ test("anything that is not a server address is refused", () => {
 test("each transport is named for the line under a saved server", () => {
   assert.equal(serverTransport("https://maus.example.com"), "https");
   assert.equal(serverTransport("https://box.tail1234.ts.net"), "tailscale");
+  // Inside WireGuard: encrypted although the scheme is http.
+  assert.equal(serverTransport("http://box.tail1234.ts.net:8799"), "tailscale");
+  assert.equal(serverTransport("http://100.101.102.103:8799"), "tailscale");
   assert.equal(serverTransport("http://192.168.1.20:8799"), "private-http");
   assert.equal(serverTransport("http://127.0.0.1:8799"), "loopback");
 });

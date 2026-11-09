@@ -1,11 +1,13 @@
 // What a person types or pastes to reach a MausBot server: a pairing link, an address, an address and a code typed
 // apart, or a code on its own. One reader for the desktop's Connect sheet, `openmausbot connect` and the MCP bridge.
+import { isTailnetHost } from "./tailnet.mjs";
 
 export const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 export const PAIRING_CODE_LENGTH = 12;
 const PAIRING_CREDENTIAL = /^omb_pair_[A-Za-z0-9_-]{43}$/;
-/** The port `openmausbot serve` listens on, used in examples only. */
-export const EXAMPLE_ADDRESS = "http://192.168.1.20:8799";
+/** The port `openmausbot serve` and the desktop app listen on. */
+export const DEFAULT_PORT = 8799;
+export const EXAMPLE_ADDRESS = `http://192.168.1.20:${DEFAULT_PORT}`;
 
 const bareHost = (host) => String(host ?? "").trim().toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
 
@@ -41,10 +43,12 @@ export function isPrivateHost(host) {
   return !name.includes(".") && /^[a-z0-9-]+$/.test(name);
 }
 
-/** How a saved server is reached, for the line under its name. */
+/** How a saved server is reached, for the line under its name. A tailnet address is Tailscale over http too: WireGuard
+ * encrypts it. */
 export function serverTransport(origin) {
   const url = new URL(origin);
-  if (url.protocol === "https:") return url.hostname.endsWith(".ts.net") ? "tailscale" : "https";
+  if (isTailnetHost(bareHost(url.hostname))) return "tailscale";
+  if (url.protocol === "https:") return "https";
   return isLoopbackHost(url.hostname) ? "loopback" : "private-http";
 }
 
@@ -149,7 +153,9 @@ export function parseServerInput(addressInput, codeInput = "") {
   const privateHost = isPrivateHost(url.hostname);
   if (url.protocol === "http:" && schemed && !privateHost) return { ok: false, problem: "publicHttp", host: url.host };
   const https = `https://${url.host}`, http = `http://${url.host}`;
-  const candidates = schemed ? [url.origin] : privateHost ? [https, http] : [https];
+  // A tailnet name typed alone may be a computer sharing itself on the tailnet, which listens on its own port.
+  const shared = !schemed && !url.port && isTailnetHost(bareHost(url.hostname)) ? [`http://${url.host}:${DEFAULT_PORT}`] : [];
+  const candidates = schemed ? [url.origin] : privateHost ? [https, http, ...shared] : [https];
   return {
     ok: true,
     candidates,
