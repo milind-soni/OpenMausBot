@@ -919,7 +919,23 @@ export function availableTools(profile: CatalogProfile) {
   return placed.map((tool) => ({ ...tool, inputSchema: advertisedSchema(tool.inputSchema, tool.description) }));
 }
 
-const FULL_INPUT_SCHEMAS = new Map<string, unknown>([...TOOL_DEFINITIONS, ...MAUSBOT_TOOL_DEFINITIONS].map((tool) => [tool.name, tool.inputSchema]));
+const OPERATOR_TOOL_DEFINITION = {
+  name: "operator_settings",
+  description: "Chief Operator only. Read only the platform settings the owner granted, or preview and apply an owner-allowlisted change. Supported settings: language and computerName. For preview, pass setting and value; for apply, pass preview_id and expected_revision from that preview. Rollback needs an applied receipt_id, read and write scope, and the current revision. The server rechecks the role, scope, turn and config at execution. No credentials, security, financial, access or resource settings are supported. Never use a shell or config file as a fallback.",
+  inputSchema: {
+    type: "object", additionalProperties: false,
+    properties: {
+      action: { type: "string", enum: ["read", "preview", "apply", "rollback"] },
+      setting: { type: "string", enum: ["language", "computerName"], description: "For preview only." },
+      value: { type: "string", maxLength: 63, description: "For preview only. Empty means use the system/default name or language." },
+      preview_id: { type: "string", description: "For apply, from preview." },
+      receipt_id: { type: "string", description: "For rollback, from an applied receipt." },
+      expected_revision: { type: "string", description: "For apply or rollback, the exact current revision." },
+    }, required: ["action"],
+  },
+} as const;
+
+const FULL_INPUT_SCHEMAS = new Map<string, unknown>([...TOOL_DEFINITIONS, ...MAUSBOT_TOOL_DEFINITIONS, OPERATOR_TOOL_DEFINITION].map((tool) => [tool.name, tool.inputSchema]));
 
 /** A tool's input schema as the catalog writes it, before tools/list leaves anything out: what every call is held to. */
 export function fullInputSchema(name: string): unknown {
@@ -954,5 +970,5 @@ function catalogTools(profile: CatalogProfile) {
       const properties = Object.fromEntries(Object.entries(tool.inputSchema.properties).filter(([key]) => key !== "for_bot_id"));
       return { ...tool, description: tool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...tool.inputSchema, properties } };
     });
-  return [...ROLE_TOOLS, ...(profile.mausbot === true ? MAUSBOT_TOOL_DEFINITIONS : [])];
+  return [...ROLE_TOOLS, ...(profile.operator ? [OPERATOR_TOOL_DEFINITION] : []), ...(profile.mausbot === true ? MAUSBOT_TOOL_DEFINITIONS : [])];
 }

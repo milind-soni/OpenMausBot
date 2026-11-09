@@ -16,6 +16,8 @@ export interface CatalogProfile {
   memoryEnabled?: boolean;
   /** The section's Chief of Staff; the server refuses Chief-only tools to every other bot. */
   chief: boolean;
+  /** The owner-appointed, scoped platform operator; the harness checks every call again. */
+  operator?: boolean;
   /** Only for Watcher's own tool. Never written into a schema: a list that names its bot can't share a prompt cache with other bots. */
   botId: string;
   /** features.chiefEscalations: raise_escalation is mounted. */
@@ -45,6 +47,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     cloudHome: env.OMB_CLOUD_HOME === "1",
     memoryEnabled: env.OMB_MEMORY_ENABLED !== "0",
     chief: env.OMB_CHIEF_OF_STAFF === "1",
+    operator: env.OMB_CHIEF_OPERATOR === "1",
     botId: env.OMB_BOT_ID ?? "",
     escalations: env.OMB_ESCALATIONS === "1",
     team: env.OMB_TEAM_PEOPLE === "1",

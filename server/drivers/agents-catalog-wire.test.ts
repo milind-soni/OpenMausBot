@@ -64,6 +64,9 @@ function profiles(): Record<string, Profile> {
   all["default+no-computer-pick"] = { env: { ...all.default!.env, OMB_COMPUTER_SELECTION: "0" } };
   for (const name of ["default", "non-chief"]) all[`${name}+room`] = { env: { ...all[name]!.env, OMB_COMPUTER_SELECTION: "0", OMB_ROOM: "1" } };
   all["default+images"] = { env: { ...all.default!.env, OMB_IMAGE_GENERATION: "1" } };
+  for (const name of ["default", "skills+shared+voice+escalations+x+team+images"]) {
+    all[`${name}+operator`] = { env: { ...all[name]!.env, OMB_CHIEF_OPERATOR: "1" } };
+  }
   return all;
 }
 
@@ -79,7 +82,7 @@ const RESEARCH_TOOLS = ["x_search", "research_search", "research_endpoint", "res
 /** Only on the person's own Cloud: never on the fullest profile, a Team Cloud's. */
 const OWN_CLOUD_TOOLS = ["ask_for_computer"];
 /** The fullest profile, checked in whole; every other one is pinned by tool names, bytes and sha256. */
-const FULL = "skills+shared+voice+escalations+x+team+images";
+const FULL = "skills+shared+voice+escalations+x+team+images+operator";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
@@ -112,6 +115,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "non-chief+room": 48379,
   "skills+shared+voice+escalations+x+team+images": 72015,
   "default+images": 61224,
+  "default+operator": 61851,
+  "skills+shared+voice+escalations+x+team+images+operator": 73415,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -253,6 +258,17 @@ describe("agents proxy tools/list golden", () => {
     for (const [name, profile] of Object.entries(PROFILES)) {
       expect(names(wires[name]!).includes("raise_escalation"), name).toBe(profile.env.OMB_ESCALATIONS === "1");
     }
+  });
+
+  it("mounts Chief Operator settings only for the appointed profile, independently of Chief of Staff", () => {
+    const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
+    for (const name of ["default", "skills+shared+voice+escalations+x+team+images"]) {
+      expect(names(wires[`${name}+operator`]!).filter((tool) => tool !== "operator_settings")).toEqual(names(wires[name]!));
+    }
+    for (const [name, profile] of Object.entries(PROFILES)) {
+      expect(names(wires[name]!).includes("operator_settings"), name).toBe(profile.env.OMB_CHIEF_OPERATOR === "1");
+    }
+    expect(availableTools({ ...catalogProfileFromEnv({ OMB_CHIEF_OF_STAFF: "0", OMB_CHIEF_OPERATOR: "1" }), botId: "bot-golden" }).map((tool) => tool.name)).toContain("operator_settings");
   });
 
   it("mounts message_person everywhere: every plan's bots can reach the person's Inbox", () => {

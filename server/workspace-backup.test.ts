@@ -152,6 +152,22 @@ describe("encrypted full workspace backups", () => {
     expect(manifest.entries.some((entry: { path: string }) => entry.path === "notes.md")).toBe(true);
   });
 
+  it("neither transfers nor retains a Chief Operator grant when restoring bots", async () => {
+    const source = directory();
+    json(join(source, "bots.json"), []);
+    json(join(source, "chief-operator.json"), { grant: "source-grant" });
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const target = directory();
+    json(join(target, "chief-operator.json"), { grant: "old-destination-grant" });
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    expect(existsSync(join(target, ".backups", staged.id, "staged", "data", "chief-operator.json"))).toBe(false);
+    commitPendingWorkspaceRestore(target, staged.id);
+    const restored = applyPendingWorkspaceRestore(target);
+    expect(restored.restored).toBe(true);
+    expect(existsSync(join(target, "chief-operator.json"))).toBe(false);
+    expect(readJson(join(restored.safetyCopyPath!, "data", "chief-operator.json"))).toEqual({ grant: "old-destination-grant" });
+  });
+
   it("round-trips WAL conversations, binary files, drafts and IDs; preserves destination identity and connections", async () => {
     const source = directory();
     const db = fixture(source);

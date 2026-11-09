@@ -485,7 +485,7 @@ import { WebhookManager } from "./webhooks.ts";
 import { tieAutomationsToBots } from "./bot-automations.ts"; import { WaitManager } from "./waits.ts"; import { cancelWaitFromCard, createWaitHost, waitRunChat } from "./wait-host.ts"; import { createWaitRoutes, findWaitPeer, hostWaitRefusal, waitSourceRefusal, type WaitRouteContext } from "./routes/waits.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "./proxy-paths.ts";
-import { agentsProxyLaunch, agentsToolBridgeEnv, applyAgentsBridge, bridgedToolTitle, turnEngine } from "./agents-bridge-switch.ts"; import { agentsServerEnv, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type TurnKind } from "./agents-turn.ts";
+import { agentsToolBridgeEnv, applyAgentsBridge, bridgedToolTitle, turnEngine } from "./agents-bridge-switch.ts"; import { COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type TurnKind } from "./agents-turn.ts";
 import { harnessMcpTokenEnv } from "./harness-mcp-token.ts";
 import {
   loadBundledSkills,
@@ -619,6 +619,10 @@ import { createComputerPreviews } from "./computer-previews.ts";
 import { createAntigravityLeftoverRoutes } from "./routes/antigravity-leftovers.ts";
 import { createAntigravityAccountRoutes } from "./routes/antigravity-accounts.ts";
 import { createConfigRoutes } from "./routes/config.ts";
+import { createChiefOperatorHost, cleanChiefOperatorBot } from "./host/chief-operator.ts";
+import { createAgentsIntegration, createHooksIntegration } from "./host/agents-integration.ts";
+import { chiefOperatorOwner, createChiefOperatorRoutes } from "./routes/chief-operator.ts";
+import { createInternalChiefOperatorRoutes } from "./routes/internal-chief-operator.ts";
 import { createInstanceRoutes } from "./routes/instances.ts";
 import { createMcpConfig } from "./host/mcp-config.ts";
 import { createMcpServerRoutes } from "./routes/mcp-servers.ts";
@@ -1816,39 +1820,19 @@ const MAX_WORKSPACE_BOTS = 100;
 const phoneProxyPath = SPAWNED_PROXIES.phone;
 
 const researchAvailability = createResearchAvailability({ credential: () => researchCredential(cfg.treg?.key) }); researchAvailability.available();
-function agentsIntegration(
-  botId: string,
-  threadId: string,
-  depth: number,
-  skillAuthoring: boolean,
-  generation: string,
-  roomHandoffId?: string,
-  hostFiles = false,
-) {
-  const bot = store.bot(botId), speaking = botForThread(botId, threadId) ?? bot;
+const chiefOperator = createChiefOperatorHost({ dataDir: DATA_DIR, config: () => cfg, bot: (id) => store.bot(id),
+  ownerActive: (owner) => !CLOUD_TEAM || (teamOwners.people?.list().some(person => person.email.toLowerCase() === owner.toLowerCase() && person.role === "owner") ?? false),
+  writeSetting: (setting, value) => { saveConfig({ [setting]: value }); Object.assign(cfg, loadConfig()); }, changed: () => broadcast({ kind: "config", ...configStatus() }) });
+const agentsIntegration = createAgentsIntegration({
+  bot: (id) => store.bot(id), speaking: botForThread, room: (id) => Boolean(store.groupByThread(id)),
+  teamComputer: (bot) => Boolean(inheritedTeamComputer(bot)), port: PORT, savedFiles: !CLOUD_HOME && !HOSTED_WORKSPACE,
   // Only advertises the tools; the routes behind them refuse regardless.
-  const host = { skillAuthoring: skillAuthoringEnabled(cfg), sharedComputers: botLending(), cloudHome: Boolean(CLOUD_HOME), team: Boolean(CLOUD_TEAM), escalations: chiefEscalationsEnabled(cfg),
-    voiceNotes: tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false, x: Boolean(researchCredential(cfg.treg?.key)), research: researchAvailability.available(), imageGeneration: imageGenerationReady(cfg), meetings: boat.boatConfigured(cfg) };
-  return { ...agentsProxyLaunch(), env: agentsServerEnv({ threadId, bot: bot ?? { id: botId }, room: Boolean(store.groupByThread(threadId)), teamComputer: Boolean(bot && inheritedTeamComputer(bot)), host },
-    { generation, depth, skillAuthoring, roomHandoffId, ...(hostFiles && !CLOUD_HOME && !HOSTED_WORKSPACE ? { deliversSavedFiles: true } : {}) },
-    (turn) => mintInternalCapability({ botId, threadId, kind: "agents", createdBots: 0, openedThreads: 0, ...turn }), `http://127.0.0.1:${PORT}`) };
-}
-
-
+  host: (botId, speaking) => ({ skillAuthoring: skillAuthoringEnabled(cfg), sharedComputers: botLending(), cloudHome: Boolean(CLOUD_HOME), team: Boolean(CLOUD_TEAM), escalations: chiefEscalationsEnabled(cfg), operator: chiefOperator.isAppointed(botId),
+    voiceNotes: tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false, x: Boolean(researchCredential(cfg.treg?.key)), research: researchAvailability.available(), imageGeneration: imageGenerationReady(cfg), meetings: boat.boatConfigured(cfg) }),
+  mint: (botId, threadId, turn) => mintInternalCapability({ botId, threadId, kind: "agents", createdBots: 0, openedThreads: 0, ...turn }),
+});
 const hooksEnabled = () => process.env.OMB_HOOKS !== "0";
-function hooksIntegration(botId: string, threadId: string, generation: string): { url: string; token: string } {
-  const token = mintInternalCapability({
-    botId,
-    threadId,
-    generation,
-    depth: 0,
-    kind: "hooks",
-    skillAuthoring: false,
-    createdBots: 0,
-    openedThreads: 0,
-  });
-  return { url: `http://127.0.0.1:${PORT}`, token };
-}
+const hooksIntegration = createHooksIntegration(mintInternalCapability, PORT);
 
 type DirectTurnDispatchClaim = {
   id: string;
@@ -2798,6 +2782,7 @@ const store = new Store(
   () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale,
   () => sharedMembership() ? undefined : cfg.profile?.name,
 );
+store.onChange((change) => { if (change.type === "bot" || change.type === "bot.deleted") cleanChiefOperatorBot(chiefOperator, change.botId); });
 const outsideLineage = createOutsideLineage({
   home: Boolean(CLOUD_HOME), team: Boolean(CLOUD_TEAM), solo: () => cloudHome?.solo() === true, store,
   confinedNow: (threadId) => guestDrivenTurns.has(threadId), activeRun: activeRoutineRunForThread,
@@ -12388,6 +12373,7 @@ const mcpConfig = createMcpConfig({
   connectionsChanged: (change) => void routineHolds?.connections(change), probeAs: mcpServersHost.probeAs, testElsewhere: (name, server, lender, signal) => lentMcp.test(name, server, lender, signal),
   changed: () => broadcast({ kind: "mcp.changed" }) });
 const persistAnnouncedMcpServers = (next: Record<string, unknown>) => { persistMcpServers(next); broadcast({ kind: "mcp.changed" }); };
+ROUTES.push(createChiefOperatorRoutes(chiefOperator, (auth, req) => chiefOperatorOwner(auth, req, { team: Boolean(CLOUD_TEAM), desktopManaged: DESKTOP_MANAGED, desktopMutationToken })));
 const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persistAnnouncedMcpServers, mcpConfigBusy: mcpConfig.busy, mcpPolicyRefusal, appCatalog: chatAppsMcp, team: teamConnections, loopback: !CLOUD_HOME && !HOSTED_WORKSPACE }); ROUTES.push(createPostizRoutes({ postiz }), createConfigRoutes({
   store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
   sharedComputers, sharedComputerControl, closeBrowser, browserEngineSwitched,
@@ -13000,6 +12986,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error(TURN_ENDED_REFUSAL), { status: 401 });
         }
       };
+      if (await dispatchRoutes([createInternalChiefOperatorRoutes({ operator: chiefOperator, botId: internalSender.id,
+        threadId: internalCapability.threadId, generation: internalCapability.generation, depth: internalCapability.depth,
+        direct: directChatOf(internalSender.id, internalCapability.threadId), personTurn: turnOrigin(internalCapability).kind === "user",
+        guest: cloudGuestDriven(internalCapability.threadId), requester: actingPeople.requester(internalCapability.threadId, internalCapability.generation),
+        team: Boolean(CLOUD_TEAM), cloudHome: Boolean(CLOUD_HOME), desktopManaged: DESKTOP_MANAGED, provenCloudOwner: cloudProvenOwnerPerson,
+        active: () => internalCapabilityIsActive(internalCapability), readBody: readInternalBody })], { req, res, url, path, method, auth, json, readBody })) return;
       const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await lentMcp.route({ method, path, req, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS || await internalToolRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders }) !== PASS || await waitRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, ...waitTurnChecks(internalCapability, internalSender) }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await devsReports.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || (computerAsks && await computerAsks.internal({ method, path, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS) || await meetingsHost.internal({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, active: () => internalCapabilityIsActive(internalCapability) }) !== PASS || await imageTools.internal({ method, path, res, json, readBody: readInternalBody, threadId: internalCapability.threadId, requireActive: requireActiveInternalCapability, personTurn: turnOrigin(internalCapability).kind === "user" || (Boolean(roomRun(internalCapability.generation)?.requestMessageId) && guestDrivenTurns.get(internalCapability.threadId) !== internalCapability.generation) }) !== PASS) return; const callSignal = turnCallSignals.signal(internalCapability, res); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: callSignal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle, bot: internalSender })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);

@@ -26,6 +26,7 @@ import { callMausBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.ts";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
 import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
 import { callDevsTool, DEVS_TOOL_NAMES } from "./agents-devs-tools.ts";
+import { callOperatorTool } from "./agents-operator-call.ts";
 
 export interface ToolCallContext {
   botId: string;
@@ -260,6 +261,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!ok) return { text: String(body.error ?? "Could not attach that file."), isError: true };
     return { text: `Attached ${String(body.name ?? "the file")} (${Number(body.bytes ?? 0)} bytes). It now appears in the chat with a preview.` };
   }
+  if (name === "operator_settings") return callOperatorTool(args, context);
   if (CARD_TOOL_NAMES.has(name)) return callCardTool(name, args, context);
   if (RESEARCH_TOOL_NAMES.has(name)) return callResearchTool(name, args, context);
   if (HELPER_TOOL_NAMES.has(name)) return callHelperTool(name, args, context);

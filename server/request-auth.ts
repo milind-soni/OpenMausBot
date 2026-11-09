@@ -578,6 +578,11 @@ function secureTokenMatch(actual: string | undefined, expected: string): boolean
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
+/** The desktop window's per-boot owner proof, including on read-only owner routes. */
+export function desktopOwnerRequest(req: IncomingMessage, token: string | undefined): boolean {
+  return token !== undefined && secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), token) && fromOwnPage(req);
+}
+
 export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions): RequestAuthResult {
   const method = req.method ?? "GET";
   const path = options.url.pathname;
@@ -637,8 +642,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
       ) return deny(403, "forbidden: invalid companion request");
       return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, companionDevice: headerValue(req.headers["x-openmausbot-companion-device"]) }, status: 401, error: "" };
     }
-    const desktopOwner = options.loopbackMutationToken !== undefined &&
-      secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken) && fromOwnPage(req);
+    const desktopOwner = desktopOwnerRequest(req, options.loopbackMutationToken);
     if (fromBrowser(req) && !desktopOwner && !options.trustLocalBrowser) return deny(401, BROWSER_SIGN_IN);
     if (options.loopbackMutationToken !== undefined && mutatingPublicRoute(method, path) && !desktopOwner) {
       return deny(403, "forbidden: this change must come from the desktop app or a paired device");

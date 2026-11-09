@@ -30,7 +30,7 @@ const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
 const WAITS_FILE = "waits.json";
 const EXCLUDED = new Set([
   ".backups", "tools", "browser", "agent-browser-profiles", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
-  ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json",
+  ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json", "chief-operator.json",
   "team-computers.json",
   "openmausbot-server.lease", "box-create-requests.lock", "messages.db-wal", "messages.db-shm",
   "runtime.db-wal", "runtime.db-shm",
@@ -97,7 +97,8 @@ function forbiddenArchivePath(path: string): boolean {
 function preserved(name: string): boolean {
   // An existing WAL/SHM belongs to the old database, and existing waits to the old chats: neither may accompany restored ones.
   const folded = name.toLowerCase();
-  return excluded(folded) && !LIVE_DATABASE_SIDECARS.has(folded) && folded !== WAITS_FILE;
+  // A restored bot roster must never revive a platform-administration grant, including on the original machine.
+  return excluded(folded) && !LIVE_DATABASE_SIDECARS.has(folded) && folded !== WAITS_FILE && folded !== "chief-operator.json";
 }
 const SNAPSHOT_DATABASES: Record<string, string> = { "messages.db": "messages-snapshot.db", "runtime.db": "runtime-snapshot.db" };
 const LIVE_DATABASE_SIDECARS = new Set(Object.keys(SNAPSHOT_DATABASES).flatMap((name) => [`${name}-wal`, `${name}-shm`]));
