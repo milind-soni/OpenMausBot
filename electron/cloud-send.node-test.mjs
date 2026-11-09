@@ -203,7 +203,7 @@ function preload({ remote = false, activation = false } = {}) {
 }
 
 test("the bridge: either page gets only the move's line and the switch that keeps this computer's bots here; its Try again, moving a bot into a team, and turning that switch go only from the person's click on My Cloud's page", async () => {
-  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "moveToTeamCoded", "teamRetry", "openTeam", "teamBring", "teamBringMove", "teamBringStatus", "botMoveState", "moveBots", "moveEverything", "botMoveRetry", "openMyCloud", "keepHere", "setKeepHere", "onNotice"];
+  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "moveToTeamCoded", "teamRetry", "openTeam", "teamBring", "teamBringMove", "teamBringStatus", "botMoveState", "botChoices", "moveBots", "moveEverything", "botMoveRetry", "openMyCloud", "keepHere", "setKeepHere", "onNotice"];
   const local = preload();
   assert.equal(local.bridge.cloudSend, undefined);
   assert.equal(local.bridge.cloudLogins, undefined);
@@ -218,6 +218,8 @@ test("the bridge: either page gets only the move's line and the switch that keep
   await assert.rejects(page.bridge.cloudSendPage.teamRetry(), /Try again/);
   await assert.rejects(page.bridge.cloudSendPage.teamBringMove("scout"), /Choose Move/);
   await assert.rejects(page.bridge.cloudSendPage.setKeepHere(true), /Turn the switch/);
+  await assert.rejects(page.bridge.cloudSendPage.moveBots(["scout"]), /Choose which bots/);
+  await assert.rejects(page.bridge.cloudSendPage.moveEverything(), /Choose which bots/);
   await page.bridge.cloudSendPage.keepHere();
   assert.deepEqual(page.invoked.filter(([channel]) => channel.startsWith("cloud-send") || channel === "one-home:keep-set"), []);
   assert.deepEqual(page.invoked, [["one-home:keep"]], "reading the switch needs no click");

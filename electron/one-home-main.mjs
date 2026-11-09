@@ -313,8 +313,10 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
     return { available: cloudTakesBots() && (!moving || moving.phase === "back"), moving: botMove.moving() };
   };
   sendDeps.ipcMain.handle("cloud-send:bot-move-state", localPage("cloud-send:bot-move-state", botMoveState));
-  // The bots come from this computer's own server, never from the page; the page only names which of them.
-  sendDeps.ipcMain.handle("cloud-send:move-bots", localPage("cloud-send:move-bots", async (ids) => {
+  // Asked on whichever page is open: a person just back from buying My Cloud is looking at My Cloud. The bots come from this
+  // computer's own server, never from the page; the page only names which of them.
+  sendDeps.ipcMain.handle("cloud-send:bot-choices", onPage("cloud-send:bot-choices", async () => ({ bots: (await botsHere()).map((bot) => ({ id: bot.id, name: bot.name })) })));
+  sendDeps.ipcMain.handle("cloud-send:move-bots", onPage("cloud-send:move-bots", async (ids) => {
     if (!botMoveState().available) throw new Error(t("native.cloud.keepNoCloud"));
     const asked = new Set(Array.isArray(ids) ? ids.map(String) : []);
     const bots = (await botsHere()).filter((bot) => asked.has(bot.id)).map((bot) => ({ id: bot.id, name: bot.name }));
@@ -324,7 +326,7 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
     botMove.start(bots, oneHomeCloud(account()?.state())?.account ?? null);
     return botMoveState();
   }));
-  sendDeps.ipcMain.handle("cloud-send:move-everything", localPage("cloud-send:move-everything", () => {
+  sendDeps.ipcMain.handle("cloud-send:move-everything", onPage("cloud-send:move-everything", () => {
     choice.write({ v: 1, answered: true });
     void botMove.drop().catch((error) => log(`bot move: ${error?.message ?? error}`));
     void home.keep(false).catch((error) => log(`one home: ${error?.message ?? error}`));

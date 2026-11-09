@@ -5,10 +5,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowRightLeft, Check, Cloud, Loader2, X } from "lucide-react";
 import type { BotMoveState, BotMoveView } from "../../electron/cloud-send.mjs";
-import { botMoveLine, chooserBots, filterBots, ipcErrorText, CHOOSER_PAGE, MY_CLOUD_TEAM } from "@/lib/cloud-send";
+import { botMoveLine, filterBots, ipcErrorText, CHOOSER_PAGE, MY_CLOUD_TEAM } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
-import { useStore, type Bot } from "@/state/store";
-import { BotAvatar } from "./Avatar";
+import type { Bot } from "@/state/store";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NotNowButton, PRIMARY_BUTTON } from "./NoticeCard";
 
@@ -18,15 +17,19 @@ const bridge = () => (!window.ogb?.remoteClient?.active ? window.ogb?.cloudSendP
 
 /** Which bots go to My Cloud: any of them, found by name, or everything with one press. */
 export function MoveChooser({ onClose }: { onClose: () => void }) {
-  const { state } = useStore();
-  const bots = useMemo(() => chooserBots(state.bots), [state.bots]);
+  const [bots, setBots] = useState<ReadonlyArray<{ id: string; name: string }> | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void bridge()?.botChoices?.().then((answer) => { if (alive) setBots(answer.bots); }, () => { if (alive) setBots([]); });
+    return () => { alive = false; };
+  }, []);
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
   const [shown, setShown] = useState(CHOOSER_PAGE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
-  const found = useMemo(() => filterBots(bots, query), [bots, query]);
+  const found = useMemo(() => filterBots(bots ?? [], query), [bots, query]);
   const allFound = found.length > 0 && found.every((bot) => chosen.has(bot.id));
   useEffect(() => {
     root.current?.querySelector<HTMLElement>("input")?.focus();
@@ -70,13 +73,12 @@ export function MoveChooser({ onClose }: { onClose: () => void }) {
           const on = chosen.has(bot.id);
           return <li key={bot.id}>
             <button type="button" role="checkbox" aria-checked={on} data-move-bot={bot.id} onClick={() => toggle(bot.id)} className="flex w-full items-center gap-2.5 px-3 py-2 text-start text-[14px] hover:bg-raised">
-              <BotAvatar bot={bot} size={22} animated={false} />
               <span className="min-w-0 flex-1 truncate" dir="auto">{bot.name}</span>
               {on && <Check size={15} aria-hidden="true" />}
             </button>
           </li>;
         })}
-        {!found.length && <li className="px-3 py-3 text-[13px] text-ink-tertiary">{t("cloudSend.choose.none")}</li>}
+        {bots !== null && !found.length && <li className="px-3 py-3 text-[13px] text-ink-tertiary">{t("cloudSend.choose.none")}</li>}
         {found.length > shown && <li><button type="button" data-move-more="" className="w-full px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised" onClick={() => setShown((count) => count + CHOOSER_PAGE)}>
           {t("cloudSend.choose.more", { count: found.length - shown })}
         </button></li>}

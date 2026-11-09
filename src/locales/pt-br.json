@@ -7184,6 +7184,7 @@
   "cloudSend.choose.more": "Mostrar mais {count}",
   "cloudSend.choose.rooms": "Uma sala vai quando todos os bots dela vão.",
   "cloudSend.choose.failed": "Não foi possível iniciar a mudança. Tente de novo.",
+  "cloudSend.choose.unclicked": "Escolha quais bots vão.",
   "cloudSend.botMove.menu": "Levar para o Cloud",
   "cloudSend.botMove.confirmTitle": "Levar {bot} para o Cloud?",
   "cloudSend.botMove.confirmBody": "As conversas, skills, memória e rotinas de {bot} vão junto, e a partir daí ele trabalha no Cloud. Seus outros bots ficam neste computador.",

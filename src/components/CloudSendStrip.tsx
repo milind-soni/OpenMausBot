@@ -43,9 +43,9 @@ export function CloudSendStrip({ cloudHome }: { cloudHome: boolean }) {
   const [notice, setNotice] = useCloudSendNotice(bridge);
   const [notNow, setNotNow] = useState(false);
   if (!bridge || !notice) return null;
-  if (cloudHome) return notice.teamMove ? <TeamMoveLine move={notice.teamMove} onChange={(next) => setNotice({ ...notice, teamMove: next ?? undefined })} /> : null;
   return <>
     {notice.move?.phase === "choose" && !notNow && <MoveChooser onClose={() => setNotNow(true)} />}
-    {notice.botMove && <BotMoveLine move={notice.botMove} onChange={(next) => setNotice({ ...notice, botMove: next ?? undefined })} />}
+    {cloudHome && notice.teamMove && <TeamMoveLine move={notice.teamMove} onChange={(next) => setNotice({ ...notice, teamMove: next ?? undefined })} />}
+    {!cloudHome && notice.botMove && <BotMoveLine move={notice.botMove} onChange={(next) => setNotice({ ...notice, botMove: next ?? undefined })} />}
   </>;
 }

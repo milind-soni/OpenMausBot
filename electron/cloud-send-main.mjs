@@ -95,9 +95,7 @@ export function installCloudSend({ ipcMain, cloudPage, server, local, home, cook
   /** The notice either page gets, with the one-time move's line when there is one. */
   const notice = (snapshot) => {
     const line = moving(), team = pageOf() === "cloud" ? teamMove()?.view() ?? null : null, bots = pageOf() === "local" ? botMove()?.view() ?? null : null;
-    // Being asked which bots go is this computer's page's own.
-    const shown = line?.phase === "choose" && pageOf() !== "local" ? null : line;
-    return { ...sendNotice(snapshot), ...(shown ? { move: shown } : {}), ...(team ? { teamMove: team } : {}), ...(bots ? { botMove: bots } : {}) };
+    return { ...sendNotice(snapshot), ...(line ? { move: line } : {}), ...(team ? { teamMove: team } : {}), ...(bots ? { botMove: bots } : {}) };
   };
   const deliver = (snapshot) => {
     if (pageOf()) window().webContents.send("cloud-send:notice-changed", notice(snapshot));

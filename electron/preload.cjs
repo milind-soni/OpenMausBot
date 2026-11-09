@@ -527,10 +527,13 @@ const bridge = {
     teamBringMove: botId => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-bring-move", String(botId)) : Promise.reject(new Error("Choose Move to move the bot.")),
     teamBringStatus: () => ipcRenderer.invoke("cloud-send:team-bring-status"),
-    // This computer's page: which of its bots move to My Cloud. Main refuses every other page.
+    // Which of this computer's bots move to My Cloud: asked on either page, and only from the person's click on My Cloud's.
     botMoveState: () => ipcRenderer.invoke("cloud-send:bot-move-state"),
-    moveBots: ids => ipcRenderer.invoke("cloud-send:move-bots", Array.isArray(ids) ? ids.map(String) : []),
-    moveEverything: () => ipcRenderer.invoke("cloud-send:move-everything"),
+    botChoices: () => ipcRenderer.invoke("cloud-send:bot-choices"),
+    moveBots: ids => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:move-bots", Array.isArray(ids) ? ids.map(String) : []) : Promise.reject(new Error("Choose which bots move.")),
+    moveEverything: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:move-everything") : Promise.reject(new Error("Choose which bots move.")),
     botMoveRetry: () => ipcRenderer.invoke("cloud-send:bot-move-retry"),
     openMyCloud: () => ipcRenderer.invoke("cloud-send:open-my-cloud"),
     // Settings → MausBot Cloud, Advanced: "Keep this computer's bots on this computer".

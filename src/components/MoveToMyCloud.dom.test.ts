@@ -3,20 +3,18 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ bots: [] as Array<Record<string, unknown>> }));
-vi.mock("@/state/store", () => ({ useStore: () => ({ state: { bots: fixture.bots }, dispatch: () => {} }) }));
-vi.mock("./Avatar", () => ({ BotAvatar: () => null }));
+const fixture = vi.hoisted(() => ({ bots: [] as Array<{ id: string; name: string }> }));
 import { BotMoveLine, MoveChooser, MovedToMyCloudRow, useMoveToMyCloud } from "./MoveToMyCloud";
 
 let container: HTMLDivElement, root: Root;
-const page = { moveBots: vi.fn(async () => ({ available: true, moving: [] })), moveEverything: vi.fn(async () => ({ available: true, moving: [] })), botMoveState: vi.fn(async () => ({ available: true, moving: ["moving-one"] })),
+const page = { botChoices: vi.fn(async () => ({ bots: fixture.bots })), moveBots: vi.fn(async () => ({ available: true, moving: [] })), moveEverything: vi.fn(async () => ({ available: true, moving: [] })), botMoveState: vi.fn(async () => ({ available: true, moving: ["moving-one"] })),
   openMyCloud: vi.fn(async () => {}), botMoveRetry: vi.fn(async () => null), dismiss: vi.fn(async () => ({})) };
 const onClose = vi.fn();
 const named = (count: number) => Array.from({ length: count }, (_, i) => ({ id: `b${i}`, name: i % 2 ? `Sales ${i}` : `Ops ${i}` }));
 const q = (selector: string) => document.body.querySelector<HTMLElement>(selector);
 const all = (selector: string) => [...document.body.querySelectorAll<HTMLElement>(selector)];
 const click = async (element: HTMLElement | null) => { expect(element).toBeTruthy(); await act(async () => element!.click()); };
-const render = async (bots: Array<Record<string, unknown>>) => { fixture.bots = bots; await act(async () => root.render(createElement(MoveChooser, { onClose }))); };
+const render = async (bots: Array<{ id: string; name: string }>) => { fixture.bots = bots; await act(async () => root.render(createElement(MoveChooser, { onClose }))); await act(async () => {}); };
 async function type(value: string) {
   const field = q("[data-move-search]") as HTMLInputElement;
   await act(async () => {
@@ -52,8 +50,9 @@ it("moves only the bots ticked, and says how many", async () => {
   expect(page.moveBots).toHaveBeenCalledWith(["b1", "b3"]);
 });
 
-it("never offers the helper every place has, an archived bot, or one that moved", async () => {
-  await render([{ id: "a", name: "Ada" }, { id: "d", name: "Maus", defaultBot: { v: 1 } }, { id: "h", name: "Old", hidden: true }, { id: "m", name: "Gone", movedTo: { state: "moved", team: { id: "my-cloud" } } }]);
+it("offers the bots main lists, whichever page asks: a page's own bots are never what is moved", async () => {
+  await render([{ id: "a", name: "Ada" }]);
+  expect(page.botChoices).toHaveBeenCalled();
   expect(all("[data-move-bot]").map((row) => row.dataset.moveBot)).toEqual(["a"]);
 });
 

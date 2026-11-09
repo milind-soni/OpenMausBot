@@ -15,6 +15,7 @@ const BRIDGE_REFUSALS: Readonly<Record<string, LocaleKey>> = {
   "Turn the switch to keep this computer's bots here.": "cloudAccount.keepHere.unclicked",
   "Choose Try again to move.": "cloudSend.move.unclicked",
   "Choose Move to move the bot.": "teamMove.unclicked",
+  "Choose which bots move.": "cloudSend.choose.unclicked",
 };
 
 /** The words main threw, without Electron's "Error invoking remote method" wrapper; null when there are none. */
@@ -163,8 +164,6 @@ function ownMoveLine(move: OneHomeView, place: string, page: "local" | "cloud"):
 
 /** The "team" a bot that moved from this computer to My Cloud is held for (electron/bot-move-main.mjs). */
 export const MY_CLOUD_TEAM = "my-cloud";
-/** The bots the person can choose to move: as the sidebar has them, but the helper every place has and any that moved. */
-export const chooserBots = <T extends { hidden?: boolean; defaultBot?: unknown; movedTo?: unknown }>(bots: readonly T[]): T[] => bots.filter((bot) => !bot.hidden && !bot.defaultBot && !bot.movedTo);
 /** How many of the choice the list shows at a time, however many bots there are. */
 export const CHOOSER_PAGE = 200;
 /** The bots whose names hold every word of `query`. */

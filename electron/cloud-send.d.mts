@@ -121,6 +121,8 @@ export interface CloudSendPageBridge {
   openTeam?(teamId: string): Promise<void>;
   /** On this computer's page: whether its bots can move to My Cloud now, and which are on their way. */
   botMoveState?(): Promise<BotMoveState>;
+  /** The bots of this computer's a person can choose to move, asked on either page. */
+  botChoices?(): Promise<{ bots: Array<{ id: string; name: string }> }>;
   /** Moves these bots to My Cloud; the others stay here and go on working. */
   moveBots?(ids: string[]): Promise<BotMoveState>;
   /** Moves everything to My Cloud: this computer's one-time move. */

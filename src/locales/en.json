@@ -1377,6 +1377,7 @@
   "cloudSend.choose.more": "Show {count} more",
   "cloudSend.choose.rooms": "A room moves when all of its bots do.",
   "cloudSend.choose.failed": "Couldn't start the move. Try again.",
+  "cloudSend.choose.unclicked": "Choose which bots move.",
   "cloudSend.botMove.menu": "Move to My Cloud",
   "cloudSend.botMove.confirmTitle": "Move {bot} to My Cloud?",
   "cloudSend.botMove.confirmBody": "{bot}'s chats, skills, memory and routines go with it, and it works on My Cloud from then on. Your other bots stay on this computer.",

@@ -3,17 +3,13 @@ import { setLocale } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import en from "@/locales/en.json";
 import ptBr from "@/locales/pt-br.json";
-import { botMoveLine, chooserBots, filterBots, ipcErrorText, moveLine, moveQuietUntil } from "./cloud-send";
+import { botMoveLine, filterBots, ipcErrorText, moveLine, moveQuietUntil } from "./cloud-send";
 
 beforeEach(() => { setLocale("en"); });
 afterEach(() => { setLocale("en"); });
 
 describe("choosing which bots move", () => {
-  const bot = (id: string, name: string, extra: { hidden?: boolean; defaultBot?: unknown; movedTo?: unknown } = {}) => ({ id, name, ...extra });
-
-  it("offers every bot but the helper every place has, an archived one, or one that moved", () => {
-    expect(chooserBots([bot("a", "Ada"), bot("d", "Maus", { defaultBot: { v: 1 } }), bot("h", "Old", { hidden: true }), bot("m", "Gone", { movedTo: { state: "moved" } })]).map((entry) => entry.id)).toEqual(["a"]);
-  });
+  const bot = (id: string, name: string) => ({ id, name });
 
   it("finds bots by every word of what is typed, in any case, and finds thousands at once", () => {
     const bots = Array.from({ length: 50_000 }, (_, i) => bot(`b${i}`, `Sales Bot ${i}`));
