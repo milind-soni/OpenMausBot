@@ -26,4 +26,7 @@ test("the main window tells its page when it renders without a GPU, so pop-ups d
   assert.match(main, /linuxSoftwareRendering \? \[SOFTWARE_RENDERING_ARG\] : \[\]/);
   assert.equal(SOFTWARE_RENDERING_ARG, "--omb-software-rendering=1");
   assert.match(preload, /softwareRendering: process\.argv\.includes\("--omb-software-rendering=1"\)/);
+  assert.match(main, /linuxDisablesGpu\(\) \|\| app\.commandLine\.hasSwitch\("disable-gpu"\)/);
+  // My Cloud's page is remote: it needs the flag too.
+  assert.match(preload, /const REMOTE_SAFE = new Set\(\[[^\]]*"softwareRendering"/);
 });

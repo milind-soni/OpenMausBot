@@ -178,7 +178,8 @@ function applyUnreadBadge(win = mainWindow) {
 }
 
 // GNOME groups the window with its desktop entry only when both identities match; set before ready.
-const linuxSoftwareRendering = process.platform === "linux" && linuxDisablesGpu();
+// A launch with --disable-gpu (a desktop entry or a user workaround) renders on the CPU too.
+const linuxSoftwareRendering = process.platform === "linux" && (linuxDisablesGpu() || app.commandLine.hasSwitch("disable-gpu"));
 if (linuxSoftwareRendering) app.disableHardwareAcceleration();
 if (process.platform === "linux") app.setDesktopName("com.openmausbot.app.desktop");
 
