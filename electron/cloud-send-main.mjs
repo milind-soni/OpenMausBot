@@ -158,7 +158,7 @@ export function installCloudSend({ ipcMain, cloudPage, server, local, home, cook
     /** The one-time move to My Cloud (cloud-send.mjs): a pass that carries everything, `final` the one after this computer
      * stops, and the check of what arrived. */
     move: (options) => send.send({ reason: "move", final: options?.final === true }),
-    check: () => send.check(),
+    check: (options) => send.check(options),
     /** Each automation the move carried, and whether it was on here when it went. */
     switches: () => send.switches(),
     snapshot: () => send.snapshot(),

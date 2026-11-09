@@ -309,7 +309,6 @@ export function createOneHome(deps) {
   async function failed(journal, error, frozen) {
     const said = sentence(error?.message) ?? "My Cloud did not answer.";
     log(`one home: ${journal.phase} failed (${said})`);
-    await letGo();
     const tries = (journal.tries ?? 0) + 1;
     // A check that got somewhere before My Cloud stopped answering goes on from there soon, as a pass that carried things does.
     const resumes = frozen && error?.progressed === true;
@@ -321,6 +320,7 @@ export function createOneHome(deps) {
       gapKey: typeof error?.gapKey === "string" ? error.gapKey : undefined, gaps: typeof error?.gaps === "string" ? error.gaps : undefined,
       retryAt: now() + wait, hourly: hourly || undefined, ...(frozen ? { thaw: true } : {}) });
     if (frozen) await thaw(next);
+    await letGo();
     return null;
   }
 
@@ -383,7 +383,8 @@ export function createOneHome(deps) {
   async function check(journal) {
     let passes = journal.passes ?? 1, first = null, stuck = null;
     try {
-      for (let report = await deps.send.check(); report?.ok !== true; report = await deps.send.check()) {
+      const stopped = () => closed || kept();
+      for (let report = await deps.send.check({ stopped }); report?.ok !== true; report = await deps.send.check({ stopped })) {
         log(`one home: the check found ${missingOf(report)} missing`);
         const key = gapKey(report);
         first ??= key;

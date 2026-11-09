@@ -56,7 +56,8 @@ function computer({ clock, checks = [], lease = null, name = "Mac", id = "comput
     cloud: () => ({ origin: CLOUD, account: "acct-1", machine: CLOUD, ready: true, moves: true, ended: false, paid: false }),
     send: {
       async move(options) { c.passes.push(options?.final ? "final" : "copy"); if (!options?.final && copy) await copy(); },
-      async check() {
+      async check(options) {
+        c.checkOptions = options;
         const next = checks.shift();
         const answer = typeof next === "function" ? await next(c) : next;
         if (answer instanceof Error) throw answer;
@@ -174,4 +175,17 @@ test("a move that waits for another computer after an earlier failure asks again
   await nuc.home.kick();
   assert.deepEqual(nuc.passes, []);
   assert.deepEqual(nuc.timers.map((timer) => timer.ms), [QUEUE_POLL_MS]);
+});
+
+test("a check is told when the person stops the move, and a failed one lifts the freeze before it lets go of My Cloud", async () => {
+  const clock = newClock();
+  const order = [];
+  const lease = cloudLease(() => clock.now);
+  const answer = lease.answer;
+  lease.answer = (body) => { if (body.release) order.push(c.server.frozen ? "released frozen" : "released thawed"); return answer(body); };
+  const c = computer({ clock, lease, checks: [Object.assign(new Error("My Cloud did not answer."), { cause: timeout() })] });
+  await c.home.kick();
+  assert.equal(typeof c.checkOptions.stopped, "function");
+  assert.equal(c.checkOptions.stopped(), false);
+  assert.ok(order.includes("released thawed") && !order.includes("released frozen"), order.join());
 });

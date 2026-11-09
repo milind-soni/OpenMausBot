@@ -4,7 +4,7 @@
 import type { ChatStore } from "./cloud-chat-merge.ts";
 import { listBotFiles, type BotFile } from "./cloud-send-files.ts";
 import { chatHeads, conversationSettings } from "./cloud-send-chats.ts";
-import { attachmentNamesOf } from "./cloud-send-rows.ts";
+import { activeLeaves, attachmentNamesOf } from "./cloud-send-rows.ts";
 import { automationSwitches, routineRunIds, type MoveKindsDeps } from "./cloud-send-kinds.ts";
 import { journalIds, memoryFiles, memoryLines, teamsHere } from "./cloud-send-memory.ts";
 import type { CloudSendSummary } from "./cloud-send.ts";
@@ -14,7 +14,7 @@ import { learnedState } from "./profile-learned.ts";
 import type { BotRecord } from "./store.ts";
 import type { TeamMemory } from "./team-memory.ts";
 
-export interface ManifestConversation { threadId: string; bot?: string; room?: string; rows: number; newest: string; settings: Record<string, unknown> }
+export interface ManifestConversation { threadId: string; bot?: string; room?: string; rows: number; newest: string; leaf: string; settings: Record<string, unknown> }
 
 export interface CloudSendManifest {
   v: 1;
@@ -70,8 +70,9 @@ export async function cloudSendManifest(sources: ManifestSources): Promise<Cloud
   const only = sources.bot;
   const rooms = only === undefined ? store.groups.filter((room) => !room.dm) : [];
   const counts = sources.heads();
+  const leaves = activeLeaves();
   const conversations: ManifestConversation[] = chatHeads(only === undefined ? store.bots : store.bots.filter((bot) => bot.id === only), rooms).map((head) => ({
-    threadId: head.threadId, ...(head.bot ? { bot: head.bot } : { room: head.room }), rows: counts.get(head.threadId)?.rows ?? 0, newest: head.lastId,
+    threadId: head.threadId, ...(head.bot ? { bot: head.bot } : { room: head.room }), rows: counts.get(head.threadId)?.rows ?? 0, newest: head.lastId, leaf: leaves.get(head.threadId) ?? head.lastId,
     settings: conversationSettings(store, head),
   }));
   const attachments = sources.attachments === false ? {} : { attachments: [...attachmentNamesOf(new Set(conversations.map((head) => head.threadId)), sources.dataDir)].sort() };

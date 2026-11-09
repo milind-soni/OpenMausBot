@@ -18,7 +18,7 @@ const sentence = (value) => (typeof value === "string" && value.trim() ? value.t
  * known, and then nothing waits. `label`: its name, which the other computer's line says while it waits.
  */
 export function createMoveLease({ session, holder, label, timers = { set: (work, ms) => { const timer = setInterval(work, ms); timer.unref?.(); return timer; }, clear: (timer) => clearInterval(timer) }, log = () => {} }) {
-  let held = null, name = "", timer = null;
+  let held = null, name = "", timer = null, renewing = null;
   const ask = async (body) => (await session()).call("POST", "/api/cloud-send/lease", { v: 1, ...body });
   const stop = () => { if (timer) timers.clear(timer); timer = null; };
 
@@ -36,7 +36,7 @@ export function createMoveLease({ session, holder, label, timers = { set: (work,
       if (!timer) {
         timer = timers.set(() => {
           if (!held) return;
-          ask({ holder: held, label: name }).then((again) => { if (again.status === 409) log("one home: another computer took My Cloud's move lease"); }, () => {});
+          renewing = ask({ holder: held, label: name }).then((again) => { if (again.status === 409) log("one home: another computer took My Cloud's move lease"); }, () => {});
         }, LEASE_RENEW_MS);
       }
       return null;
@@ -46,6 +46,8 @@ export function createMoveLease({ session, holder, label, timers = { set: (work,
       stop();
       const id = held;
       held = null;
+      // Letting go after any renewal still on its way, or that renewal would take the lease back.
+      await renewing;
       if (id) await ask({ holder: id, release: true }).catch(() => {});
     },
     held: () => held !== null,
