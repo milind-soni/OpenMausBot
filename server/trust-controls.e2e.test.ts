@@ -208,6 +208,7 @@ it("honors outbound approval and Send without asking at Full access, and still r
   expect(relayed).toHaveLength(before + 4);
   await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } });
   expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
+  expect((await relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: 'run_tool("GMAIL_SEND_EMAIL", {})' })).body.result.isError).toBe(true);
   expect(relayed).toHaveLength(before + 4);
 });
 
