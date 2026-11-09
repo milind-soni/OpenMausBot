@@ -101,6 +101,32 @@ describe("ServerPairingCard waits for the pairing configuration", () => {
     expect(createButton().disabled).toBe(false);
   });
 
+  it("issues one config request for rapid retries and disables Retry while it runs", async () => {
+    await renderCard();
+    await act(async () => {
+      rejectConfig(new Error("config down"));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    const retry = host.querySelector<HTMLButtonElement>("[data-server-pairing-retry]");
+    expect(retry).not.toBeNull();
+    const configCalls = () => fixture.api.mock.calls.filter(([path]) => path === "/api/config").length;
+    expect(configCalls()).toBe(1);
+    await act(async () => {
+      retry!.click();
+      retry!.click();
+    });
+    expect(configCalls()).toBe(2);
+    await flush();
+    expect(retry!.disabled).toBe(true);
+    await act(async () => {
+      resolveConfig({ membership: { pairingCodes: true }, computerName: "Mac" });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flush();
+    expect(createButton().disabled).toBe(false);
+  });
+
   it("offers the same retry in simple mode", async () => {
     await renderCard({ simple: true });
     await act(async () => {

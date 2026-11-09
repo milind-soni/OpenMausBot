@@ -57,6 +57,9 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   const [pairingCodes, setPairingCodes] = useState(initialPairingCodes);
   const [codesLoaded, setCodesLoaded] = useState(false);
   const [configFailed, setConfigFailed] = useState(false);
+  const [configLoading, setConfigLoading] = useState(false);
+  const configRequest = useRef(0);
+  const configPending = useRef(false);
   const [computerName, setComputerName] = useState<string | null>(null);
   const [scope, setScope] = useState<"admin" | "client">("admin");
   const [offer, setOffer] = useState<PairingOffer | null>(null);
@@ -80,20 +83,31 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   }
 
   async function loadConfig(state: SessionState) {
+    if (configPending.current) return;
+    configPending.current = true;
+    const request = ++configRequest.current;
+    setConfigLoading(true);
     try {
       const config = await api("/api/config");
+      if (request !== configRequest.current) return;
       setPairingCodes(readMembership(config).pairingCodes);
       setCodesLoaded(true);
       setConfigFailed(false);
       if (canPairDevices(state)) setComputerName(typeof config?.computerName === "string" ? config.computerName : "");
     } catch (e) {
+      if (request !== configRequest.current) return;
       setError(t("remote.serverPairing.error", { error: e instanceof Error ? e.message : String(e) }));
       setConfigFailed(true);
+    } finally {
+      if (request === configRequest.current) {
+        configPending.current = false;
+        setConfigLoading(false);
+      }
     }
   }
 
   function retryConfig() {
-    if (!session) return;
+    if (!session || configPending.current) return;
     setError(null);
     void loadConfig(session);
   }
@@ -275,7 +289,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       {error || configFailed ? (
         <div className="flex flex-wrap items-center gap-2 px-4">
           {error ? <p className="text-[12px] leading-4 text-danger">{error}</p> : null}
-          {configFailed ? <button type="button" data-server-pairing-retry onClick={retryConfig} className="ui-button">{t("remote.serverPairing.retry")}</button> : null}
+          {configFailed ? <button type="button" data-server-pairing-retry onClick={retryConfig} disabled={configLoading} className="ui-button">{t("remote.serverPairing.retry")}</button> : null}
         </div>
       ) : null}
     </div>
