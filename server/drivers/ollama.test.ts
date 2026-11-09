@@ -257,6 +257,15 @@ describe("the chat engine on Ollama", () => {
     } finally { await instance.dispose(); }
   });
 
+  it("asks nothing of a server on this network that has a fixed model list", async () => {
+    const { url } = await fakeOllama({ models: [LLAMA] });
+    const instance = await create({ url: `${url}/v1`, apiKeyEnv: "FIXTURE_KEY", managedModels: ["llama3.2:latest"] }, { FIXTURE_KEY: "fixture-key" });
+    try {
+      await instance.snapshot();
+      expect(answeredAsOllama(url)).toBeUndefined();
+    } finally { await instance.dispose(); }
+  });
+
   it("sends tools only to a model that can call them", async () => {
     const { url, chats } = await fakeOllama({ models: [LLAMA, GEMMA] });
     const instance = await create({ url: `${url}/v1`, catalog: "ollama" });
