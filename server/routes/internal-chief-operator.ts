@@ -21,8 +21,7 @@ export function createInternalChiefOperatorRoutes(deps: {
 }): RouteHandler {
   const ownerStarted = (owner: string) => deps.team ? deps.requester === personKey({ id: "", email: owner })
     : deps.cloudHome ? deps.provenCloudOwner(deps.requester ?? undefined)
-      : owner === "local-owner" && deps.desktopManaged ? deps.requester === null
-        : deps.requester === personKey(owner.includes("@") ? { id: "", email: owner } : { id: owner });
+      : (owner !== "local-owner" || deps.desktopManaged) && deps.requester === personKey(owner.includes("@") ? { id: "", email: owner } : { id: owner });
   return async ({ res, path, method, json }) => {
     if (path !== "/api/internal/chief-operator") return PASS;
     if (method !== "POST") return json(res, 405, { error: "Use POST for Chief Operator settings." });

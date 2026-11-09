@@ -201,11 +201,13 @@ export class ChiefOperator {
 
   rollback(input: { botId: string; receiptId: string; expectedRevision: string; active(): boolean }): { receiptId: string; state: "applied"; setting: OperatorSetting; after: string; revision: string } {
     const grant = this.grantFor(input.botId);
-    const original = this.state().audit.find(row => row.id === input.receiptId && row.action === "apply" && row.state === "applied" && row.botId === input.botId && row.grantId === grant.id);
+    const state = this.state();
+    const original = state.audit.find(row => row.id === input.receiptId && row.action === "apply" && row.state === "applied" && row.botId === input.botId && row.grantId === grant.id);
     if (!original?.setting || original.before === undefined || original.after === undefined) throw new OperatorRefusal(404, "No reversible receipt exists for this grant and bot.");
-    if (this.state().audit.some(row => row.undoOf === original.id && row.state !== "failed")) throw new OperatorRefusal(409, "This receipt was already rolled back or has a pending rollback.");
+    if (state.audit.some(row => row.undoOf === original.id && row.state !== "failed")) throw new OperatorRefusal(409, "This receipt was already rolled back or has a pending rollback.");
     this.scope(input.botId, original.setting, "read");
     this.scope(input.botId, original.setting, "write");
+    if (state.audit.findLast(row => row.setting === original.setting && row.state === "applied")?.id !== original.id) throw new OperatorRefusal(409, "The setting changed after this receipt. Read the setting again before rollback.");
     const revision = this.revision(grant, original.setting);
     if (!input.active() || input.expectedRevision !== revision || this.current(original.setting) !== original.after) throw new OperatorRefusal(409, "The turn or configuration changed. Read the setting again before rollback.");
     const receiptId = this.writeChange("rollback", grant, input.botId, original.setting, original.after, original.before, input.active, original.id);

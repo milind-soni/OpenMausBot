@@ -7,7 +7,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { BoxReport } from "../bot-box/box.ts";
 import { boxSummary } from "../cloud-health.ts";
 import { CLOUD_HEALTH_PATH, CLOUD_PAIRING_PATH, createCloudPairing, createCloudRequestVerifier, readSignedBody } from "../cloud-home.ts";
-import { teamMemberEmail, type CloudTeam } from "../cloud-team.ts";
+import { teamMemberEmail, type CloudTeam, type TeamMember } from "../cloud-team.ts";
 import { CLOUD_TEAM_ADMIN_PATH, type TeamAdminSummary } from "../cloud-team-admin.ts";
 import { CLOUD_TEAM_POLICY_CHANGED_PATH } from "../cloud-team-policy.ts";
 import type { CloudHealth } from "../cloud-health.ts";
@@ -34,6 +34,7 @@ export function createCloudSignedRoutes(deps: {
   sessions: Pick<SessionRegistry, "openPairing" | "revokeMember" | "attemptAllowed" | "noteFailure" | "clearFailures">;
   /** A Team Cloud: every pairing body must carry the Admin's member claim (cloud-team.ts). */
   team?: CloudTeam | null;
+  memberSeen?(member: TeamMember): void;
   health: Pick<CloudHealth, "report">;
   /** The home's power once the server listens (null before, and on a server that is not a Cloud home). */
   power?: () => Pick<CloudPower, "report" | "prepareSleep"> | null;
@@ -51,7 +52,7 @@ export function createCloudSignedRoutes(deps: {
   planTier?: ((tier: string) => void) | null;
   now?: () => number;
 }) {
-  const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, now: deps.now });
+  const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, memberSeen: deps.memberSeen, now: deps.now });
   const healthRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const powerReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const sleepRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });

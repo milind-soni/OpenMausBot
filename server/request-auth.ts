@@ -14,7 +14,7 @@ export type LoopbackTrust = "owner" | "service";
 
 export type RequestAuth =
   | {
-    kind: "loopback"; scopes: readonly Scope[]; trust?: "service";
+    kind: "loopback"; scopes: readonly Scope[]; trust?: "service"; desktopOwner?: true;
     /** Set only on the verified companion-token path: the sidecar's id for the phone that authenticated. */
     companionDevice?: string;
   }
@@ -660,7 +660,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
       }
       return { auth: { kind: "loopback", scopes: SERVICE_SCOPES, trust: "service" }, status: 401, error: "" };
     }
-    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, ...(desktopOwner ? { desktopOwner: true as const } : {}) }, status: 401, error: "" };
   }
 
   if (proxied) {

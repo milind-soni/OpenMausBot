@@ -10,7 +10,7 @@ import { join } from "node:path";
 import type { Surface } from "../shared/wire.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
-import { parseMemberClaim, teamRoleScopes, type CloudTeam } from "./cloud-team.ts";
+import { parseMemberClaim, teamRoleScopes, type CloudTeam, type TeamMember } from "./cloud-team.ts";
 import { isLoopbackHost } from "./request-auth.ts";
 import { formatPairingCode, type SessionRegistry } from "./sessions.ts";
 
@@ -191,6 +191,7 @@ export function createCloudPairing(options: {
   sessions: PairingSessions;
   /** The team this machine serves: then every pairing body must carry the Admin's `member` claim. */
   team?: CloudTeam | null;
+  memberSeen?(member: TeamMember): void;
   now?: () => number;
 }) {
   const { sessions } = options;
@@ -223,7 +224,7 @@ export function createCloudPairing(options: {
         return { status: 400, body: { error: "invalid_owner" } };
       }
       const ttl = Math.min((ttlSeconds as number | undefined) ?? CLOUD_PAIRING_DEFAULT_TTL_S, browser ? CLOUD_BROWSER_SIGN_IN_MAX_TTL_S : CLOUD_PAIRING_MAX_TTL_S);
-      if (member) sessions.revokeMember(member.email, member.role);
+      if (member) { options.memberSeen?.(member); sessions.revokeMember(member.email, member.role); }
       const opened = sessions.openPairing({
         scopes: member ? teamRoleScopes(member.role) : ["admin", "client"],
         label: typeof label === "string" && label.trim() ? label.trim() : "MausBot Cloud",

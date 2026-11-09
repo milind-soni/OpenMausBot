@@ -384,7 +384,7 @@ describe("resolveRequestAuth", () => {
       }, "POST"),
       options("/api/routines"),
     );
-    expect(desktop.auth?.kind).toBe("loopback");
+    expect(desktop.auth).toMatchObject({ kind: "loopback", desktopOwner: true });
 
     expect(resolveRequestAuth(
       request({ host: "127.0.0.1:8799" }, "GET"),
@@ -723,7 +723,7 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
 
   it("ignores service trust while the desktop capability is in force", () => {
     expect(check("PUT", "/api/config", { trust: "service", desktopToken: "owner-token", headers: { "x-openmausbot-desktop-owner": "owner-token" } }).auth)
-      .toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+      .toEqual({ kind: "loopback", scopes: ["admin", "client"], desktopOwner: true });
   });
 
   it("defaults to service on a hosted workspace, owner elsewhere, and lets the operator choose", () => {

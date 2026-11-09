@@ -4,6 +4,7 @@
 import type { BoxReport } from "../bot-box/box.ts";
 import { createCloudHealth, type CloudHealth, type CloudHealthDeps } from "../cloud-health.ts";
 import type { CloudHomeConfig } from "../cloud-home.ts";
+import type { TeamMember } from "../cloud-team.ts";
 import type { CloudPower } from "../cloud-power.ts";
 import { createCloudSignedRoutes } from "../routes/cloud-signed.ts";
 import type { TeamAdminSummary } from "../cloud-team-admin.ts";
@@ -13,6 +14,7 @@ export interface CloudSignedHostDeps {
   cloudHome: CloudHomeConfig | null;
   health: Omit<CloudHealthDeps, "box">;
   sessions: Pick<SessionRegistry, "openPairing" | "revokeMember" | "attemptAllowed" | "noteFailure" | "clearFailures">;
+  memberSeen?(member: TeamMember): void;
   /** The home's power once the server listens (a late-bound singleton of index.ts). */
   power: () => Pick<CloudPower, "report" | "prepareSleep"> | null;
   box: () => BoxReport;
@@ -31,7 +33,7 @@ export interface CloudSignedHostDeps {
 export function createCloudSignedHost(deps: CloudSignedHostDeps): { cloudHealth: CloudHealth | null; cloudSigned: ReturnType<typeof createCloudSignedRoutes> | null } {
   const cloudHealth = deps.cloudHome ? createCloudHealth({ ...deps.health, box: deps.box }) : null;
   const cloudSigned = deps.cloudHome && cloudHealth
-    ? createCloudSignedRoutes({ secret: deps.cloudHome.bootstrapSecret, sessions: deps.sessions, team: deps.cloudHome.team, health: cloudHealth, power: deps.power, box: deps.box,
+    ? createCloudSignedRoutes({ secret: deps.cloudHome.bootstrapSecret, sessions: deps.sessions, team: deps.cloudHome.team, memberSeen: deps.memberSeen, health: cloudHealth, power: deps.power, box: deps.box,
       ...(deps.cloudHome.team && deps.teamAdmin ? { teamAdmin: deps.teamAdmin } : {}),
       ...(deps.cloudHome.team && deps.memberLeft ? { memberLeft: deps.memberLeft } : {}), ...(deps.cloudHome.team && deps.policyChanged ? { policyChanged: deps.policyChanged } : {}), ...(deps.plan ? { plan: deps.plan } : {}), ...(deps.planTier ? { planTier: deps.planTier } : {}) })
     : null;

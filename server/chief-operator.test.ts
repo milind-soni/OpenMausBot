@@ -93,6 +93,45 @@ describe("Chief Operator", () => {
     expect(() => operator.rollback({ botId: "chief", receiptId: applied.receiptId, expectedRevision: restored.revision, active: () => true })).toThrow(/not the appointed/);
   }));
 
+  it.each([false, true])("P2 rejects same-setting ABA rollback, including after restart=%s", (restart) => fixture(({ operator, cfg, file, dataDir }) => {
+    operator.appoint({ botId: "chief", read: ["language"], write: ["language"], expectedRevision: "none" }, "owner@example.test");
+    const receipts = ["fr", "de", "fr"].map(value => {
+      const preview = operator.preview({ ...source, setting: "language", value });
+      return operator.apply({ ...source, previewId: preview.previewId, expectedRevision: preview.revision, active: () => true });
+    });
+    const current = restart ? new ChiefOperator({ dataDir, config: () => cfg, botIdentity: () => "bot-incarnation:owner:private",
+      writeSetting: (setting, value) => { cfg[setting] = value; writeFileSync(file, JSON.stringify(cfg)); }, changed: () => {} }) : operator;
+    const before = [readFileSync(file, "utf8"), readFileSync(join(dataDir, "chief-operator.json"), "utf8")];
+    expect(() => current.rollback({ botId: "chief", receiptId: receipts[0].receiptId, expectedRevision: current.describe("chief").settings[0].revision, active: () => true })).toThrow(/setting changed/);
+    expect(cfg.language).toBe("fr");
+    expect([readFileSync(file, "utf8"), readFileSync(join(dataDir, "chief-operator.json"), "utf8")]).toEqual(before);
+    expect(current.rollback({ botId: "chief", receiptId: receipts[2].receiptId, expectedRevision: current.describe("chief").settings[0].revision, active: () => true }).after).toBe("de");
+  }));
+
+  it("P2 preserves rollback across unrelated settings and failed receipts, and refuses a trimmed receipt", () => fixture(({ operator, cfg, dataDir }) => {
+    operator.appoint({ botId: "chief", read: ["language", "computerName"], write: ["language", "computerName"], expectedRevision: "none" }, "owner@example.test");
+    const change = (setting: "language" | "computerName", value: string) => {
+      const preview = operator.preview({ ...source, setting, value });
+      return operator.apply({ ...source, previewId: preview.previewId, expectedRevision: preview.revision, active: () => true });
+    };
+    const first = change("language", "fr");
+    change("computerName", "Office Mac");
+    const auditFile = join(dataDir, "chief-operator.json");
+    const state = JSON.parse(readFileSync(auditFile, "utf8"));
+    state.audit.push({ ...state.audit[1], id: randomUUID(), state: "failed" });
+    writeFileSync(auditFile, JSON.stringify(state));
+    expect(operator.rollback({ botId: "chief", receiptId: first.receiptId, expectedRevision: operator.describe("chief").settings[0].revision, active: () => true }).after).toBe("en");
+    expect(cfg.computerName).toBe("Office Mac");
+    const old = change("language", "fr");
+    const retained = JSON.parse(readFileSync(auditFile, "utf8"));
+    retained.audit.push(...Array.from({ length: 1_000 }, () => ({ ...retained.audit[0], id: randomUUID() })));
+    writeFileSync(auditFile, JSON.stringify(retained));
+    change("computerName", "Another Mac");
+    expect(JSON.parse(readFileSync(auditFile, "utf8")).audit).toHaveLength(1_000);
+    expect(() => operator.rollback({ botId: "chief", receiptId: old.receiptId, expectedRevision: operator.describe("chief").settings[0].revision, active: () => true })).toThrow(/No reversible receipt/);
+    expect(cfg.language).toBe("fr");
+  }));
+
   it("rejects unsupported settings and bounds the owner audit response", () => fixture(({ operator, dataDir }) => {
     expect(appointmentSchema.safeParse({ botId: "chief", read: ["openai"], write: [], expectedRevision: "none" }).success).toBe(false);
     let revision = "none";
