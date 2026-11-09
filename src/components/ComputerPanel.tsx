@@ -1468,8 +1468,7 @@ export function ComputerPanel({
               {!advanced && vpsPhase && (
                 <>
                   <p className="text-[12px]">{t("computer.simple.needsSetup", { name: bot.name })}</p>
-                  {!canProvisionVps && !canReplaceVps && <button
-                    type="button"
+                  {!canProvisionVps && !canReplaceVps && <button type="button"
                     onClick={SIMPLE_ONLY ? openConnectionSettings : () => setAdvancedMode(true)}
                     className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
                   >
