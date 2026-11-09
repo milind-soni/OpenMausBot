@@ -502,11 +502,19 @@ describe("surface pin provenance against the real server", () => {
     const workThread = (await apiOk("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.id === tester.id)
       .tasks.find((task: any) => task.openedBy?.botId === asker.id).threadId as string;
     rmSync(teammateDump, { force: true });
+    // Hold the asker's own turn that resumes with the result, to check it is not offered the hand-off's browser move.
+    rmSync(dumpFile, { force: true });
+    rmSync(finishFile, { force: true });
     writeFileSync(teammateFinish, "finish");
     const moved = await teammateTurn();
     expect(JSON.stringify(moved.prompt)).toContain("Continue the handed-off request");
     expect(moved.mcpConfig.mcpServers.browser).toBeDefined();
     expect(savedTask(tester.id, workThread)).toMatchObject({ surface: "browser" });
+    const resumedToken = (await dump()).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const resumedOffer = await (await fetch(base + "/api/internal/computer/select", {
+      headers: { authorization: `Bearer ${resumedToken}` } })).json() as any;
+    expect(resumedOffer.canSelect).not.toBe(true);
+    writeFileSync(finishFile, "finish");
     // The asker hears back from the browser turn, never from the turn that only asked to move.
     const replies = async () => JSON.stringify((await apiOk("GET", `/api/threads/${own.threadId}/messages?limit=60`)).messages);
     // "reply to: ..." is the fixture engine's own answer from the browser turn, not the prompt that started it.

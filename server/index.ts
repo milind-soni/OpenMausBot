@@ -7767,7 +7767,7 @@ async function beginTurn(
       !opts?.commsDepth && !opts?.coordination && !inheritedTeamComputer(bot) && bot.computer !== "off" && agentsMounted) {
     const source = store.activePath(threadId).findLast(message => message.id === userMessage?.id && message.role === "user" && !message.peerAsk);
     if (source) computerSelectionTurns.set(threadId, { generation: dispatchClaimId, botId: bot.id, source, text, dataContext: opts?.dataContext });
-  } else if (opts?.coordination && opts.commsDepth && !opts.computerSelectionContinuation && !opts.goalRunId && !opts.automationSource && !inheritedTeamComputer(bot) && bot.computer !== "off" && agentsMounted && browserSelectable(bot)) computerSelectionTurns.set(threadId, { generation: dispatchClaimId, botId: bot.id, text, handoff: { opts } });
+  } else if (opts?.coordination && coordinator.node(opts.coordination.id)?.parentId && opts.commsDepth && !opts.computerSelectionContinuation && !opts.goalRunId && !opts.automationSource && !inheritedTeamComputer(bot) && bot.computer !== "off" && agentsMounted && browserSelectable(bot)) computerSelectionTurns.set(threadId, { generation: dispatchClaimId, botId: bot.id, text, handoff: { opts } });
   store.setTaskActivity(bot.id, threadId, "working");
   // Watch from admission, not dispatch: a turn can wedge in setup long before any provider event exists.
   watchdog.watch(threadId, bot.id);
