@@ -413,7 +413,7 @@ export function describeQuiet(name: string, state: QuietState, quietMs: number, 
       if (state.nearFullContext) {
         return `${name} is waiting on its model: no reply for ${quiet}, but its request is still open. Its history is nearly full, so it may be compressing it.`;
       }
-      const ownStop = stopAfterMs > 0 ? `; the turn stops after ${formatQuietLimit(stopAfterMs)} of silence` : "";
+      const ownStop = stopAfterMs > 0 ? `; with no tool or question active, the turn may stop after ${formatQuietLimit(stopAfterMs)} of silence` : "";
       return `${name} is waiting on its model: no reply for ${quiet}, but its request is still open. Its model provider may be slow or busy${ownStop}.`;
     }
     case "busy":
