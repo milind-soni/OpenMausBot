@@ -1,6 +1,6 @@
 // Stdio bridge to the Cua MCP server in a VPS container; auth is the user's SSH config and agent, and nothing is stored here.
 import { runMcpBridge } from "./mcp-bridge.ts";
-import { vpsContainerMcpArgs, vpsDockerArgs } from "./vps-computer.ts";
+import { localDockerSocket, vpsContainerMcpArgs, vpsDockerArgs } from "./vps-computer.ts";
 import { DATA_DIR } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
 import { ensureVpsSshMaster, prepareVpsSsh } from "./vps-ssh.ts";
@@ -18,18 +18,22 @@ try {
 // The driving pair rides in env, not argv: argv is world-readable through `ps`.
 const controlUrl = process.env.OMB_CONTROL_URL ?? "";
 const controlToken = process.env.OMB_CONTROL_TOKEN ?? "";
-const ssh = prepareVpsSsh(DATA_DIR, augmentedPath());
+// A socket transport reaches the daemon directly; SSH would only add a way to fail
+// before the computer tools start when the alias is unreachable from this machine.
+const ssh = localDockerSocket() ? null : prepareVpsSsh(DATA_DIR, augmentedPath());
 
-try { await ensureVpsSshMaster(ssh, sshAlias); }
-catch (error) {
-  process.stderr.write(`VPS SSH initialization failed: ${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(1);
+if (ssh) {
+  try { await ensureVpsSshMaster(ssh, sshAlias); }
+  catch (error) {
+    process.stderr.write(`VPS SSH initialization failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  }
 }
 
 runMcpBridge({
   command: "docker",
   args,
-  env: { ...process.env, PATH: ssh.path },
+  ...(ssh ? { env: { ...process.env, PATH: ssh.path } } : {}), // socket mode: the bridge default PATH already resolves docker
   label: "VPS Cua Driver",
   // Probe the transport, not the driver: a busy desktop mid-tool-call must never look dead.
   liveness: { command: "docker", args: vpsDockerArgs(sshAlias, ["version", "--format", "{{.Server.Version}}"]) },
