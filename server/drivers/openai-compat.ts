@@ -43,6 +43,9 @@ const OLLAMA_STATUS_MS = 5_000;
 const OLLAMA_FIRST_LIST_MS = 2_000;
 
 const withEffort = (effort: string | undefined) => effort ? { reasoning_effort: effort } : {};
+const EFFORT_CHOICES = ["low", "medium", "high"].map((id) => ({ id, label: titleCaseModelId(id, /[-_ ]+/) }));
+/** OpenAI's reasoning models. o1-mini, o1-preview and the gpt-5 chat alias refuse `reasoning_effort`. */
+const OPENAI_REASONING = /^(?:o1(?!-mini|-preview)|o[3-9]|gpt-5(?!-chat))/i;
 
 const localFacts = ({ bytes, parameters, quantization, tools, vision }: OllamaModel) => ({
   ...(bytes ? { bytes } : {}), ...(parameters ? { parameters } : {}), ...(quantization ? { quantization } : {}),
@@ -241,6 +244,13 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       return true;
     };
 
+    const takesEffort = (id: string, row: OpenRouterModelRow) => config.catalog === "openai" ? OPENAI_REASONING.test(id)
+      : openRouter && Array.isArray(row.supported_parameters) && row.supported_parameters.includes("reasoning");
+    const apiEffort = (model: string, variant: string | undefined) => {
+      if (!variant || !catalog.options.find((option) => option.id === model)?.variants?.some((choice) => choice.id === variant)) return {};
+      return config.catalog === "openai" ? { reasoning_effort: variant } : openRouter ? { reasoning: { effort: variant } } : {};
+    };
+
     const fetchModels = async () => {
       if (!apiKey) return;
       if (ollamaCandidate && await listOllama()) return;
@@ -304,6 +314,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
             id,
             label: openRouter ? freeLabel(label, row) : label,
             ...(contextWindow ? { contextWindow } : {}),
+            ...(takesEffort(id, row) ? { variants: EFFORT_CHOICES } : {}),
             ...(config.catalog === "openai" ? {} : { custom: true }),
           });
         }
@@ -371,13 +382,14 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           return reason ? { reason, ollama: { state: status.state, url: status.url, ...(status.problem ? { problem: status.problem } : {}) } } : null;
         },
       } : {}),
-      modelVariants: ollamaCandidate,
+      modelVariants: ollamaCandidate || config.catalog === "openai" || openRouter,
       requestBody: (model, messages, stream, variant) => ({
         model,
         messages,
         stream,
         stream_options: stream ? { include_usage: true } : undefined,
         ...withEffort(thinkingEffort(fact(pickedName(model))?.thinking, variant)),
+        ...apiEffort(model, variant),
         ...(config.provider && isOpenRouterUrl(config.url)
           ? { provider: { order: [config.provider], allow_fallbacks: false } }
           : {}),
