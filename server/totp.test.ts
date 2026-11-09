@@ -69,6 +69,25 @@ describe("2FA setup keys", () => {
     expect(parseTotpKey(" jbsw y3dp ehpk 3pxp ")).toEqual({ secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA1", digits: 6, period: 30 });
   });
 
+  it.each(["A", "AAA", "AAAAAA"])("refuses a setup key ending in an incomplete base32 group (%s)", (suffix) => {
+    const secret = `JBSWY3DPEHPK3PXP${suffix}`;
+    expect(decodeBase32(secret)).toBeNull();
+    expect(parseTotpKey(secret)).toBeNull();
+    expect(parseTotpKey(`otpauth://totp/Example?secret=${secret}`)).toBeNull();
+  });
+
+  it.each([
+    ["MY", "f"],
+    ["MZXQ", "fo"],
+    ["MZXW6", "foo"],
+    ["MZXW6YQ", "foob"],
+    ["MZXW6YTB", "fooba"],
+    ["MZXW6YTBOI", "foobar"],
+  ])("decodes the complete base32 encoding %s with and without padding", (encoded, decoded) => {
+    expect(decodeBase32(encoded)?.toString("ascii")).toBe(decoded);
+    expect(decodeBase32(encoded.padEnd(Math.ceil(encoded.length / 8) * 8, "="))?.toString("ascii")).toBe(decoded);
+  });
+
   it("reads an otpauth:// address with its parameters", () => {
     expect(parseTotpKey("otpauth://totp/Example:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Example&algorithm=SHA256&digits=8&period=60"))
       .toEqual({ secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA256", digits: 8, period: 60 });

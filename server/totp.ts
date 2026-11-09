@@ -27,6 +27,7 @@ export function decodeBase32(text: string): Buffer | null {
       bytes.push((buffer >> bits) & 0xff);
     }
   }
+  if (bits >= 5) return null;
   return Buffer.from(bytes);
 }
 
