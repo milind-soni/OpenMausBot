@@ -3,6 +3,7 @@ import { t } from "@/lib/i18n";
 import { threadApprovalModes, type Bot, type InstanceInfo } from "@/state/store";
 import type { BotUpdatePatch } from "@/state/bot-patch-queue";
 import { approvalModeFor, supportsApprovalMode, type ApprovalMode } from "../../shared/approval-mode";
+import { effortChoices } from "@/lib/model-choices";
 import { atLeast, sameAccess, type BotAccess, type BotAccessLevel, type GrantedLevel } from "../../shared/bot-access";
 import { botOwner } from "../../shared/bot-owner";
 import { accessOfBot, withPerson } from "@/components/bot-access/access";
@@ -103,12 +104,12 @@ export function planTeamChange(bots: readonly Bot[], instances: readonly Instanc
     const next: ModelSelection = { instanceId: current.instanceId, model };
     if (current.variant && model === current.model) next.variant = current.variant;
     if (change.effort === undefined) {
-      if (current.effort) next.effort = current.effort;
+      if (current.effort && (effortChoices(engine, model)?.includes(current.effort) ?? true)) next.effort = current.effort;
     } else if (change.effort !== null) {
       if (engine.capabilities?.modelVariants) {
         return { bot, status: "skip", reason: t("teamSettings.skip.variantsOnly", { engine: engineName }) };
       }
-      if (!(engine.capabilities?.effortLevels ?? []).includes(change.effort)) {
+      if (!(effortChoices(engine, model) ?? []).includes(change.effort)) {
         return { bot, status: "skip", reason: t("teamSettings.skip.effortUnsupported", { engine: engineName }) };
       }
       next.effort = change.effort;

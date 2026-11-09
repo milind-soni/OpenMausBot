@@ -718,9 +718,9 @@ async function checkedModelSelection(
   if (models.default !== model && !offered.includes(model)) {
     throw new ToolInputError(`model '${model}' is not offered by instance '${instanceId}'`);
   }
-  const efforts = Array.isArray(instance.capabilities?.effortLevels) ? instance.capabilities.effortLevels : [];
+  const efforts = [records(models.options).find((option) => option.id === model)?.effortLevels, instance.capabilities?.effortLevels].find(Array.isArray) ?? [];
   if (effort && !efforts.includes(effort)) {
-    throw new ToolInputError(`effort '${effort}' is not offered by instance '${instanceId}'`);
+    throw new ToolInputError(`effort '${effort}' is not offered for model '${model}' on instance '${instanceId}'`);
   }
   return { instanceId, model, ...(effort ? { effort } : {}) };
 }

@@ -24,6 +24,15 @@ export const STATIC_GROK_MODELS: ModelCatalog = {
   ],
 };
 
+// Grok's levels vary by model and the CLI validates lazily (a rejected level only logs). grok-4.6 and grok-4.7 advertise
+// xhigh in Grok's own catalog; grok-4.5 rejects it, and a local slug's levels are unknown, so it keeps the common three.
+const GROK_EFFORT_LEVELS = ["low", "medium", "high", "xhigh"] as const;
+const GROK_XHIGH_MODELS = new Set(["grok-4.7", "grok-4.6"]);
+const grokWithEffortLevels = (catalog: ModelCatalog): ModelCatalog => ({
+  ...catalog,
+  options: catalog.options.map((option) => GROK_XHIGH_MODELS.has(option.id) ? option : { ...option, effortLevels: ["low", "medium", "high"] }),
+});
+
 const SLUG = /^[a-z0-9][a-z0-9._-]*$/i;
 
 /** `$GROK_HOME`, else `~/.grok`: Grok's sign-in, config and catalog. */
@@ -388,10 +397,9 @@ const support: AcpSupport = {
   displayName: "Grok",
   images: true,
   acceptsUnadvertisedImages: grokAcceptsUnadvertisedImages,
-  models: STATIC_GROK_MODELS,
-  resolveModels: (env) => mergeLocalInject(readGrokModelCatalog(env), env),
-  // Grok's levels vary by model and the CLI validates lazily (a rejected level only logs); grok-4.5 rejects xhigh.
-  effortLevels: ["low", "medium", "high"],
+  models: grokWithEffortLevels(STATIC_GROK_MODELS),
+  resolveModels: async (env) => grokWithEffortLevels(await mergeLocalInject(readGrokModelCatalog(env), env)),
+  effortLevels: GROK_EFFORT_LEVELS,
   defaultCli: "grok",
   nativeSource: "grok.acp",
   loginNote: "Grok is not signed in to your grok.com account — choose Sign in to Grok in engine setup",
