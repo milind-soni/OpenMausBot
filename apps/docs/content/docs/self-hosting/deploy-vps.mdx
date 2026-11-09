@@ -10,6 +10,71 @@ icon: Cloud
 
 From a blank Linux server to MausBot running on it around the clock, reachable from your laptop, the desktop app and your phone, with your bots working while every laptop is closed. It assumes nothing beyond being able to open a terminal and paste commands. About twenty minutes, most of it waiting.
 
+## Quick start: one command on your own domain
+
+For a fresh Ubuntu 22.04 or 24.04 server (x86-64, at least 2 CPUs, 4 GB of memory and 20 GB of free disk) and a domain name whose A record already points at it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
+```
+
+The installer ([`deploy/install.sh`](https://github.com/milind-soni/OpenMausBot/blob/main/deploy/install.sh)) does path B below for you and ends with MausBot answering at `https://maus.example.com`.
+
+**It checks the server first, and changes nothing while it checks.** Each check that fails prints one sentence saying what to fix, and nothing is installed until all pass:
+
+| Check | Passes when |
+|---|---|
+| Operating system | Ubuntu 22.04 or 24.04 |
+| Processor | x86-64, 2 cores or more |
+| Memory | 4 GB or more (8 GB suggested) |
+| Free disk | 20 GB or more, where the install and Docker keep their files |
+| Docker | Docker 24 or newer with the Compose plugin, running, not rootless |
+| Ports | 80 and 443 are free |
+| DNS | the domain resolves to this server's public address |
+| Outbound | HTTPS reaches the image registries (`ghcr.io`, `pkg-containers.githubusercontent.com`, Docker Hub) and Let's Encrypt |
+| User namespaces | switched on, for the bots' sandbox |
+| Clock | within five minutes of the internet's |
+| Version | a MausBot release to install was found |
+
+To run only the checks, add `--check`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --check --domain maus.example.com
+```
+
+If Docker is missing, the installer asks before installing it with Docker's official script (`get.docker.com`); `--install-docker` says yes ahead of time. It installs nothing else on the server.
+
+**Then it installs** everything under one folder, `/opt/openmausbot` (`--dir` picks another):
+
+| Path | What |
+|---|---|
+| `compose.yaml`, `Caddyfile` | the same server-plus-Caddy setup as path B; written again on every run |
+| `.env` | your settings: `DOMAIN`, the pinned version (`OMB_IMAGE`) and anything you add, such as [who may sign in with an email](/docs/self-hosting). The installer keeps your lines |
+| `data/` | everything MausBot stores: chats, bots, engine sign-ins, paired devices. Never touched once it exists |
+| `caddy/` | the HTTPS certificates |
+
+It runs the newest release, pinned by its version; once a `stable` channel is published it follows that instead. It never runs `latest`, which follows every commit. It then waits until the server reports healthy and `https://maus.example.com` answers with a valid certificate, and prints the address.
+
+**Sign in as the first admin** with a one-time link made on the server:
+
+```sh
+cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair --label "First admin"
+```
+
+Open the link it prints, or paste it into the desktop app under **＋ → Connect to a server**. To sign in with an emailed code instead, run the installer with `--email you@example.com`.
+
+- **Update or repair:** run the same command again. It checks the server, rewrites its own files, moves to the newest release and leaves `.env` and `data/` alone.
+- **Stop:** `--uninstall` stops the server and removes its containers. It deletes nothing: your data stays in `/opt/openmausbot/data`.
+- **Every other command in this guide** that starts `docker compose` for path B works from `/opt/openmausbot`.
+- **What the installer contacts:** the registries and Let's Encrypt from the table, GitHub's release list, and `cloudflare.com/cdn-cgi/trace` to learn the server's public address for the DNS check. It sends no telemetry.
+- **Behind a load balancer or NAT** that forwards ports 80 and 443 to the server, set `OMB_INSTALL_SKIP_DNS=1` to skip the DNS check.
+
+The installer also accepts the one-time code of a server connected to MausBot. That offering is not available yet.
+
+Not on Ubuntu, or prefer to do it by hand? Use one of the three ways below.
+
+## Three ways in, by hand
+
 Three ways to make the server reachable are covered. Pick one; the rest of the guide is the same.
 
 | | You need | Who can reach it | Best for |
@@ -94,6 +159,8 @@ Skip to "Install and sign the engines in".
 ## Path B: your own domain, with Docker
 
 One container for the server plus Caddy for HTTPS at `https://maus.example.com`.
+
+The [installer](#quick-start-one-command-on-your-own-domain) does these steps for you on Ubuntu. Do them by hand on another system, to build your own image with `ENGINES`, or to see what it does.
 
 1. **Point a name at the server.** In your DNS provider add an **A record** (name `maus`, value the server's public IP). After a few minutes `ping maus.example.com` should answer with that IP. Ports 80 and 443 must be open; most providers open them by default.
 2. **Install Docker:**
@@ -290,6 +357,7 @@ same release without an npm install prompt or an implicit upgrade.
   Check that installation succeeded before starting. A service restart by itself
   does not update the installed package. For foreground `npx` usage, specify the
   desired release as `npx --yes openmausbot@X.Y.Z serve --tunnel`.
+- **Installed with the installer:** run the install command again.
 - **Path B:** `cd OpenMausBot/deploy && docker compose pull omb && docker compose up -d`.
 
 Routines and queued work survive a restart; a turn running at that moment does not, so update between runs.
@@ -324,6 +392,15 @@ volume name, so use your actual volume name if you changed the Compose project:
 docker compose stop omb
 backup_dir=$(mktemp -d "$PWD/openmausbot-backup.XXXXXX")
 docker run --rm -v deploy_data:/data:ro -v "$backup_dir":/b alpine sh -c 'umask 077; tar czf /b/openmausbot-data.tgz -C /data .'
+```
+
+With the installer, the data is a folder, not a volume. Archive it the same way:
+
+```sh
+cd /opt/openmausbot && sudo docker compose stop omb
+backup_dir=$(mktemp -d "$PWD/openmausbot-backup.XXXXXX")
+sudo tar czf "$backup_dir/openmausbot-data.tgz" -C /opt/openmausbot data
+sudo docker compose start omb
 ```
 
 Each command creates a fresh private folder in the current directory, so it
