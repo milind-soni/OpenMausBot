@@ -1,13 +1,8 @@
-// Changes: Created Mola provider implementation following Boat pattern.
+// Mola provider implementation following Boat pattern.
 // Mola Cloud API v1 (https://cloud.mola.sh/api/v1): uses /computers endpoints, viewer grants for desktop
 //   Source: obaid/mola-cp (private repo) - StoreApiComputerRequest.php, ComputerController.php, ViewerGrantController.php
 // mola-core self-hosted API v1 (http://127.0.0.1:4141/v1): uses /machines endpoints, direct desktop links
 //   Source: https://github.com/obaid/mola-core/blob/main/docs/api.md
-//
-// Uncertain/Not Confirmed:
-// - Cloud API response shape for computer status fields (assumed same as self-hosted: data.status, data.id)
-// - Cloud API error response shapes (using same handling as self-hosted)
-// - Whether Cloud API auto-stop behavior differs from self-hosted
 import { createHash } from "node:crypto";
 
 import { DATA_DIR, type AppConfig } from "./config.ts";
@@ -27,6 +22,31 @@ function resourcePath(apiUrl: string): "computers" | "machines" {
 
 function getMolaApiUrl(cfg: AppConfig): string {
   return cfg.mola?.apiUrl || molaProviderApi();
+}
+
+/**
+ * Derives the viewer origin for Mola Cloud viewer grants.
+ * Uses MOLA_VIEWER_ORIGIN env override if set, otherwise derives from OpenMausBot's
+ * configured public URL (customDomain or publicUrl from CLI startup config).
+ * Falls back to https://localhost (ViewerGrantController requires HTTPS).
+ */
+export function getMolaViewerOrigin(cfg: AppConfig): string {
+  const override = process.env.MOLA_VIEWER_ORIGIN?.trim();
+  if (override) return override;
+  
+  // Use customDomain if configured
+  if (cfg.customDomain) {
+    const domain = cfg.customDomain.trim().replace(/\/+$/, "");
+    return domain.startsWith("http") ? domain : `https://${domain}`;
+  }
+  
+  // Use publicUrl from CLI startup if configured
+  if (cfg.cliStartup?.publicUrl) {
+    return cfg.cliStartup.publicUrl.trim().replace(/\/+$/, "");
+  }
+  
+  // Fallback to https://localhost (satisfies HTTPS requirement)
+  return "https://localhost";
 }
 
 export const MAX_REMOTE_COMMAND_LENGTH = 4_000;
@@ -182,10 +202,12 @@ async function mintDesktopUrl(cfg: AppConfig, machineId: string, { requestMs = 3
   
   if (isCloudApi(apiUrl)) {
     // Cloud API: create viewer grant (obaid/mola-cp: app/Http/Controllers/Api/V1/ViewerGrantController.php)
+    // ViewerOrigin::normalize requires HTTPS origin format
+    const origin = getMolaViewerOrigin(cfg);
     const { body } = await molaJson(cfg, `/${resource}/${machineId}/viewers`, { 
       method: "POST", 
       body: JSON.stringify({ 
-        origin: "https://openmausbot.local", // Required HTTPS origin
+        origin, // Derived from OpenMausBot's publicUrl/customDomain or MOLA_VIEWER_ORIGIN
         mode: "desktop", // Required: desktop, window, or browser
         expires_in_minutes: 60 // Default 60, max 1440
       }),

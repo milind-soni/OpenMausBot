@@ -8,6 +8,7 @@ import {
   molaConfigured,
   describeMolaAccount,
   verifyToken,
+  getMolaViewerOrigin,
 } from "./mola.ts";
 import type { AppConfig } from "./config.ts";
 
@@ -131,6 +132,55 @@ describe("Mola provider", () => {
   describe("command length validation", () => {
     it("has a reasonable max command length", () => {
       expect(MAX_REMOTE_COMMAND_LENGTH).toBe(4_000);
+    });
+  });
+
+  describe("getMolaViewerOrigin", () => {
+    const originalEnv = process.env.MOLA_VIEWER_ORIGIN;
+
+    afterEach(() => {
+      if (originalEnv !== undefined) {
+        process.env.MOLA_VIEWER_ORIGIN = originalEnv;
+      } else {
+        delete process.env.MOLA_VIEWER_ORIGIN;
+      }
+    });
+
+    it("uses MOLA_VIEWER_ORIGIN env override when set", () => {
+      process.env.MOLA_VIEWER_ORIGIN = "https://custom.example.com";
+      expect(getMolaViewerOrigin({} as AppConfig)).toBe("https://custom.example.com");
+    });
+
+    it("derives from customDomain when configured", () => {
+      delete process.env.MOLA_VIEWER_ORIGIN;
+      expect(getMolaViewerOrigin({ customDomain: "app.example.com" } as AppConfig)).toBe("https://app.example.com");
+      expect(getMolaViewerOrigin({ customDomain: "https://secure.example.com" } as AppConfig)).toBe("https://secure.example.com");
+    });
+
+    it("derives from cliStartup.publicUrl when configured", () => {
+      delete process.env.MOLA_VIEWER_ORIGIN;
+      expect(getMolaViewerOrigin({ cliStartup: { access: "public-url", publicUrl: "https://public.example.com" } } as AppConfig)).toBe("https://public.example.com");
+    });
+
+    it("prefers customDomain over publicUrl", () => {
+      delete process.env.MOLA_VIEWER_ORIGIN;
+      expect(
+        getMolaViewerOrigin({
+          customDomain: "custom.example.com",
+          cliStartup: { access: "public-url", publicUrl: "https://public.example.com" },
+        } as AppConfig)
+      ).toBe("https://custom.example.com");
+    });
+
+    it("falls back to https://localhost when no config present", () => {
+      delete process.env.MOLA_VIEWER_ORIGIN;
+      expect(getMolaViewerOrigin({} as AppConfig)).toBe("https://localhost");
+    });
+
+    it("strips trailing slashes from URLs", () => {
+      delete process.env.MOLA_VIEWER_ORIGIN;
+      expect(getMolaViewerOrigin({ customDomain: "app.example.com/" } as AppConfig)).toBe("https://app.example.com");
+      expect(getMolaViewerOrigin({ cliStartup: { access: "public-url", publicUrl: "https://public.example.com///" } } as AppConfig)).toBe("https://public.example.com");
     });
   });
 });
