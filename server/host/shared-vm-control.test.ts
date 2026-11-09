@@ -111,6 +111,12 @@ describe("what a hold on the shared desktop reaches", () => {
     expect(vm.snapshot("ada").held).toBe(false);
   });
 
+  it("outside shared mode a turn's mounted VM adds no key to its gate", () => {
+    const { control, vm } = fixture({ mode: "per-bot", bots: [{ id: "ada", computer: "cloud" }], vmTurns: { r: SHARED_LOCAL_VM_TARGET } });
+    control.take(DESK);
+    expect(vm.snapshot("ada", "r").held).toBe(false);
+  });
+
   it("tells every bot with a conversation on the desktop, and each its merged state", () => {
     const { control, vm } = fixture({ bots: [{ id: "ada" }, { id: "books", computer: "cloud" }, { id: "cy", computer: "cloud" }], tasks: { t: ["books", "vm"] } });
     expect(vm.membersOf(DESK)).toEqual(["ada", "books"]);
@@ -290,6 +296,12 @@ describe("what a hold on the shared desktop reaches", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("a phone's take naming the shared desktop, or a VPS its bot does not have, still starts the expiry clock", () => {
+    const { vm, bot } = fixture({ mode: "per-bot", bots: [{ id: "ada", computer: "vm" }] });
+    expect(vm.armed(phone, bot("ada"), undefined, "ada", "vps/ada")).toBe(true);
+    expect(fixture().vm.armed(phone, fixture().bot("ada"), undefined, DESK, "local/shared")).toBe(true);
   });
 
   it.each(["shared", "per-bot"] as const)("a phone's take naming a VM bot's VPS holds the bot's own key and never lapses, in %s mode", (mode) => {

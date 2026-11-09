@@ -100,6 +100,10 @@ describe("the computer a sign-in card lent the person", () => {
     w.add({ ...card(), signIn: { ...card().signIn, place: "vm" } });
     w.settle.settle("dachs", "work", "m1", "done");
     expect(w.handedBackKeys).toEqual(["dachs/work"]);
+    const answered = world();
+    answered.add({ ...card(), signIn: { ...card().signIn, place: "vm" } });
+    answered.settle.answerInChat("dachs", "work", "Bin angemeldet");
+    expect(answered.handedBackKeys).toEqual(["dachs/work"]);
   });
 
   it("goes back on every path when it is the bot's own, and a shared one only when the person settles its last plea", () => {

@@ -138,7 +138,7 @@ export function createSharedVmControl(deps: SharedVmControlDeps) {
      * desktop is not one, though it lands on the key a per-bot VM shares. */
     armed: (auth: RequestAuth, bot: BotRecord, threadId: string | undefined, key: string, target?: string): boolean => {
       const phone = auth.kind === "loopback" ? Boolean(auth.companionDevice) : auth.via === "bearer";
-      return phone && !target?.startsWith("vps/") && (key === SHARED_VM_CONTROL_KEY ||
+      return phone && !(target?.startsWith("vps/") && bot.cloudBackend === "vps") && (key === SHARED_VM_CONTROL_KEY ||
         (key === bot.id && deps.mode() === "per-bot" && onLocalVm(bot, threadId)));
     },
     release: (bot: BotRecord, threadId: string | undefined, lease: string) =>
