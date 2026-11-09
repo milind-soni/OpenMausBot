@@ -4915,6 +4915,7 @@
   "automations.toggle": "Ligar ou desligar “{name}”",
   "automations.run.done": "Concluída",
   "automations.run.nothingNew": "Nada de novo",
+  "automations.run.waitingOnTeam": "Aguardando o trabalho que repassou terminar",
   "automations.run.stopped": "Interrompida",
   "automations.run.stoppedBecause": "Interrompida: {reason}",
   "automations.run.failed": "Não terminou",

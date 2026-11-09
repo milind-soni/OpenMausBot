@@ -5185,6 +5185,7 @@
   "automations.toggle": "Turn “{name}” on or off",
   "automations.run.done": "Done",
   "automations.run.nothingNew": "Nothing new",
+  "automations.run.waitingOnTeam": "Waiting for work it handed on to finish",
   "automations.run.stopped": "Stopped",
   "automations.run.stoppedBecause": "Stopped: {reason}",
   "automations.run.failed": "It didn't finish",
