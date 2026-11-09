@@ -204,6 +204,19 @@ describe("surfacePrompt", () => {
     expect(text).toMatch(/say which surface — the Browser tab or the cloud computer/);
   });
 
+  it("tells the bot the two browsers keep separate sign-ins, so a site signed in on the computer is used there", () => {
+    for (const computer of ["vm", "cloud"] as const) {
+      const text = surfacePrompt({ computer, browser: true });
+      const label = computer === "vm" ? "the Local VM" : "the cloud computer";
+      expect(text).toContain("The two browsers keep separate sign-ins: a site signed in on one is not signed in on the other.");
+      expect(text).toContain(`When a web task needs a site that is already signed in on ${label}, do it there instead of asking the user to sign in again in the Browser tab, and keep that task there.`);
+    }
+    // One surface only, or the person's own computer: nothing to tell apart, wording unchanged.
+    expect(surfacePrompt({ computer: "vm", browser: false })).not.toContain("separate sign-ins");
+    expect(surfacePrompt({ computer: null, browser: true })).not.toContain("separate sign-ins");
+    expect(surfacePrompt({ computer: "local", browser: true })).not.toContain("separate sign-ins");
+  });
+
   it("names only the computer when it is the only surface", () => {
     const text = surfacePrompt({ computer: "vm", browser: false });
     expect(text).toMatch(/happens on the Local VM, web pages included/);
