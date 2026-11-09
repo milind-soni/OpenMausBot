@@ -1,4 +1,4 @@
-// Send to My Cloud: this computer's bots, their skills, logins, 1Password, settings and chats go to the person's own
+// Send to My Cloud: this computer's bots, their skills, logins, saved secrets, 1Password, settings and chats go to the person's own
 // Cloud. One direction; added and updated, never deleted; one action for every entry point. Chats go by row
 // (server/cloud-send-chats.ts): each conversation's rows after the last one My Cloud took, so its history goes once. A
 // Cloud too old for that gets Bring newer chats' copy, only from a send the person asked for.
@@ -176,7 +176,7 @@ function told(outcome, dismissed) {
 
 /** What a send got across, in counts only: My Cloud's page names nothing of this computer's but its bots. */
 function sentCounts(result) {
-  return { bots: result.bots.length, updatedBots: result.updatedBots.length, skills: result.skills, logins: result.logins, onePassword: result.onePassword,
+  return { bots: result.bots.length, updatedBots: result.updatedBots.length, skills: result.skills, logins: result.logins, ...(result.secrets ? { secrets: result.secrets } : {}), onePassword: result.onePassword,
     settings: result.settings.length, chats: result.chats ? { conversations: result.chats.conversations, messages: result.chats.messages } : null };
 }
 
@@ -283,7 +283,9 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
    * fields were not recorded yet has them all sent again. */
   function plan(origin, mine, theirs, force = [], { everything = false } = {}) {
     const kept = entry(origin);
-    const planned = planSend({ local: mine, cloud: theirs, sent: kept.sent, off: everything ? removedOnly(kept.off) : kept.off, force: [...force, ...Object.keys(kept.created)] });
+    // A Cloud too old to keep a secret by its id would make a new one every send.
+    const going = theirs?.vault ? mine : { ...mine, items: (mine?.items ?? []).filter((item) => item.kind !== "secret") };
+    const planned = planSend({ local: going, cloud: theirs, sent: kept.sent, off: everything ? removedOnly(kept.off) : kept.off, force: [...force, ...Object.keys(kept.created)] });
     if (everything && !team) mergeRoutines(planned.rows);
     let changed = false;
     for (const [key, parts] of Object.entries(planned.baseline)) { kept.sent[key] = { ...kept.sent[key], ...parts }; changed = true; }
@@ -408,7 +410,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const cloudItems = new Map(theirs.items.map((item) => [item.key, item]));
       const ctx = { origin, session, result, cloudBots, localItems, cloudItems, planned: new Map(planned.rows.map((row) => [row.key, row])), bots: null, skillLists: new Map(),
         sentKeys: new Set(), sentParts: {}, recorded: new Set(), move, ownMove: move && !team, summaryRoute, computer: computer?.label ?? null };
-      const order = { "library-skill": 0, "imported-skill": 0, bot: 1, skill: 2, setting: 3, login: 4, "1password": 5 };
+      const order = { "library-skill": 0, "imported-skill": 0, bot: 1, skill: 2, setting: 3, login: 4, secret: 4, "1password": 5 };
       const automations = new Set(AUTOMATION_KINDS);
       const goRow = async (row) => {
         try { await sendRow(ctx, row); }
@@ -686,6 +688,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     if (row.kind === "skill") return sendSkill(ctx, row);
     if (row.kind === "setting") return sendSetting(ctx, row);
     if (row.kind === "login") return sendLogin(ctx, row);
+    if (row.kind === "secret") return sendSecret(ctx, row);
     if (row.kind === "1password") return sendOnePassword(ctx, row);
   }
 
@@ -862,6 +865,18 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     if (Array.isArray(login.bots) && kept.length < login.bots.length) ctx.result.notes.push({ kind: "narrowed", login: row.label });
     done(ctx, row.key);
     ctx.result.logins++;
+  }
+
+  /** A saved Vault secret, under its id here so an MCP server's `vault:<id>` keeps naming it there: never a linked item. */
+  async function sendSecret(ctx, row) {
+    const secret = (await handoff({ kind: "secret", id: row.id }))?.secret;
+    if (!record(secret)) throw new CloudSendError("local", "This secret could not be read on this computer.");
+    const kept = botsOnCloud(secret.bots, ctx.cloudBots);
+    const saved = await ctx.session.call("POST", "/api/vault/secrets", { id: secret.id, name: secret.name, value: secret.value, bots: kept, source: secret.source, ...(secret.refOnly ? { refOnly: true } : {}) });
+    if (!saved.ok) throw refusedError("refused", saved, "My Cloud could not save the secret.");
+    if (Array.isArray(secret.bots) && kept.length < secret.bots.length) ctx.result.notes.push({ kind: "narrowed", login: row.label });
+    done(ctx, row.key);
+    ctx.result.secrets = (ctx.result.secrets ?? 0) + 1;
   }
 
   async function sendOnePassword(ctx, row) {

@@ -12,6 +12,7 @@ import { McpHttpError, McpRpcError } from "./mcp-http.ts";
 import type { McpOAuthManager } from "./mcp-oauth.ts";
 import { withMcpSignIn } from "./mcp-oauth.ts";
 import { probeMcpServer, sendsCredentials, type McpProbeOptions } from "./mcp-probe.ts";
+import type { McpKeys } from "./vault/mcp-keys.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
 import { lenientToolValidator, schemaProblems } from "./mcp-schema-validator.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -42,6 +43,8 @@ export interface ChatAppsMcpDeps {
   store: ChatAppsMcpStore;
   apps: ChatApps;
   storedServers(): Record<string, unknown>;
+  /** A server's `vault:<id>` keys, read when it is probed. */
+  keys?: McpKeys;
   mountedServers(bot: BotRecord): Record<string, McpServerSpec>;
   personMcp?(): readonly string[];
   oauth: ChatAppsMcpOAuth;
@@ -393,10 +396,13 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
       const stored = storedServer(name, deps.storedServers()[name]);
       if (!stored?.enabled || stored.apps === false || stored.runsOn) return;
       if (isRemoteMcpServer(stored) && deps.oauth.authState(name, stored.url) === "needs-sign-in") return;
-      const target = isRemoteMcpServer(stored) ? await signedIn(name, stored) : stored;
+      await deps.keys?.warm(name, stored);
+      const keyed = deps.keys ? deps.keys.resolve(name, stored) : { ok: true as const, server: stored };
+      if (!keyed.ok) return;
+      const target = isRemoteMcpServer(keyed.server) ? await signedIn(name, keyed.server) : keyed.server;
       if (!target) return;
       const probed = { ...target, enabled: true } as StoredMcpServer;
-      const result = await probe(probed, BACKGROUND_PROBE_MS, undefined, probeOptions(name, stored));
+      const result = await probe(probed, BACKGROUND_PROBE_MS, undefined, probeOptions(name, keyed.server));
       if (!result.ok && result.auth === "required" && isRemoteMcpServer(probed) && !sendsCredentials(probed)) deps.oauth.requireSignIn(name, probed.url);
       log(`probed ${name}: ${result.ok ? `apps=${catalog.get(name, stored)?.apps === true}` : result.auth === "required" ? "needs sign-in" : "failed"}`);
     }).catch((error: unknown) => log(`probe of ${name} failed: ${String(error)}`));

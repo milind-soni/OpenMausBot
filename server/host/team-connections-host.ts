@@ -16,7 +16,7 @@ import type { AppConfig } from "../config.ts";
 import type { McpServerSpec } from "../contracts.ts";
 import { serviceSlugFor } from "../connector-verdict.ts";
 import { type McpOAuthManager, type McpSignInPhase, withMcpSignIn, withoutPendingSignIn } from "../mcp-oauth.ts";
-import { isRemoteMcpServer, parseStoredMcpServer } from "../mcp-registry.ts";
+import { isRemoteMcpServer, parseStoredMcpServer, type McpOAuthClientConfig } from "../mcp-registry.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { appLabel, ConnectionScopes, PeopleConnections, personAppOf, SCOPES_FILE, type BrokerAccess } from "../team-connections.ts";
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolsFor } from "../connector-app-tools.ts";
@@ -45,6 +45,8 @@ export interface TeamConnectionsHostDeps {
   mcpOAuth: McpOAuthManager;
   /** The bot's enabled MCP servers, as policy allows them, before any sign-in is attached. */
   botMcp(bot: McpBot): Record<string, McpServerSpec>;
+  /** An admin's OAuth app as a member's sign-in uses it: its client secret read from the Vault when it is kept there. */
+  oauthClient?(name: string, oauth: McpOAuthClientConfig): McpOAuthClientConfig;
   /** Whether whoever started a member's sign-in (a session, or a chat's Sign in card) is still there to finish it. */
   isOwnerLive(owner: string): boolean;
   onSettled?(name: string, phase: McpSignInPhase, owner: string): void;
@@ -71,7 +73,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
   const people = new PeopleConnections({
     dataDir: deps.dataDir,
     brokerUrl: deps.brokerUrl,
-    clients: (name, url) => { const server = teamServer(name); return server && isRemoteMcpServer(server) && server.url === url ? server.oauth : undefined; },
+    clients: (name, url) => { const server = teamServer(name); return server && isRemoteMcpServer(server) && server.url === url ? (server.oauth && deps.oauthClient ? deps.oauthClient(name, server.oauth) : server.oauth) : undefined; },
     isOwnerLive: deps.isOwnerLive,
     ...(deps.onSettled ? { onSettled: deps.onSettled } : {}),
   });

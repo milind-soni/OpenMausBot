@@ -3,6 +3,7 @@ import { hostedWorkspaceConfiguration } from "../enterprise.ts";
 import { runsElsewhere, type McpConfig, type McpConfigDeps, type McpConfigResult } from "../host/mcp-config.ts";
 import { McpOAuthError, McpSignInError, mcpCallbackOrigin } from "../mcp-oauth.ts";
 import { isRemoteMcpServer, mcpServerBody, mcpServerServes, parseMcpServerMutation, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "../mcp-registry.ts";
+import { isVaultItemId } from "../vault/mcp-keys.ts";
 import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { toolBudgetOf } from "../tool-budgets.ts";
@@ -23,6 +24,12 @@ function botMcpServers(listed: readonly ListedMcpServer[], bot: { id: string; mc
     ...(server.offFor?.includes(bot.id) ? { offFor: true as const } : {}),
   }));
 }
+
+/** The Vault items a server arriving in a move may read its `vault:<id>` keys from. */
+const vaultKeysOf = (body: unknown): string[] | undefined => {
+  const keys = (body as { vaultKeys?: unknown } | null)?.vaultKeys;
+  return Array.isArray(keys) ? keys.filter(isVaultItemId) : undefined;
+};
 
 export interface McpServerRouteDeps extends Pick<McpConfigDeps, "cfg" | "sessions" | "mcpOAuth" | "teamConnections" | "cloudHome" | "fallbackPublicUrl" | "savedCustomDomain" | "appCatalog"> {
   config: McpConfig;
@@ -163,7 +170,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       if (!parsed.ok) return json(res, 400, { error: parsed.error });
       const placed = deps.place ? await deps.place(parsed.server, auth) : { ok: true as const, server: parsed.server };
       if (!placed.ok) return json(res, 409, { error: placed.error });
-      return answer(res, json, config.add(name, placed.server));
+      return answer(res, json, config.add(name, placed.server, vaultKeysOf(body)));
     }
 
     // The {"mcpServers": {...}} block other agent tools write; imported servers stay disabled until enabled.
@@ -209,9 +216,10 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
         }
         return answer(res, json, key === "enabled" ? config.setEnabled(name, body.enabled) : config.setApps(name, body.apps));
       }
-      const parsed = parseMcpServerMutation(name, body, existing.server);
+      const { vaultKeys: _keys, ...fields } = (body ?? {}) as Record<string, unknown>;
+      const parsed = parseMcpServerMutation(name, fields, existing.server);
       if (!parsed.ok) return json(res, 400, { error: parsed.error });
-      return answer(res, json, config.replace(name, parsed.server));
+      return answer(res, json, config.replace(name, parsed.server, vaultKeysOf(body)));
     }
     return PASS;
   };
