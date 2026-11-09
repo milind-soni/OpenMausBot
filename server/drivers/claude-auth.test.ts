@@ -56,6 +56,7 @@ describe("claudeAuthFailure", () => {
   it("reads an expired OAuth session in a CLI-marked frame, and a model's prose about one as prose", () => {
     expect(claudeAuthFailure({ is_api_error_message: true }, "OAuth session expired. Please sign in again.")).toBe(true);
     expect(claudeAuthFailure({ error: "api_error" }, "Your OAuth token has expired")).toBe(true);
+    expect(claudeAuthFailure({ error: "api_error" }, "OAuth token is not expired; the API request failed")).toBe(false);
     expect(claudeAuthFailure({ error: "api_error", is_api_error_message: true }, "The session could not be extended")).toBe(false);
     expect(claudeAuthFailure({}, "The OAuth session expired on the demo site.")).toBe(false);
   });

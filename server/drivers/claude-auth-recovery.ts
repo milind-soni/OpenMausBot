@@ -10,7 +10,7 @@ type Refusal = { text: string; kind: "auth" | "limit"; said?: string; resetsAt?:
 type Pending = { refusal?: Refusal; refused?: boolean; buffered: RuntimeEvent[]; settle: (error?: Error) => void };
 
 /** Claude's saved sign-in ran out and could not refresh, in the CLI's own words ("OAuth session expired"). */
-export const claudeOAuthExpired = (text: string): boolean => /\boauth\b.{0,40}\b(?:expired|revoked)\b/i.test(text);
+export const claudeOAuthExpired = (text: string): boolean => /\boauth\b(?!.{0,40}\bnot\b).{0,40}\b(?:expired|revoked)\b/i.test(text);
 
 /** Only CLI-marked API errors count; assistant prose about signing out does not. */
 export function claudeAuthFailure(frame: { error?: unknown; is_api_error_message?: unknown }, text: string): boolean {
