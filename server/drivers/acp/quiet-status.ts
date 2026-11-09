@@ -392,6 +392,7 @@ const minutes = (ms: number): string => {
   return `${Math.round(ms / 60_000)} min`;
 };
 
+/** One sentence for the notice row: what a quiet turn is doing, and what ends it. */
 export function describeQuiet(name: string, state: QuietState, quietMs: number, stopAfterMs: number): string {
   const quiet = minutes(quietMs);
   switch (state.kind) {
