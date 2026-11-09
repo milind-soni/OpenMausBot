@@ -220,11 +220,13 @@ describe("a person's hold on the shared Local VM", () => {
     // A bot a person's hold reaches cannot be deleted, so every hold a test left goes first.
     await control(api, witness, { action: "release" });
     const bots = (await api("GET", "/api/bots?messages=0")).body?.bots ?? [];
-    for (const botId of created.splice(0)) {
+    while (created.length) {
+      const botId = created[0]!;
       const tasks: Array<{ threadId: string }> = bots.find((bot: any) => bot.id === botId)?.tasks ?? [];
       for (const threadId of [undefined, ...tasks.map(task => task.threadId)]) await control(api, botId, { action: "release" }, threadId);
       await api("POST", `/api/bots/${botId}/interrupt`, {});
       await until(() => api("DELETE", `/api/bots/${botId}`).then(response => response.status), status => status === 200 || status === 404);
+      created.shift();
     }
     rmSync(finishFile, { force: true });
     rmSync(dumpFile, { force: true });
