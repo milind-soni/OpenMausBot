@@ -13,7 +13,12 @@ let api: Server;
 let origin = "";
 let dir = "";
 const calls: Array<{ method: string; path: string; body: unknown }> = [];
-let providersBody: unknown = [{ id: "github", name: "GitHub" }, { id: "gmail", name: "Gmail" }];
+let providersBody: unknown = [
+  { id: "github", name: "GitHub", authTypes: ["oauth2", "api_key"], iconUrl: "https://example.test/github.png" },
+  { id: "gmail", name: "Gmail", authTypes: ["oauth2"] },
+  { id: "npm", name: "npm", authTypes: ["no_auth"] },
+  { id: "some_api_key_app", name: "API-key app", authTypes: ["api_key"] },
+];
 let actionsBody: unknown = [
   { id: "github.get_current_user", description: "Who am I", inputSchema: { type: "object", properties: { verbose: { type: "boolean" } } } },
   { id: "github.create_issue", description: "Open an issue", inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
@@ -92,7 +97,12 @@ afterAll(async () => {
 
 beforeEach(() => {
   calls.length = 0;
-  providersBody = [{ id: "github", name: "GitHub" }, { id: "gmail", name: "Gmail" }];
+  providersBody = [
+    { id: "github", name: "GitHub", authTypes: ["oauth2", "api_key"], iconUrl: "https://example.test/github.png" },
+    { id: "gmail", name: "Gmail", authTypes: ["oauth2"] },
+    { id: "npm", name: "npm", authTypes: ["no_auth"] },
+    { id: "some_api_key_app", name: "API-key app", authTypes: ["api_key"] },
+  ];
   actionDetailsBody = null;
   actionsBody = [
     { id: "github.get_current_user", description: "Who am I", inputSchema: { type: "object", properties: { verbose: { type: "boolean" } } } },
@@ -143,7 +153,7 @@ describe("inventory / status", () => {
     expect(services.complete).toBe(true);
     expect(services.services.github).toEqual({ connected: true, pending: false, status: "ACTIVE", accounts: [] });
     expect(services.services.gmail).toEqual({ connected: false, pending: false, status: "not_connected", accounts: [] });
-    expect(await provider().serviceSlugs(cfg)).toEqual(["github", "gmail"]);
+    expect(await provider().serviceSlugs(cfg)).toEqual(["github", "gmail", "npm", "some_api_key_app"]);
   });
 
   it("answers requested keys, merging local registry accounts and pending records", async () => {
@@ -247,7 +257,7 @@ describe("tools / catalog", () => {
     expect(catalog.source).toBe("api");
     expect(catalog.pagination).toEqual({ items: 2, stalled: false, complete: true });
     expect(catalog.cards).toEqual([
-      { slug: "github", label: "GitHub", blurb: "", logo: null, domain: null },
+      { slug: "github", label: "GitHub", blurb: "", logo: "https://example.test/github.png", domain: null },
       { slug: "gmail", label: "Gmail", blurb: "", logo: null, domain: null },
     ]);
   });

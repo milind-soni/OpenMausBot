@@ -353,13 +353,18 @@ export function createOpenConnectorProvider(options: OpenConnectorProviderOption
 
     async catalog(): Promise<ConnectorCatalog> {
       const providers = await client().providers();
-      const cards = providers.map((provider) => ({
-        slug: canonicalToolkitSlug(provider.service),
-        label: provider.name ?? provider.service,
-        blurb: (provider.description ?? "").slice(0, 90),
-        logo: null,
-        domain: null,
-      }));
+      // Only OAuth apps: Connect is this backend's one flow. The catalog's api-key, custom-credential
+      // and public entries (most of it) have no path here and stay out of the panel.
+      const cards = providers.flatMap((provider) => {
+        if (!(provider.authTypes ?? []).includes("oauth2")) return [];
+        return [{
+          slug: canonicalToolkitSlug(provider.service),
+          label: provider.name ?? provider.service,
+          blurb: (provider.description ?? "").slice(0, 90),
+          logo: provider.iconUrl ?? null,
+          domain: null as string | null,
+        }];
+      });
       const pagination: CatalogPagination = { items: cards.length, stalled: false, complete: true };
       return { cards, source: "api", pagination };
     },

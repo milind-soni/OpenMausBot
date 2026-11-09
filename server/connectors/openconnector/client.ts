@@ -48,6 +48,8 @@ const providerItemSchema = z.object({
   name: z.string().optional(),
   description: z.string().optional(),
   categories: z.array(z.unknown()).optional(),
+  authTypes: z.array(z.string()).optional(),
+  iconUrl: z.string().optional(),
 });
 
 const actionItemSchema = z.object({
@@ -60,6 +62,9 @@ export interface OpenConnectorProviderItem {
   service: string;
   name?: string;
   description?: string;
+  /** How the runtime authenticates this provider: "oauth2", "api_key", "no_auth", … */
+  authTypes?: readonly string[];
+  iconUrl?: string;
   raw: Record<string, unknown>;
 }
 
@@ -144,6 +149,8 @@ export class OpenConnectorClient {
         service,
         name: parsed.success ? parsed.data.name : undefined,
         description: parsed.success ? parsed.data.description : undefined,
+        authTypes: parsed.success ? parsed.data.authTypes : undefined,
+        iconUrl: parsed.success ? parsed.data.iconUrl : undefined,
         raw: parsed.success ? (item as Record<string, unknown>) : { id: service },
       });
     }
