@@ -118,7 +118,6 @@ export function createSharedVmControl(deps: SharedVmControlDeps) {
       return sharedDesk() && !teamKey(bot, threadId) && (place === undefined || place === "vm") ? SHARED_VM_CONTROL_KEY : null;
     },
     snapshot,
-    /** The bots told about a change on this key. */
     membersOf,
     botSnapshot,
     /** A snapshot carrying the bot's sign-in plea as this viewer may see it: an answer never hides a plea the bot's frames
