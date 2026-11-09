@@ -440,11 +440,11 @@ describe("install → review → enable lifecycle", () => {
     expect(existsSync(join(workspaceDir(bot), "skills", "solo-markdown", ".env"))).toBe(false);
   });
 
-  it("removes cleanly", () => {
+  it("removes cleanly", async () => {
     installSkill(bot, "src", [{ path: "SKILL.md", content: SKILL("temp-skill") }]);
-    expect(removeSkill(bot, "temp-skill")).toEqual({ removed: true });
+    expect((await removeSkill(bot, "temp-skill"))).toEqual({ removed: true });
     expect(listSkills(bot)).toEqual([]);
-    expect("error" in removeSkill(bot, "temp-skill")).toBe(true);
+    expect("error" in (await removeSkill(bot, "temp-skill"))).toBe(true);
   });
 
   it("migrates workspace manifests disabled and adopts only old app-owned native links", () => {
@@ -752,7 +752,7 @@ describe("staged skill writes", () => {
     expect(readSkillFile(bot, "denied-update")).toBe(original);
   });
 
-  it("rejects an update when the same bytes were removed and recreated as another revision", () => {
+  it("rejects an update when the same bytes were removed and recreated as another revision", async () => {
     const original = SKILL("recreated-update", "Original.");
     const created = stageSkillWrite(bot, {
       action: "create",
@@ -768,7 +768,7 @@ describe("staged skill writes", () => {
     if ("error" in stale) throw new Error(stale.error);
 
     expect(rejectStagedSkillWrite(bot, stale.id)).toEqual({ rejected: true });
-    expect(removeSkill(bot, "recreated-update")).toEqual({ removed: true });
+    expect((await removeSkill(bot, "recreated-update"))).toEqual({ removed: true });
     const recreated = stageSkillWrite(bot, {
       action: "create",
       files: [{ path: "SKILL.md", content: original }],
@@ -1056,7 +1056,7 @@ describe("staged skill writes", () => {
     expect(listStagedSkillWrites(bot)).toMatchObject([{ id: next.id }]);
   });
 
-  it("removes an updated skill and its active revision without deleting a later same-name directory", () => {
+  it("removes an updated skill and its active revision without deleting a later same-name directory", async () => {
     const created = stageSkillWrite(bot, {
       action: "create",
       files: [{ path: "SKILL.md", content: SKILL("remove-updated", "Original.") }],
@@ -1075,12 +1075,12 @@ describe("staged skill writes", () => {
     mkdirSync(laterDirectory, { recursive: true });
     writeFileSync(join(laterDirectory, "owner.txt"), "user-owned\n");
 
-    expect(removeSkill(bot, "remove-updated")).toEqual({ removed: true });
+    expect((await removeSkill(bot, "remove-updated"))).toEqual({ removed: true });
     expect(existsSync(revision)).toBe(false);
     expect(readFileSync(join(laterDirectory, "owner.txt"), "utf8")).toBe("user-owned\n");
   });
 
-  it("never follows a replaced revisions directory while removing a reviewed skill", () => {
+  it("never follows a replaced revisions directory while removing a reviewed skill", async () => {
     const created = stageSkillWrite(bot, {
       action: "create",
       files: [{ path: "SKILL.md", content: SKILL("remove-revision-link", "Original.") }],
@@ -1099,7 +1099,7 @@ describe("staged skill writes", () => {
     writeFileSync(join(outsideRevision, "marker.txt"), "must survive\n");
     symlinkSync(outside, revisions, process.platform === "win32" ? "junction" : "dir");
 
-    expect(removeSkill(bot, "remove-revision-link")).toEqual({ removed: true });
+    expect((await removeSkill(bot, "remove-revision-link"))).toEqual({ removed: true });
     expect(readFileSync(join(outsideRevision, "marker.txt"), "utf8")).toBe("must survive\n");
     expect(listSkills(bot)).toEqual([]);
   });
@@ -1468,17 +1468,17 @@ describe("learned skill references", () => {
     })).toMatchObject({ error: expect.stringContaining("changed after review") });
   });
 
-  it("undo restores the exact earlier file set", () => {
+  it("undo restores the exact earlier file set", async () => {
     learn("create", []);
     const previous = readSkillFile(bot, "file-expense")!;
     const source = listSkills(bot)[0]!.source;
     const updated = learn("update", [ref("edge-cases")], "Moved detail out.");
-    expect(undoSkillWrite(bot, {
+    expect((await undoSkillWrite(bot, {
       stagedId: updated.id,
       name: "file-expense",
       action: "update",
       previous: { skillMd: previous, source, references: [] },
-    })).toEqual({ undone: true });
+    }))).toEqual({ undone: true });
     expect(readSkillFile(bot, "file-expense")).toBe(previous);
     expect(readSkillReferences(bot, "file-expense")).toEqual([]);
     expect(listSkills(bot)[0]).toMatchObject({ enabled: true });
@@ -1523,28 +1523,28 @@ describe("undo of a skill a bot wrote without a person", () => {
     return { stagedId: staged.id, name: "own-skill", action, ...(previous && source ? { previous: { skillMd: previous, source } } : {}) };
   };
 
-  it("removes a created skill, once", () => {
+  it("removes a created skill, once", async () => {
     const created = write("create", "First version.");
-    expect(undoSkillWrite(bot, created)).toEqual({ undone: true });
+    expect((await undoSkillWrite(bot, created))).toEqual({ undone: true });
     expect(listSkills(bot).some((skill) => skill.name === "own-skill")).toBe(false);
-    expect(undoSkillWrite(bot, created)).toEqual({ stale: true });
+    expect((await undoSkillWrite(bot, created))).toEqual({ stale: true });
   });
 
-  it("puts an updated skill's previous SKILL.md back while it is unchanged since", () => {
+  it("puts an updated skill's previous SKILL.md back while it is unchanged since", async () => {
     write("create", "First version.");
     const original = readSkillFile(bot, "own-skill");
     const updated = write("update", "Second version.");
-    expect(undoSkillWrite(bot, updated)).toEqual({ undone: true });
+    expect((await undoSkillWrite(bot, updated))).toEqual({ undone: true });
     expect(readSkillFile(bot, "own-skill")).toBe(original);
     expect(listSkills(bot).find((skill) => skill.name === "own-skill")).toMatchObject({ enabled: true, description: "First version." });
     expect(listStagedSkillWrites(bot)).toEqual([]);
-    expect(undoSkillWrite(bot, updated)).toEqual({ stale: true });
+    expect((await undoSkillWrite(bot, updated))).toEqual({ stale: true });
   });
 
-  it("refuses a create's Undo once the skill was updated since", () => {
+  it("refuses a create's Undo once the skill was updated since", async () => {
     const created = write("create", "First version.");
     write("update", "Second version.");
-    expect(undoSkillWrite(bot, created)).toEqual({ stale: true });
+    expect((await undoSkillWrite(bot, created))).toEqual({ stale: true });
     expect(readSkillFile(bot, "own-skill")).toContain("Second version.");
   });
 });

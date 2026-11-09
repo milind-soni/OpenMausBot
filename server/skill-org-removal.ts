@@ -20,7 +20,7 @@ type Storage = {
   syncSkillLinks(botId: string, options?: { onlyName?: string }): boolean;
 };
 
-export function removeOrganizationSkill(botId: string, name: string, storage: Storage, options: { retire?: typeof retireUnchangedSkillRoot } = {}): { removed: true } | { error: string } {
+export async function removeOrganizationSkill(botId: string, name: string, storage: Storage, options: { retire?: typeof retireUnchangedSkillRoot } = {}): Promise<{ removed: true } | { error: string }> {
   if (skillMayBeInUse(botId)) return { error: "wait until the bot finishes using its skills" };
   const manifest = storage.readManifest(botId), entry = manifest[name];
   if (!entry) return { removed: true };
@@ -30,7 +30,10 @@ export function removeOrganizationSkill(botId: string, name: string, storage: St
   if (!root) return { error: "the workspace skills path is not a real directory" };
   if (entry.storageRevision && entry.retiredRoot) {
     const previous = join(root, name);
-    if (nativeSkillLinksMayReferTo(botId, name, previous) || taskSkillsMayReferTo(botId, name, [previous])[0]) {
+    const referenced = await taskSkillsMayReferTo(botId, name, [previous]);
+    if (skillMayBeInUse(botId) || skillUpdateNeedsRecovery(storage.skillStateDir(botId), name) ||
+      canonicalJson(storage.readManifest(botId)[name]) !== canonicalJson(entry)) return { error: "the skill or its use changed during removal" };
+    if (nativeSkillLinksMayReferTo(botId, name, previous) || referenced[0]) {
       return { error: "the skill removal is waiting for previous links to clear" };
     }
     const retired = (options.retire ?? retireUnchangedSkillRoot)(previous, entry.retiredRoot, storage.skillStateDir(botId));
@@ -58,7 +61,11 @@ export function removeOrganizationSkill(botId: string, name: string, storage: St
   const directory = pending.revision ? join(root, ".revisions", pending.revision) : join(root, name);
   try { if (!storage.syncSkillLinks(botId, { onlyName: name }) || nativeSkillLinksMayReferTo(botId, name, directory)) return { error: "the skill removal is waiting for native links to synchronize" }; }
   catch { return { error: "the skill removal is waiting for native links to synchronize" }; }
-  if (skillMayBeInUse(botId) || taskSkillsMayReferTo(botId, name, [directory])[0]) {
+  const referenced = await taskSkillsMayReferTo(botId, name, [directory]);
+  if (skillMayBeInUse(botId) || skillUpdateNeedsRecovery(storage.skillStateDir(botId), name) ||
+    canonicalJson(storage.readManifest(botId)[name]) !== canonicalJson(entry)) return { error: "the skill or its use changed during removal" };
+  if (nativeSkillLinksMayReferTo(botId, name, directory)) return { error: "the skill removal is waiting for native links to synchronize" };
+  if (referenced[0]) {
     return { error: "the skill removal is waiting for task links to clear" };
   }
   const retired = (options.retire ?? retireUnchangedSkillRoot)(directory, pending, storage.skillStateDir(botId));

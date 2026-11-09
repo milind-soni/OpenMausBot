@@ -13,6 +13,7 @@ import { nativeSkillLinksMayReferTo } from "./skill-native-reference.ts";
 import { taskSkillsMayReferTo } from "./skill-task-references.ts";
 import { skillMayBeInUse } from "./skill-use-guard.ts";
 import { skillUpdateGuardPath, skillUpdateNeedsRecovery } from "./skill-recovery-capacity.ts";
+import { notifyPendingOrgSkillRemoval } from "./org-skill-retry.ts";
 import { orgSkillStorage, type SkillPackageStamp } from "./skills.ts";
 
 const identity = (path: string) => {
@@ -25,14 +26,14 @@ const fileIdentity = (path: string) => {
 type Options = { writeFolder?: typeof writeSkillFolder; writeManifest?: typeof orgSkillStorage.writeManifest; moveRevision?: typeof renameSync };
 
 /** Resume a committed switch independently of the package stamp, including after a restart. */
-export function recoverOrganizationSkillLinks(botId: string, onlyName?: string): { ok: true; pending?: true } | { error: string; retryable: true } {
+export async function recoverOrganizationSkillLinks(botId: string, onlyName?: string): Promise<{ ok: true; pending?: true } | { error: string; retryable: true }> {
   const pendingError = (error: string) => ({ error, retryable: true as const });
   const initial = orgSkillStorage.readManifest(botId);
   if (!onlyName) {
     let failure: { error: string; retryable: true } | undefined, pending = false;
     for (const [name, entry] of Object.entries(initial)) {
       if (!entry.pendingRetirements?.length && !entry.pendingRemoval) continue;
-      const result = recoverOrganizationSkillLinks(botId, name);
+      const result = await recoverOrganizationSkillLinks(botId, name);
       if ("error" in result) failure ??= result;
       else if (result.pending) pending = true;
     }
@@ -40,12 +41,13 @@ export function recoverOrganizationSkillLinks(botId: string, onlyName?: string):
   }
   if (!Object.entries(initial).some(([name, entry]) => name === onlyName && (entry.pendingRetirements?.length || entry.pendingRemoval))) return { ok: true };
   if (skillMayBeInUse(botId)) return pendingError("the bot is still using its skills");
+  if (skillUpdateNeedsRecovery(orgSkillStorage.skillStateDir(botId), onlyName)) return pendingError("a previous skill update needs recovery");
   let stillReferenced = false;
   let recoveryFailure: { error: string; retryable: true } | undefined;
   for (const [name, entry] of Object.entries(initial)) {
     if (onlyName && name !== onlyName) continue;
     if (entry.pendingRemoval) {
-      const removed = orgSkillStorage.removeSkill(botId, name);
+      const removed = await orgSkillStorage.removeSkill(botId, name);
       if ("error" in removed) return pendingError(removed.error);
       continue;
     }
@@ -67,7 +69,10 @@ export function recoverOrganizationSkillLinks(botId: string, onlyName?: string):
       }
       const remaining: typeof pending = [];
       const oldDirectories = pending.map((revision) => revision.revision ? join(root, ".revisions", revision.revision) : join(root, name));
-      const referenced = taskSkillsMayReferTo(botId, name, oldDirectories);
+      const referenced = await taskSkillsMayReferTo(botId, name, oldDirectories);
+      const afterScan = orgSkillStorage.readManifest(botId)[name], checkedAfterScan = readInstalledSkillBundle(botId, name);
+      if (skillUpdateNeedsRecovery(orgSkillStorage.skillStateDir(botId), name) || skillMayBeInUse(botId) || !afterScan || canonicalJson(afterScan) !== canonicalJson(entry) || !checkedAfterScan ||
+        partHash(skillReleaseValue(checkedAfterScan)) !== entry.package.w) return pendingError("the skill or its use changed during the task scan");
       for (const [index, revision] of pending.entries()) {
         const oldDirectory = oldDirectories[index]!;
         if (nativeSkillLinksMayReferTo(botId, name, oldDirectory)) {
@@ -99,14 +104,15 @@ export function recoverOrganizationSkillLinks(botId: string, onlyName?: string):
 }
 
 /** Stage a complete revision before switching the protected manifest; a failed write leaves the previous revision active. */
-export function replaceOrganizationSkill(
+export async function replaceOrganizationSkill(
   botId: string, source: string, skill: Pick<PackageSkill, "instructions" | "files">,
   stamp: SkillPackageStamp, expected: SkillPackageStamp, options: Options = {},
-): { updated: true } | { stale: true } | { error: string; retryable?: boolean } {
+): Promise<{ updated: true } | { stale: true } | { error: string; retryable?: boolean }> {
   if (!source.startsWith("org:") || (skill.files?.length && !portableFolderFilesSchema.safeParse(skill.files).success)) return { error: "invalid organization skill" };
   if (skillMayBeInUse(botId)) return { error: "the bot is still using its skills; the update will be retried", retryable: true };
-  const recovery = recoverOrganizationSkillLinks(botId, stamp.key);
+  const recovery = await recoverOrganizationSkillLinks(botId, stamp.key);
   if ("error" in recovery) return recovery;
+  if (skillMayBeInUse(botId)) return { error: "the bot started using its skills during recovery; the update will be retried", retryable: true };
   const stored = orgSkillStorage.readManifest(botId)[stamp.key];
   if (process.platform === "win32" && stored?.filesSha256 && !stored.executableFiles) {
     return { error: "the existing Windows skill has no recorded executable intent; its folder needs manual recovery before updating" };
@@ -150,13 +156,14 @@ export function replaceOrganizationSkill(
     try { orgSkillStorage.writeManifest(botId, before); } catch { return { error: "the skill recovery status could not be saved", retryable: true }; }
   }
   const revision = createHash("sha256").update(randomUUID()).digest("hex"), target = join(revisions, revision), prepared = join(staging, revision);
+  const localPrepared = join(revisions, `.prepare-${revision}`);
   const executableFiles = folder.files.filter((file) => file.executable).map((file) => file.path);
-  let published = false, moved = false, preparedId: string | null = null, guardId: string | null = null;
+  let published = false, moved = false, preparedId: string | null = null, localPreparedId: string | null = null, guardId: string | null = null;
   const outcome = (() : { updated: true } | { stale: true } | { error: string; retryable?: boolean } => { try {
     const fd = openSync(guard, "wx", 0o600);
     try {
       const stat = fstatSync(fd); guardId = `${stat.dev}:${stat.ino}`;
-      writeFileSync(fd, JSON.stringify({ revision, target, prepared })); fsyncSync(fd);
+      writeFileSync(fd, JSON.stringify({ revision, target, prepared, localPrepared })); fsyncSync(fd);
     } finally { closeSync(fd); }
     if (fileIdentity(guard) !== guardId || identity(state) !== stateId || identity(staging) !== stagingId) throw new Error("the update recovery marker could not be checked safely");
     (options.writeFolder ?? writeSkillFolder)(prepared, skill.instructions, folder.files, { recordExecutableIntent: true });
@@ -167,14 +174,31 @@ export function replaceOrganizationSkill(
       partHash(skillReleaseValue(staged)) !== partHash(skillReleaseValue(skill)) ||
       !preparedId || identity(state) !== stateId || identity(staging) !== stagingId ||
       identity(root) !== rootId || identity(revisions) !== revisionsId || directoryEntryState(target) !== "missing") throw new Error("the staged skill could not be verified safely");
-    (options.moveRevision ?? renameSync)(prepared, target);
+    try { (options.moveRevision ?? renameSync)(prepared, target); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException | null)?.code !== "EXDEV") throw error;
+      if (identity(prepared) !== preparedId || identity(state) !== stateId || identity(staging) !== stagingId ||
+        identity(root) !== rootId || identity(revisions) !== revisionsId || directoryEntryState(target) !== "missing") throw new Error("the staged skill changed before cross-filesystem publication");
+      (options.writeFolder ?? writeSkillFolder)(localPrepared, skill.instructions, folder.files, { recordExecutableIntent: true });
+      const local = snapshotPortableSkill(localPrepared, () => skill.instructions, undefined, undefined, executableFiles);
+      localPreparedId = identity(localPrepared);
+      if (!localPreparedId || !local || local.skipped.length || partHash(skillReleaseValue(local)) !== partHash(skillReleaseValue(skill)) ||
+        identity(root) !== rootId || identity(revisions) !== revisionsId || directoryEntryState(target) !== "missing") throw new Error("the local staged skill could not be verified safely");
+      preparedId = localPreparedId;
+      renameSync(localPrepared, target);
+    }
     moved = true;
     const transferred = snapshotPortableSkill(target, () => skill.instructions, undefined, undefined, executableFiles);
     if (identity(target) !== preparedId || identity(root) !== rootId || identity(revisions) !== revisionsId ||
       !transferred || transferred.skipped.length || partHash(skillReleaseValue(transferred)) !== partHash(skillReleaseValue(skill))) throw new Error("the staged skill moved through an unsafe path");
+    if (identity(state) !== stateId || identity(staging) !== stagingId) throw new Error("the protected staging path changed");
+    rmSync(prepared, { recursive: true, force: true });
+    if (skillMayBeInUse(botId) || fileIdentity(guard) !== guardId || identity(state) !== stateId || identity(staging) !== stagingId) {
+      return { error: "the skill's use or protected update state changed during publication", retryable: true };
+    }
     const manifest = orgSkillStorage.readManifest(botId), previous = manifest[stamp.key];
     const current = readInstalledSkillBundle(botId, stamp.key);
-    if (!previous?.package || canonicalJson(previous.package) !== canonicalJson(expected) || !current || partHash(skillReleaseValue(current)) !== expected.w) return { stale: true };
+    if (!previous?.package || canonicalJson(previous) !== canonicalJson(existing) || canonicalJson(previous.package) !== canonicalJson(expected) || !current || partHash(skillReleaseValue(current)) !== expected.w) return { stale: true };
     if ((previous.pendingRetirements?.length ?? 0) >= 32) return { error: "too many previous skill revisions are still in use by task links" };
     const oldDirectory = orgSkillStorage.skillDirectory(botId, stamp.key, previous);
     const oldIdentity = oldDirectory && skillRootIdentity(oldDirectory);
@@ -192,11 +216,9 @@ export function replaceOrganizationSkill(
       ...(folder.files.length ? { files: folder.files.map((file) => file.path), filesSha256, executableFiles } : {}) };
     (options.writeManifest ?? orgSkillStorage.writeManifest)(botId, manifest);
     published = true;
-    const switched = recoverOrganizationSkillLinks(botId, stamp.key);
-    return "error" in switched ? switched : { updated: true };
+    return { updated: true };
   } catch (error) {
     if (published) return { error: `the skill's links need recovery: ${error instanceof Error ? error.message : String(error)}`, retryable: true };
-    if ((error as NodeJS.ErrnoException | null)?.code === "EXDEV") return { error: "skill update was not applied: workspace and protected skill storage are on different filesystems" };
     return { error: `skill update was not applied: ${error instanceof Error ? error.message : String(error)}` };
   } })();
   let cleanupError: string | undefined;
@@ -204,13 +226,14 @@ export function replaceOrganizationSkill(
     if (identity(state) !== stateId || identity(staging) !== stagingId) cleanupError = "the protected staging path changed";
     else {
       try { rmSync(prepared, { recursive: true, force: true }); } catch { cleanupError = "the staged folder could not be cleared"; }
-      if (moved || directoryEntryState(target) !== "missing") {
+      for (const [path, expectedId] of [[target, preparedId], [localPrepared, localPreparedId]] as const) {
+        if (directoryEntryState(path) === "missing" && !(path === target && moved)) continue;
         const protectedManifest = orgSkillStorage.readProtectedManifest(botId);
-        const mayBeActive = !protectedManifest || Object.values(protectedManifest).some((entry) => entry.storageRevision === revision);
-        const targetIdentity = !mayBeActive && identity(target) === preparedId ? skillRootIdentity(target) : null;
+        const mayBeActive = !protectedManifest || (path === target && Object.values(protectedManifest).some((entry) => entry.storageRevision === revision));
+        const targetIdentity = !mayBeActive && expectedId && identity(root) === rootId && identity(revisions) === revisionsId && identity(path) === expectedId ? skillRootIdentity(path) : null;
         if (!targetIdentity) cleanupError = "the revision may be active or could not be checked safely";
         else {
-          const retired = retireUnchangedSkillRoot(target, { identity: targetIdentity, hash: partHash(skillReleaseValue(skill)), executableFiles }, state);
+          const retired = retireUnchangedSkillRoot(path, { identity: targetIdentity, hash: partHash(skillReleaseValue(skill)), executableFiles }, state);
           if ("error" in retired) cleanupError = retired.error;
         }
       }
@@ -223,5 +246,10 @@ export function replaceOrganizationSkill(
     } catch { cleanupError = "the update recovery marker could not be cleared safely"; }
   }
   if (cleanupError) return { error: `${cleanupError}. Skill update recovery marker: ${guard}; revision: ${target}; recovery folder: ${join(state, "retired-roots")}. See the organization library recovery guide.`, retryable: true };
+  if (published) {
+    const switched = await recoverOrganizationSkillLinks(botId, stamp.key);
+    if ("pending" in switched && switched.pending) notifyPendingOrgSkillRemoval(botId);
+    if ("error" in switched) return switched;
+  }
   return outcome;
 }

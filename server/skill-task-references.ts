@@ -1,4 +1,5 @@
-import { lstatSync, opendirSync, readlinkSync, realpathSync, type Stats } from "node:fs";
+import { lstatSync, readlinkSync, realpathSync, type Stats } from "node:fs";
+import { lstat, opendir, readlink, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isSkillName } from "../shared/skill-md.ts";
 import { TASK_WORKSPACES_DIR } from "./workspace.ts";
@@ -71,33 +72,72 @@ export function taskSkillMayReferTo(botId: string, threadId: string, name: strin
   return !parentAfter || !botAfter || !unchanged(parent, parentAfter) || !unchanged(botBefore, botAfter) || references.some(Boolean);
 }
 
+async function checkedStatAsync(path: string): Promise<Stats | null | undefined> {
+  try { return await lstat(path); }
+  catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT" ? null : undefined; }
+}
+
+async function inspectTaskAsync(task: string, name: string, targets: readonly string[], physicalTargets: readonly string[], references: boolean[]): Promise<boolean> {
+  const taskBefore = await checkedStatAsync(task);
+  if (!taskBefore?.isDirectory() || taskBefore.isSymbolicLink()) return false;
+  try {
+    for (const family of familyDirs) {
+      const familyPath = join(task, family), familyBefore = await checkedStatAsync(familyPath);
+      if (familyBefore === null) continue;
+      if (!familyBefore?.isDirectory() || familyBefore.isSymbolicLink()) return false;
+      const linkDir = join(familyPath, "skills"), linkDirBefore = await checkedStatAsync(linkDir);
+      if (linkDirBefore === null) {
+        const familyAfter = await checkedStatAsync(familyPath);
+        if (!familyAfter || !unchanged(familyBefore, familyAfter)) return false;
+        continue;
+      }
+      if (!linkDirBefore?.isDirectory() || linkDirBefore.isSymbolicLink()) return false;
+      const link = join(linkDir, name), linkBefore = await checkedStatAsync(link);
+      if (linkBefore === undefined) return false;
+      if (linkBefore !== null) {
+        if (!linkBefore.isSymbolicLink()) return false;
+        const raw = resolve(dirname(link), (await readlink(link)).replace(/^\\\\\?\\/, ""));
+        let actual: string;
+        try { actual = await realpath(link); } catch { return false; }
+        targets.forEach((target, index) => { if (pointsInside(target, raw) || pointsInside(physicalTargets[index]!, actual)) references[index] = true; });
+        const linkAfter = await checkedStatAsync(link);
+        if (!linkAfter || !unchanged(linkBefore, linkAfter)) return false;
+      }
+      const linkDirAfter = await checkedStatAsync(linkDir), familyAfter = await checkedStatAsync(familyPath);
+      if (!linkDirAfter || !familyAfter || !unchanged(linkDirBefore, linkDirAfter) || !unchanged(familyBefore, familyAfter)) return false;
+    }
+    const taskAfter = await checkedStatAsync(task);
+    return Boolean(taskAfter && unchanged(taskBefore, taskAfter));
+  } catch { return false; }
+}
+
 /** Reads only, once for all revisions: uncertainty keeps every old revision. */
-export function taskSkillsMayReferTo(botId: string, name: string, targets: readonly string[]): boolean[] {
+export async function taskSkillsMayReferTo(botId: string, name: string, targets: readonly string[]): Promise<boolean[]> {
   const keepAll = () => targets.map(() => true);
   const references = targets.map(() => false);
   if (!targets.length) return references;
   if (!safeId(botId) || !isSkillName(name) || targets.length > 32) return keepAll();
-  const physicalTargets = targets.map((target) => { try { return realpathSync(target); } catch { return target; } });
-  const parent = checkedStat(TASK_WORKSPACES_DIR);
-  if (parent === null) return checkedStat(TASK_WORKSPACES_DIR) === null ? references : keepAll();
+  const physicalTargets = await Promise.all(targets.map(async (target) => { try { return await realpath(target); } catch { return target; } }));
+  const parent = await checkedStatAsync(TASK_WORKSPACES_DIR);
+  if (parent === null) return await checkedStatAsync(TASK_WORKSPACES_DIR) === null ? references : keepAll();
   if (!parent?.isDirectory() || parent.isSymbolicLink()) return keepAll();
-  const botRoot = join(TASK_WORKSPACES_DIR, botId), before = checkedStat(botRoot);
+  const botRoot = join(TASK_WORKSPACES_DIR, botId), before = await checkedStatAsync(botRoot);
   if (before === null) {
-    const after = checkedStat(TASK_WORKSPACES_DIR);
+    const after = await checkedStatAsync(TASK_WORKSPACES_DIR);
     return after && unchanged(parent, after) ? references : keepAll();
   }
   if (!before?.isDirectory() || before.isSymbolicLink()) return keepAll();
   try {
-    const dir = opendirSync(botRoot);
+    const dir = await opendir(botRoot);
     let count = 0;
     try {
-      for (let entry = dir.readSync(); entry; entry = dir.readSync()) {
+      for (let entry = await dir.read(); entry; entry = await dir.read()) {
         if (++count > MAX_TASKS) return keepAll();
         if (!safeId(entry.name)) continue;
-        if (!inspectTask(join(botRoot, entry.name), name, targets, physicalTargets, references)) return keepAll();
+        if (!await inspectTaskAsync(join(botRoot, entry.name), name, targets, physicalTargets, references)) return keepAll();
       }
-    } finally { dir.closeSync(); }
-    const after = checkedStat(botRoot), parentAfter = checkedStat(TASK_WORKSPACES_DIR);
+    } finally { await dir.close(); }
+    const after = await checkedStatAsync(botRoot), parentAfter = await checkedStatAsync(TASK_WORKSPACES_DIR);
     return !after || !parentAfter || !unchanged(before, after) || !unchanged(parent, parentAfter) ? keepAll() : references;
   } catch { return keepAll(); }
 }

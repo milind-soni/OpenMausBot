@@ -11,11 +11,11 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
-  unlinkSync,
 } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 
+import { nativeLinkDirectlyTargetsOwnedSkill, removeOwnedNativeLink } from "./skill-native-link-removal.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -262,74 +262,6 @@ function nativeLinkPointsToSkill(link: string, target: string): boolean {
   }
 }
 
-function nativeLinkDirectlyTargetsOwnedSkill(
-  link: string,
-  root: string,
-  name: string,
-  revisionWasManaged: boolean,
-  targetBaseDirectory = dirname(link),
-): boolean {
-  try {
-    if (!lstatSync(link).isSymbolicLink()) return false;
-    const rawTarget = readlinkSync(link);
-    const resolvedTarget = resolve(targetBaseDirectory, rawTarget.replace(/^\\\\\?\\/, ""));
-    const insideSkills = relative(join(root, "skills"), resolvedTarget).replaceAll("\\", "/");
-    return insideSkills === name || (revisionWasManaged && /^\.revisions\/[a-f0-9]{64}$/.test(insideSkills));
-  } catch {
-    return false;
-  }
-}
-
-type NativeLinkRemoval = "removed" | "preserved" | "retry";
-/** renameSync is the identity boundary: a workspace process can replace the name, not which entry was moved. */
-function removeOwnedNativeLink(
-  botId: string,
-  link: string,
-  root: string,
-  name: string,
-  revisionWasManaged: boolean,
-  beforeRemove?: (link: string) => void,
-): NativeLinkRemoval {
-  const quarantineDir = join(skillStateDir(botId), "link-removal");
-  try {
-    mkdirSync(quarantineDir, { recursive: true, mode: 0o700 });
-  } catch {
-    return "retry";
-  }
-  const quarantined = join(quarantineDir, randomUUID());
-  beforeRemove?.(link);
-  try {
-    renameSync(link, quarantined);
-  } catch {
-    return nativeLinkDirectlyTargetsOwnedSkill(link, root, name, revisionWasManaged)
-      ? "retry"
-      : "preserved";
-  }
-
-  if (nativeLinkDirectlyTargetsOwnedSkill(
-    quarantined,
-    root,
-    name,
-    revisionWasManaged,
-    dirname(link),
-  )) {
-    try {
-      unlinkSync(quarantined);
-      return "removed";
-    } catch {
-      try {
-        if (!entryExistsWithoutFollowing(link)) renameSync(quarantined, link);
-      } catch {}
-      return "retry";
-    }
-  }
-
-  try {
-    if (!entryExistsWithoutFollowing(link)) renameSync(quarantined, link);
-  } catch {}
-  return "preserved";
-}
-
 function writeManifest(botId: string, manifest: SkillManifest): void {
   mkdirSync(skillStateDir(botId), { recursive: true, mode: 0o700 });
   writeFileAtomic(manifestPath(botId), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
@@ -363,7 +295,7 @@ function removeNativeLinksForUnsafeSkillsRoot(
       const link = join(linkDir, name);
       if (!nativeLinkDirectlyTargetsOwnedSkill(link, root, name, previouslyManaged.includes(name))) continue;
       const result = removeOwnedNativeLink(
-        botId,
+        skillStateDir(botId),
         link,
         root,
         name,
@@ -415,7 +347,7 @@ export function syncSkillLinks(
         managed.add(name);
       } else if (nativeLinkDirectlyTargetsOwnedSkill(link, root, name, previouslyManaged.includes(name))) {
         const result = removeOwnedNativeLink(
-          botId,
+          skillStateDir(botId),
           link,
           root,
           name,
@@ -622,7 +554,7 @@ function removeReviewedRevisionsNamed(botId: string, name: string): void {
   }
 }
 
-export function removeSkill(botId: string, name: string): { removed: true } | { error: string } {
+export async function removeSkill(botId: string, name: string): Promise<{ removed: true } | { error: string }> {
   if (!isSkillName(name)) return { error: "invalid skill name" };
   const manifest = readManifest(botId);
   const entry = manifest[name];
@@ -1208,7 +1140,7 @@ export function applySkillWriteWithReceipt(
   }
 }
 
-export function undoSkillWrite(
+export async function undoSkillWrite(
   botId: string,
   write: {
     stagedId: string;
@@ -1216,13 +1148,13 @@ export function undoSkillWrite(
     action: StagedSkillAction;
     previous?: { skillMd: string; source: string; references?: Array<{ path: string; content: string }> };
   },
-): { undone: true } | { stale: true } | { error: string } {
+): Promise<{ undone: true } | { stale: true } | { error: string }> {
   const entry = readManifest(botId)[write.name];
   if (!entry || entry.appliedStageId !== write.stagedId || !installedLearnedSkillMatches(botId, write.name, entry)) {
     return { stale: true };
   }
   if (write.action === "create") {
-    const removed = removeSkill(botId, write.name);
+    const removed = await removeSkill(botId, write.name);
     return "error" in removed ? removed : { undone: true };
   }
   if (!write.previous) return { error: "This change can't be undone here." };

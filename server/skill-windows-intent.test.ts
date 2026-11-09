@@ -23,9 +23,9 @@ const name = "reviewed-intent";
 const library = join(DATA_DIR, `win-intent-library-${randomUUID()}`);
 const instructions = `---\nname: ${name}\ndescription: A reviewed fixture.\n---\n\nRead the guide.\n`;
 const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
-const simulateWindows = <T>(fn: () => T): T => {
+const simulateWindows = async <T>(fn: () => T | Promise<T>): Promise<T> => {
   Object.defineProperty(process, "platform", { value: "win32", configurable: true });
-  try { return fn(); } finally { Object.defineProperty(process, "platform", platform); }
+  try { return await fn(); } finally { Object.defineProperty(process, "platform", platform); }
 };
 
 afterEach(() => {
@@ -172,30 +172,30 @@ describe("reviewed executable intent on Windows", () => {
     expect(exportPrivateSkill(bot, name)).toBeNull();
   }));
 
-  it("keeps the legacy text-only release hash and update behavior", () => simulateWindows(() => {
+  it("keeps the legacy text-only release hash and update behavior", () => simulateWindows(async () => {
     setSkillUseGuard(() => false);
     const first = { instructions }, next = { instructions: `${instructions}Updated.\n` };
     const stamp = (release: string, skill: typeof first) => ({ installId: "a".repeat(32), key: name, release, ...pair(skillReleaseValue(skill), skillReleaseValue(skill)) });
     const before = stamp("1.0.0", first), after = stamp("1.1.0", next);
     expect(before.w).toBe(createHash("sha256").update(JSON.stringify(instructions)).digest("hex"));
     expect(installOrgSkill(bot, "org:fixture", first.instructions, before)).toMatchObject({ enabled: true });
-    expect(replaceOrganizationSkill(bot, "org:fixture", next, after, before)).toEqual({ updated: true });
+    expect((await replaceOrganizationSkill(bot, "org:fixture", next, after, before))).toEqual({ updated: true });
     expect(readInstalledSkillBundle(bot, name)).toEqual(next);
-    expect(removeSkill(bot, name)).toEqual({ removed: true });
+    expect((await removeSkill(bot, name))).toEqual({ removed: true });
   }));
 
-  it("removes an unchanged unstamped organization-source folder with reviewed mode metadata", () => simulateWindows(() => {
+  it("removes an unchanged unstamped organization-source folder with reviewed mode metadata", () => simulateWindows(async () => {
     setSkillUseGuard(() => false);
     expect(installSkill(bot, "org:fixture@1.0.0", [{ path: "SKILL.md", content: instructions },
       { path: "scripts/run.sh", content: "echo fixture\n", executable: true }])).toMatchObject({ enabled: false });
     expect(setSkillEnabled(bot, name, true)).toMatchObject({ enabled: true });
     const entry = orgSkillStorage.readManifest(bot)[name]!, directory = orgSkillStorage.skillDirectory(bot, name, entry)!;
     expect(entry.package).toBeUndefined();
-    expect(removeSkill(bot, name)).toEqual({ removed: true });
+    expect((await removeSkill(bot, name))).toEqual({ removed: true });
     expect(existsSync(directory)).toBe(false);
   }));
 
-  it("keeps a legacy organization bundle when executable intent is unavailable", () => simulateWindows(() => {
+  it("keeps a legacy organization bundle when executable intent is unavailable", () => simulateWindows(async () => {
     setSkillUseGuard(() => false);
     const skill = { instructions, files: [{ path: "scripts/run.sh", content: "echo fixture\n" }] };
     const stamp = (release: string) => ({ installId: "a".repeat(32), key: name, release, ...pair(skillReleaseValue(skill), skillReleaseValue(skill)) });
@@ -203,13 +203,13 @@ describe("reviewed executable intent on Windows", () => {
     const manifest = orgSkillStorage.readManifest(bot), directory = orgSkillStorage.skillDirectory(bot, name, manifest[name]!)!;
     delete manifest[name]!.executableFiles;
     orgSkillStorage.writeManifest(bot, manifest);
-    expect(replaceOrganizationSkill(bot, "org:fixture", skill, stamp("1.1.0"), stamp("1.0.0"))).toHaveProperty("error", expect.stringContaining("no recorded executable intent"));
-    expect(removeSkill(bot, name)).toHaveProperty("error", expect.stringContaining("no recorded executable intent"));
+    expect((await replaceOrganizationSkill(bot, "org:fixture", skill, stamp("1.1.0"), stamp("1.0.0")))).toHaveProperty("error", expect.stringContaining("no recorded executable intent"));
+    expect((await removeSkill(bot, name))).toHaveProperty("error", expect.stringContaining("no recorded executable intent"));
     expect(readFileSync(join(directory, "scripts", "run.sh"), "utf8")).toBe("echo fixture\n");
     expect(listSkills(bot)[0]!.enabled).toBe(true);
   }));
 
-  it("keeps mode metadata with a task-pinned previous revision until recovery", () => simulateWindows(() => {
+  it("keeps mode metadata with a task-pinned previous revision until recovery", () => simulateWindows(async () => {
     setSkillUseGuard(() => false);
     const first = { instructions, files: [{ path: "scripts/run.sh", content: "echo previous\n", executable: true as const }] };
     const next = { instructions, files: [{ path: "scripts/run.sh", content: "echo current\n" }] };
@@ -218,30 +218,30 @@ describe("reviewed executable intent on Windows", () => {
     expect(installOrgSkill(bot, "org:fixture", first.instructions, before, first.files)).toMatchObject({ enabled: true });
     const folder = ensureTaskWorkspaceWithSkills(bot, "task-one"), taskFile = join(folder, ".claude", "skills", name, "scripts", "run.sh");
     const old = orgSkillStorage.skillDirectory(bot, name, orgSkillStorage.readManifest(bot)[name]!)!;
-    expect(replaceOrganizationSkill(bot, "org:fixture", next, after, before)).toEqual({ updated: true });
+    expect((await replaceOrganizationSkill(bot, "org:fixture", next, after, before))).toEqual({ updated: true });
     expect(readFileSync(taskFile, "utf8")).toBe("echo previous\n");
     expect(orgSkillStorage.readManifest(bot)[name]!.pendingRetirements).toEqual([expect.objectContaining({ executableFiles: ["scripts/run.sh"] })]);
     ensureTaskWorkspaceWithSkills(bot, "task-one");
     expect(readFileSync(taskFile, "utf8")).toBe("echo current\n");
-    expect(recoverOrganizationSkillLinks(bot, name)).toEqual({ ok: true });
+    expect((await recoverOrganizationSkillLinks(bot, name))).toEqual({ ok: true });
     expect(existsSync(old)).toBe(false);
   }));
 
-  it("retains an interrupted executable bundle and its mode metadata for recovery", () => simulateWindows(() => {
+  it("retains an interrupted executable bundle and its mode metadata for recovery", () => simulateWindows(async () => {
     setSkillUseGuard(() => false);
     const skill = { instructions, files: [{ path: "scripts/run.sh", content: "echo keep\n", executable: true as const }] };
     const stamp = { installId: "a".repeat(32), key: name, release: "1.0.0", ...pair(skillReleaseValue(skill), skillReleaseValue(skill)) };
     expect(installOrgSkill(bot, "org:fixture", instructions, stamp, skill.files)).toMatchObject({ enabled: true });
-    const result = removeOrganizationSkill(bot, name, orgSkillStorage, { retire: (directory, expected, state) =>
-      retireUnchangedSkillRoot(directory, expected, state, { afterVerify: (moved) => { writeFileSync(join(moved, "scripts", "run.sh"), "late local edit"); throw new Error("interrupted"); } }) });
+    const result = (await removeOrganizationSkill(bot, name, orgSkillStorage, { retire: (directory, expected, state) =>
+      retireUnchangedSkillRoot(directory, expected, state, { afterVerify: (moved) => { writeFileSync(join(moved, "scripts", "run.sh"), "late local edit"); throw new Error("interrupted"); } }) }));
     expect(result).toHaveProperty("error", expect.stringContaining("still needs recovery"));
     const pending = orgSkillStorage.readManifest(bot)[name]!;
     expect(pending).toMatchObject({ enabled: false, pendingRemoval: { executableFiles: ["scripts/run.sh"] } });
-    expect(recoverOrganizationSkillLinks(bot, name)).toHaveProperty("error", expect.stringContaining("still needs recovery"));
+    expect((await recoverOrganizationSkillLinks(bot, name))).toHaveProperty("error", expect.stringContaining("still needs recovery"));
     expect(orgSkillStorage.readManifest(bot)[name]!.pendingRemoval).toEqual(pending.pendingRemoval);
   }));
 
-  it("preserves executable intent through organization updates, failed staging and removal", () => simulateWindows(() => {
+  it("preserves executable intent through organization updates, failed staging and removal", () => simulateWindows(async () => {
     setSkillUseGuard(() => false);
     const first = { instructions, files: [{ path: "scripts/run.sh", content: "#!/bin/sh\necho fixture\n", executable: true as const }] };
     const next = { instructions, files: [{ path: "scripts/run.sh", content: "#!/bin/sh\necho fixture\n" }] };
@@ -251,20 +251,20 @@ describe("reviewed executable intent on Windows", () => {
     expect(readInstalledSkillBundle(bot, name)).toEqual(first);
     expect(setSkillEnabled(bot, name, false)).toMatchObject({ enabled: false });
     const old = orgSkillStorage.skillDirectory(bot, name, orgSkillStorage.readManifest(bot)[name]!)!;
-    const failed = replaceOrganizationSkill(bot, "org:fixture", next, after, before, { writeManifest: () => { throw new Error("fixture disk failure"); } });
+    const failed = (await replaceOrganizationSkill(bot, "org:fixture", next, after, before, { writeManifest: () => { throw new Error("fixture disk failure"); } }));
     expect(failed).toHaveProperty("error");
     expect(readInstalledSkillBundle(bot, name)).toEqual(first);
     expect(listSkills(bot)[0]!.enabled).toBe(false);
     writeFileSync(join(old, "scripts", "run.sh"), "local edit\n");
-    expect(replaceOrganizationSkill(bot, "org:fixture", next, after, before)).toEqual({ stale: true });
+    expect((await replaceOrganizationSkill(bot, "org:fixture", next, after, before))).toEqual({ stale: true });
     expect(readFileSync(join(old, "scripts", "run.sh"), "utf8")).toBe("local edit\n");
     writeFileSync(join(old, "scripts", "run.sh"), first.files[0]!.content);
-    expect(replaceOrganizationSkill(bot, "org:fixture", next, after, before)).toEqual({ updated: true });
+    expect((await replaceOrganizationSkill(bot, "org:fixture", next, after, before))).toEqual({ updated: true });
     expect(readInstalledSkillBundle(bot, name)).toEqual(next);
     expect(orgSkillStorage.readManifest(bot)[name]!.executableFiles).toEqual([]);
     expect(listSkills(bot)[0]!.enabled).toBe(false);
     expect(existsSync(old)).toBe(false);
-    expect(removeSkill(bot, name)).toEqual({ removed: true });
+    expect((await removeSkill(bot, name))).toEqual({ removed: true });
     expect(orgSkillStorage.readManifest(bot)[name]).toBeUndefined();
   }));
 });

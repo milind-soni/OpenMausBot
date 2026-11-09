@@ -11,7 +11,8 @@ export function notifyPendingOrgSkillRemoval(botId: string): void {
   }
 }
 
-type Recovery = (botId: string) => { ok: true; pending?: true } | { error: string; retryable: true };
+type RecoveryResult = { ok: true; pending?: true } | { error: string; retryable: true };
+type Recovery = (botId: string) => RecoveryResult | Promise<RecoveryResult>;
 
 export function createOrgSkillRetry(options: {
   bots: () => readonly { id: string }[];
@@ -20,11 +21,11 @@ export function createOrgSkillRetry(options: {
   delayMs?: number;
 }) {
   let timer: ReturnType<typeof setTimeout> | null = null, disposed = false;
-  const recover = () => {
+  const recover = async () => {
     if (!options.recover) return true;
     let complete = true;
     for (const bot of options.bots()) {
-      try { const result = options.recover(bot.id); if ("error" in result || result.pending) complete = false; }
+      try { const result = await options.recover(bot.id); if ("error" in result || result.pending) complete = false; }
       catch { complete = false; }
     }
     return complete;

@@ -252,8 +252,8 @@ export interface OrgLibraryDeps {
     setEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string };
     installOrg(botId: string, source: string, skillMd: string, stamp: SkillPackageStamp, files?: PackageSkill["files"]): SkillListing | { error: string };
     replaceOrg?(botId: string, source: string, skill: Pick<PackageSkill, "instructions" | "files">, stamp: SkillPackageStamp, expected: SkillPackageStamp):
-      { updated: true } | { stale: true } | { error: string; retryable?: boolean };
-    recoverOrg?(botId: string, name?: string): { ok: true; pending?: true } | { error: string; retryable: true };
+      { updated: true } | { stale: true } | { error: string; retryable?: boolean } | Promise<{ updated: true } | { stale: true } | { error: string; retryable?: boolean }>;
+    recoverOrg?(botId: string, name?: string): { ok: true; pending?: true } | { error: string; retryable: true } | Promise<{ ok: true; pending?: true } | { error: string; retryable: true }>;
   };
   /** A team's brief, by its section; without it an update leaves the brief as it is. */
   sections?: { read(section: string): string; write(section: string, text: string): void };
@@ -327,13 +327,13 @@ export class OrgLibrary {
     if (this.rebuild()) this.save();
     this.unsubscribe = deps.store.onChange((change) => this.onStoreChange(change));
     this.skillRetry = createOrgSkillRetry({ bots: () => deps.store.bots, recover: deps.skills.recoverOrg, delayMs: deps.retryDelayMs, retry: () => {
-      this.pending = this.pending.then(() => {
-        try { if (this.library) this.reconcile(this.library); else if (!this.skillRetry.recover()) this.skillRetry.schedule(); }
+      this.pending = this.pending.then(async () => {
+        try { if (this.library) await this.reconcile(this.library); else if (!await this.skillRetry.recover()) this.skillRetry.schedule(); }
         catch (error) { console.error(`[org-library] could not retry skill synchronization: ${error instanceof Error ? error.message : String(error)}`); this.skillRetry.schedule(); }
       });
     } });
     this.unsubscribeRemoval = onPendingOrgSkillRemoval((botId) => { if (deps.store.bots.some((bot) => bot.id === botId)) this.skillRetry.schedule(); });
-    if (!this.skillRetry.recover()) this.skillRetry.schedule();
+    this.pending = this.pending.then(async () => { if (!await this.skillRetry.recover()) this.skillRetry.schedule(); });
   }
 
   dispose(): void {
@@ -385,27 +385,24 @@ export class OrgLibrary {
     }
     this.library = { adminOrigin: origin, organizationId: relay.data.organizationId, digest: relay.data.digest, catalog };
     const applied = this.library;
-    this.pending = this.pending.then(() => new Promise<void>((resolve) => {
-      setImmediate(() => {
-        try {
-          if (this.library === applied) this.reconcile(applied);
-        } catch (error) {
-          console.error(`[org-library] could not apply the library: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        resolve();
-      });
-    }));
+    this.pending = this.pending.then(async () => {
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
+      try {
+        if (this.library === applied) await this.reconcile(applied);
+      } catch (error) {
+        console.error(`[org-library] could not apply the library: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
     return { ok: true };
   }
 
-  private reconcile(applied: AppliedLibrary): void {
+  private async reconcile(applied: AppliedLibrary): Promise<void> {
     this.rebuild();
     const releases = this.releases();
-    let retry = !this.skillRetry.recover();
+    let retry = !await this.skillRetry.recover();
     if (releases) {
       handleWithdrawn(releases);
-      retry = applyUpdates(releases).retry || retry;
-      retry = !this.skillRetry.recover() || retry;
+      retry = (await applyUpdates(releases)).retry || retry;
     }
     this.state.source = { adminOrigin: applied.adminOrigin, organizationId: applied.organizationId };
     this.state.appliedDigest = applied.digest;

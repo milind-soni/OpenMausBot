@@ -101,7 +101,7 @@ export interface BotMessageRouteDeps {
   resolveAndSendRoutine(res: ServerResponse, args: CardAnswer): boolean;
   resolveAndSendProfile(res: ServerResponse, args: CardAnswer): boolean;
   resolveAndSendModel(res: ServerResponse, args: CardAnswer): boolean;
-  resolveSkillRequest(args: CardAnswer & { behavior: Behavior; reviewedSha256?: string }): SkillResolution;
+  resolveSkillRequest(args: CardAnswer & { behavior: Behavior; reviewedSha256?: string }): Promise<SkillResolution>;
   sendSkillResolution(res: ServerResponse, result: SkillResolution): boolean;
   answerRequest(
     threadId: string, instanceId: string, requestId: string, behavior: Behavior, message?: string,
@@ -581,7 +581,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           requestId: String(body.requestId),
           behavior,
         })) return;
-        if (sendSkillResolution(res, resolveSkillRequest({
+        if (sendSkillResolution(res, await resolveSkillRequest({
           botId: bot.id,
           botName: bot.name,
           threadId: bot.threadId,
@@ -635,7 +635,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           const skillBotId = skillCard.from?.botId ?? store.botByThread(threadId)?.id;
           if (!skillBotId) return json(res, 400, { error: "this skill request has no valid owner" });
           const skillOwner = store.bot(skillBotId);
-          if (sendSkillResolution(res, resolveSkillRequest({
+          if (sendSkillResolution(res, await resolveSkillRequest({
             botId: skillBotId,
             botName: skillOwner?.name,
             threadId,

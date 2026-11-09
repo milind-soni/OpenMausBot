@@ -101,7 +101,7 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
       return json(res, 200, { skill: result });
     }
     if (m && method === "DELETE") {
-      const result = removeSkill(m[1]!, m[2]!);
+      const result = await removeSkill(m[1]!, m[2]!);
       if ("error" in result) return json(res, 404, { error: result.error });
       return json(res, 200, { ok: true });
     }

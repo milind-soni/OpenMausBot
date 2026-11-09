@@ -92,14 +92,16 @@ including after restart. A task's link can keep an older revision available;
 the task gets the new link before its next turn, after which the old revision
 can move into recovery storage. Up to 32 old revisions per skill can wait this way;
 removing or moving that skill waits until its old links are cleared. This
-staging currently requires the workspace and protected skill state
-to be on the same filesystem; an update across filesystems is refused. A change
+publication verifies a second staging folder on the workspace filesystem when
+the protected staging folder cannot be renamed across filesystems. A change
 to a file's path, bytes or executable bit is an update; an edited, missing or extra local
 file blocks replacement of that skill. On Windows, protected metadata carries
 reviewed executable intent through updates and cleanup; an older copy without
 that metadata needs manual recovery rather than guessing. Once no skill links
-need an old revision, the app moves its original folder into protected recovery
-storage and keeps it with a receipt. It does not delete the folder: a process
+need an old revision, the app moves its original folder into recovery storage
+and keeps it with a protected receipt. Across filesystems, the folder is renamed
+to a sibling named `.retired-<receipt-key>` on its original filesystem; the receipt
+records its original parent identity. It does not delete the folder: a process
 that already has a file open can still write to the retained original. If a
 move or its verification is interrupted, the app keeps the folder and receipt
 and reports that recovery needs attention.
@@ -115,7 +117,10 @@ for recovery without blocking updates to other skills.
 ### Recovering retained skill folders
 
 Each bot admits up to 32 retained folders, 64 MiB of measured file content and
-8,192 filesystem entries under `<data>/skill-state/<bot-id>/retired-roots/`.
+8,192 filesystem entries across `<data>/skill-state/<bot-id>/retired-roots/`
+and any local retained folders identified by its receipts. Local receipts are
+validated before accounting; a missing, replaced or unsafe retained path blocks
+another admission.
 An update or removal that would exceed a limit stops with a warning in the
 bot's Skills settings. The active or pending folder is kept. These checks bound
 new admissions; they are not a filesystem quota, and a process with an already
@@ -125,11 +130,17 @@ included in the retained-folder limit.
 To make room, first stop the bots and any other processes that might still be
 using the old files. Back up the complete retained folders and their matching
 `.json` receipts to a private location, and verify the backup. Move the original
-folder and receipt together out of `retired-roots` without deleting them; use a
-location on the same filesystem for the move. After the writers have stopped,
+folder and receipt out of recovery without deleting them. A receipt with
+`localParent` refers to `.retired-<receipt-key>` beside its original `directory`,
+rather than a folder under `retired-roots`. Move each item to a private backup
+on its own filesystem. After the writers have stopped,
 the verified backup may also be copied to another filesystem. The app retries
 pending work automatically. Do not move or delete a folder that an active
 process may still write to: moving across filesystems can copy and unlink it.
+Native links crossing filesystems are retained in `.omb-link-removal-*` folders
+beside the original link, with receipts under the bot's protected `link-removal`
+folder. Preserve these entries and receipts during recovery too; a workspace
+process may have substituted a file for the link.
 On a hosted workspace without access to its data directory, ask the server
 operator for this recovery; there is no in-app archive management yet.
 Deleting the bot also removes its recovery storage, so move any folders you
@@ -138,7 +149,7 @@ want to keep to a verified backup before deleting the bot.
 An interrupted update can leave a `pending-*.json` marker in the bot's
 `org-skill-staging` folder. This marker stops further updates for that skill,
 even after a restart. Stop all writers and have the server operator inspect the
-marker, its `target` and `prepared` paths, the matching recovery receipt, and
+marker, its `target`, `prepared` and `localPrepared` paths, the matching recovery receipt, and
 the protected `skills.json` manifest. If the manifest's `storageRevision`
 matches the marker's `revision`, the target is active and must stay in place.
 Otherwise preserve any uncommitted target or staged folder and its recovery

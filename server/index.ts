@@ -9442,7 +9442,7 @@ type UndoResult =
   | { claimed: true; state: "already_undone" | "undone" }
   | { claimed: true; state: "invalid"; error: string; status: number; stale?: true };
 
-function undoSkillCard(botId: string, threadId: string, messageId: string): UndoResult {
+async function undoSkillCard(botId: string, threadId: string, messageId: string): Promise<UndoResult> {
   const message = store.messagesFor(threadId).find((candidate) => candidate.id === messageId);
   const card = message?.card;
   const request = card?.skillRequest;
@@ -9454,7 +9454,7 @@ function undoSkillCard(botId: string, threadId: string, messageId: string): Undo
   if (request.botId !== botId || request.threadId !== threadId) return { claimed: true, state: "invalid", error: "this skill request belongs to a different bot", status: 403 };
   const action = request.action; if (isSkillSwitchAction(action)) return skillSwitch.undo(botId, threadId, message, { ...request, action });
   if (request.shared) return skillsHost.undoReceipt(botId, threadId, message, { ...request, action, shared: request.shared });
-  const undone = undoSkillWrite(botId, { stagedId: request.stagedId, name: request.name, action,
+  const undone = await undoSkillWrite(botId, { stagedId: request.stagedId, name: request.name, action,
     ...(request.previous ? { previous: { skillMd: request.previous.preview, source: request.previous.source, references: request.previous.references ?? [] } } : {}),
   });
   if ("stale" in undone) return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
@@ -9496,7 +9496,7 @@ async function undoAppliedChange(res: ServerResponse, threadId: string, requestI
     }
     result = undone;
   } else if (card.skillRequest) {
-    result = undoSkillCard(botId, threadId, message.id);
+    result = await undoSkillCard(botId, threadId, message.id);
   } else if (card.teamMemoryRequest) {
     result = teamMemoryRequests.undo(threadId, requestId);
   } else if (card.teamSetupRequest) {
@@ -11331,17 +11331,17 @@ function appendSkillRequestCard(args: {
 }
 
 const skillSwitch = createSkillSwitchHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, listBotSkills, readBotSkillFile, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) });
-function resolveSkillRequest(args: {
+async function resolveSkillRequest(args: {
   botId: string;
   botName?: string;
   threadId: string;
   requestId: string;
   behavior: "allow" | "deny" | "answer";
   reviewedSha256?: string;
-}):
+}): Promise<
   | { claimed: false }
   | { claimed: true; status: number; error: string }
-  | { claimed: true; outcome: "allowed-once" | "rejected"; alreadySettled?: true } {
+  | { claimed: true; outcome: "allowed-once" | "rejected"; alreadySettled?: true }> {
   const message = store.messagesFor(args.threadId).find(
     (candidate) => candidate.card?.requestId === args.requestId && candidate.card.skillRequest,
   );
@@ -11493,7 +11493,7 @@ function resolveSkillRequest(args: {
 
 function sendSkillResolution(
   res: ServerResponse,
-  result: ReturnType<typeof resolveSkillRequest>,
+  result: Awaited<ReturnType<typeof resolveSkillRequest>>,
 ): boolean {
   if (!result.claimed) return false;
   if ("error" in result) {
@@ -13667,7 +13667,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
         const direct = appliesDirectly(from.id, fromThreadId);
-        if (isSkillSwitchAction(body.action)) { const staged = skillSwitch.stage(from, fromThreadId, body.action, body, direct); return json(res, staged.status, staged.body); }
+        if (isSkillSwitchAction(body.action)) { const staged = await skillSwitch.stage(from, fromThreadId, body.action, body, direct); return json(res, staged.status, staged.body); }
         const persistence = skillProposalPersistence(from.id, fromThreadId, !direct);
         if (!persistence.ok) return json(res, persistence.status, { error: persistence.error });
         const action = body.action === "create" || body.action === "update" ? body.action : "";
