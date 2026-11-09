@@ -10,9 +10,10 @@ import { AUTHORITY, botWho, fromNoteWith, informationOnly, lineNote, type LineLa
 const REQUEST_QUOTE_MAX = 400;
 
 /** From the harness's records, never from model text; work handed on keeps the origin it came from. `person`: on work
- * handed on, whom it acts for (server/host/acting-person.ts), so it may use that person's own apps. */
+ * handed on, whom it acts for (server/host/acting-person.ts), so it may use that person's own apps. `lends`: the turn that
+ * handed it on could itself use their lent computer when it did (server/cloud-lending.ts handedOnForOwner). */
 export const workOriginSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("user"), request: z.string().min(1).max(REQUEST_QUOTE_MAX), person: z.string().regex(/^p_[\w-]{22}$/).optional() }),
+  z.object({ kind: z.literal("user"), request: z.string().min(1).max(REQUEST_QUOTE_MAX), person: z.string().regex(/^p_[\w-]{22}$/).optional(), lends: z.literal(true).optional() }),
   z.object({ kind: z.literal("outside") }),
 ]);
 export type WorkOrigin = z.infer<typeof workOriginSchema>;

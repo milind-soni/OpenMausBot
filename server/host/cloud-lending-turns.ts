@@ -1,7 +1,7 @@
 // Which turns on a Cloud home may use the Mac lent to it, read from the harness's own records (server/cloud-lending.ts
 // decides), and the plain words a turn that can't is told. A room member turn acts for the person's line that started
 // its run, for that turn generation alone, while the run lasts.
-import { answersOwnersLine, cloudHomeLendingRefusal, cloudLendingRefusalText, ON_THE_CARD, ONLY_THE_PERSON, teamLendingRefusal, type CloudLendingRefusal, type CloudLendingTurn } from "../cloud-lending.ts";
+import { answersOwnersLine, cloudHomeLendingRefusal, cloudLendingRefusalText, handedOnForOwner, ON_THE_CARD, ONLY_THE_PERSON, teamLendingRefusal, type CloudLendingRefusal, type CloudLendingTurn } from "../cloud-lending.ts";
 import { unstamped } from "../cloud-owner-lines.ts";
 import { deviceWord } from "../lent-computers.ts";
 import type { Routine, RoutineManager, RoutineRun } from "../routines.ts";
@@ -12,7 +12,7 @@ import type { createLendingLifts } from "./lending-lifts.ts";
 type Turn = { botId: string; threadId: string; generation: string };
 
 export interface CloudLendingTurnsDeps {
-  store: Pick<Store, "botByThread" | "groupByThread" | "messagesFor" | "taskByThread">;
+  store: Pick<Store, "botByThread" | "groupByThread" | "messagesFor" | "taskByThread" | "setTaskOpenedBy">;
   cloudHome: boolean;
   /** The team whose Cloud this is; null on a person's own. */
   team?: string | null;
@@ -53,7 +53,7 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
       thread: store.messagesFor(capability.threadId),
       starters: cloudThreadStarters(capability.threadId),
       reportsFromOthers: store.messagesFor(capability.threadId).some(cloudReportFromOthers),
-      botOpened: cloudBotOpened(capability.threadId),
+      botOpened: cloudBotOpened(capability.threadId) && !openedForOwner(capability.threadId),
       ownerPerson: deps.ownerPerson,
       cardAnswerer: deps.cardAnswerer,
       routineRun: () => {
@@ -132,6 +132,32 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
     return Boolean(bot && store.taskByThread(bot.id, threadId)?.openedBy);
   }
 
+  /** Opened by a turn that could itself use the lent computer, with nothing handed in since but work from turns like it. */
+  function openedForOwner(threadId: string): boolean {
+    const bot = store.botByThread(threadId);
+    return Boolean(bot && store.taskByThread(bot.id, threadId)?.openedBy?.forOwner);
+  }
+
+  /** Security invariant: whether what this turn hands on now may go on using the lent computer. Only the owner's own
+   * one-on-one line, in a conversation every gate allows without a card, or work already handed on that way: never a
+   * routine's or a webhook's run, a room, a turn a card let through, or a bot whose memory is locked. It may never reach
+   * further than this turn itself can. */
+  function handsOnLending(capability: Turn): boolean {
+    if (!deps.cloudHome || deps.team || store.groupByThread(capability.threadId)) return false;
+    const turn = cloudLendingTurn(capability);
+    return (answersOwnersLine(turn) || handedOnForOwner(turn)) && cloudHomeLendingRefusal(turn) === null && !deps.memoryChangedBySomeoneElse(capability.botId);
+  }
+
+  /** Work handed into this conversation by a turn that could not hand on the lent computer: it no longer counts as the
+   * owner's, whatever is handed in later. */
+  function handedInUnproven(threadId: string): void {
+    const bot = store.botByThread(threadId);
+    const task = bot && store.taskByThread(bot.id, threadId);
+    if (!bot || !task?.openedBy?.forOwner) return;
+    const { forOwner: _cleared, ...openedBy } = task.openedBy;
+    store.setTaskOpenedBy(bot.id, threadId, openedBy);
+  }
+
   function cloudThreadStarters(threadId: string): (string | undefined)[] {
     const room = store.groupByThread(threadId);
     return [deps.threadStarter(threadId), ...(room && room.threadId !== threadId ? [deps.threadStarter(room.threadId)] : [])];
@@ -152,7 +178,7 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
   }
 
   return {
-    cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusalForBot, cloudLendingRefusal, cloudThreadStarters, cloudBotOpened, cloudLendingView, cloudReportFromOthers,
+    cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusalForBot, cloudLendingRefusal, cloudThreadStarters, cloudBotOpened, cloudLendingView, cloudReportFromOthers, handsOnLending, handedInUnproven,
     /** A room member turn of this run started: its generation acts for the line the run answers. */
     roomTurnStarted(generation: string, run: RoomRun): void { roomTurnOperations.set(generation, run); },
     /** The run ended: none of its turn generations act for anyone any more. */

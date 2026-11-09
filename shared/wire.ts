@@ -96,6 +96,9 @@ export interface TaskOpenedBy {
   threadId?: string;
   /** A parallel room job's thread: `threadId` is the room thread it came from, and the member must stay in that room. */
   roomLane?: true;
+  /** Security invariant: set only by the harness, when a turn that could itself use the owner's lent computer opened this
+   * thread (server/cloud-lending.ts); a later hand-in from any other turn clears it for good. */
+  forOwner?: true;
   at: number;
 }
 
@@ -579,7 +582,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
    * conversation (coordinate_bots, start_thread). `incident`: the line is a
    * Team incidents report or Team escalations notice about that bot's thread
    * in `threadId`, not its words; `notified`: the person was already buzzed. */
-  peerAsk?: { botId: string; name: string; unattended?: boolean; incident?: { threadId: string; notified?: boolean } };
+  peerAsk?: { botId: string; name: string; unattended?: boolean; incident?: { threadId: string; notified?: boolean }; /** Security invariant: set only by the harness, for a line a turn that could itself use the owner's lent computer handed in. */ forOwner?: true };
   /** One reaction per person (shared/reactions.ts REACTIONS). `by` is "user"
    * on a workspace one person uses, otherwise that person's opaque key, the
    * one GET /api/auth/session returns as `reactor`. `name` is attribution

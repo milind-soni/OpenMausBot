@@ -90,8 +90,10 @@ async function completedTurn(start: () => Promise<void>) {
 }
 const newBot = async (name: string, instanceId: "held" | "done" | "brief" | "turns") =>
   (await api("POST", "/api/bots", { token: owner, body: { name, modelSelection: { instanceId, model: "claude-sonnet-5" } } })).body.bot as { id: string; threadId: string };
-const say = async (token: string, bot: { id: string }, text: string, threadId?: string) =>
-  expect((await api("POST", `/api/bots/${bot.id}/messages`, { token, body: { text, ...(threadId ? { threadId } : {}) } })).status).toBe(202);
+const say = async (token: string, bot: { id: string }, text: string, threadId?: string) => {
+  const sent = await api("POST", `/api/bots/${bot.id}/messages`, { token, body: { text, ...(threadId ? { threadId } : {}) } });
+  expect(sent.status, JSON.stringify(sent.body)).toBe(202);
+};
 const newThread = async (bot: { id: string }, token = owner, title = "Mine") => {
   const created = await api("POST", `/api/bots/${bot.id}/tasks`, { token, body: { title } });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
@@ -906,8 +908,20 @@ const withSkill = async (bot: { id: string }, name = "weekly-report") => {
 const lendingRecord = (bot: { id: string }) =>
   (JSON.parse(readFileSync(join(home, ".openmausbot", "lending-memory.json"), "utf8")) as { bots: Record<string, { flagged?: true; pending?: true }> }).bots[bot.id];
 /** A hand-off opens a new `@sender · work` thread on the receiver and runs its turn there, held open. */
-async function handedThread(sender: { id: string }, receiver: { id: string }) {
-  const senderTools = await toolsFor(() => say(owner, sender, "Ask your teammate for the report."));
+/** A bot locked for what changed its memory, so nothing it hands on keeps the lent computer. */
+async function lockedSender(name: string) {
+  const sender = await newBot(name, "held");
+  const guests = await guestThread(sender);
+  await toolsFor(() => say(owner, sender, "Save a note in your memory file.", guests));
+  appendFileSync(ws(sender, "MEMORY.md"), `\n- Written in a conversation a guest left behind.\n`);
+  await stop(sender, guests);
+  await expect.poll(() => lendingRecord(sender)?.flagged).toBe(true);
+  await stopRunningTurns();
+  return sender;
+}
+/** Work a bot hands on from its own conversation with the owner: it keeps the lent computer only when `sender` is not locked. */
+async function handedThread(sender: { id: string; threadId: string }, receiver: { id: string }) {
+  const senderTools = await toolsFor(() => say(owner, sender, "Ask your teammate for the report.", sender.threadId));
   let thread = "";
   const tools = await toolsFor(async () => {
     const handed = JSON.parse((await senderTools("coordinate_bots", { bot_ids: [receiver.id], message: "Please write the report." })).content[0].text);
@@ -930,8 +944,25 @@ async function postedThread(bot: { id: string }): Promise<string> {
   return thread;
 }
 
+it("the owner's own line handed on keeps the Mac for the teammate's turn, and locks nothing", async () => {
+  const sender = await newBot("Hands owner's work", "held");
+  const receiver = await newBot("Takes owner's work", "held");
+  await review(receiver);
+  const { thread, tools } = await handedThread(sender, receiver);
+  // Not a foreign turn: nothing to reconcile when it ends.
+  expect(lendingRecord(receiver)).toEqual(expect.not.objectContaining({ pending: true }));
+  const listing = await sees(tools);
+  expect(listing.unavailable).toBeUndefined();
+  expect(listing.computers).toHaveLength(1);
+  expect((await reads(tools)).content[0].text).toContain("from the Mac");
+  appendFileSync(ws(receiver, "MEMORY.md"), "\n- Owner's work kept here.\n");
+  await stop(receiver, thread);
+  await stop(sender, sender.threadId);
+  await expect.poll(() => lendingRecord(receiver)?.flagged).toBeFalsy();
+}, 60_000);
+
 it("a hand-off that only opens a thread on a bot leaves its Mac in reach of the owner's new conversation", async () => {
-  const sender = await newBot("Handing", "held");
+  const sender = await lockedSender("Handing");
   const receiver = await newBot("Handed", "held");
   await withSkill(receiver);
   await review(receiver);
@@ -963,7 +994,7 @@ it("a hand-off that only opens a thread on a bot leaves its Mac in reach of the 
 }, 60_000);
 
 it("a skill a handed-in turn writes in its new thread's folder still locks the bot, and each refusal names the way out that works", async () => {
-  const sender = await newBot("Handing plant", "held");
+  const sender = await lockedSender("Handing plant");
   const receiver = await newBot("Handed plant", "held");
   await withSkill(receiver);
   await review(receiver);
@@ -990,7 +1021,7 @@ it("a skill a handed-in turn writes in its new thread's folder still locks the b
 }, 60_000);
 
 it("the owner's line in a webhook's thread, on a locked bot, names both steps; once reviewed only the new conversation is left", async () => {
-  const sender = await newBot("Handing both", "held");
+  const sender = await lockedSender("Handing both");
   const receiver = await newBot("Handed both", "held");
   await review(receiver);
   const { thread } = await handedThread(sender, receiver);
@@ -1046,7 +1077,7 @@ const cardsIn = async (threadId: string) => ((await api("GET", `/api/threads/${t
 const answer = (threadId: string, requestId: string, behavior: "allow" | "deny") => api("POST", `/api/threads/${threadId}/respond`, { token: owner, body: { requestId, behavior } });
 /** A bot locked by a note a handed-in turn wrote directly. */
 async function lockedBot(name: string) {
-  const sender = await newBot(`${name} sender`, "held");
+  const sender = await lockedSender(`${name} sender`);
   const bot = await newBot(name, "held");
   await review(bot);
   const { thread } = await handedThread(sender, bot);
@@ -1219,7 +1250,7 @@ it("a new post after he allowed his line shuts it again", async () => {
 }, 60_000);
 
 it("his own line in a thread a bot opened gets the card; Allow lets that line through, and work handed in after shuts it again", async () => {
-  const sender = await newBot("Card opener", "held");
+  const sender = await lockedSender("Card opener");
   const receiver = await newBot("Card opened", "held");
   await review(receiver);
   const { thread } = await handedThread(sender, receiver);
@@ -1241,7 +1272,7 @@ it("his own line in a thread a bot opened gets the card; Allow lets that line th
   // Still not his own conversation for what feeds memory.
   expect((await mine("memory_update", { action: "append", text: INJECTED })).isError).toBe(true);
   // The bot that opened it hands more work into it while his turn runs: that shuts it again.
-  const senderTools = await toolsFor(() => say(owner, sender, "Send them one more thing."));
+  const senderTools = await toolsFor(() => say(owner, sender, "Send them one more thing.", sender.threadId));
   const more2 = JSON.parse((await senderTools("coordinate_bots", { bot_ids: [receiver.id], message: "Also check the spam folder." })).content[0].text);
   expect(more2.receipts?.[0]?.threadId, JSON.stringify(more2)).toBe(thread);
   await expect.poll(async () => (await sees(mine)).computers.length).toBe(0);

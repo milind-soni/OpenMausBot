@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cloudHomeLendingRefusal, cloudLendingRefusalText, createCloudRoutineAuthors, ownerOnlyConversation, routineFingerprint, teamLendingRefusal, type CloudLendingTurn } from "./cloud-lending.ts";
+import { cloudHomeLendingRefusal, cloudLendingRefusalText, createCloudRoutineAuthors, handedOnForOwner, ownerOnlyConversation, routineFingerprint, teamLendingRefusal, type CloudLendingTurn } from "./cloud-lending.ts";
 import { CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts";
 
 const OWNER = "p_owner", GUEST = "p_guest";
@@ -116,6 +116,43 @@ describe("who may use a Mac lent to a Cloud home (review: guests, webhooks)", ()
     const routineThread = [said("m1")];
     expect(mayLend(turn({ request: request("m1", { automation: "manual" }), thread: routineThread, routineRun: run({ triggerSource: "manual", ownerStarted: true }) }))).toBe(true);
     expect(mayLend(turn({ request: request("m1", { automation: "manual" }), thread: routineThread, routineRun: run({ triggerSource: "manual", ownerStarted: false }) }))).toBe(false);
+  });
+});
+
+describe("work handed on inherits the lent computer only from an owner-started root (review: hand-offs)", () => {
+  const generations = new Set(["g1"]);
+  const origin = (extra: Record<string, unknown> = {}) => ({ kind: "user" as const, request: "Tidy Downloads", person: OWNER, lends: true as const, ...extra });
+  const handed = (overrides: Partial<CloudLendingTurn> & { origin?: ReturnType<typeof origin> | { kind: "outside" }; automation?: "schedule" } = {}): CloudLendingTurn => {
+    const { origin: chosen, automation, ...rest } = overrides;
+    return turn({ thread: [reply("brief")], request: { generations, origin: (chosen ?? origin()) as never, ...(automation ? { automation } : {}) }, ...rest });
+  };
+  it("a hand-off the harness recorded as coming from a turn that could use it may, with no line of the owner's in the thread", () => {
+    expect(handedOnForOwner(handed())).toBe(true);
+    expect(cloudHomeLendingRefusal(handed())).toBeNull();
+    // A thread opened with the opener's words as a line of its own.
+    expect(cloudHomeLendingRefusal(turn({ thread: [said("m1", undefined, { peerAsk: { botId: "b2", forOwner: true } }), reply("r1")], request: { generations, messageId: "m1", origin: origin() } }))).toBeNull();
+  });
+  it("a recorded person the owner no longer vouches for, an unrecorded hop or a run of automation may not", () => {
+    expect(cloudHomeLendingRefusal(handed({ origin: origin({ person: GUEST }) }))).toBe("unproven");
+    expect(cloudHomeLendingRefusal(handed({ origin: origin({ lends: undefined }) as never }))).toBe("unproven");
+    expect(cloudHomeLendingRefusal(handed({ origin: { kind: "outside" } }))).toBe("unproven");
+    expect(handedOnForOwner(turn({ request: { generations, automation: "schedule", origin: origin() } }))).toBe(false);
+    expect(cloudHomeLendingRefusal(turn({ thread: [reply("brief")], request: { generations, messageId: "brief", automation: "webhook", origin: origin() }, routineRun: run() }))).toBe("not-owner");
+  });
+  it("stopped, or from another generation, it may not", () => {
+    expect(cloudHomeLendingRefusal(turn({ thread: [reply("brief")], request: { generations, stopped: true, origin: origin() } }))).toBe("unproven");
+    expect(cloudHomeLendingRefusal(turn({ thread: [reply("brief")], generation: "g-other", request: { generations, origin: origin() } }))).toBe("unproven");
+  });
+  it("anyone else's words in the conversation still shut it: a guest, an unvouched hand-in, a webhook's post or a guest's opening", () => {
+    expect(cloudHomeLendingRefusal(handed({ thread: [reply("brief"), said("g1", GUEST)] }))).toBe("someone-else");
+    expect(cloudHomeLendingRefusal(handed({ thread: [reply("brief"), said("p1", undefined, { peerAsk: { botId: "b2" } })] }))).toBe("someone-else");
+    expect(cloudHomeLendingRefusal(handed({ reportsFromOthers: true }))).toBe("someone-else");
+    expect(cloudHomeLendingRefusal(handed({ starters: [GUEST] }))).toBe("someone-else");
+    expect(cloudHomeLendingRefusal(handed({ botOpened: true }))).toBe("someone-else");
+  });
+  it("a vouched hand-in never makes a conversation the owner's for what feeds memory, recall or the brief", () => {
+    const thread = [said("m1", undefined, { peerAsk: { botId: "b2", forOwner: true } })];
+    expect(ownerOnlyConversation(thread, ownerPerson, cardAnswerer)).toBe(false);
   });
 });
 

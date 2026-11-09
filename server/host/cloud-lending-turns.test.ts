@@ -6,17 +6,20 @@ const OWNER = "p_owner";
 const turn = { botId: "b1", threadId: "t1", generation: "g1" };
 const own = { id: "m1", role: "user", sender: { id: OWNER } };
 
-function lending({ lines = [own] as Record<string, unknown>[], flagged = false, room = false, team = null as string | null, starter = undefined as string | undefined, openedBy = undefined as object | undefined } = {}) {
+function lending({ lines = [own] as Record<string, unknown>[], flagged = false, room = false, team = null as string | null, starter = undefined as string | undefined, openedBy = undefined as object | undefined,
+  request = { messageId: "m1", generations: new Set(["g1"]) } as { messageId?: string; generations: Set<string>; origin?: unknown; automation?: string } } = {}) {
   const asked: string[] = [];
+  let opened = openedBy;
   const host = createCloudLendingTurns({
     store: {
       groupByThread: () => (room ? { threadId: "t1" } : undefined),
       messagesFor: () => lines,
       botByThread: () => ({ id: "b1" }),
-      taskByThread: () => ({ threadId: "t1", ...(openedBy ? { openedBy } : {}) }),
+      taskByThread: () => ({ threadId: "t1", ...(opened ? { openedBy: opened } : {}) }),
+      setTaskOpenedBy: (_botId: string, _threadId: string, next: object) => { opened = next; return null; },
     } as never,
     cloudHome: true, team,
-    directRequest: () => ({ messageId: "m1", generations: new Set(["g1"]) }),
+    directRequest: () => request as never,
     threadStarter: () => starter,
     ownerPerson: (person) => person === OWNER,
     cardAnswerer: () => undefined,
@@ -29,11 +32,43 @@ function lending({ lines = [own] as Record<string, unknown>[], flagged = false, 
     lentPlatform: () => "darwin",
   });
   if (room) host.roomTurnStarted("g1", { requestMessageId: "m1", cancelled: false } as never);
-  return { host, asked };
+  return { host, asked, opened: () => opened };
 }
 
 const handedIn = { id: "m1", role: "user", peerAsk: { botId: "b2" } };
 const webhookPost = { id: "w1", role: "bot", webhookPost: true };
+
+describe("handing the lent computer on (server/host/cloud-lending-turns.ts)", () => {
+  const proven = { kind: "user" as const, request: "Tidy Downloads", person: OWNER, lends: true as const };
+  const handedTurn = { messageId: undefined, generations: new Set(["g1"]), origin: proven };
+  it("a turn answering the owner's own clean line may hand it on; a card, a guest or a locked bot may not", () => {
+    expect(lending().host.handsOnLending(turn)).toBe(true);
+    expect(lending({ flagged: true }).host.handsOnLending(turn)).toBe(false);
+    expect(lending({ lines: [{ id: "m1", role: "user", sender: { id: "p_guest" } }] }).host.handsOnLending(turn)).toBe(false);
+    expect(lending({ lines: [own, { id: "g1", role: "user", sender: { id: "p_guest" } }] }).host.handsOnLending(turn)).toBe(false);
+  });
+  it("work already handed on that way may hand it on again; a routine's or webhook's run, a room or a Cloud team never can", () => {
+    expect(lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn }).host.handsOnLending(turn)).toBe(true);
+    expect(lending({ request: { messageId: "m1", generations: new Set(["g1"]), automation: "schedule" } }).host.handsOnLending(turn)).toBe(false);
+    expect(lending({ room: true }).host.handsOnLending(turn)).toBe(false);
+    expect(lending({ team: "Acme" }).host.handsOnLending(turn)).toBe(false);
+  });
+  it("a thread a turn like that opened passes the opened-by-a-bot gate; anyone else's opening still shuts it", () => {
+    const opened = { botId: "b2", name: "Two", at: 1 };
+    expect(lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn, openedBy: { ...opened, forOwner: true } }).host.cloudLendingRefusal(turn)).toBeNull();
+    expect(lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn, openedBy: opened }).host.cloudLendingRefusal(turn)).toBe("someone-else");
+  });
+  it("a hand-in from a turn that couldn't hand it on clears the record for good, and an unproven thread stays unproven", () => {
+    const openedBy = { botId: "b2", name: "Two", at: 1, forOwner: true };
+    const world = lending({ lines: [{ id: "brief", role: "bot" }], request: handedTurn, openedBy });
+    world.host.handedInUnproven("t1");
+    expect(world.opened()).toEqual({ botId: "b2", name: "Two", at: 1 });
+    expect(world.host.cloudLendingRefusal(turn)).toBe("someone-else");
+    const none = lending({ openedBy: { botId: "b2", name: "Two", at: 1 } });
+    none.host.handedInUnproven("t1");
+    expect(none.opened()).toEqual({ botId: "b2", name: "Two", at: 1 });
+  });
+});
 
 describe("what a turn hears when it can't use the lent Mac (server/host/cloud-lending-turns.ts)", () => {
   it("a turn every gate allows hears nothing", () => {
