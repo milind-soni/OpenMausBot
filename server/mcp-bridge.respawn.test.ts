@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { COMPUTER_HELPER_STOPPED } from "../shared/your-computer.ts";
@@ -38,7 +39,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 `);
   const entry = join(home, "bridge-entry.ts");
   writeFileSync(entry, `
-import { runMcpBridge } from ${JSON.stringify(resolve("server/mcp-bridge.ts"))};
+import { runMcpBridge } from ${JSON.stringify(pathToFileURL(resolve("server/mcp-bridge.ts")).href)};
 runMcpBridge({ command: process.execPath, args: [${JSON.stringify(helper)}], label: "fake", respawn: { stopped: ${JSON.stringify(STOPPED)} } });
 `);
   return { home, log, entry, helper };
