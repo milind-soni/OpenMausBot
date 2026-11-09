@@ -329,6 +329,19 @@ describe("Chat MCP session", () => {
     warn.mockRestore();
   });
 
+  it.each([["built-in", true], ["configured", false]])("skips a %s server that exits after listing its tools while another server is still mounting", async (_kind, builtIn) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const slow = fixture(`if (message.method === "tools/list") { setTimeout(() => reply(message, {tools:[{name:"write",description:"Fixture write",inputSchema:schema}]}), 600); continue; }`);
+    const leaves = fixture(`if (message.method === "tools/list") { reply(message, {tools:[{name:"write",description:"Fixture write",inputSchema:schema}]}); setTimeout(() => process.exit(5), 20); continue; }`);
+    const session = await mountChatTools(builtIn ? { agents: leaves.server, custom: { slow: slow.server } } : { custom: { leaves: leaves.server, slow: slow.server } }, slow.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["slow_write"]);
+    expect(session.skipped).toEqual([{ server: builtIn ? "agents" : "leaves", reason: "MCP server exited before the session closed (exit code 5)", builtIn }]);
+    expect(() => session.validate(builtIn ? "agents_write" : "leaves_write", { value: "x" })).toThrow("not advertised");
+    await expect(session.execute("slow_write", { value: "still works" }, slow.controller.signal)).resolves.toMatchObject({ ok: true });
+    warn.mockRestore();
+  });
+
   it("rejects untrusted transport error text without leaking it", async () => {
     const f = fixture(`if (message.method === "tools/call") { send({jsonrpc:"2.0",id:message.id,error:{code:-1,message:"secret-fixture-key"}}); continue; }`);
     const session = await f.mount();

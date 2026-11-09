@@ -99,6 +99,7 @@ export class ChatMcpClient {
   private frames = 0;
   private closed = false;
   private closing?: Promise<void>;
+  private failed?: Error;
   private pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
 
   /** `configured`: a server the person set up, whose own environment passes the bot box as theirs. */
@@ -120,9 +121,12 @@ export class ChatMcpClient {
     this.child.stdin.on("error", () => this.fail(new Error("MCP server input closed")));
   }
 
+  get failure(): Error | undefined { return this.failed; }
+
   private fail(error: Error): void {
     if (this.closed) return;
     this.closed = true;
+    this.failed = error;
     for (const entry of this.pending.values()) entry.reject(error);
     this.pending.clear();
     void this.close().catch(() => {});
@@ -606,6 +610,8 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         await skip(name, index < builtIns, mount.reason, startedAt[index]);
         continue;
       }
+      const { failure } = mount.value.origin.client;
+      if (failure) { await skip(name, index < builtIns, failure, mount.value.origin.client); continue; }
       if (index < builtIns) {
         offeredTools.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) });
         continue;
