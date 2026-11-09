@@ -1036,7 +1036,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (turn.userSkillsDir) args.push("--add-dir", turn.userSkillsDir);
       }
       const compactWindow = autoCompactWindow(turnEnvironment);
-      if (compactWindow && cliHasAutocompact === true) args.push("--autocompact", compactWindow);
+      const passedAutocompact = Boolean(compactWindow) && cliHasAutocompact === true; if (compactWindow && passedAutocompact) args.push("--autocompact", compactWindow);
       // --resume keeps the recorded system prompt, so every turn refreshes it.
       if (cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) {
         args.push("--system-prompt-snapshot", "off");
@@ -1350,7 +1350,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           (event) => emit({ ...base(threadId, session.turn?.turnId ?? turnId), ...event })),
         mcpConfigPath,
         systemPromptPath,
-        argsKey, cliVersion: cliHelpVersion, passedAutocompact: args.includes("--autocompact"),
+        argsKey, cliVersion: cliHelpVersion, passedAutocompact,
         volatile: turn.systemVolatile ?? "",
         sessionId: sessionId ?? newSessionId,
         sawInit: false,
@@ -1714,8 +1714,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           }
         } else if (session.turn && !session.turn.settled) {
           const { turnId, input: turn, retryAbort } = session.turn;
-          // Commander prints this last before exiting; only a launch that passed the flag counts, so the flag-less relaunch can't loop.
-          const refusedAutocompact = session.passedAutocompact && /unknown option '--autocompact'/.test(session.stderr);
+          // Commander prints this at launch, before init; only a launch that passed the flag counts, so the flag-less relaunch can't loop.
+          const refusedAutocompact = session.passedAutocompact && !session.sawInit && /unknown option '--autocompact'/.test(session.stderr);
           if (refusedAutocompact) { if (session.cliVersion !== null) autocompactRefusedBy.add(session.cliVersion); if (session.cliVersion === cliHelpVersion) cliHasAutocompact = false; }
           const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
