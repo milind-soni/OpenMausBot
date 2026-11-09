@@ -5,13 +5,14 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 
 import { ChiefOperator } from "../chief-operator.ts";
+import type { AppConfig } from "../config.ts";
 import { createActingPeople, HandedPeople, type ActingLine } from "../host/acting-person.ts";
 import { personKey } from "../person-key.ts";
 import { createInternalChiefOperatorRoutes } from "./internal-chief-operator.ts";
 
 it.each([null, personKey({ id: "client-a" }), personKey({ id: "local-owner" })])("P2 requires positive desktop owner provenance: %s", async (requester) => {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-operator-provenance-"));
-  const cfg = { language: "en" };
+  const cfg: AppConfig = { language: "en" };
   const operator = new ChiefOperator({ dataDir, config: () => cfg, botIdentity: () => "chief-identity",
     writeSetting: (_setting, value) => { cfg.language = value; }, changed: () => {} });
   try {
@@ -30,7 +31,7 @@ it.each([null, personKey({ id: "client-a" }), personKey({ id: "local-owner" })])
 
 it.each(["read", "preview", "apply", "rollback"])("rechecks owner provenance after a gated %s body", async action => {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-operator-body-"));
-  const cfg = { language: "en" };
+  const cfg: AppConfig = { language: "en" };
   const owner = personKey({ id: "local-owner" });
   const lines: ActingLine[] = [{ id: "ask", at: 1, role: "user", sender: { id: owner } }];
   const people = createActingPeople({ store: { groupByThread: () => undefined, messagesFor: () => lines },

@@ -1,7 +1,9 @@
 // "Forget X" reaches every note a bot keeps: MEMORY.md, its topic notes and their archive. About me is forgotten by the caller.
 import { join } from "node:path";
 
+import type { WireMessage } from "../shared/wire.ts";
 import type { AboutMe } from "./about-me.ts";
+import { ownersOwnLine } from "./cloud-owner-lines.ts";
 import { parseMemoryEntries, passageMatcher } from "./memory-entries.ts";
 import { clearForgotten, rememberForgotten } from "./profile-learned.ts";
 import { isMemorySeed, listMemoryTopics, readMemoryText, updateMemory, workspaceDir, writeMemoryFile, writeMemoryTopic, type MemoryUpdate, type MemoryUpdateResult } from "./workspace.ts";
@@ -67,9 +69,9 @@ export function forgetInNotes(botId: string, mentions: (text: string) => boolean
 }
 
 /** The person's own words started this turn: not another person's, not another bot's, not a room's. */
-export function ownersOwnAsk(path: ReadonlyArray<{ role: string; kind?: string; sender?: unknown; peerAsk?: unknown }>): boolean {
+export function ownersOwnAsk(path: readonly Pick<WireMessage, "role" | "kind" | "sender" | "peerAsk" | "aside" | "relayed" | "via" | "text">[]): boolean {
   const asked = path.findLast((message) => message.role === "user" && message.kind === "text");
-  return Boolean(asked) && !asked!.sender && !asked!.peerAsk;
+  return Boolean(asked && ownersOwnLine(asked));
 }
 
 export type BotMemoryResult = MemoryUpdateResult | { ok: true; forgotten: string[]; aboutMe: string[] }

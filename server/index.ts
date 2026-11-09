@@ -128,6 +128,7 @@ import { createSideJobs, helperSelection } from "./side-jobs.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
 import { createAboutMe } from "./about-me.ts"; import { createPersonPreference } from "./host/person-preference.ts";
 import { botMemoryUpdate, ownersOwnAsk } from "./memory-forget.ts";
+import { ownersOwnLine } from "./cloud-owner-lines.ts";
 import { canManage, canReach, hasTeamAuthority, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
 import {
   containerComputerAction,
@@ -1821,9 +1822,9 @@ const MAX_WORKSPACE_BOTS = 100;
 const phoneProxyPath = SPAWNED_PROXIES.phone;
 
 const researchAvailability = createResearchAvailability({ credential: () => researchCredential(cfg.treg?.key) }); researchAvailability.available();
-const chiefOperator = createChiefOperatorHost({ dataDir: DATA_DIR, config: () => cfg, bot: (id) => store.bot(id),
-  ownerActive: (owner) => !CLOUD_TEAM || (teamOwners.people?.list().some(person => person.email.toLowerCase() === owner.toLowerCase() && person.role === "owner") ?? false),
-  writeSetting: (setting, value) => { saveConfig({ [setting]: value }); Object.assign(cfg, loadConfig()); }, changed: () => broadcast({ kind: "config", ...configStatus() }) });
+const chiefOperatorOwnerActive = (owner: string) => !CLOUD_TEAM || (teamOwners.people?.list().some(person => person.email.toLowerCase() === owner.toLowerCase() && person.role === "owner") ?? false);
+const chiefOperator = createChiefOperatorHost({ dataDir: DATA_DIR, config: () => cfg, bot: (id) => store.bot(id), ownerActive: chiefOperatorOwnerActive,
+  changed: () => broadcast({ kind: "config", ...configStatus() }) });
 const agentsIntegration = createAgentsIntegration({
   bot: (id) => store.bot(id), speaking: botForThread, room: (id) => Boolean(store.groupByThread(id)),
   teamComputer: (bot) => Boolean(inheritedTeamComputer(bot)), port: PORT, savedFiles: !CLOUD_HOME && !HOSTED_WORKSPACE,
@@ -5163,7 +5164,7 @@ function captureTurnFor(threadId: string, turnId: string): CaptureTurn | null {
   return {
     person: extractTurnImages(asked.text ?? "").text,
     bot: path[replyAt]!.text ?? "",
-    owner: !asked.sender,
+    owner: ownersOwnLine(asked),
     turnId,
   };
 }
@@ -5275,7 +5276,7 @@ function captureRoomTurnFor(threadId: string, botId: string, turnId: string): Ca
     if (message.role === "user") {
       if (message.peerAsk || message.aside) continue;
       const text = extractTurnImages(message.text).text;
-      lines.push(message.sender ? { by: "other", name: message.sender.name, text } : { by: "person", name: "Person", text });
+      lines.push(ownersOwnLine(message) ? { by: "person", name: "Person", text } : { by: "other", name: message.sender?.name ?? "Person", text });
     } else if (message.role === "bot" && message.from && message.from.botId !== botId && !message.webhookPost) {
       lines.push({ by: "peer", name: message.from.name, text: message.text });
     }
@@ -12374,7 +12375,7 @@ const mcpConfig = createMcpConfig({
   connectionsChanged: (change) => void routineHolds?.connections(change), probeAs: mcpServersHost.probeAs, testElsewhere: (name, server, lender, signal) => lentMcp.test(name, server, lender, signal),
   changed: () => broadcast({ kind: "mcp.changed" }) });
 const persistAnnouncedMcpServers = (next: Record<string, unknown>) => { persistMcpServers(next); broadcast({ kind: "mcp.changed" }); };
-ROUTES.push(createChiefOperatorRoutes(chiefOperator, (auth, req) => chiefOperatorOwner(auth, req, { team: Boolean(CLOUD_TEAM), desktopManaged: DESKTOP_MANAGED, desktopMutationToken })));
+ROUTES.push(createChiefOperatorRoutes(chiefOperator, (auth, req) => chiefOperatorOwner(auth, req, { team: Boolean(CLOUD_TEAM), desktopManaged: DESKTOP_MANAGED, desktopMutationToken, sessions, ownerActive: chiefOperatorOwnerActive })));
 const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persistAnnouncedMcpServers, mcpConfigBusy: mcpConfig.busy, mcpPolicyRefusal, appCatalog: chatAppsMcp, team: teamConnections, loopback: !CLOUD_HOME && !HOSTED_WORKSPACE }); ROUTES.push(createPostizRoutes({ postiz }), createConfigRoutes({
   store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
   sharedComputers, sharedComputerControl, closeBrowser, browserEngineSwitched,

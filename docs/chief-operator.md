@@ -20,7 +20,8 @@ This slice exposes `GET`, `PUT` and `DELETE /api/chief-operator`. They require a
 The supported scripted path is a paired owner session or admin-scoped access token used as a bearer token. Never put the token in a command argument, URL, transcript or repository file. First read the current appointment and its `revision`:
 
 ```sh
-curl -H "Authorization: Bearer $OPENMAUSBOT_TOKEN" "$OPENMAUSBOT_URL/api/chief-operator"
+printf 'Authorization: Bearer %s\n' "$OPENMAUSBOT_TOKEN" |
+  curl --header @- "$OPENMAUSBOT_URL/api/chief-operator"
 ```
 
 Appoint an existing, active bot by its ID and explicitly select its scopes. Use the exact `revision` returned by GET as `expectedRevision` (`none` when there is no appointment):

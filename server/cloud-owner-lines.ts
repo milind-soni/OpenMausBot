@@ -13,7 +13,7 @@ export interface CloudOwner { person: string; name: string }
 /** Security invariant: only a user line nobody else's words or no automation made. A peer's ask or aside, a line a
  * script or an outside interface relayed, and a routine's, webhook's or app event's own prompt are never the owner's,
  * however they arrive; a webhook's post is a bot's line. */
-export function ownersOwnLine(row: Message): boolean {
+export function ownersOwnLine(row: Pick<Message, "role" | "sender" | "peerAsk" | "aside" | "relayed" | "via" | "text">): boolean {
   if (row.role !== "user" || (row.sender && row.sender.id !== DESKTOP_OWNER_KEY) || row.peerAsk || row.aside || row.relayed || row.via === "api") return false;
   const text = typeof row.text === "string" ? row.text : "";
   return !routinePrompt(text) && !text.includes(WEBHOOK_EVENT_DATA) && !text.includes(APP_EVENT_DATA);

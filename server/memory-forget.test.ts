@@ -54,7 +54,7 @@ describe("ownersOwnAsk", () => {
   it("is true only when the person's own words started the turn", () => {
     expect(ownersOwnAsk([{ role: "user", kind: "text" }, { role: "bot", kind: "text" }])).toBe(true);
     expect(ownersOwnAsk([{ role: "user", kind: "text", sender: { name: "Asha" } }])).toBe(false);
-    expect(ownersOwnAsk([{ role: "user", kind: "text", peerAsk: true }])).toBe(false);
+    expect(ownersOwnAsk([{ role: "user", kind: "text", peerAsk: { botId: "peer", name: "Peer" } }])).toBe(false);
     expect(ownersOwnAsk([{ role: "bot", kind: "text" }])).toBe(false);
   });
 });

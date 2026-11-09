@@ -28,6 +28,7 @@ const HEADER_BYTES = MAGIC.length + 16 + 12;
 const TAG_BYTES = 16;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const WAITS_FILE = "waits.json";
+const CHIEF_OPERATOR_TEMP = /^chief-operator\.json\..*\.tmp$/i;
 const EXCLUDED = new Set([
   ".backups", "tools", "browser", "agent-browser-profiles", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
   ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json", "chief-operator.json",
@@ -87,7 +88,7 @@ export interface WorkspaceRestoreResult {
 export type LastWorkspaceRestore = WorkspaceRestoreResult & { restored: true; id: string; pathsRewritten?: true };
 
 function excluded(name: string): boolean {
-  return EXCLUDED.has(name) || excludedWorkspaceAuthPath(name) || name.startsWith("openmausbot-server.lease.") || name.startsWith("box-create-requests.lock.") || /^perm-[A-Za-z0-9_-]+\.sock$/.test(name);
+  return EXCLUDED.has(name) || CHIEF_OPERATOR_TEMP.test(name) || excludedWorkspaceAuthPath(name) || name.startsWith("openmausbot-server.lease.") || name.startsWith("box-create-requests.lock.") || /^perm-[A-Za-z0-9_-]+\.sock$/.test(name);
 }
 function forbiddenArchivePath(path: string): boolean {
   const folded = path.toLowerCase();
@@ -98,7 +99,7 @@ function preserved(name: string): boolean {
   // An existing WAL/SHM belongs to the old database, and existing waits to the old chats: neither may accompany restored ones.
   const folded = name.toLowerCase();
   // A restored bot roster must never revive a platform-administration grant, including on the original machine.
-  return excluded(folded) && !LIVE_DATABASE_SIDECARS.has(folded) && folded !== WAITS_FILE && folded !== "chief-operator.json";
+  return excluded(folded) && !LIVE_DATABASE_SIDECARS.has(folded) && folded !== WAITS_FILE && folded !== "chief-operator.json" && !CHIEF_OPERATOR_TEMP.test(folded);
 }
 const SNAPSHOT_DATABASES: Record<string, string> = { "messages.db": "messages-snapshot.db", "runtime.db": "runtime-snapshot.db" };
 const LIVE_DATABASE_SIDECARS = new Set(Object.keys(SNAPSHOT_DATABASES).flatMap((name) => [`${name}-wal`, `${name}-shm`]));

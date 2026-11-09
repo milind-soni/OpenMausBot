@@ -152,6 +152,30 @@ describe("encrypted full workspace backups", () => {
     expect(manifest.entries.some((entry: { path: string }) => entry.path === "notes.md")).toBe(true);
   });
 
+  it("excludes atomic Chief Operator state while preserving normal backup files", async () => {
+    const source = directory();
+    const excluded = ["chief-operator.json.123.crash.tmp", "CHIEF-OPERATOR.JSON.456.OTHER.TMP"];
+    for (const name of excluded) json(join(source, name), { grant: "unfinished-source-grant" });
+    writeFileSync(join(source, "chief-operator.json.notes"), "ordinary note");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    const manifest = readJson(join(target, ".backups", staged.id, "staged", "manifest.json"));
+    const paths = manifest.entries.map((entry: { path: string }) => entry.path);
+    for (const name of excluded) {
+      expect(omittedFromWorkspaceBackup(name)).toBe(true);
+      expect(omittedFromWorkspaceBackup(`${name}/child`)).toBe(true);
+      expect(paths).not.toContain(name);
+    }
+    expect(paths).toContain("chief-operator.json.notes");
+  });
+
+  it("rejects noncanonical Chief Operator grant names before export", async () => {
+    const source = directory();
+    json(join(source, "CHIEF-OPERATOR.JSON"), { grant: "source-grant" });
+    await expect(createWorkspaceBackup(source, { password: PASSWORD })).rejects.toThrow(/protected authentication/);
+  });
+
   it("neither transfers nor retains a Chief Operator grant when restoring bots", async () => {
     const source = directory();
     json(join(source, "bots.json"), []);
@@ -539,6 +563,11 @@ describe("encrypted full workspace backups", () => {
       await expect(stageWorkspaceBackup(directory(), path, { password: PASSWORD })).rejects.toThrow(/metadata/);
     }
     for (const [name, content] of [
+      ["chief-operator.json.123.crash.tmp", '{"grant":"foreign-grant"}'],
+      ["CHIEF-OPERATOR.JSON.456.OTHER.TMP", '{"grant":"foreign-grant"}'],
+      ["chief-operator.json.123.crash.tmp/child", "foreign-grant"],
+      ["folder/../chief-operator.json.123.crash.tmp", "foreign-grant"],
+      ["chief-operator.json.123.crash.tmp\\child", "foreign-grant"],
       ["team-computers.json", '{"computers":[{"id":"foreign-computer","section":"Design"}]}'],
       ["workspace-credentials.json", '{"xaiApiKey":"secret"}'],
       ["external-runtimes.json", '{"bot-id":"external-runtime-secret"}'],
@@ -562,7 +591,7 @@ describe("encrypted full workspace backups", () => {
       const parents = name.split("/").slice(0, -1).map((_part, index) => name.split("/").slice(0, index + 1).join("/"));
       const manifest = { ...base, entries: [...parents.map((path) => ({ path, type: "directory", size: 0, mode: 0o700 })), entry], summary: { ...base.summary, directories: parents.length, files: 1, bytes: entry.size } };
       const path = encryptedPayload(source, Buffer.concat([tarEntry("manifest.json", "File", JSON.stringify(manifest)), tarEntry("data", "Directory"), ...parents.map((parent) => tarEntry(`data/${parent}`, "Directory")), tarEntry(`data/${name}`, "File", content), Buffer.alloc(1024)]));
-      await expect(stageWorkspaceBackup(directory(), path, { password: PASSWORD })).rejects.toThrow(/Unsafe|connection settings|webhook credentials/);
+      await expect(stageWorkspaceBackup(directory(), path, { password: PASSWORD })).rejects.toThrow(/unsafe|connection settings|webhook credentials/i);
     }
   });
 

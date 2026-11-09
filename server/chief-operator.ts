@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { configSettingRevision } from "./config-setting-revision.ts";
 import type { AppConfig } from "./config.ts";
 
 export const OPERATOR_SETTINGS = ["language", "computerName"] as const;
@@ -24,9 +25,11 @@ const auditSchema = z.object({
   action: z.enum(["appoint", "revoke", "apply", "rollback"]),
   botId: z.string().min(1), owner: z.string().min(1),
   setting: settingSchema.optional(), before: z.string().optional(), after: z.string().optional(),
+  beforeAbsent: z.boolean().optional(), afterAbsent: z.boolean().optional(),
   state: z.enum(["pending", "applied", "failed"]), reason: z.string().optional(),
   decision: z.enum(["owner-appointed", "owner-revoked", "identity-lost", "scope-allowed"]).optional(), undoOf: z.string().uuid().optional(),
   grantId: z.string().uuid().optional(), revision: z.string().optional(),
+  mutationRevision: z.string().optional(),
 }).strict();
 const stateSchema = z.object({ grant: grantSchema.nullable(), audit: z.array(auditSchema) }).strict();
 type Grant = z.infer<typeof grantSchema>;
@@ -51,6 +54,8 @@ function validValue(setting: OperatorSetting, value: unknown): string {
     if (value && (value.length > 35 || !/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/.test(value))) {
       throw new OperatorRefusal(400, "language must be empty or a lowercase BCP-47 language tag");
     }
+    try { if (value) Intl.getCanonicalLocales(value); }
+    catch { throw new OperatorRefusal(400, "language must be empty or a lowercase BCP-47 language tag"); }
   } else if (value.length > 63 || value.trim() !== value || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) {
     throw new OperatorRefusal(400, "computerName must be at most 63 trimmed, printable characters");
   }
@@ -62,7 +67,7 @@ export interface ChiefOperatorDeps {
   config(): AppConfig;
   botIdentity(id: string): string | null;
   ownerActive?(owner: string): boolean;
-  writeSetting(setting: OperatorSetting, value: string): void;
+  writeSetting(setting: OperatorSetting, value: string | undefined): void;
   changed(): void;
 }
 
@@ -92,10 +97,8 @@ export class ChiefOperator {
   private save(state: State): void {
     mkdirSync(this.deps.dataDir, { recursive: true });
     if (state.audit.filter(row => row.state === "pending").length > PENDING_LIMIT) throw new OperatorRefusal(503, "Too many pending Chief Operator receipts. The owner must reconcile them before new changes.");
-    const audit = state.audit.length <= AUDIT_LIMIT ? state.audit : [
-      ...state.audit.filter(row => row.state === "pending"),
-      ...state.audit.filter(row => row.state !== "pending").slice(-AUDIT_LIMIT),
-    ];
+    const settled = new Set(state.audit.filter(row => row.state !== "pending").slice(-AUDIT_LIMIT));
+    const audit = state.audit.filter(row => row.state === "pending" || settled.has(row));
     writeFileAtomic(this.file, JSON.stringify({ ...state, audit }), { mode: 0o600 });
   }
 
@@ -109,7 +112,7 @@ export class ChiefOperator {
   private current(setting: OperatorSetting): string { return this.deps.config()[setting] ?? ""; }
 
   private revision(grant: Grant, setting: OperatorSetting): string {
-    return createHash("sha256").update(JSON.stringify([grant.id, setting, this.current(setting), this.configStamp()])).digest("hex");
+    return createHash("sha256").update(JSON.stringify([grant.id, setting, this.deps.config()[setting], this.configStamp(), configSettingRevision(setting, this.deps.dataDir)])).digest("hex");
   }
 
   private grantFor(botId: string): Grant {
@@ -207,17 +210,18 @@ export class ChiefOperator {
     if (state.audit.some(row => row.undoOf === original.id && row.state !== "failed")) throw new OperatorRefusal(409, "This receipt was already rolled back or has a pending rollback.");
     this.scope(input.botId, original.setting, "read");
     this.scope(input.botId, original.setting, "write");
-    if (state.audit.findLast(row => row.setting === original.setting && row.state === "applied")?.id !== original.id) throw new OperatorRefusal(409, "The setting changed after this receipt. Read the setting again before rollback.");
+    if (!original.mutationRevision || original.mutationRevision !== configSettingRevision(original.setting, this.deps.dataDir) || state.audit.findLast(row => row.setting === original.setting && row.state === "applied")?.id !== original.id) throw new OperatorRefusal(409, "The setting changed after this receipt. Read the setting again before rollback.");
     const revision = this.revision(grant, original.setting);
     if (!input.active() || input.expectedRevision !== revision || this.current(original.setting) !== original.after) throw new OperatorRefusal(409, "The turn or configuration changed. Read the setting again before rollback.");
-    const receiptId = this.writeChange("rollback", grant, input.botId, original.setting, original.after, original.before, input.active, original.id);
+    const receiptId = this.writeChange("rollback", grant, input.botId, original.setting, original.after, original.beforeAbsent ? undefined : original.before, input.active, original.id);
     return { receiptId, state: "applied", setting: original.setting, after: original.before, revision: this.revision(grant, original.setting) };
   }
 
-  private writeChange(action: "apply" | "rollback", grant: Grant, botId: string, setting: OperatorSetting, before: string, after: string, active: () => boolean, undoOf?: string): string {
+  private writeChange(action: "apply" | "rollback", grant: Grant, botId: string, setting: OperatorSetting, before: string, after: string | undefined, active: () => boolean, undoOf?: string): string {
     const id = randomUUID();
     const beforeStamp = this.configStamp();
-    const row: Audit = { id, at: new Date().toISOString(), actor: botId, action, botId, owner: grant.owner, setting, before, after, state: "pending", decision: "scope-allowed", grantId: grant.id, revision: this.revision(grant, setting), ...(undoOf ? { undoOf } : {}) };
+    const beforeValue = this.deps.config()[setting];
+    const row: Audit = { id, at: new Date().toISOString(), actor: botId, action, botId, owner: grant.owner, setting, before, after: after ?? "", beforeAbsent: beforeValue === undefined, afterAbsent: after === undefined, state: "pending", decision: "scope-allowed", grantId: grant.id, revision: this.revision(grant, setting), ...(undoOf ? { undoOf } : {}) };
     const state = this.state();
     if (state.grant?.id !== grant.id || !active()) throw new OperatorRefusal(409, "The role or initiating turn was revoked.");
     if (state.audit.some(item => item.state === "pending")) throw new OperatorRefusal(409, "A Chief Operator receipt is still pending. The owner must inspect and reconcile it before another settings change.");
@@ -225,12 +229,13 @@ export class ChiefOperator {
     try {
       if (this.state().grant?.id !== grant.id || !active()) throw new OperatorRefusal(409, "The role or initiating turn was revoked.");
       this.deps.writeSetting(setting, after);
+      const mutationRevision = configSettingRevision(setting, this.deps.dataDir);
       this.deps.changed();
       const updated = this.state();
-      this.save({ ...updated, audit: updated.audit.map(item => item.id === id ? { ...item, state: "applied" } : item) });
+      this.save({ ...updated, audit: updated.audit.map(item => item.id === id ? { ...item, state: "applied", mutationRevision } : item) });
     } catch (error) {
       const updated = this.state();
-      const changed = this.current(setting) !== before || this.configStamp() !== beforeStamp;
+      const changed = this.deps.config()[setting] !== beforeValue || this.configStamp() !== beforeStamp;
       if (!changed) this.save({ ...updated, audit: updated.audit.map(item => item.id === id ? { ...item, state: "failed", reason: "Configuration was not changed." } : item) });
       if (changed) throw new OperatorRefusal(503, `Setting may have changed, but receipt ${id} was not finalized. The owner must inspect the setting and audit before retrying.`);
       throw error;

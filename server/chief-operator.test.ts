@@ -142,12 +142,41 @@ describe("Chief Operator", () => {
     expect(JSON.parse(readFileSync(join(dataDir, "chief-operator.json"), "utf8")).audit.length).toBe(105);
   }));
 
+  it("retains pending and applied receipts in order after 1000 settled entries", () => fixture(({ operator, dataDir }) => {
+    operator.appoint({ botId: "chief", read: ["language"], write: ["language"], expectedRevision: "none" }, "owner@example.test");
+    const file = join(dataDir, "chief-operator.json");
+    const state = JSON.parse(readFileSync(file, "utf8"));
+    state.audit = Array.from({ length: 1_000 }, () => ({ ...state.audit[0], id: randomUUID() }));
+    const settled = state.audit.map((row: { id: string }) => row.id);
+    writeFileSync(file, JSON.stringify(state));
+    const preview = operator.preview({ ...source, setting: "language", value: "fr" });
+    let pending: string[] = [];
+    const receipt = operator.apply({ ...source, previewId: preview.previewId, expectedRevision: preview.revision, active: () => {
+      const audit = JSON.parse(readFileSync(file, "utf8")).audit;
+      if (audit.some((row: { state: string }) => row.state === "pending")) pending = audit.map((row: { id: string }) => row.id);
+      return true;
+    } });
+    expect.soft(pending).toEqual([...settled, receipt.receiptId]);
+    const audit = JSON.parse(readFileSync(file, "utf8")).audit;
+    expect(audit.map((row: { id: string }) => row.id)).toEqual([...settled.slice(1), receipt.receiptId]);
+    expect(audit.at(-1)).toMatchObject({ id: receipt.receiptId, state: "applied" });
+  }));
+
   it("accepts multilingual computer names but rejects invisible and control characters", () => fixture(({ operator }) => {
     operator.appoint({ botId: "chief", read: [], write: ["computerName"], expectedRevision: "none" }, "owner@example.test");
     expect(operator.preview({ ...source, setting: "computerName", value: "辦公室 Mac 🖥️" }).after).toBe("辦公室 Mac 🖥️");
     for (const name of ["Office\u0085Mac", "Office\u202eMac", "Office\u200bMac", "Office\u2028Mac"]) {
       expect(() => operator.preview({ ...source, setting: "computerName", value: name })).toThrow(/printable characters/);
     }
+  }));
+
+  it("rejects the invalid BCP47 tag en-12 without changing configuration", () => fixture(({ operator, cfg, file, dataDir }) => {
+    operator.appoint({ botId: "chief", read: ["language"], write: ["language"], expectedRevision: "none" }, "owner@example.test");
+    const before = [readFileSync(file, "utf8"), readFileSync(join(dataDir, "chief-operator.json"), "utf8")];
+    expect(() => operator.preview({ ...source, setting: "language", value: "en-12" })).toThrow(/BCP-47/);
+    expect(cfg.language).toBe("en");
+    expect([readFileSync(file, "utf8"), readFileSync(join(dataDir, "chief-operator.json"), "utf8")]).toEqual(before);
+    for (const value of ["", "en", "zh-hant", "es-419"]) expect(operator.preview({ ...source, setting: "language", value }).after).toBe(value);
   }));
 
   it("keeps old pending receipts visible to the owner and blocks subsequent apply and rollback", () => fixture(({ operator, cfg, dataDir }) => {

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { expect, it } from "vitest";
 
@@ -93,6 +94,13 @@ it.each(["stdio", "http"])("appoints one operator through an owner session and c
     expect(applied.body).toMatchObject({ state: "applied", setting: "language", after: "fr" });
     expect((await api("GET", "/api/config", undefined, owner)).body.language).toBe("fr");
     expect((await api("GET", "/api/chief-operator", undefined, owner)).body.audit.at(-1)).toMatchObject({ id: applied.body.receiptId, state: "applied", botId: operatorBot.id, setting: "language" });
+    for (const language of ["de", "fr"]) expect((await api("PATCH", "/api/config", { language }, owner)).status).toBe(200);
+    const current = await call({ action: "read" });
+    const bytes = () => ["config.json", "chief-operator.json"].map(file => readFileSync(join(fixture.info.dataDir, file), "utf8"));
+    const beforeRollback = bytes();
+    expect((await rpc("tools/call", { name: "operator_settings", arguments: { action: "rollback", receipt_id: applied.body.receiptId, expected_revision: current.body.settings[0].revision } })).isError).toBe(true);
+    expect(bytes()).toEqual(beforeRollback);
+    expect((await api("GET", "/api/config", undefined, owner)).body.language).toBe("fr");
     await cli("interrupt", "--bot", operatorBot.id);
     const clientPairing = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
     const client = await api("POST", "/api/auth/pair", { code: clientPairing.body.code });

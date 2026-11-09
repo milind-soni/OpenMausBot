@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { botThreadLimitText, defaultBotThreads, maxConcurrentBotThreads, maxConcurrentChildThreads } from "./bot-thread-limits.ts";
 import type { JsonValue } from "./schema.ts";
 import { imageSlots } from "./image-generation.ts";
+import { configSettingRevision } from "./config-setting-revision.ts";
 
 import { cacheUntilConfigChanges,
   changedInstanceIds,
@@ -1652,6 +1653,35 @@ describe("credential env preference", () => {
     expect(loadConfig()).toMatchObject({ computerName: "AdamPC", profile: { name: "Workspace owner" } });
     saveConfig({ computerName: "" });
     expect(loadConfig()).toMatchObject({ computerName: "", profile: { name: "Workspace owner" } });
+  });
+
+  it("keeps setting mutation revisions private, durable and independent", () => {
+    saveConfig({ language: "en", computerName: "Work Mac" });
+    const language = configSettingRevision("language");
+    const computerName = configSettingRevision("computerName");
+    const patch = parseConfigPatch({ language: "fr", _settingRevisions: { language } });
+    expect(patch).toEqual({ language: "fr" });
+    saveConfig(patch);
+    const changed = configSettingRevision("language");
+    expect(changed).not.toBe(language);
+    expect(configSettingRevision("computerName")).toBe(computerName);
+    saveConfig({ profile: { name: "Owner" } });
+    expect(configSettingRevision("language")).toBe(changed);
+    expect(loadConfig()).not.toHaveProperty("_settingRevisions");
+    saveConfig({}, { unsetSettings: ["language"] });
+    expect(loadConfig()).not.toHaveProperty("language");
+    expect(JSON.parse(readFileSync(join(DATA_DIR, "config.json"), "utf8"))).not.toHaveProperty("language");
+    expect(configSettingRevision("language")).not.toBe(changed);
+    expect(configSettingRevision("computerName")).toBe(computerName);
+  });
+
+  it.each([null, { language: 12 }, { language: "invalid" }])("refuses damaged setting revisions without overwriting configuration: %j", revisions => {
+    const file = join(DATA_DIR, "config.json");
+    const bytes = JSON.stringify({ language: "fr", _settingRevisions: revisions });
+    writeFileSync(file, bytes);
+    expect(() => configSettingRevision("language")).toThrow();
+    expect(() => saveConfig({ language: "de" })).toThrow();
+    expect(readFileSync(file, "utf8")).toBe(bytes);
   });
 
   it("merges onboarding progress like any other section", () => {

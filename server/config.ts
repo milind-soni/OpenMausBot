@@ -7,7 +7,7 @@ import { z } from "zod";
 import type { ImageGenerationConfig } from "../shared/image-generation.ts";
 import { imageGenConfigSchema, imageGenPatchSchema, keepKeysOutOfImageModels, type ImageGenCredentialPatch } from "./image-generation-config.ts";
 import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
-import { writeFileAtomic } from "./atomic.ts";
+import { writeConfigWithSettingRevisions } from "./config-setting-revision.ts";
 import { defaultBotThreads, MAX_CONCURRENT_BOT_THREADS } from "./bot-thread-limits.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
@@ -916,7 +916,7 @@ export function saveConfig(
     newBots?: z.output<typeof newBotsPatchSchema>;
     imageGen?: z.output<typeof imageGenPatchSchema>;
   },
-  options: { replaceInstances?: boolean } = {},
+  options: { replaceInstances?: boolean; unsetSettings?: Array<"language" | "computerName"> } = {},
 ): void {
   const p = join(DATA_DIR, "config.json");
   let disk: JsonObject = {};
@@ -1026,7 +1026,7 @@ export function saveConfig(
     }
   }
   mkdirSync(DATA_DIR, { recursive: true });
-  writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
+  writeConfigWithSettingRevisions(p, disk, checkedPatch, options.unsetSettings);
   storedConfig.forget();
   for (const listener of configSaveListeners) {
     try {
