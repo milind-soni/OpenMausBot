@@ -177,6 +177,8 @@ export function isRuntimeEvent(value: unknown): value is RuntimeEvent {
       );
     case "turn.wait_started":
       return typeof value.resource === "string" && computerHolderOrMissing(value.holder);
+    case "cap.exhausted":
+      return typeof value.handoffPath === "string" && value.reason === "cap";
     case "turn.wait_ended":
       return (
         typeof value.resource === "string" &&

@@ -63,6 +63,24 @@ describe("readThreadEvents", () => {
     expect(page.entries.map((entry) => (entry.data as { eventId: string }).eventId)).toEqual(["e1"]);
   });
 
+  it("keeps budget exhaustion and its handoff while rejecting malformed cap events", () => {
+    const eventsDir = tmp();
+    const nativeDir = tmp();
+    const cap = runtime({ eventId: "cap", type: "cap.exhausted", createdAt: "2026-08-17T10:00:00.000Z", handoffPath: "/fixture/handoff.json", reason: "cap" });
+    writeFileSync(join(eventsDir, "t1.ndjson"), [
+      cap,
+      { ...cap, eventId: "missing-path", handoffPath: undefined },
+      { ...cap, eventId: "bad-path", handoffPath: 42 },
+      { ...cap, eventId: "missing-reason", reason: undefined },
+      { ...cap, eventId: "bad-reason", reason: "timeout" },
+    ].map(line).join(""));
+
+    const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1" });
+
+    expect(page.entries).toHaveLength(1);
+    expect(page.entries[0]).toMatchObject({ kind: "runtime", data: cap });
+  });
+
   it("caps each log to its most recent `limit` lines and reports what it skipped", () => {
     const eventsDir = tmp();
     const nativeDir = tmp();
