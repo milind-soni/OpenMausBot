@@ -30,9 +30,20 @@ describe("splitReplyBlocks", () => {
 
   it.each(["`", "~"])("keeps tables inside longer %s fences as code", (character) => {
     const outer = character.repeat(4);
-    const fenced = [`${outer}md`, character.repeat(3), table, `${outer} still code`, table, character.repeat(5)].join("\n");
+    const opposite = character === "`" ? "~~~~" : "````";
+    const fenced = [
+      `${outer}md`, character.repeat(3), opposite, table, `${outer} still code`, table, character.repeat(5),
+    ].join("\n");
     expect(splitReplyBlocks(`${fenced}\n\n${table}`)).toEqual([
       { kind: "prose", text: fenced },
+      { kind: "table", text: table },
+    ]);
+  });
+
+  it("keeps tables outside an invalid backtick fence visible", () => {
+    const invalidFence = "```md`example";
+    expect(splitReplyBlocks(`${invalidFence}\n\n${table}`)).toEqual([
+      { kind: "prose", text: invalidFence },
       { kind: "table", text: table },
     ]);
   });
