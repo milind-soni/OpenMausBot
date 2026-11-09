@@ -44,7 +44,7 @@ export function codexConfigMcp(env: Record<string, string | undefined>): CodexCo
   return { names: mcpServerNamesInToml(text), tables };
 }
 
-/** Disable literal config keys before mounting per-turn servers. Codex splits CLI paths at every dot. */
+/** Disable literal config keys before mounting per-turn servers. Codex splits CLI paths at every dot, so a whole-table override preserves literal names; it must precede the per-mount CLI overrides. */
 export function codexMcpDisableArgs(names: ReadonlySet<string>): string[] {
   if ([...names].some((name) => !/^[A-Za-z0-9_-]+$/.test(name))) {
     const tables = [...names].map((name) => `${JSON.stringify(name)} = { enabled = false }`).join(", ");

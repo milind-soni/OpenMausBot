@@ -66,7 +66,7 @@ describe("readThreadEvents", () => {
   it("keeps budget exhaustion and its handoff while rejecting malformed cap events", () => {
     const eventsDir = tmp();
     const nativeDir = tmp();
-    const cap = runtime({ eventId: "cap", type: "cap.exhausted", createdAt: "2026-08-17T10:00:00.000Z", handoffPath: "/fixture/handoff.json", reason: "cap" });
+    const cap = runtime({ eventId: "cap", type: "cap.exhausted", createdAt: "2026-08-17T10:00:00.000Z", handoffPath: resolve("/fixture/handoff.json"), reason: "cap" });
     writeFileSync(join(eventsDir, "t1.ndjson"), [
       cap,
       { ...cap, eventId: "missing-path", handoffPath: undefined },

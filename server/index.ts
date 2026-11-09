@@ -325,8 +325,7 @@ import { createStopLineRoutes } from "./routes/stop-line.ts"; import { decideRoo
 import { createLiveSession, liveAttachUrl, liveHistoryFrom, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
 import { LiveCallController, LiveCallSignedOutError, openLiveSocket } from "./live-call-controller.ts";
 import { liveCallSettings, liveSettingsFor, liveSettingsForClient, saveLiveSettings } from "./live-settings.ts"; import { azureLiveCallRefusal, liveScopeRefusal } from "./live-access.ts";
-import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-record.ts";
-import { noteGroupTurn, turnsSince } from "./room-round-turns.ts";
+import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-record.ts"; import { noteGroupTurn, turnsSince } from "./room-round-turns.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { createTtsRoutes } from "./routes/tts.ts";
 import { turnStartLogLine } from "./turn-log.ts";
@@ -10553,18 +10552,14 @@ async function runClaimedGroupMemberTurn(
       });
     }
     // A bot that spoke earlier answers a mention by its own name (not @everyone) again, unless it took a turn since this reply.
-    const spokeBeforeReply = new Set(spoken), answeredSince = turnsSince(spoken);
-    const named = new Set(mentionedBots(replyText, members).map((member) => member.id));
+    const spokeBeforeReply = new Set(spoken), answeredSince = turnsSince(spoken), named = new Set(mentionedBots(replyText, members).map((member) => member.id));
     for (const next of roomResponders(replyText, members, { kind: "mentions" })) {
       if (isCancelled?.()) return false;
       if (spokeBeforeReply.has(next.id) ? answeredSince(next.id) > 0 || !named.has(next.id) : spoken.has(next.id)) continue;
       if (operation) {
         const verdict = await waitForChatRoomMember(operation, threadId, next);
         if (verdict === "stop") return false;
-        if (verdict === "skip") {
-          noteGroupTurn(spoken, next.id);
-          continue;
-        }
+        if (verdict === "skip") { noteGroupTurn(spoken, next.id); continue; }
       }
       if (providerTurnId) usageTrace.expect(threadId, { parent: { threadId, turnId: providerTurnId } });
       if (!(await runGroupMemberTurn(
