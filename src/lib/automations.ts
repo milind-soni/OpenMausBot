@@ -249,8 +249,14 @@ function ownerFix(run: RoutineRun): { reason: string; fix: AutomationFix } | nul
   return null;
 }
 
-/** A waiting run that waits only on work it handed to teammates: nothing is asked of the person. */
-const waitsOnTeammates = (run: Pick<RoutineRun, "attention">) => run.attention === ROUTINE_HANDOFF_WAIT;
+/** A bot's waiting run that waits only on work it handed to teammates: nothing is asked of the person. */
+const waitsOnTeammates = (run: Pick<RoutineRun, "target" | "attention">) => run.target === "bot" && run.attention === ROUTINE_HANDOFF_WAIT;
+
+/** The run whose question the person should answer: the newest run, looking past runs that only wait on teammates. */
+export function runAwaitingAnswer(runs: readonly RoutineRun[]): RoutineRun | undefined {
+  const run = runs.find((candidate) => candidate.status !== "cancelled" && candidate.status !== "queued" && !(candidate.status === "waiting" && waitsOnTeammates(candidate)));
+  return run?.status === "waiting" ? run : undefined;
+}
 
 /** Done when a one-time automation's time has passed, Paused when switched off. Needs you when its last run waits on the
  * person, its app needs reconnecting, failed for a reason only the person can fix, or failed twice running. A run that
@@ -262,7 +268,7 @@ export function automationStatus(automation: Pick<Automation, "enabled" | "runs"
   if (automation.checkTrouble) return { state: "needs-you", reason: routineLineText(automation.checkTroubleCode, automation.checkTrouble), fix: SIGNED_OUT.test(automation.checkTrouble) ? "reconnect" : "run" };
   const settled = automation.runs.filter((run) => run.status !== "cancelled" && run.status !== "queued");
   const latest = settled[0];
-  if (latest?.status === "waiting" && !waitsOnTeammates(latest)) return { state: "needs-you", reason: t("automations.reason.answer"), fix: "answer" };
+  if (runAwaitingAnswer(settled)) return { state: "needs-you", reason: t("automations.reason.answer"), fix: "answer" };
   if (latest && isProblem(latest)) {
     const owner = ownerFix(latest);
     if (owner) return { state: "needs-you", ...owner };
