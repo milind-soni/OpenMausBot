@@ -13,12 +13,13 @@ const COORDINATE_FIELDS: Readonly<Record<string, string>> = {
   reason: "Say why in one short line, then call coordinate_bots again.",
 };
 
-/** The first over-long field a coordinate_bots call was refused for; undefined when something else was wrong with it. */
+/** What to say when length is the only thing wrong with a coordinate_bots call; undefined when anything else is too, so the
+ * general words cover it all and the bot isn't sent back to fix one field of two. */
 export function coordinateTooLong(issues: readonly Issue[]): string | undefined {
-  for (const issue of issues) {
+  const refusals = issues.map((issue) => {
     const field = String(issue.path[0]);
     const how = COORDINATE_FIELDS[field];
-    if (issue.code === "too_big" && how && issue.maximum !== undefined) return tooLongRefusal(field, issue.maximum, how);
-  }
-  return undefined;
+    return issue.code === "too_big" && how && issue.maximum !== undefined ? tooLongRefusal(field, issue.maximum, how) : undefined;
+  });
+  return refusals.length && refusals.every(Boolean) ? refusals.join(" ") : undefined;
 }

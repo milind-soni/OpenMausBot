@@ -32,5 +32,6 @@ describe("calls refused for length", () => {
   it("leaves any other refusal to the general words", () => {
     expect(refusal({ botIds: ["a", "b", "c", "d", "e"], message: "ok" }), "too many teammates is no length").toBeUndefined();
     expect(refusal({ botIds: [], message: "" })).toBeUndefined();
+    expect(refusal({ botIds: ["a", "b", "c", "d", "e"], message: "x".repeat(4001) }), "the general words cover both").toBeUndefined();
   });
 });
