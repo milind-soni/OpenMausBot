@@ -110,6 +110,19 @@ describe("Upgrade", () => {
     // Every meter on the page reads the plan again at once.
     expect(dispatchEvent.mock.calls.map(([event]) => (event as Event).type)).toEqual(["omb:cloud-plan-changed"]);
   });
+  it("reads the trial's end from the plan when the preview has no date, so a longer trial still hears nothing is charged today", async () => {
+    const DAY = 86_400_000;
+    const asked = async (trialEndsAt: number) => {
+      const b = bridge(), current = usage({ trialEndsAt });
+      b.upgradePreview.mockResolvedValue({ outcome: "preview" as const, preview: { ...PREVIEW, trial: true, nextBillingAt: undefined } });
+      const render = () => { f.index = 0; return useUpgrade(b, current, "app_usage"); };
+      render().start();
+      await flush();
+      return String(render().dialog.props.body);
+    };
+    expect(await asked(Date.now() + 3 * DAY)).toBe("Your free trial moves to Max now, and nothing is charged today. When it ends, Max is $99 a month, plus any tax.");
+    expect(await asked(Date.now() + DAY / 2)).toBe("Your free trial moves to Max now. When it ends, Max is $99 a month, plus any tax.");
+  });
   it("opens the Cloud page when the app can't change plans, and never previews or changes then", async () => {
     const b = bridge();
     expect(await previewUpgrade(b, usage({ upgrades: [] }), "app_settings")).toEqual({ note: { tone: "info", text: "Your Plan page opened in your browser. You can change your plan there." } });

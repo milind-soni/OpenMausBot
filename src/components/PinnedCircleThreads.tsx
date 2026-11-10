@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type DragEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, FolderPlus, Plus } from "lucide-react";
-import { openBot, visibleMessages, type Bot, type Message } from "@/state/store";
+import { openBotRow, visibleMessages, type Bot, type Message } from "@/state/store";
 import { avatarCropRadius, botAvatarProfile } from "../../shared/bot-avatar";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { BotAvatar } from "./Avatar";
@@ -95,7 +95,7 @@ function pinnedCircleDropClass({ axis, place }: PinnedCircleDrop): string {
 }
 
 export function pinnedCircleDragClass({ drag, dragging = false, drop = null }: PinnedCircleDragProps): string {
-  return cn(drag && "cursor-grab select-none active:cursor-grabbing", dragging && "opacity-40", drop && !dragging && pinnedCircleDropClass(drop));
+  return cn(drag && "cursor-pointer select-none active:cursor-grabbing", dragging && "opacity-40", drop && !dragging && pinnedCircleDropClass(drop));
 }
 
 export function pinnedCircleDragHandlers(botId: string, { drag, dragging = false, prevId, nextId }: PinnedCircleDragProps) {
@@ -203,14 +203,14 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
         aria-keyshortcuts={drag ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
         aria-label={`${bot.name}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`}
         title={bot.name}
-        onClick={() => openBot(dispatch, bot, showThreads)}
+        onClick={() => openBotRow(dispatch, bot, showThreads, selected)}
         {...pinnedCircleDragHandlers(bot.id, { drag, dragging, prevId, nextId })}
         onContextMenu={(event) => {
           event.preventDefault();
           onMenu({ botId: bot.id, x: event.clientX, y: event.clientY });
         }}
         className={cn(
-          "flex w-full min-w-0 flex-col items-center gap-1 rounded-lg px-1 py-1 text-center outline-none focus-visible:ring-1 focus-visible:ring-accent/60",
+          "flex w-full min-w-0 cursor-pointer flex-col items-center gap-1 rounded-lg px-1 py-1 text-center outline-none focus-visible:ring-1 focus-visible:ring-accent/60",
           pinnedCircleDragClass({ drag, dragging, drop }),
         )}
       >

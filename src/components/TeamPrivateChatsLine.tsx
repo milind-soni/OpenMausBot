@@ -21,9 +21,13 @@ export function TeamPrivateHeader() {
   return <ChatHeadAudience icon={<Lock size={12} aria-hidden="true" className="shrink-0" />} label={t("team.privateHeader")} data-chathead-private="" />;
 }
 
-/** In a team bot's shared chats (its main chat, a routine's report): everyone in the team can read them. */
-export function TeamSharedHeader({ team }: { team: { name: string } }) {
-  return <ChatHeadAudience icon={<Users size={12} aria-hidden="true" className="shrink-0" />} label={t("team.sharedHeader", { team: team.name })} data-chathead-shared="" />;
+/** Who can read a team bot's shared chats (its main chat, a routine's report). */
+export function sharedChatAudience(team: string, onlyPeopleAdded?: boolean): string {
+  return onlyPeopleAdded ? t("team.sharedHeaderPeople") : t("team.sharedHeader", { team });
+}
+
+export function TeamSharedHeader({ team, onlyPeopleAdded }: { team: { name: string }; onlyPeopleAdded?: boolean }) {
+  return <ChatHeadAudience icon={<Users size={12} aria-hidden="true" className="shrink-0" />} label={sharedChatAudience(team.name, onlyPeopleAdded)} data-chathead-shared="" />;
 }
 
 /** On a narrow header only the icon shows, so the bot's name keeps its room. */

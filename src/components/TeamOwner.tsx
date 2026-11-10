@@ -9,6 +9,7 @@ import { api, useStore, openThread, type Bot } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { askingWhom, departmentOwner, ownerChanged, ownerOf, pictureOf, refreshNeedsYou, useTeamPeople, type TeamPeople, type TeamPerson } from "@/state/team-people";
 import type { NeedsYouItem } from "../../shared/today";
+import { useInboxSupport } from "@/state/inbox";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { MENU_HEADING, MENU_SHEET } from "./menu-recipe";
 
@@ -134,11 +135,32 @@ export function NeedsYouTitle({ item, title }: { item: NeedsYouItem; title: stri
   return <span className="flex w-full min-w-0 items-center gap-1.5 text-[13px] text-ink"><PersonFace person={from} size={16} /><span className="min-w-0 truncate">{title}</span></span>;
 }
 
-/** On a Team Cloud: what the bots ask of this person, newest first, each one opening its conversation. */
-export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
-  const team = useTeamPeople();
+/** One thing that needs this person, opening its conversation. */
+export function NeedsYouLine({ item, onOpened }: { item: NeedsYouItem; onOpened?: () => void }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
+  const botName = (botId: string) => state.bots.find((bot) => bot.id === botId)?.name ?? t("needsYou.aBot");
+  const botId = "botId" in item ? item.botId : item.botIds[0]!;
+  const title = item.kind === "message" ? t("needsYou.message", { name: item.from })
+    : item.kind === "question" ? t("needsYou.asking", { bot: botName(botId) }) : t("needsYou.fix", { bot: botName(botId) });
+  const text = "text" in item ? item.text : "";
+  return <button type="button" role="menuitem"
+    onClick={() => {
+      onOpened?.();
+      if (!item.threadId) return;
+      openThread(dispatch, { botId, threadId: item.threadId }, state, showThreads);
+      if (item.kind === "message") readConversation(state.groups, botId, item.threadId);
+    }}
+    className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left hover:bg-menu-hover">
+    <NeedsYouTitle item={item} title={title} />
+    {text && <span className="w-full truncate text-[12px] text-ink-secondary">{text}</span>}
+  </button>;
+}
+
+/** For a server older than this page, where the person has no inbox: what the bots ask of them, newest first. */
+export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
+  const team = useTeamPeople();
+  const support = useInboxSupport();
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return;
@@ -147,9 +169,8 @@ export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
     return () => window.removeEventListener("mousedown", onDown);
   }, [open]);
   const items = team?.needsYou ?? [];
-  if (!team || items.length === 0) return null;
+  if (support !== "no" || !team || items.length === 0) return null;
   const label = t("needsYou.count", { count: items.length });
-  const botName = (botId: string) => state.bots.find((bot) => bot.id === botId)?.name ?? t("needsYou.aBot");
   return (
     <div data-needs-you className={cn("relative", compact ? "px-1" : "px-2 pb-1")}>
       <button type="button" aria-expanded={open} aria-haspopup="menu" aria-label={label} title={label} onClick={() => setOpen((value) => !value)}
@@ -160,23 +181,7 @@ export function NeedsYouButton({ compact = false }: { compact?: boolean }) {
       </button>
       {open && (
         <div role="menu" aria-label={t("needsYou.title")} className={cn("absolute left-2 right-2 top-full z-40 mt-1 max-h-[340px] overflow-y-auto", MENU_SHEET)}>
-          {items.map((item) => {
-            const botId = "botId" in item ? item.botId : item.botIds[0]!;
-            const title = item.kind === "message" ? t("needsYou.message", { name: item.from })
-              : item.kind === "question" ? t("needsYou.asking", { bot: botName(botId) }) : t("needsYou.fix", { bot: botName(botId) });
-            const text = "text" in item ? item.text : "";
-            return <button key={`${item.kind}:${item.id}`} type="button" role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                if (!item.threadId) return;
-                openThread(dispatch, { botId, threadId: item.threadId }, state, showThreads);
-                if (item.kind === "message") readConversation(state.groups, botId, item.threadId);
-              }}
-              className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left hover:bg-menu-hover">
-              <NeedsYouTitle item={item} title={title} />
-              {text && <span className="w-full truncate text-[12px] text-ink-secondary">{text}</span>}
-            </button>;
-          })}
+          {items.map((item) => <NeedsYouLine key={`${item.kind}:${item.id}`} item={item} onOpened={() => setOpen(false)} />)}
         </div>
       )}
     </div>

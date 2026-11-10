@@ -75,12 +75,16 @@ if (!teamFixture) console.info("skipping the team own-chat e2e: the cloud fixtur
   }, hostTimeout(60_000));
 
   it("an Admin on a second device reopens their own chat: the server names the conversations they opened", async () => {
-    const mine = (await team.as(tokens.ben!, "GET", "/api/auth/session")).body.openedThreads as string[];
-    expect(mine.length, "Ben opened one on his first device").toBe(1);
+    const opened = (await team.as(tokens.ben!, "GET", "/api/auth/session")).body.openedThreads as string[];
+    // His own MausBot's main chat is his as well (server/host/mausbot-own-chat.ts); besides it, he opened one with Scout.
+    const bots = (await team.as(tokens.ben!, "GET", "/api/bots")).body.bots as Array<{ threadId: string; defaultBot?: { person?: string } }>;
+    const hisMausBot = bots.find((bot) => bot.defaultBot?.person === "ben@acme.test")!.threadId;
+    expect([...opened].sort(), "his MausBot's main chat and the one he opened with Scout").toEqual([hisMausBot, ownChatOf(await scoutAs("ben"), await chatsOf("ben"))].sort());
+    const mine = opened.filter((threadId) => threadId !== hisMausBot);
     const second = (await team.pair({ email: "ben@acme.test", role: "admin" })).token!;
     // Another device: a page of its own that never made a conversation, signed in as Ben.
     const session = (await team.as(second, "GET", "/api/auth/session")).body as { scopes: string[]; openedThreads: string[] };
-    expect(session.openedThreads).toEqual(mine);
+    expect(session.openedThreads).toEqual(opened);
     const listed = ((await team.as(second, "GET", "/api/bots")).body.bots as Array<{ id: string; tasks: Array<{ threadId: string; private?: true }> }>).find((bot) => bot.id === scout)!;
     expect(ownChatOf(listed, { teamId: "team-acme-1", member: false, opened: session.openedThreads }), "his own, not a new one").toBe(mine[0]);
     expect(ownChatOf(listed, { teamId: "team-acme-1", member: false }), "without the server's word it would have made a new one").toBeNull();

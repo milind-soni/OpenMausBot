@@ -36,7 +36,7 @@ export function StatStrip({ items }: { items: Array<{ label: string; value: stri
           title={item.hint}
         >
           <dt className="truncate text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">{item.label}</dt>
-          <dd className={cn("mt-1 truncate text-[20px] font-medium tabular-nums sm:text-[22px]", item.tone === "danger" ? "text-danger" : "text-ink")}>{item.value}</dd>
+          <dd className={cn("mt-1 font-medium tabular-nums [overflow-wrap:anywhere]", item.value.length > 6 ? "text-[17px] sm:text-[18px]" : "text-[20px] sm:text-[22px]", item.tone === "danger" ? "text-danger" : "text-ink")}>{item.value}</dd>
         </div>
       ))}
     </dl>

@@ -693,22 +693,26 @@ describe("helper threads a bot opened", () => {
   const thread = (threadId: string, patch: Record<string, unknown> = {}) =>
     ({ threadId, title: threadId, createdAt: 1, updatedAt: 1, ...patch }) as any;
 
-  it("folds open bot-opened threads into a group and keeps the person's own threads", () => {
-    const tasks = [thread("mine"), thread("email", { openedBy: opener, busy: true }), thread("pricing", { openedBy: opener })];
+  it("folds idle bot-opened threads into a group and keeps the person's own threads", () => {
+    const tasks = [thread("mine"), thread("email", { openedBy: opener }), thread("pricing", { openedBy: opener })];
     const { own, helpers } = partitionHelperThreads(tasks, "mine");
     expect(own.map((task) => task.threadId)).toEqual(["mine"]);
     expect(helpers.map((task) => task.threadId)).toEqual(["email", "pricing"]);
   });
 
-  it("keeps a helper thread in view while it needs the person", () => {
+  it("keeps a helper thread in view while it needs the person or is doing something, as the phone lists it", () => {
     const tasks = [
       thread("open-now", { openedBy: opener }),
       thread("approval", { openedBy: opener, activity: "waiting-on-you" }),
       thread("reply", { openedBy: opener, unread: true }),
       thread("pinned", { openedBy: opener, pinned: true }),
+      thread("working", { openedBy: opener, busy: true }),
+      thread("thinking", { openedBy: opener, activity: "working" }),
+      thread("waiting", { openedBy: opener, waitingForTeammates: true }),
+      thread("queued", { openedBy: opener, queued: true }),
     ];
     const { own, helpers } = partitionHelperThreads(tasks, "open-now");
-    expect(own.map((task) => task.threadId)).toEqual(["open-now", "approval", "reply", "pinned"]);
+    expect(own.map((task) => task.threadId)).toEqual(["open-now", "approval", "reply", "pinned", "working", "thinking", "waiting", "queued"]);
     expect(helpers).toEqual([]);
   });
 

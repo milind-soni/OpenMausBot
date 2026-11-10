@@ -174,6 +174,16 @@ describe("the chat-app tools", () => {
     expect(result).toEqual({ text: "Shown as app m9. To change it, call show_html again with app_id \"m9\"." });
   });
 
+  it("passes frameless on to the page, for a new page and an update", async () => {
+    const { apiResponse, context } = harness({ ok: true, status: 201, body: { messageId: "m9" } });
+    await callTool("show_html", { html: "<p>hi</p>", title: "Hi", frameless: true }, context);
+    expect(apiResponse).toHaveBeenLastCalledWith("/api/internal/options-card", {
+      method: "POST", body: JSON.stringify({ tool: "show_html", html: "<p>hi</p>", title: "Hi", frameless: true }),
+    });
+    await callTool("show_html", { app_id: "m9", html: "<p>hi</p>", frameless: false }, context);
+    expect(JSON.parse(apiResponse.mock.lastCall![1]!.body as string)).toMatchObject({ app_id: "m9", frameless: false });
+  });
+
   it("says when something in the page was masked as a secret", async () => {
     const { context } = harness({ ok: true, status: 201, body: { messageId: "m9", masked: true } });
     expect((await callTool("show_html", { html: "<p>hi</p>", title: "Hi" }, context)).text).toContain("masked before it was stored");

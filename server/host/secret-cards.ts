@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 // The secure credential cards request_credential adds: the card on the conversation's visible branch, settling it,
 // resuming the turn it paused, and the value a paired phone sealed for this computer. No card, message or log holds the value.
 import { randomUUID } from "node:crypto";
@@ -19,6 +20,7 @@ import {
   type CredentialTargetId,
   type SecretDelivery,
 } from "../../shared/credential-request.ts";
+import { EMAIL_CREDENTIAL, type EmailConnectAnswer, type EmailConnectRequest, type EmailServerFields } from "../../shared/email.ts";
 import type { SecretRequestCardData } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
 import { perBotLocalVmTarget, poolLocalVmTarget, SHARED_LOCAL_VM_TARGET, VM_WORKSPACE_GUEST } from "../container-computer.ts";
@@ -57,6 +59,8 @@ export interface SecretCardsDeps {
   phoneSecretSubmissions: PhoneSecretSubmissionRegistry;
   connectorThread(botId: string, threadId: string): { bot: BotRecord; group: GroupRecord | undefined } | null;
   answerCardNode(threadId: string, messageId: string, text: string): boolean;
+  /** A newer card replaced `from`: a turn parked on it waits on `to`. */
+  followCard(threadId: string, from: string, to: string): void;
   dataDir: string;
   /** Admin manages this server's models: an AI provider key cannot be saved here. */
   providerKeysRefused: boolean;
@@ -66,6 +70,16 @@ export interface SecretCardsDeps {
   turnVm(threadId: string): string | undefined;
   /** The language a line in this conversation is written in for its person (server/server-lines.ts). */
   threadLanguage?(threadId: string): string | undefined;
+  /** The Email connector the mailbox card saves to: connecting proves it reads a real header before anything is kept. */
+  email?: {
+    connect(request: EmailConnectRequest): Promise<EmailConnectAnswer>;
+    /** Why a mailbox can't be connected here, if so. */
+    refusal(): string | undefined;
+    /** Already connected and working. */
+    connected(address: string): boolean;
+    /** The person's own address, the likeliest mailbox when the bot names none. */
+    profileAddress(): string | undefined;
+  };
 }
 
 export type SecretCards = ReturnType<typeof createSecretCards>;
@@ -98,6 +112,23 @@ function vmFileHome(botId: string, vm: string): SecretFileHome | null {
   return target ? { host: target.workspaceDir, shown: VM_WORKSPACE_GUEST } : null;
 }
 
+/** What the bot hears when the mailbox card settles; it never hears the password. */
+function emailUpdateText(secret: SecretRequestCardData, outcome: "provided" | "dismissed"): string {
+  return outcome === "provided"
+    ? `OpenMausBot secret update: the person connected the mailbox ${secret.address ?? "they typed"}. The email tools (EMAIL_LIST_MESSAGES, EMAIL_READ_MESSAGE, EMAIL_SEND_MESSAGE and others) are ready. Continue the task that paused for it.`
+    : "OpenMausBot secret update: the person chose not to connect a mailbox. Say briefly what you cannot do without it, and do not ask for the password in chat.";
+}
+
+const SERVER_FIELDS = ["imapHost", "imapPort", "smtpHost", "smtpPort", "username"] as const;
+function emailServerFields(fields: Record<string, unknown>): EmailServerFields {
+  const out: Record<string, unknown> = {};
+  for (const name of SERVER_FIELDS) {
+    const value = fields[name];
+    if ((name.endsWith("Port") && Number.isInteger(value)) || (!name.endsWith("Port") && typeof value === "string" && value.trim())) out[name] = value;
+  }
+  return out as EmailServerFields;
+}
+
 function customRequest(body: Record<string, unknown>): { label: string; reason: string; placeholder: string; delivery: SecretDelivery } | { error: string } {
   const text = (value: unknown, max: number) => typeof value === "string"
     ? [...value].map((ch) => (ch.charCodeAt(0) < 0x20 || ch === "\u007f" ? " " : ch)).join("").trim().slice(0, max)
@@ -124,6 +155,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
 
   function updateText(messageId: string, secret: SecretRequestCardData, outcome: "provided" | "dismissed"): string {
     if (!custom(secret)) return credentialUpdateText(secret.label, outcome);
+    if (secret.delivery === "email") return emailUpdateText(secret, outcome);
     return outcome === "provided"
       ? `OpenMausBot secret update: ${savedSecretText(secret.label, vault.savedFor(messageId))} Continue the task that paused for it.`
       : `OpenMausBot secret update: the person declined to provide ${secret.label}. Continue without it if you can, or say briefly what you cannot do. Do not ask for it in chat.`;
@@ -171,28 +203,52 @@ export function createSecretCards(deps: SecretCardsDeps) {
   /** A value typed into a custom card in the app: kept, then the paused turn resumes. */
   function saveCustomSecret(botId: string, threadId: string, messageId: string, raw: unknown): { status: number; body: Record<string, unknown> } {
     const message = secretMessage(botId, threadId, messageId);
-    if (!message?.secret) return { status: 404, body: { error: "no such credential request" } };
+    if (!message?.secret) return { status: 404, body: { ...userError("serverError.secret.missing") } };
     const secret = message.secret;
-    if (!custom(secret)) return { status: 400, body: { error: "this card saves a key in Settings" } };
+    if (!custom(secret)) return { status: 400, body: { ...userError("serverError.secret.settingsCard") } };
     if (phoneSecretSubmissions.has(phoneSecretSubmissionKey(threadId, message.id, secret.requestKey))) {
-      return { status: 409, body: { error: "this secret is currently being saved from a phone" } };
+      return { status: 409, body: { ...userError("serverError.secret.savingFromPhone") } };
     }
-    if (secret.dismissed) return { status: 409, body: { error: "this request was declined" } };
-    if (secret.superseded) return { status: 409, body: { error: "this request was replaced by a newer one" } };
-    if (secret.stopped) return { status: 409, body: { error: "this request stopped with its task" } };
-    if (secret.provided || secret.savedAt !== undefined) return { status: 409, body: { error: "this secret was already saved" } };
+    if (secret.dismissed) return { status: 409, body: { ...userError("serverError.secret.declined") } };
+    if (secret.superseded) return { status: 409, body: { ...userError("serverError.secret.replaced") } };
+    if (secret.stopped) return { status: 409, body: { ...userError("serverError.secret.taskStopped") } };
+    if (secret.provided || secret.savedAt !== undefined) return { status: 409, body: { ...userError("serverError.secret.alreadySaved") } };
     const value = typeof raw === "string" ? raw.trim() : "";
     if (!value || Buffer.byteLength(value) > SECRET_VALUE_MAX_BYTES) {
-      return { status: 400, body: { error: `Enter the secret: up to ${SECRET_VALUE_MAX_BYTES} bytes.` } };
+      return { status: 400, body: { ...userError("serverError.secret.valueSize", { bytes: SECRET_VALUE_MAX_BYTES }) } };
     }
     try {
       storeCustomSecret(message, botId, threadId, value);
     } catch (error) {
       console.warn(`secret card: could not keep a secret: ${error instanceof Error ? error.message : String(error)}`);
-      return { status: 500, body: { error: "The secret could not be kept safely. Nothing was saved." } };
+      return { status: 500, body: { ...userError("serverError.secret.notKeptSafely") } };
     }
-    if (!resumeSecretCard(botId, threadId, message.id, "provided")) return { status: 409, body: { error: "this credential request is no longer available" } };
+    if (!resumeSecretCard(botId, threadId, message.id, "provided")) return { status: 409, body: { ...userError("serverError.secret.unavailableLower") } };
     return { status: 200, body: currentSecretState(botId, threadId, message.id) ?? { provided: true, resumed: false } };
+  }
+
+  /** The mailbox card: the password goes to the Email connector, which reads a real header before keeping it. A wrong one
+   * leaves the card open with why, so the person isn't sent back to a new card. */
+  async function saveEmailSecret(botId: string, threadId: string, messageId: string, fields: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
+    const message = secretMessage(botId, threadId, messageId);
+    if (!message?.secret || message.secret.delivery !== "email") return { status: 404, body: userError("serverError.secret.missing") };
+    const secret = message.secret;
+    if (phoneSecretSubmissions.has(phoneSecretSubmissionKey(threadId, message.id, secret.requestKey))) return { status: 409, body: userError("serverError.secret.savingFromPhone") };
+    if (secret.dismissed) return { status: 409, body: userError("serverError.secret.declined") };
+    if (secret.superseded) return { status: 409, body: userError("serverError.secret.replaced") };
+    if (secret.stopped) return { status: 409, body: userError("serverError.secret.taskStopped") };
+    if (secret.provided || secret.savedAt !== undefined) return { status: 409, body: userError("serverError.secret.mailboxAlreadyConnected") };
+    const password = typeof fields.value === "string" ? fields.value : "";
+    const address = typeof fields.address === "string" && fields.address.trim() ? fields.address.trim() : secret.address ?? "";
+    if (!address || !password.trim() || Buffer.byteLength(password) > SECRET_VALUE_MAX_BYTES) return { status: 400, body: userError("serverError.secret.emailAndPassword") };
+    if (!deps.email) return { status: 409, body: userError("serverError.secret.emailUnavailable") };
+    const answer = await deps.email.connect({ address, password, ...emailServerFields(fields) });
+    if (!answer.ok) return { status: 400, body: { error: answer.error, ...(answer.needsServer ? { needsServer: true } : {}) } };
+    const current = secretMessage(botId, threadId, messageId);
+    if (!current?.secret) return { status: 409, body: userError("serverError.secret.unavailableLower") };
+    store.patchMessage(threadId, message.id, { secret: { ...current.secret, address: answer.account.address, savedAt: Date.now() } });
+    if (!resumeSecretCard(botId, threadId, message.id, "provided")) return { status: 409, body: userError("serverError.secret.unavailableLower") };
+    return { status: 200, body: { ...currentSecretState(botId, threadId, message.id), ...(answer.sending.ok ? {} : { sendingProblem: answer.sending.problem }) } };
   }
 
   /** mcp_server's fields with every secretRef swapped for its value: only in env, headers and oauth.clientSecret. */
@@ -322,7 +378,12 @@ export function createSecretCards(deps: SecretCardsDeps) {
       }
       if (opened !== null) {
         if (current.secret.stopped) throw new PhoneSecretError("This request stopped with its task", 409);
-        storeCustomSecret(current, context.botId, context.threadId, opened);
+        if (current.secret.delivery === "email") {
+          if (!current.secret.address || !deps.email) throw new PhoneSecretError(serverLine(deps.threadLanguage?.(context.threadId), "server.connect.emailOnComputer"), 409);
+          const answer = await deps.email.connect({ address: current.secret.address, password: opened });
+          if (!answer.ok) throw new PhoneSecretError(answer.error, 400);
+          store.patchMessage(context.threadId, current.id, { secret: { ...current.secret, savedAt: Date.now() } });
+        } else storeCustomSecret(current, context.botId, context.threadId, opened);
       }
       const saved = secretMessage(context.botId, context.threadId, context.messageId) ?? current;
       // Electron acknowledges only after credentials.bin and the config update both commit; keep this assertion so no handler resumes first.
@@ -347,6 +408,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
     const owner = connectorThread(from.id, fromThreadId);
     if (!owner) return { status: 403, body: { error: "source conversation does not belong to sender" } };
     if (body.credentialId === undefined) return requestCustomSecret(from, fromThreadId, Boolean(owner.group), body);
+    if (body.credentialId === EMAIL_CREDENTIAL) return requestEmailCard(from, fromThreadId, Boolean(owner.group), body);
     if (!isCredentialTargetId(body.credentialId)) {
       return { status: 400, body: { error: "unsupported credential id" } };
     }
@@ -368,6 +430,13 @@ export function createSecretCards(deps: SecretCardsDeps) {
         target: credentialId,
         label: target.label,
         description: `${reason ? `${target.description} ${reason}` : target.description} ${serverLine(language, "server.connect.secretNeverRead", { bot: from.name })}`,
+        ...(credentialId === "greenferenceApiKey" || credentialId === "geminiTtsKey" ? {
+          descriptionParts: {
+            baseCode: credentialId === "greenferenceApiKey" ? "secretCard.greenference.description" as const : "secretCard.geminiTts.description" as const,
+            reason,
+            bot: from.name,
+          },
+        } : {}),
         placeholder: target.placeholder,
         helpUrl: target.helpUrl,
         requestKey: randomUUID(),
@@ -377,8 +446,43 @@ export function createSecretCards(deps: SecretCardsDeps) {
       if (prior.id === message.id) continue;
       if (!prior.secret || !isPendingCredentialRequest(prior, credentialId, from.id, Boolean(owner.group))) continue;
       store.patchMessage(fromThreadId, prior.id, { secret: { ...prior.secret, superseded: true } });
+      deps.followCard(fromThreadId, prior.id, message.id);
     }
     return { status: 201, body: { messageId: message.id, label: target.label } };
+  }
+
+  /** One card for a mailbox's address and password, as a custom card so a phone shows it as it does any secret. */
+  function requestEmailCard(from: BotRecord, threadId: string, room: boolean, body: Record<string, unknown>): { status: number; body: Record<string, unknown> } {
+    const refusal = deps.email ? deps.email.refusal() : "Email can't be connected here.";
+    if (refusal || !deps.email) return { status: 403, body: { error: refusal } };
+    const named = typeof body.address === "string" && /^[^\s@]+@[^\s@]+$/u.test(body.address.trim()) ? body.address.trim() : undefined;
+    if (named && deps.email.connected(named)) return { status: 200, body: { alreadyConfigured: true, label: named } };
+    const address = named ?? deps.email.profileAddress();
+    const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, CUSTOM_SECRET_REASON_MAX) : "";
+    const language = deps.threadLanguage?.(threadId);
+    const label = serverLine(language, "server.connect.emailLabel");
+    const message = store.appendMessage(threadId, {
+      role: "bot",
+      kind: "secret",
+      text: credentialDesktopHandoff(label, language),
+      ...(room ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
+      secret: {
+        target: CUSTOM_SECRET_TARGET,
+        label,
+        description: `${reason ? `${reason} ` : ""}${serverLine(language, "server.connect.emailNote", { bot: from.name })}`,
+        ...(reason ? { reason: `${reason} ${serverLine(language, "server.connect.emailNote", { bot: from.name })}` } : {}),
+        placeholder: serverLine(language, "server.connect.emailPlaceholder"),
+        helpUrl: "",
+        delivery: "email",
+        ...(address ? { address } : {}),
+        requestKey: randomUUID(),
+      },
+    });
+    for (const prior of store.activePath(threadId)) {
+      if (prior.id === message.id || !prior.secret || !isPendingCustomSecretRequest(prior, label, from.id, room)) continue;
+      store.patchMessage(threadId, prior.id, { secret: { ...prior.secret, superseded: true } });
+    }
+    return { status: 201, body: { messageId: message.id, label, delivery: "email" } };
   }
 
   /** A secret OpenMausBot does not keep: the same bot asking again for one already saved here gets it back, and a newer
@@ -415,12 +519,13 @@ export function createSecretCards(deps: SecretCardsDeps) {
     for (const prior of path) {
       if (!prior.secret || !isPendingCustomSecretRequest(prior, asked.label, from.id, room)) continue;
       store.patchMessage(threadId, prior.id, { secret: { ...prior.secret, superseded: true } });
+      deps.followCard(threadId, prior.id, message.id);
     }
     return { status: 201, body: { messageId: message.id, label: asked.label, delivery: asked.delivery, ...(mismatch ? { savedAs: mismatch } : {}) } };
   }
 
   return {
-    phoneSecretSubmissionKey, secretMessage, currentSecretState, resumeSecretCard, provideSecretFromPhone, requestCredential, saveCustomSecret,
+    phoneSecretSubmissionKey, secretMessage, currentSecretState, resumeSecretCard, provideSecretFromPhone, requestCredential, saveCustomSecret, saveEmailSecret,
     secretSaved, updateText, redeemMcpServer,
   };
 }

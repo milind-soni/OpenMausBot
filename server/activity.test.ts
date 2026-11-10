@@ -1,9 +1,10 @@
-import { appendFileSync, mkdirSync, mkdtempSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { describeTool, readBotActivity, type ActivityRow } from "./activity.ts";
+import englishCatalog from "../src/locales/en.json" with { type: "json" };
+import { describedTool, describeTool, readBotActivity, type ActivityRow } from "./activity.ts";
 import type { DecisionRow } from "./decision-log.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
@@ -61,6 +62,47 @@ describe("describeTool", () => {
     expect(describeTool("TaskUpdate")).toEqual({ app: null, label: "Task update" });
     expect(describeTool("replace_file_content")).toEqual({ app: null, label: "Replace file content" });
   });
+
+  it("names this app's own tools by an activity.tool key whose English is exactly the label", () => {
+    const en: Record<string, string> = englishCatalog;
+    const goldens = ["full", "bridged"].flatMap((name) => [...readFileSync(new URL(`./drivers/agents-catalog-goldens/${name}.tools-list.json`, import.meta.url), "utf8").matchAll(/"name":\s*"([a-z_]+)"/g)].map((match) => match[1]!));
+    const named = [
+      "Bash", "Read", "Edit", "MultiEdit", "Write", "Glob", "Grep", "LS", "WebSearch", "WebFetch", "Skill", "Task", "Agent", "AskUserQuestion", "TodoWrite",
+      ...goldens.map((tool) => `mcp__agents__${tool}`), "mcp__agents__ask_bot", "mcp__agents__delegate_bot", "mcp__agents__send",
+      ...["screenshot", "get_screen_size", "click", "move", "drag", "type_text", "key_press", "scroll", "open_url", "exec", "computer_exec", "wait_for"].map((tool) => `mcp__computer__${tool}`),
+    ];
+    const calls = ["apollo.people.search", "crunchbase.companies.lookup", "x.funding.rounds", "newsapi.news.everything", "tikhub.tiktok.user", "g.trends.daily", "serp.google.search", "moz.seo.backlinks", "fal.images.generate", "anyapi.x.search", "people.vendor.thing"];
+    const rows = [...named.map((name) => describedTool(name)), ...calls.map((id) => describedTool("mcp__agents__research_call", { id }))];
+    for (const row of rows) {
+      expect(row.labelKey, row.label).toMatch(/^activity\.tool\./);
+      expect(en[row.labelKey!], row.labelKey).toBe(row.label);
+    }
+    expect(new Set(rows.map((row) => row.labelKey)).size).toBeGreaterThan(80);
+    for (const row of rows.filter((entry) => entry.appKey)) expect(en[row.appKey!], row.appKey).toBe(row.app);
+    expect(["mcp__agents__list_bots", "mcp__computer__click", "mcp__agents__research_search", "mcp__agents__x_search", "mcp__claude_ai_Research__find"].map((name) => describedTool(name).appKey))
+      .toEqual(["activity.app.team", "activity.app.computer", "activity.app.research", undefined, undefined]);
+  });
+
+  it.each([
+    ["decide", "Decide", "activity.tool.team.decide"],
+    ["extract", "Extract", "activity.tool.team.extract"],
+    ["message_person", "Message person", "activity.tool.team.messagePerson"],
+    ["report_bug", "Report bug", "activity.tool.team.reportBug"],
+    ["delete_trigger", "Delete trigger", "activity.tool.team.deleteTrigger"],
+    ["wait_until", "Wait until", "activity.tool.team.waitUntil"],
+    ["list_waits", "List waits", "activity.tool.team.listWaits"],
+    ["cancel_wait", "Cancel wait", "activity.tool.team.cancelWait"],
+  ])("names %s with its own activity key and unchanged English", (tool, label, labelKey) => {
+    expect(describedTool(`mcp__agents__${tool}`)).toEqual({ app: "Team", appKey: "activity.app.team", label, labelKey });
+    expect(describeTool(`mcp__agents__${tool}`)).toEqual({ app: "Team", label });
+  });
+
+  it("keeps an unknown or third-party tool in its own words, with no key", () => {
+    for (const name of ["GMAIL_SEND_EMAIL", "mcp__composio__GITHUB_CREATE_AN_ISSUE", "mcp__claude_ai_Gmail__search_threads", "mcp__highlevel__HIGHLEVEL_ADD_NOTE",
+      "mcp__agents__brand_new_tool", "mcp__computer__teleport", "mcp__some_server__do_thing", "TaskUpdate", "constructor"]) {
+      expect(describedTool(name).labelKey, name).toBeUndefined();
+    }
+  });
 });
 
 let dataDir: string;
@@ -117,8 +159,18 @@ describe("readBotActivity", () => {
   it("turns a finished tool item into one row that says it ran", () => {
     toolRun("t1", "i1", "Read", "2026-09-07T09:00:00.000Z", true);
     expect(read()).toEqual([
-      expect.objectContaining({ at: "2026-09-07T09:00:00.000Z", threadId: "t1", tool: "Read", label: "Read a file", outcome: "ran" }),
+      expect.objectContaining({ at: "2026-09-07T09:00:00.000Z", threadId: "t1", tool: "Read", label: "Read a file", labelKey: "activity.tool.readFile", outcome: "ran" }),
     ]);
+  });
+
+  it.each([
+    ["mcp__email__EMAIL_SEND_EMAIL", "Send email"],
+    ["mcp__email__EMAIL_READ_EMAIL", "Read email"],
+  ])("keeps %s unchanged and supplies its app's presentation key", (tool, label) => {
+    toolRun("t1", "mail", tool, "2026-09-07T09:00:00.000Z", true);
+    expect(read()).toEqual([expect.objectContaining({ tool, app: "Email", appKey: "activity.app.email", label, outcome: "ran" })]);
+    expect(describeTool(tool)).toEqual({ app: "Email", label });
+    expect(englishCatalog["activity.app.email"]).toBe("Email");
   });
 
   it("marks a tool that finished badly as failed, and one still going as running", () => {
@@ -158,6 +210,14 @@ describe("readBotActivity", () => {
     expect(rows[0]).toMatchObject({ tool: "Bash", summary: "git status", outcome: "ran", requestId: "r1" });
   });
 
+  it("keeps summary metadata from the same decision as the words when folding and matching a run", () => {
+    const summary = { summary: "allowed PHONE_CREATE_EVENT", summaryCode: "chat.notice.phone.allowed", summaryParams: { tool: "PHONE_CREATE_EVENT" } };
+    decision({ at: "2026-09-07T09:00:00.000Z", requestId: "phone", tool: "PHONE_CREATE_EVENT", decision: "card-shown", source: "question", ...summary });
+    decision({ at: "2026-09-07T09:00:01.000Z", requestId: "phone", tool: "PHONE_CREATE_EVENT", decision: "user-approved", source: "user", summary: "changed", summaryCode: "chat.notice.phone.notOwner" });
+    toolRun("t1", "phone", "PHONE_CREATE_EVENT", "2026-09-07T09:00:01.400Z", true);
+    expect(read()).toEqual([expect.objectContaining({ ...summary, outcome: "ran" })]);
+  });
+
   it("keeps a denied request as its own row, since nothing ran", () => {
     decision({ at: "2026-09-07T09:00:00.000Z", requestId: "r1", tool: "Bash", summary: "rm -rf build", decision: "card-shown", source: "question" });
     decision({ at: "2026-09-07T09:00:05.000Z", requestId: "r1", tool: "Bash", summary: "rm -rf build", decision: "user-denied", source: "user" });
@@ -171,6 +231,7 @@ describe("readBotActivity", () => {
     expect(read()).toEqual([
       expect.objectContaining({ app: "Gmail", label: "Send email", outcome: "waiting" }),
     ]);
+    expect(read()[0]).not.toHaveProperty("labelKey");
   });
 
   it("does not attach an approval to a different tool, or to a run long after it", () => {

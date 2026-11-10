@@ -42,6 +42,8 @@ const ABORTED = -3;
  */
 export function createChromeRail({ createView, preload, args, url, wanted, prefs = () => null, changed = () => {}, log = () => {} }) {
   let view = null, win = null, shown = false, expanded = false, held = false;
+  // The rail's page didn't load (this app's server was restarting): it loads again at the next refresh, or it stays a blank strip.
+  let unloaded = false;
   // Whether the page beside draws the frame; the window opens as if it does (windowChromeOptions).
   let framed = true, frameGrace = null;
   // The document beside the rail offered its button; a new one may still (`grace`); the page stopped responding.
@@ -94,6 +96,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
   };
   /** The page beside the rail asks: the window's own page, in its main frame (never a frame inside it). */
   const pageBeside = (event) => Boolean(page() && event?.sender === win.webContents && event.senderFrame === win.webContents.mainFrame);
+  const load = (contents) => { void contents.loadURL(url()).catch((error) => log(`chrome rail: ${error?.message ?? error}`)); };
   const ensureView = () => {
     if (view) return view;
     view = createView({ webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload, additionalArguments: args() } });
@@ -105,7 +108,9 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     contents.on("will-redirect", stay);
     contents.on("render-process-gone", () => { log("chrome rail: its page went away; loading it again"); void contents.loadURL(url()).catch(() => {}); });
     contents.on("did-finish-load", () => contents.send("rail:framed", framed));
-    void contents.loadURL(url()).catch((error) => log(`chrome rail: ${error?.message ?? error}`));
+    // Only a load's failing says so: the error page that replaces it finishes loading too.
+    contents.on("did-fail-load", (_event, code, _description, _url, mainFrame) => { if (mainFrame && code !== ABORTED) unloaded = true; });
+    load(contents);
     return view;
   };
   const rail = {
@@ -138,6 +143,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
      * whole window otherwise. */
     refresh() {
       const on = alive() && ((wanted() && !hidden()) || held);
+      if (view && unloaded && on) { unloaded = false; load(view.webContents); }
       if (on === shown) layout();
       else {
         shown = on;

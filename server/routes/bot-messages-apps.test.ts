@@ -15,6 +15,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import { acceptedSendMatch, sendFingerprint, SendSequencer } from "../send-idempotency.ts";
 import { _queuedCount, drainSteeredMessages, queuedSteeredMessage, queueSteeredMessage } from "../steer-queue.ts";
 import { Store, type Message } from "../store.ts";
+import { typedWords } from "../typed-sends.ts";
 import { createBotMessageRoutes, type BotMessageRouteDeps } from "./bot-messages.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -139,6 +140,7 @@ describe("POST /api/bots/:id/messages with appMessage", () => {
     expect(answer.status, JSON.stringify(answer.body)).toBe(202);
     expect(answer.body.message).toMatchObject({ role: "user", text: "Book the 3pm slot", replyToId: appId, sendId: id, fromApp: { messageId: appId, title: "Booking" } });
     expect(sent()).toHaveLength(1);
+    expect(typedWords(threadId, [answer.body.message])).toBe("");
     expect(state.accepted[0]).toMatchObject({ text: "Book the 3pm slot", replyTo: { id: appId, appMessage: { title: "Booking", origin: "a page you made with show_html" } }, app: { fromApp: { messageId: appId, title: "Booking" } } });
     expect(state.accepted[0]!.dataContext).toBeUndefined();
     // The stored row is not marked; only the copy the prompt is composed from is.

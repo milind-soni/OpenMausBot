@@ -20,14 +20,14 @@ export interface ChatsSide {
 }
 type Owner = { kind: "bot" | "group"; id: string };
 type Link = { id: string; parentId: string | null };
-export interface ThreadMerge { owner: Owner; threadId: string; task?: TaskRecord | GroupTaskRecord; added: Message[]; relinked: Link[]; leaf: string | null }
+export interface ThreadMerge { owner: Owner; threadId: string; task?: TaskRecord | GroupTaskRecord; added: Message[]; relinked: Link[]; leaf: string | null; outside?: true }
 /** `messages`: text lines (what a person reads as messages); `intoExisting`: of those, the ones added to conversations it already had. */
 export interface ChatMergeResult { conversations: number; messages: number; intoExisting: number; skippedBots: number; skippedRooms: number; deleted: number }
 export interface ChatMergePlan extends ChatMergeResult { threads: ThreadMerge[] }
 export type ChatStore = Pick<Store, "bots" | "groups" | "bot" | "group" | "messagesFor" | "activeLeaf" | "importTranscript" | "patchBot" | "patchGroup" | "createGroup">;
 
 const BOT_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "openedBy", "closedBy", "archivedAt", "pinned", "link", "linkAuto",
-  "lastReadMessageId", "pinnedMessageId", "routineRunId", "askedAt", "snoozedUntil"] as const;
+  "lastReadMessageId", "pinnedMessageId", "routineRunId", "askedAt", "snoozedUntil", "outside"] as const;
 const GROUP_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId", "turnTimeoutMinutes"] as const;
 export const ATTACHMENT_NAME = /^[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}$/;
 
@@ -140,7 +140,7 @@ export function planChatMerge(from: ChatsSide, to: ChatsSide, syncedAt = Number.
       const merged = mergeThread(rows, to.thread(threadId), options);
       synced = Math.max(synced, merged.synced);
       if (!merged.added.length) continue;
-      plan.threads.push({ owner, threadId, added: merged.added, relinked: merged.relinked, leaf: merged.leaf });
+      plan.threads.push({ owner, threadId, added: merged.added, relinked: merged.relinked, leaf: merged.leaf, ...(task && "outside" in task && task.outside ? { outside: true as const } : {}) });
       plan.intoExisting += textLines(merged.added);
     } else if (home === undefined && task && !to.thread(threadId).rows.length) fresh.push({ owner, threadId, task, rows });
   }
@@ -242,6 +242,7 @@ export function applyChatMerge(store: ChatStore, plan: ChatMergePlan): void {
   for (const thread of plan.threads) {
     store.importTranscript(thread.threadId, thread.added, thread.leaf, thread.task ? undefined : thread.relinked);
     if (!thread.task) touched.set(ownerKey(thread.owner), thread.owner);
+    if (thread.outside && thread.owner.kind === "bot") { const task = store.bot(thread.owner.id)?.tasks?.find((one) => one.threadId === thread.threadId); if (task) task.outside = true; }
   }
   // Saves the conversations' new activity times and tells open apps about them; no message frame, so nothing is read aloud or notified.
   for (const owner of touched.values()) {

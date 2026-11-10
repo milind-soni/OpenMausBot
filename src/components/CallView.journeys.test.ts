@@ -253,18 +253,28 @@ describe("calling a bot off the Mac", () => {
     await firstLiveCall();
   });
 
-  it.each(["win32", "linux"] as const)("on My Cloud in the %s app, the call is Live, and Take turns says it needs the Mac app", async (platform) => {
+  it.each(["win32", "linux"] as const)("on My Cloud in the %s app, the call is Live, and Take turns says it works on This computer", async (platform) => {
     open(desktopApp(platform, "my-cloud"));
     chat(CLOUD);
-    expectTurnsDisabled("Calls where you take turns need the Mac app");
+    expectTurnsDisabled("Calls where you take turns work with bots on this computer. They listen from this computer's own window, so only bots on this computer can use them.");
     await firstLiveCall();
   });
 
-  it.each(["win32", "linux"] as const)("on This computer in the %s app, the call is Live and points to API keys for its key", async (platform) => {
+  it.each(["win32", "linux"] as const)("on This computer in the %s app with no Fish Audio key, the call is Live, Take turns asks for the key, and Live points to API keys", async (platform) => {
     open(desktopApp(platform, "this-computer"));
     chat(THIS_COMPUTER);
-    expectTurnsDisabled("Calls where you take turns need the Mac app");
+    expectTurnsDisabled("Add a Fish Audio key to take turns on calls. On this computer, Take turns hears you through Fish Audio speech-to-text. Add a Fish Audio key in Settings → API keys.");
     await firstLiveCall();
+  });
+
+  it.each(["win32", "linux"] as const)("on This computer in the %s app with a Fish Audio key, Take turns is on and says where the voice goes", (platform) => {
+    open(desktopApp(platform, "this-computer"));
+    chat({ ...THIS_COMPUTER, savedKeys: { fishAudioKey: { configured: true } } } as AppState["config"]);
+    expect(callButton()?.getAttribute("aria-label")).toBe("Call Ada");
+    press(container.querySelector('[aria-label="Call mode"]'));
+    const [turns] = menuItems();
+    expect(turns?.hasAttribute("aria-disabled")).toBe(false);
+    expect(turns?.textContent).toContain("Fish Audio turns what you say into text, so your voice goes to Fish Audio.");
   });
 
   it.each([
@@ -318,7 +328,7 @@ describe("calling a bot off the Mac", () => {
     expect(callButton()?.getAttribute("aria-label")).toBe("Call Ada");
   });
 
-  it("shows a room's call button only where taking turns can run: the Mac app's own page", () => {
+  it("shows a room's call button only on this computer's own page, and asks for a Fish Audio key off the Mac", () => {
     roomHeader(CLOUD);
     expect(callButton()).toBeNull();
     for (const platform of ["darwin", "win32", "linux"] as const) {
@@ -328,8 +338,12 @@ describe("calling a bot off the Mac", () => {
     }
     for (const platform of ["win32", "linux"] as const) {
       open(desktopApp(platform, "this-computer"));
+      flushSync(() => root.render(null));
       roomHeader(THIS_COMPUTER);
-      expect(callButton(), `${platform} on This computer`).toBeNull();
+      expect(callButton()?.getAttribute("aria-label"), `${platform} on This computer`).toBe("Add a Fish Audio key to take turns on calls");
+      flushSync(() => root.render(null));
+      roomHeader({ ...THIS_COMPUTER, savedKeys: { fishAudioKey: { configured: true } } } as AppState["config"]);
+      expect(callButton()?.getAttribute("aria-label"), `${platform} with a key`).toBe("Call Standup");
     }
 
     open(desktopApp("darwin", "this-computer"));

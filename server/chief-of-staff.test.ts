@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chiefOfStaffSystemPrompt, chiefTidies } from "./chief-of-staff.ts";
+import { chiefOfStaffSystemPrompt, chiefTidies, EVERYONE_ON_THE_MAP } from "./chief-of-staff.ts";
 
 describe("chiefTidies", () => {
   const chief = { id: "chief", name: "Chief", section: "Work", chiefOfStaff: true };
@@ -126,6 +126,7 @@ describe("chiefOfStaffSystemPrompt", () => {
         "Do the work yourself, bring in a teammate when one fits the job, and return one concise consolidated answer. Never invent a teammate's progress or result. Normal permission and approval rules still apply.",
         "A standing preference the person states for all their bots (where reminders go, how replies should sound) is one line you save yourself with memory_update action prefer: every bot reads it. Never send it to each bot with coordinate_bots.",
         "When a job needs a specialist you do not have (an ongoing area of work, a different skill set, or work to run in parallel), add one with create_bot without asking first, then tell the person in one line; they can undo it. When their goal matches a ready-made team, list_team_library has its roles to create the same way. Never add a bot just to look busy, or one that duplicates a teammate.",
+        EVERYONE_ON_THE_MAP,
         "Incidents: when a teammate's run fails, stalls or cannot start, OpenMausBot reports it to you in your \"Problems to look at\" thread with a link to the thread. Read the report, then either call retry_thread to resume that thread where it stopped, coordinate_bots with a corrected brief when the request itself must change, or — when only the person can fix the cause (a sign-in, a missing credential, an unanswered question, a setting) — say so plainly and stop. Never retry the same thread more than twice; report what failed and what you did in one or two sentences.",
         "Use list_bots or list_room_targets for the live reachable roster. Use coordinate_bots to assign actual teammates concrete work, or with consult: true to ask them for advice. It returns immediately and keeps you available to the user; give clear, self-contained briefs, then end your turn — you resume automatically when their results return, success or failure. Say that work is assigned, not completed; only claim completion after the teammate's result has actually arrived, and if a teammate fails or stalls, tell the user plainly and decide the next step yourself. Leads can coordinate their own specialists. Do not poll or wait, send acknowledgements as new work, or substitute native helpers for named bots. On return, verify the requested outcome, resolve decisions within the user's scope, request concrete corrections with rework=true when necessary, and return one consolidated answer. Consultations are advice, not proof that work or tests ran. A refusal from coordinate_bots means nothing was sent: fix what it names (usually the id — copy it from list_bots or your roster; a unique teammate name also works) and retry, and never describe a handoff the tool did not accept.",
         "Housekeeping: list_threads also shows threads one teammate opened on another (marked \"opened by\"), and you may close_thread those once they are idle and their work is done. Threads the person started are theirs: never close them.",
@@ -157,5 +158,21 @@ describe("chiefOfStaffSystemPrompt", () => {
 
     expect(prompt).toContain("Patch — Engineer [id: coder]");
     expect(prompt).not.toContain("Quill");
+  });
+});
+
+describe("an @everyone line from the Team map", () => {
+  const team = [{ id: "chief", name: "Clive", chiefOfStaff: true }, { id: "mail", name: "Mail" }, { id: "books", name: "Books" }];
+
+  it("tells the Chief it alone gets the line and passes it only to the bots it concerns", () => {
+    const prompt = chiefOfStaffSystemPrompt("chief", team, true);
+    expect(prompt).toContain(EVERYONE_ON_THE_MAP);
+    expect(EVERYONE_ON_THE_MAP).toContain("never to all of them by default");
+  });
+
+  it("says nothing of it to a Chief that cannot hand work on, or to a MausBot that only holds the tools", () => {
+    expect(chiefOfStaffSystemPrompt("chief", team, false)).not.toContain(EVERYONE_ON_THE_MAP);
+    const maus = [{ id: "maus", name: "MausBot", defaultBot: { person: "ada@example.test" } }, ...team.slice(1)];
+    expect(chiefOfStaffSystemPrompt("maus", maus, true)).not.toContain(EVERYONE_ON_THE_MAP);
   });
 });

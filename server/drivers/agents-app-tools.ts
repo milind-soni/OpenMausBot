@@ -13,6 +13,7 @@ export const APP_TOOL_DEFINITIONS = [
         title: { type: "string", description: "A one-line title, at most 80 characters; a new page needs one." },
         height: { type: "number", description: "Optional starting height in pixels, 80 to 720." },
         fallback_text: { type: "string", description: "Optional plain-text version for clients that cannot show pages. Written for you when omitted." },
+        frameless: { type: "boolean", description: "Optional: true shows the page without the card frame. A replacement with app_id keeps the page's frame unless this is given." },
         app_id: { type: "string", description: "Only to replace a page you showed: the id it returned." },
       },
     },

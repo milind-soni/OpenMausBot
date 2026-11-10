@@ -1,5 +1,5 @@
-// The template preview body: what a team, package or backup brings and what stays behind. Shared by Templates,
-// the organization shelf and the Grok Bot import.
+// The template preview body: what a team, package or backup brings and what stays behind. Shared by Templates and
+// the organization shelf.
 import { BookOpen, CalendarClock, Check, Crown, MessageSquare, NotebookPen, Plug, Users } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -30,7 +30,7 @@ export function TeamImportDetails({ pending, importedNames, org = false }: {
         </div>
       )}
       {Boolean(pending.warnings?.length) && <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
-        <div className="mb-2 font-medium text-ink">{pending.leftOut ? t("grokImport.leftOut") : t("templates.backupNotes")}</div>
+        <div className="mb-2 font-medium text-ink">{t("templates.backupNotes")}</div>
         {pending.warnings?.map((warning, index) => <p key={index}>{warning}</p>)}
       </div>}
       {(pending.kind === "package" || pending.kind === "backup") && (

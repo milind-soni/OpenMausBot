@@ -24,13 +24,22 @@ export const NEAR_LIMIT_PERCENT = 90;
 
 export type LimitWindowName = "5-hour" | "weekly" | "other";
 
+/** One usage window as the engine reported it. */
+export interface LimitWindowUsage {
+  window: LimitWindowName;
+  /** 0–100. */
+  usedPercent: number;
+  /** Epoch ms when it resets; null when not known. */
+  resetsAt: number | null;
+}
+
 /** One engine's usage limit as OpenMausBot knows it now. */
 export interface EngineLimit {
   /** Engine instance id. */
   engine: string;
   /** The engine's display name ("Claude", "Codex", or the instance's own name). */
   name: string;
-  driver: "claude" | "codex" | "grok" | "copilot";
+  driver: "claude" | "codex" | "grok" | "copilot" | "opencode";
   /** The window that decides the reset: the fullest, or the one refusing work. */
   window: LimitWindowName | null;
   /** 0–100, or null when the engine reported no window. */
@@ -39,6 +48,8 @@ export interface EngineLimit {
   resetsAt: number | null;
   /** The engine refuses work until resetsAt. */
   blocked: boolean;
+  /** Every window the engine reported, in the engine's order. A server that predates it sends only the deciding window above. */
+  windows?: LimitWindowUsage[];
 }
 
 export interface EngineLimitsReport {

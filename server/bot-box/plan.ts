@@ -13,6 +13,7 @@
 //     bot's own SOUL.md (bots/<bot>/SOUL.md, which it may read but never write) and the engines OpenMausBot installed
 //     there, whole, since npm's bin links point into the prefix by relative paths;
 //   - a private /proc (its own PID namespace: other turns' processes do not exist for it), /dev, /tmp and /run;
+//   - of /sys, only the machine's CPU list, read-only;
 //   - a network namespace with loopback only. Two loopback ports inside are bridged to unix sockets bound in from outside:
 //     the egress gate (every connection to the internet goes through it) and the harness gate (only /api/internal/
 //     routes of this server). Nothing else on the server's loopback is reachable.
@@ -99,11 +100,17 @@ export function taskWorkspaceIds(cwd: string, dataDir: string): { botId: string;
   return { botId: rel[0]!, threadId: rel[1]! };
 }
 
+/** The server-owned folder holding a conversation's uploads for its boxes (server/box-attachments.ts), bound read-only. */
+export function boxUploadsDir(dataDir: string, botId: string, threadId: string): string {
+  return join(dataDir, "box-uploads", botId, threadId);
+}
+
 /** Absolute paths on the command line (`/x/y` or `--flag=/x/y`), which the engine must be able to read. */
 export function argvPaths(args: readonly string[]): string[] {
   const paths: string[] = [];
   for (const arg of args) {
-    const value = arg.startsWith("--") && arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : arg;
+    const optionValue = arg.startsWith("--") && arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : arg;
+    const value = optionValue.startsWith("@") ? optionValue.slice(1) : optionValue;
     if (isAbsolute(value) && value.length > 1 && !paths.includes(value)) paths.push(resolve(value));
   }
   return paths;
@@ -111,6 +118,10 @@ export function argvPaths(args: readonly string[]): string[] {
 
 /** Environment values that name folders the engine writes: its own config and caches. */
 export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "GROK_HOME", "OPENCODE_HOME", "HERMES_HOME", "GEMINI_HOME", "TMPDIR"] as const;
+
+/** The only part of /sys the box has: how many CPUs the machine has. Programs built with TCMalloc (Google's Antigravity
+ * runtime) read `possible` at start and stop themselves (SIGABRT, exit 134) when it is missing. */
+export const CPU_LIST_FILES = ["/sys/devices/system/cpu/possible", "/sys/devices/system/cpu/online"] as const;
 
 /** Folders the box always has its own copy of, so no setting may put the host's back. */
 const PRIVATE_INSIDE = ["/tmp", "/var/tmp", "/run", "/dev", "/proc"];
@@ -128,6 +139,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     { kind: "ro", source: "/etc", target: "/etc" },
     { kind: "ro", source: "/opt", target: "/opt", optional: true },
     { kind: "ro", source: "/var/lib", target: "/var/lib", optional: true },
+    ...CPU_LIST_FILES.map((file): Mount => ({ kind: "ro", source: file, target: file, optional: true })),
   ];
   for (const root of setup.codeRoots) {
     const code = resolve(root);
@@ -186,6 +198,11 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   for (const root of setup.engineRoots) {
     const engines = resolve(root);
     mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source: engines, target: engines, optional: true });
+  }
+  // The person's uploads for this conversation, after every read-write line: readable, but never writable or swappable.
+  if (ids) {
+    const shown = boxUploadsDir(dataDir, ids.botId, ids.threadId);
+    mounts.push({ kind: "ro", source: shown, target: shown, optional: true });
   }
   const readOnly = new Set<string>();
   for (const path of [...(request.ro ?? []), ...argvPaths(request.args), ...(botId && ID.test(botId) ? [join(dataDir, "bots", botId, "SOUL.md")] : [])]) {

@@ -7,7 +7,6 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
@@ -22,7 +21,7 @@ const JOINED = "Another teammate asked this a moment ago, so it was answered onc
 const DONE = "Bolt estimates about 15 working days.";
 
 type Bot = { id: string; name: string; threadId: string; tasks?: Array<{ threadId: string; title: string; busy?: boolean }> };
-type Turn = { botId: string; turnIndex: number; threadId: string; system: string; prompt: unknown };
+type Turn = { botId: string; turnIndex: number; system: string; prompt: unknown };
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
 let olive = "", bob = "";
@@ -50,18 +49,6 @@ const boltTasks = async (token: string) =>
 /** The notes in Bolt's threads this person reads that a request waited for another's answer. */
 const joinedNotes = async (token: string) => (await Promise.all((await boltTasks(token)).map((task) => messages(token, task.threadId).catch(() => []))))
   .flat().filter((message) => message.tool?.name.startsWith("notice: Another teammate asked the same a moment ago")).length;
-/** The join is decided from these rows, so a request that never joined is explained by them and by the turns that ran. */
-const explainNoJoin = () => {
-  const db = new DatabaseSync(join(team.home, ".openmausbot", "runtime.db"), { readOnly: true });
-  try {
-    console.error("one-answer: bots", JSON.stringify({ scout: scout.id, quill: quill.id, bolt: bolt.id, pip: pip.id }));
-    for (const row of db.prepare("select * from assignments").all()) console.error("one-answer: assignment", JSON.stringify(row).slice(0, 1_500));
-  } finally {
-    db.close();
-  }
-  console.error("one-answer: turns", turns().map((turn) => `${turn.botId}#${turn.turnIndex} in ${turn.threadId}`).join(", "));
-  console.error("one-answer: server", fx.logs().split("\n").filter((line) => line.startsWith("coordinator:")).slice(-40).join("\n"));
-};
 const privateChat = async (token: string, bot: Bot, title: string) => {
   const opened = await team.as(token, "POST", `/api/bots/${bot.id}/tasks`, { title });
   expect(opened.status, JSON.stringify(opened.body)).toBe(201);
@@ -106,10 +93,7 @@ it("answers the same question from two of Bob's teammates once, and Olive's, whi
   const sent = await team.as(bob, "POST", `/api/bots/${scout.id}/messages`, { text: "How long will the migration take? Ask Bolt, and have Quill look too.", threadId: bobChat });
   expect(sent.status, JSON.stringify(sent.body)).toBe(202);
   // Quill asked while Bolt still works on Scout's question: its request waits for that answer.
-  await expect.poll(() => joinedNotes(bob), { timeout: 90_000 }).toBe(1).catch((error: unknown) => {
-    explainNoJoin();
-    throw error;
-  });
+  await expect.poll(() => joinedNotes(bob), { timeout: 90_000 }).toBe(1);
 
   const oliveChat = await privateChat(olive, pip, "Estimate");
   const asked = await team.as(olive, "POST", `/api/bots/${pip.id}/messages`, { text: "Ask Bolt how long the migration takes.", threadId: oliveChat });

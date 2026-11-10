@@ -18,6 +18,7 @@ import {
   type MessageAttachmentContext,
   type PreviewImage,
 } from "./AttachmentPreview";
+import { useRevealOriginalMenu } from "./RevealOriginalMenu";
 
 export interface GalleryFile extends TranscriptFileAttachment {
   linked?: boolean;
@@ -72,23 +73,29 @@ export function isAudioAttachment(path: string): boolean {
   return /\.(?:mp3|m4a|aac|wav|ogg|oga|opus|flac)$/i.test(fileIdentity(path));
 }
 
-type MessageAttachmentEntry = { path: string; kind?: string; name?: string };
+type MessageAttachmentEntry = { path: string; kind?: string; name?: string; source?: string };
+/** A bot's attach-file copy path -> the original it was copied from, for the desktop app's Show in Finder / folder. */
+export type AttachmentOriginals = Readonly<Record<string, string>>;
+const originalOf = (originals: AttachmentOriginals | undefined, path: string) => originals && Object.hasOwn(originals, path) ? originals[path] : undefined;
 const NO_GENERATED_ATTACHMENTS: readonly MessageAttachmentEntry[] = [];
 
-export function splitMessageAttachments(attachments: readonly MessageAttachmentEntry[] = NO_GENERATED_ATTACHMENTS): { images: string[]; files: GalleryFile[] } {
+export function splitMessageAttachments(attachments: readonly MessageAttachmentEntry[] = NO_GENERATED_ATTACHMENTS): { images: string[]; files: GalleryFile[]; originals: AttachmentOriginals } {
   const images: string[] = [];
   const files: GalleryFile[] = [];
+  const originals: Record<string, string> = {};
   for (const attachment of attachments) {
+    if (attachment.source && (attachment.kind === "file" || attachment.kind === "image")) originals[attachment.path] = attachment.source;
     if (attachment.kind === "file") files.push({ path: attachment.path, name: attachment.name || attachmentBasename(attachment.path), private: true });
     else if (attachment.kind === "image" || attachment.kind === undefined) images.push(attachment.path);
   }
-  return { images, files };
+  return { images, files, originals };
 }
 
 export function replyAttachmentGroup(text: string, attachments: readonly MessageAttachmentEntry[] = NO_GENERATED_ATTACHMENTS): {
   images: string[];
   files: GalleryFile[];
   delivered: Record<string, string>;
+  originals: AttachmentOriginals;
 } {
   const attached = splitMessageAttachments(attachments);
   const links = collectMessageFiles(text);
@@ -106,7 +113,7 @@ export function replyAttachmentGroup(text: string, attachments: readonly Message
     if (Object.hasOwn(delivered, link.name) || taken.has(fileIdentity(link.path))) continue;
     if (isVideoAttachment(link.path) || isAudioAttachment(link.path)) files.push(link);
   }
-  return { images: attached.images, files, delivered };
+  return { images: attached.images, files, delivered, originals: attached.originals };
 }
 
 export function MessageAttachmentGallery({ text, attachments = NO_GENERATED_ATTACHMENTS, message, eager, className }: {
@@ -121,16 +128,62 @@ export function MessageAttachmentGallery({ text, attachments = NO_GENERATED_ATTA
     () => [...attached.files, ...collectMessageFiles(text, [...attached.images, ...attached.files.map((file) => file.path)])],
     [text, attached],
   );
-  return <AttachmentGallery images={attached.images} files={files} message={message} eager={eager} className={className} />;
+  return <AttachmentGallery images={attached.images} files={files} originals={attached.originals} message={message} eager={eager} className={className} />;
+}
+
+const MEDIA_STALL_MS = 15_000;
+const MEDIA_STALL_RETRIES = 2;
+
+/**
+ * A proxy or tailnet hiccup can leave a response open with no bytes moving, which would spin "Loading" forever.
+ * Abort an attempt after a quiet stretch and start a fresh request; the caller's signal still cancels everything.
+ */
+async function withStallRetry<T>(
+  signal: AbortSignal,
+  unavailable: string,
+  load: (signal: AbortSignal, progress: () => void) => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const controller = new AbortController();
+    let stalled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const progress = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { stalled = true; controller.abort(); }, MEDIA_STALL_MS);
+    };
+    const forward = () => controller.abort();
+    signal.addEventListener("abort", forward, { once: true });
+    progress();
+    try {
+      return await load(controller.signal, progress);
+    } catch (reason) {
+      if (!stalled || signal.aborted) throw reason;
+      if (attempt >= MEDIA_STALL_RETRIES) throw new Error(unavailable);
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", forward);
+    }
+  }
 }
 
 /** Security: the server's MIME is required as well as the filename, so arbitrary bytes never become UI. */
-export async function loadMessageVideo(
+export function loadMessageVideo(
   file: GalleryFile,
   message: MessageAttachmentContext,
   signal: AbortSignal,
 ): Promise<Blob> {
+  return withStallRetry(signal, t("attach.videoUnavailable"), (attempt, progress) => readMessageVideo(file, message, attempt, progress));
+}
+
+async function readMessageVideo(
+  file: GalleryFile,
+  message: MessageAttachmentContext,
+  signal: AbortSignal,
+  progress: () => void,
+): Promise<Blob> {
   const response = await requestMessageFile(file.path, message, signal);
+  progress();
   const mime = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (!mime || !["video/mp4", "video/webm", "video/quicktime", "video/x-m4v"].includes(mime)) {
     await response.body?.cancel();
@@ -154,6 +207,7 @@ export async function loadMessageVideo(
       size += value.byteLength;
       if (size > FILE_MAX_BYTES) throw new Error(t("attach.fileTooLarge"));
       chunks.push(new Uint8Array(value));
+      progress();
     }
   } finally {
     await reader.cancel().catch(() => undefined);
@@ -245,12 +299,22 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
 
 const AUDIO_MIMES = ["audio/mpeg", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/wav", "audio/x-wav", "audio/wave", "audio/ogg", "audio/opus", "audio/flac", "audio/x-flac"];
 
-export async function loadMessageAudio(
+export function loadMessageAudio(
   file: GalleryFile,
   message: MessageAttachmentContext,
   signal: AbortSignal,
 ): Promise<Blob> {
+  return withStallRetry(signal, t("attach.audioUnavailable"), (attempt, progress) => readMessageAudio(file, message, attempt, progress));
+}
+
+async function readMessageAudio(
+  file: GalleryFile,
+  message: MessageAttachmentContext,
+  signal: AbortSignal,
+  progress: () => void,
+): Promise<Blob> {
   const response = await requestMessageFile(file.path, message, signal);
+  progress();
   const mime = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (!mime || !AUDIO_MIMES.includes(mime)) {
     await response.body?.cancel();
@@ -273,6 +337,7 @@ export async function loadMessageAudio(
       size += value.byteLength;
       if (size > FILE_MAX_BYTES) throw new Error(t("attach.fileTooLarge"));
       chunks.push(new Uint8Array(value));
+      progress();
     }
   } finally {
     await reader.cancel().catch(() => undefined);
@@ -326,16 +391,17 @@ function AudioAttachment({ file, message }: { file: GalleryFile; message: Messag
   );
 }
 
-type GalleryItem = { key: string } & (
+type GalleryItem = { key: string; source?: string } & (
   | { kind: "image"; image: PreviewImage }
   | { kind: "video" | "audio" | "file"; file: GalleryFile }
 );
 
 const BENEATH_LIMIT = 6;
 
-export function AttachmentGallery({ images = [], files = [], message, eager = false, beneath = false, className }: {
+export function AttachmentGallery({ images = [], files = [], originals, message, eager = false, beneath = false, className }: {
   images?: Array<string | TranscriptImageAttachment>;
   files?: GalleryFile[];
+  originals?: AttachmentOriginals;
   message?: MessageAttachmentContext;
   eager?: boolean;
   beneath?: boolean;
@@ -354,18 +420,20 @@ export function AttachmentGallery({ images = [], files = [], message, eager = fa
       const image = typeof reference === "string" || reference.private
         ? previewImage(path, typeof reference === "string" ? undefined : reference.name)
         : null;
-      if (image) result.push({ key, kind: "image", image });
-      else result.push({ key, kind: "file", file: typeof reference === "string" ? { path, name: attachmentBasename(path) } : reference });
+      const source = originalOf(originals, path);
+      if (image) result.push({ key, source, kind: "image", image });
+      else result.push({ key, source, kind: "file", file: typeof reference === "string" ? { path, name: attachmentBasename(path) } : reference });
     }
     for (const file of files) {
       const key = fileIdentity(file.path);
       if (seen.has(key)) continue;
       seen.add(key);
       const trusted = Boolean(message && (file.private || file.linked));
-      result.push({ key, kind: trusted && isVideoAttachment(file.path) ? "video" : trusted && isAudioAttachment(file.path) ? "audio" : "file", file });
+      result.push({ key, source: originalOf(originals, file.path), kind: trusted && isVideoAttachment(file.path) ? "video" : trusted && isAudioAttachment(file.path) ? "audio" : "file", file });
     }
     return result;
-  }, [images, files, message]);
+  }, [images, files, originals, message]);
+  const reveal = useRevealOriginalMenu();
   if (!items.length) return null;
   const limit = beneath ? BENEATH_LIMIT : 4;
   const shown = expanded ? items : items.slice(0, limit);
@@ -386,7 +454,7 @@ export function AttachmentGallery({ images = [], files = [], message, eager = fa
         {thumbs.length > 0 && (
           <div className="flex max-w-full flex-wrap gap-2">
             {thumbs.map((item) => item.kind === "image" && (
-              <div key={item.key} className="min-w-0" title={item.image.name}>
+              <div key={item.key} className="min-w-0" title={item.image.name} {...reveal.targetProps(item.source)}>
                 <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} onPreview={() => setSelected(item.image)} className="h-24 w-auto max-w-48 rounded-2xl border-0" />
               </div>
             ))}
@@ -395,15 +463,15 @@ export function AttachmentGallery({ images = [], files = [], message, eager = fa
         {videos.length > 0 && message && (
           <div className={cn("grid w-[min(34rem,70vw)] max-w-full gap-2", videos.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
             {videos.map((item) => item.kind === "video" && (
-              <VideoAttachment key={`${message.threadId}:${message.messageId}:${item.key}`} file={item.file} message={message} />
+              <span key={`${message.threadId}:${message.messageId}:${item.key}`} className="contents" {...reveal.targetProps(item.source)}><VideoAttachment file={item.file} message={message} /></span>
             ))}
           </div>
         )}
         {(rest.length > 0 || items.length > limit) && (
           <div className="flex max-w-full flex-wrap items-start gap-1.5">
             {rest.map((item) => item.kind === "audio" && message
-              ? <AudioAttachment key={`${message.threadId}:${message.messageId}:${item.key}`} file={item.file} message={message} />
-              : item.kind === "file" && <AttachedFileChip key={item.key} file={item.file} linked={item.file.linked} message={message} compact />)}
+              ? <span key={`${message.threadId}:${message.messageId}:${item.key}`} className="contents" {...reveal.targetProps(item.source)}><AudioAttachment file={item.file} message={message} /></span>
+              : item.kind === "file" && <span key={item.key} className="contents" {...reveal.targetProps(item.source)}><AttachedFileChip file={item.file} linked={item.file.linked} message={message} compact /></span>)}
             {items.length > limit && (
               <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded} className="inline-flex h-7 items-center rounded-full px-2.5 text-[13px] leading-none text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
                 {expanded ? t("attach.showLess") : t("attach.moreCount", { count: items.length - limit })}
@@ -411,7 +479,7 @@ export function AttachmentGallery({ images = [], files = [], message, eager = fa
             )}
           </div>
         )}
-        {dialog}
+        {dialog}{reveal.menu}
       </section>
     );
   }
@@ -421,19 +489,19 @@ export function AttachmentGallery({ images = [], files = [], message, eager = fa
       {media.length > 0 && (
         <div className={cn("grid gap-2", media.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
           {media.map((item) => item.kind === "image" ? (
-            <div key={item.key} className="min-w-0" title={item.image.name}>
+            <div key={item.key} className="min-w-0" title={item.image.name} {...reveal.targetProps(item.source)}>
               <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} onPreview={() => setSelected(item.image)} className="max-h-72 rounded-2xl border-0 bg-transparent" />
             </div>
           ) : item.kind === "video" && message ? (
-            <VideoAttachment key={`${message.threadId}:${message.messageId}:${item.key}`} file={item.file} message={message} />
+            <span key={`${message.threadId}:${message.messageId}:${item.key}`} className="contents" {...reveal.targetProps(item.source)}><VideoAttachment file={item.file} message={message} /></span>
           ) : null)}
         </div>
       )}
       {documents.length > 0 && (
         <div className="flex flex-col items-start gap-1.5">
           {documents.map((item) => item.kind === "audio" && message
-            ? <AudioAttachment key={`${message.threadId}:${message.messageId}:${item.key}`} file={item.file} message={message} />
-            : item.kind === "file" && <AttachedFileChip key={item.key} file={item.file} linked={item.file.linked} message={message} className="max-w-none rounded-xl border-hairline/25 bg-transparent" />)}
+            ? <span key={`${message.threadId}:${message.messageId}:${item.key}`} className="contents" {...reveal.targetProps(item.source)}><AudioAttachment file={item.file} message={message} /></span>
+            : item.kind === "file" && <span key={item.key} className="contents" {...reveal.targetProps(item.source)}><AttachedFileChip file={item.file} linked={item.file.linked} message={message} className="max-w-none rounded-xl border-hairline/25 bg-transparent" /></span>)}
         </div>
       )}
       {items.length > limit && (
@@ -442,7 +510,7 @@ export function AttachmentGallery({ images = [], files = [], message, eager = fa
           {expanded ? t("attach.showLess") : t("attach.showMore", { count: items.length - limit })}
         </button>
       )}
-      {dialog}
+      {dialog}{reveal.menu}
     </section>
   );
 }

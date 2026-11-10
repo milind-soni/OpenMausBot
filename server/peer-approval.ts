@@ -5,6 +5,7 @@ import { optionCardsForTools } from "./message-db.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
+import { turnWaitedOnPerson } from "./waiting-on-person.ts";
 
 export { peerAllowKey } from "./peer-approval-key.ts";
 
@@ -54,10 +55,10 @@ function settleCard(pending: Pending, behavior: string, source: "user" | "system
   const store = pending.bus.store;
   const task = store.projectBotForTask(pending.fromBotId, pending.threadId);
   if (task) {
-    if (task.activity === "waiting-on-you") store.setTaskActivity(task.id, pending.threadId, "working");
+    if (turnWaitedOnPerson(task)) store.setTaskActivity(task.id, pending.threadId, "working");
   } else if (store.groupByThread(pending.threadId)) {
     const waiting = store.bot(pending.fromBotId);
-    if (waiting?.activity === "waiting-on-you") store.setActivity(waiting.id, "working");
+    if (turnWaitedOnPerson(waiting)) store.setActivity(waiting.id, "working");
   }
 }
 

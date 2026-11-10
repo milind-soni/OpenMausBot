@@ -1,3 +1,5 @@
+import { waitNoticeText } from "./wait-notice-text.ts";
+import { redactParams } from "../shared/redact.ts";
 import type { Notification } from "../shared/notification.ts";
 import { buildNotification } from "./notify.ts";
 import type { RoutineManager, RoutineRun } from "./routines.ts";
@@ -62,7 +64,8 @@ export function createWaitHost(deps: WaitHostDeps): Pick<WaitManagerOptions, "so
       if (deps.threadBusy(wait.botId, wait.threadId)) return false;
       const posted = store.messagesFor(wait.threadId).some((m) => m.wait?.id === wait.id && m.wait.status === notice.status);
       if (posted) return true;
-      store.appendMessage(wait.threadId, { role: "bot", kind: "text", text: notice.text, wait: { id: wait.id, status: notice.status } });
+      const words = waitNoticeText(wait, notice);
+      store.appendMessage(wait.threadId, { role: "bot", kind: "text", text: notice.text, textCode: words?.key, textParams: words?.params && redactParams(words.params), wait: { id: wait.id, status: notice.status } });
       store.patchTask(wait.botId, wait.threadId, { unread: true });
       deps.wrote(bot, wait.threadId);
       if (notice.status === "fired") deps.notify(buildNotification("wait", bot, wait.threadId, notice.text, { avatarUrl: bot.avatarUrl }));

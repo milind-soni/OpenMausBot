@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { accessSync, constants, lstatSync } from "node:fs";
 import { isAbsolute } from "node:path";
+import { installDetail } from "./update-words.mjs";
 
 // Installs a downloaded .deb behind one polkit prompt. Root copies the file to a root-only dir and checks the feed's SHA-512 before apt-get sees it,
 // so a file swapped in the user-writable cache after the download is refused. Only this fixed script runs as root, never renderer text.
@@ -85,14 +86,14 @@ export function installPackageElevated({
     return Promise.resolve({
       ok: false,
       reason: "unverifiable",
-      detail: "The downloaded package is no longer available. Try the update again.",
+      ...installDetail("native.update.packageMissing"),
     });
   }
   if (!expected) {
     return Promise.resolve({
       ok: false,
       reason: "unverifiable",
-      detail: "The update feed gave no checksum to verify the package against.",
+      ...installDetail("native.update.noChecksum"),
     });
   }
 
@@ -106,23 +107,24 @@ export function installPackageElevated({
         (error, _stdout, stderr) => {
           if (!error) return resolve({ ok: true });
           if (error.code === "ENOENT") {
-            return resolve({ ok: false, reason: "unavailable", detail: "pkexec is not installed." });
+            return resolve({ ok: false, reason: "unavailable", ...installDetail("native.update.noPkexec") });
           }
           if (error.code === PKEXEC_DISMISSED) {
-            return resolve({ ok: false, reason: "declined", detail: "The password prompt was closed." });
+            return resolve({ ok: false, reason: "declined", ...installDetail("native.update.promptClosed") });
           }
           if (error.code === PKEXEC_NOT_AUTHORIZED) {
-            return resolve({ ok: false, reason: "refused", detail: "This session could not ask for administrator rights." });
+            return resolve({ ok: false, reason: "refused", ...installDetail("native.update.noAdmin") });
           }
           if (error.code === CHECKSUM_MISMATCH) {
             return resolve({
               ok: false,
               reason: "checksum",
-              detail: "The downloaded update did not match its checksum. Check again to download it fresh.",
+              ...installDetail("native.update.checksumMismatch"),
             });
           }
-          const reason = error.killed ? "The install took too long." : lastLine(stderr) || error.message;
-          resolve({ ok: false, reason: "failed", detail: `The install did not finish: ${reason}`.slice(0, 240) });
+          const reason = error.killed ? installDetail("native.update.installTimedOut").detail : lastLine(stderr) || error.message;
+          const words = installDetail("native.update.installFailed", { reason, ...(error.killed ? { timedOut: "true" } : {}) });
+          resolve({ ok: false, reason: "failed", ...words, detail: words.detail.slice(0, 240) });
         },
       );
     } catch (error) {

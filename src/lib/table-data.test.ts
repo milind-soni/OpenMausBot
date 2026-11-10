@@ -32,6 +32,10 @@ describe("table data", () => {
     expect(exported.rows[1999]).toEqual(["1999", '\'=HYPERLINK("bad")']);
     expect(exported.rows[0]).toEqual(["0", "A,B"]);
   });
+  it("exports negative and signed numbers as numbers while still escaping formulas", () => {
+    const exported = parseTableFile(tableCsv(["Amount"], [["-12.50"], ["+3"], ["-1e3"], ["-1+1"], ["@SUM(A1)"], ["+A1"]]), ",");
+    expect(exported.rows).toEqual([["-12.50"], ["+3"], ["-1e3"], ["'-1+1"], ["'@SUM(A1)"], ["'+A1"]]);
+  });
   it("sorts long integer IDs without losing precision", () => {
     expect(tableRowOrder([["9007199254740993"], ["9007199254740992"], ["-9007199254740993"]], "", { column: 0, descending: false })).toEqual([2, 1, 0]);
   });

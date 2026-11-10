@@ -1110,6 +1110,10 @@
   max-width: var(--chat-prose-max);
 }
 
+/* A reply's long unbroken text (a URL, a run of letters) wraps inside its bubble instead of running past the window.
+   Code blocks keep scrolling sideways; table cells keep their widths. */
+.chat-md :is(p, li, h1, h2, h3, h4, blockquote) { overflow-wrap: anywhere; }
+
 .chat-text,
 .chat-md {
   line-height: 1.75;
@@ -3031,12 +3035,14 @@ button:disabled.bg-danger {
    property inherits, so a select's or input's wrapper is cut out too: its
    chevron or icon overlay would otherwise drag over the field. A modal's
    full-window backdrop is cut out with its dialog, so a press on it over a
-   header still closes the dialog instead of moving the window. */
+   header still closes the dialog instead of moving the window. The
+   full-screen live desktop covers the headers beneath it the same way. */
 [data-window-drag] :has(> :is(select, input)),
 [data-window-drag] :is(button, a[href], input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [role="switch"], [role="checkbox"], [role="radio"], [role="combobox"], [role="slider"], [role="separator"], [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])),
 :is([role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [role="tooltip"]),
 .fixed:has(> :is([role="dialog"], [role="alertdialog"], [aria-modal="true"])),
-[data-browser-transport] {
+[data-browser-transport],
+[data-live-desktop][data-expanded] {
   -webkit-app-region: no-drag;
 }
 

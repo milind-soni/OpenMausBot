@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 import { basename, join } from "node:path";
 
 import type { WireBot, WireGroup } from "../../shared/wire.ts";
@@ -158,7 +159,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
 
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/tool$/);
     if (m && method === "GET") {
-      if (!store.botByThread(m[1]) && !store.groupByThread(m[1])) return json(res, 404, { error: "no such conversation" });
+      if (!store.botByThread(m[1]) && !store.groupByThread(m[1])) return json(res, 404, userError("serverError.chat.missingConversation"));
       const message = readMessage(m[1], m[2]);
       if (message?.tool?.output === undefined) return json(res, 404, { error: "no tool output on that message" });
       return json(res, 200, { output: message.tool.output });
@@ -397,7 +398,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     if (m && method === "DELETE") {
       const name = m[1]!;
       if (!UPLOADED_NAME.test(name) || !deps.uploads.owns(auth, name)) return json(res, 404, { error: "no such attachment" });
-      if (deps.attachmentInUse(name)) return json(res, 409, { error: "This file is already in a message, so it stays." });
+      if (deps.attachmentInUse(name)) return json(res, 409, { ...userError("serverError.attachment.alreadyInMessage") });
       deleteAttachment(join(ATTACHMENTS_DIR, name));
       return json(res, 200, { ok: true });
     }

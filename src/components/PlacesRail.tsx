@@ -3,9 +3,10 @@
 // never names an address. A right-click on a tile (or its row past eight) opens that place's menu: its colour, changed
 // here for every place whatever its server runs, Remove from list for a Cloud of the person's own that ended or was
 // never paid for (asked first; main takes it off their list on the Admin), and Make … my home for a server of theirs that
-// main says this computer's bots may move to (one tap: main starts the move).
+// main says this computer's bots may move to (one tap: main starts the move). With several accounts signed in here, the tiles
+// are grouped by account with a thin divider, and a click on another account's tile switches to it first (main does that).
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
-import { House, Laptop, Loader2, MoreHorizontal, Plus, Search, Server } from "lucide-react";
+import { House, Laptop, Loader2, MoreHorizontal, Plus, Search, Server, UserRound } from "lucide-react";
 import type { CloudSwatch } from "../../electron/cloud-list.mjs";
 import type { PlaceColorOutcome } from "../../electron/place-look.mjs";
 import { track } from "@/lib/analytics";
@@ -16,6 +17,7 @@ import { localizedRelativeTime } from "@/lib/relative-time";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useBesideFramed } from "@/lib/chrome-rail";
 import { makeHome, placeInitials, recolorPlace, removePlace, usePlaces, type RailPlace } from "@/lib/places";
+import { AccountsSheet, switchNote } from "./AccountMenu";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
 import { PlaceAddSheet } from "./PlaceAddSheet";
@@ -32,6 +34,11 @@ const tileRadius = (size: number) => Math.round(size * 0.3);
  * own that signed in with their account says so, whether it is online, and why there is nothing to open when it is only
  * reachable on its own network. */
 export function placeLabel(place: RailPlace, now = Date.now()): string {
+  const own = place.kind === "account" ? null : place.email ?? null;
+  return [placeStatus(place, now), own, place.signIn && t("accounts.needsSignIn")].filter(Boolean).join(" · ");
+}
+
+function placeStatus(place: RailPlace, now: number): string {
   const name = place.kind === "computer" ? t("rail.thisComputer") : place.server ? t("rail.ownServer", { name: place.name }) : place.name;
   if (place.waiting) return t("rail.waiting", { name });
   if (place.progress !== undefined) return t("rail.settingUp", { name });
@@ -54,14 +61,17 @@ export function shownPlaces(places: RailPlace[], limit = RAIL_SHOWN): RailPlace[
   return [...first, active && !first.includes(active) ? active : places[limit - 1]!];
 }
 
-/** Places whose name has every word typed, in the rail's order. */
+/** Places whose name, or account's address, has every word typed, in the rail's order. */
 export function matchingPlaces(places: RailPlace[], query: string): RailPlace[] {
   const words = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
   return places.filter((place) => {
-    const name = (place.kind === "computer" ? t("rail.thisComputer") : place.name).toLocaleLowerCase();
+    const name = `${place.kind === "computer" ? t("rail.thisComputer") : place.name} ${place.email ?? ""}`.toLocaleLowerCase();
     return words.every((word) => name.includes(word));
   });
 }
+
+/** A divider goes between two places of different groups; with one account no place has a group, so none does. */
+export const startsGroup = (places: RailPlace[], at: number): boolean => at > 0 && places[at]!.group !== places[at - 1]!.group;
 
 /** The tile's progress, drawn round its edge: a 2px line 1px off the tile, its corners in step with the tile's, on whole
  * pixels at any scale. The line starts at the top edge's middle and runs clockwise. */
@@ -88,7 +98,7 @@ export function PlaceMark({ place, size = TILE }: { place: MarkedPlace; size?: n
   return <span aria-hidden="true" data-rail-offline={place.offline ? "" : undefined} data-rail-ended={place.ended ? "" : undefined}
     className={cn("grid shrink-0 place-items-center font-semibold leading-none", color ? "text-white" : "bg-card text-ink", (place.offline || place.ended) && "opacity-55 grayscale")}
     style={{ width: size, height: size, borderRadius: tileRadius(size), fontSize: Math.round(size * 0.4), ...(color ? { background: cloudColorFill(color) } : {}) }}>
-    {place.kind === "computer" ? <Laptop size={Math.round(size * 0.46)} strokeWidth={1.75} /> : placeInitials(place.name)}
+    {place.kind === "computer" ? <Laptop size={Math.round(size * 0.46)} strokeWidth={1.75} /> : place.kind === "account" ? <UserRound size={Math.round(size * 0.5)} strokeWidth={1.75} /> : placeInitials(place.name)}
   </span>;
 }
 
@@ -233,11 +243,12 @@ function MorePlaces({ places, canPair, onOpen, onMenu, onClose }: { places: Rail
         className="w-full bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary" />
     </label>
     <ul className="max-h-72 overflow-y-auto">
-      {found.map((place) => <li key={place.id}>
+      {found.map((place, at) => <li key={place.id}>
+        {startsGroup(found, at) && <div data-rail-group className="mt-1 truncate border-t border-hairline/50 px-2 pt-1.5 text-[12px] text-ink-tertiary">{place.kind === "account" ? "" : place.email ?? ""}</div>}
         <button type="button" disabled={!placeActs(place, canPair)} aria-current={place.active ? "page" : undefined} onClick={() => { onOpen(place); onClose(); }}
           onContextMenu={menuOpener(place, (menu) => { onClose(); onMenu(menu); })} className={cn(MENU_ROW, "h-9")}>
           <PlaceMark place={place} size={22} />
-          <span className="min-w-0 flex-1 truncate">{placeLabel(place)}</span>
+          <span className="min-w-0 flex-1 truncate">{[placeStatus(place, Date.now()), place.signIn && t("accounts.needsSignIn")].filter(Boolean).join(" · ")}</span>
         </button>
       </li>)}
     </ul>
@@ -256,6 +267,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   const [adding, setAdding] = useState(false);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ place: RailPlace; top: number } | null>(null);
+  const [accounts, setAccounts] = useState<{ adding: string | null; note: string | null } | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
@@ -268,14 +280,18 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     window.addEventListener("mousedown", away);
     return () => window.removeEventListener("mousedown", away);
   }, [more, menu]);
-  const covering = more || adding || connecting !== null || menu !== null;
+  const covering = more || adding || connecting !== null || menu !== null || accounts !== null;
   useEffect(() => { if (chrome) void window.ogb?.rail?.expand?.(covering)?.catch(() => {}); }, [chrome, covering]);
   if (!state.places.length) return null;
   const bridge = window.ogb?.workspaces;
   const open = (place: RailPlace) => {
     if (!place.opens) { if (place.pairs) setConnecting(place.name); return; }
     track("rail_place_opened", { kind: place.kind });
-    void bridge?.open?.(place.id).catch(() => {});
+    void bridge?.open?.(place.id).then((said) => {
+      if (!said) return;
+      if (said.outcome === "sign-in") setAccounts({ adding: said.email ?? place.email ?? "", note: null });
+      else { const note = switchNote(said); if (note) setAccounts({ adding: null, note }); }
+    }, () => {});
   };
   const framed = windowFramed(capabilities), draggable = capabilities.windowChrome !== "native";
   // In a framed window the rail is part of the frame: the window's own rail runs the full height, its top in the frame's
@@ -287,7 +303,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   const drag = draggable ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
   const noDrag = draggable ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
   const shown = shownPlaces(state.places);
-  const canPair = state.add.link || state.add.address, canAdd = state.add.cloud || canPair || state.add.organization === true;
+  const canPair = state.add.link || state.add.address, canAdd = state.add.cloud || canPair || state.add.organization === true || state.add.account === true;
   // The menu opens next to the tile or row it was asked from (measured now, while that row is there), within the rail.
   const openMenu = ({ place, from }: MenuAt) => {
     const nav = navRef.current;
@@ -299,7 +315,8 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     <div aria-hidden="true" className={cn(above, "shrink-0")} />
     {/* As wide as the rail, so nothing round a tile is cut off at the sides: a list that scrolls clips its overflow. */}
     <ul className="flex min-h-0 w-full flex-col items-center gap-2 overflow-y-auto py-1" style={noDrag}>
-      {shown.map((place) => <li key={place.id} className="flex">
+      {shown.map((place, at) => <li key={place.id} className="flex flex-col items-center gap-2">
+        {startsGroup(shown, at) && <span role="separator" data-rail-divider className="h-px w-4 bg-hairline" />}
         <PlaceTile place={place} canPair={canPair} onOpen={open} onMenu={openMenu} />
       </li>)}
     </ul>
@@ -319,7 +336,8 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     {menu && <div ref={menuRef} style={noDrag}>
       <PlaceMenu key={menu.place.id} place={state.places.find((entry) => entry.id === menu.place.id) ?? menu.place} top={menu.top} onClose={() => setMenu(null)} />
     </div>}
-    {adding && <PlaceAddSheet choices={state.add} onClose={() => setAdding(false)} />}
+    {adding && <PlaceAddSheet choices={state.add} onClose={() => setAdding(false)} onAccount={() => { setAdding(false); setAccounts({ adding: "", note: null }); }} />}
+    {accounts && <AccountsSheet adding={accounts.adding} note={accounts.note} onClose={() => setAccounts(null)} />}
     {connecting !== null && <PlaceAddSheet choices={state.add} connect={{ name: connecting }} onClose={() => setConnecting(null)} />}
   </nav>;
 }

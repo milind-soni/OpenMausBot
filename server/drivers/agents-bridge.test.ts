@@ -25,7 +25,7 @@ import {
 } from "./agents-bridge.ts";
 
 const flag = (on: boolean) => (on ? "1" : "0");
-const profile = (options: { chief?: boolean; skills?: boolean; shared?: boolean; voice?: boolean; cloudHome?: boolean; memory?: boolean; botId?: string } = {}): CatalogProfile =>
+const profile = (options: { chief?: boolean; skills?: boolean; shared?: boolean; voice?: boolean; cloudHome?: boolean; memory?: boolean; images?: boolean; botId?: string } = {}): CatalogProfile =>
   catalogProfileFromEnv({
     OMB_BOT_ID: options.botId ?? "bot-bridge",
     OMB_CHIEF_OF_STAFF: flag(options.chief ?? false),
@@ -36,6 +36,7 @@ const profile = (options: { chief?: boolean; skills?: boolean; shared?: boolean;
     OMB_MEMORY_ENABLED: flag(options.memory ?? true),
     // A person's own request, which may pick its computer.
     OMB_COMPUTER_SELECTION: "1",
+    OMB_IMAGE_GENERATION: flag(options.images ?? false),
   });
 
 /** Every switch combination the harness can ask for, as the wire test's
@@ -46,6 +47,7 @@ function everyProfile(): Array<{ name: string; profile: CatalogProfile }> {
     all.push({ name: JSON.stringify({ chief, skills, shared, voice, cloudHome }), profile: profile({ chief, skills, shared, voice, cloudHome }) });
   }
   all.push({ name: "memory off", profile: profile({ memory: false }) });
+  all.push({ name: "images", profile: profile({ ...FULL_CHIEF, images: true }) });
   all.push({ name: "watcher", profile: profile({ botId: WATCHER_OPTIONS_CARD_BOT_ID }) });
   return all;
 }
@@ -82,6 +84,7 @@ describe("what a bridged turn is listed", () => {
       "request_credential",
       "request_sign_in",
       "fill_login",
+      "message_person",
       "memory_update",
       FIND_TOOL,
       USE_TOOL,
@@ -102,6 +105,7 @@ describe("what a bridged turn is listed", () => {
       "request_sign_in",
       "fill_login",
       "send_voice_note",
+      "message_person",
       "memory_update",
       FIND_TOOL,
       USE_TOOL,
@@ -111,12 +115,12 @@ describe("what a bridged turn is listed", () => {
   it("names every hot tool the catalog really has, so a renamed tool cannot fall out of the list unnoticed", () => {
     const everyName = new Set(everyProfile().flatMap(({ profile: turn }) => names(availableTools(turn))));
     for (const hot of BRIDGE_HOT_TOOL_NAMES) expect(everyName.has(hot), hot).toBe(true);
-    // 11 to 14 of them on any one turn, always fewer than the turn has
+    // 12 to 15 of them on any one turn, always fewer than the turn has
     for (const { name, profile: turn } of everyProfile()) {
       const tools = availableTools(turn);
       const hot = createToolBridge(tools as BridgeTool[]).listed.length - 2;
-      expect(hot, name).toBeGreaterThanOrEqual(11);
-      expect(hot, name).toBeLessThanOrEqual(14);
+      expect(hot, name).toBeGreaterThanOrEqual(12);
+      expect(hot, name).toBeLessThanOrEqual(15);
       expect(hot, name).toBeLessThan(tools.length / 2);
     }
   });

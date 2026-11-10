@@ -20,6 +20,7 @@ import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
+import { UsageBars } from "./EngineUsage";
 
 /** One item list for the chat's ⋯ menu wherever it sits; it lists the threads whenever the sidebar hides them. The
  * Simple bot panel draws the same items as rows, and its Share button holds the two that export. */
@@ -55,6 +56,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       label: t("model.simple.model"),
       icon: <Cpu size={16} />,
       value: modelName,
+      trailing: <UsageBars engine={selection?.instanceId} hover={false} />,
       onSelect: () => openBotSettings(dispatch, "model"),
     } satisfies SidebarMenuItem]),
     {

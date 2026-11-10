@@ -151,7 +151,7 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Set up Stripe test charges and Notion's MCP." })).status).toBe(202);
   });
   const listed = (await tools.list()).tools.find((tool: any) => tool.name === "request_credential");
-  expect(Object.keys(listed.inputSchema.properties)).toEqual(["credential_id", "label", "reason", "placeholder", "delivery"]);
+  expect(Object.keys(listed.inputSchema.properties)).toEqual(["credential_id", "address", "label", "reason", "placeholder", "delivery"]);
   expect(listed.inputSchema.properties.credential_id.enum).toEqual(expect.arrayContaining(["composioApiKey", "openaiApiKey", "anthropicApiKey"]));
   const cards = async () => (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages.filter((message: any) => message.kind === "secret");
   const save = (cardId: string, value: unknown) => api("POST", `/api/bots/${bot.id}/secret-cards/${cardId}/save`, { threadId: bot.threadId, value });
@@ -159,7 +159,7 @@ it("keeps a file secret and a ref secret out of every record, and the bot uses e
   // A file for the bot's own commands.
   expect((await tools.call("request_credential", { label: "Stripe secret key", reason: "To create test charges." })).text).toMatch(/needs delivery/u);
   const askedFile = await tools.call("request_credential", { label: "Stripe secret key", reason: "To create test charges.", placeholder: "sk_test_…", delivery: "file" });
-  expect(askedFile).toEqual({ isError: false, text: expect.stringMatching(/^A secure card for Stripe secret key is ready/u) });
+  expect(askedFile).toEqual({ isError: false, text: expect.stringMatching(/^A secure card for Stripe secret key is now in this conversation/u) });
   const fileCard = (await cards()).at(-1);
   expect(fileCard.secret).toMatchObject({ target: "customSecret", label: "Stripe secret key", placeholder: "sk_test_…", helpUrl: "", delivery: "file", reason: "To create test charges." });
   expect(fileCard.secret.description).toBe("To create test charges. Ledger's commands can read it from a private file for 24 hours; it is never added to chat.");

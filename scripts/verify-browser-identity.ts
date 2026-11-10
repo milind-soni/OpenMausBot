@@ -12,6 +12,7 @@ import { pathToFileURL } from "node:url";
 import { agentBrowserIntegration, closeBrowserSession, prepareBrowserSessionState, resolveAgentBrowserBinary, setBrowserViewport } from "../server/browser-engine.ts";
 import { BrowserRuntime, browserRuntimeEnv, type BrowserSpawnSpec } from "../server/browser-runtime.ts";
 import { ChromeLauncher } from "../server/browser/chrome/launcher.ts";
+import type { IdentitySidecars } from "../server/browser/chrome/sidecar.ts";
 import { openGate } from "../server/browser/egress/gate.ts";
 import { refusalFor } from "../server/browser/egress/policy.ts";
 import { DATA_DIR } from "../server/config.ts";
@@ -151,6 +152,8 @@ export interface BotBrowserOptions {
   out: string;
   sessionPrefix?: string;
   log?: (line: string) => void;
+  /** The identity connections, in place of the server's own: a test can slow one down. */
+  sidecars?: IdentitySidecars;
 }
 
 /** A browser tool call, as the bot makes it. */
@@ -171,7 +174,7 @@ export async function withBotBrowser<T>(options: BotBrowserOptions, work: (call:
   // runner's HOME is a temporary folder, so the real one comes from the user database.
   const home = userInfo().homedir;
   const session = `${options.sessionPrefix ?? "omb-identity"}-${randomBytes(3).toString("hex")}`;
-  const launcher = new ChromeLauncher({ dataDir: join(scratch, "data"), env: { ...process.env, HOME: home, USERPROFILE: home, OMB_CHROME_PATH: options.chrome }, log });
+  const launcher = new ChromeLauncher({ dataDir: join(scratch, "data"), env: { ...process.env, HOME: home, USERPROFILE: home, OMB_CHROME_PATH: options.chrome }, log, ...(options.sidecars ? { sidecars: options.sidecars } : {}) });
   // Where the launcher adds nothing (OMB_BROWSER_LEGACY_SHELL=1, a headless shell), agent-browser would otherwise look for a
   // browser of its own, such as an installed Google Chrome, instead of the one named here.
   const launcherEnv = launcher.env();

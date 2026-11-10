@@ -11,6 +11,7 @@ import {
   parseCodexUsage,
   parseCopilotUsage,
   parseGrokUsage,
+  parseOpenCodeUsage,
   planAccountsFromInstances,
   type PlanAccount,
   type PlanFetch,
@@ -33,10 +34,11 @@ function jsonResponse(body: unknown, status = 200): PlanResponse {
   };
 }
 
+/** A plan account for one driver, named as the panel names it. */
 function account(driver: PlanAccount["driver"], extras: Partial<PlanAccount> = {}): PlanAccount {
   return {
     id: driver,
-    name: { claude: "Claude", codex: "Codex", grok: "Grok", copilot: "GitHub Copilot" }[driver],
+    name: { claude: "Claude", codex: "Codex", grok: "Grok", copilot: "GitHub Copilot", opencode: "OpenCode" }[driver],
     driver,
     environment: {},
     ...extras,
@@ -415,6 +417,31 @@ describe("Copilot plan usage", () => {
   });
 });
 
+/** OpenCode Go's meters as the panel shows them: the running window, the week and the month. */
+describe("an OpenCode Go allowance", () => {
+  const body = {
+    usage: {
+      rolling: { status: "ok", percent: 5, resetsAt: "2026-11-04T22:20:18.000Z" },
+      weekly: { status: "rate-limited", percent: 100, resetsAt: "2026-11-09T00:00:00.000Z" },
+      monthly: { status: "ok", percent: 17, resetsAt: "2026-11-24T21:32:14.000Z" },
+    },
+  };
+
+  it("reads the running window, the week and the month", () => {
+    const parsed = parseOpenCodeUsage(body);
+    expect(parsed.plan).toBe("Go");
+    expect(parsed.fiveHour).toEqual({ available: true, usedPercent: 5, remainingPercent: 95, resetsAt: "2026-11-04T22:20:18.000Z" });
+    expect(parsed.weekly).toMatchObject({ usedPercent: 100, remainingPercent: 0 });
+    expect(parsed.extra).toEqual([{ label: "Monthly", usedPercent: 17, remainingPercent: 83, resetsAt: "2026-11-24T21:32:14.000Z" }]);
+  });
+
+  it("says nothing it was not given", () => {
+    expect(parseOpenCodeUsage({}).plan).toBeNull();
+    expect(parseOpenCodeUsage({ usage: {} }).fiveHour.available).toBe(false);
+    expect(parseOpenCodeUsage({ usage: { rolling: { status: "ok", percent: "5" } } }).fiveHour.available).toBe(false);
+  });
+});
+
 describe("plan usage fetcher", () => {
   it("does not call fetch when the Claude token is expired", async () => {
     const fetchImpl = vi.fn<PlanFetch>();
@@ -647,6 +674,99 @@ describe("plan usage fetcher", () => {
       { id: "grok", name: "Grok", driver: "grok", environment: { GROK_HOME: "/tmp/grok" } },
       { id: "githubCopilot", name: "GitHub Copilot", driver: "copilot", environment: {} },
     ]);
+  });
+
+/** An OpenCode instance becomes an account under the driver the panel knows. */
+  it("lists an OpenCode instance under the key its environment carries", () => {
+    expect(planAccountsFromInstances({
+      open: { driver: "opencodeGo", environment: { OPENCODE_API_KEY: SECRET } },
+    })).toEqual([{ id: "open", name: "OpenCode", driver: "opencode", environment: { OPENCODE_API_KEY: SECRET } }]);
+  });
+
+/** The saved key is the Bearer, and the three meters land in their slots. */
+  it("reads OpenCode Go's allowance with the key saved on the instance", async () => {
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({
+      usage: {
+        rolling: { status: "ok", percent: 5, resetsAt: "2026-11-04T22:20:18.000Z" },
+        weekly: { status: "ok", percent: 15, resetsAt: "2026-11-09T00:00:00.000Z" },
+        monthly: { status: "ok", percent: 17, resetsAt: "2026-11-24T21:32:14.000Z" },
+      },
+    }));
+    const report = await fetchPlanUsage([account("opencode", { environment: { OPENCODE_API_KEY: SECRET } })], {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: fileCredentialReader({ now: () => NOW, env: {}, readText: () => null }),
+    });
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://opencode.ai/zen/go/v1/usage");
+    expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(`Bearer ${SECRET}`);
+    expect(report.providers[0]).toMatchObject({
+      driver: "opencode",
+      ok: true,
+      error: null,
+      plan: "Go",
+      fiveHour: { available: true, usedPercent: 5, remainingPercent: 95 },
+      weekly: { available: true, usedPercent: 15 },
+    });
+    expect(report.providers[0]?.extra[0]).toMatchObject({ label: "Monthly", usedPercent: 17 });
+    expect(JSON.stringify(report)).not.toContain(SECRET);
+  });
+
+/** With no key, the CLI login is used, and the Go entry wins over the Zen one. */
+  it("takes the CLI's OpenCode Go login when no key is saved, before the Zen one", async () => {
+    const goLogin = "opencode-go-fixture-login";
+    const zenLogin = "opencode-zen-fixture-login";
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ usage: { rolling: { status: "ok", percent: 4, resetsAt: null } } }));
+    const auth = (entries: Record<string, unknown>) => ({ OPENCODE_AUTH_CONTENT: JSON.stringify(entries) });
+    await fetchPlanUsage([
+      account("opencode", { id: "go", environment: auth({ opencode: { type: "key", key: zenLogin }, "opencode-go": { type: "oauth", access: goLogin, expires: NOW + 600_000 } }) }),
+      account("opencode", { id: "zen", environment: auth({ opencode: { type: "key", key: zenLogin } }) }),
+    ], {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: fileCredentialReader({ now: () => NOW, env: {}, readText: () => null }),
+    });
+    expect(fetchImpl.mock.calls.map((call) => call[1].headers.Authorization)).toEqual([`Bearer ${goLogin}`, `Bearer ${zenLogin}`]);
+  });
+
+  /** The row reads the login the CLI keeps when the environment carries no key and no auth content. */
+  it("falls back to the CLI's auth.json when OPENCODE_AUTH_CONTENT is empty", async () => {
+    const login = "opencode-file-fixture-login";
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ usage: { rolling: { status: "ok", percent: 2, resetsAt: null } } }));
+    await fetchPlanUsage([account("opencode", { environment: { OPENCODE_AUTH_CONTENT: "   " } })], {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: fileCredentialReader({ now: () => NOW, env: { HOME: tmpdir() }, readText: () => JSON.stringify({ "opencode-go": { access: login } }) }),
+    });
+    expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(`Bearer ${login}`);
+  });
+
+  /** A 200 that carries no meter is an unreadable answer, not an empty allowance. */
+  it("does not call a 200 without meters a working row", async () => {
+    const report = await fetchPlanUsage([account("opencode", { environment: { OPENCODE_API_KEY: SECRET } })], {
+      fetch: async () => jsonResponse({}),
+      now: () => NOW,
+      credentials: fileCredentialReader({ now: () => NOW, env: {}, readText: () => null }),
+    });
+    expect(report.providers[0]).toMatchObject({ ok: false, error: "OpenCode returned an unexpected usage response" });
+  });
+
+/** No Go plan is a quiet row; a refused key is named. */
+  it("keeps the OpenCode row when there is no Go plan, and names a refused key", async () => {
+    const credentials = fileCredentialReader({ now: () => NOW, env: {}, readText: () => null });
+    const instances = [account("opencode", { environment: { OPENCODE_API_KEY: SECRET } })];
+    const noGo = await fetchPlanUsage(instances, {
+      fetch: async () => jsonResponse({ _tag: "Forbidden" }, 403),
+      now: () => NOW,
+      credentials,
+    });
+    expect(noGo.providers[0]).toMatchObject({ ok: true, error: null, plan: null, fiveHour: { available: false }, extra: [] });
+
+    const refused = await fetchPlanUsage(instances, {
+      fetch: async () => jsonResponse({ error: "unauthorized" }, 401),
+      now: () => NOW,
+      credentials,
+    });
+    expect(refused.providers[0]).toMatchObject({ ok: false, error: "OpenCode refused the saved credentials" });
   });
 
   it("reads no usage for a ChatGPT-plan provider, whose sign-in is not the shared Codex login", async () => {

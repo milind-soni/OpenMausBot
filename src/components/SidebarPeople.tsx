@@ -1,6 +1,8 @@
 // On a Team Cloud: the team's people, with their pictures. Your own row opens your inbox, your chat with your Chief where
 // everything sent to you arrives, with the inbox's list beside it, and counts the asks waiting on you there. Anyone
-// else's puts @their name in the composer, which reaches their inbox once sent.
+// else's puts @their name in the composer, which reaches their inbox once sent. For the team's admins, one more row opens
+// the team's People page, where invitations are sent, so someone alone on a new team still has a way to bring people in.
+import { UserPlus } from "lucide-react";
 import { botOwner } from "../../shared/bot-owner";
 import { openAsksOf } from "@/lib/bot-unread";
 import { cn } from "@/lib/cn";
@@ -28,13 +30,20 @@ function openComposer(state: Pick<AppState, "activeView" | "selectedId" | "group
   return bot ? `bot:${bot.id}:${bot.threadId}` : null;
 }
 
+/** Where a team's admins invite people: the Team admin's People page on the Cloud that runs this team. */
+export function teamPeoplePage(team: { id: string; cloudPage?: string } | null | undefined): string | null {
+  return team?.cloudPage ? `${team.cloudPage}/team/${encodeURIComponent(team.id)}/people` : null;
+}
+
 const focusComposer = () => requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea')?.focus());
 
 export function SidebarPeople({ compact }: { compact: boolean }) {
   const team = useTeamPeople();
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
-  if (!team || team.people.length < 2) return null;
+  if (!team) return null;
+  const invite = team.admin ? teamPeoplePage(state.config?.team) : null;
+  if (team.people.length < 2 && !invite) return null;
   const me = team.me;
   const people = [...team.people].sort((a, b) => Number(Boolean(b.you)) - Number(Boolean(a.you)) || a.name.localeCompare(b.name));
   const inbox = inboxBotOf(state.bots, me?.email);
@@ -76,6 +85,15 @@ export function SidebarPeople({ compact }: { compact: boolean }) {
             </li>
           );
         })}
+        {invite && (
+          <li>
+            <a href={invite} target="_blank" rel="noreferrer" aria-label={t("sidebar.people.invite")} title={t("sidebar.people.invite")} data-people-invite
+              className={cn("flex w-full min-w-0 items-center gap-2 rounded-lg text-left text-[13px] text-ink-secondary hover:bg-raised/60 hover:text-ink", compact ? "justify-center p-1" : "px-2 py-1")}>
+              <UserPlus aria-hidden="true" size={compact ? 18 : 15} strokeWidth={1.75} className="shrink-0" />
+              {!compact && <span className="min-w-0 flex-1 truncate">{t("sidebar.people.invite")}</span>}
+            </a>
+          </li>
+        )}
       </ul>
     </section>
   );

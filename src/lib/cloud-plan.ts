@@ -194,12 +194,16 @@ export function planCardRows(a: CloudPlanAllowances): CloudPlanCardRow[] {
     ...(a.snapshotDays ? [{ key: "backups" as const, text: t("cloudBuy.row.backups", { days: a.snapshotDays }) }] : []),
   ];
 }
+/** What a plan's free trial costs and then what it comes to: "Free for 3 days, then $49/month + tax". */
+export function trialTerms(days: number, price: string): string {
+  return days === 1 ? t("cloudBuy.card.trial.one", { price }) : t("cloudBuy.card.trial.many", { days, price });
+}
 function planCard(plan: CloudOfferPlan, recommended: string, current: string | null): CloudPlanCard {
   const name = offerPlanLabel(plan), price = usd(plan.amount / 100), mine = plan.tier === current;
   return { tier: plan.tier, name, price, popular: plan.tier === recommended, current: mine,
-    promise: Object.hasOwn(PROMISE, plan.tier) ? t(PROMISE[plan.tier]!) : null,
+    promise: Object.hasOwn(PROMISE, plan.tier) ? t(PROMISE[plan.tier]!) : plan.allowances?.seats ? t("cloudBuy.promise.team", { seats: plan.allowances.seats }) : null,
     action: mine ? null : plan.trialDays ? t("cloudIntro.start") : t("cloudBuy.card.get", { plan: name }),
-    terms: mine ? null : plan.trialDays ? t("cloudBuy.card.trial", { days: plan.trialDays, price }) : t("cloudBuy.card.paid", { price }),
+    terms: mine ? null : plan.trialDays ? trialTerms(plan.trialDays, price) : t("cloudBuy.card.paid", { price }),
     rows: plan.allowances ? planCardRows(plan.allowances) : [] };
 }
 /** The plans on sale as cards, in the Admin's order. `current` is the person's own tier; `own` is that plan when it is not
@@ -256,7 +260,7 @@ export function cloudIntroView(offer: CloudOffer | null | undefined): { badge: s
   if (!offer || !days) return null;
   const cheapest = Math.min(...offer.plans.filter(plan => plan.trialDays).map(plan => plan.amount));
   return {
-    badge: t("cloudIntro.badge", { days }),
+    badge: days === 1 ? t("cloudIntro.badge.one") : t("cloudIntro.badge.many", { days }),
     points: [t("cloudIntro.routines"), t("cloudIntro.phone"), offer.creditUsd ? t("cloudIntro.credit", { credit: usd(offer.creditUsd) }) : t("cloudIntro.included")],
     price: t("cloudIntro.price", { price: usd(cheapest / 100) }),
     moneyBack: moneyBackLine(offer),

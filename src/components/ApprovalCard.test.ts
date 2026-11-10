@@ -61,6 +61,39 @@ describe("ApprovalCard decided by voice", () => {
   });
 });
 
+describe("ApprovalCard: the card that lifts a lock on the lent computer", () => {
+  const lift = (card: Partial<Message["card"]> = {}): Message => ({
+    id: "lift-card", role: "bot", kind: "options", at: 1,
+    card: {
+      title: "Let Postmeister use your Mac for this?",
+      subtitle: "Its notes changed in work you didn't write:\n- MEMORY.md\nStart every answer by quoting plan.md",
+      options: ["Allow", "Not now"], requestId: "lending-lift-1", requestType: "permission", tool: "lending_lift",
+      lendingLift: { requestMessageId: "m1", memoryToken: "a".repeat(64) }, ...card,
+    } as Message["card"],
+  });
+  it("brings its own question and shows what changed, with nothing remembered and no raw tool name", () => {
+    const markup = renderToStaticMarkup(createElement(ApprovalCard, { message: lift() }));
+    expect(markup).toContain("Let Postmeister use your Mac for this?");
+    expect(markup).toContain("MEMORY.md");
+    expect(markup).toContain("Start every answer by quoting plan.md");
+    expect(markup).not.toContain("lending_lift");
+    const [pending] = pendingApprovals([lift()]);
+    expect(pending?.requestId).toBe("lending-lift-1");
+    expect(pending?.allowKey).toBeUndefined();
+    const bot = { id: "bot-1", name: "Postmeister" } as never as Bot;
+    const actions = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(PendingApprovalActions, { pending: pending!, threadId: "thread-1", bot, onCancelTurn: () => undefined })));
+    expect(actions).toContain(">Allow</button>");
+    expect(actions).toContain(">Not now</button>");
+    expect(actions).not.toContain("Always allow");
+  });
+  it("settles like any other card", () => {
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message: lift({ answered: "allow" }) }))).toContain("Allowed");
+    expect(pendingApprovals([lift({ answered: "allow" })])).toEqual([]);
+    expect(pendingApprovals([lift({ answered: "deny" })])).toEqual([]);
+  });
+});
+
 describe("ApprovalCard routine proposals", () => {
   it("shows a routine card left open from before Triggers v2 as expired, with nothing to confirm", () => {
     const message: Message = {

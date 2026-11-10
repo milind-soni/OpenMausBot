@@ -530,16 +530,17 @@ describe("Simple mode's account menu", () => {
     expect(groups(build({ move: [] }))[0]).toEqual(["usage", "phone-app", "support", "settings"]);
   });
 
-  it("gives a failing or moving move one row shaped like Usage and Settings: a label and an icon, no second line", () => {
+  it("gives a moving move one row shaped like Usage and Settings, and a failing one the reason written under its Try again", () => {
     const shape = (item: SidebarMenuItem) => ({ lines: [item.subtitle, item.note].filter(Boolean).length, wrap: item.wrap === true, icon: Boolean(item.icon) });
     const failing = moveMenuItems(moveLine({ phase: "copy", failing: { error: "Some of this computer's things did not reach My Cloud." } }, "local"), { onOpen: noop, onRetry: noop, onClose: noop });
     const moving = moveMenuItems(moveLine({ phase: "copy", chats: { done: 34, total: 120 } }, "local"), { onOpen: noop, onRetry: noop, onClose: noop });
-    for (const move of [failing, moving]) {
-      const items = build({ move });
-      expect(groups(items)[0]).toEqual(["cloud-move"]);
-      const settings = items.find((item) => item.key === "settings")!;
-      expect(shape(items[0]!)).toEqual(shape(settings));
-    }
+    const items = build({ move: moving });
+    expect(groups(items)[0]).toEqual(["cloud-move"]);
+    expect(shape(items[0]!)).toEqual(shape(items.find((item) => item.key === "settings")!));
+    const failed = build({ move: failing });
+    expect(groups(failed)[0]).toEqual(["cloud-move"]);
+    expect(shape(failed[0]!)).toEqual({ lines: 1, wrap: true, icon: true });
+    expect(failed[0]!.note).toBe("Some of this computer's things did not reach My Cloud.");
   });
 
   it("puts the move's row first in Advanced's account menu too, under its own divider", () => {

@@ -2,6 +2,7 @@
 import { PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "./config.ts";
 import { clientInstall } from "./contracts.ts";
 import type { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
+import { notThisCli } from "./drivers/acp/version-probe.ts";
 import { augmentedPath } from "./env-path.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
 
@@ -36,7 +37,11 @@ export async function testCliBinary(
           resolve({ ok: false, message, ...(driver?.install && isSpawnError ? { install: clientInstall(driver.install) } : {}) });
           return;
         }
-        resolve({ ok: true, version: stdout.trim().split("\n")[0] });
+        const version = stdout.trim().split("\n")[0];
+        // An install command pasted as the path runs curl, which answers --version too: that is not this engine.
+        const expected = driver?.metadata.cliVersion;
+        if (expected && !expected.test(version)) return resolve({ ok: false, message: notThisCli(cli, driver.metadata.displayName) });
+        resolve({ ok: true, version });
       },
     );
   });

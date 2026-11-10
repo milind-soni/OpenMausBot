@@ -1,5 +1,7 @@
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
 import type { ConnectorCardData } from "../../shared/connector-card";
+import { t } from "./i18n";
+import type { LocaleKey } from "@/locales";
 import type { DefaultBotFields } from "../../shared/default-bot";
 import { hiddenFromSidebar } from "./default-bot";
 
@@ -18,15 +20,15 @@ export type SectionDropPlace = "before" | "after";
 export type SidebarDensityMode = "comfortable" | "icons";
 
 const GOAL_RUN_PREVIEW_LABEL = {
-  working: "Working",
-  completed: "Completed",
-  "needs-input": "Needs your input",
-  blocked: "Blocked",
-  "limit-reached": "Turn limit reached",
-  paused: "Paused",
-  stopped: "Stopped",
-  failed: "Failed",
-} satisfies Record<GroupGoalRunCardData["status"], string>;
+  working: "routines.goal.working",
+  completed: "routines.goal.completed",
+  "needs-input": "routines.goal.needs-input",
+  blocked: "routines.goal.blocked",
+  "limit-reached": "routines.goal.limit-reached",
+  paused: "routines.goal.paused",
+  stopped: "routines.goal.stopped",
+  failed: "routines.goal.failed",
+} satisfies Record<GroupGoalRunCardData["status"], LocaleKey>;
 
 export type SidebarBot = DefaultBotFields & {
   id: string;
@@ -67,7 +69,7 @@ export function sidebarGoalRunPreview(run: GroupGoalRunCardData): string {
   const detail = run.detail?.replace(/\s+/g, " ").trim();
   const goal = run.goal.replace(/\s+/g, " ").trim();
   const summary = detail || goal;
-  const label = GOAL_RUN_PREVIEW_LABEL[run.status];
+  const label = t(GOAL_RUN_PREVIEW_LABEL[run.status]);
   return summary ? `${label}: ${summary}` : label;
 }
 
@@ -134,6 +136,16 @@ export function withPrimaryTile<T extends SidebarBot>(parts: ReturnType<typeof p
   if (!primary) return { ...parts, primary };
   const others = (bots: T[]) => bots.filter((bot) => bot.id !== primary.id);
   return { ...parts, primary, unsectionedChief: null, pinnedBots: others(parts.pinnedBots), unsectionedBots: others(parts.unsectionedBots) };
+}
+
+/** Bots that are working or waiting on the person move to the top of their own list (pinned, main, each department),
+ * keeping the person's order among them; the rest follow in that same order. Only how the list is shown changes. */
+export function activeBotsFirst<T>(parts: { pinnedBots: T[]; sectionedBots: T[]; unsectionedBots: T[] }, active: (bot: T) => boolean) {
+  const first = (bots: T[]) => {
+    const flags = bots.map(active);
+    return [...bots.filter((_, index) => flags[index]), ...bots.filter((_, index) => !flags[index])];
+  };
+  return { pinnedBots: first(parts.pinnedBots), sectionedBots: first(parts.sectionedBots), unsectionedBots: first(parts.unsectionedBots) };
 }
 
 export function partitionSidebarGroups<T extends SidebarGroup>(groups: T[]) {

@@ -22,6 +22,22 @@ network. A small window cannot spare the full list, so those bots get the bridge
 without the switch. `OMB_AGENTS_TOOL_BRIDGE=0` turns that off too, and the rules
 under "Which bots and engines get it" still apply.
 
+## Why it stays off by default
+
+A live run of `evals/tool-choice` (6 requests that went wrong in real use, each picking a tool the bridge hides, one real Sonnet
+turn each) reached the right tool every time, bridged or not, but did not save money on those turns:
+
+| Tool list | Reached the right tool | Cost of the 6 turns | Looked a tool up first |
+|---|---|---|---|
+| Full catalog | 6 of 6 | $0.56 | 0 of 6 |
+| Bridged | 6 of 6 | $0.58 | 5 of 6, 3 of them through `ToolSearch` as well |
+
+A hidden tool costs one more model call, and `find_tool` brings up to three full schemas into the conversation. A bridged first
+request is 13k tokens smaller, which matters most on a turn that uses no hidden tool, but once new threads and new bots
+read a shared prompt cache, those 13k tokens cost only about $0.003 a call. By our estimate the saving and the extra calls roughly cancel out on a
+busy day, so the small-window case above is the reason to use it, not cost. These are 6 runs on one model, chosen as the bridge's
+worst case. Run the eval again before changing this.
+
 ## Turning it on
 
 In `~/.openmausbot/config.json`:

@@ -825,9 +825,9 @@ const support = (loadCatalog: OpenCodeCatalogLoader, ownAccess = new Map<string,
   loginNote: "OpenCode has no usable models. Add an OpenCode key in Settings → API keys.",
   install: {
     command: {
-      darwin: "npm install -g opencode-ai",
-      linux: "npm install -g opencode-ai",
-      win32: "npm install -g opencode-ai",
+      darwin: "npm install -g @opencode/cli",
+      linux: "npm install -g @opencode/cli",
+      win32: "npm install -g @opencode/cli",
     },
     docsUrl: "https://opencode.ai/docs/",
     signInCommand: "opencode auth login",

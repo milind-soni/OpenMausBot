@@ -23,6 +23,7 @@ const LEAN: Record<NotifyKind, Lean> = {
   approval: "needs-you",
   question: "needs-you",
   "sign-in": "needs-you",
+  secret: "needs-you",
   incident: "needs-you",
   "turn-failed": "needs-you",
   "routine-failed": "needs-you",

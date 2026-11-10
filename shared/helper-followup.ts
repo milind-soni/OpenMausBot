@@ -10,6 +10,9 @@ export interface HelperFollowupFacts {
   /** The person's other bots, and the routines running here, when it looked. */
   bots: number;
   routines: number;
+  /** On a team, for someone who can't connect an AI: the name of the person who does; empty until the team's owner has
+   * opened the team. */
+  connects?: string;
 }
 
 export interface HelperFollowupField {
@@ -34,6 +37,10 @@ export const FOLLOWUP_ENGLISH = {
   "helperIntro.followup.more": "{count} more",
   "helperIntro.followup.noAi": "I looked around. Before I can do real work, I need an AI to think with. Sign in with an account you already have, like Claude or ChatGPT, and I'll take it from there.",
   "helperIntro.followup.backup": "I looked around. For now I'm thinking with a free backup model. Sign in with an account you already have, like Claude or ChatGPT, and I'll take it from there.",
+  "helperIntro.followup.noAiOwner": "I looked around. Before I can do real work, I need an AI to think with. {name} connects that for the team, and I'll take it from there.",
+  "helperIntro.followup.noAiTeamOwner": "I looked around. Before I can do real work, I need an AI to think with. The team's owner connects that, and I'll take it from there.",
+  "helperIntro.followup.backupOwner": "I looked around. For now I'm thinking with a free backup model. {name} can connect a better one for the team.",
+  "helperIntro.followup.backupTeamOwner": "I looked around. For now I'm thinking with a free backup model. The team's owner can connect a better one.",
 } as const;
 
 export type FollowupKey = keyof typeof FOLLOWUP_ENGLISH;
@@ -45,8 +52,12 @@ function counted(say: Say, count: number, none: FollowupKey, one: FollowupKey, m
 
 /** The follow-up in `say`'s language; `list` joins app names as that language does. */
 export function followupText(facts: HelperFollowupFacts, say: Say, list: (items: string[]) => string): string {
-  if (facts.ai === "none") return say("helperIntro.followup.noAi");
-  if (facts.ai === "backup") return say("helperIntro.followup.backup");
+  if (facts.ai !== "own") {
+    const none = facts.ai === "none", connects = facts.connects;
+    if (connects === undefined) return say(none ? "helperIntro.followup.noAi" : "helperIntro.followup.backup");
+    if (connects) return say(none ? "helperIntro.followup.noAiOwner" : "helperIntro.followup.backupOwner", { name: connects });
+    return say(none ? "helperIntro.followup.noAiTeamOwner" : "helperIntro.followup.backupTeamOwner");
+  }
   const found = say("helperIntro.followup.found");
   if (facts.apps.length) {
     const shown = facts.apps.slice(0, FOLLOWUP_APP_NAMES);

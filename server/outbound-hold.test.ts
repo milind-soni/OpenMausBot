@@ -147,12 +147,62 @@ describe("createOutboundHold", () => {
   });
 
   it("reserve refuses when the hold was not approved and the policy is ask", async () => {
-    const { hold, dataDir, input } = setup(bot({ policy: "ask", dailyCap: 10 }));
+    const { hold, input } = setup(bot({ policy: "ask", dailyCap: 10 }));
     expect(() => hold.reserve({ ...input, fullAccess: false, approved: false })).toThrow(/outbound policy changed/);
+  });
+});
 
-    // Full access sends freely and logs it.
-    expect(() => hold.reserve({ ...input, fullAccess: true, approved: false })).not.toThrow();
-    await flushDecisionLog(dataDir);
-    expect(readDecisions(dataDir, 10)).toMatchObject([{ decision: "auto-approved", source: "outbound", rule: "full-access" }]);
+describe("Full access with no sending rule of its own", () => {
+  const send = async (held: ReturnType<typeof setup>) => {
+    const answer = await held.hold.hold({ ...held.input, fullAccess: true, active: () => true });
+    if (answer.ok) held.hold.reserve({ ...held.input, fullAccess: true, approved: answer.approved });
+    return answer;
+  };
+
+  it("sends 25 a day without a card and refuses the 26th, sending nothing", async () => {
+    const held = setup(bot(undefined));
+    for (let sent = 0; sent < 25; sent++) await expect(send(held)).resolves.toEqual({ ok: true, approved: false });
+    await expect(send(held)).resolves.toEqual({ ok: false, text: expect.stringMatching(/did not send this\. Scout has reached its daily limit of 25 outbound actions at Full access\. Tell the user it was not sent/) });
+    expect(held.appended, "never a card").toEqual([]);
+    expect(held.notified).toEqual([]);
+    expect(held.outboundRequests.pending("t1")).toEqual([]);
+    // A send that passed the hold just before the 25th was spent is still stopped at dispatch.
+    expect(() => held.hold.reserve({ ...held.input, fullAccess: true, approved: false })).toThrow(/daily outbound limit\. Nothing was sent/);
+    await flushDecisionLog(held.dataDir);
+    const rules = readDecisions(held.dataDir, 100).map((row) => row.rule);
+    expect(rules[0]).toBe("full-access:1/25");
+    expect(rules[24]).toBe("full-access:25/25");
+    expect(rules[25]).toBe("full-access-cap:25");
+  });
+
+  it("starts the count again the next day", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 4, 23, 30));
+    const held = setup(bot(undefined));
+    for (let sent = 0; sent < 25; sent++) await send(held);
+    await expect(send(held)).resolves.toMatchObject({ ok: false });
+    vi.setSystemTime(new Date(2026, 10, 5, 0, 5));
+    await expect(send(held)).resolves.toEqual({ ok: true, approved: false });
+    await flushDecisionLog(held.dataDir);
+    expect(readDecisions(held.dataDir, 100).map((row) => row.rule).at(-1)).toBe("full-access:1/25");
+  });
+
+  it("keeps a stored rule exactly as set: ask still asks, allow keeps its own cap", async () => {
+    const asking = setup(bot({ policy: "ask", dailyCap: 100 }));
+    const pending = asking.hold.hold({ ...asking.input, fullAccess: true, active: () => true });
+    expect(asking.appended).toHaveLength(1);
+    asking.outboundRequests.resolve({ threadId: "t1", requestId: asking.appended[0].message.card!.requestId as string, behavior: "allow" });
+    await expect(pending).resolves.toEqual({ ok: true, approved: true });
+
+    const allowing = setup(bot({ policy: "allow", dailyCap: 30 }));
+    for (let sent = 0; sent < 30; sent++) await expect(send(allowing)).resolves.toEqual({ ok: true, approved: false });
+    await expect(send(allowing)).resolves.toEqual({ ok: false, text: expect.stringMatching(/daily limit of 30 outbound actions\. Tell the user it was not sent, and ask them to raise the limit/) });
+  });
+
+  it("counts a call it cannot inspect too, and never turns it into a card", async () => {
+    const held = setup(bot(undefined));
+    for (let sent = 0; sent < 25; sent++) await held.hold.hold({ ...held.input, opaque: true, fullAccess: true, active: () => true }).then((answer) => answer.ok && held.hold.reserve({ ...held.input, opaque: true, fullAccess: true, approved: false }));
+    await expect(held.hold.hold({ ...held.input, opaque: true, fullAccess: true, active: () => true })).resolves.toMatchObject({ ok: false });
+    expect(held.appended).toEqual([]);
   });
 });

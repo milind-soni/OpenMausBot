@@ -118,6 +118,21 @@ describe("show_html", () => {
   });
 });
 
+describe("a frameless page", () => {
+  it("is drawn without the card frame only when the bot asks, and keeps that look through updates unless changed", () => {
+    const { call, row } = setup();
+    call({ tool: "show_html", html: PAGE, title: "Framed" });
+    expect(row("m1").app).toMatchObject({ border: true });
+    call({ tool: "show_html", html: PAGE, title: "Inline", frameless: true });
+    expect(row("m2").app).toMatchObject({ border: false });
+    call({ tool: "update_html", app_id: "m2", html: "<p>New numbers</p>" });
+    expect(row("m2").app).toMatchObject({ border: false, rev: 1 });
+    call({ tool: "update_html", app_id: "m2", html: "<p>New numbers</p>", frameless: false });
+    expect(row("m2").app).toMatchObject({ border: true, rev: 1 });
+    expect(call({ tool: "show_html", html: PAGE, title: "Bad", frameless: "yes" })).toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/^frameless:/) });
+  });
+});
+
 describe("update_html", () => {
   it("replaces the page in place: a new document, the next revision, the title kept unless given, context dropped", () => {
     const { call, row, store } = setup();
@@ -401,9 +416,12 @@ describe("publishablePage", () => {
     const { call, store, docs } = setup();
     call({ tool: "show_html", html: PAGE, title: "Sales" });
     store.appendMessage(THREAD, { role: "bot", kind: "app", text: "x", app: { v: 1, source: "mcp", title: "Excalidraw", doc: "", rev: 0, bytes: 1, border: true, network: { connect: [], resources: [] }, mcp: { server: "excalidraw", tool: "create_view", resourceUri: "ui://excalidraw/mcp-app.html" } } });
-    expect(publishablePage({ store, docs, threadId: "elsewhere", messageId: "m1" })).toMatchObject({ ok: false, status: 404 });
-    expect(publishablePage({ store, docs, threadId: THREAD, messageId: "m2" })).toMatchObject({ ok: false, status: 409 });
-    expect(publishablePage({ store, docs, threadId: THREAD, messageId: "m1", rev: 4 })).toMatchObject({ ok: false, status: 404 });
+    expect(publishablePage({ store, docs, threadId: "elsewhere", messageId: "m1" })).toMatchObject({ ok: false, status: 404,
+      error: "That page is not in this conversation.", errorKey: "serverError.page.notHere" });
+    expect(publishablePage({ store, docs, threadId: THREAD, messageId: "m2" })).toMatchObject({ ok: false, status: 409,
+      error: "That app came from an MCP server; only a page a bot made can be published.", errorKey: "serverError.page.fromMcp" });
+    expect(publishablePage({ store, docs, threadId: THREAD, messageId: "m1", rev: 4 })).toMatchObject({ ok: false, status: 404,
+      error: "That version of the page is no longer kept.", errorKey: "serverError.page.versionGone" });
   });
 });
 

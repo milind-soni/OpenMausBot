@@ -159,7 +159,7 @@ describe("Settings in Simple mode", () => {
     const placed = SIMPLE_PAGES.flatMap((page) => page.sections);
     expect(new Set(placed).size).toBe(placed.length);
     const hidden = SECTIONS.map((entry) => entry.id).filter((id) => !placed.includes(id));
-    expect(hidden).toEqual(["decisionModel", "skills", "backups", "workspaces", "experimental"]);
+    expect(hidden).toEqual(["decisionModel", "imageGeneration", "skills", "backups", "workspaces", "experimental"]);
     for (const id of hidden) expect(SIMPLE_HIDDEN_SECTIONS).toContain(id);
   });
 
@@ -183,7 +183,7 @@ describe("Settings in Simple mode", () => {
       .map((needle) => appearance.indexOf(needle));
     expect(order.every((at) => at > -1), String(order)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
-    expect(appearance).toContain("A circle for each place your bots live, at the window&#x27;s left edge.");
+    expect(appearance).toContain("An icon for each place your bots live");
     const toggle = fixture.switches.find((props) => props["aria-label"] === "Show your computers")!;
     expect(toggle.checked).toBe(true);
     toggle.onClick!({} as never);

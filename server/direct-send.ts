@@ -20,8 +20,10 @@ export interface DirectSendInput {
   app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
   /** Sent while the bot works: steer into the running turn, queue after it, or restart it (shared/follow-up.ts). */
   followUp?: FollowUp;
+  /** Bot ids the person picked from the @ list. */
+  mentions?: string[];
 }
 
 export type DirectSendReceipt =
   | { ok: true; threadId: string; message: Message; steered?: true }
-  | { ok: true; queued: true; queueId: string; threadId: string; reason?: SteerQueueReason };
+  | { ok: true; queued: true; queueId: string; threadId: string; reason?: SteerQueueReason; why?: string };

@@ -100,10 +100,12 @@ export function stepStatus(step: LiveStep): LiveStatus {
     : { activity: step.activity, file: step.target };
 }
 
-/** The status line's "now": the engine's own report when it made one, else the tool call still running in the chat,
- * else nothing, and the line shows its timer alone. */
+/** The status line's "now": the engine's own report when it made one, else what the server just said about the turn (it
+ * is waiting for memory, say), else the tool call still running in the chat, else nothing, and the line shows its timer alone. */
 export function turnNowPhrases(status: LiveStatus | null, message?: Message): LiveActivityPhrases | null {
   if (status) return liveStatusPhrases(status);
+  const notice = message?.kind === "activity" && message.tool?.name.startsWith("notice:") ? /[^.!?。！？]+[.!?。！？]?/u.exec(message.tool.name.slice("notice:".length).trim())?.[0] : undefined;
+  if (notice) return { phase: `notice:${notice}`, phrases: [notice] };
   if (message?.kind !== "activity" || !message.tool || message.tool.ok !== undefined || message.comm) return null;
   const phrases = toolActivityPhrases(message.tool);
   return phrases.phase === "chat.activity.working" ? null : phrases;

@@ -1,3 +1,4 @@
+import { userError, userErrorFields } from "../user-errors.ts";
 import { randomUUID } from "node:crypto";
 import { providerIconError } from "../../shared/provider-icon.ts";
 import {
@@ -7,6 +8,13 @@ import {
   instanceSettingsSchema,
   newClaudeAccount,
 } from "../claude-accounts.ts";
+import {
+  claudeEndpointSchema,
+  claudeEndpointUpdateSchema,
+  newClaudeEndpoint,
+  updateClaudeEndpoint,
+  withClaudeEndpointInfo,
+} from "../claude-endpoints.ts";
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
 import { addEndpoint, addEndpointSchema, isAddedEndpoint, withEndpointUrls } from "../openai-compat-endpoints.ts";
@@ -28,7 +36,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 export interface InstanceRouteDeps {
   store: Pick<Store, "bots" | "tasks">;
   cfg: AppConfig;
-  registry: Pick<ProviderRegistry, "get" | "refreshModels" | "installRuntime" | "cliTarget" | "forgetSnapshots">;
+  registry: Pick<ProviderRegistry, "get" | "refreshModels" | "installRuntime" | "cliTarget" | "forgetSnapshots" | "onWrongCli">;
   sessions: Pick<SessionRegistry, "isLive">;
   providerAuthSessions: Pick<ProviderAuthSessions, "status" | "start" | "revokeOwner" | "signOut" | "complete" | "cancel">;
   hostedModels: boolean;
@@ -53,7 +61,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
     persistProviderInstance, configStatus, broadcast, testCliBinary, cliProbeEnvironment, threadBusy,
     botForThread, activeGroupTurnForBot,
   } = deps;
-  const describeInstances = async () => hostedModels ? deps.describeInstances() : withEndpointUrls(await deps.describeInstances(), cfg.instances ?? {});
+  const describeInstances = async () => hostedModels ? deps.describeInstances()
+    : withEndpointUrls(withClaudeEndpointInfo(await deps.describeInstances(), cfg.instances ?? {}), cfg.instances ?? {});
   /** Bots, their backups and threads, the new-bot default, or a turn running on it: a provider in use can't go away. */
   const providerInUse = (instanceId: string): boolean => cfg.defaultModelSelection?.instanceId === instanceId || store.bots.some((bot) =>
     bot.modelSelection.instanceId === instanceId || bot.fallback?.some(candidate => candidate.instanceId === instanceId) || store.tasks(bot.id).some((task) => task.modelSelection?.instanceId === instanceId)) ||
@@ -81,6 +90,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       providerConfigBusy.set(false);
     }
   };
+  // A saved CLI path that runs another program (an install command pasted as the path) gives way to the engine's own CLI
+  // once one is installed, by itself: nobody has to find Reset.
+  registry?.onWrongCli?.((instanceId, cli) => useAppCopy(instanceId, cli));
   // One updater per executable: Claude instances can share an install, and two self-updates would race its files.
   const claudeUpdatesInFlight = new Set<string>();
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
@@ -156,6 +168,51 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         await persistProviderInstance(added.instanceId, instances);
         return json(res, 201, { instanceId: added.instanceId, instances: await describeInstances() });
       } finally { providerConfigBusy.set(false); }
+    }
+
+    if (method === "POST" && path === "/api/instances/claude-endpoint") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const parsed = claudeEndpointSchema.safeParse(await readBody(req, 16384));
+      if (!parsed.success) return json(res, 400, { error: "Enter a name, an http(s) base URL, a token and the model the endpoint serves." });
+      if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      providerConfigBusy.set(true);
+      try {
+        const { instanceId, instances } = newClaudeEndpoint(cfg, parsed.data);
+        await persistProviderInstance(instanceId, instances);
+        return json(res, 201, { instanceId, instances: await describeInstances() });
+      } catch (error) {
+        const status = (error as { status?: unknown }).status;
+        return json(res, typeof status === "number" ? status : 400, { error: error instanceof Error ? error.message : String(error) });
+      } finally { providerConfigBusy.set(false); }
+    }
+
+    const endpointPatch = /^\/api\/instances\/([\w.-]+)\/claude-endpoint$/.exec(path);
+    if (method === "PATCH" && endpointPatch) {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const instanceId = endpointPatch[1];
+      const parsed = claudeEndpointUpdateSchema.safeParse(await readBody(req, 16384));
+      if (!parsed.success) return json(res, 400, { error: "Check the address, token and model ids." });
+      if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      if (busyProviderSelections().some((selection) => selection.instanceId === instanceId)) {
+        return json(res, 409, { error: "Wait for bots using this endpoint to finish before changing its settings." });
+      }
+      providerConfigBusy.set(true);
+      providerInstancesChanging.add(instanceId);
+      try {
+        const { instances } = updateClaudeEndpoint(cfg, instanceId, parsed.data);
+        await persistProviderInstance(instanceId, instances);
+        return json(res, 200, { instances: await describeInstances() });
+      } catch (error) {
+        const status = (error as { status?: unknown }).status;
+        return json(res, typeof status === "number" ? status : 400, { error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        providerInstancesChanging.delete(instanceId);
+        providerConfigBusy.set(false);
+      }
     }
 
     if (method === "POST" && path === "/api/instances/claude-accounts") {
@@ -246,7 +303,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       } catch (error) {
         const requestedStatus = error && typeof error === "object" ? (error as { status?: unknown }).status : undefined;
         const status = typeof requestedStatus === "number" && [400, 401, 404, 409, 413, 415].includes(requestedStatus) ? requestedStatus : 500;
-        return json(res, status, { error: error instanceof Error ? error.message : String(error) });
+        return json(res, status, { error: error instanceof Error ? error.message : String(error), ...userErrorFields(error) });
       }
     }
 
@@ -299,7 +356,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         resetPathCache();
         return json(res, 200, { ok: true, version: result.version });
       } catch (error) {
-        return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        return json(res, 500, { error: error instanceof Error ? error.message : String(error), ...userErrorFields(error) });
       } finally {
         claudeUpdatesInFlight.delete(target.cli);
         // Even a failed update may have replaced the executable.
@@ -315,7 +372,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const parsed = instanceSettingsSchema.safeParse(await readBody(req, 16384));
-      if (!parsed.success) return json(res, 400, { error: "Supply a valid CLI path, account name, configuration directory, boolean tools setting or a reply wait of 1 to 60 minutes." });
+      if (!parsed.success) return json(res, 400, { ...userError("serverError.instance.settingsInvalid") });
       const body = parsed.data;
       const instanceId = instancePatch[1];
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
@@ -346,8 +403,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           entry.config = { ...entry.config as Record<string, unknown>, tools: body.tools };
         }
         if (body.replyWaitMinutes !== undefined) {
-          if (entry.driver !== "openai-compat") return json(res, 400, { error: "The reply wait is available for OpenAI-compatible servers only." });
-          const { replyWaitMinutes: _previous, ...rest } = entry.config as Record<string, unknown>;
+          if (entry.driver !== "openai-compat") return json(res, 400, { ...userError("serverError.instance.replyWaitUnsupported") });
+          const { replyWaitMinutes: _previous, ...rest } = (entry.config ?? {}) as Record<string, unknown>;
           entry.config = body.replyWaitMinutes === null ? rest : { ...rest, replyWaitMinutes: body.replyWaitMinutes };
         }
         if (body.displayName !== undefined) entry.displayName = body.displayName;
@@ -389,7 +446,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         try { await providerAuthSessions.signOut(live, auth.kind === "session" ? auth.session.id : "loopback"); }
         catch (error) {
           if ((error as { code?: unknown }).code !== "chatgpt_revocation_unconfirmed") {
-            return json(res, 409, { error: error instanceof Error ? error.message : String(error) });
+            return json(res, 409, { error: error instanceof Error ? error.message : String(error), ...userErrorFields(error) });
           }
         }
       }

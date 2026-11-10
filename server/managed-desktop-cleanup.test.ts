@@ -95,8 +95,8 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
       if (generation === undefined || yourComputerAsks.get(threadId) === generation) yourComputerAsks.delete(threadId);
     },
     turnResources: { release() {} }, cloudComputerPower: { released() {} }, settlingResourceOwners: new Map(), turnComputerResources: new Map(), teamComputerTurns: new Map(),
-    coordinator: { stopAwaitingDirect: (threadId: string) => { stopAwaiting.push(threadId); return []; } },
-    noteTeammatesLeftRunning() {}, stopParkedCards: (threadId: string) => stoppedCards.push(threadId),
+    coordinator: { stopAwaitingDirect: (threadId: string) => { stopAwaiting.push(threadId); } },
+    stopParkedCards: (threadId: string) => stoppedCards.push(threadId),
     cancelDirectTurnDispatch: (_botId: string, threadId: string) => cancelled.push(threadId),
     cancelGroupTurnOperations: (_groupId: string, threadId: string, outcome?: { status: string; detail: string; byHarness?: boolean }) => {
       cancelled.push(threadId);
@@ -383,10 +383,9 @@ it("ends a room stopped by the harness with its cause, and one the person stoppe
     const context = vm.createContext({
       coordinator: {
         cancelRoom: (...args: string[]) => calls.push(`assignments:${args.join("|")}`),
-        stopAwaitingDirect: (threadId: string) => { calls.push(`stop-awaiting:${threadId}`); return ["mid-turn teammate"]; },
+        stopAwaitingDirect: (threadId: string) => { calls.push(`stop-awaiting:${threadId}`); },
       },
       stopParkedCards: (threadId: string) => calls.push(`cards-stopped:${threadId}`),
-      noteTeammatesLeftRunning: (threadId: string, left: string[]) => calls.push(`left-running:${threadId}:${left.join(",")}`),
       roomMemberLock: { releaseThread: (threadId: string) => calls.push(`member-claims:${threadId}`) },
       groupTurnOperations: new Map([["g", new Set([{ threadId: "room", cancellation: new AbortController() }])]]),
       finishGroupGoalRun: (_groupId: string, _operation: unknown, status: string, detail: string) => calls.push(`goal:${status}|${detail}`),
@@ -403,7 +402,7 @@ it("ends a room stopped by the harness with its cause, and one the person stoppe
     "goal:stopped|Turn interrupted — provider settings changed.",
   ]);
   expect(run()).toEqual([
-    "cards-stopped:room", "stop-awaiting:room", "left-running:room:mid-turn teammate",
+    "cards-stopped:room", "stop-awaiting:room",
     "assignments:g|room", "member-claims:room", "goal:stopped|Stopped by you.",
   ]);
 });

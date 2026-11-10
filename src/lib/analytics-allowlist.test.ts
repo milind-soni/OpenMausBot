@@ -77,7 +77,7 @@ describe("app, role and key lists", () => {
     expect(rows).toEqual({
       openai: "openai", anthropic: "anthropic", xai: "xai", openrouter: "openrouter", mistral: "mistral", cerebras: "cerebras", groq: "groq",
       greenference: "greenference", meta: "meta", deepseek: "deepseek", opencodeGo: "opencode_go", openaiCompat: "openai_compat", liveKey: "openai_live",
-      elevenlabs: "elevenlabs", fishAudio: "fish_audio", box: "boat", composio: "composio", treg: "treg", jev: "jev",
+      elevenlabs: "elevenlabs", fishAudio: "fish_audio", geminiTts: "gemini_tts", box: "boat", composio: "composio", treg: "treg", jev: "jev",
       openrouterHelper: "openrouter_decider", imageOpenai: "openai_image", postiz: "postiz",
     });
     for (const provider of Object.values(rows)) expect(KEY_PROVIDER).toContain(provider);
@@ -85,7 +85,7 @@ describe("app, role and key lists", () => {
 
   it("names a provider for every credential a bot can ask for in chat, and nothing else", () => {
     const expected = {
-      boxToken: "boat", xaiApiKey: "xai", opencodeGoApiKey: "opencode_go", ttsKey: "elevenlabs", fishAudioKey: "fish_audio",
+      boxToken: "boat", xaiApiKey: "xai", opencodeGoApiKey: "opencode_go", ttsKey: "elevenlabs", fishAudioKey: "fish_audio", geminiTtsKey: "gemini_tts",
       openaiImageApiKey: "openai_image",
       onePasswordToken: "onepassword", composioApiKey: "composio", openaiApiKey: "openai", anthropicApiKey: "anthropic",
       openrouterApiKey: "openrouter", mistralApiKey: "mistral", cerebrasApiKey: "cerebras", groqApiKey: "groq", greenferenceApiKey: "greenference", metaApiKey: "meta",

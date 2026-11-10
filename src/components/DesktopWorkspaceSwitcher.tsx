@@ -55,7 +55,7 @@ export type WorkspacePlace = ReturnType<typeof useWorkspacePlace>;
  */
 export function useWorkspacePlace({ cloudHome = false, howTo = false, onMenuClosed }: { cloudHome?: boolean; howTo?: boolean; onMenuClosed?: () => void }) {
   const bridge = window.ogb?.workspaces;
-  const [current, setCurrent] = useState<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean } | null>(null);
+  const [current, setCurrent] = useState<{ local: boolean; name: string; localPath?: string; origin?: string; color?: string; home?: boolean } | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -117,7 +117,7 @@ function Switcher({ compact = false, inline = false, pill = false, rail = false,
       </div>
     </div>;
   }
-  const name = current?.name ?? (cloudHome ? cloudName : t("sidebar.servers"));
+  const name = (current?.local && !current.localPath ? t("place.local") : current?.name) ?? (cloudHome ? cloudName : t("sidebar.servers"));
   const Icon = current?.local === false || (cloudHome && !current) ? Cloud : Laptop;
   const shown = cloudHome ? withPower(name) : name;
   const title = current?.origin ? `${shown} · ${current.origin}` : shown;

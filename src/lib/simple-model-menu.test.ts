@@ -183,6 +183,23 @@ describe("the Simple model menu", () => {
     expect(modelName(cursor, "gone-model")).toBe("gone-model");
   });
 
+  it("names the picked Antigravity thinking level on the current model, as its row in the list does (#4160)", () => {
+    const variants = [{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }];
+    const gemini = engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", variants },
+    ], { capabilities: { modelVariants: true } });
+    const picked = menu([gemini], { selection: { instanceId: "antigravity", model: "gemini-3.8-flash", variant: "medium" } });
+    expect(picked.current).toMatchObject({ label: "Gemini 3.8 Flash · Medium" });
+    expect(picked.current?.title).toBe("Google Gemini · Gemini 3.8 Flash · Medium");
+    const pickedLow = menu([gemini], { selection: { instanceId: "antigravity", model: "gemini-3.8-flash", variant: "low" } });
+    expect(pickedLow.current).toMatchObject({ label: "Gemini 3.8 Flash · Low" });
+    expect(rows(picked)).toEqual(["Gemini 3.8 Flash · Low"]);
+    expect(modelName(gemini, "gemini-3.8-flash")).toBe("Gemini 3.8 Flash");
+    expect(modelName(gemini, "gemini-3.8-flash", "gone")).toBe("Gemini 3.8 Flash");
+    expect(modelName({ ...gemini, driverKind: "opencodeGo" }, "gemini-3.8-flash", "medium")).toBe("Gemini 3.8 Flash");
+    expect(modelName(gemini, "gemini-3.8-flash", "low")).toBe("Gemini 3.8 Flash · Low");
+  });
+
   it("is busy while the menu reads its providers or one provider's models", () => {
     expect(menu([claude()]).busy).toBe(false);
     expect(menu([claude()], { loading: true }).busy).toBe(true);
@@ -242,5 +259,17 @@ describe("a model the organization turned off", () => {
   it("says so on the current row, with nothing to set up", () => {
     expect(menuOn("opus-5-5").current).toMatchObject({ warning: true, blocked: true, meta: "Turned off by your organization" });
     expect(menuOn("sonnet-5").current?.blocked).toBeUndefined();
+  });
+});
+
+describe("custom Claude endpoint", () => {
+  // The driver marks every endpoint catalog option `custom`; the picker keeps exactly those.
+  const endpoint = claude({ access: "custom" }, [
+    { id: "deepseek-chat", label: "deepseek-chat", custom: true },
+    { id: "deepseek-reasoner", label: "deepseek-reasoner", custom: true },
+  ]);
+
+  it("lists the endpoint's own models and none of Claude's", () => {
+    expect(rows(menu([endpoint]), 0)).toEqual(["deepseek-chat", "deepseek-reasoner"]);
   });
 });

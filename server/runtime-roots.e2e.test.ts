@@ -254,7 +254,7 @@ it("T2 parks the root on a credential card and runs it again with the provided l
   expect(f.eventsOf(parked.id)).toContain("parked");
   await f.settle(500);
   expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual(["C0"]);
-  expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "idle" });
+  expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "waiting-on-you" });
   f.script(f.clive.id, { key: "C-TYPED", match: ["T2-TYPED"], reply: "T2-TYPED-DONE: hello back." });
   await f.say(f.clive.id, job, "T2-TYPED: hello while the card waits.");
   await f.final(job, "T2-TYPED-DONE");
@@ -300,7 +300,7 @@ it("T3 parks the root on connector cards and runs it again once when both connec
       await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("needs_input");
       const parked = f.roots()[0];
       expect(parked.cards).toEqual([gmail, slack]);
-      expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "idle" });
+      expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "waiting-on-you" });
       composio.connect("gmail");
       const first = await f.api("GET", `/api/bots/${f.clive.id}/connector-cards/${gmail}/status?threadId=${job}`);
       expect(first.body).toMatchObject({ connected: true });
@@ -461,13 +461,13 @@ itHost("T7 queues a root on the computer seat at the wait ceiling and continues 
       try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
     }, Boolean);
 
-    const { bot: holder } = await apiOk("POST", "/api/bots", { name: "Seat Holder" });
+    const { bot: holder } = await apiOk("POST", "/api/bots", { name: "Seat Holder", settings: { approvalMode: "ask" } });
     const { task: held } = await apiOk("POST", `/api/bots/${holder.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${holder.id}/messages`, { text: "Hold the screen slowly.", threadId: held.threadId });
     await until(() => taskOf(holder.id, held.threadId), (task) => task?.busy === true);
-    // On Auto the person is asked once before each turn first uses their computer.
+    // Below Full access (these bots ask), the person is asked once before each turn first uses their computer.
     expect(await withAnswer(base, held.threadId, gate(await dumpFor(holder.id)))).toEqual({ held: false, helpOpen: false });
-    const { bot: waiter } = await apiOk("POST", "/api/bots", { name: "Seat Waiter" });
+    const { bot: waiter } = await apiOk("POST", "/api/bots", { name: "Seat Waiter", settings: { approvalMode: "ask" } });
     const { task: wait } = await apiOk("POST", `/api/bots/${waiter.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${waiter.id}/messages`, { text: "T7-JOB: use the screen too.", threadId: wait.threadId });
     await until(() => taskOf(waiter.id, wait.threadId), (task) => task?.busy === true);
@@ -481,7 +481,7 @@ itHost("T7 queues a root on the computer seat at the wait ceiling and continues 
     const parkedChip = chat.find((message) => chipText(message).includes("Parked — it continues automatically when the computer is free"));
     expect(parkedChip, JSON.stringify(chat.map(chipText))).toBeDefined();
     expect(chipText(parkedChip)).toContain("Seat Holder");
-    const { bot: second } = await apiOk("POST", "/api/bots", { name: "Seat Second" });
+    const { bot: second } = await apiOk("POST", "/api/bots", { name: "Seat Second", settings: { approvalMode: "ask" } });
     const { task: wait2 } = await apiOk("POST", `/api/bots/${second.id}/tasks`, {});
     await apiOk("POST", `/api/bots/${second.id}/messages`, { text: "T7-JOB-2: use the screen as well.", threadId: wait2.threadId });
     await until(() => taskOf(second.id, wait2.threadId), (task) => task?.busy === true);
@@ -635,7 +635,7 @@ it("T9 parks the root on a sign-in card and runs it again with the signed-in lin
   const parked = f.roots()[0];
   expect(parked).toMatchObject({ status: "needs_input", cards: [card.id], executions: 1, question: expect.stringContaining("sign in to example.com") });
   expect(card.signIn.resumed).toBeUndefined();
-  expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "idle" });
+  expect(await f.task(f.clive.id, job)).toMatchObject({ busy: false, activity: "waiting-on-you" });
   const done = await f.api("POST", `/api/bots/${f.clive.id}/sign-in-cards/${card.id}/done`, { threadId: job });
   expect(done.status, JSON.stringify(done.body)).toBe(200);
   expect(done.body).toEqual({ done: true, resumed: true });

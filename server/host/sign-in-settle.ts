@@ -1,7 +1,4 @@
-// How a sign-in card settles: Done or Cancel on the card, a saved login filling it, the person's own line in the
-// conversation, which answers every sign-in request still open there, an answer passed on by another bot, or the bot
-// carrying on with the site after asking, which shows the sign-in went through. Work handed on that waited on the card
-// carries on with the person's line; a person's own conversation goes on with the turn their line starts.
+import { userError } from "../user-errors.ts";
 import { savedLoginResumePrompt } from "../../shared/logins.ts";
 import { signInOutcome, signInResumePrompt, signInWaits } from "../../shared/sign-in-request.ts";
 import type { HandoffView } from "../coordinator.ts";
@@ -43,13 +40,13 @@ export function createSignInSettle(deps: SignInSettleDeps) {
   const settle = (botId: string, threadId: string, messageId: string, outcome: "done" | "cancelled", saved?: { site: string }): SignInSettled => {
     const bot = store.bot(botId);
     const message = deps.signInMessage(botId, threadId, messageId);
-    if (!bot || !message?.signIn) return { status: 404, body: { error: "no such sign-in request" } };
+    if (!bot || !message?.signIn) return { status: 404, body: { ...userError("serverError.signIn.requestMissing") } };
     const card = message.signIn;
-    if (card.superseded) return { status: 409, body: { error: "this sign-in request was superseded by a newer one" } };
-    if (card.answeredInChat) return { status: 409, body: { error: "this sign-in request was already answered in the chat" } };
+    if (card.superseded) return { status: 409, body: { ...userError("serverError.signIn.requestReplaced") } };
+    if (card.answeredInChat) return { status: 409, body: { ...userError("serverError.signIn.answeredInChat") } };
     const settled = signInOutcome(card);
     if (settled && settled !== outcome) {
-      return { status: 409, body: { error: `this sign-in request was already ${settled === "done" ? "marked done" : "cancelled"}` } };
+      return { status: 409, body: { ...userError(settled === "done" ? "serverError.signIn.alreadyDone" : "serverError.signIn.alreadyCancelled") } };
     }
     if (settled && card.resumed) return { status: 200, body: { [outcome]: true, resumed: true } };
     if (!settled) handPlaceBack(bot, threadId, message.id, card.place);

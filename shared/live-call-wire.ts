@@ -45,14 +45,23 @@ export interface LiveCallRecord {
   title?: string;
 }
 
+/** Who runs a Live call's GPT-Live session: OpenAI itself, or a GPT-Live deployment on the user's own Azure OpenAI / Foundry resource. */
+export type LiveProvider = "openai" | "azure";
+
 /** `live`: the key saved for Live calls only; `openai`: the OpenAI API key from Settings → API keys, used when there is no `live` key. */
 export type LiveKeySource = "live" | "openai";
 
 /** Non-secret Live settings, as GET /api/config and PATCH /api/live/settings report them. */
 export interface LiveSettings {
-  /** A Live call has a key to use (`keySource` says which); never the key itself. */
+  /** A Live call has everything it needs: a key (`keySource` says which; never the key itself) and, for Azure, a valid endpoint and deployment. */
   configured: boolean;
   keySource?: LiveKeySource;
+  /** Absent means "openai". With "azure" only the `live` key is used, never the OpenAI API key. */
+  provider?: LiveProvider;
+  /** The Azure resource endpoint as saved, e.g. `https://my-resource.openai.azure.com`. Not a secret. */
+  azureEndpoint?: string;
+  /** The Azure deployment of gpt-live-1; empty means "gpt-live-1". */
+  azureDeployment?: string;
   voice: string;
   readTypedReplies: boolean;
   idleMinutes: number;

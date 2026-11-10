@@ -230,9 +230,11 @@ describe("resolveTeammate", () => {
   });
 
   it("refuses a name two reachable teammates share instead of picking one", () => {
-    const twins = [...fleet, { id: "writer2", name: "quill", section: "Work" }];
+    const twins = [...fleet, { id: "writer2", name: "quill", title: "Analyst", section: "Work" }, { id: "writer3", name: "QUILL", chiefOfStaff: true, section: "Work" }];
     expect(resolveTeammate(twins, self, "Quill")).toEqual({
-      error: '2 reachable teammates are named "Quill" — call list_bots and use the id of the one you mean',
+      error: '3 teammates you can reach are named "Quill", so nothing was sent: '
+        + `${fleet.filter((bot) => bot.name === "Quill").map((bot) => `Quill${bot.title ? `, ${bot.title}` : ""} (id ${bot.id})`).join("; ")}; quill, Analyst (id writer2); QUILL, Chief of Staff (id writer3). `
+        + "Send it again with the id of the one you mean.",
     });
     expect(resolveTeammate(twins, self, "writer2")).toEqual({ id: "writer2", byName: false });
   });

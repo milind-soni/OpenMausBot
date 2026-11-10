@@ -15,6 +15,7 @@ import { linkUrl, runDeviceLink } from "./device-link.mjs";
 import { createComputerAsks } from "./computer-asks.mjs";
 import { LINK_ASLEEP, linkPath } from "./device-link-protocol.mjs";
 import { shareableDrive } from "./shared-drives.mjs";
+import nativeText from "./native-text.cjs";
 
 const uuid = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 const DATA_VOLUME = "/System/Volumes/Data";
@@ -205,7 +206,7 @@ const BROWSE_NOTE_MS = 10 * 60_000;
  * running commands once the person confirms it here. */
 export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, screenLocked = () => false, idleSeconds = () => null, protectedPaths = [], enabled = async () => false, home = os.homedir(), activityFile, cloud = () => null, onChange = () => {}, reconnect = null, now = Date.now, power = createCloudPowerGate(),
   linkHeaders = () => ({}), WebSocket: linkSocket = globalThis.WebSocket, egress = {}, chrome = {}, myCloud = () => null, ownClouds = () => [], screen = () => false, askForScreen = () => {}, cloudPower = () => null,
-  prompt = async () => null, startScreen = async () => null, confirmTerminal = async () => false, log = () => {} }) {
+  prompt = async () => null, startScreen = async () => null, confirmTerminal = async () => false, log = () => {}, t = nativeText.englishText.t }) {
   const protectedRoots = [path.dirname(file), ...protectedPaths.filter(entry => typeof entry === "string" && entry), ...personalSecretPaths(home)];
   const activity = createLendingActivity(activityFile ?? path.join(path.dirname(file), "lending-activity.jsonl"));
   const presence = createLentScreenPresence({ idleSeconds, now });
@@ -241,6 +242,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     return {
       lending: lent.map(env => env.id),
       clouds: (paused ? ownClouds() : lent).map(env => env.name),
+      // Lent, but the Cloud hasn't accepted this computer yet (or lost it): the menu must not say it can use it. A
+      // sleeping My Cloud still can; it wakes when a bot needs this computer.
+      waiting: lent.filter(env => !status.get(env.id)?.connected && status.get(env.id)?.problem !== "asleep").map(env => env.name),
       using: using.map(env => env.name),
       paused,
       terminal: terminalAccount !== null && terminalAccount === signedInAccount(),
@@ -362,7 +366,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   const cloudIdentity = async env => {
     const { auth, info, details, link, chrome: takesChrome, timeouts, long, edits } = await describe(env);
     const own = ownHomeId(env);
-    if (own !== null && (auth.own !== true || info.environmentId !== own)) throw Object.assign(new Error("This server is not your bots' home any more"), { problem: "not-cloud" });
+    if (own !== null && (auth.own !== true || info.environmentId !== own)) throw Object.assign(new Error(t("native.lend.homeChanged")), { problem: "not-cloud" });
     if ((own === null && auth.cloudHome !== true) || !Array.isArray(auth.scopes) || !auth.scopes.includes("admin")) throw Object.assign(new Error("This server is not My Cloud"), { problem: "not-cloud" });
     if (details) supportsDetails.add(env.id); else supportsDetails.delete(env.id);
     if (link) supportsLink.add(env.id); else supportsLink.delete(env.id);
@@ -501,8 +505,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
                   const connection = await cuaConnection();
                   jobSignal.throwIfAborted();
                   const mcp = sharedCuaConnection(connection);
-                  if (!mcp) { if (grant.cloud) try { askForScreen(connection); } catch {} throw new Error(cuaUnavailable(connection?.reason)); }
-                  live.cua = createSharedCua(mcp);
+                  if (!mcp) { if (grant.cloud) try { askForScreen(connection); } catch {} throw new Error(cuaUnavailable(connection?.reason, process.platform, t)); }
+                  live.cua = createSharedCua(mcp, { t });
                 }
                 return live.cua;
               });
@@ -561,10 +565,14 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     return { enabled: grant?.enabled === true, folders: Array.isArray(grant?.folders) ? grant.folders : [], terminal: grant?.terminal === true, computer: grant?.computer === true, ...status.get(id) };
   };
   // `resumes`: lending waits (for the Cloud sign-in, say) and resumes by itself, so the server keeps it as lent, not stopped.
+  /** Disconnects still waiting for their Cloud's answer. */
+  const goodbyes = new Set();
   const disconnect = (env, grant, resumes = false) => {
     stop(env.id);
     if (resumes && sleepsHere(env) && sleepGate(env).asleep()) return;
-    if (grant?.secret) void request(env, `/api/shared-computers/${grant.id}/disconnect`, resumes ? { paused: true } : {}, undefined, grant.secret).catch(() => {});
+    if (!grant?.secret) return;
+    const told = request(env, `/api/shared-computers/${grant.id}/disconnect`, resumes ? { paused: true } : {}, undefined, grant.secret).catch(() => {}).finally(() => { goodbyes.delete(told); });
+    goodbyes.add(told);
   };
   const cloudState = env => {
     const grant = env ? records[env.id] : undefined;
@@ -599,7 +607,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     const current = verifiedCloud(env);
     if (!current) throw Object.assign(new Error("Open My Cloud first."), { problem: "connect-first" });
     const folders = await validateSharedFolders(input?.folders, { homeEdits: true });
-    if (!folders.length && input?.screen !== true && input?.internet !== true && input?.chrome !== true && input?.terminal !== true) throw new Error("Choose at least one folder, apps and screen, the internet connection, your Chrome, or the terminal.");
+    if (!folders.length && input?.screen !== true && input?.internet !== true && input?.chrome !== true && input?.terminal !== true) throw new Error(t("native.lend.chooseCapability"));
     let info = { sessionId: null, environmentId: null };
     try { info = await cloudIdentity(env); } catch (error) { if (error.problem !== "connect-first") throw error; }
     if (grantVersions.get(env.id) !== version) return cloudState(env);
@@ -621,8 +629,11 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     run(env, grant);
     changed();
   };
+  /** Moves on each time an account is left: a pass that began before that lends nothing more. */
+  let accountTurn = 0;
   const automaticPass = async (projects, target) => {
     if (closed || paused || !ownClouds().some(verifiedCloud)) return;
+    const turn = accountTurn;
     const [[homeFolder = null], screenLent, projectFolders] = await Promise.all([
       lendable([{ id: randomUUID(), path: home, write: true, home: true }]),
       readScreen(),
@@ -630,11 +641,11 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     ]);
     for (const env of ownClouds()) {
       const kept = records[env.id], current = verifiedCloud(env);
-      if (closed || paused || !current) continue;
+      if (closed || paused || turn !== accountTurn || !current) continue;
       const keptFolders = kept?.cloud?.accountId === current.accountId && Array.isArray(kept.folders) ? await lendable(kept.folders) : [];
       const wanted = automaticGrant({ kept: keptFolders, home: homeFolder, screen: screenLent, projects: env.id === (target ?? myCloud())?.id ? projectFolders : [],
         terminal: terminalAccount === current.accountId });
-      if (closed || paused || records[env.id] !== kept) continue;
+      if (closed || paused || turn !== accountTurn || records[env.id] !== kept) continue;
       if (!lendsAsWanted(kept, wanted)) lendNow(env, current, kept, wanted);
       else if (!running.has(env.id) && validRecord(kept) && cloudLendingVerdict(kept.cloud, cloud(env), env).allow) run(env, kept);
     }
@@ -642,7 +653,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   /** This computer as the person's own Clouds hear it: paused, and why apps and screen or commands aren't lent. */
   const thisComputer = async () => {
     const status = await Promise.resolve().then(screen).then(value => value && typeof value === "object" ? value : null, () => null);
-    return { name: os.hostname().slice(0, 120) || "This computer", platform: LENT_PLATFORMS.has(process.platform) ? process.platform : null, paused,
+    return { name: os.hostname().slice(0, 120) || t("rail.thisComputer"), platform: LENT_PLATFORMS.has(process.platform) ? process.platform : null, paused,
       screen: { ready: status?.ready === true, reason: status && !status.ready ? status.reason ?? null : null }, terminal: terminalAccount !== null && terminalAccount === signedInAccount() };
   };
   /** Every Cloud of the person's own may use this computer again. */
@@ -768,11 +779,14 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
      * so the move tries again later. */
     async lendProjects(paths, place = null) {
       const env = place ?? myCloud();
-      if (paused || !env || !verifiedCloud(env)) throw new Error("Lending to your bots' home waits until it is signed in and not paused.");
+      if (paused || !env || !verifiedCloud(env)) throw new Error(t("native.lend.moveWaiting"));
       await lendAutomatically(Array.isArray(paths) ? paths.filter(where => typeof where === "string") : [], env);
-      if (records[env.id]?.enabled !== true) throw new Error("Lending to My Cloud did not start.");
+      if (records[env.id]?.enabled !== true) throw new Error(t("native.lend.moveNotStarted"));
     },
     paused: () => paused,
+    /** Lending's last requests have been answered or have timed out (10 s at most). Security: a Cloud re-issues its session
+     * cookie in the answer to any request that carried one, so that answer must land before the window's session is cleared. */
+    goodbyesDone: () => Promise.allSettled([...goodbyes, passing]),
     /** Every Cloud of the person's own stops using this computer, across restarts too, until resume(). */
     pause() {
       if (paused || closed) return;
@@ -791,7 +805,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     lendTerminal(on) {
       const account = on === true ? signedInAccount() : null;
       if (closed || terminalAccount === account) return;
-      if (on === true && !account) throw new Error("Sign in to the Cloud before lending it the terminal.");
+      if (on === true && !account) throw new Error(t("native.lend.terminalSignIn"));
       const before = terminalAccount;
       terminalAccount = account;
       try { store(records); } catch (error) { terminalAccount = before; throw error; }
@@ -821,6 +835,19 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       }
       changed();
       void lendAutomatically();
+    },
+    /** Another account takes over: this computer stops being lent to this one's Clouds, as when this app quits. Nothing is
+     * told to them (one asleep stays asleep) and what was lent is kept, so lending goes on if it comes back. */
+    leaveAccount(accountId) {
+      if (!accountId) return;
+      accountTurn++;
+      for (const [id, grant] of Object.entries(records)) {
+        if (grant?.cloud?.accountId !== accountId) continue;
+        stop(id);
+        const entry = asking.get(id);
+        if (entry) { entry.stop.abort(); asking.delete(id); }
+      }
+      changed();
     },
     cloudChanged() {
       if (closed) return;

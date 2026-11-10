@@ -130,6 +130,51 @@ describe("ACP decodeConfig", () => {
     });
     await instance.dispose();
   });
+  it("says its list is unconfirmed until the engine gives one, and shares a read already under way", async () => {
+    let answer!: (catalog: { default: string; options: Array<{ id: string; label: string }> }) => void;
+    let reads = 0;
+    const freshReads: boolean[] = [];
+    const support: AcpSupport = {
+      driverKind: "unconfirmed-test",
+      displayName: "Unconfirmed Test",
+      models: { default: "fixed", options: [{ id: "fixed", label: "Fixed" }] },
+      defaultCli: FAKE_CLI,
+      nativeSource: "unconfirmed-test.acp",
+      loginNote: "not authenticated",
+      spawnArgs: () => [],
+      pickAuthMethod: () => null,
+      authFailure: "continue",
+      isAuthenticated: () => true,
+      resolveModelsOnCreate: false,
+      resolveModels: (_env, _config, _id, fresh) => {
+        reads += 1;
+        freshReads.push(fresh === true);
+        return new Promise((resolve) => { answer = resolve; });
+      },
+    };
+    const driver = createAcpDriver(support);
+    const instance = await driver.create({
+      instanceId: `unconfirmed-${randomUUID()}`,
+      displayName: "Unconfirmed Test",
+      environment: {},
+      enabled: true,
+      config: driver.defaultConfig(),
+    });
+    try {
+      expect(instance.modelsUnconfirmed).toBe(true);
+      const first = instance.refreshModels!();
+      const second = instance.refreshModels!();
+      await vi.waitFor(() => expect(reads).toBe(1));
+      answer({ default: "account", options: [{ id: "account", label: "Account" }] });
+      await Promise.all([first, second]);
+      expect(reads).toBe(1);
+      expect(instance.models.default).toBe("account");
+      expect(instance.modelsUnconfirmed).toBe(false);
+      expect(freshReads).toEqual([true]);
+    } finally {
+      await instance.dispose();
+    }
+  });
   it("grok defaults to the grok binary", () => {
     expect(GrokAgentDriver.decodeConfig({})).toEqual({ cli: "grok", fullAuto: false, workspace: undefined });
   });
@@ -2031,6 +2076,15 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(true);
   });
 
+  it("an engine that aborts says so in plain words, with its last output masked", async () => {
+    await create(GrokAgentDriver, "abort-in-prompt");
+    await instance.adapter.sendTurn({ threadId: "t-abort", text: "go" });
+    const failed = await recorder.until((e) => e.type === "runtime.error") as { message: string };
+    expect(failed.message).toMatch(/ exited 134 before the prompt result: it stopped itself \(abort\)\. Last output: Open https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?«redacted \d+ chars» \| 2 third_party\/tcmalloc\/internal\/sysinfo\.h:76\] CHECK in NumCPUs: maybe_cpus\.has_value\(\) \(false\)$/u);
+    for (const secret of ["private-state", "private-code-value"]) expect(failed.message).not.toContain(secret);
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false });
+  });
+
   it("does not expire an agent while a person is answering an approval", async () => {
     process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
     await create(GrokAgentDriver, "permission");
@@ -2227,6 +2281,9 @@ describe("ACP turns (fake CLI)", () => {
     // The person reads the AI's name in plain words, never the internal id.
     expect(message).toBe("Grok finished without replying.");
     expect(message).not.toContain("grokAgent");
+    expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
+      text: { key: "chat.notice.acpEmpty", params: { provider: "Grok" } },
+    });
   });
 
   // omp 18.12's ACP mode sends a provider's refusal as the reply's text and ends the turn with end_turn.
@@ -2265,6 +2322,9 @@ describe("ACP turns (fake CLI)", () => {
       expect(error.limit).toBe("engine");
       expect(error.limitResetsAt).toBeGreaterThanOrEqual(before + 115_636_000);
       expect(error.limitResetsAt).toBeLessThanOrEqual(after + 115_636_000);
+      expect(error.text).toMatchObject({ key: "chat.notice.usageLimitResets", params: {
+        provider: "Grok", resetsAt: error.limitResetsAt, timeZone: expect.any(String),
+      } });
       expect(error.message).toMatch(/^This Grok account has reached its usage limit \(Grok says: "\[1310\]\[Weekly\/Monthly Limit Exhausted"\), which resets .+\. Until then, switch this bot to another AI\.$/);
       expect(error.message).not.toMatch(/rate_limit_error|retry-after-ms|request_id/);
       expect(classifyError({ text: error.message }).reason).toBe("quota");

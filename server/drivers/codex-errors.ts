@@ -2,6 +2,8 @@ import { cloudHomeConfigured } from "../cloud-home.ts";
 import { hostTimeZone } from "../turn-clock.ts";
 import { USAGE_LIMIT } from "./retry.ts";
 import { CODEX_USAGE_LIMIT_REACHED } from "../../shared/codex-usage-limit.ts";
+import type { ServerText } from "../../shared/server-text.ts";
+import { noticeFailure } from "../chat-notices.ts";
 
 /** How a Codex turn reaches OpenAI: OpenMausBot's ChatGPT plan, Codex's own sign-in, or any other provider. */
 export type CodexRoute = "plan" | "own" | "other";
@@ -60,7 +62,23 @@ export function codexLimitFacts(raw: string, route: CodexRoute, codexErrorInfo?:
   return { limit: /\busage limit for \S+?\.(?:\s|$)/i.test(raw) ? "model" : "engine", ...(at === undefined ? {} : { limitResetsAt: at }) };
 }
 
+// ChatGPT's words, reported 2026-11-03, for a model its /models lists but the plan can't use through Codex:
+// "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."
+const PLAN_MODEL_REFUSED = /model is not supported when using Codex with a ChatGPT account/i;
+
+/** A ChatGPT plan turn refused because the signed-in account can't use the selected model. */
+export function codexPlanModelRefused(value: string, route: CodexRoute): boolean {
+  return route === "plan" && PLAN_MODEL_REFUSED.test(value);
+}
+
+export function codexUserFailure(value: string, route: CodexRoute, codexErrorInfo?: unknown): { message: string; text?: ServerText } {
+  return codexPlanModelRefused(value, route)
+    ? noticeFailure("chat.notice.codexModelUnavailable")
+    : { message: codexUserError(value, route, codexErrorInfo) };
+}
+
 export function codexUserError(value: string, route: CodexRoute, codexErrorInfo?: unknown): string {
+  if (codexPlanModelRefused(value, route)) return noticeFailure("chat.notice.codexModelUnavailable").message;
   if (route === "plan" && value.includes("subscription_sharing_usage_limit_exceeded")) {
     return "subscription_sharing_usage_limit_exceeded: Your ChatGPT plan usage limit was reached. Manage usage in ChatGPT Settings, or explicitly choose another provider.";
   }

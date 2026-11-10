@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 // POST /api/bots/<bot>/secret-cards/<message>/provide with a phone's sealed envelope, .../save with {threadId, value}
 // for a custom secret typed in the app, and .../(provided|resume|dismiss) with {threadId}; and the agents tool's
 // /api/internal/request-credential. A value is never echoed back, logged or added to the card.
@@ -21,13 +22,17 @@ export interface SecretAnswerContext {
 }
 
 /** Stricter than an ordinary card: only the conversation's own person, never another member or an admin on their behalf. */
-export function secretAnswerRefusal(auth: RequestAuth, context: SecretAnswerContext): string | null {
-  if (auth.kind === "loopback") return auth.trust === "service" ? "A local service cannot enter a secret. Enter it in OpenMausBot." : null;
+function codedSecretAnswerRefusal(auth: RequestAuth, context: SecretAnswerContext): { error: string } | null {
+  if (auth.kind === "loopback") return auth.trust === "service" ? userError("serverError.secret.localService") : null;
   const admin = auth.scopes.includes("admin");
-  if (context.personalCloud) return admin ? null : "Only the owner of this Cloud can enter this secret.";
+  if (context.personalCloud) return admin ? null : userError("serverError.secret.cloudOwnerOnly");
   if (!context.shared) return null;
-  if (context.owner) return context.owner === context.person ? null : "Only the person this conversation belongs to can enter this secret.";
-  return admin ? null : "Only a workspace admin can enter this secret.";
+  if (context.owner) return context.owner === context.person ? null : userError("serverError.secret.conversationOwnerOnly");
+  return admin ? null : { error: "Only a workspace admin can enter this secret." };
+}
+
+export function secretAnswerRefusal(auth: RequestAuth, context: SecretAnswerContext): string | null {
+  return codedSecretAnswerRefusal(auth, context)?.error ?? null;
 }
 
 export interface SecretCardRouteDeps {
@@ -51,10 +56,12 @@ export function createSecretCardRoutes(deps: SecretCardRouteDeps): RouteHandler 
       const raw = await readBody(req, SECRET_VALUE_MAX_BYTES * 4);
       const fields = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
       const threadId = String(fields.threadId ?? "");
-      if (!deps.threadVisible(auth, threadId) || !secretMessage(m[1]!, threadId, m[2]!)) return json(res, 404, { error: "no such credential request" });
-      const refusal = secretAnswerRefusal(auth, deps.answerContext(auth, m[1]!, threadId));
-      if (refusal) return json(res, 403, { error: refusal });
-      const result = deps.cards.saveCustomSecret(m[1]!, threadId, m[2]!, fields.value);
+      if (!deps.threadVisible(auth, threadId) || !secretMessage(m[1]!, threadId, m[2]!)) return json(res, 404, { ...userError("serverError.secret.missing") });
+      const refusal = codedSecretAnswerRefusal(auth, deps.answerContext(auth, m[1]!, threadId));
+      if (refusal) return json(res, 403, refusal);
+      const result = secretMessage(m[1]!, threadId, m[2]!)?.secret?.delivery === "email"
+        ? await deps.cards.saveEmailSecret(m[1]!, threadId, m[2]!, fields)
+        : deps.cards.saveCustomSecret(m[1]!, threadId, m[2]!, fields.value);
       return json(res, result.status, result.body);
     }
     // An HPKE envelope bound to the paired device, bot, task, card and target; only the embedded Electron server holds the key to open it.
@@ -76,8 +83,8 @@ export function createSecretCardRoutes(deps: SecretCardRouteDeps): RouteHandler 
         return json(res, 400, { error: "The encrypted credential request is invalid" });
       }
       if (parsed.data.target === CUSTOM_SECRET_TARGET) {
-        const refusal = secretAnswerRefusal(auth, deps.answerContext(auth, m[1], parsed.data.threadId));
-        if (refusal) return json(res, 403, { error: refusal });
+        const refusal = codedSecretAnswerRefusal(auth, deps.answerContext(auth, m[1], parsed.data.threadId));
+        if (refusal) return json(res, 403, refusal);
       }
       const state = await provideSecretFromPhone({
         ...parsed.data,
@@ -94,47 +101,47 @@ export function createSecretCardRoutes(deps: SecretCardRouteDeps): RouteHandler 
       const body = await readBody(req);
       const threadId = String(body.threadId ?? "");
       const message = secretMessage(m[1], threadId, m[2]);
-      if (!message?.secret) return json(res, 404, { error: "no such credential request" });
+      if (!message?.secret) return json(res, 404, { ...userError("serverError.secret.missing") });
       if (phoneSecretSubmissions.has(
         phoneSecretSubmissionKey(threadId, message.id, message.secret.requestKey),
       )) {
-        return json(res, 409, { error: "this credential is currently being saved from a phone" });
+        return json(res, 409, { ...userError("serverError.secret.credentialSavingFromPhone") });
       }
       if (m[3] === "provided") {
-        if (message.secret.dismissed) return json(res, 409, { error: "this credential request was dismissed" });
-        if (message.secret.superseded) return json(res, 409, { error: "this credential request was superseded by a newer one" });
+        if (message.secret.dismissed) return json(res, 409, { ...userError("serverError.secret.credentialDismissed") });
+        if (message.secret.superseded) return json(res, 409, { ...userError("serverError.secret.credentialSuperseded") });
         if (!secretSaved(message.secret)) {
-          return json(res, 409, { error: `${message.secret.label} was not saved yet` });
+          return json(res, 409, { ...userError("serverError.secret.notSavedYet", { label: message.secret.label }) });
         }
         if (!resumeSecretCard(m[1], threadId, message.id, "provided")) {
-          return json(res, 409, { error: "this credential request is no longer available" });
+          return json(res, 409, { ...userError("serverError.secret.unavailableLower") });
         }
         const state = currentSecretState(m[1], threadId, message.id);
-        if (!state) return json(res, 409, { error: "this credential request is no longer available" });
+        if (!state) return json(res, 409, { ...userError("serverError.secret.unavailableLower") });
         return json(res, 200, state);
       }
       if (m[3] === "resume") {
-        if (message.secret.superseded) return json(res, 409, { error: "this credential request was superseded by a newer one" });
+        if (message.secret.superseded) return json(res, 409, { ...userError("serverError.secret.credentialSuperseded") });
         const outcome = credentialResumeOutcome(message.secret);
         if (!outcome) {
-          return json(res, 409, { error: "this credential request is not ready to resume" });
+          return json(res, 409, { ...userError("serverError.secret.notReadyToResume") });
         }
         if (outcome === "provided" && !secretSaved(message.secret)) {
-          return json(res, 409, { error: `${message.secret.label} is no longer configured` });
+          return json(res, 409, { ...userError("serverError.secret.noLongerConfigured", { label: message.secret.label }) });
         }
         if (!resumeSecretCard(m[1], threadId, message.id, outcome)) {
-          return json(res, 409, { error: "this credential request is no longer available" });
+          return json(res, 409, { ...userError("serverError.secret.unavailableLower") });
         }
         const state = currentSecretState(m[1], threadId, message.id);
-        if (!state) return json(res, 409, { error: "this credential request is no longer available" });
+        if (!state) return json(res, 409, { ...userError("serverError.secret.unavailableLower") });
         return json(res, 200, { resumed: state.resumed });
       }
-      if (message.secret.superseded) return json(res, 409, { error: "this credential request was superseded by a newer one" });
+      if (message.secret.superseded) return json(res, 409, { ...userError("serverError.secret.credentialSuperseded") });
       if (!message.secret.provided && !resumeSecretCard(m[1], threadId, message.id, "dismissed")) {
-        return json(res, 409, { error: "this credential request is no longer available" });
+        return json(res, 409, { ...userError("serverError.secret.unavailableLower") });
       }
       const state = currentSecretState(m[1], threadId, message.id);
-      if (!state) return json(res, 409, { error: "this credential request is no longer available" });
+      if (!state) return json(res, 409, { ...userError("serverError.secret.unavailableLower") });
       return json(res, 200, { dismissed: true, resumed: state.resumed });
     }
     return PASS;

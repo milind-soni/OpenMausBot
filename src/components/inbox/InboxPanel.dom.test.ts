@@ -153,28 +153,25 @@ describe("answer buttons in the asking bot's colour", () => {
 });
 
 describe("keeping the list live", () => {
-  function Loader({ version }: { version: string | null }) {
+  function Loader({ version }: { version: string }) {
     useInboxLoader(version);
     return null;
   }
 
-  it("reads the list again whenever the person's inbox task says it changed, and never off a team", async () => {
+  it("reads the list again whenever what it depends on changes", async () => {
     const task = (inboxChangedAt?: number, openAsks?: number) => [{ id: "bens-chief", tasks: [{ threadId: "inbox", inbox: true as const, ...(inboxChangedAt ? { inboxChangedAt } : {}), ...(openAsks ? { openAsks } : {}) }] }];
     expect(inboxVersion([{ id: "solo", tasks: [{ threadId: "t1" }] }]), "nothing is anyone's inbox off a team").toBeNull();
     const first = inboxVersion(task(5, 2));
     expect(inboxVersion(task(6, 2))).not.toBe(first);
     expect(inboxVersion(task(5, 1))).not.toBe(first);
-    await mount(createElement(Loader, { version: first }));
+    await mount(createElement(Loader, { version: first! }));
     await settle();
     const reads = () => server.calls.filter((call) => call.path === "/api/inbox").length;
     expect(reads()).toBe(1);
-    await mount(createElement(Loader, { version: first }));
+    await mount(createElement(Loader, { version: first! }));
     await settle();
     expect(reads(), "the same version reads nothing").toBe(1);
-    await mount(createElement(Loader, { version: inboxVersion(task(6, 1)) }));
-    await settle();
-    expect(reads()).toBe(2);
-    await mount(createElement(Loader, { version: null }));
+    await mount(createElement(Loader, { version: inboxVersion(task(6, 1))! }));
     await settle();
     expect(reads()).toBe(2);
   });

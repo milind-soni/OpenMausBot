@@ -173,6 +173,13 @@ describe("@Ben", () => {
     expect(f.continued, "nobody's turn carries on: a person asked").toEqual([]);
   });
 
+  it("takes no reply from a confined conversation to anybody's inbox, whoever it names", () => {
+    const f = fixture({ confined: ["scout-main"] });
+    const reply = f.store.appendMessage("scout-main", { role: "bot", kind: "text", text: "Done. @Ben please review.", turnId: "t1" });
+    f.store.patchMessage("scout-main", reply.id, { turnTerminal: true, turnSucceeded: true });
+    expect(f.notified).toEqual([]);
+  });
+
   it("reads a bot's settled reply once, and only where the person can see it", () => {
     const f = fixture();
     const reply = f.store.appendMessage("scout-main", { role: "bot", kind: "text", text: "Done. @Ben please review.", turnId: "t1" });

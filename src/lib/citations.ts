@@ -6,6 +6,8 @@ export const CITATION_MAX_COMMENT_LENGTH = 4_000;
 const CITATION_CONTEXT_LENGTH = 64;
 const CITATION_MARKER = "<!--omb-citation-v1:";
 const CITATION_MARKER_RE = /<!--omb-citation-v1:([A-Za-z0-9_-]{1,100000})-->/g;
+// No length cap here: a marker too long to decode must still never reach a report.
+const CITATION_MARKER_LINE_RE = /<!--omb-citation-v1:[A-Za-z0-9_-]+-->\n?/g;
 
 export type CitationSource = {
   ownerType: "bot" | "group";
@@ -136,6 +138,11 @@ export function splitTranscriptCitations(text: string): { display: string; citat
     citations.push(citation);
   }
   return { display: `${display}${text.slice(cursor)}`.trim(), citations };
+}
+
+/** The text with every encoded citation removed, valid or not; each readable fallback stays where it was. */
+export function withoutCitationMarkers(text: string): string {
+  return text.replace(CITATION_MARKER_LINE_RE, "");
 }
 
 export function citationPreviewText(text: string): string {

@@ -686,6 +686,19 @@ describe("waiting on a conversation's job", () => {
     await expect(handleToolCall("send_bot_message", { bot_id: "bot-1", text: "Go", send_id: "short" }, fetcher)).rejects.toThrow("send_id must be");
     expect(sent).toHaveLength(2);
   });
+
+  it("sends a channel message with the ids of the bots it means when two share a name", async () => {
+    const sent: unknown[] = [];
+    const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === "/api/bots?messages=0") return { bots: [], groups: [{ id: "channel-1", threadId: "room-1", tasks: [] }] };
+      sent.push(JSON.parse(String(init?.body)));
+      return { ok: true, threadId: "room-1", message: { id: "msg-1", at: 1, text: "@Quill go" } };
+    });
+    await handleToolCall("send_channel_message", { channel_id: "channel-1", text: "@Quill go", mentions: ["quill-chief"] }, fetcher);
+    expect(sent).toEqual([{ text: "@Quill go", threadId: "room-1", mentions: ["quill-chief"] }]);
+    await expect(handleToolCall("send_channel_message", { channel_id: "channel-1", text: "@Quill go", mentions: "quill-chief" }, fetcher))
+      .rejects.toThrow("arguments.mentions must be array");
+  });
 });
 
 describe("connection security and discovery", () => {

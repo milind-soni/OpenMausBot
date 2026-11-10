@@ -1,5 +1,8 @@
 // A pairing code lives in main-process memory for one navigation: never persisted, never sent to a renderer, only in a link's hash.
 import environments from "./environments.cjs";
+import nativeText from "./native-text.cjs";
+
+const { englishText } = nativeText;
 
 export { createCloudPowerGate, openSleepingCloud } from "./cloud-power.mjs";
 
@@ -68,15 +71,16 @@ export function parseCloudSummary(input) {
     ...(input.moves === true ? { moves: true } : {}), ...(hold ? { hold } : {}) };
 }
 
-const UNREACHABLE_TEXT = Object.freeze({
-  host: "The server My Cloud runs on is being restarted by our hosting provider. My Cloud and its files are safe, and it comes back on its own, usually within about 20 minutes.",
-  no_answer: "My Cloud hasn't answered for a few minutes. Nothing was lost, and we've been told.",
-});
-/** Why My Cloud can't be reached when the Admin says so, for main's dialogs; with `origin`, only for that server. */
-export function cloudUnreachableText(state, origin = null) {
+const UNREACHABLE_TEXT = Object.freeze({ host: "native.cloud.unreachable.host", no_answer: "native.cloud.unreachable.noAnswer" });
+/** Why My Cloud can't be reached when the Admin says so ("host" or "no_answer"); with `origin`, only for that server. */
+export function cloudUnreachableCause(state, origin = null) {
   const machine = state?.status === "connected" ? state.machine : null;
   if (!machine?.unreachable || (origin !== null && machine.origin !== origin)) return null;
-  return UNREACHABLE_TEXT[machine.unreachable.cause] ?? null;
+  return Object.hasOwn(UNREACHABLE_TEXT, machine.unreachable.cause) ? machine.unreachable.cause : null;
+}
+export function cloudUnreachableText(state, origin = null, t = englishText.t) {
+  const cause = cloudUnreachableCause(state, origin);
+  return cause ? t(UNREACHABLE_TEXT[cause]) : null;
 }
 
 const PURCHASE_STATES = Object.freeze(["confirming", "held"]);
@@ -152,7 +156,8 @@ function planAllowances(input) {
   if (!record(input) || !["cpus", "memoryMb", "diskGb", "maxDiskGb", "computers", "computerHours", "voiceCharacters"].every(key => count(input[key]))) return null;
   return { cpus: input.cpus, ...(["shared", "performance"].includes(input.cpuKind) ? { cpuKind: input.cpuKind } : {}), memoryMb: input.memoryMb, diskGb: input.diskGb, maxDiskGb: Math.max(input.maxDiskGb, input.diskGb),
     computers: input.computers, computerHours: input.computerHours, voiceCharacters: input.voiceCharacters, ...(input.sleeps === true ? { sleeps: true } : {}),
-    ...(count(input.swapMb) && input.swapMb > 0 ? { swapMb: input.swapMb } : {}), ...(days(input.snapshotDays, 365) ? { snapshotDays: input.snapshotDays } : {}) };
+    ...(count(input.swapMb) && input.swapMb > 0 ? { swapMb: input.swapMb } : {}), ...(days(input.snapshotDays, 365) ? { snapshotDays: input.snapshotDays } : {}),
+    ...(days(input.seats, 1_000) ? { seats: input.seats } : {}) };
 }
 /** Monthly price before tax in US cents; a plan without one is not sold here. */
 function offerPlan(input) {

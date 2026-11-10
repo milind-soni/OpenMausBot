@@ -26,6 +26,16 @@ export function deviceWord(platform: LentPlatform | null | undefined): "PC" | "M
   return platform === "win32" ? "PC" : platform === "darwin" ? "Mac" : "computer";
 }
 
+/** Their computer as they know it: "their PC (MILIND-PC)" on Windows, "their Mac (…)" only on a Mac, else "their own computer". */
+export function theirComputer(lent: ReadonlyArray<{ name: string; platform: LentPlatform | null }>): { theirs: string; device: "PC" | "Mac" | "computer" } {
+  const latest = lent[0];
+  if (!latest) return { theirs: "their own computer", device: "computer" };
+  const device = deviceWord(latest.platform);
+  // eslint-disable-next-line no-control-regex
+  const name = latest.name.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ").slice(0, 80);
+  return { theirs: `their ${device} (${name})`, device };
+}
+
 export class LentComputers {
   private readonly file: string;
   private readonly now: () => number;

@@ -204,6 +204,33 @@ describe("rpc", () => {
     expect(await rpc("m1", "tools/call", { name: "wipe_board", arguments: {} })).toMatchObject({ status: 200 });
   }, 30_000);
 
+  it("keeps a change the card made itself on its row, so a reopened conversation shows it done (#4532)", async () => {
+    const { record, rpc, row } = setup({ approval: "full" });
+    await record();
+    // looking and the app's own plumbing are not changes
+    await rpc("m1", "tools/call", { name: "show_board", arguments: { cards: 5 } });
+    await rpc("m1", "tools/call", { name: "save_board", arguments: { state: "s" } });
+    expect(row("m1").app.done).toBeUndefined();
+    expect(await rpc("m1", "tools/call", { name: "paint_board", arguments: { color: "blue" } })).toMatchObject({ status: 200 });
+    expect(row("m1").app.done).toEqual({ tool: "Paint board", text: "Painted blue", at: expect.any(Number) });
+    // the row keeps everything else it had
+    expect(row("m1").app).toMatchObject({ source: "mcp", mcp: { server: "board", tool: "show_board" } });
+  }, 30_000);
+
+  it("keeps no secret from the result in the note", async () => {
+    const { record, rpc, row } = setup({ approval: "full" });
+    await record();
+    await rpc("m1", "tools/call", { name: "paint_board", arguments: { color: "ghp_abcdefghijklmnopqrstuvwxyz0123456789" } });
+    expect(JSON.stringify(row("m1").app.done)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+  }, 30_000);
+
+  it("records nothing when the change is declined", async () => {
+    const { record, rpc, row } = setup();
+    await record();
+    expect(await rpc("m1", "tools/call", { name: "paint_board", arguments: { color: "red" } })).toMatchObject({ status: 403 });
+    expect(row("m1").app.done).toBeUndefined();
+  }, 30_000);
+
   it("refuses a tool the server lacks, one its view may not call, one outside the selection, and bad arguments", async () => {
     const { record, rpc } = setup({ scope: { allow: ["mcp:board:show_board", "mcp:board:peek_board"] } });
     await record();

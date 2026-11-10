@@ -5,7 +5,8 @@
 // Replying to a line answers it: the answer goes back to the bot that asked, which carries on, or to the teammate's own
 // inbox. A question that a fact the person shares with the team answers, their assistant may answer (representative.ts).
 // Security: a line carries only what was addressed to the person, and links its conversation only when they may read
-// it. The state is ids, names and short excerpts, in person-inbox.json. Off a team nothing here exists.
+// it. The state is ids, names and short excerpts, in person-inbox.json. Off a team nothing here exists: place-inbox.ts is
+// the inbox there.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -89,6 +90,8 @@ export interface Delivery {
 }
 
 export interface PersonInboxDeps {
+  /** Security invariant: an inbox is a person's own chat with their Chief at its own level, so what a confined conversation says never lands there. */
+  confined?(threadId: string): boolean;
   team: CloudTeam | null;
   dataDir: string;
   store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "createTask" | "patchTask" | "patchGroup" | "appendMessage" | "patchMessage" | "messagesFor" | "groupByThread" | "onChange">;
@@ -377,6 +380,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     if (!team || notification.forPerson || (!ASK_NOTIFICATIONS.has(notification.kind) && !result)) return notification;
     const person = deps.askedPerson(notification.botId, notification.threadId);
     if (!person || personOf(notification.threadId)) return notification;
+    if (deps.confined?.(notification.threadId)) return { ...notification, forPerson: person };
     const own = audienceMember(deps.audienceOf(notification.threadId)) === person;
     if (own && !how.routine && !deps.handedFrom?.(notification.threadId)) return notification;
     const card = notification.kind === "approval" || notification.kind === "question" ? openCard(notification.botId, notification.threadId) : undefined;

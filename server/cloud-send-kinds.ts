@@ -35,7 +35,7 @@ import { restorePaths, validRelative } from "./workspace-backup-paths.ts";
 const SHARED_ROOT = "/omb-data";
 const FINISHED = new Set(["completed", "failed", "cancelled", "missed"]);
 const KIND_BODY_MAX = 8 * 1024 * 1024;
-const ROUTINE_FIELDS = ["name", "prompt", "target", "botId", "groupId", "runOn", "schedule", "durationMinutes", "timeoutMinutes", "attachments", "continuity",
+const ROUTINE_FIELDS = ["name", "prompt", "target", "botId", "groupId", "runOn", "schedule", "durationMinutes", "timeoutMinutes", "attachments", "continuity", "modelSelection",
   "overlap", "runOnStartup", "sourceThreadId", "resultsThreadId", "createdAt", "checks", "access", "deliver"] as const;
 const CALL_FIELDS = ["name", "description", "botIds", "schedule", "durationMinutes", "attachments", "roomId", "createdAt"] as const;
 const WEBHOOK_FIELDS = ["name", "prompt", "botId", "runOn", "delivery", "groupId", "eventTypes", "maxPendingRuns", "resultsThreadId", "createdAt"] as const;
@@ -50,7 +50,7 @@ export interface MoveKindsDeps {
   routines(): Pick<RoutineManager, "listRoutines" | "listRuns" | "adopt"> | null;
   calls(): Pick<CalendarCallManager, "list" | "adopt"> | null;
   webhooks(): Pick<WebhookManager, "list" | "adopt"> | null;
-  appEvents(): Pick<AppTriggerManager, "list" | "adopt" | "remove"> | null;
+  appEvents(): Pick<AppTriggerManager, "list" | "adopt" | "remove" | "service"> | null;
   /** The person's Claude Code skills while this server uses them where they are; a move keeps them as imported skills. */
   claudeCodeSkills(): ImportedSkillInput[];
   instanceExists(id: string): boolean;
@@ -225,11 +225,13 @@ export function kindRecord(deps: MoveKindsDeps, kind: Kind, id: string): { recor
   return skill ? { record: skill } : null;
 }
 
+/** `final`: sending it again cannot help until the person changes something, so the move goes on without it. */
 class Refused extends Error {
   status: number;
-  constructor(status: number, message: string) { super(message); this.status = status; }
+  final: boolean;
+  constructor(status: number, message: string, final = false) { super(message); this.status = status; this.final = final; }
 }
-const refuse = (status: number, message: string): never => { throw new Refused(status, message); };
+const refuse = (status: number, message: string, final = false): never => { throw new Refused(status, message, final); };
 
 const routineSchema = z.object({ id: z.string().regex(/^[\w-]{1,128}$/u), name: z.string().max(200), prompt: z.string().max(100_000), target: z.enum(["bot", "room-goal"]),
   botId: z.string().min(1).max(128), groupId: z.string().max(128).optional(), runOn: z.enum(["maus", "cloud"]), schedule: z.record(z.string(), z.unknown()),
@@ -343,6 +345,10 @@ async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, 
   }
   if (kind === "app-event") {
     const triggers = deps.appEvents() ?? refuse(503, "My Cloud's app events are not ready yet.");
+    const service = triggers.service();
+    if (!service.available) refuse(409, service.reason === "self-hosted"
+      ? "This app automation stays on the computer it came from: My Cloud uses its own Composio key, so it cannot watch apps. Use a schedule or a webhook here instead."
+      : "This app automation stays on the computer it came from: connected apps are not set up on My Cloud. Set them up here, then make it again.", true);
     await triggers.adopt({ ...rebased(raw as unknown as AppTrigger, from, deps.dataDir), id });
     return;
   }
@@ -403,7 +409,7 @@ export async function moveKindsRoute(deps: MoveKindsDeps, { req, res, path, meth
     json(res, 405, { error: "method not allowed" });
   } catch (error) {
     const status = error instanceof Refused ? error.status : Number.isInteger((error as { status?: unknown }).status) ? (error as { status: number }).status : 500;
-    json(res, status, { error: (error as Error).message?.slice(0, 300) || "It could not be moved." });
+    json(res, status, { error: (error as Error).message?.slice(0, 300) || "It could not be moved.", ...(error instanceof Refused && error.final ? { final: true } : {}) });
   }
   return true;
 }

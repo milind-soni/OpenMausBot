@@ -10,13 +10,18 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **Signing in.** Each person pairs from the app with a link the Admin signs for them; the machine shows the team's name
   wherever a server names itself. Owners and Admins get everything an admin session can do (Super admin and Admin in the
   app); a Member (User) uses each bot as far as it is shared with them (below, "Who can use a bot"), uses rooms and
-  makes routines, and connects no app and makes no webhook.
+  makes routines, and connects no app and makes no webhook. Owners and Admins also get **Invite someone** under People in
+  the sidebar, in Simple too and when they are alone on the team: it opens the team's People page on the Cloud in their
+  browser, where they sign in if that browser hasn't yet.
+  With Azure OpenAI chosen for Live calls, only an Owner or
+  Admin can start one: a Member is told so in plain words and never gets a call through another provider
+  (`docs/verification/live-calls.md`).
 - **Conversations.** A bot's main chat is the team's: everyone who sees the bot reads and writes it. Teammates are
   in the @ list too, and whatever is addressed to one of them reaches their inbox (below, "One inbox per person"). "New conversation"
   is yours alone: no other Member and no Admin, the Super admin included, sees it, writes in it or learns of it, in
   lists, counts, unread marks, searches, files, notifications, streams, a bot's tools or another bot. A group chat is
   seen by whoever sees it, and its unread mark is each person's own: a bot's reply there is unread for everyone until
-  they read it, and one person reading it clears it for nobody else (`room-reads.json`). Every private chat says so in its header, *"Private · only you"*, and the first one on a
+  they read it, and one person reading it clears it for nobody else (`room-reads.json`). A bot's shared chats say who can read them, *"Shared · everyone in Acme can see"* or, on a bot set to Only people added (`onlyPeopleAdded` on everyone's copy of it), *"Shared · only people added and admins can see"*. Every private chat says so in its header, *"Private · only you"*, and the first one on a
   device also says it as a sentence: *"Your chats in Acme are private. Only you can see them: not other members, not
   Acme's admins."* The server marks such a conversation `private: true` on the wire (`WireTask.private`). When you leave
   the team (or are removed), your private chats and everything only yours there are deleted, never handed to an admin
@@ -81,14 +86,29 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **Never asleep, kept across restarts.** A Team Cloud refuses the Admin's sleep request (`busy: ["team"]`) and keeps
   every member's session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
 
+
+### Off a team
+
+Everyone has an Inbox: on a personal Cloud and in the desktop app with no account, the same row at the top of the sidebar
+opens the same panel. Each place keeps its own, where its bots live, and nothing syncs; the rail's "{name}: needs you"
+says which place to open. There is one person, so nothing is routed and nobody's assistant answers. An approval or a
+question is the open card itself, listed from where it was asked, so one answer settles it however many surfaces show it
+and whatever was waiting before an upgrade is listed. `message_person` leaves out `to`: it posts one line in its
+conversation and sends one notification, and a reply is an ordinary line there. A routine's report and a failure of work
+nobody watches each get a line, in `place-inbox.json`. A guest's conversation left on a Cloud reaches its owner labelled
+with who asked, and its news stays out of the owner's list. See [Verifying the Inbox](verification/inbox.md).
+
 ## Rules
 
 The team's rules live on the Admin (openmaus-cloud `docs/team-cloud.md` "Rules"): one document, `{ schema: 1, limits }`, that
 only restricts. `server/cloud-team-policy.ts` fetches it at boot, every 5 minutes and when the Admin's signed `POST
 /api/cloud/team/policy-changed` nudges it, signed with the bootstrap secret (`POST /api/cloud/machines/team-policy`), and each
-request reports the fingerprint in force here. A change applies without a restart, to the next thing each bot does: a turn
-already running finishes with what it had (its engine process and the servers mounted when it began), and every turn that
-starts after the change, a hand-off's included, gets the new rules.
+request reports the fingerprint in force here. A change applies without a restart. A turn already running keeps its engine
+process and the servers it mounted when it began, HighLevel included, and finishes with them. What it reaches for through this
+machine is refused from that moment, mid-turn too: a connected-apps tool (the turn carries on without it) and the first claim on
+a computer (the turn stops there, in the rule's words; a computer it already holds stays with it until it ends). Every turn that
+starts after the change, a hand-off's included, gets the new rules, even in a chat whose engine process is still warm: that
+process restarts without what is now blocked.
 
 - **One enforcement.** The document is projected into the one policy object (`server/managed-policy.ts`) every refusal site
   and every "Managed by" screen already reads. Nothing restricted: no object at all, as on a team with no rules. Admins are not exempt.
@@ -125,6 +145,16 @@ owner" card rule (whoever started a conversation, or an Admin, answers its cards
 `OMB_CLOUD_TEAM_LANGUAGE` (optional, one of the app's locales: `de`, `pt-br`…) is the team's default language, set on
 the Admin's Team admin → Settings. It is this server's language while its own settings set none (the app's words and the
 language new bots start in); a value that isn't a locale is ignored, never refused.
+
+## Work from outside stays with that work
+
+What came in from outside (a webhook, an app's event) is confined, and the conversation it reached stays that way for good: a run or a hand-off ends, its words stay in the thread. The record is on the conversation (`outside`, `server/host/outside-lineage.ts`), and every turn is judged from it, at any level and after a restart.
+
+- **What it starts stays outside.** A thread it hands work to, a one-way notice still queued when the run ends, a retry, a wake and a routine it makes or changes all run confined. A routine it made runs without full access until someone opens it and saves it once. An event's own results chat counts too.
+- **It reaches nothing else.** A confined turn can't open a thread, hand work to, post to or retry into a conversation or room that isn't already outside, can't answer a question in a person's work or be folded into a turn running there, and can't change, start, pause, resume or delete a person's routine. A skill its words name stays plain text, and a page it shows keeps its frame. It hears why in plain words and finishes where it is. Of the server's own routes it reaches only those `server/host/outside-fence.ts` lists; anything else is refused, whether or not its engine pre-allows the tool.
+- **What it writes for later turns waits on a card.** A room's bulletin and a bot's memory load into later turns as instructions, so an admin sees a card and nothing is saved until they say yes (`server/host/outside-writes.ts`). A memory log line and a preference are refused, and nothing such a conversation says reaches memory or the daily log on its own.
+- **Its problems reach a person.** A confined run that fails or needs someone notifies a person; it starts no turn on a Chief at the Chief's own level. None of what it says lands in a person's inbox thread, by naming them or as a copy of its question or report: the person gets the notification and opens the conversation.
+- **A person's own line there runs confined too.** The engine reads the outside words as context, whoever typed last, so the bot works without its shell and says so once. A new conversation with the same bot runs at the bot's own level; it doesn't read that conversation on its own (recall and the recent-work brief leave it out), and a person can paste what they want into it.
 
 ## Team admin: the Admin's signed read
 
@@ -347,6 +377,12 @@ On a My Cloud and on a desktop there is one person: every audience is the team's
 every browser keeps its old name and Chrome its old launcher, every engine keeps the server's HOME, and nothing here
 changes what those do.
 
+## The shared chat's name
+
+A team bot's main chat is called *"Shared chat"* on every person's copy (`WireTask.sharedChat`), whatever its stored title,
+so nobody takes it for one of their own, and it can't be renamed. A member's own MausBot has none. Clicking a bot still
+opens the person's own private chat.
+
 ## Who looks after a bot
 
 Every team bot is **looked after by** one member, its owner in the data: `reportsTo` (an email) names them; without it
@@ -396,6 +432,18 @@ or posts in one.
 
 On a My Cloud and on a desktop no bot has an owner: nothing is routed, and one Chief per department holds as before.
 Every bot still reaches every bot there.
+
+## Bringing a bot in from My Cloud
+
+Someone with a My Cloud moves a bot into a team from two places: **Move to Acme** in the bot's menu on My Cloud, and on the
+team's own page in the desktop app, **Bring your stuff**, which lists My Cloud's bots with one **Move** each. Both say the
+same before anything moves: who can use it there, what goes (instructions, skills, files, routines, their chats), what
+stays on My Cloud (what the bot remembers, their connections, MausBot), and that there is no way back.
+
+A team's server isn't the person's own, so its page gets less than My Cloud's does (`electron/team-move-main.mjs`). It reads
+only the names of My Cloud's bots and which can go, and only while it is the window's active page and the Admin's verified
+session says the person is in that team. It names a bot by id, and main reads the name from My Cloud. The confirm is main's
+own window, in English, because a page could soften or skip one of its own.
 
 ## Who can use a bot
 
@@ -458,6 +506,16 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   Not now changes nothing and tells nobody; they can ask again. The card is a set-answer question card
   (`card.accessRequest`), shown in each person's language, and its answer is always its own option.
 
+## A team with no AI
+
+Until someone connects an AI, a bot has nothing to answer with. A Send from a User comes back as `409` with `code: "no_ai"`:
+*"Olive needs to connect an AI before bots can answer. I've told them."*, and the app keeps their message in the box for
+them to send again. The owner gets one line in their inbox, naming who tried and never their words, at most once a day
+for each person (`server/host/no-ai-notice.ts`). The machine learns who the owner is only when they first open the team, so
+until then the User reads that the owner will be told, and the line goes when the owner first opens it
+(`no-ai-notices.json`). An Admin reads *"Connect an AI first, so bots can answer."* and nobody is told; a run nobody
+started by hand reads *"No AI is connected yet, so nothing can run."*
+
 ## One inbox per person
 
 Everything addressed to a person reaches one place, their **inbox** (`server/host/person-inbox.ts`): their own private
@@ -480,6 +538,7 @@ inbox is unread.
 | @Ben in a bot's settled reply, where Ben can see it | the same | that bot, in that conversation |
 | a question or approval routed to Ben (`ask-routing.ts`), from a shared chat, a room, a routine or work handed on | a copy of the card, `"ask"` | the card where it was asked: the copy's buttons answer it there (`answeredIn`) and the copy follows it |
 | a routine's report or a failure routed to Ben | the report, `"result"` / `"notice"` | nothing |
+| a routine Ben wrote that tried to hand work to a bot it may not reach | what was refused, `"notice"` | nothing |
 
 An ask in the person's own private chat, where they are, stays only there. The Admins' asks (a bot nobody owns) are not
 anyone's inbox. A member without any bot of their own gets the notification where it was written, as before.

@@ -1,13 +1,15 @@
 /** What this computer's screen says while the window can't show the place. `reason`: the Admin's words on why My Cloud
- * doesn't answer; `machine`: a plan problem's state; `other`: another MausBot Cloud account is signed in; `name`: the
- * team whose Cloud is being opened (absent for My Cloud). */
+ * doesn't answer, in English; `cause`: the same as a code the page says in its own language; `machine`: a plan
+ * problem's state; `other`: another MausBot Cloud account is signed in; `name`: the team whose Cloud is being opened
+ * (absent for My Cloud). */
 export type HomeView = { name?: string } & (
   | { screen: "opening" | "waking" | "moving" }
   /** The Admin is setting it up (or a brand-new one's name isn't found yet, at `checking`): the step it reports. */
   | { screen: "setup"; step?: import("./cloud-home.mjs").CloudSetupStep; slow?: true }
-  | { screen: "offline"; reason?: string }
+  | { screen: "offline"; reason?: string; cause?: "host" | "no_answer" }
   | { screen: "signin"; other?: true }
-  | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed" }
+  /** `member`: a team's User, who can't subscribe or pay for it and is sent to its owner. */
+  | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed"; member?: true }
   /** A Cloud the session's list says isn't running, so nothing looks up its address: it has ended (`deleteAt`: when its kept
    * files are deleted), its checkout wasn't finished, or its payment has a problem; `removable` while its owner may take it
    * off their list. */
@@ -30,7 +32,10 @@ export interface HomeBridge {
   updating?: boolean;
 }
 
-export type Home = { kind: "computer" } | { kind: "cloud"; origin: string } | { kind: "signin"; other?: true };
+export type Home = ({ kind: "computer" } | { kind: "cloud"; origin: string } | { kind: "signin"; other?: true })
+  /** This computer's copy is frozen by a move to a server of the person's own, whose marker names it: that server, and
+   * its name. The copy's own page has nothing to show, so the window goes back to it (`reopen`). */
+  & { frozenPlace?: { origin: string | null; place: string } };
 /** A place the window shows: My Cloud, or a team's Cloud or another Cloud of the person's own (`own`), from the verified session. */
 export type HomePlace = { kind: "cloud"; origin: string } | { kind: "team" | "own"; id: string; name: string; role: string | null; origin: string };
 /** What to open: My Cloud, a team's Cloud, another Cloud of the person's own, or (null) the place remembered from last time. */
@@ -57,10 +62,11 @@ export declare const NAME_WAIT_MS: number;
 export declare const NAME_RETRY_MS: readonly number[];
 export function nameNotFound(code: number): boolean;
 export function createReadyClock(input?: { store?: { read(): unknown; write(value: unknown): void } | null; now?(): number }): { seen(state: unknown): void; fresh(origin: string | null): boolean };
-export function splashText(status: "opening" | "waking", name?: string | null): string;
+export function splashText(status: "opening" | "waking", name?: string | null, t?: (key: string, params?: Record<string, string | number>) => string): string;
 export function placeOf(input: { ask?: HomeAsk; remembered?: RememberedPlace; state?: any }): { kind: "cloud"; left?: string | null } | { kind: "team" | "own"; id: string; name: string; role: string | null; origin: string | null; machine: any };
 
 export function homeOf(input: { journal?: any; frozenCloud?: string | true | null; state?: any }): Home;
+export function noWayHome(worked: Home, state?: any): boolean;
 export function routeOf(url: string, origin: string): string | null;
 
 interface WindowLike { isDestroyed(): boolean; webContents: { id: number; getURL(): string; reload(): void; mainFrame?: unknown } }
@@ -68,6 +74,7 @@ type Timers = { set(work: () => void, ms: number): unknown; clear(timer: unknown
 
 export interface HomeWindow {
   show(options?: { open?: "phone" | null; place?: HomeAsk }): Promise<unknown>;
+  cancel(): void;
   openCloud(open?: "phone" | null): Promise<unknown>;
   /** Remove from list from this computer's screen: the Cloud it shows leaves the person's list. */
   remove(): Promise<import("./cloud-account.mjs").CloudRemoveOutcome>;
@@ -97,7 +104,7 @@ export interface HomeWindow {
 
 export function createHomeWindow(deps: {
   journal(): unknown;
-  frozen(): Promise<{ frozen: boolean; cloud?: string } | null>;
+  frozen(): Promise<{ frozen: boolean; cloud?: string; place?: string } | null>;
   account(): { state(): any; power(): any; wakeHome(): Promise<unknown>; setWaking(on: boolean): void; pairHome(cloudId?: string | null): Promise<{ origin: string; code: string; expiresAt: number }>;
     pairTeam?(teamId: string): Promise<{ origin: string; code: string; expiresAt: number }>; signInAgain(): Promise<unknown>; begin(): Promise<unknown>; signOut?(): Promise<unknown>; reopen?(): Promise<unknown>;
     hideCloud?(cloudId: string): Promise<{ outcome: import("./cloud-account.mjs").CloudRemoveOutcome }> } | null;
@@ -108,7 +115,9 @@ export function createHomeWindow(deps: {
   cookieFetch: (url: string, init?: RequestInit) => Promise<Response>;
   power: { asleep(): boolean; hold(): void; woke(): void };
   go(url: string, origin: string | null, place: HomePlace | null): unknown;
+  reopen?(place: { origin: string | null; place: string }, still?: () => boolean): Promise<boolean>;
   showLocal(leaving: boolean): unknown;
+  clean?: import("./clean-workspace.mjs").CleanWorkspace | null;
   remembered?(): RememberedPlace;
   remember?(place: { team: string } | { cloud: string } | null): void;
   left?(name: string): void;
@@ -125,6 +134,7 @@ export function createHomeWindow(deps: {
   hosts?(): { clearHostResolverCache(): Promise<void>; resolveHost(host: string, options?: { cacheUsage?: "allowed" | "staleAllowed" | "disallowed" }): Promise<{ endpoints: unknown[] }> } | null;
   readyStore?: { read(): unknown; write(value: unknown): void } | null;
   log?(line: string): void;
+  t?(key: string, params?: Record<string, string | number>): string;
 }): HomeWindow;
 
 export function installHomeWindowIpc(deps: {

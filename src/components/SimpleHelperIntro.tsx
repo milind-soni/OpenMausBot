@@ -5,6 +5,7 @@ import { introChips, introStaged, stageIntro, useWelcomingBot } from "@/lib/defa
 import { activeLocale, t } from "@/lib/i18n";
 import { detectSetupWithin, localSetupImport, setupImportApi } from "@/lib/setup-import";
 import { api, useStore, type Bot, type InstanceInfo, type Message } from "@/state/store";
+import { useTeamPeople, type TeamPeople } from "@/state/team-people";
 import { freeFallback } from "../../shared/ai-ranking";
 import { greetingName } from "../../shared/greeting-name";
 import { followupText, type HelperFollowupFacts } from "../../shared/helper-followup";
@@ -37,6 +38,11 @@ export function introLines(input: { name: string; chief: boolean; person?: strin
 /** The follow-up in the viewer's language. */
 export function followupLine(facts: HelperFollowupFacts): string {
   return followupText(facts, (key, params) => t(key, params), (items) => new Intl.ListFormat(activeLocale(), { style: "long", type: "conjunction" }).format(items));
+}
+
+/** Who a User reads connects the AI, once the team's people are known; nothing for someone who can connect one themselves. */
+export function whoConnectsAi(team: Pick<TeamPeople, "people" | "admin"> | null): string | undefined {
+  return team && !team.admin ? team.people.find((person) => person.role === "owner")?.name ?? "" : undefined;
 }
 
 function thinksWith(bot: Bot | undefined, instances: readonly InstanceInfo[]): HelperFollowupFacts["ai"] {
@@ -119,6 +125,7 @@ export function SimpleHelperIntro({ botId, threadId, message, answered, followup
   const lines = introLines({ name: bot?.name ?? "MausBot", chief: Boolean(bot?.chiefOfStaff), person, team });
   const look = useLookAround(!answered);
   const ai = thinksWith(bot, state.instances);
+  const connects = whoConnectsAi(useTeamPeople());
 
   // A first run's intro plays once: it asks for the follow-up, which then stays in the conversation.
   const [first, setFirst] = useState(false);
@@ -144,7 +151,8 @@ export function SimpleHelperIntro({ botId, threadId, message, answered, followup
   const local: HelperFollowupFacts | null = look.settled && (unsaved || !(first || due))
     ? { ai, apps: look.apps ?? [], bots: state.bots.filter((candidate) => !candidate.hidden && !candidate.defaultBot).length, routines: 0 }
     : null;
-  const facts = followup?.helperFollowup ?? posted ?? local;
+  const said = followup?.helperFollowup ?? posted ?? local;
+  const facts = said && connects !== undefined ? { connects, ...said } : said;
   const { shown, staged } = useArrival(first || due, ai !== "none", facts !== null);
   if (hidden) return null;
 

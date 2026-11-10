@@ -22,15 +22,18 @@ const KEY_PREFIXES: RegExp[] = [
   /\bcsk-[A-Za-z0-9]{32,}/g, // cerebras
   /\bLLM\|\d{6,}\|[A-Za-z0-9_-]{16,}/g, // meta model api
   /\bhf_[A-Za-z0-9]{30,}/g, // hugging face
+  /\bpypi-AgE[A-Za-z0-9_-]{82,}/g, // pypi and testpypi api tokens (macaroons)
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g, // github classic
   /\bgithub_pat_[A-Za-z0-9_]{20,}/g, // github fine-grained
   /\bgl(?:pat|dt|rtr?)-[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]+)*/g, // gitlab personal, deploy and runner tokens (routable ones carry .-parts)
   /\bxox[abposr]-[A-Za-z0-9-]{20,}/g, // slack
   /\bxapp-\d-[A-Za-z0-9-]{20,}/g, // slack app-level (socket mode) tokens
-  /\bAKIA[0-9A-Z]{16}\b/g, // aws access key id
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, // aws access key id, long-term (AKIA) or temporary STS (ASIA)
   /\bAIza[0-9A-Za-z_-]{30,}/g, // google api key
   /\bnpm_[A-Za-z0-9]{20,}/g, // npm
   /\bwhsec_[A-Za-z0-9_-]{20,}/g, // webhook secrets, alone or in an automation's address
+  /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g, // sendgrid api keys
+  /\bbak_[A-Za-z0-9_-]{20,}/g, // Bot API keys
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, // jwt
 ];
 const KEY_PREFIX_TESTS = KEY_PREFIXES.map((re) => new RegExp(re.source));
@@ -100,3 +103,7 @@ export function redactSecretsInText(text: string): string {
   return out;
 }
 
+/** Security invariant: a sentence's params are scrubbed like the English they fill, so a secret survives in neither. */
+export function redactParams<T extends Record<string, string | number>>(params: T): T {
+  return Object.fromEntries(Object.entries(params).map(([name, value]) => [name, typeof value === "string" ? redactSecretsInText(value) : value])) as T;
+}

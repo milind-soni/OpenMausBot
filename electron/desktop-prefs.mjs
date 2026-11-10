@@ -3,6 +3,8 @@
 // the person hid the window's rail of places and whether they turned the window's frame off.
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
+import nativeText from "./native-text.cjs";
 import { onboardingHints } from "./onboarding-record.mjs";
 import { DEFAULT_TALK_KEY, isTalkKey } from "./talk-keys.mjs";
 import { createUpdatesConsent, parseUpdatesConsent, registerUpdatesConsent } from "./updates-consent.mjs";
@@ -10,7 +12,7 @@ import { accountFullName } from "./system-name.mjs";
 
 export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 /** The only notices a page may record, so no page can write anything else into the file. */
-export const DESKTOP_NOTICES = Object.freeze(["whats-new-2026-11", "boat-credit-2026-11"]);
+export const DESKTOP_NOTICES = Object.freeze(["whats-new-2026-11", "boat-credit-2026-11", "grok-move-2026-11"]);
 const WHATS_NEW = DESKTOP_NOTICES[0];
 /** A locale code such as "de" or "pt-br", or "" for following the system. */
 const LANGUAGE = /^(?:[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,2})?$/i;
@@ -55,6 +57,19 @@ function parse(raw) {
     ...(typeof record.railHidden === "boolean" ? { railHidden: record.railHidden } : {}),
     ...(typeof record.windowFrame === "boolean" ? { windowFrame: record.windowFrame } : {}),
     ...(Object.keys(quickAsks).length ? { quickAsks } : {}) };
+}
+
+/** Main's own words in the language this desktop's record keeps, with that record as `prefs`. Electron knows the
+ * system's language only once the app is ready. */
+export function createDesktopText(app, prefs = createDesktopPrefs(jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")))) {
+  return Object.assign(nativeText.createNativeText({ saved: prefs.language(), system: () => (app.isReady() ? app.getLocale() : "") }), { prefs });
+}
+
+export function relabelDesktop({ menu, trays, window, title, badge }) {
+  menu();
+  for (const tray of trays) tray?.relabel();
+  if (window && !window.isDestroyed()) window.setTitle(title());
+  badge();
 }
 
 /** A record that cannot be written is still kept for this launch. */
@@ -135,9 +150,11 @@ export function createDesktopPrefs({ read, write }) {
  * `page(event)`: "local" for this computer's page, "cloud" for My Cloud's own page as main verifies it, "server" for
  * another saved server open in this desktop's window, null for anything else. `cloudOffered()`: this desktop sells
  * MausBot Cloud, asked once its Cloud sign-in is restored. `localConfig()`: This computer's own workspace's config.json.
- * `languageChanged(language, sender)`: tells this desktop's other pages the language picked on one of them.
+ * `languageChanged(language, sender)`: tells this desktop's other pages the language picked on one of them;
+ * `onLanguage(language)`: tells main, which draws its menus, tray and dialogs in it. `onShown(language, sender)`: the
+ * language a page of the window shows, which main's words follow while nothing is picked. `prefs`: the record main reads too.
  */
-export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, frame = null, now = Date.now, systemName = accountFullName }) {
+export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, onLanguage = () => {}, onShown = () => {}, frame = null, now = Date.now, systemName = accountFullName }) {
   let prefs = given ?? null;
   const store = () => prefs ??= createDesktopPrefs({ read, write });
   const from = (channel, pages, handler) => (event, ...args) => {
@@ -176,8 +193,12 @@ export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page,
   ipcMain.handle("desktop-language:set", (event, language) => {
     if (setLanguage(event, language)) {
       try { languageChanged(language, event.sender); } catch {}
+      try { onLanguage(language); } catch {}
     }
     return store().language() === language;
+  });
+  ipcMain.on("desktop-language:shown", (event, language) => {
+    try { if (page(event) && isLanguage(language) && language) onShown(language, event.sender); } catch {}
   });
   // Every page of this desktop's window reads and sets the frame; a server's page sets it only from the person's click,
   // which the preload checks.

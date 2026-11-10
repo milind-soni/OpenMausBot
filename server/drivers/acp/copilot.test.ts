@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,8 @@ import type { ProviderInstance } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { BUILT_IN_DRIVERS } from "../builtIn.ts";
+import { SPAWNED_PROXIES } from "../../proxy-paths.ts";
+import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
 import {
   classifyCopilotError, CopilotAgentDriver, copilotModelLabel, copilotSignedIn, forgetCopilotDiscoverySession, resolveCopilotModels,
 } from "./copilot.ts";
@@ -44,7 +46,8 @@ describe("GitHub Copilot ACP driver", () => {
   async function create(environment: Record<string, string> = {}) {
     instance = await CopilotAgentDriver.create({
       instanceId: `copilot-contract-${Math.random().toString(36).slice(2)}`, displayName: "GitHub Copilot", enabled: true,
-      environment: { FAKE_ACP_MODELS: MODELS, FAKE_ACP_VARIANTS: VARIANTS, FAKE_ACP_DUMP: join(scratch, "launch.json"), ...environment },
+      environment: { FAKE_ACP_MODELS: MODELS, FAKE_ACP_VARIANTS: VARIANTS, FAKE_ACP_REJECT_STDIO_MCP: "1",
+        FAKE_ACP_DUMP: join(scratch, "launch.json"), ...environment },
       config: { cli: FAKE_CLI, fullAuto: false },
     });
     recorder = recordEvents(instance.adapter);
@@ -248,7 +251,7 @@ describe("GitHub Copilot ACP driver", () => {
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
     expect(recorder.events.every((event) => event.provider === "copilotAgent")).toBe(true);
     const launch = JSON.parse(readFileSync(join(scratch, "launch.json"), "utf8"));
-    expect(launch.argv).toEqual(["--acp", "--stdio"]);
+    expect(launch.argv.slice(-2)).toEqual(["--acp", "--stdio"]);
     expect(launch.env.COPILOT_ALLOW_ALL).toBeUndefined();
     expect(launch.env.GITHUB_TOKEN).toBeUndefined();
     expect(launch.env.GH_TOKEN).toBe("engine-fixture-token");
@@ -264,6 +267,85 @@ describe("GitHub Copilot ACP driver", () => {
     expect(await instance.adapter.respondToRequest("copilot-permission", ask.requestId!, { behavior: "deny" })).toBe("rejected");
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
     expect(readFileSync(answer, "utf8")).toBe("reject");
+  });
+
+  it("connects the agents tools even when Copilot rejects ACP stdio servers", async () => {
+    const { instance, recorder } = await create({ FAKE_ACP_MODE: "mcp-tools" });
+    const browser = await startFakeHttpMcp({
+      tools: [{ name: "agent_browser_open", inputSchema: { type: "object", properties: {} } }],
+    });
+    try {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: "copilot-tools", text: "Which automation controls are available?", model: "auto",
+        integrations: {
+          agents: { command: process.execPath, args: [SPAWNED_PROXIES.agents],
+            env: { OMB_HARNESS_URL: "http://127.0.0.1:1", OMB_COMMS_TOKEN: "fixture-token", OMB_BOT_ID: "fixture" } },
+          browser: { command: process.execPath, args: [SPAWNED_PROXIES.mcpRemote],
+            env: { OMB_REMOTE_MCP_SERVER: JSON.stringify({ type: "http", url: browser.url }) } },
+        },
+      });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+      const text = recorder.events.filter((event) => event.type === "content.delta").map((event) => event.delta).join("");
+      expect(text).toContain("agents:");
+      expect(text).toContain("trigger");
+      expect(text).toContain("trigger_info");
+      expect(text).toContain("browser: agent_browser_open");
+    } finally { await browser.close(); }
+  });
+
+  it("isolates native MCP configuration by thread and refreshes scoped tools and credentials on resume", async () => {
+    const launches = join(scratch, "launches.txt");
+    const { instance, recorder } = await create({ FAKE_ACP_MODE: "mcp-tools", FAKE_ACP_LAUNCH_COUNT_FILE: launches });
+    const agents = (token: string) => ({ agents: { command: process.execPath, args: [SPAWNED_PROXIES.agents],
+      env: { OMB_HARNESS_URL: "http://127.0.0.1:1", OMB_COMMS_TOKEN: token, OMB_BOT_ID: "fixture" } } });
+    const run = async (threadId: string, token: string, allow: string[], resumeCursor?: string) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId, text: "List tools", model: "auto", resumeCursor, integrations: agents(token), toolScope: { allow },
+      });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+      const launch = JSON.parse(readFileSync(join(scratch, "launch.json"), "utf8"));
+      const path = launch.argv[launch.argv.indexOf("--additional-mcp-config") + 1].slice(1) as string;
+      const text = recorder.events.filter((event) => event.type === "content.delta").filter((event) => event.turnId === turnId)
+        .map((event) => event.delta).join("");
+      expect(JSON.stringify(launch.argv)).not.toContain(token);
+      return { path, text, settings: JSON.parse(readFileSync(path, "utf8")) };
+    };
+    const first = await run("scoped-one", "first-token", ["native:*", "mcp:agents:list_bots"]);
+    expect(first.text).toBe("agents: list_bots");
+    expect(JSON.stringify(first.settings)).toContain("first-token");
+    if (process.platform !== "win32") expect(statSync(first.path).mode & 0o777).toBe(0o600);
+    const second = await run("scoped-two", "second-token", ["native:*", "mcp:agents:trigger_info"]);
+    expect(second.text).toBe("agents: trigger_info");
+    expect(second.path).not.toBe(first.path);
+    expect(readFileSync(first.path, "utf8")).toContain("first-token");
+    const resumed = await run("scoped-one", "refreshed-token", ["native:*", "mcp:agents:trigger_info"], "fake-acp-session");
+    expect(resumed.path).toBe(first.path);
+    expect(resumed.text).toBe("agents: trigger_info");
+    expect(JSON.stringify(resumed.settings)).toContain("refreshed-token");
+    expect(JSON.stringify(resumed.settings)).not.toContain("first-token");
+    const before = Number(readFileSync(launches, "utf8"));
+    const revoked = await run("scoped-one", "new-token", ["native:*"], "fake-acp-session");
+    expect(revoked.path).toBe(first.path);
+    expect(revoked.settings).toEqual({ mcpServers: {} });
+    expect(revoked.text).toBe("No MCP servers configured.");
+    expect(Number(readFileSync(launches, "utf8"))).toBe(before + 1);
+    expect(JSON.parse(readFileSync(join(scratch, "launch.json.mcp.json"), "utf8"))).toEqual([]);
+    await instance.dispose();
+    expect(existsSync(first.path)).toBe(false);
+    expect(existsSync(second.path)).toBe(false);
+  });
+
+  it("does not reuse a conversation's native MCP servers for memory upkeep", async () => {
+    const { instance, recorder } = await create({ FAKE_ACP_TEXT_REPLY: "memory fixture" });
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "copilot-memory", text: "hello",
+      integrations: { agents: { command: "must-not-run", args: [], env: { TOKEN: "conversation-token" } } },
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    expect(await instance.generateMemoryText!("summarize the fixture")).toBe("memory fixture");
+    const launch = JSON.parse(readFileSync(join(scratch, "launch.json"), "utf8"));
+    const path = launch.argv[launch.argv.indexOf("--additional-mcp-config") + 1].slice(1) as string;
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ mcpServers: {} });
   });
 
   it("runs Auto when the session leaves the model currentValue unset, then still confirms an explicit model", async () => {

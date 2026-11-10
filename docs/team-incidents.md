@@ -50,6 +50,7 @@ announced twice. A thread running an assignment another bot is waiting on
 failure is reported to it and resumes it — so it raises no incident. A run
 the person stopped is not an incident.
 
+A confined conversation's problem (work from outside, docs/team-cloud.md) reaches a person, never a Chief's turn.
 `retry_thread` is Chief-only, for a teammate the Chief can reach, never a
 room thread (coordinate in the room instead), never a thread that is still
 running, and never one that has finished a run since it was last reported
