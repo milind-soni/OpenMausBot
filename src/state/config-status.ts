@@ -42,6 +42,16 @@ export interface ConfigStatus {
     features: string[];
     license?: { expiresAt: string; expiresInDays: number; graceEndsAt?: string };
   };
+  /** The server's hardened profile (docs/self-hosting.md): `notice` reaches admins only. `on` and a dismissible
+   * `unboxed` are shown until an admin has read them; the rest stay until the server is fixed or started again. */
+  serverProfile?: {
+    profile: "hardened" | "standard";
+    boxed: boolean;
+    notice?:
+      | { kind: "on" }
+      | { kind: "restart" }
+      | { kind: "unboxed"; fault: "switched-off" | "not-linux" | "no-bwrap" | "userns-refused"; shared: boolean; dismissible: boolean };
+  };
   /** a fleet agent exists on this server (Settings → Workspaces) */
   fleet?: { available: boolean };
   budgets?: { monthlyUsd?: number; warnAtPercent?: number };

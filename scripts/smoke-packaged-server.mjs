@@ -79,6 +79,8 @@ const fixtureEnv = {
   OMB_WEBHOOK_PORT: String(webhookPort),
   // Not a genuine key: enough to make the server look for its enterprise layer.
   OMB_LICENSE_KEY: "omb1.not.real",
+  // A licence key is an organization's server, which runs the hardened profile; this smoke is about the packaging.
+  OMB_PROFILE: "standard",
   ...(browserBundle ? {
     OMB_RESOURCES_PATH: staging,
     // A global engine on the developer's PATH must not make this test pass.
