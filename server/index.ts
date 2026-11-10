@@ -116,6 +116,8 @@ import { boatDeletionSnapshot } from "./boat-delete-journal.ts";
 import { liveDecisionRefusal } from "../shared/live-approval.ts"; import type { PersonWaitKind } from "../shared/person-wait.ts";
 import { vpsLeftBehindNotice } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
+import { openConnectorTokenStatus, readConnectorSettings } from "./connectors/provider.ts";
+import { composioProvider } from "./connectors/composio.ts";
 import { connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import { connectorCardDescription, connectorCardText, signInCardText } from "./connector-card-text.ts";
 import { BOT_PAUSED_CODE } from "../shared/bot-limit.ts"; import { createStarterAwake } from "./host/starter-awake.ts"; import { createStarterCaps } from "./host/starter-caps.ts"; import { createStarterAwakeRoutes } from "./routes/starter-awake.ts"; import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts"; import { chiefLevel, readTeamRolesWith } from "./chief-level.ts"; import { defaultBotRefusal, ensureDefaultBot } from "./default-bot.ts";
@@ -639,7 +641,7 @@ import { createDevsReports } from "./host/devs-reports.ts"; import { bugReportEn
 import { createCardRequester, linePersonKey } from "./host/thread-person.ts"; import { selfThreadRefusal } from "./host/self-threads.ts"; import { lookedAfterBy } from "./host/looked-after.ts"; import { createActingPeople, HANDED_PEOPLE_FILE, HandedPeople, type HandedRun, keptPrivate, privateHandBack, withPerson } from "./host/acting-person.ts"; import { createTurnCallSignals } from "./host/turn-call-signals.ts";
 import { createThreadRoutes } from "./routes/threads.ts";
 import { createWebhookRoutes } from "./routes/webhooks.ts";
-import { withScopeHint } from "./connector-scope-hint.ts";
+import { withScopeHint } from "./connector-scope-hint.ts"; import { decodeConnectedAccountId } from "./connectors/common.ts";
 import { connectorRequestItems } from "./connector-request-items.ts";
 import { onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
 
@@ -11745,9 +11747,20 @@ function configStatus() {
     safetyFloor: { enabled: safetyFloorOn() },
     openaiCompat: { ...keyStatus(cfg.openaiCompat?.key), url: cfg.openaiCompat?.url ?? "" },
     composio: {
-      ...(composio.connectionMode(cfg) === "self-hosted" ? keyHint(cfg.composio?.apiKey) : {}),
-      configured: composio.configured(cfg), mode: composio.connectionMode(cfg),
+      // Composio's own state, whatever backend is selected: the key card must not light up because
+      // OpenConnector is configured. The connector layer's availability lives in connectors.configured.
+      ...(composioProvider.mode(cfg) === "self-hosted" ? keyHint(cfg.composio?.apiKey) : {}),
+      configured: composioProvider.isConfigured(cfg), mode: composioProvider.mode(cfg),
     },
+    connectors: (() => {
+      const settings = readConnectorSettings();
+      return {
+        provider: settings.provider,
+        // The connector layer as a whole: whatever backend is selected is ready to serve apps.
+        configured: composio.configured(cfg),
+        openconnector: { url: settings.openconnector.url ?? "", ...openConnectorTokenStatus(settings.openconnector) },
+      };
+    })(),
     box: { ...boat.describeBoatAccount(cfg), ...(boat.boatAccount(cfg)?.included ? {} : keyHint(cfg.box?.token)) },
     vps: { configured: Boolean(vpsSshAlias(cfg)), sshAlias: vpsSshAlias(cfg) ?? "" },
     opencodeGo: { ...keyStatus(cfg.opencodeGo?.apiKey), providerKeys: Object.keys(openCodeProviderKeys(cfg)) },
@@ -11817,6 +11830,7 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
     edition: { edition: status.edition.edition, features: status.edition.features },
     signIn: { admins: [], members: [] }, live: liveSettingsForClient(status.live), everyBotRules: undefined,
     vps: { configured: status.vps.configured, sshAlias: "" },
+    ...(status.connectors ? { connectors: { provider: status.connectors.provider, configured: status.connectors.configured, openconnector: { url: "", configured: status.connectors.openconnector.configured } } } : {}),
     opencodeGo: { configured: status.opencodeGo.configured, providerKeys: [] },
     ...(CLOUD_TEAM ? { onboarding } : {}), profile: CLOUD_TEAM ? profile : { name: profile.name, email: "", ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}) },
     browserProfiles: status.browserProfiles.map((profile) => Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "partitionId"))),
@@ -15085,8 +15099,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req); const refused = managedPolicy.appRefusal(m[1]); if (refused) return json(res, 403, { error: refused, code: "managed_policy" });
       const started = await composio.authorizeService(cfg, m[1], body.alias); void routineHolds?.connections("added"); connectionHealth.added("app", m[1], auth.kind === "session" ? auth.session.email ?? null : null); return json(res, 200, started);
     }
-    m = path.match(/^\/api\/connectors\/([\w-]+)\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/);
-    if (m && method === "DELETE") { const removed = await composio.removeAccount(cfg, m[1], m[2]); void routineHolds?.connections("removed"); return json(res, 200, removed); }
+    m = path.match(/^\/api\/connectors\/([\w-]+)\/accounts\/([^/]+)$/);
+    if (m && method === "DELETE") { const accountId = decodeConnectedAccountId(m[2]); if (accountId === undefined) return json(res, 400, { error: "invalid connected-account ID" }); const removed = await composio.removeAccount(cfg, m[1], accountId); void routineHolds?.connections("removed"); return json(res, 200, removed); }
     m = path.match(/^\/api\/connectors\/([\w-]+)$/);
     if (m && method === "DELETE") { const removed = await composio.removeService(cfg, m[1]); void routineHolds?.connections("removed"); connectionHealth.removed("app", m[1]); return json(res, 200, removed); }
 

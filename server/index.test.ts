@@ -12160,6 +12160,49 @@ describe("harness HTTP API", () => {
     expect((await api("PATCH", "/api/config", { vps: { sshAlias: "" } })).status).toBe(200);
   });
 
+  it("keeps connector availability for client sessions while hiding OpenConnector details", async () => {
+    const saved = await api("PUT", "/api/config", {
+      connectors: { openconnector: { url: "http://127.0.0.1:3001", adminToken: "runtime-token-1234" } },
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.body.connectors).toMatchObject({
+      provider: "openconnector",
+      configured: true,
+      openconnector: { url: "http://127.0.0.1:3001", configured: true, last4: "1234" },
+    });
+    try {
+      const window = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+      const paired = await fetch(`${BASE}/api/auth/pair`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: window.body.code }),
+      });
+      const memberToken = ((await paired.json()) as any).token as string;
+      const response = await fetch(`${BASE}/api/config`, { headers: { authorization: `Bearer ${memberToken}` } });
+      const member = await response.json() as any;
+      expect(member.connectors).toEqual({
+        provider: "openconnector",
+        configured: true,
+        openconnector: { url: "", configured: true },
+      });
+      expect(JSON.stringify(member)).not.toContain("runtime-token-1234");
+
+      // A removal failure must fail the save instead of claiming the token is gone.
+      const tokenFile = join(home, ".openmausbot", "openconnector-admin-token");
+      rmSync(tokenFile, { force: true });
+      mkdirSync(tokenFile);
+      try {
+        const failed = await api("PUT", "/api/config", { connectors: { openconnector: { url: "", adminToken: "" } } });
+        expect(failed.status).toBe(500);
+        const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+        expect(disk.connectors.openconnector.adminTokenRef).toBe(`file:${tokenFile}`);
+      } finally {
+        rmSync(tokenFile, { recursive: true, force: true });
+      }
+    } finally {
+      const cleared = await api("PUT", "/api/config", { connectors: { openconnector: { url: "", adminToken: "" } } });
+      expect(cleared.status).toBe(200);
+    }
+  });
+
   it("validates a Composio project key, creates a Session, and keeps externally stored secrets off disk", async () => {
     const oldKey = await api("PUT", "/api/config", { composio: { apiKey: "old_key" } });
     expect(oldKey.status).toBe(400);
@@ -12702,6 +12745,68 @@ describe("harness HTTP API", () => {
         email: EMAIL_TOOLS.map(({ name, description }) => ({ name, description })),
       },
     });
+  });
+
+  it("accepts a boundary-length non-BMP OpenConnector alias when removing one account", async () => {
+    const configPath = join(home, ".openmausbot", "config.json");
+    const originalConfig = readFileSync(configPath, "utf8");
+    const tokenPath = join(home, ".openmausbot", "openconnector-route-test-token");
+    writeFileSync(tokenPath, "0".repeat(64), { mode: 0o600 });
+    const config = JSON.parse(originalConfig);
+    const alias = "\u{1F600}".repeat(64);
+    const accountId = encodeURIComponent(`oc:github:${alias}`);
+    const statePath = join(home, ".openmausbot", "openconnector-state.json");
+    const disconnectCalls: Array<{ method: string; path: string; authorization: string | undefined }> = [];
+    const openConnector = createServer((req, res) => {
+      disconnectCalls.push({
+        method: req.method ?? "",
+        path: req.url ?? "",
+        authorization: req.headers.authorization,
+      });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ success: true, data: { deleted: true } }));
+    });
+    await new Promise<void>((resolve) => openConnector.listen(0, "127.0.0.1", resolve));
+    const openConnectorUrl = `http://127.0.0.1:${(openConnector.address() as { port: number }).port}`;
+    writeFileSync(configPath, JSON.stringify({
+      ...config,
+      connectors: {
+        provider: "openconnector",
+        openconnector: { url: openConnectorUrl, adminTokenRef: `file:${tokenPath}` },
+      },
+    }));
+    writeFileSync(statePath, JSON.stringify({
+      runtimeUrl: openConnectorUrl,
+      connections: [{
+        accountId: decodeURIComponent(accountId),
+        service: "github",
+        alias,
+        status: "connected",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }],
+    }), { mode: 0o600 });
+    try {
+      const response = await api("DELETE", `/api/connectors/github/accounts/${accountId}`);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ removed: 1 });
+      expect(disconnectCalls).toEqual([{
+        method: "DELETE",
+        path: `/api/connections/github?alias=${encodeURIComponent(alias)}`,
+        authorization: `Bearer ${"0".repeat(64)}`,
+      }]);
+    } finally {
+      await new Promise<void>((resolve) => openConnector.close(() => resolve()));
+      rmSync(statePath, { force: true });
+      rmSync(`${statePath}.lock.db`, { force: true });
+      rmSync(tokenPath, { force: true });
+      writeFileSync(configPath, originalConfig);
+    }
+  });
+
+  it("rejects malformed percent-encoded OpenConnector account IDs with 400", async () => {
+    const response = await api("DELETE", "/api/connectors/github/accounts/oc%ZZ");
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: "invalid connected-account ID" });
   });
 
   it.skipIf(process.platform === "win32")("stores the credentials file with owner-only permissions", () => {
