@@ -21,7 +21,7 @@ import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent,
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
-import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
+import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
 import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
@@ -423,7 +423,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               const bodyError = body ? completionError(body, "completion error") : null;
               if (bodyError) throw bodyError;
             }
-            throw new ChatProtocolError("Stream ended before completion");
+            throw new StreamTruncatedError("Stream ended before completion");
           }
           resetIdleTimer();
           buffer += decoder.decode(value, { stream: true });
@@ -707,16 +707,14 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 continue;
               }
               // Once a call has been handled, never replay it through a turn retry.
-              // A stream the provider closed with no completion marker is the one protocol error
-              // worth resending: the guards above prove nothing streamed and no tool call ran, so
-              // the resend repeats no text and executes nothing — and it applies even where the
-              // caller never opted into transient retries (openai-compat and five friends).
-              const truncation = verdict.reason === "stream_truncated";
+              // A stream closed before any completion marker executed nothing upstream, so exactly
+              // that protocol error may resend — even where the caller never opted into retries.
+              const truncation = error instanceof StreamTruncatedError;
               const retryScale = truncation ? options.retryScale ?? 1 : options.retryScale;
               if (retryScale === undefined || abort.signal.aborted || streamed || seenCalls.size ||
-                  (error instanceof ChatProtocolError && !truncation) || !verdict.transient || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
+                  (error instanceof ChatProtocolError && !truncation) || (!verdict.transient && !truncation) || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
               const delayMs = computeBackoff(attempt++);
-              emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt, delayMs, reason: verdict.reason });
+              emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt, delayMs, reason: truncation ? "stream_truncated" : verdict.reason });
               await interruptibleDelay(delayMs * retryScale, abort.signal).promise;
               abort.signal.throwIfAborted();
             }

@@ -13,8 +13,7 @@ export type TransientReason =
   | "overloaded"
   | "server_error"
   | "connection_reset"
-  | "timeout"
-  | "stream_truncated";
+  | "timeout";
 
 export type TerminalReason =
   | "auth"
@@ -44,9 +43,6 @@ const TRANSIENT_PATTERNS: Array<{ pattern: RegExp; reason: TransientReason }> = 
     reason: "connection_reset",
   },
   { pattern: /\btimeout(ed)?\b|\btimed? out\b/i, reason: "timeout" },
-  // A provider closing the stream with neither finish_reason nor [DONE]. Retriable only while the
-  // chat runtime's resend gate proves nothing streamed and no tool call ran.
-  { pattern: /\bstream ended before completion\b/i, reason: "stream_truncated" },
 ];
 
 /** A subscription's usage running out: terminal even when phrased as a rate limit. Claude Code 2.1.295
