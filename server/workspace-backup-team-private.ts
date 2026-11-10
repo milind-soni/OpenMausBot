@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { isLayerId, layerAudience } from "./audience.ts";
 import { CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts";
+import { routineHome } from "./routine-home.ts";
 
 const PERSON = /^p_[\w-]{22}$/;
 const MARKERS: ReadonlySet<string> = new Set([CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY]);
@@ -71,6 +72,22 @@ export function withoutTeamPrivate(bots: unknown, privacy: TeamPrivacy): unknown
   return bots.filter((bot) => !(record(bot) && typeof bot.id === "string" && privacy.bots.has(bot.id))).map((bot) => (record(bot) && Array.isArray(bot.tasks)
     ? { ...bot, tasks: bot.tasks.filter((task) => !(record(task) && typeof task.threadId === "string" && privacy.threads.has(task.threadId))) }
     : bot));
+}
+
+/** routines.json without the routines that live in a member's private chat (routine-home.ts) and without any run that
+ * names a private conversation: a run carries its prompt and what it wrote. `bots` is bots.json, as stored. */
+export function routinesWithoutTeamPrivate(value: unknown, bots: unknown, privacy: TeamPrivacy): unknown {
+  if (!record(value)) return value;
+  const tasks = new Map<string, { title: string; askedAt?: number }>();
+  for (const bot of rows(bots)) for (const task of rows(bot.tasks)) {
+    if (typeof task.threadId === "string" && typeof task.title === "string") tasks.set(task.threadId, { title: task.title, ...(typeof task.askedAt === "number" ? { askedAt: task.askedAt } : {}) });
+  }
+  const privateTo = (threadId: string) => (privacy.threads.has(threadId) ? threadId : null);
+  const names = (row: Row, keys: readonly string[]) => keys.some((key) => typeof row[key] === "string" && privacy.threads.has(row[key] as string));
+  const routines = rows(value.routines).filter((routine) => !privacy.bots.has(String(routine.botId)) && routineHome(routine, { privateTo, task: (_bot, threadId) => tasks.get(threadId) }) === null);
+  const kept = new Set(routines.map((routine) => routine.id));
+  const runs = rows(value.runs).filter((run) => kept.has(run.routineId) && !names(run, ["threadId", "resultsThreadId", "sourceThreadId", "executionThreadId"]));
+  return { ...value, ...(Array.isArray(value.routines) ? { routines } : {}), ...(Array.isArray(value.runs) ? { runs } : {}) };
 }
 
 function chunks(ids: readonly string[]): string[][] {

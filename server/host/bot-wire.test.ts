@@ -11,9 +11,12 @@ it("projects each thread's external wait without exposing provider cursors", () 
       { threadId: "two", title: "Two", createdAt: 2, resumeCursors: {} }],
   };
   const wire = createBotWire({ teammates: () => new Set(), localAgents: () => new Set(["one"]), keepWarm: () => undefined,
-    ownTurn: () => false, inbox: () => ({}), threadBusy: () => false, mainThread: () => "one" }).wireBot(bot);
+    ownTurn: () => false, inbox: () => ({}), threadBusy: () => false, mainThread: () => "one",
+    askedBy: task => task.threadId === "one" ? { askedBy: { name: "Ada", id: "ada" } } : {},
+  }).wireBot(bot);
   expect(wire.waitingForExternalAgent).toBe(true);
   expect(wire.tasks?.map(task => task.waitingForExternalAgent)).toEqual([true, false]);
+  expect(wire.tasks?.[0]?.askedBy).toEqual({ name: "Ada", id: "ada" });
   expect(wire).not.toHaveProperty("resumeCursors");
   expect(wire.tasks?.[0]).not.toHaveProperty("resumeCursors");
 });

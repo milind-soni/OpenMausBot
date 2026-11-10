@@ -446,3 +446,13 @@ describe("why a step of the dialog ended without going on", () => {
     expect(cloudAddView(free, OFFER, { ...at, conflict: true })).toMatchObject({ kind: "offer", notice: "preparing" });
   });
 });
+
+describe("an invited person with no Cloud of their own", () => {
+  it("is offered no plan before their team: no trial card, no Start free trial in Settings", () => {
+    const account = { status: "connected", account: { id: "u", email: "sam@acme.test" }, deviceId: "d", expiresAt: 1, entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 1 },
+      teams: [{ id: "t", name: "Acme", role: "member", machine: null }], landing: { teamId: "t" } } as never;
+    expect(cloudPlanView(account)).toEqual({ kind: "free", invited: true });
+    expect(buyOfferAllowed(cloudPlanView(account))).toBe(false);
+    expect(buyOfferAllowed(cloudPlanView({ ...(account as object), landing: undefined } as never))).toBe(true);
+  });
+});

@@ -10,12 +10,13 @@ export function createBotWire(deps: {
   keepWarm: (threadId: string) => KeepWarmStatus | undefined; ownTurn: (threadId: string) => unknown;
   inbox: TeamMessages["inbox"]["wire"]; threadBusy: (botId: string, threadId: string) => boolean;
   mainThread: (botId: string) => string | undefined;
+  askedBy: (task: { threadId: string; busy?: boolean }) => Pick<WireTask, "askedBy">;
 }) {
   const wireTask = (task: TaskRecord, botModel: ModelSelection, awaiting = deps.teammates()): WireTask => {
     // Snoozes heal on read against the server clock; the 0 sentinel ("until new activity") survives reads.
     const { snoozedUntil, ...base } = toWireTask(task, botModel);
     const keepWarm = deps.keepWarm(task.threadId);
-    const coordinated = { ...base, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, waitingForExternalAgent: deps.localAgents().has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(deps.ownTurn(task.threadId) ? { private: true as const } : {}), ...deps.inbox(task.threadId) };
+    const coordinated = { ...base, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, waitingForExternalAgent: deps.localAgents().has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(deps.ownTurn(task.threadId) ? { private: true as const } : {}), ...deps.inbox(task.threadId), ...deps.askedBy(task) };
     const asleep = snoozedUntil === 0 || (snoozedUntil !== undefined && snoozedUntil > Date.now());
     return asleep ? { ...coordinated, snoozedUntil } : coordinated;
   };

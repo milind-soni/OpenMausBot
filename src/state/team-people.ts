@@ -76,6 +76,14 @@ export function teamBotName(bot: { name: string; defaultBot?: { person?: string 
   return `${bot.name} · ${owner?.name || nameFromEmail(person)}`;
 }
 
+/** The bots a person may set a routine up for: on a team only the ones they can chat with, never a teammate's own
+ * MausBot (`keep`: the bot a routine being changed already has); anywhere else every bot shown. */
+export function schedulableBots<T extends { id: string; hidden?: boolean; yourAccess?: string; defaultBot?: { person?: string } }>(bots: readonly T[], team: Pick<TeamPeople, "me"> | null, keep?: string): T[] {
+  const me = team?.me?.email.toLowerCase();
+  return bots.filter((bot) => bot.id === keep || (!bot.hidden && (!team || ((bot.yourAccess === undefined || bot.yourAccess === "chat" || bot.yourAccess === "edit")
+    && (!bot.defaultBot?.person || bot.defaultBot.person.trim().toLowerCase() === me)))));
+}
+
 export function mayChangeOwner(bot: { createdBy?: string; reportsTo?: string; defaultBot?: { person?: string } }, team: TeamPeople | null): boolean {
   return Boolean(team && !bot.defaultBot?.person && (team.admin || (team.me && botOwner(bot) === team.me.email)));
 }
