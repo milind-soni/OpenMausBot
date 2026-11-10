@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { BotBox, bwrapDisablesUserns } from "./bot-box/box.ts";
 import { detectBox } from "./bot-box/detect.ts";
-import { seccompSupported } from "./bot-box/seccomp.ts";
+import { seccompSupported, seccompTable } from "./bot-box/seccomp.ts";
 import { checkLayout } from "./server-profile-boot.ts";
 import { OPERATOR_TOKEN_FILE } from "./server-profile.ts";
 
@@ -179,9 +179,14 @@ describe.skipIf(!works)("what else the profile's box takes away", () => {
     expect((await shell(cloudLike, nested)).out).toContain("nested-ok");
   }, 60_000);
 
-  it.runIf(seccompSupported())("the box's filter is loaded on this architecture", async () => {
-    const status = await shell(guarded, "grep -E '^Seccomp(_filters)?:' /proc/self/status");
-    expect(status.out).toMatch(/^Seccomp:\s*2$/m);
-    expect(guarded.report().hardening).toMatchObject({ seccomp: "on" });
+  // umount2(2) of a path that is not there: ENOENT from the kernel, which looks the path up first, and EPERM from the
+  // box's filter, which refuses the call before the kernel sees it. (The keyring call the self-check makes, and setns,
+  // are refused by a container's own filter too, so inside Docker they cannot tell the box's filter from none.)
+  it.runIf(seccompSupported())("the box's own filter is loaded on this architecture and refuses what the kernel would otherwise answer", async () => {
+    const umount = seccompTable()!.denied.find(([name]) => name === "umount2")![1];
+    const call = `perl -e 'my $path = "/omb-not-there"; my $r = syscall(${umount}, $path, 0); print $r >= 0 ? "ok" : "errno " . ($! + 0);'`;
+    expect((await shell(guarded, call)).out).toBe("errno 1");
+    expect((await asBot(new BotBox(), cwd, home, "/bin/sh", ["-c", call])).out).toBe("errno 2");
+    expect(guarded.report().hardening).toMatchObject({ seccomp: "on", denied: seccompTable()!.denied.length });
   }, 60_000);
 });

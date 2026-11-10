@@ -7,7 +7,7 @@ import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, writeSeccompFile } f
 import { processStart, seesProcess } from "./box-probe.ts";
 import { procHidepid } from "./hidepid.ts";
 import { visibleInBox } from "./plan.ts";
-import { DENIED_SYSCALLS, seccompBytes } from "./seccomp.ts";
+import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
 import { engineInstallRoots, npmEnginesPrefix } from "../engine-roots.ts";
 import { spawnCli } from "../procs.ts";
 import { waitForExit } from "../procs.ts";
@@ -99,7 +99,7 @@ describe("the box's hardening (T0c)", () => {
     expect(plain.extraFds).toEqual([]);
     const none = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() }).wrap({ command: "/usr/bin/x", args: [], env: {} });
     expect(none.extraFds).toEqual([]);
-    expect(writeSeccompFile(dir)).toBe(process.platform === "linux" && process.arch === "x64" ? file : null);
+    expect(writeSeccompFile(dir)).toBe(seccompSupported() ? file : null);
     expect(DENIED_SYSCALLS.length).toBeGreaterThan(30);
     rmSync(dir, { recursive: true, force: true });
   });
