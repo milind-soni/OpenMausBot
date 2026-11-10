@@ -48,7 +48,9 @@ export async function displayScreen(host: HostKind, { platform = process.platfor
       const pixels = parseDisplay(lines.find((line) => / primary /u.test(line)) ?? lines[0] ?? "");
       if (!pixels) return SERVER_SCREEN;
       const gdkScale = Number(env.GDK_SCALE);
-      const scale = Number.isInteger(gdkScale) && gdkScale > 1 && gdkScale <= 4 ? gdkScale : await xftScale(runCommand);
+      // Under Wayland, XWayland's RandR size can already be logical, so Xft.dpi is only read in an X11 session.
+      const x11 = !env.WAYLAND_DISPLAY && env.XDG_SESSION_TYPE !== "wayland";
+      const scale = Number.isInteger(gdkScale) && gdkScale > 1 && gdkScale <= 4 ? gdkScale : x11 ? await xftScale(runCommand) : 1;
       return { width: Math.round(pixels.width / scale), height: Math.round(pixels.height / scale), deviceScaleFactor: scale };
     }
   } catch {}

@@ -40,6 +40,8 @@ describe("the display a headless bot browser reports", () => {
     expect(await linux("Xft.dpi:\t96\n")).toEqual({ width: 3840, height: 2160, deviceScaleFactor: 1 });
     expect(await linux("*customization:\t-color\n")).toEqual({ width: 3840, height: 2160, deviceScaleFactor: 1 });
     expect(await linux(new Error("no xrdb"))).toEqual({ width: 3840, height: 2160, deviceScaleFactor: 1 });
+    expect(await linux("Xft.dpi:\t192\n", { DISPLAY: ":0", WAYLAND_DISPLAY: "wayland-0" })).toEqual({ width: 3840, height: 2160, deviceScaleFactor: 1 });
+    expect(await linux("Xft.dpi:\t192\n", { DISPLAY: ":0", XDG_SESSION_TYPE: "wayland" })).toEqual({ width: 3840, height: 2160, deviceScaleFactor: 1 });
   });
 
   it("is a declared 1920x1080 at 1x on a server or in a container, and when the desktop cannot be read", async () => {
