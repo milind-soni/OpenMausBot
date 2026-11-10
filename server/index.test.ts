@@ -12202,6 +12202,29 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("answers a bot's search of the catalog, and suggests what it looked for first, through the real routes", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const found = await fetch(`${BASE}/api/internal/connectors/find`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, query: "something for spreadsheets" }),
+      });
+      expect(found.status).toBe(200);
+      expect(((await found.json()) as { text: string }).text).toContain("- googlesheets: Google Sheets (not connected).");
+      const suggested = await api("GET", `/api/connectors/suggestions?botId=${bot.id}&for=notion&limit=3`);
+      expect(suggested.status).toBe(200);
+      expect(suggested.body.cards.map((card: { slug: string }) => card.slug)).toEqual(["googlesheets", "slack", "googledrive"]);
+      expect(suggested.body.pick).toBe("needs-key");
+      expect((await api("POST", "/api/connectors/suggestions/pick")).body.pick).toBe("needs-key");
+    } finally {
+      await api("PUT", "/api/config", { composio: { apiKey: "" } });
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("keeps connecting an app from its card an admin's, though members reach the card's authorize for MCP sign-ins", async () => {
     expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
     const bot = (await api("POST", "/api/bots")).body.bot;
