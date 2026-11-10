@@ -54,7 +54,7 @@ describe.skipIf(detection.box !== "bwrap")(`paths on a boxed command line (${det
   it("still runs a configured server whose program is in the bot's own folder, with the bot known or not", async () => {
     const program = join(dataDir, "workspaces", "bot-1", "tools", "server.sh");
     mkdirSync(join(dataDir, "workspaces", "bot-1", "tools"), { recursive: true });
-    writeFileSync(program, "echo the bot's own server ran\n");
+    writeFileSync(program, "echo \"the bot's own server ran\"\n");
     expect((await run([program], { configured: true })).out).toBe("the bot's own server ran\n");
     const unknown = box.wrap({ command: "/bin/sh", args: [program], env: { ...ENV, HOME: home }, configured: true })!;
     const out = await new Promise<string>((resolve) => {
