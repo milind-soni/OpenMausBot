@@ -1402,6 +1402,8 @@
   "settings.analytics.aria": "Enviar analíticas de uso",
   "newLook.title": "{app} ahora tiene un aspecto más sencillo",
   "newLook.body": "Todo lo que necesitas sigue aquí; los ajustes que se usan menos están en Ajustes → Más ajustes.",
+  "advancedBack.title": "El modo avanzado ha vuelto",
+  "advancedBack.body": "Este dispositivo vuelve a estar en modo avanzado. Puedes desactivarlo cuando quieras en Ajustes → General.",
   "settings.updates.startingDownload": "Iniciando la descarga…",
   "settings.updates.preparing": "Descarga completa. macOS está preparando la actualización.",
   "settings.updates.readyInstall": "{app} {version} está lista: instálala en una terminal",

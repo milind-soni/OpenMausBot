@@ -16,6 +16,11 @@ export function teamPrivateChatsLineDue(teamId: string, storage: Pick<Storage, "
   }
 }
 
+/** The team's welcome said it: the first private chat doesn't say it again. */
+export function markTeamPrivateChatsLineSaid(teamId: string, storage: Pick<Storage, "getItem" | "setItem"> | null = typeof localStorage === "undefined" ? null : localStorage): void {
+  try { if (storage && !storage.getItem(SEEN_KEY(teamId))) storage.setItem(SEEN_KEY(teamId), String(Date.now())); } catch {}
+}
+
 /** In every private chat with a team's bot, beside its name: who can see it. */
 export function TeamPrivateHeader() {
   return <ChatHeadAudience icon={<Lock size={12} aria-hidden="true" className="shrink-0" />} label={t("team.privateHeader")} data-chathead-private="" />;

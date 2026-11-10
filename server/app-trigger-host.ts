@@ -10,7 +10,7 @@ import { AppTriggerRequestService, type AppTriggerRequestStore } from "./app-tri
 import { AppTriggerError, AppTriggerManager, type AppTriggerPatch } from "./app-triggers.ts";
 import type { RosterMember } from "./peer-roster.ts";
 import type { RequestAuth } from "./request-auth.ts";
-import type { RoutineManager } from "./routines.ts";
+import type { Routine, RoutineManager } from "./routines.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./routes/table.ts";
 import { listTriggers, triggerTarget } from "./trigger-tools.ts";
 import { addressFor } from "./webhook-address.ts";
@@ -50,6 +50,8 @@ export interface InternalTriggerContext {
   /** A run a webhook or app event started, or work one handed on. */
   outsideDriven: () => boolean;
   canCommit: () => boolean;
+  /** Whether this turn may know of the routine: on a Team Cloud one that lives in someone's private chat only in theirs. */
+  routineShown?: (routine: Routine) => boolean;
 }
 
 const GUEST_REFUSAL = "Only the Cloud's owner can make a bot watch their connected apps. Tell the person to ask from their own conversation.";
@@ -177,7 +179,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     if ("error" in target) return json(res, target.status, { error: target.error });
     const ownerId = target.forBot?.botId ?? context.from.id;
     const listing = listTriggers({
-      botId: ownerId, triggerId: url.searchParams.get("triggerId") ?? undefined, routines: deps.routines().listRoutines(),
+      botId: ownerId, triggerId: url.searchParams.get("triggerId") ?? undefined, routines: deps.routines().listRoutines().filter((routine) => context.routineShown?.(routine) ?? true),
       webhooks: deps.webhooks.list(), appTriggers: manager.list(), runs: deps.routines().listRuns(), timeZone: deps.timeZone(), now: Date.now(),
     });
     const shown = listing.trigger;

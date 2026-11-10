@@ -9,6 +9,8 @@ type Refused = { target: RosterMember; from: RosterMember };
 
 export interface RefusedHandoffDeps {
   bots(): readonly RosterMember[];
+  /** A bot `from` may never be told of (personal-reach.ts hides). */
+  hides?(from: RosterMember, target: RosterMember): boolean;
   /** The run this conversation is, when it is one. */
   runOf(threadId: string): { routineId: string; botId: string } | undefined;
   /** The person key of who wrote this routine; absent off a Cloud and for a routine nobody wrote. */
@@ -39,7 +41,7 @@ export function createRefusedHandoffs(deps: RefusedHandoffDeps) {
       if (!deps.runOf(threadId)) return;
       const seen = refused.get(threadId) ?? new Map<string, Refused>();
       for (const raw of named) {
-        const target = status >= 400 ? unreachableTeammate(deps.bots(), from, raw) : null;
+        const target = status >= 400 ? unreachableTeammate(deps.bots(), from, raw, (bot) => deps.hides?.(from, bot) === true) : null;
         if (target) seen.set(target.id, { target, from });
         if (status < 400) for (const [id, was] of seen) if (namesTeammate(was.target, raw)) seen.delete(id);
       }

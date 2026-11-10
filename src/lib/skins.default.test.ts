@@ -71,7 +71,7 @@ describe("default skin", () => {
 
   it("keeps Midnight for an earlier install whose saved skin is missing or no longer exists", async () => {
     values.set("omb-installed", "2026-01-01T00:00:00.000Z");
-    expect(await boot()).toEqual({ skin: "midnight", advanced: false, stored: "midnight" });
+    expect(await boot()).toEqual({ skin: "midnight", advanced: true, stored: "midnight" });
     values.set("omb-skin", "retired-skin");
     expect(await boot()).toMatchObject({ skin: "midnight", stored: "midnight" });
   });

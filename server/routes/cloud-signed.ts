@@ -34,6 +34,10 @@ export function createCloudSignedRoutes(deps: {
   sessions: Pick<SessionRegistry, "openPairing" | "revokeMember" | "attemptAllowed" | "noteFailure" | "clearFailures">;
   /** A Team Cloud: every pairing body must carry the Admin's member claim (cloud-team.ts). */
   team?: CloudTeam | null;
+  /** A pairing's `member.invitedBy`: who invited that member (team-welcome.ts); absent on a My Cloud. */
+  invited?: (member: string, by: string) => void;
+  /** The team's rule turned remote access off: no browser sign-in for a User. */
+  memberBrowserOff?: () => boolean;
   health: Pick<CloudHealth, "report">;
   /** The home's power once the server listens (null before, and on a server that is not a Cloud home). */
   power?: () => Pick<CloudPower, "report" | "prepareSleep"> | null;
@@ -51,7 +55,7 @@ export function createCloudSignedRoutes(deps: {
   planTier?: ((tier: string) => void) | null;
   now?: () => number;
 }) {
-  const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, now: deps.now });
+  const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, ...(deps.invited ? { invited: deps.invited } : {}), ...(deps.memberBrowserOff ? { memberBrowserOff: deps.memberBrowserOff } : {}), now: deps.now });
   const healthRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const powerReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const sleepRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
