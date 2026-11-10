@@ -840,3 +840,28 @@ export async function screenshotMola(cfg: AppConfig, botId: string, knownMolaId?
   
   return { png: body.data.image_base64, format: body.data.mime_type?.includes("jpeg") ? "jpeg" : "png" };
 }
+
+export async function molaAction(cfg: AppConfig, machineId: string, actionPayload: Record<string, unknown>, signal: AbortSignal) {
+  const apiUrl = getMolaApiUrl(cfg);
+  const resource = resourcePath(apiUrl);
+  
+  const res = await molaFetch(cfg, `/${resource}/${machineId}/actions`, {
+    method: "POST",
+    body: JSON.stringify(actionPayload),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+  });
+  
+  const body: any = await res.json().catch(() => null);
+  
+  if (!res.ok) {
+    const errorMessage = body?.message || body?.error || `Mola action ${actionPayload.action} failed`;
+    return {
+      isError: true,
+      content: [{ type: "text" as const, text: errorMessage }],
+    };
+  }
+  
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify({ ok: true, data: body?.data }) }],
+  };
+}

@@ -209,4 +209,54 @@ describe("cloud computer tools", () => {
     expect(calls.filter(entry => entry.path.endsWith("/commands"))).toHaveLength(1);
     server.closeAllConnections();
   });
+
+  describe("Mola provider routing", () => {
+    it("returns clear unsupported errors for background exec on Mola", async () => {
+      const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "sleep 10", background: true } } }, {
+        cfg, boxId: () => "ml_test123", signal: new AbortController().signal, assertActive: () => {}, provider: "mola",
+        gate: async () => ({ held: false }),
+      });
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: "Background command execution (exec with background: true) is not supported on Mola. Run commands in the foreground or use a terminal multiplexer like tmux." }] });
+    });
+
+    it("returns clear unsupported errors for exec_status on Mola", async () => {
+      const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec_status", arguments: { process_id: "proc_123" } } }, {
+        cfg, boxId: () => "ml_test123", signal: new AbortController().signal, assertActive: () => {}, provider: "mola",
+        gate: async () => ({ held: false }),
+      });
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: "Background process status checking (exec_status) is not supported on Mola because Mola does not support background command execution." }] });
+    });
+
+    it("returns clear unsupported errors for file copy operations on Mola", async () => {
+      const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "copy_from_computer", arguments: { path: "/tmp/file.txt" } } }, {
+        cfg, boxId: () => "ml_test123", signal: new AbortController().signal, assertActive: () => {}, provider: "mola",
+        gate: async () => ({ held: false }),
+      });
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: "File copy operations (copy_from_computer, copy_to_computer) are not supported on Mola. Use exec with shell commands to transfer files." }] });
+    });
+
+    it("returns clear unsupported errors for drag on Mola", async () => {
+      const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "drag", arguments: { x: 1, y: 2, to_x: 3, to_y: 4 } } }, {
+        cfg, boxId: () => "ml_test123", signal: new AbortController().signal, assertActive: () => {}, provider: "mola",
+        gate: async () => ({ held: false }),
+      });
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: "Drag operations are not supported on Mola. Use move, click with mousedown/mouseup, or exec with xdotool commands as a workaround." }] });
+    });
+
+    it("returns clear unsupported errors for get_screen_size on Mola", async () => {
+      const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "get_screen_size", arguments: {} } }, {
+        cfg, boxId: () => "ml_test123", signal: new AbortController().signal, assertActive: () => {}, provider: "mola",
+        gate: async () => ({ held: false }),
+      });
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: "get_screen_size is not supported on Mola. Use screenshot to see the current desktop dimensions." }] });
+    });
+
+    it("returns clear unsupported errors for open_url on Mola", async () => {
+      const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "open_url", arguments: { url: "https://example.com" } } }, {
+        cfg, boxId: () => "ml_test123", signal: new AbortController().signal, assertActive: () => {}, provider: "mola",
+        gate: async () => ({ held: false }),
+      });
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: "open_url is not supported on Mola. Use exec to launch a browser with the URL as a command-line argument." }] });
+    });
+  });
 });

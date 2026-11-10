@@ -88,6 +88,9 @@ export async function runCloudComputerTool(
   if (problem) return { isError: true, content: [{ type: "text", text: problem }] };
   signal.throwIfAborted();
   if (COPY_TOOLS.has(name)) {
+    if (provider === "mola") {
+      return { isError: true, content: [{ type: "text", text: "File copy operations (copy_from_computer, copy_to_computer) are not supported on Mola. Use exec with shell commands to transfer files." }] };
+    }
     if (!folder) return { isError: true, content: [{ type: "text", text: "This turn has no working folder to copy into or out of." }] };
     const copied = name === "copy_from_computer"
       ? await copyFromComputer(cfg, boxId, folder, args as { path: string; to?: string }, signal)
@@ -104,6 +107,11 @@ export async function runCloudComputerTool(
     signal.throwIfAborted();
     return { content: [{ type: "image", mimeType: "image/jpeg", data: shot.png }] };
   }
+  
+  if (provider === "mola") {
+    return await runMolaAction(cfg, boxId, name, args, signal);
+  }
+  
   const a = args;
   const mouse = `xdotool mousemove --sync ${a.x} ${a.y}`;
   let command: string;
@@ -121,17 +129,52 @@ export async function runCloudComputerTool(
     default: return { isError: true, content: [{ type: "text", text: "Unknown cloud computer tool." }] };
   }
   
-  let result: Awaited<ReturnType<typeof runCommand>>;
-  if (provider === "mola") {
-    result = await mola.runCommand(cfg, boxId, mola.isolatedRemoteCommand(command), { signal });
-  } else {
-    result = await runCommand(cfg, boxId, isolatedRemoteCommand(command), { signal });
-  }
-  
+  const result = await runCommand(cfg, boxId, isolatedRemoteCommand(command), { signal });
   signal.throwIfAborted();
   if (name === "open_url" && result.ok) return { content: [{ type: "text", text: "Browser launch requested. Page loading is not confirmed; inspect the screen before continuing." }] };
   if (name === "exec" && result.timedOut) return { isError: true, content: [{ type: "text", text: EXEC_LATE }] };
   return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result) }] };
+}
+
+async function runMolaAction(cfg: AppConfig, boxId: string, name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<CloudComputerResult> {
+  const a = args;
+  
+  switch (name) {
+    case "click":
+      return await mola.molaAction(cfg, boxId, { action: "click", x: Number(a.x), y: Number(a.y), button: String(a.button ?? "left"), count: Number(a.count ?? 1) }, signal);
+    case "move":
+      return await mola.molaAction(cfg, boxId, { action: "move", x: Number(a.x), y: Number(a.y) }, signal);
+    case "scroll":
+      return await mola.molaAction(cfg, boxId, { action: "scroll", x: Number(a.x), y: Number(a.y), direction: String(a.direction), amount: Number(a.amount ?? 3) }, signal);
+    case "type_text":
+      return await mola.molaAction(cfg, boxId, { action: "type", text: String(a.text) }, signal);
+    case "key_press":
+      return await mola.molaAction(cfg, boxId, { action: "key", key: String(a.key) }, signal);
+    case "exec": {
+      if (a.background === true) {
+        return { isError: true, content: [{ type: "text", text: "Background command execution (exec with background: true) is not supported on Mola. Run commands in the foreground or use a terminal multiplexer like tmux." }] };
+      }
+      const command = String(a.command);
+      if (command.length > 32768) {
+        return { isError: true, content: [{ type: "text", text: "Command is too long for Mola (maximum 32768 characters). Split it into smaller parts or save it to a script file first." }] };
+      }
+      const timeoutMs = Math.min(50_000, 120_000);
+      const result = await mola.runCommand(cfg, boxId, mola.isolatedRemoteCommand(command), { timeoutMs, signal });
+      signal.throwIfAborted();
+      if (result.timedOut) return { isError: true, content: [{ type: "text", text: EXEC_LATE }] };
+      return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+    case "exec_status":
+      return { isError: true, content: [{ type: "text", text: "Background process status checking (exec_status) is not supported on Mola because Mola does not support background command execution." }] };
+    case "get_screen_size":
+      return { isError: true, content: [{ type: "text", text: "get_screen_size is not supported on Mola. Use screenshot to see the current desktop dimensions." }] };
+    case "drag":
+      return { isError: true, content: [{ type: "text", text: "Drag operations are not supported on Mola. Use move, click with mousedown/mouseup, or exec with xdotool commands as a workaround." }] };
+    case "open_url":
+      return { isError: true, content: [{ type: "text", text: "open_url is not supported on Mola. Use exec to launch a browser with the URL as a command-line argument." }] };
+    default:
+      return { isError: true, content: [{ type: "text", text: "Unknown cloud computer tool." }] };
+  }
 }
 
 /** The order is the safety argument: arguments, then the control gate (which may create or wake the Boat), then the Boat
