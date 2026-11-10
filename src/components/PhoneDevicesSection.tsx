@@ -20,6 +20,7 @@ import { revealPhonePairing } from "../lib/phone-pairing";
 import { PhonesList } from "./PhonesList";
 import { PairedPhones } from "./PairedPhones";
 import { Card, Switch } from "./SettingsPrimitives";
+import { Layer } from "./Layer";
 import { productName } from "../lib/brand";
 import { useStore } from "@/state/store";
 
@@ -221,7 +222,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
     setStep("pairing");
     c.useLocal();
   };
-  return (
+  return <Layer modal>
     <div role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step}>
       <div className="flex max-h-full w-full max-w-[460px] flex-col gap-4 overflow-y-auto rounded-2xl bg-card p-5 shadow-xl">
@@ -259,7 +260,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
         )}
       </div>
     </div>
-  );
+  </Layer>;
 }
 
 /** A pairing code still open: anyone holding it can pair until it runs out, so it can be revoked here. */

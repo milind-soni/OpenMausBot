@@ -7,6 +7,7 @@ import { t } from "@/lib/i18n";
 import { usePlaces } from "@/lib/places";
 import { CLOSE, Heading, PRIMARY, QUIET, SCREEN, SHEET } from "./cloud-buy/parts";
 import { codeDigits, SignInScreen } from "./cloud-buy/SignInScreen";
+import { Layer } from "./Layer";
 import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 
 export interface AccountsAccess {
@@ -161,7 +162,7 @@ export function AccountsSheet({ onClose, adding = null, note: given = null }: { 
     }, () => setNote(t("accounts.failed")));
   };
   const active = view?.active ?? null;
-  return <div className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+  return <Layer modal><div className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <div role="dialog" aria-modal="true" aria-labelledby="cloud-add-title" data-accounts-sheet className={cn(SHEET, "relative w-full max-w-[420px]")}>
       <button type="button" onClick={onClose} aria-label={t("accounts.close")} className={cn(CLOSE, "absolute end-4 top-4 z-10")}><X size={16} /></button>
       {add !== null
@@ -173,7 +174,7 @@ export function AccountsSheet({ onClose, adding = null, note: given = null }: { 
           {active && !given && <button type="button" data-accounts-sign-out className={PRIMARY} onClick={() => signOut(active.id)}>{t("accounts.signOut")}</button>}
         </div>}
     </div>
-  </div>;
+  </div></Layer>;
 }
 
 /** The sheet as the rail's page keeps it: asked for by main, from the person's click on the page beside the rail. */
