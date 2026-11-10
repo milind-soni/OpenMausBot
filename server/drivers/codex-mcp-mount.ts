@@ -48,3 +48,8 @@ export function customServerEnvBox(
   const names = [...new Set([...mounted.values()].filter((server) => configured.has(server)).flatMap((server) => Object.keys(server.env)))];
   return names.length ? { box: { allowEnv: names } } : {};
 }
+
+/** The custom env names the box admits into Codex: none with the box off, where its shell keeps what it inherited anyway. */
+export function boxAdmittedEnv(custom: { box?: { allowEnv: string[] } }): Set<string> {
+  return new Set(botBox.enabled() ? custom.box?.allowEnv : []);
+}
