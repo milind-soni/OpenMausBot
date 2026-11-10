@@ -200,10 +200,47 @@ describe("connector MCP bridge", () => {
     const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
     child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 5, method: "tools/list", params: {} })}\n`);
     const [listed, search] = (await nextJson(lines)).result.tools;
-    expect(listed.inputSchema.required).toEqual(["toolkits"]);
-    expect(Object.keys(listed.inputSchema.properties)).toEqual(["toolkits", "auth_config_id"]);
+    expect(listed.inputSchema.required).toBeUndefined();
+    expect(Object.keys(listed.inputSchema.properties)).toEqual(["toolkits", "auth_config_id", "find"]);
     expect(listed.inputSchema.properties.auth_config_id).toMatchObject({ type: "string", description: expect.stringContaining("(ac_…)") });
+    expect(listed.inputSchema.properties.find).toMatchObject({ type: "string", description: expect.stringContaining("spreadsheets") });
     expect(search).toEqual({ name: "COMPOSIO_SEARCH_TOOLS" });
+  });
+
+  it("answers a search of the catalog through the harness, and never sends it upstream", async () => {
+    const paths: string[] = [];
+    let body: any = null;
+    const harness = await listen((request, response) => {
+      let text = "";
+      request.on("data", (chunk) => { text += chunk; });
+      request.on("end", () => {
+        paths.push(request.url!);
+        body = JSON.parse(text);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ text: "- googlesheets: Google Sheets (not connected)." }));
+      });
+    });
+    const lines = start({ OMB_HARNESS_URL: harness, OMB_CONNECTOR_TOKEN: "token", OMB_BOT_ID: "b1", OMB_THREAD_ID: "t1" });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "COMPOSIO_MANAGE_CONNECTIONS", arguments: { find: "something for spreadsheets" } } })}\n`);
+    expect((await nextJson(lines)).result.content[0].text).toContain("googlesheets");
+    expect(paths).toEqual(["/api/internal/connectors/find"]);
+    expect(body).toEqual({ botId: "b1", threadId: "t1", query: "something for spreadsheets" });
+  });
+
+  it("raises the card when a bot names toolkits, even with a search beside them", async () => {
+    const paths: string[] = [];
+    const harness = await listen((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        paths.push(request.url!);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end("{}");
+      });
+    });
+    const lines = start({ OMB_HARNESS_URL: harness, OMB_CONNECTOR_TOKEN: "token", OMB_BOT_ID: "b1", OMB_THREAD_ID: "t1" });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "COMPOSIO_MANAGE_CONNECTIONS", arguments: { toolkits: ["gmail"], find: "mail" } } })}\n`);
+    expect((await nextJson(lines)).result.content[0].text).toContain("secure connection card for gmail");
+    expect(paths).toEqual(["/api/internal/connectors/request"]);
   });
 
   it("answers initialize locally so a missing or failing upstream cannot fail the MCP handshake", async () => {

@@ -99,6 +99,16 @@ test("one swap at a time: open, leave and open again at once end where the last 
   assert.equal(w.clean.active(), true);
 });
 
+test("settled() waits for the swaps asked for so far, and is already done with none", async (t) => {
+  const w = computer(t);
+  await w.clean.settled();
+  assert.deepEqual(w.swaps, []);
+  const entering = w.clean.enter();
+  await w.clean.settled();
+  assert.deepEqual(w.swaps, [w.cleanDir], "after the swap under way");
+  await entering;
+});
+
 test("the marker is the frozen copy's own, read from its folder whichever server runs", async (t) => {
   const w = computer(t, { frozen: { v: 1, at: 1, cloud: CLOUD, place: "Garage" } });
   await w.clean.enter();

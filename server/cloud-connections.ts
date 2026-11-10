@@ -172,7 +172,8 @@ export function listConnections(sources: ConnectionSources): ConnectionListing[]
 
 /** What one connection's handoff carries, for My Cloud's own routes. */
 export type ConnectionHandoff =
-  | { mcp: { name: string; server: StoredMcpServer; signIn?: McpOAuthRecord } }
+  /** `keys`: the Vault items this server may read its `vault:<id>` keys from, which go with it. */
+  | { mcp: { name: string; server: StoredMcpServer; signIn?: McpOAuthRecord; keys?: string[] } }
   | { config: Partial<AppConfig> }
   | { composio: { apiKey: string; userId: string } }
   | { email: readonly EmailAccount[] };
@@ -183,6 +184,8 @@ export interface HandoffSources {
   mcpSignIn(name: string, url: string): McpOAuthRecord | undefined;
   /** The person's mailboxes with their passwords, which go only to the owner's session on their own Cloud. */
   email?(): readonly EmailAccount[];
+  /** The Vault items an MCP server may read its keys from. */
+  mcpKeys?(name: string): string[];
 }
 
 /** A sign-in's tokens in a digest: the same tokens give the same digest, so a sign-in that refreshed meanwhile is seen. */
@@ -211,7 +214,8 @@ export function answerConnection(id: string, sources: HandoffSources):
     const server = parsed.server;
     const record = isRemoteMcpServer(server) && !runsHere(server) ? sources.mcpSignIn(name, server.url) : undefined;
     const signIn = record?.state === "signed-in" && record.tokens ? record : undefined;
-    return { ok: true, connection: { mcp: { name, server, ...(signIn ? { signIn } : {}) } }, ...(signIn ? { digest: signInDigest(signIn.tokens) } : {}) };
+    const keys = sources.mcpKeys?.(name) ?? [];
+    return { ok: true, connection: { mcp: { name, server, ...(signIn ? { signIn } : {}), ...(keys.length ? { keys } : {}) } }, ...(signIn ? { digest: signInDigest(signIn.tokens) } : {}) };
   }
   const key = /^key:(\w{1,40})$/u.exec(id);
   if (key) {

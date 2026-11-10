@@ -31,6 +31,7 @@ export function countedList(sent: CloudSendCounts): string[] {
     ...(sent.updatedBots ? [counted(sent.updatedBots, "cloudSend.list.changedBotOne", "cloudSend.list.changedBots")] : []),
     ...(sent.skills ? [counted(sent.skills, "cloudSend.list.skillOne", "cloudSend.list.skills")] : []),
     ...(sent.logins ? [counted(sent.logins, "cloudSend.list.loginOne", "cloudSend.list.logins")] : []),
+    ...(sent.secrets ? [counted(sent.secrets, "cloudSend.list.secretOne", "cloudSend.list.secrets")] : []),
     ...(sent.onePassword ? [t("cloudSend.list.onePassword")] : []),
     ...(sent.settings ? [t("cloudSend.list.settings")] : []),
     ...(chats?.conversations ? [counted(chats.conversations, "cloudSend.list.chatOne", "cloudSend.list.chats")]

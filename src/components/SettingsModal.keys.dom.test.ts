@@ -61,9 +61,9 @@ function publish() {
   for (const listener of Array.from(fx.listeners)) listener();
 }
 
-const search = () => host.querySelector<HTMLInputElement>("[data-settings-search]")!;
-const result = (id: string) => host.querySelector<HTMLButtonElement>(`[data-settings-key-result="${id}"]`);
-const row = (id: string) => host.querySelector<HTMLElement>(`[data-key-row="${id}"]`)!;
+const search = () => document.querySelector<HTMLInputElement>("[data-settings-search]")!;
+const result = (id: string) => document.querySelector<HTMLButtonElement>(`[data-settings-key-result="${id}"]`);
+const row = (id: string) => document.querySelector<HTMLElement>(`[data-key-row="${id}"]`)!;
 
 function type(value: string) {
   flushSync(() => {
@@ -119,7 +119,7 @@ describe("searching Settings for a key", () => {
   it("says plainly when nothing matches", () => {
     flushSync(() => root.render(createElement(SettingsModal)));
     type("zzzz");
-    expect(host.textContent).toContain("Nothing matches “zzzz”");
-    expect(host.querySelector("[data-settings-key-result]")).toBeNull();
+    expect(document.body.textContent).toContain("Nothing matches “zzzz”");
+    expect(document.querySelector("[data-settings-key-result]")).toBeNull();
   });
 });

@@ -11,6 +11,7 @@ import {
   importedSkillListings, importedSkillsFor, importedSkillsPrompt, listedImportedSkills, nativeSkillFolders, readImportedSkillFile,
   readImportedSkills, type ImportedSkillView, type SkillTurnEngine,
 } from "../imported-skills.ts";
+import { disabledNativeSkillNames, isNativeSkillEnabled } from "../native-skill-choices.ts";
 import { nativeSkillListing, nativeSkills, readNativeSkillFile } from "../native-skills.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { readSectionContext } from "../section-context.ts";
@@ -92,7 +93,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     const own = ownSkills(bot);
     const listed = [...own, ...importedSkillListings(bot.id, new Set(own.map((skill) => skill.name)), aboutBot(bot))];
     const names = new Set(listed.map((skill) => skill.name));
-    return [...listed, ...nativesFor(bot, threadId).filter((skill) => !names.has(skill.name)).map(nativeSkillListing)];
+    return [...listed, ...nativesFor(bot, threadId).filter((skill) => !names.has(skill.name)).map((skill) => nativeSkillListing(skill, isNativeSkillEnabled(bot.id, skill.name)))];
   };
   const readBotSkillFile = (bot: BotRecord, name: string): string | null => {
     const own = readSkillFile(bot.id, name);
@@ -281,8 +282,11 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       if (files.size < mentioned.length) add(importsFor(bot, assigned, instance));
       if (files.size < mentioned.length) {
         // A skill switched off on the Skills page stays off, even when the engine holds one of the same name.
-        const switched = new Set([...resolveBotSkills(bot.id, assigned), ...importedSkillListings(bot.id, new Set())]
-          .filter((skill) => !skill.enabled).map((skill) => skill.name));
+        const switched = new Set([
+          ...[...resolveBotSkills(bot.id, assigned), ...importedSkillListings(bot.id, new Set())]
+            .filter((skill) => !skill.enabled).map((skill) => skill.name),
+          ...disabledNativeSkillNames(bot.id),
+        ]);
         add(nativesFor(bot, threadId, instance).filter((skill) => !switched.has(skill.name)));
       }
       return skillCommandTurnText(text, files, typed, ownStart);

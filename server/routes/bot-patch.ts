@@ -82,6 +82,8 @@ export interface BotPatchRouteDeps {
   personMarkThread?(auth: RequestAuth, threadId: string, unread: boolean): boolean;
   /** The conversation this session sees the bot on (on a Team Cloud never someone else's private chat). */
   shownThread?(auth: RequestAuth, bot: BotRecord): string;
+  /** The Chief of Staff of a scope changed: these bots' flags did. */
+  chiefChanged?(changed: readonly BotRecord[]): void;
 }
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
@@ -713,6 +715,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           ? store.setChiefOfStaff(bot.id)
           : [];
       if (chiefChanges === null) return json(res, 404, { error: "no such bot" });
+      if (chiefChanges.length) deps.chiefChanged?.(chiefChanges);
       if (beforeProfile) {
         const now = store.bot(bot.id)!;
         recordProfileChange(bot.id, "user", "api", beforeProfile, profileSnapshot(now));

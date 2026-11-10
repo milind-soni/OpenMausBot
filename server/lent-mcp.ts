@@ -18,6 +18,7 @@ import type { McpProbeResult } from "./mcp-probe.ts";
 import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer } from "./mcp-registry.ts";
 import { PASS } from "./routes/table.ts";
 import type { LentMcpServer, SharedComputers } from "./shared-computers.ts";
+import type { McpKeys } from "./vault/mcp-keys.ts";
 
 export const LENT_MCP_PATH = "/api/internal/lent/mcp/";
 export const isLentMcpPath = (path: string): boolean => path.startsWith(LENT_MCP_PATH);
@@ -146,6 +147,8 @@ export interface LentMcpDeps {
   /** This turn's bearer for LENT_MCP_PATH, minted only while it runs. */
   mint(turn: Turn): string;
   active(turn: Turn): boolean;
+  /** A server's `vault:<id>` keys, read when it is launched or called on the computer it runs on. */
+  keys?: McpKeys;
   /** This server's own loopback address, `http://127.0.0.1:<port>`. */
   origin: string;
   personal: boolean;
@@ -166,7 +169,14 @@ export function createLentMcp(deps: LentMcpDeps) {
   const listings = new Map<string, { at: number; tools: Promise<unknown[]> }>();
   const words = { personal: deps.personal, place: deps.place };
 
-  const servers = (bot: Bot) => deps.policy(Object.fromEntries(elsewhereServers(deps.cfg(), bot)));
+  const servers = (bot: Bot) => {
+    const mine = deps.policy(Object.fromEntries(elsewhereServers(deps.cfg(), bot)));
+    if (!deps.keys) return mine;
+    return Object.fromEntries(Object.entries(mine).flatMap(([name, server]): Array<[string, ElsewhereServer]> => {
+      const resolved = deps.keys!.resolve(name, server, bot.id);
+      return resolved.ok ? [[name, resolved.server]] : [];
+    }));
+  };
 
   /** The tools a computer lists for a server, kept ten minutes, since every turn's engine asks again as it starts. */
   function tools(computerId: string, definition: LentMcpServer, principal: string, active: () => boolean, fresh = false): Promise<unknown[]> {
@@ -269,8 +279,11 @@ export function createLentMcp(deps: LentMcpDeps) {
       const state = lentState(deps.computers, principal, server);
       if (!principal) return { status: 409, error: `${name} runs on ${server.runsOn.label}, so it is checked there the next time one of your conversations uses it.` };
       if (state.kind !== "ready") return { status: 409, error: lentLine(name, state, words) };
+      await deps.keys?.warm(name, server);
+      const keyed = deps.keys ? deps.keys.resolve(name, server) : { ok: true as const, server };
+      if (!keyed.ok) return { status: 200, body: { ok: false, reason: "keys", error: keyed.why } };
       try {
-        const listed = await tools(state.computerId, lentDefinition(name, server), principal, () => !signal.aborted, true);
+        const listed = await tools(state.computerId, lentDefinition(name, keyed.server), principal, () => !signal.aborted, true);
         const named = listed.flatMap((tool) => (tool && typeof tool === "object" && typeof (tool as { name?: unknown }).name === "string" ? [tool as { name: string; description?: unknown }] : []));
         const shown = named.slice(0, MAX_TOOLS).map((tool) => ({ name: tool.name, ...(typeof tool.description === "string" ? { description: tool.description.slice(0, 500) } : {}) }));
         return { status: 200, body: { ok: true, tools: shown, ...(named.length > shown.length ? { total: named.length } : {}) } };

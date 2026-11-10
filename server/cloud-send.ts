@@ -36,6 +36,8 @@ export interface CloudSendSources {
   picture(avatarUrl: string): Uint8Array | null;
   logins(): ReadonlyArray<{ id: string; site: string; hosts: readonly string[]; exactHost: boolean; username: string; updatedAt: number }>;
   onePassword(): { connectedAt: number; grants: Record<string, LoginBots> } | null;
+  /** Saved Vault secrets, never a value. Linked password-manager items are not listed: they stay linked. */
+  secrets?(): ReadonlyArray<{ id: string; name: string; updatedAt: number }>;
   settings(): { profile?: { name?: string; email?: string; aboutMe?: string }; language?: string };
   /** What only a move carries, of the bots it carries (cloud-send-kinds.ts), and a bot's parts only a move compares.
    * `only`: a move of that one bot into a team. */
@@ -124,6 +126,9 @@ export function cloudSendSummary(sources: CloudSendSources, { move = false, bot:
   if (onePassword) {
     items.push({ key: itemKey.onePassword(), kind: "1password", label: "1Password",
       parts: { token: partHash(onePassword.connectedAt), vaults: partHash(onePassword.grants) } });
+  }
+  for (const secret of sources.secrets?.() ?? []) {
+    items.push({ key: itemKey.secret(secret.id), kind: "secret", label: secret.name, id: secret.id, parts: { saved: partHash(secret.updatedAt) } });
   }
   const { profile = {}, language } = sources.settings();
   items.push({ key: itemKey.setting("profile"), kind: "setting", label: "profile",
