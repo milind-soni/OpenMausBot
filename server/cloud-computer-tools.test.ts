@@ -220,7 +220,7 @@ describe("cloud computer tools", () => {
     });
 
     it("returns clear unsupported errors for exec_status on Mola", async () => {
-      const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec_status", arguments: { process_id: "proc_123" } } }, {
+      const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec_status", arguments: { process_id: "bg-12345-abcd1234" } } }, {
         cfg, boxId: () => "ml_test123", signal: new AbortController().signal, assertActive: () => {}, provider: "mola",
         gate: async () => ({ held: false }),
       });
