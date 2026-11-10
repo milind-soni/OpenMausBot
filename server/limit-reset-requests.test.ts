@@ -153,6 +153,16 @@ describe("the limit-reset routes", () => {
     return { ...h, call, created };
   }
 
+  it("Try again now ends the engine's hold and answers with the limits as they are now (emails 1a1c2500, 1a1c136d)", async () => {
+    const { call, clock } = routes();
+    clock.noteRefusal("claude", NOW + 5 * HOUR);
+    expect(clock.blockedUntil("claude")).not.toBeNull();
+    const response = await call("POST", "/api/limit-resets/release", { engine: "claude" });
+    expect(response).toMatchObject({ status: 200, body: { engines: expect.any(Array) } });
+    expect(clock.blockedUntil("claude")).toBeNull();
+    expect(await call("POST", "/api/limit-resets/release", {})).toMatchObject({ status: 400 });
+  });
+
   it("Continue creates a one-time limit-reset automation in that same conversation, told the turn hit the limit", async () => {
     const { call, routines, store, created } = routes();
     const response = await call("POST", "/api/limit-resets/continue", { botId: "scout", threadId: "thread-1" });

@@ -4,6 +4,7 @@
 // it through the same ownership-verified path as an owner's DELETE. The row
 // and its hostname stay, so a computer the relay later cannot serve gets the
 // same address back by provisioning again.
+import { TUNNEL_CONNECTED_CODE } from "./cloudflare-api";
 import type { ControlPlaneConfig } from "./config";
 import { ACTED_ON_ENDPOINT_SQL, actedOnAccounts, appVersionAtLeast } from "./endpoint-accounts";
 import type { JSONValue } from "./http";
@@ -21,6 +22,8 @@ export const SEEN_FRESH_MS = 2 * DAY_MS;
 /** Release marks per cron run, all reasons together: with the cleanup sweep's
  * 20 rows a run, a wave never outgrows what cleanup removes. */
 export const RELEASE_MARK_LIMIT = 20;
+/** A forced removal that met a tunnel still connected: by name, and as Cloudflare's own code from before it was named. */
+const STILL_CONNECTED_CODES = JSON.stringify([TUNNEL_CONNECTED_CODE, "cf_api_1022"]);
 /** Rows read per run before a percentage is applied. */
 const PROVEN_SCAN_LIMIT = 5_000;
 
@@ -249,10 +252,14 @@ export async function releaseTunnels(
   };
   // Never more waiting for cleanup than one sweep removes: while the sweep is
   // failing or rate-limited its queue stays full and nothing more is marked,
-  // so no owner is left with a row it cannot take back.
+  // so no owner is left with a row it cannot take back. A forced removal
+  // whose tunnel was still connected after its cleanup rounds is not a failing
+  // sweep: it backs off and retries on its own, and does not hold the queue.
   const queued = await env.DB.prepare(
-    `SELECT COUNT(*) AS count FROM installation_endpoints e WHERE e.status = 'deleting' AND ${ACTED_ON_ENDPOINT_SQL}`,
-  ).bind(actedOnAccounts(config)).first<{ count: number }>();
+    `SELECT COUNT(*) AS count FROM installation_endpoints e
+      WHERE e.status = 'deleting' AND ${ACTED_ON_ENDPOINT_SQL}
+        AND NOT (e.reclaim_requested_at IS NULL AND COALESCE(e.last_error_code, '') IN (SELECT value FROM json_each(?)))`,
+  ).bind(actedOnAccounts(config), STILL_CONNECTED_CODES).first<{ count: number }>();
   let budget = Math.max(0, Math.min(RELEASE_MARK_LIMIT, config.capacity.cleanupSweepLimit) - (queued?.count ?? 0));
   const fresh = now - RELAY_FRESH_MS;
   const versions = rows.map((row) => row.version);
