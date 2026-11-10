@@ -155,11 +155,12 @@ healthy_again && through_caddy "kill -9 of the server process"
 step "the documented backup and restore, each with the whole project stopped and started"
 echo before-backup | sudo tee "$DIR/data/e2e-backup" >/dev/null
 # docs/deploy-vps.md, "Back up", with the installer: exactly as written there.
-(cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'umask 077; tar --warning=no-file-ignored -czf "backup-$(date -u +%Y%m%dT%H%M%SZ).tgz" data .env'; sudo docker compose start) >"$OUT/backup.txt" 2>&1
-archive=$(cd "$DIR" && sudo sh -c 'ls backup-*.tgz' | head -n 1)
+(cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'set -e; install -d -m 700 backups; f="backups/backup-$(date -u +%Y%m%dT%H%M%SZ).tgz"; (umask 077; tar --warning=no-file-ignored -czf "$f" data .env); chmod 600 "$f"'; sudo docker compose start) >"$OUT/backup.txt" 2>&1
+archive=$(cd "$DIR" && sudo sh -c 'ls backups/backup-*.tgz' | head -n 1)
 [ -n "$archive" ] || fail "the backup made no archive: $(cat "$OUT/backup.txt")"
 grep -q "socket ignored" "$OUT/backup.txt" && fail "tar listed sockets: $(cat "$OUT/backup.txt")"
 [ "$(sudo stat -c %a "$DIR/$archive")" = 600 ] || fail "the archive is readable by others"
+[ "$(sudo stat -c %a "$DIR/backups")" = 700 ] || fail "the backups folder is open to others"
 healthy_again && through_caddy "the backup"
 echo after-backup | sudo tee "$DIR/data/e2e-backup" >/dev/null
 (cd /opt/openmausbot && sudo docker compose stop && sudo sh -c "set -e; tar -tzf $archive data/ >/dev/null; rm -rf data.before-restore; mv data data.before-restore; tar -xzpf $archive data"; sudo docker compose start) >"$OUT/restore.txt" 2>&1

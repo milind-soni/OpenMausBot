@@ -274,11 +274,19 @@ room_for_copy() { # data backup image → 0 when there is room where the copy go
   [ "$FREE_MB" -ge "$NEEDED_MB" ]
 }
 
-# After a rollback the version that ran before stays pinned by its digest. A tag .env named before (the installer's
-# `stable`) may have moved since, and a later run of the installer or `docker compose pull` would follow it and undo
-# the rollback. A version built on this machine has no digest to pin.
+# After a rollback .env is exactly as it was, unless it named a tag that moves: the installer's `stable`, `latest`, or no
+# image at all (the Compose file's `latest`). Such a tag may have moved since, and a later run of the installer or
+# `docker compose pull` would follow it and undo the rollback, so the version that ran before is pinned by its digest
+# instead. A digest or a released version's own tag (`:v0.1.150`) never moves, and stays as it was. A version built on
+# this machine has no digest to pin.
 pin_previous() {
-  case "$J_previous" in "$REPO@sha256:"*) pin_image "$J_previous" ;; esac
+  local named
+  case "$J_previous" in "$REPO@sha256:"*) ;; *) return 0 ;; esac
+  named=$(sed -n 's/^OMB_IMAGE=//p' .env 2>/dev/null | tail -n 1)
+  case "$named" in
+    *@sha256:* | *:v[0-9]*.[0-9]*.[0-9]*) return 0 ;;
+  esac
+  pin_image "$J_previous"
 }
 pin_image() { # writes OMB_IMAGE=<ref> into .env, keeping every other line and the file's mode
   local tmp="$DIR/.env.update.tmp"

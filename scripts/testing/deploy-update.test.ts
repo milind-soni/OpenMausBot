@@ -325,6 +325,26 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(box.run(["--rollback", "--yes"]).stdout).toContain("There is no earlier update to go back from.");
   });
 
+  // A released version's own tag, or a digest, never moves: .env comes back byte for byte. Only a moving tag (`stable`,
+  // `latest`, or none) is replaced by the digest of the version that ran.
+  it("puts .env back exactly when it named a tag that does not move", () => {
+    for (const named of [`${REPO}:v0.1.150`, OLD.refs[1]!]) {
+      const box = install({}, { images: [{ ...OLD, refs: [...OLD.refs, `${REPO}:v0.1.150`] }, NEW] });
+      writeFileSync(join(box.deploy, ".env"), `${ENV}OMB_IMAGE=${named}\n`, { mode: 0o600 });
+      const before = box.env();
+      expect(box.run().status).toBe(0);
+      expect(box.env()).not.toBe(before);
+      const back = box.run(["--rollback", "--yes"]);
+      expect(back.status, back.stdout).toBe(0);
+      expect(box.env(), named).toBe(before);
+    }
+    const moving = install();
+    writeFileSync(join(moving.deploy, ".env"), `${ENV}OMB_IMAGE=${REPO}:stable\n`);
+    expect(moving.run().status).toBe(0);
+    expect(moving.run(["--rollback", "--yes"]).status).toBe(0);
+    expect(moving.env()).toBe(`${ENV}OMB_IMAGE=${OLD.refs[1]}\n`);
+  });
+
   // A hardened server answers `openmausbot doctor` without a session with a refusal, so before the server's own count
   // the check that a bot can still start never ran there.
   it("checks a hardened version's engines with the server's own count, where doctor is refused", () => {

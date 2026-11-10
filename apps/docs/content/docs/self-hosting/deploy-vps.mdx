@@ -417,10 +417,11 @@ every file's owner and mode either way. The script then:
    without it), and Caddy runs again.
 5. If any of that fails: puts back the data from the copy, `.env` and the old
    image, starts the old version, and tells you what went wrong. Your server
-   is as it was before step 1, except that `.env` now names the old version by
-   its digest: a tag such as the installer's `stable` may have moved since,
-   and a later run of the installer would otherwise follow it. `--rollback`
-   does the same. The copy is put into a new folder inside the
+   is as it was before step 1, `.env` included, byte for byte. Only when `.env`
+   named a tag that moves (the installer's `stable`, `latest`, or no image at
+   all) does it now name the old version by its digest instead: that tag may
+   have moved since, and a later run of the installer would otherwise follow
+   it. `--rollback` does the same. The copy is put into a new folder inside the
    data and checked there before it takes the data's place, so a restore that
    fails (a full disk, say) leaves both the data and the copy as they were:
    the server stays stopped, the update's journal is kept, and
@@ -494,7 +495,7 @@ the administrator shell, replacing `X.Y.Z`:
 
 ```sh
 sudo systemctl stop openmausbot
-sudo -iu maus sh -c 'umask 077; tar czf ~/openmausbot-before-update.tgz -C ~ .openmausbot'
+sudo -iu maus sh -c 'umask 077; tar czf ~/openmausbot-before-update.tgz -C ~ .openmausbot && chmod 600 ~/openmausbot-before-update.tgz'
 sudo -iu maus npm install --global --prefix /home/maus/.local openmausbot@X.Y.Z
 sudo systemctl start openmausbot
 curl -sf http://127.0.0.1:8799/api/health && sudo -iu maus openmausbot doctor
@@ -536,6 +537,7 @@ credentials, and paired sessions). Run it from the service account's shell:
 umask 077
 backup_dir=$(mktemp -d "$PWD/openmausbot-backup.XXXXXX")
 tar czf "$backup_dir/openmausbot-data.tgz" -C "$HOME" .openmausbot
+chmod 600 "$backup_dir/openmausbot-data.tgz"
 ```
 
 A full backup also needs your engine credential/configuration paths, such as
@@ -552,7 +554,7 @@ volume name if you changed the Compose project:
 ```sh
 docker compose stop
 backup_dir=$(mktemp -d "$PWD/openmausbot-backup.XXXXXX")
-docker run --rm -v deploy_data:/data:ro -v "$backup_dir":/b alpine sh -c 'umask 077; tar czf /b/openmausbot-data.tgz -C /data .'
+docker run --rm -v deploy_data:/data:ro -v "$backup_dir":/b alpine sh -c 'umask 077; tar czf /b/openmausbot-data.tgz -C /data . && chmod 600 /b/openmausbot-data.tgz'
 docker compose start
 ```
 
@@ -566,24 +568,26 @@ docker compose start
 ```
 
 With the installer, the data is the folder `/opt/openmausbot/data`. This backs
-it up, with `.env`, into a private archive in `/opt/openmausbot`, the whole
-project stopped and started again around it:
+it up, with `.env`, into an archive in `/opt/openmausbot/backups`, the whole
+project stopped and started again around it. The folder is `700` and the archive
+`600` whatever the server's umask or the folder's default ACLs, since the archive
+holds every chat, key and session:
 
 ```sh
-cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'umask 077; tar --warning=no-file-ignored -czf "backup-$(date -u +%Y%m%dT%H%M%SZ).tgz" data .env'; sudo docker compose start
+cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'set -e; install -d -m 700 backups; f="backups/backup-$(date -u +%Y%m%dT%H%M%SZ).tgz"; (umask 077; tar --warning=no-file-ignored -czf "$f" data .env); chmod 600 "$f"'; sudo docker compose start
 ```
 
 Copy the archive to another machine and keep it private.
 `--warning=no-file-ignored` keeps tar from listing the sockets in the data
 folder, which are not data: the server makes them again when it starts.
 
-To restore an archive, replace `backup-20261110T153000Z.tgz` with its name.
+To restore an archive, replace `backups/backup-20261110T153000Z.tgz` with its name.
 The data as it is now is moved aside to `data.before-restore`, and the archive's
 data takes its place, with its owner and permissions. An archive without a
 `data/` folder changes nothing:
 
 ```sh
-cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'set -e; tar -tzf backup-20261110T153000Z.tgz data/ >/dev/null; rm -rf data.before-restore; mv data data.before-restore; tar -xzpf backup-20261110T153000Z.tgz data'; sudo docker compose start
+cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'set -e; tar -tzf backups/backup-20261110T153000Z.tgz data/ >/dev/null; rm -rf data.before-restore; mv data data.before-restore; tar -xzpf backups/backup-20261110T153000Z.tgz data'; sudo docker compose start
 ```
 
 Once MausBot runs on the restored data, remove the old copy:
