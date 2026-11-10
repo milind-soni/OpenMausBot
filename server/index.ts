@@ -8811,11 +8811,9 @@ routines = new RoutineManager({
     return groupIsWorking(group) || coordinator.busy ? "busy" : "ready";
   },
   createTask: (botId, title, run) => {
-    const task = store.createTask(botId, title, false, undefined, undefined, undefined, routineThreadModel(run && routines?.listRoutines().find((routine) => routine.id === run.routineId), routineModelChecks));
     // On a Cloud home the routine's writer opens a run's conversation; a webhook run is the owner's, but its payload never reaches the lent Mac.
-    if (task && CLOUD_HOME && run) {
-      threadStarters.set(task.threadId, run.triggerSource === "webhook" ? CLOUD_OWNER_KEY! : routineOpener(run.routineId));
-    }
+    const task = store.createTask(botId, title, false, undefined, undefined, undefined, routineThreadModel(run && routines?.listRoutines().find((routine) => routine.id === run.routineId), routineModelChecks), undefined,
+      CLOUD_HOME && run ? (created) => threadStarters.set(created.threadId, run.triggerSource === "webhook" ? CLOUD_OWNER_KEY! : routineOpener(run.routineId)) : undefined);
     if (task && run?.triggerSource === "webhook") outsideLineage.mark(task.threadId);
     return task;
   },
@@ -13805,10 +13803,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (lane?.created) createdThread = lane.threadId;
             if (lane) delegatedLevel.apply(internalSender, internalCapability.threadId, internalCapability.roomHandoffId ?? generation, recipient, lane.threadId);
             if (!room) {
-              const opened = { botId: internalSender.id, name: internalSender.name, threadId: address.threadId, at: Date.now(), ...(lends ? { forOwner: true as const } : {}) };
+              const opened = { botId: internalSender.id, name: internalSender.name, threadId: address.threadId, at: Date.now(), ...(lends ? { forOwner: true as const } : {}) }, startedFor = (created: { threadId: string }) => threadStarters.set(created.threadId, opener);
               const task = continued ?? (fresh
-                ? store.createTask(target.botId, call.title ?? (call.message.replace(/\s+/g, " ").trim().slice(0, 60) || `From ${internalSender.name}`), false, call.projectId, opened, call.ownThread?.approvalMode, call.ownThread?.modelSelection, folder.cwd)
-                : store.createTask(target.botId, `@${internalSender.name} · work`, false, undefined, { ...opened, kind: "work" }, undefined, undefined, folder.cwd));
+                ? store.createTask(target.botId, call.title ?? (call.message.replace(/\s+/g, " ").trim().slice(0, 60) || `From ${internalSender.name}`), false, call.projectId, opened, call.ownThread?.approvalMode, call.ownThread?.modelSelection, folder.cwd, startedFor)
+                : store.createTask(target.botId, `@${internalSender.name} · work`, false, undefined, { ...opened, kind: "work" }, undefined, undefined, folder.cwd, startedFor));
               if (!task) throw new Error("The recipient no longer exists");
               target.threadId = task.threadId;
               if (!continued) createdThread = task.threadId;
@@ -14160,9 +14158,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (body.reportBack === true) { if (owner.group) return json(res, 400, { error: "report_back works only from your own conversation, not a room. Leave it out; the thread's result then stays in that thread." });
             const result = await coordinateBots({ botIds: [from.id], message, rework: false, thread: "new", reply: "resume", consult: false, title, projectId, ownThread: inherited }), receipt = (result.body.receipts as PeerDeliveryReceipt[] | undefined)?.[0];
             return json(res, result.status === 200 ? 201 : result.status, { ...result.body, self: true, reportBack: true, title, botId: from.id, botName: from.name, threadId: receipt?.threadId, requestId: receipt?.requestId }); }
-          const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() }, inherited.approvalMode, inherited.modelSelection);
+          const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() }, inherited.approvalMode, inherited.modelSelection, undefined,
+            (created) => threadStarters.set(created.threadId, (CLOUD_TEAM ? teamConnections.handOnFor(internalCapability.threadId, internalCapability.generation) : null) ?? openerFrom(fromThreadId)));
           if (!task) return json(res, 500, { error: "couldn't create that thread" });
-          threadStarters.set(task.threadId, (CLOUD_TEAM ? teamConnections.handOnFor(internalCapability.threadId, internalCapability.generation) : null) ?? openerFrom(fromThreadId));
           internalCapability.openedThreads += 1;
           const chip: Omit<Message, "id" | "at"> = {
             role: "bot",

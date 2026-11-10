@@ -165,9 +165,8 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     let threadId = standing?.threadId;
     if (standing?.brief) store.patchTask(bot.id, standing.threadId, { title: INBOX_TITLE });
     else if (!standing) {
-      const created = store.createTask(bot.id, INBOX_TITLE, false);
+      const created = store.createTask(bot.id, INBOX_TITLE, false, undefined, undefined, undefined, undefined, undefined, (task) => deps.starters.set(task.threadId, person));
       if (!created) return null;
-      deps.starters.set(created.threadId, person);
       threadId = created.threadId;
     }
     homes[person] = { botId: bot.id, threadId: threadId! };
