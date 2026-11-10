@@ -421,8 +421,18 @@ private chat goes to that person instead), and it retries their threads and chan
 chat with it is their inbox (below). A crowned bot nobody owns stays its department's Chief, as on any other server.
 The app offers no crown on a team, so this is reached only through the API (`PATCH /api/bots/<id>` with `chiefOfStaff`).
 
-**A member's MausBot is not crowned.** It is theirs alone, and the audience rule below keeps a bot only one person sees
-from reaching a bot everyone sees (`sameAudience`), so today it cannot hand work to the team's shared bots.
+**A person's MausBot hands work to the bots they can use.** A member's MausBot is not crowned and has no authority over any
+bot, but from a chat private to its person, with their own request behind the turn, it can hand work to any team bot that
+person may chat with, at their level (`server/host/personal-reach.ts`): the receiving bot reads it as `[From @MausBot (bot)
+· assignment … for Mira · on their behalf at your level]`. The work runs in that bot's own private chat with the person,
+exactly as if they had opened it themselves: it is created private to them before anyone's app hears of it, reads and
+writes their layer, and comes back whole to the chat they asked in. Nothing of it reaches the bot's shared chat, a room,
+the team's notes, another member or an admin, in lists, counts, search, notifications or streams. It never widens what the
+person could do: a bot they cannot see is never named to their MausBot (by name or id it is refused exactly like a bot that
+does not exist, and it is never counted), and a bot they can only view is refused. A routine, a relayed line, an event, a
+guest and another person's words can't use this, and it can answer a waiting question only in that person's own chats.
+The same holds for an Owner's or Admin's MausBot, which reaches every bot but other people's MausBots. Nothing reaches a
+person's MausBot from outside it: no other bot is told of it.
 
 **Every bot reaches every bot.** Departments are folders, not walls. Any bot can ask, hand work to or @mention any
 other bot on the team, in any department, someone's Chief included, with nothing to set up (`canReach` in
@@ -430,7 +440,8 @@ other bot on the team, in any department, someone's Chief included, with nothing
 first and everyone else as reachable. Reaching a bot gives no authority over it: supervision, incidents, escalations,
 the inbox, setup changes and automations follow ownership and departments as above (`hasAuthority`, `canManage`).
 Only three things narrow reach: a bot's own peers list (a person can open it again in the bot's settings, under
-Permissions), archived bots, and the audience rule below (a bot shared with different people). A turn in someone's
+Permissions), archived bots, and the audience rule below (a bot shared with different people; a person's own MausBot is the
+one exception, above). A turn in someone's
 private chat may ask any bot, and the work it hands on stays in that person's audience; it never hands work into a room
 or posts in one.
 
