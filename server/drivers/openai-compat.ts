@@ -1,6 +1,7 @@
 // Transcript-replay driver for OpenRouter, Groq, Together, llama.cpp, and
 // other endpoints that speak the OpenAI chat-completions contract.
 import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
+import { EFFORT_LEVELS } from "../../shared/wire.ts";
 import { isLoopback } from "../provider-key-check.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
 import { isContextName, isOllama, serveWithWindow } from "./ollama-context.ts";
@@ -374,6 +375,9 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       timeoutMs: config.replyWaitMinutes ? config.replyWaitMinutes * 60_000 : idleTimeoutMs(),
       ...(onThisNetwork(config.url) ? { livenessEveryMs: livenessEveryMs(), localModel: true } : {}),
       reasoning: true,
+      // Local servers (llama.cpp, LM Studio, vLLM) mostly ignore or refuse `reasoning_effort`, so their bots
+      // keep the control hidden; a remote endpoint's level is sent and demoted if the endpoint refuses it.
+      ...(onThisNetwork(config.url) ? {} : { effortLevels: EFFORT_LEVELS }),
       billing: "metered",
       includeUsageInCompleted: true,
       nativeLog: {

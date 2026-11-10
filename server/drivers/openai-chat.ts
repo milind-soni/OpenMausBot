@@ -12,6 +12,7 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQuestions, questionChoices } from "../../shared/ask-question.ts";
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
+import type { EffortLevel } from "../../shared/wire.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
 import { ChatToolSessionError, chatToolNotices, mountChatTools, refitChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
@@ -21,20 +22,21 @@ import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent,
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
-import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
+import { completionError, refusedToolCallFailure, RejectedToolCallError, UnsupportedChatToolsError, UnsupportedReasoningEffortError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
+import { classifyFailure } from "./openai-chat-failure.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
-import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
+import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { plainFailure } from "./engine-errors.ts";
 import { noticeFailure } from "../chat-notices.ts";
 import { toolFailureMessage } from "./tool-failure.ts";
-import { refusesRequestSize, RequestTooLargeError, sizeChange, smallerResend } from "./chat-size-limit.ts";
+import { RequestTooLargeError, sizeChange, smallerResend } from "./chat-size-limit.ts";
 import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
 import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
-import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
+import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted } from "../key-rejections.ts";
 import { FETCH_LIMIT_MS, fetchPastLimit } from "./openai-chat-fetch.ts";
 import { announcesAction } from "./chat-announcement.ts";
 
@@ -104,6 +106,8 @@ interface RuntimeOptions<Config> {
   refreshModels?: () => Promise<void>;
   generateModel?: () => string;
   reasoning?: boolean;
+  /** Effort levels the endpoint takes as `reasoning_effort`, ascending; absent hides the bot's effort control. */
+  effortLevels?: readonly EffortLevel[];
   /** Cerebras rejects `reasoning_content` and takes `reasoning`. */
   reasoningReplayField?: "reasoning_content" | "reasoning";
   contentText?: (content: unknown) => string;
@@ -212,6 +216,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     ending: boolean;
   }>();
   const reasoningReplayRejected = new Set<string>();
+  /** Models that refused `reasoning_effort` once; later turns stop offering it instead of paying a failed request each time. */
+  const effortRejected = new Set<string>();
   const routes = createModelRoutes(options.apiUrl);
   /** Beside the messages, not on them, so encrypted reasoning never reaches a Chat Completions body, a log or a handoff. */
   const responseOutputs = new WeakMap<OpenAIChatMessage, ResponseItem[]>();
@@ -260,6 +266,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
     tools: ChatToolDefinition[] = [],
     onUsage?: TextGenerationOptions["onUsage"],
+    effort?: EffortLevel,
   ): Promise<Completion> => {
     const timeoutController = new AbortController();
     let idleTimer: NodeJS.Timeout | null = null;
@@ -283,7 +290,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model) })
         : {
           ...options.requestBody(served, messages, stream),
-          ...(route === "chat-reasoning-off" ? { reasoning_effort: "none" } : {}),
+          ...(route === "chat-reasoning-off"
+            ? { reasoning_effort: "none" }
+            : effort && !effortRejected.has(model) ? { reasoning_effort: effort } : {}),
           ...(tools.length ? { tools } : {}),
         });
       const send = options.timeoutMs > FETCH_LIMIT_MS ? fetchPastLimit : fetch;
@@ -294,20 +303,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         body: payload,
         signal: activeSignal,
       });
-      const failure = (status: number, body: string): Error => {
-        const message = `${options.httpErrorLabel} HTTP ${status}${body ? `: ${httpErrorDetail(body)}` : ""}`;
-        const refused = tools.length ? routeRefusal(route, status, body) : null;
-        if (refused) return new ModelRouteRefused(refused, message);
-        if (rejectsKey(status, body)) noteKeyRejected(options.apiUrl, options.apiKey);
-        if (refusesRequestSize(status, body)) return new RequestTooLargeError(message, Buffer.byteLength(payload));
-        if (rejectsToolsParameter(status, body)) return new UnsupportedChatToolsError(message);
-        const refusal = refusedToolCall(status, body);
-        if (refusal) return new RejectedToolCallError(message, refusal);
-        if (messages.some((entry) => entry.reasoning_content !== undefined) && rejectsReasoningReplay(status, body)) {
-          return new UnsupportedReasoningReplayError(message);
-        }
-        return new Error(message);
-      };
+      const failure = classifyFailure({ label: options.httpErrorLabel, route, apiUrl: options.apiUrl, apiKey: options.apiKey,
+        payloadBytes: Buffer.byteLength(payload), offersTools: tools.length > 0, effort,
+        replaysReasoning: messages.some((entry) => entry.reasoning_content !== undefined) });
       if (!response.ok) throw failure(response.status, await response.text().catch(() => ""));
       noteKeyAccepted(options.apiUrl, options.apiKey);
       if (route === "responses") {
@@ -462,6 +460,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
     tools: ChatToolDefinition[] = [],
     onUsage?: TextGenerationOptions["onUsage"],
+    effort?: EffortLevel,
   ): Promise<Completion> => {
     for (;;) {
       let replied = false;
@@ -469,7 +468,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         return await completeOn(routes.routeFor(model, tools.length > 0), messages, model, stream, signal, onDelta && ((text, kind) => {
           replied = true;
           onDelta(text, kind);
-        }), tools, onUsage);
+        }), tools, onUsage, effort);
       } catch (error) {
         if (!(error instanceof ModelRouteRefused) || replied || signal?.aborted) throw error;
         if (!routes.advance(model, error.refusal)) throw new ChatProtocolError(noRouteLeft(error.message));
@@ -524,6 +523,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const retainImages = chatImageBudget();
     for (const message of messages) retainImages(message.content);
     const model = turn.model || options.models().default;
+    let effort = turn.effort && options.effortLevels?.includes(turn.effort) ? turn.effort : undefined;
     const maskable = (value: unknown): value is string => typeof value === "string" && value.length >= 8; // a short placeholder key ("1") would redact every match
     const secrets = [options.apiKey].filter(maskable);
     for (const integration of Object.values(turn.integrations ?? {})) {
@@ -650,7 +650,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 if (streamKind === "assistant_text") answerStreamed = true;
                 const shown = holdback && streamKind === "assistant_text" ? holdback.feed(text) : text;
                 if (shown) delta(shown, streamKind);
-              }, tools.definitions);
+              }, tools.definitions, undefined, effort);
               // A reply cut off at the token limit may be a call cut short; running half of one is worse than saying so.
               const written = holdback && !completion.toolCalls.length && completion.finishReason !== "length" ? textToolCalls(completion.text, tools.definitions) : null;
               unreadable = written?.kind === "unreadable" && !askedAgain;
@@ -669,6 +669,15 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               break;
             } catch (value) {
               const error = asError(value);
+              // The endpoint refused the level, not the turn: one resend at the model's own default keeps it running.
+              if (error instanceof UnsupportedReasoningEffortError && effort && !streamed && !abort.signal.aborted) {
+                effortRejected.add(model);
+                effort = undefined;
+                native("out", { refused: "reasoning_effort" });
+                emit({ ...base(turn.threadId, turnId), type: "runtime.notice",
+                  message: safeText(`${model} does not take a reasoning effort, so this turn runs at the model's own default.`) });
+                continue;
+              }
               const verdict = classifyError(error);
               // A provider refuses a request with too many tools before running anything: learn its limit and list fewer.
               const refit = streamed || seenCalls.size || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model), [ASK_USER_TOOL_DEFINITION]);
@@ -954,6 +963,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         deviceMcp: options.tools !== false,
         queueing: true,
         ...(options.tools !== false ? { askTool: { kind: "native" as const, name: ASK_USER_TOOL } } : {}),
+        ...(options.effortLevels?.length ? { effortLevels: options.effortLevels } : {}),
         guestTurns: "confined" },
       sendTurn,
       interruptTurn: async (threadId, turnId) => {

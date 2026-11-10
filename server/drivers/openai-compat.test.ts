@@ -71,6 +71,20 @@ describe("OpenAICompatDriver", () => {
     }
   });
 
+  it.each([
+    ["https://api.neuralwatt.com/v1", ["none", "low", "medium", "high", "xhigh", "max"]],
+    ["http://127.0.0.1:1234/v1", undefined],
+  ])("advertises reasoning effort for a remote endpoint only: %s", async (url, levels) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [] })));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "effort-capability", displayName: "Other", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url }),
+      environment: { OPENAI_COMPAT_API_KEY: "«redacted 17 chars»" },
+    });
+    expect(instance.adapter.capabilities.effortLevels).toEqual(levels);
+    await instance.dispose();
+  });
+
   it("honours an explicit url and apiKeyEnv override", () => {
     const cfg = OpenAICompatDriver.decodeConfig({
       url: "https://api.groq.com/openai/v1/",

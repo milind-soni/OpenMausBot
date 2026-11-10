@@ -963,3 +963,66 @@ describe("createOpenAIChatRuntime rejected keys", () => {
     await instance.dispose();
   });
 });
+
+describe("createOpenAIChatRuntime reasoning effort", () => {
+  const ok = () => sse(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+  const create = (key: string) => OpenAICompatDriver.create({
+    instanceId: "openaiCompat", displayName: "Other", enabled: true,
+    config: OpenAICompatDriver.decodeConfig({ url: "https://effort.example.com/v1" }),
+    environment: { OPENAI_COMPAT_API_KEY: key },
+  });
+  const script = (responses: Array<() => Response>) => {
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (!String(url).endsWith("/chat/completions")) return new Response("", { status: 404 });
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return (responses[Math.min(bodies.length, responses.length) - 1] ?? ok())();
+    }));
+    return bodies;
+  };
+  const turn = async (instance: Awaited<ReturnType<typeof create>>, effort?: "none" | "low" | "high") => {
+    const events: RuntimeEvent[] = [];
+    const stop = instance.adapter.onEvent((event) => events.push(event));
+    await instance.adapter.sendTurn({ threadId: "thread", text: "hi", ...(effort ? { effort } : {}) });
+    await vi.waitFor(() => {
+      if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+    }, { timeout: 10_000 });
+    stop();
+    return events;
+  };
+
+  it("advertises the levels an OpenAI-compatible endpoint takes, so a bot can hold its own", async () => {
+    script([ok]);
+    const instance = await create("fixture-effort-capability");
+    expect(instance.adapter.capabilities.effortLevels).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
+    await instance.dispose();
+  });
+
+  it("sends the bot's level as reasoning_effort and sends nothing when the bot holds none", async () => {
+    const bodies = script([ok]);
+    const instance = await create("fixture-effort-sent");
+    await turn(instance, "low");
+    await turn(instance);
+    expect(bodies[0]!.reasoning_effort).toBe("low");
+    expect(bodies[1]).not.toHaveProperty("reasoning_effort");
+    await instance.dispose();
+  }, 20_000);
+
+  it("runs the turn at the endpoint's default when it refuses the level", async () => {
+    const bodies = script([
+      () => new Response(JSON.stringify({ error: { message: "Unsupported parameter: 'reasoning_effort'", type: "invalid_request_error", param: "reasoning_effort" } }), { status: 400 }),
+      ok,
+    ]);
+    const instance = await create("fixture-effort-refused");
+    const events = await turn(instance, "high");
+    expect(bodies[0]!.reasoning_effort).toBe("high");
+    expect(bodies[1]).not.toHaveProperty("reasoning_effort");
+    expect(events.find((event) => event.type === "runtime.notice")).toMatchObject({
+      message: expect.stringContaining("does not take a reasoning effort"),
+    });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+    await turn(instance, "high");
+    expect(bodies[2]).not.toHaveProperty("reasoning_effort");
+    await instance.dispose();
+  }, 20_000);
+});
