@@ -72,9 +72,9 @@ export function installedExtensions(userDataDir: string): InstalledExtension[] {
       const manifest = dir ? readJson(join(dir, "manifest.json")) : null;
       if (!dir || !manifest) continue;
       const page = pageOf(manifest);
+      if (!page) continue;
       const name = text(manifest.name);
       const shown = name ? localized(name, dir, manifest) : null;
-      if (!page) continue;
       const url = new URL(page, `chrome-extension://${id}/`).href;
       if (extensionPage(url) && new URL(url).hostname === id) found.push({ id, name: (shown ?? id).slice(0, 120), url });
     } catch {

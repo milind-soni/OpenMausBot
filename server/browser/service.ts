@@ -729,7 +729,7 @@ export class BrowserService {
         profile.hub.tabsChanged();
       },
       download: (id: string): Download | undefined => profile.run?.browser.downloads?.list().find((download) => download.id === id),
-      extensions: () => (profileKind(profile.key) === "mychrome" || profileKind(profile.key) === "cdp" ? [] : installedExtensions(profileDir(this.#options.dataDir, profile.key))),
+      extensions: () => (["mychrome", "cdp"].includes(profileKind(profile.key)) ? [] : installedExtensions(profileDir(this.#options.dataDir, profile.key))),
     };
   }
 }
