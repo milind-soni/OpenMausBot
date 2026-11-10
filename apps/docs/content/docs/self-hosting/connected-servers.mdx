@@ -1,0 +1,93 @@
+---
+title: What a connected server shares
+description: For a security reviewer. Exactly what MausBot can do on a server you connect to it, and what that server sends to MausBot.
+icon: ShieldCheck
+---
+
+<Callout title="Connected mode is not on sale yet">
+  A standalone server, the default, has no connector and nothing on this page applies to it. This page describes the connector's code as it is in the [public repository](https://github.com/milind-soni/OpenMausBot/tree/main/connector), so you can check every line against it. Items marked **planned** do not exist yet.
+</Callout>
+
+A connected server is a server of yours that MausBot's control plane (the Admin) manages for you: it starts the MausBot server (the home) there, updates it and watches its health. The part that does this on your server is the **connector**.
+
+## The connector
+
+- One container, `mausbot-connector`, from `ghcr.io/milind-soni/mausbot-connector`, pinned by digest.
+- It only calls out: one HTTPS request to enrol, then one WebSocket to the Admin. It opens no port.
+- It makes its own Ed25519 key at enrolment. The private key stays on your server. It pins the Admin's signing keys.
+- It runs with every Linux capability dropped, a read-only file system and no new privileges.
+- It is given Docker's socket, which is root on the server in the hands of any program. What the connector does with it is fixed in its code: the home's container, its data volume and copies of it, short helper containers, and the connector's own replacement. It runs images from `ghcr.io/milind-soni/` only, pinned by digest.
+
+## What MausBot can do: eleven jobs
+
+Every job is signed by the Admin for your server alone and is refused 15 minutes after it was signed. A job of any other kind, or with any other argument, is refused. There is no shell, no command the Admin chooses, and no reading of a file by its path.
+
+| Job | What it does on your server |
+|---|---|
+| `start` | Starts the home on a named image with the settings the Admin sends (names beginning `OMB_` only) |
+| `stop`, `restart` | Stops or restarts the home |
+| `update` | Pulls a new image, copies the data, swaps the container and rolls both back if the new version is not healthy |
+| `status` | Reads the home's state, the connector's version and the list of copies |
+| `backup` | Copies the data to a volume on your server; three are kept |
+| `restore` | Puts one of those copies back |
+| `export-disk` | **Uploads an archive of the whole data directory to MausBot.** Used to move a Cloud off your server |
+| `import-disk` | Replaces the data directory with an archive from an HTTPS address. Used to move a Cloud onto your server |
+| `host-health` | Reads the server's size, load and checks (below) |
+| `self-update` | Replaces the connector with a newer one from the same registry |
+
+Until your team's Owner accepts the server in MausBot, it answers only `status` and `host-health`.
+
+## What else MausBot can do: requests to the home
+
+On the same connection the Admin can send HTTP requests to the home. The connector passes each one to the home on the server's loopback and nowhere else, one request per stream, with no protocol upgrade. The home treats them as requests from outside: without a member's session it acts only on those signed with its own secret. The signed ones read its health and its team summary (below), and one of them, a **pairing**, opens a sign-in for a named member of your team: it is how the MausBot dashboard signs a person in to your server. A session opened this way can do what that member can do.
+
+Jobs are not limited to reading: `export-disk` and a pairing both reach what people wrote. They are here so you can see them, log them and refuse them.
+
+## Your log and your rules
+
+- **The audit log.** Every job, each of its steps, its result and every request to the home is one line in `/var/log/mausbot/audit.jsonl` on your server, owned by root. A pairing's line names the member and the device. Each line carries the hash of the line before it, so a removed or changed line shows. A job that would change something is refused when the log cannot be written.
+
+  ```sh
+  docker exec mausbot-connector mausbot-connector audit --tail 50
+  docker exec mausbot-connector mausbot-connector audit --verify
+  ```
+
+- **Your policy.** `/etc/mausbot/policy.json`, which only root on your server can write, lists the job kinds MausBot may run and can hold updates. The connector reads it before every job and never writes it.
+
+  ```json
+  { "jobs": ["status", "host-health", "update", "backup"], "updates": "hold" }
+  ```
+
+  `"jobs": []` refuses every job. Two things the policy does not cover: the connector's own `self-update` is always accepted, and requests to the home are not jobs.
+
+- **Cutting MausBot off.** `docker stop mausbot-connector` ends the connection. The home keeps running and the sessions it already gave out keep working. While the connector is stopped, MausBot's dashboard cannot open a new sign-in, and nothing restarts the home if it stops. A pause switch in MausBot itself is **planned**.
+
+## What the connector sends
+
+| When | What |
+|---|---|
+| Once, at enrolment | The one-time code, the connector's public key, and the server's facts: operating system, kernel, architecture, CPU count, memory, free disk, Docker version, whether AppArmor and user namespaces are on |
+| Every 30 seconds | Those facts, plus total disk, available memory, load, uptime, clock difference and the result of each server check; the home's state, image and version, and its sandbox self-check as a count and check names; the connector's version and image |
+| After each job | The result: the home's state and image, the name and time of a copy, or a byte count and checksum. A failure is a fixed code and a sentence that never carries a secret |
+| During `export-disk` only | The archive of the data directory |
+
+The connector reads no chat, file, key or name to build any of this, apart from the archive.
+
+## What the home sends
+
+A connected home runs the image our own Clouds run, so it also talks to MausBot itself. Read from the server's code:
+
+- **At each start:** a signed note that it started, with the time.
+- **When the Admin asks for health:** versions, start time, counts of turns started and failed, each routine's random id and last status, which engines are installed and signed in, which connected apps are on, sandbox and memory figures, counts such as emails sorted and replies drafted, and incidents as fixed codes. No message text, bot name, title, address or key.
+- **On a team's server, when the Admin asks for the team summary** (MausBot's Team admin pages show it)**:** the names of connected apps and MCP servers, the account email each engine is signed in with, and the email addresses of the members who connected each app.
+- **Only when a person does it:** a page a bot publishes is uploaded; a report someone sends to the developers carries their message, the bot's name and recent log lines, with secrets removed.
+- **Only if your plan includes them:** included AI credit, voice and research send that traffic through MausBot's hosts. With your own keys it goes to the provider directly.
+- **Connected apps:** a home registers with MausBot's connected-apps broker at start, and app traffic passes through it while apps are used.
+- **In the browser:** [usage analytics](/docs/security/analytics), which each person can turn off.
+
+## Planned
+
+- A seat count in what the server reports. No seat or member count is sent today.
+- A connected mode in which nothing a person wrote can leave: today `export-disk`, pairing, the Team admin summary and reports to the developers are the exceptions above.
+- Connecting a server that was installed standalone, keeping its data. Today the connector starts a separate home with its own data.
+- A published list of the network addresses a connected server needs.
