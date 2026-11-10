@@ -61,9 +61,9 @@ export function createTeamOwners(deps: TeamOwnersDeps) {
     left(email: string): void {
       people?.left(email);
     },
-    /** Bots moved in before owners were recorded report to whoever moved them. */
+    /** Bots moved in before owners were recorded report to whoever moved them, unless they left. */
     backfill(moveIns: Record<string, { email?: string }>): void {
-      for (const [botId, move] of Object.entries(moveIns)) if (move.email) setCreatedBy(deps.store(), botId, move.email);
+      for (const [botId, move] of Object.entries(moveIns)) if (move.email && !people?.gone(move.email)) setCreatedBy(deps.store(), botId, move.email);
     },
   };
 }

@@ -75,6 +75,10 @@ export interface BoxRequest {
   home?: string;
   /** Files bound read-write over their names in `home`: the team's engine sign-ins. */
   shared?: ReadonlyArray<{ source: string; target: string }>;
+  /** The command, its arguments and its environment are a server someone configured (an MCP server a bot may have
+   * added), not ones OpenMausBot built. Security: none of them puts anything of the data folder in the box but the
+   * bot's own folders, so an environment value naming a folder there is not made writable. */
+  configured?: boolean;
   /** A host unix socket the box dials out to, so the server can reach a port the engine listens on inside the box's own
    * network, such as a sign-in's callback. Only an isolated box has one. */
   relay?: string;
@@ -200,6 +204,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     const own = join(dataDir, "workspaces", botId);
     if (!covered(own)) rw(own);
   }
+  const ownFolders = botId && ID.test(botId) ? [join(dataDir, "workspaces", botId), join(dataDir, "task-workspaces", botId)] : [];
   if (mutate.has("bind-otherws")) {
     rw(join(dataDir, "workspaces"));
     rw(join(dataDir, "task-workspaces"));
@@ -207,7 +212,9 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   for (const name of PATH_ENV_NAMES) {
     const value = request.env[name];
     // A temp folder stays the box's own private one; anything else the engine writes is put back.
-    if (value && isAbsolute(value) && !covered(resolve(value)) && !PRIVATE_INSIDE.some((base) => under(resolve(value), base))) rw(resolve(value));
+    if (!value || !isAbsolute(value) || covered(resolve(value)) || PRIVATE_INSIDE.some((base) => under(resolve(value), base))) continue;
+    if (request.configured && (under(resolve(value), dataDir) || under(dataDir, resolve(value))) && !ownFolders.some((folder) => under(resolve(value), folder))) continue;
+    rw(resolve(value));
   }
   for (const path of request.rw ?? []) if (!covered(resolve(path))) rw(resolve(path));
   if (ownHome) {
@@ -226,9 +233,19 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     mounts.push({ kind: "ro", source: shown, target: shown, optional: true });
   }
   const readOnly = new Set<string>();
+  const inBotFolder = (path: string) => ["workspaces", "task-workspaces"].some((kind) => {
+    const [owner, ...rest] = relative(join(dataDir, kind), path).split(sep);
+    return owner !== undefined && ID.test(owner) && !rest.includes("..") && (botId ? owner === botId : true);
+  });
+  const named = new Set((request.ro ?? []).map((path) => resolve(path)));
+  if (botId && ID.test(botId)) named.add(join(dataDir, "bots", botId, "SOUL.md"));
   for (const path of [...(request.ro ?? []), ...argvPaths(request.args), ...(botId && ID.test(botId) ? [join(dataDir, "bots", botId, "SOUL.md")] : [])]) {
     const full = resolve(path);
     if (request.ro?.includes(path)) assertReadOnlySource(full);
+    // Security: a command line is not a grant. A path on one that is in the data folder, or holds it, is shown only
+    // when the caller named it in `ro`, or when it is in a bot's folder: this box's bot's, or any bot's where the caller
+    // gave no bot (a configured server's program lives in the folder of the bot that added it).
+    if (!named.has(full) && (under(full, dataDir) || under(dataDir, full)) && !covered(full) && !inBotFolder(full)) continue;
     // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
     if (covered(full) || readOnly.has(full)) continue;
     if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;

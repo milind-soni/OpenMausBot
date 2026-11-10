@@ -142,6 +142,14 @@ export function shouldResumePausedAddress(
   return account?.paused === true && account.available && state?.enabled === true && !state.error && state.devices.length > 0;
 }
 
+/** The secure address was ended for old phone apps and a phone here still depends on it: say what to do, once. */
+export function showTunnelRetiredNotice(
+  account: Pick<CompanionAccountState, "tunnelRetired"> | null,
+  state: Pick<CompanionState, "devices"> | null,
+): boolean {
+  return account?.tunnelRetired === true && Boolean(state?.devices.some((device) => !device.e2eAt));
+}
+
 export const relative = (at: number) => {
   const seconds = Math.round((Date.now() - at) / 1000);
   if (seconds < 90) return t("remote.time.justNow");
@@ -373,6 +381,11 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
 
       <section className="flex flex-col gap-2" data-devices-block="paired">
         <div className="text-[13px] font-medium text-ink">{t("devices.paired")}</div>
+        {showTunnelRetiredNotice(c.account, state) && (
+          <p role="status" data-devices-notice="tunnel-retired" className="rounded-xl bg-inset px-3 py-2.5 text-[13px] leading-relaxed text-ink">
+            {t("remote.devices.retiredNotice")}
+          </p>
+        )}
         <OpenCodeRow c={c} state={state} />
         {pairedCount ? <PairedPhones c={c} state={state} /> : !state.pairing && <div className="text-[12px] text-ink-secondary">{t("devices.pairedNone")}</div>}
         <PhonesList />

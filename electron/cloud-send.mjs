@@ -89,16 +89,15 @@ function onePasswordRefusal(answer) {
 
 const pick = (source, names) => Object.fromEntries(names.filter((name) => source[name] !== undefined && source[name] !== null).map((name) => [name, source[name]]));
 
-/** A bot's fields for some parts, as My Cloud's PATCH takes them: nothing that names this computer's other bots unless
- * My Cloud has them, and never Custom approval, which only this computer's own window can grant. */
-export function botPatch(bot, parts, cloudBots) {
+/** A bot's fields for some parts, as My Cloud's PATCH takes them: never Custom approval, which only this computer's own
+ * window can grant. */
+export function botPatch(bot, parts) {
   const body = {};
   for (const part of parts) {
     const names = BOT_PARTS[part];
     if (names) Object.assign(body, pick(bot, names));
   }
   if (body.approvalMode === "custom") delete body.approvalMode;
-  if (Array.isArray(body.peers)) body.peers = body.peers.filter((id) => cloudBots.has(id));
   if (record(body.modelSelection)) body.modelSelection = pick(body.modelSelection, ["instanceId", "model", "effort", "variant"]);
   if (parts.includes("model") && record(body.modelSelection)) body.requireAvailableModel = true;
   return body;
@@ -691,10 +690,10 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
 
   async function patchBot(ctx, bot, parts) {
     const refused = {};
-    const whole = await ctx.session.call("PATCH", `/api/bots/${bot.id}`, botPatch(bot, parts, ctx.cloudBots));
+    const whole = await ctx.session.call("PATCH", `/api/bots/${bot.id}`, botPatch(bot, parts));
     if (whole.ok) return refused;
     for (const part of parts) {
-      const body = botPatch(bot, [part], ctx.cloudBots);
+      const body = botPatch(bot, [part]);
       if (!Object.keys(body).length) continue;
       const one = await ctx.session.call("PATCH", `/api/bots/${bot.id}`, body);
       if (!one.ok) refused[part] = refusal(one, "My Cloud refused this setting.");

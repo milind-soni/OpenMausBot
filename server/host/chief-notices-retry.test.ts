@@ -37,7 +37,7 @@ function fixture(over: Partial<ChiefNoticeDeps> = {}) {
   });
   const notices = createChiefNotices({
     store: store as never, notify: () => {}, threadBusy: () => false, botAtThreadCapacity: () => false,
-    groupTurnActive: () => false, startTurn, assignerOf: () => undefined, escalationsEnabled: () => true, schedule: (run) => run(), ...over,
+    groupTurnActive: () => false, startTurn, assignerOf: () => undefined, schedule: (run) => run(), ...over,
   });
   const turnsOf = (botId: string) => startTurn.mock.calls.filter(([id]) => id === botId).map(([, text, opts]) => ({ text, threadId: opts.threadId }));
   return { notices, store, startTurn, turnsOf, chief: bots[0]!, ada: bots[1]! };
@@ -248,13 +248,6 @@ describe("a problem in a conversation that runs confined", () => {
     const f = fixture({ confined: (threadId) => threadId === "ada-job" });
     f.notices.reportIncident({ kind: "failed", bot: f.ada as never, threadId: "ada-job", detail: "the turn stopped" });
     expect(f.turnsOf("ada")).toEqual([]);
-  });
-
-  it("leaves an escalation with a person too", () => {
-    const notify = vi.fn();
-    const f = fixture({ confined: (threadId) => threadId === "ada-job", notify });
-    expect(f.notices.reportEscalation({ kind: "needs-input", bot: f.ada as never, threadId: "ada-job", gate: "a card", reason: "waiting", alreadyNotified: false })).toBe("person");
-    expect(f.startTurn).not.toHaveBeenCalled();
   });
 
   it("a conversation that is not confined still reaches its Chief", () => {
