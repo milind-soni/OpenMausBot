@@ -72,7 +72,7 @@ export interface PlanAccount {
   driver: PlanDriver;
   environment: Record<string, string | undefined>;
   configDir?: string;
-  /** Signed in through OpenMausBot (ChatGPT plan), not a CLI login on disk, so it has no usage reading. */
+  /** No usage reading: a ChatGPT plan signed in through OpenMausBot has no CLI login on disk, and a Claude login is read only when its instance sets `usageMeter: true`, since Anthropic's credential policy covers that token for Claude Code alone (a refused turn still fails over). */
   noUsage?: true;
 }
 
@@ -164,7 +164,7 @@ export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAcc
       environment: { ...entry.environment },
       ...(configDir ? { configDir } : {}),
       // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit.
-      ...(config?.authMode === "chatgpt-plan" ? { noUsage: true as const } : {}),
+      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && config?.usageMeter !== true) ? { noUsage: true as const } : {}),
     });
   }
   return accounts;
@@ -709,7 +709,7 @@ function planUsageCacheKey(accounts: PlanAccount[]): string {
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([name, value]) => `${name}=${value}`)
       .join("\n");
-    return [account.id, account.driver, account.name, account.configDir ?? "", environment].join("\u0000");
+    return [account.id, account.driver, account.name, account.configDir ?? "", environment, account.noUsage ? "no-usage" : "usage"].join("\u0000");
   }).join("\n");
 }
 

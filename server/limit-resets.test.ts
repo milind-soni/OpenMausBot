@@ -34,6 +34,24 @@ const codex = (primary: [number, number], secondary: [number, number]) => row("c
 }));
 const report = (...providers: PlanProviderRow[]): PlanUsageReport => ({ fetchedAt: iso(NOW), providers });
 
+describe("a Claude account whose usage meter is turned off", () => {
+  it("stops a full reading from holding it, even one fetched before the switch, and keeps a refusal's hold", () => {
+    const account = { id: "claude", name: "Claude", driver: "claude" as const, environment: {} };
+    let accounts: Array<typeof account & { noUsage?: true }> = [account];
+    const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
+    const full = report(claude([100, NOW + 2 * HOUR], [40, NOW + 50 * HOUR]));
+    instance.noteUsage(full);
+    expect(instance.blockedUntil("claude")).toBe(NOW + 2 * HOUR);
+    accounts = [{ ...account, noUsage: true }];
+    expect(instance.blockedUntil("claude")).toBeNull();
+    instance.noteUsage(full);
+    expect(instance.blockedUntil("claude")).toBeNull();
+    expect(instance.report().engines).toEqual([]);
+    instance.noteRefusal("claude", NOW + HOUR);
+    expect(instance.blockedUntil("claude")).toBe(NOW + HOUR);
+  });
+});
+
 describe("engineLimitFromUsage", () => {
   it("takes Claude's fullest window and its reset when nothing is at the limit", () => {
     expect(engineLimitFromUsage(claude([92, NOW + 2 * HOUR], [40, NOW + 50 * HOUR]))).toEqual({

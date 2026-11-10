@@ -489,7 +489,7 @@ describe("plan usage fetcher", () => {
 
   it("lists configured Claude, Codex, and Grok accounts and skips other engines", () => {
     expect(planAccountsFromInstances({
-      claude: { driver: "claudeAgent", displayName: "  Personal Claude  ", config: { configDir: "/tmp/claude" } },
+      claude: { driver: "claudeAgent", displayName: "  Personal Claude  ", config: { configDir: "/tmp/claude", usageMeter: true } },
       codex: { driver: "codex" },
       grok: { driver: "grokAgent", environment: { GROK_HOME: "/tmp/grok" } },
       cursor: { driver: "cursorAgent", displayName: "Cursor" },
@@ -613,5 +613,33 @@ describe("plan usage fetcher", () => {
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(report.providers.map((row) => row.id)).toEqual(["codex"]);
+  });
+
+  it("reads no Claude login unless the instance turns its usage meter on", async () => {
+    const accounts = planAccountsFromInstances({
+      claude: { driver: "claudeAgent" },
+      metered: { driver: "claudeAgent", displayName: "Metered", config: { usageMeter: true } },
+    });
+    expect(accounts).toEqual([
+      { id: "claude", name: "Claude", driver: "claude", environment: {}, noUsage: true },
+      { id: "metered", name: "Metered", driver: "claude", environment: {} },
+    ]);
+    const read = vi.fn((_account: PlanAccount) => ({ token: SECRET, accountId: null, expired: false }));
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({}));
+    const report = await fetchPlanUsage(accounts, { fetch: fetchImpl, now: () => NOW, credentials: { read } });
+    expect(read.mock.calls.map(([account]) => account.id)).toEqual(["metered"]);
+    expect(report.providers.map((row) => row.id)).toEqual(["metered"]);
+  });
+
+  it("never serves a cached report across a usage-meter switch", async () => {
+    const read = vi.fn((_account: PlanAccount) => ({ token: SECRET, accountId: null, expired: false }));
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({}));
+    const load = (usageMeter: boolean) => loadPlanUsage({
+      accounts: planAccountsFromInstances({ claude: { driver: "claudeAgent", config: { usageMeter } } }),
+      fetch: fetchImpl, now: NOW, credentials: { read },
+    });
+    expect((await load(true)).providers.map((row) => row.id)).toEqual(["claude"]);
+    expect((await load(false)).providers).toEqual([]);
+    expect((await load(true)).providers.map((row) => row.id)).toEqual(["claude"]);
   });
 });
