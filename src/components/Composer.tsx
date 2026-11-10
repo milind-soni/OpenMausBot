@@ -403,8 +403,9 @@ export function Composer({
     requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(learn.length, learn.length); });
   };
 
-  const pendingCount = (state.pendingQueued[threadId] ?? []).length;
-  const queuedMessages = state.pendingQueued[threadId] ?? [];
+  const sharedChat = Boolean(state.config?.team && !group && profile?.tasks?.some((task) => task.threadId === threadId && !task.private));
+  const queuedMessages = sharedChat ? [] : state.pendingQueued[threadId] ?? [];
+  const pendingCount = queuedMessages.length;
   const canSteerQueued = composerCanSteerQueuedMessages(
     busy,
     locked,

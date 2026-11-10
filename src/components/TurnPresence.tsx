@@ -165,7 +165,7 @@ export function TurnPresence({
     <span id={statusId} className="flex min-w-0 items-baseline gap-x-1.5 text-[14px] leading-[22px] text-ink-tertiary" data-turn-status>
       <span className="turn-phrase turn-phrase-quiet relative grid min-w-0" title={hover} data-turn-now={now ? "" : undefined}>
         {now ? (
-          <ShimmerPhrase key={`in:${current}`} text={current} className={cn("truncate", previous !== null && "turn-phrase-in")} />
+          <ShimmerPhrase key={`in:${current}`} text={label ? `${label} · ${current}` : current} className={cn("truncate", previous !== null && "turn-phrase-in")} />
         ) : (
           <span>{label ?? t("chat.typing")}</span>
         )}
