@@ -399,13 +399,13 @@ describe("app_active", () => {
     expect(ph.calls.filter((call) => call === "capture app_opened")).toHaveLength(3);
   });
 
-  it("says Simple, the only mode, even where the page was on Advanced before", async () => {
+  it("says which mode the page is in that day, Simple or Advanced", async () => {
     await page.load();
     expect(active()).toEqual([{ event: "app_active", props: { platform: "browser", mode: "simple" } }]);
     store.set("omb-advanced-mode", "1");
     vi.setSystemTime(new Date(2026, 9, 24, 9, 0));
     await page.load();
-    expect(active()[1]).toEqual({ event: "app_active", props: { platform: "browser", mode: "simple" } });
+    expect(active()[1]).toEqual({ event: "app_active", props: { platform: "browser", mode: "advanced" } });
   });
 
   it("is sent again after midnight by the ten-minute check, then not again that day", async () => {
