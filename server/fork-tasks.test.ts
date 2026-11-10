@@ -72,3 +72,37 @@ it("forks a room conversation into a normal room task", async () => {
   store.deleteGroupTask(room.id, sourceThreadId);
   expect(store.groupTaskByThread(room.id, fork!.threadId)).toBeTruthy();
 });
+
+it("keeps the source thread's effective permissions without inheriting a pending elevation", async () => {
+  const store = await freshStore();
+  const bot = store.createBot();
+  const anchor = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Restricted work" });
+  store.patchTask(bot.id, bot.threadId, { approvalMode: "custom", autoApprove: false, alwaysAllow: ["provider-tool:example"] });
+  const restricted = store.forkTask(bot.id, bot.threadId, anchor.id)!;
+  expect(restricted).toMatchObject({ approvalMode: "custom", autoApprove: false, alwaysAllow: ["provider-tool:example"] });
+  expect(restricted.alwaysAllow).not.toBe(store.taskByThread(bot.id, bot.threadId)?.alwaysAllow);
+
+  store.bot(bot.id)!.approvalGrant = {
+    requestId: "pending", mode: "full", phase: "prepared", threadId: bot.threadId, threadOnly: true,
+  };
+  const pending = store.forkTask(bot.id, bot.threadId, anchor.id)!;
+  expect(pending).toMatchObject({ approvalMode: "ask", autoApprove: false });
+  expect(store.projectBotForTask(bot.id, pending.threadId)?.approvalGrant).toBeUndefined();
+});
+
+it("removes copied history when registering the fork fails", async () => {
+  const store = await freshStore();
+  const bot = store.createBot();
+  const anchor = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Keep this atomic" });
+  const { createBotFork } = await import("./store-forks.ts");
+  const { readMessage } = await import("./message-db.ts");
+  let importedThreadId = "";
+  expect(() => createBotFork(bot, store.activeTask(bot.id)!, store.activePath(bot.threadId), anchor.id,
+    { mode: "ask", alwaysAllow: [] }, (task) => {
+      importedThreadId = task.threadId;
+      throw new Error("registry unavailable");
+    })).toThrow("registry unavailable");
+  expect(importedThreadId).not.toBe("");
+  expect(readMessage(importedThreadId, anchor.id)).toBeNull();
+  expect(store.taskByThread(bot.id, importedThreadId)).toBeUndefined();
+});

@@ -2190,7 +2190,9 @@ export class Store {
     const bot = this.bot(botId);
     const source = this.taskByThread(botId, sourceThreadId);
     if (!bot || !source) return null;
+    const sourceView = this.projectBotForTask(botId, sourceThreadId)!;
     const task = createBotFork(bot, source, this.activePath(sourceThreadId), messageId,
+      { mode: approvalModeFor(sourceView), alwaysAllow: sourceView.alwaysAllow ?? [] },
       (created) => this.commitBotChange(bot, "the forked thread", () => { bot.tasks = [created, ...(bot.tasks ?? [])]; }));
     if (task) this.emit({ type: "bot", botId });
     return task;

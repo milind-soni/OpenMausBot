@@ -2975,6 +2975,11 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("marks a DM's canonical thread read without requiring a room task", async () => {
+    expect((await api("POST", "/api/groups/test-dm/read", { threadId: "test-dm-thread" })).status).toBe(200);
+    expect((await api("POST", "/api/groups/test-dm/read", { threadId: "another-thread" })).status).toBe(404);
+  });
+
   it("keeps bot-to-bot channels single-threaded and lets another task start beside an open approval", async () => {
     const dm = await api("POST", "/api/groups/test-dm/tasks", {});
     expect(dm.status).toBe(400);

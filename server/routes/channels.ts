@@ -298,7 +298,9 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!room) return json(res, 404, { error: "no such room" });
       const body = await readBody(req);
       const threadId = body?.threadId ?? room.threadId;
-      if (typeof threadId !== "string" || !store.groupTaskByThread(room.id, threadId)) {
+      if (typeof threadId !== "string" || (room.dm
+        ? threadId !== room.threadId
+        : !store.groupTaskByThread(room.id, threadId))) {
         return json(res, 404, { error: "no such channel task" });
       }
       sawThread(threadId);

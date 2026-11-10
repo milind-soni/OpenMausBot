@@ -2,7 +2,7 @@ import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError, retryRequest, snapshotArrays } from "./api";
 import { loadOlderPage, MESSAGE_PAGE_SIZE, reduceOlderMessages } from "./message-history";
 export { MESSAGE_PAGE_SIZE } from "./message-history";
-import { reduceForkPanel, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
+import { addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
 import {
   createContext,
   useCallback,
@@ -56,7 +56,7 @@ import {
 import type { Routine, RoutineInput, RoutineRun, RoutineRunStatusFilter } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
-import { botShowsUnread } from "@/lib/bot-unread";
+import { markVisibleBotThreadsRead, markVisibleGroupThreadsRead } from "./read-visible";
 import { placeUnreadDivider, threadOpensUnread, threadReadCursor, unreadDividerFor, type UnreadDivider } from "@/lib/unread-divider";
 import type { ComputerStart } from "@/lib/computer-start";
 import { parseComputerHelp } from "@/lib/computer-control";
@@ -981,7 +981,7 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
-    case "forkMessage": case "openForkPanel": case "forkPanelLoaded":
+    case "forkMessage": case "openForkPanel": case "forkPanelLoaded": case "forkPanelLoadFailed":
     case "forkPanelMessage": case "forkPanelActive": case "closeForkPanel":
       return reduceForkPanel(state, action);
     case "showTeamMap":
@@ -1286,17 +1286,18 @@ export function reducer(state: AppState, action: Action): AppState {
       return animated;
     }
     case "optimisticMessageRemoved": {
+      const panelState = removeForkOptimistic(state, action);
       const id = optimisticMessageId(action.sendId);
       const remove = (messages: Message[], optimistic: Message) => messages
         .filter((message) => message.id !== id)
         .map((message) => message.optimisticThreadOrderAt === optimistic.at
           ? { ...message, optimisticThreadOrderAt: optimistic.optimisticThreadOrderAt }
           : message);
-      const bot = state.bots.find((candidate) => candidate.threadId === action.threadId);
+      const bot = panelState.bots.find((candidate) => candidate.threadId === action.threadId);
       if (bot) {
         const optimistic = bot.messages.find((message) => message.id === id);
-        if (!optimistic) return state;
-        const cleared = updateBot(state, bot.id, (current) => ({
+        if (!optimistic) return panelState;
+        const cleared = updateBot(panelState, bot.id, (current) => ({
           ...current,
           messages: remove(current.messages, optimistic),
           activeLeafId: current.activeLeafId === id
@@ -1307,12 +1308,12 @@ export function reducer(state: AppState, action: Action): AppState {
         const kept = cleared.bots.find((candidate) => candidate.id === bot.id)?.messages ?? [];
         return rewindThreadUpdatedAt(cleared, action.threadId, kept, task?.createdAt ?? 0, bot.hasMore ? optimistic.optimisticThreadOrderAt : undefined);
       }
-      const group = state.groups.find((candidate) => candidate.threadId === action.threadId);
+      const group = panelState.groups.find((candidate) => candidate.threadId === action.threadId);
       const optimistic = group?.messages.find((message) => message.id === id);
-      if (!group || !optimistic) return state;
+      if (!group || !optimistic) return panelState;
       const cleared = {
-        ...state,
-        groups: state.groups.map((candidate) => candidate.id === group.id
+        ...panelState,
+        groups: panelState.groups.map((candidate) => candidate.id === group.id
           ? { ...candidate, messages: remove(candidate.messages, optimistic) }
           : candidate),
       };
@@ -1676,11 +1677,11 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, pendingQueued };
     }
     case "send": {
-      const animated = withMascotMotion(
+      const animated = addForkOptimistic(withMascotMotion(
         dismissOnboardingCard(state, action.botId),
         action.botId,
         "working",
-      );
+      ), action);
       if (!action.sendId) return animated;
       const bot = animated.bots.find((candidate) => candidate.id === action.botId);
       const threadId = action.threadId ?? bot?.threadId;
@@ -1808,10 +1809,11 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, dataView: action.view };
     case "sendGroup": {
       if (!action.sendId) return state;
-      const group = state.groups.find((candidate) => candidate.id === action.groupId);
-      if (!group) return state;
+      const withPanel = addForkOptimistic(state, action);
+      const group = withPanel.groups.find((candidate) => candidate.id === action.groupId);
+      if (!group) return withPanel;
       const threadId: string = action.threadId ?? group.threadId;
-      if (threadId === group.threadId && group.messages.some((message) => message.sendId === action.sendId)) return state;
+      if (threadId === group.threadId && group.messages.some((message) => message.sendId === action.sendId)) return withPanel;
       const message = optimisticUserMessage(
         action.text,
         action.sendId,
@@ -1820,7 +1822,7 @@ export function reducer(state: AppState, action: Action): AppState {
         action.mode ?? "chat",
       );
       message.optimisticThreadOrderAt = group.tasks?.find((task) => task.threadId === threadId)?.lastThreadOrderAt;
-      const stamped = bumpThreadUpdatedAt(state, threadId, message.at, threadId === group.threadId);
+      const stamped = bumpThreadUpdatedAt(withPanel, threadId, message.at, threadId === group.threadId);
       if (threadId !== group.threadId) return stamped;
       return {
         ...stamped,
@@ -2254,6 +2256,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       action = pinBotThreadAction(action, stateRef.current.bots);
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
       if (action.type === "botPatched") action = { ...action, bot: withTaskWrites(action.bot) };
+      if (action.type === "openForkPanel" && !action.loadId) action = { ...action, loadId: randomUuid() };
       if ((action.type === "send" || action.type === "sendGroup" || action.type === "editMessage") && !action.sendId) action = { ...action, sendId: randomUuid() };
       const botBeforeUpdate =
         action.type === "updateBot" || action.type === "setModel"
@@ -2411,7 +2414,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const threadId =
             action.threadId ?? stateRef.current.bots.find((bot) => bot.id === action.botId)?.threadId;
           const sendId = action.sendId ?? randomUuid();
-          const arrived = () => sendArrived(stateRef.current.bots.find((bot) => bot.id === action.botId && bot.threadId === threadId)?.messages, sendId);
+          const arrived = () => {
+            const panel = stateRef.current.forkPanel;
+            return sendArrived(panel?.kind === "bot" && panel.ownerId === action.botId && panel.threadId === threadId
+              ? panel.messages : stateRef.current.bots.find((bot) => bot.id === action.botId && bot.threadId === threadId)?.messages, sendId);
+          };
           void waitForExecutionSettings(botBeforeSend ? [botBeforeSend] : [], threadId)
             .then(() => sendReconciled(() => api(`/api/bots/${action.botId}/messages`, {
                 method: "POST",
@@ -2422,6 +2429,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const body = sent.body;
               if (body?.message && typeof body.threadId === "string") {
                 rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
+                rawDispatch({ type: "forkPanelMessage", threadId: body.threadId, message: body.message });
               }
               if (
                 body?.queued &&
@@ -2657,8 +2665,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const threadId =
             action.threadId ?? stateRef.current.groups.find((group) => group.id === action.groupId)?.threadId;
           const sendId = action.sendId ?? randomUuid();
+          const arrived = () => {
+            const panel = stateRef.current.forkPanel;
+            return sendArrived(panel?.kind === "group" && panel.ownerId === action.groupId && panel.threadId === threadId
+              ? panel.messages : stateRef.current.groups.find((group) => group.id === action.groupId && group.threadId === threadId)?.messages, sendId);
+          };
           void waitForExecutionSettings(executionBotsBeforeAction)
-            .then(() => api(`/api/groups/${action.groupId}/messages`, {
+            .then(() => sendReconciled(() => api(`/api/groups/${action.groupId}/messages`, {
               method: "POST",
               body: JSON.stringify({
                 text: action.text,
@@ -2667,10 +2680,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 sendId,
                 mode: action.mode ?? "chat", ...(action.mentions?.length ? { mentions: action.mentions } : {}),
               }),
-            }))
-            .then((body) => {
+            }), arrived))
+            .then((sent) => {
+              if (!("body" in sent)) return;
+              const body = sent.body;
               if (body?.message && typeof body.threadId === "string") {
                 rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
+                rawDispatch({ type: "forkPanelMessage", threadId: body.threadId, message: body.message });
               }
               if (
                 body?.queued &&
@@ -3123,17 +3139,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "bot": {
           const bot = frame.bot as BotAnnouncement;
-          const selected = stateRef.current.bots.find((candidate) => candidate.id === bot.id);
-          const shown = selected?.switchingTo ?? selected?.threadId;
-          const panel = stateRef.current.forkPanel;
-          const readThreadId = panel?.kind === "bot" && panel.ownerId === bot.id ? panel.threadId : shown;
-          const selectedTask = bot.tasks?.find((task) => task.threadId === readThreadId);
-          if (bot.id === stateRef.current.selectedId && stateRef.current.activeView === "chat" && document.hasFocus() &&
-              (selectedTask?.unread || (!bot.tasks && bot.unread))) {
-            if (selectedTask) selectedTask.unread = false;
-            bot.unread = botShowsUnread(bot);
-            fetch(`/api/bots/${bot.id}/read`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId: readThreadId }) }).catch(() => {});
-          }
+          markVisibleBotThreadsRead(stateRef.current, bot, document.hasFocus());
           rawDispatch({
             type: "botPatched",
             bot: withTaskWrites({ ...bot, ...botPatchQueue.overlayFor(bot.id) }),
@@ -3142,12 +3148,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         case "group": {
           const group = frame.group as Partial<Group> & { id: string };
-          if (group.unread && group.id === stateRef.current.selectedId && document.hasFocus()) {
-            group.unread = false;
-            const panel = stateRef.current.forkPanel;
-            const threadId = panel?.kind === "group" && panel.ownerId === group.id ? panel.threadId : undefined;
-            fetch(`/api/groups/${group.id}/read`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) }).catch(() => {});
-          }
+          markVisibleGroupThreadsRead(stateRef.current, group, document.hasFocus());
           rawDispatch({ type: "groupPatched", group });
           break;
         }

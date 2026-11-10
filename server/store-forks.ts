@@ -4,6 +4,7 @@ import * as mdb from "./message-db.ts";
 import type { BotRecord, Message, TaskRecord } from "./store.ts";
 import { buildTask } from "./task-record.ts";
 import { titleFromMessage } from "./thread-title.ts";
+import type { ApprovalMode } from "../shared/approval-mode.ts";
 
 function forkHistory(path: Message[], messageId: string): Message[] | null {
   const anchor = path.findIndex((message) => message.id === messageId);
@@ -11,7 +12,21 @@ function forkHistory(path: Message[], messageId: string): Message[] | null {
   return structuredClone(path.slice(0, anchor + 1));
 }
 
-/** Import the copied message path and register the task in the same database transaction. */
+/** Commit copied history first; a failed database commit must never leave a visible task without its history. */
+function registerImportedFork<T extends { threadId: string }>(task: T, history: Message[], messageId: string,
+  register: (task: T) => void): void {
+  mdb.importThread(task.threadId, history, messageId);
+  try {
+    register(task);
+  } catch (error) {
+    // The registry writer rolls back its in-memory mutation on failure.
+    try { mdb.deleteThread(task.threadId); } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "could not roll back the imported fork");
+    }
+    throw error;
+  }
+}
+
 export function createGroupFork(source: GroupTaskRecord, path: Message[], messageId: string,
   register: (task: GroupTaskRecord) => void): GroupTaskRecord | null {
   const history = forkHistory(path, messageId);
@@ -25,18 +40,23 @@ export function createGroupFork(source: GroupTaskRecord, path: Message[], messag
     origin: { threadId: source.threadId, messageId },
     ...(source.pinnedCwd !== undefined ? { pinnedCwd: source.pinnedCwd } : {}),
   };
-  mdb.importThread(task.threadId, history, messageId, undefined, () => register(task));
+  registerImportedFork(task, history, messageId, register);
   return task;
 }
 
 export function createBotFork(bot: BotRecord, source: TaskRecord, path: Message[], messageId: string,
+  approval: { mode: ApprovalMode; alwaysAllow: string[] },
   register: (task: TaskRecord) => void): TaskRecord | null {
   const history = forkHistory(path, messageId);
   if (!history) return null;
   const task = buildTask(bot, titleFromMessage(history.at(-1)?.text ?? ""), source.projectId, undefined,
     undefined, source.modelSelection, source.cwd ?? undefined);
+  // A fork starts with the source's effective permissions, including an Ask mask for an unconfirmed grant.
+  task.approvalMode = approval.mode;
+  task.autoApprove = approval.mode === "auto";
+  task.alwaysAllow = structuredClone(approval.alwaysAllow);
   task.origin = { threadId: source.threadId, messageId };
   task.lastReadMessageId = messageId;
-  mdb.importThread(task.threadId, history, messageId, undefined, () => register(task));
+  registerImportedFork(task, history, messageId, register);
   return task;
 }

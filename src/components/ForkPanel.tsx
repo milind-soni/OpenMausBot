@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useStore } from "@/state/store";
+import { currentTaskBot, useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { ChatView } from "./ChatView";
 import { GroupView } from "./GroupView";
@@ -10,10 +10,13 @@ export function ForkPanel() {
   if (!panel) return null;
   const bot = panel.kind === "bot" ? state.bots.find((candidate) => candidate.id === panel.ownerId) : undefined;
   const group = panel.kind === "group" ? state.groups.find((candidate) => candidate.id === panel.ownerId) : undefined;
-  const task = bot?.tasks?.find((candidate) => candidate.threadId === panel.threadId)
-    ?? group?.tasks?.find((candidate) => candidate.threadId === panel.threadId);
-  const openedBot = bot && task ? { ...bot, threadId: panel.threadId, messages: panel.messages, activeLeafId: panel.activeLeafId, hasMore: false } : null;
-  const openedGroup = group && task ? { ...group, threadId: panel.threadId, messages: panel.messages, hasMore: false } : null;
+  const botTask = bot?.tasks?.find((candidate) => candidate.threadId === panel.threadId);
+  const groupTask = group?.tasks?.find((candidate) => candidate.threadId === panel.threadId);
+  const task = botTask ?? groupTask;
+  const openedBot = bot && botTask ? { ...currentTaskBot(bot, panel.threadId), messages: panel.messages, activeLeafId: panel.activeLeafId, hasMore: false } : null;
+  const openedGroup = group && groupTask ? { ...group, threadId: panel.threadId, messages: panel.messages, hasMore: false,
+    working: groupTask.working ?? false, busyBotId: groupTask.busyBotId ?? null,
+    turnStartedAt: null, pinnedCwd: groupTask.pinnedCwd, pinnedMessageId: groupTask.pinnedMessageId } : null;
 
   return (
     <aside aria-label={t("chat.forkPanel")} className="relative flex h-full w-[min(48vw,640px)] min-w-[360px] flex-col border-l border-hairline bg-app">
@@ -24,6 +27,13 @@ export function ForkPanel() {
       </div>
       <div className="min-h-0 flex-1">
         {panel.loading ? <p className="p-4 text-sm text-ink-secondary">{t("chat.loadingFork")}</p>
+          : panel.loadFailed ? <div className="flex items-center gap-3 p-4 text-sm text-ink-secondary">
+            <span>{t("chat.forkUnavailable")}</span>
+            <button type="button" className="rounded px-2 py-1 text-ink hover:bg-raised"
+              onClick={() => dispatch({ type: "openForkPanel", kind: panel.kind, ownerId: panel.ownerId, threadId: panel.threadId })}>
+              {t("chat.retry")}
+            </button>
+          </div>
           : openedBot ? <ChatView key={panel.threadId} bot={openedBot} />
             : openedGroup ? <GroupView key={panel.threadId} group={openedGroup} />
               : <p className="p-4 text-sm text-ink-secondary">{t("chat.forkUnavailable")}</p>}
