@@ -1,5 +1,5 @@
 import { botOwner, nameFromEmail } from "../shared/bot-owner.ts";
-import { canManage, hasAuthority, peerName, renderRoster, reachablePeers, type RosterMember } from "./peer-roster.ts"; import { chiefLevel } from "./chief-level.ts";
+import { canManage, peerName, renderRoster, reachablePeers, type RosterMember } from "./peer-roster.ts"; import { chiefLevel } from "./chief-level.ts";
 import type { TaskRecord } from "./store.ts";
 
 export type ChiefTeamMember = RosterMember;
@@ -32,6 +32,7 @@ export function chiefOfStaffSystemPrompt(
   bots: ChiefTeamMember[],
   canDelegate: boolean,
   escalations = false,
+  also?: (bot: ChiefTeamMember) => boolean,
 ): string {
   const chief = bots.find((bot) => bot.id === chiefId);
   const chiefSection = sectionKey(chief?.section);
@@ -39,9 +40,9 @@ export function chiefOfStaffSystemPrompt(
   const owner = chief ? botOwner(chief) : null;
   const person = owner ? peerName(nameFromEmail(owner)) || "your person" : null;
   // The roster honours the Chief's own allow-list, or the prompt would name teammates the tools then refuse.
-  const reachable = reachablePeers(bots, chief ?? { id: chiefId, name: "" });
-  const team = chief ? reachable.filter((bot) => hasAuthority(chief, bot)) : reachable;
-  const others = chief ? reachable.filter((bot) => !hasAuthority(chief, bot)) : [];
+  const reachable = reachablePeers(bots, chief ?? { id: chiefId, name: "" }, also);
+  const team = chief ? reachable.filter((bot) => canManage(chief, bot)) : reachable;
+  const others = chief ? reachable.filter((bot) => !canManage(chief, bot)) : [];
   const roster = renderRoster(team, {
     max: ROSTER_MAX_BOTS,
     empty: "- No other visible bots are available yet.",
