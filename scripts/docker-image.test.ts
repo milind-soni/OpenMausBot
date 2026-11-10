@@ -58,6 +58,9 @@ describe("container images", () => {
     const tools = server.find(step => step.op === "RUN" && /apt-get install\b.*\bbubblewrap\b/.test(step.args));
     expect(tools?.args).toMatch(/\bsocat\b/);
     expect(tools?.args).toMatch(/bwrap --version/);
+    // The box's self-check makes its keyring call with perl here (server/bot-box/box-probe.ts): no python3 in this image.
+    expect(tools?.args).toMatch(/perl -e 'exit 0'/);
+    expect(server.some(step => step.op === "RUN" && /\bpython3\b/.test(step.args))).toBe(false);
     expect(server.some(step => step.op === "ENV" && /\bOMB_IMAGE=server\b/.test(step.args))).toBe(true);
     // A Cloud home is hardened by its role, and the box's fix for a self-hosted host is not its.
     expect(chain("cloud-home").some(step => step.op === "ENV" && /\bOMB_IMAGE=/.test(step.args))).toBe(false);
