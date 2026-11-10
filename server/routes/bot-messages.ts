@@ -29,7 +29,8 @@ import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { acceptedSendMatch, parseSendId } from "../send-idempotency.ts";
 import type { DirectSendInput, DirectSendReceipt } from "../direct-send.ts";
-import { cancelSteeredMessage, holdSteeredQueue, queuedSteeredMessage, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
+import { cancelSteeredMessage, holdSteeredQueue, queuedSteerSender, queuedSteeredMessage, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
+import { routeRunOwners, type Actor, type RunOwners } from "../host/run-owner.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
@@ -108,7 +109,10 @@ export interface BotMessageRouteDeps {
     decidedFor?: { id: string; name: string }, always?: boolean, rememberCommand?: boolean,
   ): Promise<RequestOutcome>;
   deliverLateQuestionAnswer(auth: RequestAuth, threadId: string, requestId: string, answer: string, cardMessage: Message, owner: BotRecord): Promise<{ queued: boolean }>;
-  stopThreadForPerson(botId: string, threadId: string): Promise<void>;
+  stopThreadForPerson(botId: string, threadId: string, by?: ResolvedSender): Promise<void>;
+  /** Whoever asked owns the run, where several people write. */
+  runOwners?: Pick<RunOwners, "stopRefusal" | "removeRefusal" | "joinRefusal">;
+  runActor?(auth: RequestAuth): Actor;
   cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): unknown;
   revokeInternalCapabilitiesForThread(threadId: string): void;
   cancelGroupTurnOperations(groupId: string, threadId: string): void;
@@ -170,7 +174,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
     deliverLateQuestionAnswer, stopThreadForPerson, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
     cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, pressRecords, serverPress, relayedReaction, answeredIn, fromPhone, notePhoneSend, goals,
-  } = deps;
+  } = deps; const owners = routeRunOwners(deps.runOwners, deps.runActor);
   const pinnedClientThread = pinnedClientThreadGuard(store);
   /** Security: a bot's own shell must never approve its own card, so a local request counts only from the desktop app, or
    * from a browser while every bot is idle. */
@@ -336,7 +340,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
-          personPresent, ...(followUp ? { followUp } : {}),
+          personPresent, admin: owners.admin(auth), ...(followUp ? { followUp } : {}),
           ...(mentions?.length && !press && !appSent ? { mentions } : {}),
         }, guardedStart);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);
@@ -358,6 +362,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       requirePinnedClientThread(m[1], body?.threadId);
       const bot = requestedTaskBot(m[1], body?.threadId);
       const queueId = m[2];
+      const waiting = queuedSteerSender(bot.id, bot.threadId, queueId);
+      const notYours = waiting && owners.removeRefusal(auth, bot.threadId, waiting.sender);
+      if (notYours) return json(res, 403, { error: notYours, code: "queued_not_yours" });
       if (!cancelSteeredMessage(bot.id, queueId, bot.threadId)) {
         return json(res, 404, { error: "no such queued message" });
       }
@@ -374,6 +381,11 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       // Hold the whole queue atomically: a racing settle drains it or this request steers it, never both.
       const held = holdSteeredQueue(bot.id, bot.threadId, m[2]);
       if (!held) return json(res, 404, { error: "no such queued message" });
+      const waitsItsTurn = owners.joinRefusal(auth, bot.threadId, held.items.map((item) => item.sender));
+      if (waitsItsTurn) {
+        restoreHeldSteeredQueue(held);
+        return json(res, 403, { error: waitsItsTurn, code: "waits_its_turn" });
+      }
       const currentAtStart = store.projectBotForTask(bot.id, bot.threadId);
       const instance = currentAtStart?.busy ? runningTurnInstance(currentAtStart, bot.threadId) : undefined;
       const engineCanSteer = Boolean(currentAtStart?.busy && instance?.adapter.capabilities.queueing && instance.adapter.steer);
@@ -757,9 +769,15 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (body.turnId !== undefined && (!turnId || turnId.length > 200)) {
         return json(res, 400, { error: "turnId must name a turn" });
       }
+      const stopRefused = (threadId: string): boolean => {
+        const refusal = owners.stopRefusal(auth, threadId);
+        if (refusal) json(res, 403, { error: refusal, code: "stop_not_yours" });
+        return refusal !== null;
+      };
       if (typeof expectedThreadId === "string" && store.taskByThread(bot.id, expectedThreadId)) {
         if (!stopReachesLiveTurn(turnId, liveTurn(expectedThreadId))) return json(res, 200, { ok: true, outcome: "already-stopped" });
-        await stopThreadForPerson(bot.id, expectedThreadId);
+        if (stopRefused(expectedThreadId)) return;
+        await stopThreadForPerson(bot.id, expectedThreadId, messageSender(auth));
         return json(res, 200, { ok: true });
       }
       const directClaim = directTurnDispatchClaims.get(bot.threadId);
@@ -781,6 +799,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         if (expectedThreadId !== undefined && busyGroup.threadId !== expectedThreadId) {
           return json(res, 409, userError("serverError.chat.busyInRoom", { room: busyGroup.group.name }));
         }
+        if (stopRefused(busyGroup.threadId)) return;
         cancelGroupTurnOperations(busyGroup.group.id, busyGroup.threadId);
         revokeInternalCapabilitiesForThread(busyGroup.threadId);
         await instance?.adapter.interruptTurn(busyGroup.threadId).catch(() => {});
@@ -796,7 +815,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         return json(res, 409, { error: "the bot switched tasks before it could be interrupted" });
       }
       if (!stopReachesLiveTurn(turnId, liveTurn(expectedThreadId ?? bot.threadId))) return json(res, 200, { ok: true, outcome: "already-stopped" });
-      await stopThreadForPerson(bot.id, expectedThreadId ?? bot.threadId);
+      if (stopRefused(expectedThreadId ?? bot.threadId)) return;
+      await stopThreadForPerson(bot.id, expectedThreadId ?? bot.threadId, messageSender(auth));
       return json(res, 200, { ok: true });
     }
     return PASS;

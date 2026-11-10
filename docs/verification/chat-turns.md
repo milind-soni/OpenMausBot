@@ -274,6 +274,20 @@ was stopped 1.5 s after the steered question, and the fake engine answered the
 question in the next turn. With the steered message's watch removed, the
 question stayed unanswered for 30 s and the test failed.
 
+## Several people in one shared chat
+
+```sh
+pnpm exec vitest run server/cloud-team-asker-owns.e2e.test.ts server/host/run-owner.test.ts src/components/SharedQueueLine.test.ts
+```
+
+On a Team Cloud, whoever asked owns the run ([team-cloud.md](../team-cloud.md#whoever-asked-owns-the-run)). The
+e2e test pairs an Owner and three members, holds Priya's request in the same scripted CI poll, and checks with
+`OMB_PERSON_FIRST_MS=1500`: Tom's line is queued (never steered, never cut short to be answered first) and runs after
+hers as his own turn; everyone sees the waiting lines with their writers, in order; only a line's writer removes it
+and nobody joins someone else's run; Tom's Stop and typed stop answer 403 "Only Priya or an admin can stop this.",
+while Priya and the Owner stop it; Priya's own addition is steered and answered first, in the shared chat and in her
+private chat; and a routine run started mid-run leaves its report between her answer and Tom's line.
+
 ## Threads of one bot at the same time
 
 Different threads of one bot run at once. A saved `threads.maxConcurrentPerBot` sets how many. With none saved, a Cloud
