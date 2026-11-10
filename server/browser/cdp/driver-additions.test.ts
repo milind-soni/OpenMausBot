@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AUTH_WAIT_MS, AuthChallenges } from "./auth.ts";
 import { CdpConnection, type CdpSession, type Params } from "./connection.ts";
 import { DriverError, isUnanswered } from "./errors.ts";
+import { Dialogs } from "./dialogs.ts";
 import { FrameTree } from "./frames.ts";
 import { methodRefusal } from "./policy.ts";
 import type { CdpTransport } from "./transport.ts";
@@ -76,6 +77,67 @@ describe("HTTP authentication challenges", () => {
     await vi.advanceTimersByTimeAsync(AUTH_WAIT_MS);
     expect(auth.pending).toBeNull();
     expect(sent.at(-1)).toEqual({ method: "Fetch.continueWithAuth", params: { requestId: "s1", authChallengeResponse: { response: "CancelAuth" } } });
+  });
+});
+
+describe("prompts whose renderer session went away", () => {
+  it("closes a detached renderer's dialog and reports its closure once", () => {
+    const { session, emit, detach } = eventSession();
+    const dialogs = new Dialogs();
+    const unwatch = dialogs.watch(session);
+    const closed: string[] = [];
+    dialogs.onClose((dialog) => closed.push(dialog.message));
+    emit("Page.javascriptDialogOpening", { type: "confirm", message: "Old renderer" });
+    detach();
+    expect(dialogs.pending).toBeNull();
+    unwatch();
+    expect(closed).toEqual(["Old renderer"]);
+  });
+
+  it("does not clear another watched renderer's dialog", () => {
+    const first = eventSession();
+    const second = eventSession();
+    const dialogs = new Dialogs();
+    dialogs.watch(first.session);
+    const unwatch = dialogs.watch(second.session);
+    second.emit("Page.javascriptDialogOpening", { type: "prompt", message: "Current renderer" });
+    first.detach();
+    expect(dialogs.pending?.message).toBe("Current renderer");
+    unwatch();
+    expect(dialogs.pending).toBeNull();
+  });
+
+  it("clears detached authentication state and its cancellation timer", async () => {
+    vi.useFakeTimers();
+    const { session, sent, emit, detach } = eventSession();
+    const auth = new AuthChallenges();
+    const unwatch = auth.watch(session);
+    const changes: Array<string | null> = [];
+    auth.onChange((challenge) => changes.push(challenge?.realm ?? null));
+    emit("Fetch.authRequired", { requestId: "a1", authChallenge: { source: "Server", realm: "Old renderer" } });
+    expect(vi.getTimerCount()).toBe(1);
+    detach();
+    expect(auth.pending).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    unwatch();
+    await vi.advanceTimersByTimeAsync(AUTH_WAIT_MS);
+    expect(sent).toEqual([]);
+    expect(changes).toEqual(["Old renderer", null]);
+  });
+
+  it("keeps another renderer's authentication challenge until its watch ends", () => {
+    vi.useFakeTimers();
+    const first = eventSession();
+    const second = eventSession();
+    const auth = new AuthChallenges();
+    auth.watch(first.session);
+    const unwatch = auth.watch(second.session);
+    second.emit("Fetch.authRequired", { requestId: "a2", authChallenge: { source: "Server", realm: "Current renderer" } });
+    first.detach();
+    expect(auth.pending?.realm).toBe("Current renderer");
+    unwatch();
+    expect(auth.pending).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
