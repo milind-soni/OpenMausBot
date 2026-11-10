@@ -8,6 +8,7 @@ import { afterEach, expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { AUTOMATION_REPLY_PROMPT } from "./system-prompt.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 import { launchRestartableServer } from "./testing/restartable-server.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
 
@@ -58,8 +59,8 @@ async function server(env: NodeJS.ProcessEnv = {}) {
     schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
   }, 201)).routine.id as string;
   const runNow = async (routineId: string) => (await api("POST", `/api/routines/${routineId}/run`, undefined, 201)).run.id as string;
-  const settled = (id: string, status = "completed") => expect.poll(async () => (await run(id))?.status, { timeout: 30_000 }).toBe(status);
-  const reported = (id: string, state: string) => expect.poll(async () => (await run(id))?.report?.state, { timeout: 30_000 }).toBe(state);
+  const settled = (id: string, status = "completed") => expect.poll(async () => (await run(id))?.status, { timeout: hostTimeout(30_000) }).toBe(status);
+  const reported = (id: string, state: string) => expect.poll(async () => (await run(id))?.report?.state, { timeout: hostTimeout(30_000) }).toBe(state);
   const savedBot = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id);
   const notified = () => events!.frames.filter((frame) => frame.kind === "notify").map((frame) => frame.notification as { kind: string; threadId: string; body: string });
   const header = (name: string) => `Routine ${JSON.stringify(name)} — do this now:`;
@@ -239,21 +240,21 @@ it("asks the person in the main chat when a run needs them, and their answer the
   expect((await s.messages(s.main)).findLast((message) => message.role === "bot" && message.kind === "text")?.text).toBe("Sent.");
 }, 120_000);
 
-it("takes a 👍 on a run's question in the chat as the answer, with that report in hand", async () => {
+it("takes a \ud83d\udc4d on a run's question in the chat as the answer, with that report in hand", async () => {
   const s = await server();
   s.script([
     { key: "run", match: [s.header("Acme replies")], reply: "I drafted a reply to Acme's invoice question.\nNEEDS INPUT: Should I send it?" },
-    { key: "answer", match: ["reacted 👍"], reply: "Sent.", expectContextIncludes: ["[From routine ", "Acme replies", "Should I send it?"] },
+    { key: "answer", match: ["reacted \ud83d\udc4d"], reply: "Sent.", expectContextIncludes: ["[From routine ", "Acme replies", "Should I send it?"] },
   ]);
   const id = await s.runNow(await s.routine("Acme replies"));
   await s.reported(id, "posted");
   const [question] = await s.lines();
-  expect(await s.api("POST", `/api/threads/${s.main}/messages/${question.id}/reactions`, { emoji: "👍", on: true })).toMatchObject({ delivery: "started" });
+  expect(await s.api("POST", `/api/threads/${s.main}/messages/${question.id}/reactions`, { emoji: "\ud83d\udc4d", on: true })).toMatchObject({ delivery: "started" });
   await s.cli("wait", "--bot", s.bot.id, "--task", s.main, "--timeout", "20");
   expect((await s.messages(s.main)).findLast((message) => message.role === "bot" && message.kind === "text")?.text).toBe("Sent.");
 }, 120_000);
 
-it("answers the run itself when the person gives a 👍 to the copy of the question it waits on", async () => {
+it("answers the run itself when the person gives a \ud83d\udc4d to the copy of the question it waits on", async () => {
   const s = await server();
   const gate = join(s.dataDir, "finish-run");
   s.script([{ key: "run", match: [s.header("Inbox watch")], reply: "Checked the Work account: two new orders.", gateFile: gate }]);
@@ -263,7 +264,7 @@ it("answers the run itself when the person gives a 👍 to the copy of the quest
   broker!.write(JSON.stringify({ t: "ask", kind: "question", id: "work-account", tool: "ask_user", input: { question: "Should I check the Work account?" } }) + "\n");
   await expect.poll(async () => (await s.lines()).find((message) => message.kind === "options")?.card?.requestId, { timeout: 20_000 }).toBeTruthy();
   const copy = (await s.lines()).find((message) => message.kind === "options");
-  expect(await s.api("POST", `/api/threads/${s.main}/messages/${copy.id}/reactions`, { emoji: "👍", on: true })).toMatchObject({ delivery: "answered" });
+  expect(await s.api("POST", `/api/threads/${s.main}/messages/${copy.id}/reactions`, { emoji: "\ud83d\udc4d", on: true })).toMatchObject({ delivery: "answered" });
   await expect.poll(() => answers.find((answer) => answer.id === "work-account"), { timeout: 20_000 }).toMatchObject({ t: "answer", behavior: "answer", source: "user" });
   await s.settled(id, "running");
   writeFileSync(gate, "done");
@@ -386,7 +387,7 @@ it("says in the main chat, once per run of failures, that an automation could no
   await s.settled(second, "failed");
   expect((await s.run(second)).error).toBe((await s.run(first)).error);
   expect(await s.lines()).toHaveLength(1);
-}, 120_000);
+}, hostTimeout(120_000));
 
 it("tells the main chat about a run missed while the computer was off, which has no conversation of its own", async () => {
   const restartable = await launchRestartableServer({ scripted: true });
@@ -406,7 +407,7 @@ it("tells the main chat about a run missed while the computer was off, which has
     saved.routines.find((each: any) => each.id === routine.id).nextRunAt = Date.now() - 13 * 3_600_000;
     writeFileSync(file, JSON.stringify(saved));
     await restartable.start();
-    await expect.poll(async () => (await api("GET", "/api/routines")).runs.map((run: any) => run.status), { timeout: 30_000 }).toEqual(["missed"]);
+    await expect.poll(async () => (await api("GET", "/api/routines")).runs.map((run: any) => run.status), { timeout: hostTimeout(30_000) }).toEqual(["missed"]);
     const missed = (await api("GET", "/api/routines")).runs[0];
     expect(missed).toMatchObject({ resultsThreadId: main });
     expect(missed.threadId).toBeUndefined();
@@ -458,7 +459,7 @@ it("leaves the images a run's tools returned in the run, and reports the files i
   });
   const { run: { id } } = await api("POST", `/api/routines/${routine.id}/run`);
   const run = async () => (await api("GET", "/api/routines")).runs.find((candidate: any) => candidate.id === id);
-  await expect.poll(async () => (await run())?.report?.state, { timeout: 30_000 }).toBe("posted");
+  await expect.poll(async () => (await run())?.report?.state, { timeout: hostTimeout(30_000) }).toBe("posted");
   const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=200`)).messages as any[];
   const inRun = (await messages((await run()).threadId)).flatMap((message) => message.attachments ?? []);
   expect(inRun).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "image", fromTool: true }), expect.objectContaining({ kind: "file", name: "brief.pdf" })]));
