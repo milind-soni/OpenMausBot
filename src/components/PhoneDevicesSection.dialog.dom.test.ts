@@ -6,7 +6,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { CompanionState, PhoneSetupController } from "./PhoneSetupFlow";
 
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: {} } }) }));
-vi.mock("./PhoneSetupFlow", () => ({ PhoneSetupFlowView: () => createElement("div", { "data-qr": "" }, "QR") }));
+vi.mock("./PhoneSetupFlow", () => ({
+  PhoneSetupFlowView: () => createElement("div", { "data-qr": "" }, "QR", createElement("details", null, createElement("summary", null, "Code"))),
+}));
 const { PairDeviceDialog } = await import("./PhoneDevicesSection");
 
 const on = { on: true, since: 1 };
@@ -16,6 +18,7 @@ let root: Root;
 let settings: HTMLElement;
 let onClose = vi.fn<() => void>();
 let cancel = vi.fn<() => void>();
+let trigger: HTMLButtonElement;
 
 beforeEach(() => {
   // Stands in for Settings: its glass pane (backdrop-filter) is the box a `fixed` child is laid out in.
@@ -23,6 +26,9 @@ beforeEach(() => {
   settings.setAttribute("role", "dialog");
   settings.className = "glass-surface";
   document.body.append(settings);
+  trigger = document.createElement("button");
+  document.body.append(trigger);
+  trigger.focus();
   onClose = vi.fn<() => void>();
   cancel = vi.fn<() => void>();
   const c = { busy: false, act: vi.fn(), useLocal: vi.fn(), start: vi.fn(), cancel } as unknown as PhoneSetupController;
@@ -32,6 +38,7 @@ beforeEach(() => {
 afterEach(() => {
   flushSync(() => root.unmount());
   settings.remove();
+  trigger.remove();
 });
 
 const pair = () => document.querySelector<HTMLElement>("[data-pair-dialog]")!;
@@ -57,8 +64,24 @@ it("closes only the pairing dialog on Escape, so Settings stays open", () => {
 it("keeps Tab inside the pairing dialog", () => {
   const done = pair().querySelector("button")!;
   done.getClientRects = () => [{}] as unknown as DOMRectList;
+  pair().querySelector("summary")!.getClientRects = () => [] as unknown as DOMRectList;
   expect(press("Tab").defaultPrevented).toBe(true);
   expect(document.activeElement).toBe(done);
   press("Tab", true);
   expect(document.activeElement).toBe(done);
+});
+
+it("moves focus into the pairing dialog when it opens and gives it back when it closes", () => {
+  expect(pair().contains(document.activeElement)).toBe(true);
+  flushSync(() => root.render(null));
+  expect(document.activeElement).toBe(trigger);
+});
+
+it("lets Tab reach the code details toggle", () => {
+  const summary = pair().querySelector("summary")!;
+  const done = [...pair().querySelectorAll("button")].at(-1)!;
+  for (const control of [summary, done]) control.getClientRects = () => [{}] as unknown as DOMRectList;
+  done.focus();
+  press("Tab");
+  expect(document.activeElement).toBe(summary);
 });

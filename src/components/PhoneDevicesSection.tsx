@@ -208,6 +208,8 @@ function RouteRow({ c, state, route, blocked }: { c: PhoneSetupController; state
 
 type PairStep = "consent" | "pairing";
 
+const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+
 /** Pair a device: says what it will turn on before anything listens, then shows the code. */
 export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
   c: PhoneSetupController;
@@ -232,6 +234,13 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
   };
   const close = step === "consent" ? onClose : () => { c.cancel(); onClose(); };
   const root = useRef<HTMLDivElement>(null);
+  // A modal dialog: move focus inside when it opens, and give it back to whatever had it (the Pair button) on close.
+  useEffect(() => {
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const box = root.current;
+    if (box && !box.contains(document.activeElement)) box.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    return () => { if (before?.isConnected) before.focus(); };
+  }, []);
   // Out of Settings' tree, Settings no longer steps aside for this dialog: take Escape and Tab first, so Escape closes
   // only this dialog and Tab cycles through its controls instead of Settings'.
   useEffect(() => {
@@ -240,9 +249,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
       if (!box || event.defaultPrevented || event.isComposing || (event.key !== "Escape" && event.key !== "Tab")) return;
       event.preventDefault();
       if (event.key === "Escape") { close(); return; }
-      const controls = [...box.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      )].filter((control) => control.getClientRects().length);
+      const controls = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((control) => control.getClientRects().length);
       if (!controls.length) return;
       const at = controls.indexOf(document.activeElement as HTMLElement);
       const next = at < 0 ? (event.shiftKey ? -1 : 0) : at + (event.shiftKey ? -1 : 1);
