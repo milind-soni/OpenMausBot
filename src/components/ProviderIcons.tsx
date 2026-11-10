@@ -153,6 +153,13 @@ export function GreenferenceMark({ size = 16, className }: IconProps) {
   </svg>;
 }
 
+/** ModelGo's placeholder lettermark: its real logo file replaces this one drawing, everywhere ModelGo's mark shows. */
+export function ModelgoMark({ size = 16, className }: IconProps) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" className={cn("fill-[var(--color-ink)]", className)} aria-hidden="true">
+    <path fillRule="evenodd" d="M5 2h14a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Zm1 15h2.4v-6.6l2.9 4.6h1.4l2.9-4.6V17H18V7h-2.2L12 13 8.2 7H6v10Z" />
+  </svg>;
+}
+
 export function ProviderMark({ driverKind, size, className }: IconProps & { driverKind: string }) {
   switch (driverKind) {
     case "grok":
@@ -193,6 +200,8 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
       return <KiroMark size={size} className={className} />;
     case "greenference":
       return <GreenferenceMark size={size} className={className} />;
+    case "modelgo":
+      return <ModelgoMark size={size} className={className} />;
     default:
       return (
         <span className={cn("flex size-full items-center justify-center text-[10px] font-semibold tracking-tight text-ink-secondary", className)}>

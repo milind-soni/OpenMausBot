@@ -31,6 +31,7 @@ const MAPPINGS: Array<[ConfigCredentialTargetId, CredentialConfig]> = [
   ["cerebrasApiKey", { cerebras: { key: "secret" } }],
   ["groqApiKey", { groq: { key: "secret" } }],
   ["greenferenceApiKey", { greenference: { key: "secret" } }],
+  ["modelgoApiKey", { modelgo: { key: "secret" } }],
   ["metaApiKey", { meta: { key: "secret" } }],
   ["deepseekApiKey", { deepseek: { key: "secret" } }],
 ];
@@ -67,7 +68,7 @@ describe("credential request allowlist", () => {
     expect(credentialIsConfigured({ tts: { key: "" } }, "ttsKey")).toBe(false);
     expect(credentialIsConfigured({ tts: { fishKey: "secret" } }, "fishAudioKey")).toBe(true);
     expect(credentialIsConfigured({ tts: { fishKey: "" } }, "fishAudioKey")).toBe(false);
-    expect(Object.keys(CREDENTIAL_TARGETS)).toHaveLength(18);
+    expect(Object.keys(CREDENTIAL_TARGETS)).toHaveLength(19);
   });
 
   // The desktop's encrypted store has a slot only for these; a provider key goes to the server's config, as Settings does.
