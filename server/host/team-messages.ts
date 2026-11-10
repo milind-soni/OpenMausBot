@@ -419,8 +419,12 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       return waiting ? { returned: false, open: { botId: waiting.botId, threadId: waiting.threadId } } : { returned: false };
     },
     /** A notification about to go out: an ask, a failure or a routine's report routed to a person reaches their inbox. */
-    route(notification: Notification, how: { routine?: boolean } = {}): Notification | null {
+    route(notification: Notification, how: { routine?: boolean; summary?: boolean } = {}): Notification | null {
       return !team && deps.place ? deps.place.route(notification, how) : inbox.route(notification, how);
+    },
+    /** Work handed on finished: on a place that is no team's, a line in the inbox (place-inbox.ts). */
+    handedResult(work: { botId: string; threadId: string; groupId?: string; text: string }, requester: { botId: string; threadId: string }): void {
+      if (!team) deps.place?.handedResult(work, requester);
     },
     stop(): void {
       unsubscribe();

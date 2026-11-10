@@ -921,3 +921,44 @@ describe("the day's memory pressure, for the Admin", () => {
     expect(ledger.read(start + 24 * 60 * 60_000 + 60_000)).toEqual({ waits: 0, waitMs: 0, stopped: 0, killed: 0, stallMinutes: 0 });
   });
 });
+
+describe("a lane of its own", () => {
+  const free = (bytes: number) => () => ({ totalBytes: 4 * GB, availableBytes: bytes, swapFreeBytes: 0, oomKills: 0, fullStall10: 0 });
+  const lane = new Set(["burst-1", "burst-2"]);
+  const capped = (running: string[], most = 2) => {
+    const memory = new EngineMemory({ enabled: true, read: free(3 * GB), groups: () => new Map(), now: () => 0, signal: () => {}, log: () => {} });
+    memory.useCap({ most: () => most, waitsOnOthers: () => false, laneOwned: (threadId) => lane.has(threadId) });
+    for (const threadId of running) memory.turnStarted(threadId);
+    return memory;
+  };
+
+  it("keeps a burst's threads out of the plan's turn cap, so a person's chat still starts", async () => {
+    const memory = capped(["burst-1", "burst-2"]);
+    await expect(memory.admit("persons-chat", new AbortController().signal, () => {}, "turn")).resolves.toBe(true);
+  });
+
+  it("lets a lane's thread past the cap the lane already counted", async () => {
+    const memory = capped(["persons-chat-1", "persons-chat-2"]);
+    await expect(memory.admit("burst-1", new AbortController().signal, () => {}, "turn")).resolves.toBe(true);
+  });
+
+  it("gives the lane no room under the plan's cap, its own turns counted", () => {
+    expect(capped(["burst-1"]).laneHasRoom()).toBe(true);
+    expect(capped(["burst-1", "persons-chat"]).laneHasRoom()).toBe(false);
+  });
+
+  it("gives the lane no room while the person's own work waits", async () => {
+    const memory = capped(["busy-a", "busy-b"]);
+    memory.useTurnOrder((threadId) => threadId === "persons-chat");
+    const abort = new AbortController();
+    const waiting = memory.admit("persons-chat", abort.signal, () => {}, "turn");
+    await Promise.resolve();
+    expect(memory.laneHasRoom()).toBe(false);
+    abort.abort();
+    await waiting;
+  });
+
+  it("is always open with the gate off", () => {
+    expect(new EngineMemory({ enabled: false }).laneHasRoom()).toBe(true);
+  });
+});
