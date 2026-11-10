@@ -10,7 +10,7 @@ vi.mock("./api", () => ({
 
 import { openBot } from "./thread-navigation";
 import { rememberOwnChat, setTeamChats, type TeamChats } from "./team-chats";
-import { botOnSide, setTeamSide, sideOfThread, tasksOfSide, teamSide, teamSideView, teamThreadOf } from "./team-side";
+import { botOnSide, savedTeamSide, setTeamSide, showTeamSide, sideOfThread, tasksOfSide, teamSide, teamSideView, teamThreadOf } from "./team-side";
 
 const ADA: TeamChats = { teamId: "team-acme", member: true, opened: [], person: "ada@acme.test" };
 const BEN: TeamChats = { ...ADA, person: "ben@acme.test" };
@@ -158,6 +158,22 @@ describe("the remembered side", () => {
     expect(stored.get("omb.team-side.team-acme.ada@acme.test")).toBe("team");
     setTeamSide("me", ADA);
     expect(teamSide(ADA)).toBe("me");
+  });
+
+  it("is not rewritten by a side that is only shown: that lasts for the page, and the choice comes back with the next one", () => {
+    setTeamChats(ADA);
+    showTeamSide("team");
+    expect(teamSide(), "what the sidebar shows now").toBe("team");
+    expect(savedTeamSide(), "what the person chose").toBe("me");
+    expect(stored.size, "nothing written").toBe(0);
+    setTeamChats(null);
+    setTeamChats(ADA);
+    expect(teamSide(), "a new page").toBe("me");
+    setTeamSide("team");
+    showTeamSide("me");
+    expect(stored.get("omb.team-side.team-acme.ada@acme.test")).toBe("team");
+    setTeamSide("team");
+    expect(teamSide(), "choosing again what is kept still moves the sidebar").toBe("team");
   });
 
   it("is each person's own on a shared device, and each team's", () => {

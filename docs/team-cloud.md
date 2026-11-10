@@ -517,13 +517,20 @@ none, and the person can hide it.
 - **By the message box**, every conversation on a team says who can read it, from that same answer: *"Private · only
   you"*, *"Shared · everyone in Acme can see"*, *"Shared · only people added and admins can see"* or, in a group chat,
   *"Shared · everyone in this group chat can see"* (`TeamAudienceLabel`).
-- **The switch follows the conversation on screen.** A conversation opened from a notification, a link or search on the
-  other side moves the switch to its side. Choosing a side opens the bot on screen there, or that side's first bot.
-- **Remembered** per person and team on the device (`localStorage`, `omb.team-side.<team>.<address>`), Just me until
-  they choose Team. The page's first conversation moves to the remembered side when its bot has a conversation there
-  and nothing asked for that conversation by name.
+- **The switch follows a conversation the person asked for**: another bot or group chat, a conversation opened by
+  name (a notification, a link, search, a list), one they just made. That, and pressing the switch, are the only things
+  that keep a side as their choice (`localStorage`, `omb.team-side.<team>.<address>`, per person and team on the
+  device; Just me until they choose Team).
+- **A conversation that came on screen unasked is never kept.** The first conversation a page shows, one the app opened
+  as it started (before it knew this is a team's Cloud), or the bot's own pick changing because a teammate opened
+  another: when it is of the other side, the page goes back to the side the person chose, to their own conversation
+  with that bot when it is listed there. So a reload with Just me chosen opens their private chat, never the shared one.
+  With nowhere to go on that side the switch shows the side on screen for that page only.
+- **A draft stays with its conversation.** What is typed and not sent is kept per conversation, so it is never in the
+  message box of the other side; on a team the older per-bot draft is not read.
 - **Unread.** The side not shown carries a dot when the person has something unread there (their own marks: a private
-  chat's, or their own read line of a shared chat or a group chat).
+  chat's, or their own read line of a shared chat or a group chat). A bot's row carries only its side's marks: no
+  unread mark, working line or preview from the other side's conversations.
 - With one side empty (nobody shared a bot with them yet, say) there is no switch and the sidebar lists everything.
   The first time the switch shows on a device, one line under it says what the two sides are.
 

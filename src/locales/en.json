@@ -7570,7 +7570,7 @@
   "teamSide.label": "Whose chats to show",
   "teamSide.me": "Just me",
   "teamSide.team": "Team",
-  "teamSide.hint": "Just me shows your private chats: nobody else can read them, admins included. Team shows what everyone shares.",
+  "teamSide.hint": "Just me is private, even from admins. Team is shared.",
   "teamSide.groupAudience": "Shared · everyone in this group chat can see",
   "chat.page.usage": "{pages} of {limit} pages",
   "chat.page.copyLink": "Copy link",

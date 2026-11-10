@@ -7381,7 +7381,7 @@
   "teamSide.label": "Quais conversas mostrar",
   "teamSide.me": "Só eu",
   "teamSide.team": "Equipe",
-  "teamSide.hint": "Só eu mostra suas conversas privadas: ninguém mais pode ler, nem os administradores. Equipe mostra o que todos compartilham.",
+  "teamSide.hint": "Só eu é privado, até para os administradores. Equipe é compartilhado.",
   "teamSide.groupAudience": "Compartilhado · todos neste chat em grupo podem ver",
   "chat.page.usage": "Páginas: {pages} de {limit}",
   "chat.page.copyLink": "Copiar link",

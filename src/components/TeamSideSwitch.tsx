@@ -5,16 +5,23 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { openBot, useStore, type AppState, type Bot, type Group } from "@/state/store";
-import { setTeamSide, sideOfThread, teamSide, teamSideView, useTeamSide, type TeamSide } from "@/state/team-side";
+import { setTeamSide, showTeamSide, sideOfThread, teamSide, teamSideView, useTeamSide, type TeamSide } from "@/state/team-side";
 import { markTeamPrivateChatsLineSaid, sharedChatAudience } from "./TeamPrivateChatsLine";
 
 const SIDES = [{ side: "me", label: "teamSide.me", Icon: Lock }, { side: "team", label: "teamSide.team", Icon: Users }] as const;
 const HINT_KEY = (teamId: string) => `omb.team-side-hint.${teamId}`;
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
+let openedAtStart: number | null = null;
+/** A conversation the app opened as it started, before it knew this is a team's Cloud, is not one the person asked for. */
+function noteStart(state: Pick<AppState, "revealThread">, team: unknown): void {
+  if (!team && state.revealThread) openedAtStart = state.revealThread.nonce;
+}
+
 /** What the sidebar lists on the side its switch shows; off a team, everything as ever. */
-export function useTeamSideLists(state: Pick<AppState, "bots" | "groups" | "config">) {
+export function useTeamSideLists(state: Pick<AppState, "bots" | "groups" | "config" | "revealThread">) {
   const { team, side } = useTeamSide();
+  noteStart(state, team);
   const onTeam = state.config?.team ? team : null;
   const last = useRef<{ inputs: readonly unknown[]; view: ReturnType<typeof teamSideView<Bot, Group>> } | null>(null);
   const inputs = [state.bots, state.groups, onTeam, side] as const;
@@ -95,39 +102,52 @@ export function TeamSideSwitch({ compact, listOnly = false }: { compact: boolean
   );
 }
 
-let restored: string | null = null;
+let known = new Set<string>();
+let lastChat: string | null = null;
 /** Tests only. */
-export function forgetTeamSideRestore(): void {
-  restored = null;
+export function forgetShownConversations(): void {
+  known = new Set();
+  lastChat = null;
+  openedAtStart = null;
 }
 
 /**
  * By the message box of every conversation on a team's Cloud: who can read what is typed there. It is read from the
- * conversation itself, as the server sent it, never from the sidebar's switch; the switch follows the conversation on
- * screen instead, so a chat opened from a notification or a link moves it. The one exception is the page's first
- * conversation, shown before the person chose anything: the page opens on the side they last used instead, with this
- * bot when it is listed there.
+ * conversation itself, as the server sent it, never from the sidebar's switch.
+ *
+ * The switch follows a conversation the person asked for (another bot or group chat, a conversation this page opened by
+ * name, one they just made), and that is kept as their choice. A conversation of the other side that came on screen
+ * unasked (the first one a page shows, one the app opened as it started, or the bot's own pick changing under them) is
+ * never kept: the page goes back to the side they chose, to their own conversation with this bot when it is listed there.
  */
 export function TeamAudienceLabel({ bot, group }: { bot?: Bot; group?: Group }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const { team } = useTeamSide();
+  noteStart(state, team);
   const teamName = state.config?.team?.name;
   const side: TeamSide | null = !team || !teamName ? null : group ? "team" : bot ? sideOfThread(bot, bot.threadId) : null;
   const shown = group?.threadId ?? bot?.threadId;
   const person = team?.person;
   useEffect(() => {
-    if (!team || !person || !side) return;
-    const first = restored !== `${team.teamId}:${person}`;
-    restored = `${team.teamId}:${person}`;
-    const last = teamSide(team);
-    const lists = first && last !== side && !bot?.switchingTo && !state.revealThread ? teamSideView(state.bots, state.groups, team, last) : null;
-    const there = lists?.switchable ? lists.bots : [];
-    const target = there.find((candidate) => candidate.id === bot?.id) ?? there.find((candidate) => !candidate.sidebarHidden);
+    const chat = group?.id ?? bot?.id;
+    if (!team || !person || !side || !shown || !chat) return;
+    const justMade = known.size > 0 && !known.has(shown);
+    known = new Set([...state.bots.flatMap((each) => (each.tasks ?? []).map((task) => task.threadId)), ...state.groups.map((each) => each.threadId)]);
+    if (state.activeView !== "chat" || state.selectedId !== chat) return;
+    const movedHere = lastChat !== null && lastChat !== chat;
+    lastChat = chat;
+    const showing = teamSide(team);
+    if (showing === side || bot?.switchingTo) return;
+    const askedFor = state.revealThread?.threadId === shown && state.revealThread.nonce !== openedAtStart;
+    if (group || movedHere || askedFor || (justMade && side === "me")) { setTeamSide(side, team); return; }
+    const lists = teamSideView(state.bots, state.groups, team, showing);
+    const there = lists.switchable ? lists.bots : [];
+    const target = there.find((candidate) => candidate.id === chat) ?? there.find((candidate) => !candidate.sidebarHidden);
     const landing = target && state.bots.find((candidate) => candidate.id === target.id);
     if (landing) openBot(dispatch, landing, showThreads);
-    else setTeamSide(side, team);
-  }, [team?.teamId, person, shown, side]);
+    else showTeamSide(side, team);
+  }, [team?.teamId, person, shown, side, bot?.switchingTo]);
   if (!side || !teamName) return null;
   const Icon = side === "me" ? Lock : Users;
   const label = side === "me" ? t("team.privateHeader") : group ? t("teamSide.groupAudience") : sharedChatAudience(teamName, bot?.onlyPeopleAdded);

@@ -28,7 +28,7 @@ const DESKTOP = ["1280", "800"] as const, PHONE = ["390", "844"] as const;
 const DISMISS = `(() => { [...document.querySelectorAll('[role="dialog"] button, dialog button')].find((button) => button.textContent.trim() === "Not now")?.click(); return true; })()`;
 
 type Task = { threadId: string; private?: true; sharedChat?: true; unread?: boolean };
-type Bot = { id: string; mainThreadId: string; tasks: Task[] };
+type Bot = { id: string; threadId: string; mainThreadId: string; tasks: Task[] };
 type App = Awaited<ReturnType<typeof openAs>>;
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
@@ -91,6 +91,15 @@ async function openAs(who: keyof typeof tokens, size: readonly [string, string])
       await browser("press", "Enter");
       await expect.poll(() => evaluate<string>("document.querySelector('main')?.innerText ?? ''"), { timeout: 30_000 }).toContain(text);
     },
+    /** Types without sending. */
+    async draft(text: string) {
+      await evaluate(`(() => { const field = document.querySelector('textarea[placeholder^="Message"]'); field.focus();
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(field, ${JSON.stringify(text)});
+        field.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    },
+    typed: () => evaluate<string>(`document.querySelector('textarea[placeholder^="Message"]')?.value ?? ""`),
+    saved: () => evaluate<string | null>(`localStorage.getItem("omb.team-side.team-acme-switch." + ${JSON.stringify(`${who}@acme.test`)})`),
     async reload() {
       await evaluate("location.reload(); true");
       await expect.poll(() => evaluate<boolean>(`Boolean(document.querySelector('[data-sidebar-bot-row="${scout}"]'))`), { timeout: 60_000, interval: 500 }).toBe(true);
@@ -136,7 +145,7 @@ async function openAs(who: keyof typeof tokens, size: readonly [string, string])
   it("a member's Just me chat is hers alone and her Team message is the team's, each sent to the conversation the label names", async () => {
     const ada = await openAs("ada", DESKTOP);
     await expect.poll(ada.side, { timeout: 60_000, interval: 500 }).toBe("me");
-    expect(await ada.evaluate<string | null>("document.querySelector('[data-team-side-hint]')?.textContent ?? null"), "said once, the first time").toContain("Just me shows your private chats");
+    expect(await ada.evaluate<string | null>("document.querySelector('[data-team-side-hint]')?.textContent ?? null"), "said once, the first time").toBe("Just me is private, even from admins. Team is shared.");
     expect(await ada.evaluate<string[]>("[...document.querySelectorAll('[data-team-side] [role=radio]')].map((radio) => radio.textContent.trim() + ':' + radio.getAttribute('aria-checked'))")).toEqual(["Just me:true", "Team:false"]);
     await ada.openScout("me");
     expect(await ada.audience(), "by the message box").toBe("me:Private · only you");
@@ -172,6 +181,49 @@ async function openAs(who: keyof typeof tokens, size: readonly [string, string])
     expect(await ada.evaluate<string>("document.querySelector('main').innerText")).toContain(PRIVATE);
     expect(await ada.words(), "and nothing of the shared chat under Just me").not.toContain(SHARED);
     expect((await scoutAs("ada")).tasks.filter((task) => task.private === true).length, "going back opens her chat, it makes no second one").toBe(1);
+    await ada.close();
+  }, hostTimeout(300_000));
+
+  it("a reload keeps a member in her private chat and keeps her choice, whatever conversation the server would show first", async () => {
+    const ada = await openAs("ada", DESKTOP);
+    await ada.openScout("me");
+    await ada.choose("team");
+    await ada.choose("me");
+    expect(await ada.saved(), "she pressed Just me").toBe("me");
+    for (let round = 0; round < 2; round++) {
+      // A teammate opens the bot's shared chat meanwhile, so the bot's own pick of a conversation is the shared one.
+      expect((await team.as(tokens.ben, "POST", `/api/bots/${scout}/tasks/${main}`, {})).status).toBe(200);
+      expect((await scoutAs("ada")).threadId, "what her page is sent first").toBe(main);
+      await ada.reload();
+      await expect.poll(async () => `${await ada.side()} ${await ada.audience()}`, { timeout: 60_000, interval: 500 }).toBe("me me:Private · only you");
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      expect(`${await ada.side()} ${await ada.audience()}`, "and it stays there").toBe("me me:Private · only you");
+      expect(await ada.saved(), "a reload never rewrites what she chose").toBe("me");
+      expect(await ada.evaluate<string>("document.querySelector('main').innerText"), "her own conversation, the one she was in").toContain(PRIVATE);
+      // The same teammate opening the shared chat again while her page is open moves nothing under her.
+      expect((await team.as(tokens.ben, "POST", `/api/bots/${scout}/tasks/${main}`, {})).status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      expect(`${await ada.side()} ${await ada.audience()} ${await ada.saved()}`).toBe("me me:Private · only you me");
+    }
+    expect((await scoutAs("ada")).tasks.filter((task) => task.private === true).map((task) => task.threadId), "no second private chat is made").toEqual([adaOwn]);
+
+    const AFTER = "Typed after the reload, for me alone";
+    await ada.say(AFTER);
+    expect((await wordsIn("ada", adaOwn)).text).toContain(AFTER);
+    expect((await wordsIn("ada", main)).text, "what she types after a reload never reaches the shared chat").not.toContain(AFTER);
+
+    const DRAFT = "A private thought not sent yet";
+    await ada.draft(DRAFT);
+    await ada.choose("team");
+    expect(await ada.typed(), "a draft typed under Just me is not in the Team message box").toBe("");
+    await ada.reload();
+    await expect.poll(ada.audience, { timeout: 60_000, interval: 500 }).toBe("team:Shared · everyone in Acme can see");
+    expect(await ada.typed(), "nor after a reload").toBe("");
+    expect(await ada.saved(), "she pressed Team").toBe("team");
+    await ada.choose("me");
+    expect(await ada.typed(), "it waits where it was typed").toBe(DRAFT);
+    expect((await wordsIn("ada", main)).text).not.toContain(DRAFT);
+    await ada.draft("");
     await ada.close();
   }, hostTimeout(300_000));
 

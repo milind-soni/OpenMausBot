@@ -37,10 +37,13 @@ export function botOnSide(bot: SideBot, team: TeamChats, side: TeamSide): boolea
   return Boolean(bot.defaultBot?.person) || bot.yourAccess !== "view" || ownChatOf(bot, team) !== null;
 }
 
-/** A bot as one side lists it: that side's conversations only, and none of the other side's words in its preview. */
+/** A bot as one side lists it: that side's conversations only, and nothing of the other side's on its row: no unread
+ * mark, no working line, no words in its preview. */
 export function botForSide<T extends SideBot>(bot: T, side: TeamSide): T {
   const onScreenHere = sideOfThread(bot, bot.threadId) === side;
-  return { ...bot, tasks: bot.tasks && tasksOfSide(bot, side), ...(onScreenHere || !bot.messages ? {} : { messages: [] }) } as T;
+  const tasks = tasksOfSide(bot, side);
+  const elsewhere = onScreenHere ? {} : { busy: false, activity: undefined, waitingForTeammates: false, ...(bot.messages ? { messages: [] } : {}) };
+  return { ...bot, tasks: bot.tasks && tasks, unread: tasks.some(marksUnread), ...elsewhere } as T;
 }
 
 const marksUnread = (task: SideTask) => Boolean(task.unread) && !task.routineRunId && task.archivedAt === undefined;
@@ -71,27 +74,46 @@ type SideStorage = Pick<Storage, "getItem" | "setItem">;
 const deviceStorage = (): SideStorage | null => (typeof localStorage === "undefined" ? null : localStorage);
 const keyOf = (team: TeamChats) => (team.person ? `omb.team-side.${team.teamId}.${team.person}` : null);
 
-let unsaved: { teamId: string; side: TeamSide } | null = null;
+let shown: { page: string; side: TeamSide } | null = null;
 let version = 0;
 const listeners = new Set<() => void>();
 const changed = () => { version++; for (const listener of listeners) listener(); };
-onTeamChats(changed);
+const pageOf = (team: TeamChats) => `${team.teamId}:${team.person ?? ""}`;
+onTeamChats(() => {
+  const team = teamChats();
+  if (!team || pageOf(team) !== shown?.page) shown = null;
+  changed();
+});
 
 /** The side this person last chose on this device: "Just me" until they chose "Team". */
-export function teamSide(team: TeamChats | null = teamChats(), storage: SideStorage | null = deviceStorage()): TeamSide {
-  if (!team) return "me";
-  const key = keyOf(team);
+export function savedTeamSide(team: TeamChats | null = teamChats(), storage: SideStorage | null = deviceStorage()): TeamSide {
+  const key = team && keyOf(team);
   try {
     if (key && storage) return storage.getItem(key) === "team" ? "team" : "me";
   } catch {}
-  return unsaved?.teamId === team.teamId ? unsaved.side : "me";
+  return "me";
 }
 
+/** The side the sidebar shows: the one this page moved to, else the one the person last chose. */
+export function teamSide(team: TeamChats | null = teamChats(), storage: SideStorage | null = deviceStorage()): TeamSide {
+  if (!team) return "me";
+  return shown?.page === pageOf(team) ? shown.side : savedTeamSide(team, storage);
+}
+
+/** Shows a side without keeping it: for a conversation that came on screen without the person asking for it. */
+export function showTeamSide(side: TeamSide, team: TeamChats | null = teamChats()): void {
+  if (!team || teamSide(team) === side) return;
+  shown = { page: pageOf(team), side };
+  changed();
+}
+
+/** The person's own choice, kept for next time: they pressed the switch, or opened a conversation of that side. */
 export function setTeamSide(side: TeamSide, team: TeamChats | null = teamChats(), storage: SideStorage | null = deviceStorage()): void {
-  if (!team || teamSide(team, storage) === side) return;
-  const key = keyOf(team);
-  unsaved = { teamId: team.teamId, side };
-  try { if (key && storage) storage.setItem(key, side); } catch {}
+  if (!team) return;
+  const key = keyOf(team), moves = teamSide(team, storage) !== side;
+  try { if (key && storage && savedTeamSide(team, storage) !== side) storage.setItem(key, side); } catch {}
+  if (!moves) return;
+  shown = { page: pageOf(team), side };
   changed();
 }
 

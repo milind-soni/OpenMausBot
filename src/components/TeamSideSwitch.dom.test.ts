@@ -20,8 +20,9 @@ vi.mock("@/lib/use-media-query", async (importOriginal) => ({ ...await importOri
 
 const { initialState } = await import("@/state/store");
 const { setTeamChats } = await import("@/state/team-chats");
-const { setTeamSide, teamSide } = await import("@/state/team-side");
-const { forgetTeamSideRestore, TeamAudienceLabel, TeamSideSwitch } = await import("./TeamSideSwitch");
+const { savedTeamSide, setTeamSide, teamSide, teamSideView } = await import("@/state/team-side");
+const { botShowsUnread } = await import("@/lib/bot-unread");
+const { forgetShownConversations, TeamAudienceLabel, TeamSideSwitch } = await import("./TeamSideSwitch");
 const { BotConversations, forgetConversationLines } = await import("./bot-panel/Conversations");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -58,7 +59,7 @@ beforeEach(() => {
   fixture.dispatch.mockReset();
   fixture.calls.length = 0;
   fixture.answer = null;
-  forgetTeamSideRestore();
+  forgetShownConversations();
   setTeamChats(ADA);
   host = document.body.appendChild(document.createElement("div"));
   root = createRoot(host);
@@ -163,7 +164,7 @@ describe("the Just me / Team switch at the top of a team's sidebar", () => {
 
   it("explains the switch in one line the first time it is seen on this device, and never again", () => {
     sidebar();
-    expect(host.querySelector("[data-team-side-hint]")?.textContent).toBe("Just me shows your private chats: nobody else can read them, admins included. Team shows what everyone shares.");
+    expect(host.querySelector("[data-team-side-hint]")?.textContent).toBe("Just me is private, even from admins. Team is shared.");
     act(() => root.unmount());
     root = createRoot(host);
     sidebar();
@@ -191,7 +192,7 @@ describe("who can see it, by the message box", () => {
 
   it("never follows the switch: with Just me chosen, a shared chat on screen still says Shared", () => {
     setTeamSide("me");
-    forgetTeamSideRestore();
+    forgetShownConversations();
     draw(acme(), createElement(TeamAudienceLabel, { bot: bot({ threadId: "scout-main", switchingTo: "ada-own" }) }));
     expect(label()?.textContent).toBe("Shared · everyone in Acme can see");
     draw(acme(), createElement(TeamAudienceLabel, { bot: bot({ threadId: "never-heard-of", tasks: [MAIN] }) }));
@@ -204,32 +205,92 @@ describe("who can see it, by the message box", () => {
     expect(host.innerHTML).toBe("<div></div>");
   });
 
-  it("moves the switch to match a conversation opened on the other side, from a notification or a link", () => {
-    box(acme(), { bot: bot({ threadId: "ada-own" }) });
+  it("moves the switch to a conversation the person asked for by name, from a notification or a link, and keeps that as their choice", () => {
+    box(acme({ revealThread: { threadId: "scout-main", nonce: 1 } }), { bot: bot({ threadId: "scout-main" }) });
+    expect(checked(), "the shared chat they opened").toBe("team");
+    expect(savedTeamSide()).toBe("team");
+    box(acme({ revealThread: { threadId: "ada-own", nonce: 2 } }), { bot: bot({ threadId: "ada-own" }) });
     expect(checked()).toBe("me");
-    box(acme(), { bot: bot({ threadId: "scout-main" }) });
-    expect(checked(), "the shared chat came on screen").toBe("team");
-    expect(teamSide()).toBe("team");
-    box(acme(), { bot: MINE });
-    expect(checked()).toBe("me");
-    box(acme(), { group: ROOM });
-    expect(checked()).toBe("team");
+    expect(savedTeamSide()).toBe("me");
     expect(fixture.dispatch, "following moves the switch, never the conversation").not.toHaveBeenCalled();
   });
 
-  it("brings the page's first conversation to the side the person last used, when this bot has one there", () => {
+  it("moves the switch when the person goes to another bot or a group chat of the other side", () => {
+    box(acme(), { bot: bot({ threadId: "ada-own" }) });
+    expect(checked()).toBe("me");
+    box(acme({ selectedId: "room-1" }), { group: ROOM });
+    expect(checked()).toBe("team");
+    expect(savedTeamSide()).toBe("team");
+    box(acme({ selectedId: "mine" }), { bot: MINE });
+    expect(checked(), "their own MausBot, picked from search").toBe("me");
+    expect(savedTeamSide()).toBe("me");
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("moves the switch to Just me for a conversation the person just made beside a shared chat", () => {
+    setTeamSide("team");
+    const before = bot({ threadId: "scout-main", tasks: [MAIN] });
+    box(acme({ bots: [before, MINE] }), { bot: before });
+    const made = bot({ threadId: "ada-new", tasks: [MAIN, task("ada-new", "New chat", { private: true })] });
+    box(acme({ bots: [made, MINE] }), { bot: made });
+    expect(checked()).toBe("me");
+    expect(label()?.textContent).toBe("Private · only you");
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("after a reload with Just me chosen, goes to the person's own chat with the bot and never saves Team from what the page showed first", () => {
+    box(acme(), { bot: bot({ threadId: "scout-main" }) });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "scout", threadId: "ada-own" });
+    expect(checked(), "the switch does not move for it").toBe("me");
+    expect(savedTeamSide()).toBe("me");
+    expect(stored.get("omb.team-side.team-acme.ada@acme.test")).not.toBe("team");
+    expect(label()?.textContent, "and until their chat is on screen the label says what is").toBe("Shared · everyone in Acme can see");
+  });
+
+  it("goes back to the person's own chat when the bot's own pick puts its shared chat on screen under them, and keeps their choice", () => {
+    box(acme({ revealThread: { threadId: "ada-own", nonce: 1 } }), { bot: bot({ threadId: "ada-own" }) });
+    expect(checked()).toBe("me");
+    fixture.dispatch.mockReset();
+    box(acme({ revealThread: { threadId: "ada-own", nonce: 1 } }), { bot: bot({ threadId: "scout-main" }) });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "scout", threadId: "ada-own" });
+    expect(checked()).toBe("me");
+    expect(savedTeamSide(), "nobody chose Team").toBe("me");
+    expect(stored.get("omb.team-side.team-acme.ada@acme.test")).not.toBe("team");
+  });
+
+  it("does not take the shared chat the app opened as it started, before it knew this is a team, for the person's choice", () => {
+    setTeamChats(null);
+    const starting = { ...initialState, bots: [bot({ threadId: "ada-own", switchingTo: "scout-main" }), MINE], revealThread: { threadId: "scout-main", nonce: 7 } } as unknown as AppState;
+    draw(starting, createElement(TeamSideSwitch, { compact: false }));
+    setTeamChats(ADA);
+    box(acme({ revealThread: { threadId: "scout-main", nonce: 7 } }), { bot: bot({ threadId: "scout-main" }) });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "scout", threadId: "ada-own" });
+    expect(checked()).toBe("me");
+    expect(savedTeamSide(), "nobody chose Team").toBe("me");
+    expect(stored.get("omb.team-side.team-acme.ada@acme.test")).not.toBe("team");
+  });
+
+  it("after a reload with Team chosen, goes to the bot's shared chat and keeps Team", () => {
     setTeamSide("team");
     box(acme(), { bot: bot({ threadId: "ada-own" }) });
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "scout", threadId: "scout-main" });
-    expect(teamSide(), "still the side they chose").toBe("team");
+    expect(teamSide()).toBe("team");
+    expect(savedTeamSide()).toBe("team");
     expect(label()?.textContent, "and the label still says what is on screen").toBe("Private · only you");
   });
 
-  it("leaves a conversation a link or a notification asked for where it is, and follows it", () => {
-    setTeamSide("team");
-    box(acme({ revealThread: { threadId: "ada-own", nonce: 1 } }), { bot: bot({ threadId: "ada-own" }) });
+  it("waits while a conversation is on its way, and takes no notice of a message box that is not the chat on screen", () => {
+    box(acme(), { bot: bot({ threadId: "scout-main", switchingTo: "ada-own" }) });
     expect(fixture.dispatch).not.toHaveBeenCalled();
-    expect(teamSide()).toBe("me");
+    expect(checked()).toBe("me");
+    box(acme({ selectedId: "mine" }), { bot: MINE });
+    box(acme(), { bot: bot({ threadId: "scout-main", switchingTo: "ada-own" }) });
+    expect(savedTeamSide(), "coming from another bot, its own chat still loading over the shared one").toBe("me");
+    expect(checked()).toBe("me");
+    setTeamSide("team");
+    box(acme({ selectedId: "scout" }), { bot: MINE });
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(teamSide(), "an inbox's reply box beside the chat").toBe("team");
   });
 
   it("opens a new person's page on Just me, their own chat with the bot on screen made as a click on it makes it", async () => {
@@ -239,18 +300,44 @@ describe("who can see it, by the message box", () => {
     expect(teamSide(), "Just me until they choose Team").toBe("me");
   });
 
-  it("opens the page on the remembered side with another bot when the one on screen is not listed there, and follows when nothing is", async () => {
+  it("goes to another bot of the chosen side when the one on screen is not listed there", () => {
     setTeamSide("team");
-    box(acme(), { bot: MINE });
+    box(acme({ selectedId: "mine" }), { bot: MINE });
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "scout", threadId: "scout-main" });
-    forgetTeamSideRestore();
-    fixture.dispatch.mockReset();
-    setTeamSide("me");
-    box(acme({ bots: [bot({ yourAccess: "view", tasks: [MAIN] })], groups: [] }), { bot: bot({ yourAccess: "view", tasks: [MAIN] }) });
+    expect(savedTeamSide()).toBe("team");
+  });
+
+  it("with nowhere to go on the chosen side, shows the side on screen without keeping it", async () => {
+    const viewOnly = bot({ yourAccess: "view", tasks: [MAIN] });
+    box(acme({ bots: [viewOnly], groups: [] }), { bot: viewOnly });
     await settle();
     expect(fixture.dispatch).not.toHaveBeenCalled();
     expect(fixture.calls).toEqual([]);
     expect(teamSide()).toBe("team");
+    expect(savedTeamSide(), "nobody chose it").toBe("me");
+  });
+});
+
+describe("each side's rows carry only that side's marks", () => {
+  const rows = (bots: Bot[], side: "me" | "team") => teamSideView(bots, [ROOM], ADA, side).bots;
+
+  it("puts no unread mark on a Just me row for something unread in the bot's shared chat", () => {
+    const sharedUnread = bot({ unread: true, tasks: [{ ...MAIN, unread: true }] });
+    expect(botShowsUnread(sharedUnread), "the bot as the server sent it").toBe(true);
+    const [row] = rows([sharedUnread, MINE], "me");
+    expect(row!.id).toBe("scout");
+    expect(botShowsUnread(row!), "no private conversation there, so no mark").toBe(false);
+    expect(botShowsUnread(rows([sharedUnread, MINE], "team")[0]!)).toBe(true);
+  });
+
+  it("puts no unread mark on a Team row for something unread in a private chat, and none of a run on the other side", () => {
+    const privateUnread = bot({ unread: true, threadId: "ada-own", busy: true, tasks: [MAIN, { ...OWN, unread: true }] });
+    const team = rows([privateUnread, MINE], "team")[0]!;
+    expect(botShowsUnread(team)).toBe(false);
+    expect(team.busy, "her private run is not the shared chat's").toBe(false);
+    const me = rows([privateUnread, MINE], "me")[0]!;
+    expect(botShowsUnread(me)).toBe(true);
+    expect(me.busy).toBe(true);
   });
 });
 
