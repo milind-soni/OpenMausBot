@@ -16,9 +16,11 @@ vi.mock("./retry.ts", async (importOriginal) => {
 
 afterEach(() => vi.unstubAllGlobals());
 
+/** An SSE chat completion response carrying `body`. */
 const sse = (body: string) => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 /** Closes with no [DONE], no finish_reason and nothing streamed: the truncation under test. */
 const truncated = () => sse("");
+/** A clean completion the resend should finish the turn with. */
 const answer = () => sse('data: {"choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n'
   + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n\n');
 
