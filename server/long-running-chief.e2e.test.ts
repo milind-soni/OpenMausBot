@@ -269,13 +269,15 @@ it("tells the Chief what happened to each approval: allowed or denied, and parks
     { key: "B0", match: ["PHASE-APPROVALS-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "CHECK-HISTORY: check the export module's recent history." } }], reply: "B0: Mira is checking." },
     { key: "B1", match: [SETTLED, "HISTORY-RESULT"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "PUSH-BRANCH: push the export branch.", rework: true } }], reply: "B1: pushing." },
     { key: "B2", match: [SETTLED, "PUSH-RESULT"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "RUN-TESTS: run the test suite.", rework: true } }], reply: "B2: testing." },
-    { key: "B3", match: [SETTLED, "TESTS-RESULT"], reply: "APPROVALS-FINAL: history checked, push not done, tests not run." });
+    { key: "B3", match: [SETTLED, "TESTS-RESULT"], reply: "APPROVALS-FINAL: history checked, push not done, tests not run." },
+    // Mira's parked ask can resume Clive before the person answers it; whether it does is a race, so the entry is optional.
+    { key: "BQ", match: ["Let it try again?"], reply: "BQ: Mira is waiting on the person." });
   f.script(f.mira.id,
     { key: "MA", match: ["CHECK-HISTORY"], approve: { tool_name: "Bash", input: { command: "git log --oneline -5 -- src/export" } },
       reply: "HISTORY-RESULT: checked the history.", replyIfDenied: "HISTORY-RESULT: not checked." },
     { key: "MB", match: ["PUSH-BRANCH"], approve: { tool_name: "Bash", input: { command: "git push origin export" } },
       reply: "PUSH-RESULT: pushed.", replyIfDenied: "PUSH-RESULT: not pushed; the push was denied." },
-    { key: "MC", match: ["RUN-TESTS"], approve: { tool_name: "Bash", input: { command: "pnpm test" } },
+    { key: "MC", repeat: true, match: ["RUN-TESTS"], approve: { tool_name: "Bash", input: { command: "pnpm test" } },
       reply: "TESTS-RESULT: tests pass.", replyIfDenied: "TESTS-RESULT: I could not run the tests." });
   const job = await f.newJob("Approvals");
   await f.say(job, "PHASE-APPROVALS-JOB: check the export history, push the branch, and run the tests.");
