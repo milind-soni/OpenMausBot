@@ -418,6 +418,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/config$/ },
   // a person's own "About you" on a Team Cloud
   { methods: ["GET", "PUT"], path: /^\/api\/me$/ },
+  // whether the person saw their own welcome to the team, and its steps they finished (team-welcome.ts)
+  { methods: ["PUT"], path: /^\/api\/me\/welcome$/ },
   // what a bot remembers about the signed-in person on a Team Cloud: their own layer only (routes/bot-memory.ts ownLayer)
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/memory\/mine$/ },
   { methods: ["GET", "PUT", "DELETE"], path: /^\/api\/bots\/[\w-]+\/memory\/mine\/file$/ },

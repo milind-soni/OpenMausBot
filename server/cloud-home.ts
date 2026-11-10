@@ -10,7 +10,7 @@ import { join } from "node:path";
 import type { Surface } from "../shared/wire.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
-import { parseMemberClaim, teamRoleScopes, type CloudTeam } from "./cloud-team.ts";
+import { parseMemberClaim, teamMemberEmail, teamRoleScopes, type CloudTeam } from "./cloud-team.ts";
 import { isLoopbackHost } from "./request-auth.ts";
 import { formatPairingCode, type SessionRegistry } from "./sessions.ts";
 
@@ -191,6 +191,8 @@ export function createCloudPairing(options: {
   sessions: PairingSessions;
   /** The team this machine serves: then every pairing body must carry the Admin's `member` claim. */
   team?: CloudTeam | null;
+  /** The claim's `member.invitedBy` (additive): who invited this member, for their welcome (team-welcome.ts). */
+  invited?: (member: string, by: string) => void;
   now?: () => number;
 }) {
   const { sessions } = options;
@@ -213,6 +215,7 @@ export function createCloudPairing(options: {
       const claim = options.team ? parseMemberClaim(parsed as Record<string, unknown>, options.team) : null;
       if (claim && !claim.ok) return { status: 400, body: { error: claim.error } };
       const member = claim?.ok ? claim.member : null;
+      const invitedBy = member ? teamMemberEmail((parsed as { member?: { invitedBy?: unknown } }).member?.invitedBy) : null;
       // oxlint-disable-next-line no-control-regex
       if (label !== undefined && (typeof label !== "string" || label.length > 80 || /[\x00-\x1f\x7f]/.test(label))) return { status: 400, body: { error: "invalid_label" } };
       if (ttlSeconds !== undefined && (!Number.isSafeInteger(ttlSeconds) || (ttlSeconds as number) < 1)) return { status: 400, body: { error: "invalid_ttl" } };
@@ -224,6 +227,9 @@ export function createCloudPairing(options: {
       }
       const ttl = Math.min((ttlSeconds as number | undefined) ?? CLOUD_PAIRING_DEFAULT_TTL_S, browser ? CLOUD_BROWSER_SIGN_IN_MAX_TTL_S : CLOUD_PAIRING_MAX_TTL_S);
       if (member) sessions.revokeMember(member.email, member.role);
+      if (member && invitedBy && invitedBy !== member.email) {
+        try { options.invited?.(member.email, invitedBy); } catch { /* the welcome names nobody; the pairing goes on */ }
+      }
       const opened = sessions.openPairing({
         scopes: member ? teamRoleScopes(member.role) : ["admin", "client"],
         label: typeof label === "string" && label.trim() ? label.trim() : "MausBot Cloud",
