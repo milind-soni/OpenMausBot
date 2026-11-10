@@ -365,14 +365,18 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage + verified CUA runtime
 
 ### Desktop capability status
 
-| Capability | macOS | Ubuntu 24.04 Xorg | Ubuntu 24.04 Wayland |
-|---|---|---|---|
-| Packaged app, embedded harness, local agent CLIs | Supported | Beta | Beta |
-| Composio and Boat/cloud computers | Supported | Beta | Beta |
-| Explicit preview-only local screen capture | Supported | Beta | Beta |
-| Bot control of this computer | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate (Omarchy with Cua's Hyprland plugin: experimental) |
-| Native on-device dictation | Supported | Planned | Planned |
-| Dictation and Take turns calls through Fish Audio (needs a Fish Audio key) | Not used, on-device instead | Supported | Supported |
+| Capability | macOS | Windows x64 | Ubuntu 24.04 Xorg | Ubuntu 24.04 Wayland |
+|---|---|---|---|---|
+| Packaged app, embedded harness, local agent CLIs | Supported | Supported | Beta | Beta |
+| Composio and Boat/cloud computers | Supported | Supported | Beta | Beta |
+| Explicit preview-only local screen capture | Supported | Unavailable | Beta | Beta |
+| Bot control of this computer | Supported | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate (Omarchy with Cua's Hyprland plugin: experimental) |
+| Native on-device dictation | Supported | Unavailable | Planned | Planned |
+| Dictation and Take turns calls through Fish Audio (needs a Fish Audio key) | Not used, on-device instead | Supported | Supported | Supported |
+
+On Windows, choose **This computer** to let a bot control the local desktop. The packaged app includes its own
+CUA driver and SDK; a separate Cua installation is not required. Local bot control is available even though the
+preview-only screen capture above is unavailable. See [Computer use & browser use](docs/computer-use-integration.md).
 
 The Linux preview is user-initiated and never enables local bot control or Auto routing. On Xorg, the reviewed Cua
 Driver 0.41.3 runtime starts only after explicit opt-in and without its full-screen cursor overlay. On Wayland the
