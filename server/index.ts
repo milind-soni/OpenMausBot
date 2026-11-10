@@ -6105,7 +6105,7 @@ function continueComputerSelection(threadId: string, generation: string | undefi
   const selection = computerSelectionTurns.get(threadId);
   if (!selection || selection.generation !== generation) return false;
   // A hand-off that does not continue reports that its work was not done (or its own failure), never the move request.
-  const giveUp = () => { if (computerSelectionTurns.get(threadId) === selection) computerSelectionTurns.delete(threadId); if (selection.handoff?.outcome) settleDirectCoordination(generation, stoppedHandoffResult(selection.handoff.outcome)); else if (selection.handoff && generation && directCoordinationSettlers.has(generation)) stoppedHandoffs.stop(generation); };
+  const giveUp = () => { if (computerSelectionTurns.get(threadId) === selection) computerSelectionTurns.delete(threadId); if (selection.handoff?.outcome) settleDirectCoordination(generation, stoppedHandoffResult(selection.handoff.outcome)); else if (selection.handoff && selection.selected && generation && directCoordinationSettlers.has(generation)) stoppedHandoffs.stop(generation); };
   if (!succeeded || !selection.selected || hasQueuedSteeredMessages(selection.botId, threadId)) return giveUp(), false;
   const surface = selection.selected;
   setImmediate(() => {
