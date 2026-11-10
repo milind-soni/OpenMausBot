@@ -47,6 +47,17 @@ Configure the optional Vercel hook below to rebuild the docs immediately after
 publication; otherwise the live cache or the next normal docs deployment
 refreshes it.
 
+## Data format and rollback
+
+Each release records the data-folder formats it writes and reads:
+**Prepare next release** runs `scripts/record-data-format.mjs`, which writes
+`server/data-format-released.json` into the version-bump commit. The next
+release's changes are tested against that record, so a version never writes
+data the release before it cannot read
+([CONTRIBUTING.md, "Changing how data is stored"](../CONTRIBUTING.md#changing-how-data-is-stored)).
+A version bump made by hand needs the same command, or
+`server/data-format.test.ts` fails on the mismatched version.
+
 ## Updater migration invariant
 
 `app-update.yml` is baked into every packaged desktop app. Builds through

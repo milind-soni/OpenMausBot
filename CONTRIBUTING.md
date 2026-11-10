@@ -107,6 +107,72 @@ House rules for tests:
 - Fake CLI shebang scripts must be launched through `spawnCli`/`execCli`, which resolve them through
   Node on Windows. Only gate a test when the behavior itself is genuinely platform-specific.
 
+## Changing how data is stored
+
+**The rule: what version N writes, version N-1 can read.** A self-hosted server
+is updated with a way back: the updater keeps a copy of the data, and when the
+new version does not come up it puts the old version and the copy back. A
+server that was rolled back by hand, or a Cloud moved back one release, starts
+the old version on data the new one has already touched. That must work.
+
+The data folder says which format it is in: `data-format.json`
+(`{ "format": 1, "writtenBy": "0.1.152", … }`), written at start by
+[`server/data-format.ts`](server/data-format.ts). Two numbers in that file
+describe a version: `writes`, the format it leaves the folder in, and `reads`,
+the newest format it understands. A server whose `reads` is below the folder's
+format refuses to start, before it creates, migrates or locks anything, with
+one line that says which version wrote the data and what to do. A folder with
+no marker is format 1.
+
+Most changes need no new format. These are fine in one release, and are how
+every migration so far works:
+
+- a new file, table, index or nullable column; a new optional field in a JSON
+  file whose older readers ignore fields they do not know;
+- a one-time fill of a new field, guarded by a marker file or by the field
+  being absent.
+
+A change needs a new format when the previous release, started on the changed
+data, would fail, lose something, or quietly undo it. Typical cases: a file or
+folder moves or is renamed; a field older code relies on changes meaning or
+goes away; a value older code deletes because it does not recognise it (the
+store's start-up clean-up of `bots.json` does this); the `version` of a JSON
+store goes up (older code treats a higher version as unreadable and starts
+empty); a table changes in a way an older `INSERT` or `SELECT` breaks on.
+
+Such a change ships in **two releases**:
+
+1. **Read it first.** Add the code that reads the new format beside the old,
+   keep writing the old one, and raise `reads` by one. Release.
+2. **Write it one release later.** Start writing the new format and raise
+   `writes` to match. The release before can already read it.
+
+The rule is between one release and the next. The stable channel may skip
+releases, so going back from one stable version to the one before it can cross
+both steps; there the updater's copy of the data is the way back, and the
+marker makes the old version say so instead of running on data it would
+damage.
+
+`server/data-format.test.ts` fails the build on any other step. It compares
+the two numbers with `server/data-format-released.json`, the numbers of the
+last release, which **Prepare next release** records with the version bump
+(`scripts/record-data-format.mjs`); do not edit that file by hand. Raising
+`writes` past what the last release reads fails with the two steps spelled
+out.
+
+What exists today, all of it format 1: the server has no numbered migrations.
+Each store repairs or extends its own files when it opens them, and decides
+by looking (a column that is missing, a legacy file that is still there, a
+marker file such as `thread-model-copies-cleared`), so every one of them is
+safe to run twice. Most are additive: the SQLite `ADD COLUMN`s and
+`CREATE … IF NOT EXISTS` in `server/message-db.ts`, `server/cloud-sync-store.ts`
+and `server/runtime/store.ts`, and the field fills in `server/store.ts`. A few
+are one-way moves from formats that predate every supported version (JSON
+transcripts into `messages.db`, per-bot skills into the library, engine
+sessions into `engine-homes/`, the old data folder's rename). They stay as
+they are. The marker does not replace them; it adds the one thing they cannot
+do, which is to stop an older version at the door.
+
 ## Adding a provider driver
 
 The SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately small. A driver PR should:
