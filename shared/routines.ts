@@ -249,6 +249,10 @@ export interface RoutineInput {
   access?: RoutineAccess | null;
   deliver?: RoutineDelivery | null;
   attachments?: RoutineContextAttachment[];
-  /** Omission preserves routing; null resets it to the bot's main thread. */
+  /** Omission preserves routing; null resets it to the bot's main thread (on a Team Cloud, a results chat everyone who
+   * sees the bot reads); RESULTS_JUST_ME, on a Team Cloud only, the person's own private chat with the bot. */
   resultsThreadId?: string | null;
 }
+
+/** On a Team Cloud, "Just me": the routine reports into the person's own private chat with the bot, theirs alone. */
+export const RESULTS_JUST_ME = "just-me";

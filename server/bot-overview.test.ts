@@ -13,8 +13,6 @@ function baseFacts(overrides: Partial<OverviewFacts> = {}): OverviewFacts {
       cloudBackend: undefined,
       cwd: undefined,
       autoApprove: false,
-      approvePeerComms: false,
-      peers: [],
       composio: undefined,
       browser: undefined,
       chiefOfStaff: undefined,
@@ -34,7 +32,6 @@ function baseFacts(overrides: Partial<OverviewFacts> = {}): OverviewFacts {
 
 const WONT_ORDER = [
   "Command approvals use Ask mode; saved permissions and provider rules still apply.",
-  "Cannot initiate contact with other bots.",
   "Has no connected apps.",
   "Can't use a computer.",
   "Won't act on a schedule.",
@@ -43,22 +40,19 @@ const WONT_ORDER = [
 
 describe("buildBotOverview", () => {
   it("describes additional departments only for an authorized Chief", () => {
-    const facts = baseFacts({ bot: { ...baseFacts().bot, chiefOfStaff: true, managedSections: ["Engineering", "Research"], peers: undefined }, engine: { agentsMcp: true }, sectionPeers: 3 });
+    const facts = baseFacts({ bot: { ...baseFacts().bot, chiefOfStaff: true, managedSections: ["Engineering", "Research"] }, engine: { agentsMcp: true }, sectionPeers: 3 });
     expect(buildBotOverview(facts).reaches).toContain("Also in charge of these departments: Engineering, Research.");
     expect(buildBotOverview(facts).managedSections).toEqual(facts.bot.managedSections);
     facts.bot.chiefOfStaff = false;
     expect(buildBotOverview(facts).reaches.join(" ")).not.toContain("Engineering");
   });
 
-  it("says a bot can talk to every other bot unless a peers list narrows it", () => {
-    const open = baseFacts({ bot: { ...baseFacts().bot, peers: undefined }, engine: { agentsMcp: true }, sectionPeers: 3 });
+  it("says a bot can talk to every other bot", () => {
+    const open = baseFacts({ bot: baseFacts().bot, engine: { agentsMcp: true }, sectionPeers: 3 });
     expect(buildBotOverview(open).reaches).toContain("Can talk to all 3 other bots, in any department.");
     expect(buildBotOverview({ ...open, sectionPeers: 1 }).reaches).toContain("Can talk to the other bot.");
-    const listed = baseFacts({ bot: { ...baseFacts().bot, peers: ["a", "b"] }, engine: { agentsMcp: true }, sectionPeers: 2 });
-    expect(buildBotOverview(listed).reaches).toContain("Talks only to the bots chosen for it.");
-    expect(buildBotOverview(listed).reaches.join(" ")).not.toContain("department");
   });
-  it("yields all six wont lines in order and no does lines for a bot on Ask", () => {
+  it("yields all five wont lines in order and no does lines for a bot on Ask", () => {
     const overview = buildBotOverview(baseFacts({ bot: { ...baseFacts().bot, approvalMode: "ask" } }));
     expect(overview.wont).toEqual(WONT_ORDER);
     expect(overview.does).toEqual([]);
@@ -80,18 +74,12 @@ describe("buildBotOverview", () => {
       .toContain("Command approvals follow the provider's custom configuration.");
   });
 
-  it("does not promise duplicate profile or peer approvals in Full Access", () => {
-    const bot = { ...baseFacts().bot, peers: undefined, approvePeerComms: true, approvalMode: "full" as const, autoApprove: false };
-    const full = buildBotOverview(baseFacts({ bot })).wont;
-    expect(full).not.toContain("Asks before contacting other bots.");
-    expect(full).not.toContain("Profile proposal cards require your approval.");
+  it("does not promise profile approvals in Full Access", () => {
+    const bot = { ...baseFacts().bot, approvalMode: "full" as const, autoApprove: false };
+    expect(buildBotOverview(baseFacts({ bot })).wont).not.toContain("Profile proposal cards require your approval.");
     for (const approvalMode of ["ask", "custom"] as const) {
-      const reviewed = buildBotOverview(baseFacts({ bot: { ...bot, approvalMode, autoApprove: true } })).wont;
-      expect(reviewed).toContain("Asks before contacting other bots.");
-      expect(reviewed).toContain("Profile proposal cards require your approval.");
+      expect(buildBotOverview(baseFacts({ bot: { ...bot, approvalMode, autoApprove: true } })).wont).toContain("Profile proposal cards require your approval.");
     }
-    expect(buildBotOverview(baseFacts({ bot: { ...bot, peers: [] } })).wont)
-      .toContain("Cannot initiate contact with other bots.");
   });
 
   it("does not advertise a browser disabled globally or unsupported by the engine", () => {
@@ -241,10 +229,8 @@ describe("buildBotOverview", () => {
     ]);
   });
 
-  it("picks a computer automatically and stays reachable by default when computer/peers are unset", () => {
-    const facts = baseFacts({
-      bot: { ...baseFacts().bot, computer: undefined, peers: undefined, approvePeerComms: false },
-    });
+  it("picks a computer automatically when the computer is unset", () => {
+    const facts = baseFacts({ bot: { ...baseFacts().bot, computer: undefined } });
     const overview = buildBotOverview(facts);
     expect(overview.reaches).toContain("Computer preference: Auto; availability is checked when a task starts.");
     expect(overview.wont).not.toContain("Can't use a computer.");

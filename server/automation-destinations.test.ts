@@ -11,7 +11,7 @@ function world(writer: string, cloud = true, earlier: Array<{ webhookId: string;
   let made = 0;
   const store = {
     bot: () => ({ id: "bot" }),
-    createTask: (_botId: string, title: string) => { const task = { threadId: `made-${++made}`, title }; tasks.set(task.threadId, task); return task; },
+    createTask: (_botId: string, title: string, ...rest: unknown[]) => { const task = { threadId: `made-${++made}`, title }; tasks.set(task.threadId, task); (rest[6] as ((made: { threadId: string }) => void) | undefined)?.(task); return task; },
     messagesFor: () => [],
     taskByThread: (_botId: string, threadId: string) => tasks.get(threadId),
   } as unknown as AutomationDestinationDeps["store"];

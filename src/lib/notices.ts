@@ -17,6 +17,8 @@ export const PRODUCT_HUNT_UNTIL = Date.UTC(2026, 10, 1);
 export const BOAT_OFFER_NOTICE = "boat-credit-2026-11";
 /** The Move from Grok Bot popup: each person sees it once, first of all, after their welcome. */
 export const GROK_MOVE_NOTICE = "grok-move-2026-11";
+/** The sponsor's card for ModelGo: each person sees it once, on every page but a branded build or a desktop whose organization refuses it. */
+export const MODELGO_OFFER_NOTICE = "modelgo-offer-2026-11";
 
 /**
  * Every notice, in the order a launch asks them: one launch shows one notice, the first one due, and only the product-updates
@@ -32,6 +34,7 @@ export const NOTICES = [
   CLOUD_INTRO,
   CLOUD_TRIAL_NOTICE,
   CLOUD_NOTICE,
+  MODELGO_OFFER_NOTICE,
   BOAT_OFFER_NOTICE,
   STAR_NOTICE,
 ] as const;

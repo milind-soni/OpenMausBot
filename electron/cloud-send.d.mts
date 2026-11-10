@@ -9,6 +9,7 @@ export interface CloudSendResult {
   updatedBots: string[];
   skills: number;
   logins: number;
+  secrets?: number;
   onePassword: boolean;
   /** "profile" and/or "language". */
   settings: string[];
@@ -34,7 +35,7 @@ export interface CloudSendOutcome { at: number; reason: string; result: CloudSen
  * send stopped as a whole. */
 export interface CloudSendFailure {
   /** `connections`: apps and keys a move could not carry; absent from an older desktop. */
-  reasons?: Array<{ what: { bots: string[]; skills: number; logins: number; onePassword: boolean; settings: number; connections?: number; chats: boolean }; error: string }>;
+  reasons?: Array<{ what: { bots: string[]; skills: number; logins: number; secrets?: number; onePassword: boolean; settings: number; connections?: number; chats: boolean }; error: string }>;
   error?: string;
 }
 
@@ -90,7 +91,7 @@ export interface CloudSendNotice {
 export type CloudSendTold = { at: number; reason: string; failed: number; seen: boolean; sent: CloudSendCounts; final?: boolean } & CloudSendFailure;
 export interface CloudSendArrived extends CloudSendCounts { chats: { conversations: number; messages: number } }
 export interface CloudSendCounts {
-  bots: number; updatedBots: number; skills: number; logins: number; onePassword: boolean; settings: number;
+  bots: number; updatedBots: number; skills: number; logins: number; secrets?: number; onePassword: boolean; settings: number;
   chats: { conversations: number; messages: number } | null;
 }
 

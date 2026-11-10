@@ -37,7 +37,7 @@ async function serve(onePasswordToken: string | null = null) {
   await onePassword.refresh();
   const botLogins = new BotLogins(store, onePassword);
   const logins = botLogins.routes((id) => ["pepper", "quill"].includes(id));
-  const routes = [createLoginRoutes(logins), createVaultRoutes({ logins, secrets: store, linked: () => botLogins.linkedSecrets() })];
+  const routes = [createLoginRoutes(logins), createVaultRoutes({ logins, secrets: store, linked: () => botLogins.linkedSecrets(), keys: { usedBy: (item) => store.serversUsingKey(item) } })];
   const answers: string[] = [];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -57,6 +57,17 @@ async function serve(onePasswordToken: string | null = null) {
 }
 
 describe("the Vault routes", () => {
+  it("deleting a secret says which MCP servers lost their key, and a move's secret keeps its id and who may use it", async () => {
+    const { store, call } = await serve();
+    const added = await call("POST", "/api/vault/secrets", { id: "55555555-5555-4555-8555-555555555555", name: "Stripe", value: VALUE, bots: ["pepper"], source: "card", refOnly: true });
+    expect(added).toMatchObject({ status: 201, body: { secret: { id: "55555555-5555-4555-8555-555555555555", source: "card", refOnly: true, bots: ["pepper"] } } });
+    expect((await call("POST", "/api/vault/secrets", { id: "not an id!", name: "x", value: VALUE })).status).toBe(400);
+    store.grantMcpKeys("stripe", ["55555555-5555-4555-8555-555555555555"]);
+    expect(await call("DELETE", "/api/vault/secrets/55555555-5555-4555-8555-555555555555")).toMatchObject({ status: 200, body: { ok: true, keysOff: ["stripe"] } });
+    const plain = await call("POST", "/api/vault/secrets", { name: "Other", value: VALUE });
+    expect(await call("DELETE", `/api/vault/secrets/${plain.body.secret.id}`)).toMatchObject({ status: 200, body: { ok: true } });
+  });
+
   it("add, list, change and delete a secret beside the logins, and never return its value", async () => {
     const { store, call, answers } = await serve();
     await call("POST", "/api/logins", { site: "example.com", username: "alice", password: "fake-route-login-pass" });

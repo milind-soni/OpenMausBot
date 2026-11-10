@@ -45,6 +45,21 @@ describe("PersonStops", () => {
   });
 });
 
+describe("who stopped it", () => {
+  it("keeps who pressed Stop until the turn's end, and names them on the stopped row", () => {
+    const stops = new PersonStops();
+    const maya = { name: "Maya", id: "p_maya" };
+    stops.stop("t", "turn-1", false, maya);
+    expect(stops.stopper("t")).toEqual(maya);
+    expect(stoppedTurnRow([], "turn-1", true, stops.stopper("t"))?.stoppedBy).toEqual(maya);
+    expect(stoppedTurnRow([], "turn-1", false, maya)).not.toHaveProperty("stoppedBy");
+    stops.turnEnded("t", "turn-1");
+    expect(stops.stopper("t")).toBeUndefined();
+    stops.stop("t", "turn-2", false);
+    expect(stops.stopper("t")).toBeUndefined();
+  });
+});
+
 describe("LiveTurns", () => {
   const frame = (type: string, turnId: string, threadId = "t1") => ({ type, turnId, threadId }) as never;
 

@@ -1,6 +1,7 @@
 /** The client-visible wire model for tasks, bots, messages and rooms. A field
  * here is one the server emits in every response and SSE frame that carries
  * the shape. */
+import type { PresenceFrame } from "./team-presence.ts";
 import type { DataBroadcast } from "./data-surface.ts";
 import type { ApprovalMode } from "./approval-mode.ts";
 import type { ToolScope } from "./tool-scope.ts";
@@ -154,6 +155,7 @@ export interface WireTask extends InboxTask {
   /** Set when a bot, not a person, opened this thread. */ openedBy?: TaskOpenedBy;
   /** On a team's server: one person's conversation, seen by them alone (never by another member or an admin). */
   private?: true;
+  /** Team Cloud, where several people write, while it works: whose request runs (they or an Owner or Admin stop it). */ askedBy?: ResolvedSender;
   /** Set by close_thread; absent while the thread is open. */
   closedBy?: TaskClosedBy;
   archivedAt?: number;
@@ -370,10 +372,6 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** Team Cloud only: the lowercased email of the member the bot reports to, whose inbox its questions, approvals,
    * failures and routine results reach. Absent: it reports to `createdBy`. */
   reportsTo?: string;
-  /** Pause for human approval before this bot talks to a peer. */
-  approvePeerComms?: boolean;
-  /** Bot ids this bot is allowed to contact. */
-  peers?: string[];
   /** Whether this bot may use the workspace's connected apps. */
   composio?: boolean;
   /** Which connected-app tools this bot may call, by service slug. Absent
@@ -460,7 +458,8 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   digest?: TurnDigest;
   /** kind "compaction" with no `compaction` record: the engine condensed its own session. A marker for people, never context. */
   engineCompaction?: true;
-  compaction?: { summary: string; firstKeptId: string; foldedThroughId: string; tokensBefore: number; by: "person" | "harness" };
+  compaction?: { summary: string; firstKeptId: string; foldedThroughId: string; tokensBefore: number; by: "person" | "harness";
+    /** The divider "Start fresh" leaves: no summary, and a provider reads nothing before it. */ fresh?: true };
   /** Renderers receive only the allowlisted /api/attachments URL. `file` entries are opened through the message-scoped
    * file route, never by path. `source`: a bot attach-file copy's original path on the server, for Show in folder.
    * `fromTool`: an image a tool's result returned while the bot worked, which it did not make or send. */
@@ -533,7 +532,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
    * one. Absent reads as the profile name. */
   sender?: ResolvedSender;
   /** Provider turn that produced this message. */
-  turnId?: string;
+  turnId?: string; /** A stopped row where several people use the server: who pressed Stop. */ stoppedBy?: ResolvedSender;
   /** Server-proven originating user message, including supported harness
    * continuations. Absent means external clients must not infer ownership. */
   requestMessageId?: string;
@@ -573,7 +572,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   doneWhen?: string;
   /** Set on the user-role line another bot delivered into this bot's own
    * conversation (coordinate_bots, start_thread). `incident`: the line is a
-   * Team incidents report or Team escalations notice about that bot's thread
+   * Team incidents report about that bot's thread
    * in `threadId`, not its words; `notified`: the person was already buzzed. */
   peerAsk?: { botId: string; name: string; unattended?: boolean; incident?: { threadId: string; notified?: boolean } };
   /** One reaction per person (shared/reactions.ts REACTIONS). `by` is "user"
@@ -727,7 +726,7 @@ export interface SecretRequestCardData {
   description: string;
   /** Optional named-key copy for client localization; `description` remains the complete fallback for English and older cards. */
   descriptionParts?: {
-    baseCode: "secretCard.greenference.description" | "secretCard.geminiTts.description";
+    baseCode: "secretCard.greenference.description" | "secretCard.modelgo.description" | "secretCard.geminiTts.description";
     reason: string;
     bot: string;
   };
@@ -839,7 +838,7 @@ export interface GroupTask {
 /** A room as a client may see it: the record plus the computed working flag. */
 export interface WireGroup {
   /** Computed from the usage ledger, not stored in groups.json. */
-  usage?: GroupThreadUsage | null;
+  usage?: GroupThreadUsage | null; /** Transient: the department's Chief of Staff, when this room is without it. Null clears an earlier value. */ chiefAbsent?: { botId: string; name: string } | null;
   /** transient: each member's context in the active thread, from its last
    * turn there, and whether its next turn there was asked to start
    * compacted. */
@@ -926,9 +925,9 @@ export interface RoomHeldMessage {
  * turn (which runs one at a time per bot). */
 export type SteerQueueReason = "capacity" | "group-turn";
 
-/** Pending steer-queue chips, as `queuedSteerSnapshot` emits them and the
- * `bot.queued` frame carries them: threadId → queued items. */
-export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason; /** The reason in plain words, shown as it is. */ why?: string }>>;
+/** Pending steer-queue chips, as `queuedSteerSnapshot` emits them and the `bot.queued` frame carries them: threadId → queued items. */
+export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason; /** The reason in plain words, shown as it is. */ why?: string;
+  /** Team Cloud, where several people write: whose line waits; only they remove it, and it runs after as their own turn. */ sender?: ResolvedSender }>>;
 
 /** Skills library browse surface: one row per library entry, with the bots
  * currently assigned to it. Version is null for locally imported skills. */
@@ -992,5 +991,7 @@ export type ServerFrame =
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** A job is waiting for the phone whose registry key this is; it polls now. */
   | { kind: "device.job"; phone: string; id: string }
+  /** Who is here on a Team Cloud (shared/team-presence.ts). */
+  | PresenceFrame
   /** The config status object spread flat into the frame. */
   | ({ kind: "config" } & Record<string, unknown>);

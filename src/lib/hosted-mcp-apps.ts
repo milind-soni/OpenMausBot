@@ -2,6 +2,7 @@ import { CreditCard, Mail, PhoneCall, RadioTower, Smartphone, type LucideIcon } 
 
 import whopLogo from "@/assets/whop/logo.png";
 import type { LocaleKey } from "@/locales";
+import { POSTIZ_SERVER } from "../../shared/postiz";
 
 export interface HostedMcpApp {
   /** The card's id (`data-app-tile`) and the name the server is added under (then `-2`, `-3`…): a valid server name. */
@@ -126,4 +127,14 @@ export function hostedConnections(
     app.id,
     servers.some((server) => hostedMcpApp(server) === app && server.enabled && ("key" in app ? holdsKey(server) : server.auth === "signed-in")),
   ])) as HostedConnections;
+}
+
+/** A server of the person's own: a hosted app's, and Postiz's, show as their own cards instead. */
+export function ownMcpServer(server: ServerAddress & { name: string }): boolean {
+  return server.url === undefined || !(hostedMcpApp(server) || server.name === POSTIZ_SERVER);
+}
+
+/** The one rule for "connected" for such a server: on, and signed in if it takes a sign-in. */
+export function mcpServerConnected(server: { enabled: boolean; auth?: "signed-in" | "needs-sign-in" }): boolean {
+  return server.enabled && server.auth !== "needs-sign-in";
 }

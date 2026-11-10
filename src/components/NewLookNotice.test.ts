@@ -4,7 +4,8 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { NEW_LOOK_KEY, newLookDue } from "@/lib/new-look";
+import { ADVANCED_BACK_KEY, advancedBackDue, NEW_LOOK_KEY, newLookDue } from "@/lib/new-look";
+import { SIMPLE_MODE_PROMPT_KEY } from "@/lib/simple-mode-prompt";
 
 const analytics = vi.hoisted(() => ({ track: vi.fn() }));
 vi.mock("@/lib/analytics", () => analytics);
@@ -16,7 +17,7 @@ let host: HTMLDivElement, root: Root, opener: HTMLButtonElement;
 const onClose = vi.fn();
 const dialog = () => host.querySelector<HTMLElement>("[data-new-look-notice]");
 const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent === label || node.getAttribute("aria-label") === label)!;
-const show = async () => { await act(async () => { root.render(createElement(NewLookNotice, { onClose })); }); };
+const show = async (back = false) => { await act(async () => { root.render(createElement(NewLookNotice, { onClose, back })); }); };
 const key = async (name: string, shiftKey = false) => {
   await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: name, shiftKey, bubbles: true, cancelable: true })); });
 };
@@ -79,5 +80,33 @@ describe("the new look notice", () => {
     await act(async () => root.unmount());
     root = createRoot(host);
     expect(document.activeElement).toBe(opener);
+  });
+});
+
+describe("the word that Advanced mode is back", () => {
+  const backEvents = () => analytics.track.mock.calls.filter(([event]) => event === "advanced_back_notice").map(([, props]) => props);
+
+  it("says Advanced mode is back and where its switch is, with no switch of its own", async () => {
+    localStorage.setItem(ADVANCED_BACK_KEY, "due");
+    await show(true);
+    expect(dialog()?.hasAttribute("data-advanced-back")).toBe(true);
+    expect(host.querySelector("h2")?.textContent).toBe("Advanced mode is back");
+    expect(host.textContent).toContain("This device is on Advanced mode again. Turn it off any time in Settings → General.");
+    expect(host.querySelector('[role="switch"]')).toBeNull();
+    expect(document.activeElement).toBe(host.querySelector("h2"));
+  });
+
+  it.each(["Done", "Escape"])("closes for good with %s, and takes the Simple mode popup's place for good too", async (how) => {
+    localStorage.setItem(ADVANCED_BACK_KEY, "due");
+    await show(true);
+    if (how === "Escape") await key("Escape");
+    else await act(async () => { button(how).click(); });
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(advancedBackDue()).toBe(false);
+    expect(localStorage.getItem(ADVANCED_BACK_KEY)).toBe("seen");
+    expect(localStorage.getItem(SIMPLE_MODE_PROMPT_KEY)).toBe("1");
+    expect(localStorage.getItem(NEW_LOOK_KEY), "the record of the move stays").toBe("due");
+    expect(backEvents()).toEqual([{ action: "closed" }]);
+    expect(events()).toEqual([]);
   });
 });

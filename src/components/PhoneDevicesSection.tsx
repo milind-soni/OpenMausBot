@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { t } from "@/lib/i18n";
 import { Loader2, ShieldCheck } from "lucide-react";
 import type { CompanionAccountState } from "../types/ogb";
@@ -142,6 +143,14 @@ export function shouldResumePausedAddress(
   return account?.paused === true && account.available && state?.enabled === true && !state.error && state.devices.length > 0;
 }
 
+/** The secure address was ended for old phone apps and a phone here still depends on it: say what to do, once. */
+export function showTunnelRetiredNotice(
+  account: Pick<CompanionAccountState, "tunnelRetired"> | null,
+  state: Pick<CompanionState, "devices"> | null,
+): boolean {
+  return account?.tunnelRetired === true && Boolean(state?.devices.some((device) => !device.e2eAt));
+}
+
 export const relative = (at: number) => {
   const seconds = Math.round((Date.now() - at) / 1000);
   if (seconds < 90) return t("remote.time.justNow");
@@ -199,6 +208,8 @@ function RouteRow({ c, state, route, blocked }: { c: PhoneSetupController; state
 
 type PairStep = "consent" | "pairing";
 
+const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+
 /** Pair a device: says what it will turn on before anything listens, then shows the code. */
 export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
   c: PhoneSetupController;
@@ -221,8 +232,33 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
     setStep("pairing");
     c.useLocal();
   };
-  return (
-    <div role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
+  const close = step === "consent" ? onClose : () => { c.cancel(); onClose(); };
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const box = root.current;
+    if (box && !box.contains(document.activeElement)) box.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    return () => { if (before?.isConnected) before.focus(); };
+  }, []);
+  // Settings also handles Escape and Tab; capture them first so they act on this dialog only.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const box = root.current;
+      if (!box || event.defaultPrevented || event.isComposing || (event.key !== "Escape" && event.key !== "Tab")) return;
+      event.preventDefault();
+      if (event.key === "Escape") { close(); return; }
+      const controls = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((control) => control.getClientRects().length);
+      if (!controls.length) return;
+      const at = controls.indexOf(document.activeElement as HTMLElement);
+      const next = at < 0 ? (event.shiftKey ? -1 : 0) : at + (event.shiftKey ? -1 : 1);
+      controls.at(next % controls.length)!.focus();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [close]);
+  // An ancestor with backdrop-filter becomes the containing block for `fixed`, so render into the body.
+  const dialog = (
+    <div ref={root} role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step}>
       <div className="flex max-h-full w-full max-w-[460px] flex-col gap-4 overflow-y-auto rounded-2xl bg-card p-5 shadow-xl">
         <div className="text-[15px] font-semibold text-ink">{step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}</div>
@@ -243,7 +279,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
               {chosen.length === 0 && <div role="alert" className="text-[12px] text-danger">{t("devices.pair.pickOne")}</div>}
             </div>
             <div className="flex justify-end gap-2">
-              <button type="button" className={button} onClick={onClose}>{t("common.cancel")}</button>
+              <button type="button" className={button} onClick={close}>{t("common.cancel")}</button>
               <button type="button" disabled={chosen.length === 0 || c.busy} onClick={() => void begin()}
                 className="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40">{t("devices.route.turnOn")}</button>
             </div>
@@ -253,13 +289,14 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
             <PhoneSetupFlowView controller={c} />
             <div className="text-[12px] leading-relaxed text-ink-secondary">{reachLine(state)}</div>
             <div className="flex justify-end">
-              <button type="button" className={button} onClick={() => { c.cancel(); onClose(); }}>{t("devices.pair.done")}</button>
+              <button type="button" className={button} onClick={close}>{t("devices.pair.done")}</button>
             </div>
           </>
         )}
       </div>
     </div>
   );
+  return typeof document === "undefined" ? dialog : createPortal(dialog, document.body);
 }
 
 /** A pairing code still open: anyone holding it can pair until it runs out, so it can be revoked here. */
@@ -373,6 +410,11 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
 
       <section className="flex flex-col gap-2" data-devices-block="paired">
         <div className="text-[13px] font-medium text-ink">{t("devices.paired")}</div>
+        {showTunnelRetiredNotice(c.account, state) && (
+          <p role="status" data-devices-notice="tunnel-retired" className="rounded-xl bg-inset px-3 py-2.5 text-[13px] leading-relaxed text-ink">
+            {t("remote.devices.retiredNotice")}
+          </p>
+        )}
         <OpenCodeRow c={c} state={state} />
         {pairedCount ? <PairedPhones c={c} state={state} /> : !state.pairing && <div className="text-[12px] text-ink-secondary">{t("devices.pairedNone")}</div>}
         <PhonesList />

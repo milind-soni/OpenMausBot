@@ -1178,16 +1178,24 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   signed `POST /api/cloud/plan` `{"v":1,"tier":"starter"}` (`server/host/cloud-plan-tier.ts`), and a
   home it never told has no such limit. What a bot's own turn starts always goes through,
   and a teammate's hand-off never takes that one thread from the person.
-- **How many bots a Starter Cloud makes.** Five beside its MausBot, one number in
-  `server/host/starter-bot-limit.ts`, from the same signed plan. An archived bot or one
-  that moved away takes no room. Making one past it answers `409` with
-  `{"code":"bot_limit","error":"…"}` from `POST /api/bots`, `POST /api/teams/import`,
-  `POST /api/org-library/add` and a Chief's `create_bot` and `propose_team_setup`; a group that
-  doesn't fit is refused whole, before anything is written. The app opens its upgrade popup
-  when a create button is pressed with no room, and on that refusal. A bot is never taken away:
-  a Cloud over the limit (a downgrade, a move) keeps every one and only making a new one stops.
-  A bot arriving with its own id (a move) and a backup restored are never refused. The limit
-  lifts as soon as the Admin tells the home its new plan, with no restart.
+- **How many bots a Starter Cloud makes and keeps awake.** Any number; five of them,
+  beside its MausBot and its Chief of Staff, take turns (`STARTER_AWAKE_LIMIT` in
+  `server/host/starter-awake.ts`), from the same signed plan, and the rest are paused with
+  everything they know kept. An archived bot or one that moved away isn't counted. The awake
+  set is written down (`starter-awake.json`) while every bot still fits, so a bot made past
+  the five starts paused and never pushes out one the person was using: `POST /api/bots`
+  answers it with `"paused": true`, and the app opens **Keep these awake** with the new bot
+  chosen in place of the least recently active one that isn't working (`POST /api/starter/awake`).
+  A Chief's `create_bot` answers with a `paused` line for the person. A restore or a move into a
+  Cloud that never wrote a set down wakes the most recently active. A paused bot's turn answers
+  `409` `{"code":"bot_paused"}`, a hand-off to it is refused, a routine or webhook run for it
+  fails at once with that line (no conversation is made, and it never wakes a sleeping Cloud),
+  and its daily memory upkeep waits. Every bot wakes as soon as the Admin tells the home its new
+  plan, with no restart. An older server refuses a sixth bot with `409` `{"code":"bot_limit"}`;
+  the app still shows its upgrade popup for that. Every plan holds at most 100 bots
+  (`MAX_WORKSPACE_BOTS`), counted on `POST /api/bots`, a package import and a Chief's setup.
+- **How much a Starter Cloud runs at once.** Two turns Cloud-wide, and four hand-offs waiting
+  beyond them; past that a new hand-off is refused (`server/host/starter-caps.ts`).
 - **Who goes first.** The gate only changes the order, never how much it lets in. A
   person's own work goes first: their line, or a turn going on from what they answered.
   Bot work that has waited 5 minutes takes its place by arrival, so it is never starved
@@ -1717,9 +1725,32 @@ wait for the next read, `truncated: true`):
   "firstHour": { "startedAt": 1790000000000, "apps": ["gmail"], "look": "delivered",
     "ms": { "seen": 41000, "firstMessage": 52000, "offered": 61000, "firstApp": 118000, "firstLook": 171000, "briefOn": 172000, "phoneOffered": 172000 } },
   "value": { "sorted": 40, "drafted": 6, "prepped": 4, "routines": 0, "minutes": 110 },
-  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2 }
+  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2 },
+  "speed": { "windowS": 300, "steal": 1.2, "psi": { "cpu": 3.4, "memory": 0, "io": 0.8 }, "bootMs": 5400, "wakeMs": null,
+    "turnStarts": [12, 3, 1, 0, 0, 0] }
 }
 ```
+
+**`speed`** says how fast the machine is for this home (`server/cloud-speed.ts`),
+read from `/proc` when the report is built, with no timer or sampler of its
+own. `windowS` is how many seconds the CPU figures cover: since the previous
+read at least a minute before (a read sooner, such as the next page of the
+same poll, repeats the last figures), or since the process started. `steal`
+is the percent of all CPU time in that window the hypervisor ran something
+else on this machine's CPUs (`/proc/stat`). `psi` is the percent of the window
+in which some task waited for CPU, memory or disk (the kernel's pressure
+`some` line, the home's own cgroup's in a container, else the machine's).
+Each is `null` where the kernel doesn't expose it, and for a window whose
+counter went down. `bootMs` is this process's start to its server listening;
+`wakeMs`, on a boot that woke the home from a sleep it was stopped for with
+a request waiting, the time from the machine's start (the process's, in a
+container on a long-running server) to that request reaching the server.
+Fly's own start before that, and a resume from a suspend, are not in it.
+`turnStarts` counts people's messages since boot by how long each waited
+from being stored to its engine's turn starting: up to 0.5, 1, 2, 5 and 15
+seconds, and longer. A message sent while its thread runs a turn, a bot's, a
+routine's and a steer are not counted. Older homes don't send `speed`: the
+Admin reads that as unknown, never as zero.
 
 **`room`** is the last day's memory pressure where the home watches it (a Cloud
 home on Linux, `server/engine-memory.ts`), else `null`: how many tasks had to

@@ -54,7 +54,6 @@ export interface BotPatchRouteDeps {
   hostedWorkspace: boolean;
   hostedFullAccessRefusal: string;
   desktopManaged: boolean;
-  maxWorkspaceBots: number;
   broadcast(payload: Record<string, unknown>): void;
   wireBot(bot: BotRecord): WireBot;
   publicGroupState(group: GroupRecord): WireGroup;
@@ -83,12 +82,14 @@ export interface BotPatchRouteDeps {
   personMarkThread?(auth: RequestAuth, threadId: string, unread: boolean): boolean;
   /** The conversation this session sees the bot on (on a Team Cloud never someone else's private chat). */
   shownThread?(auth: RequestAuth, bot: BotRecord): string;
+  /** The Chief of Staff of a scope changed: these bots' flags did. */
+  chiefChanged?(changed: readonly BotRecord[]): void;
 }
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode, activeVpsThreads,
-    hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED, maxWorkspaceBots: MAX_WORKSPACE_BOTS,
+    hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED,
     broadcast, wireBot, publicGroupState, audienceChanged, storedAvatarExists, requestedTaskBot, threadBusy, activeGroupTurnForBot,
     checkedModelSelection, engineSwitchNeedsAsk, currentBrowserSession, interruptAllDirectThreads, cancelGroupTurnOperations,
     revokeInternalCapabilitiesForThread, runningTurnInstance, closeOpenApprovals, assertTeamComputerChangeIdle, forgetTemporaryBrowser,
@@ -545,34 +546,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           error: "Auto mode on this computer requires confirming the warning first (acknowledgeLocalAuto)",
         });
       }
-      if (body.approvePeerComms !== undefined) {
-        if (typeof body.approvePeerComms !== "boolean") {
-          return json(res, 400, { error: "approvePeerComms must be true or false" });
-        }
-        patch.approvePeerComms = body.approvePeerComms;
-      }
-      // null: every visible bot; an array (even empty) is the explicit wiring. Narrowing is free;
-      // widening needs acknowledgePeerScope, since any loopback caller (a bot with Bash) gets admin.
-      if (body.peers !== undefined) {
-        let nextPeers: string[] | undefined;
-        if (body.peers === null) nextPeers = undefined;
-        else if (
-          !Array.isArray(body.peers) ||
-          body.peers.some((peerId: unknown) => typeof peerId !== "string")
-        ) {
-          return json(res, 400, { error: "peers must be a list of bot ids, or null for every bot" });
-        } else {
-          nextPeers = [...new Set<string>(body.peers)].slice(0, MAX_WORKSPACE_BOTS);
-        }
-        const currentPeers = existingBot?.peers;
-        const widensReach =
-          Array.isArray(currentPeers) &&
-          (nextPeers === undefined || nextPeers.some((peerId) => !currentPeers.includes(peerId)));
-        if (widensReach && body.acknowledgePeerScope !== true) {
-          return json(res, 400, userError("serverError.department.confirmPeers"));
-        }
-        patch.peers = nextPeers;
-      }
       if (body.managedSections !== undefined) {
         const parsed = z.array(z.string().trim().max(60)).max(100).safeParse(body.managedSections);
         if (!parsed.success) return json(res, 400, { error: "managedSections must be a list of up to 100 department names (60 characters each)" });
@@ -627,13 +600,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (loosened.includes("managedSections") && auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
         return json(res, 409, userError("serverError.department.stopBots"));
       }
-      if (body.peers !== undefined && Array.isArray(existingBot?.peers)) {
-        const nextPeers = patch.peers;
-        if (nextPeers === undefined || (Array.isArray(nextPeers) && nextPeers.some((peerId) => !existingBot.peers!.includes(peerId)))) {
-          loosened.push("peers");
-        }
-      }
-      if (body.approvePeerComms === false && existingBot?.approvePeerComms === true) loosened.push("approvePeerComms");
       if (section !== undefined && sectionKey(existingBot?.section) !== sectionKey(section)) loosened.push("section");
       if (Array.isArray(patch.alwaysAllow) && patch.alwaysAllow.some((key) => !(existingBot?.alwaysAllow ?? []).includes(key))) {
         loosened.push("alwaysAllow");
@@ -749,6 +715,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           ? store.setChiefOfStaff(bot.id)
           : [];
       if (chiefChanges === null) return json(res, 404, { error: "no such bot" });
+      if (chiefChanges.length) deps.chiefChanged?.(chiefChanges);
       if (beforeProfile) {
         const now = store.bot(bot.id)!;
         recordProfileChange(bot.id, "user", "api", beforeProfile, profileSnapshot(now));
