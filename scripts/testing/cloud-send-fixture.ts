@@ -25,6 +25,13 @@ const SERVER_DIR = fileURLToPath(new URL("../../server/", import.meta.url));
 export const CLOUD_HOST = "omb-t-5e6d7c8b9a0f.fly.dev";
 const EDGE = { host: CLOUD_HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", origin: `https://${CLOUD_HOST}` };
 const parse = (text: string) => { try { return JSON.parse(text); } catch { return null; } };
+// freePortBlock only probes. The server binds after it finishes starting, so two launches in one worker must not pick ports together or one's pairing is signed for the other's secret.
+let portTurn: Promise<void> = Promise.resolve();
+function claimPort<T>(run: () => Promise<T>): Promise<T> {
+  const result = portTurn.then(run, run);
+  portTurn = result.then(() => undefined, () => undefined);
+  return result;
+}
 
 export interface CloudSendFixture {
   root: string;
@@ -234,21 +241,27 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     process.on("message", (data) => { for (const listener of listeners) listener({ data }); });
     process.channel?.unref();
   `)}`;
-  const desktopPort = await freePortBlock([0, 1]);
-  const desktopBase = `http://127.0.0.1:${desktopPort}`;
   const desktopInstallation = broker ? await broker.install() : null;
-  const startDesktop = async (dataDir?: string) => {
-    const child = await start("desktop", { OMB_DESKTOP_PARENT: "1", ...(dataDir ? { OMB_DATA_DIR: dataDir } : {}),
-      ...(broker && desktopInstallation ? { OMB_COMPOSIO_BROKER_URL: broker.url, OMB_COMPOSIO_BROKER_TOKEN: desktopInstallation.token } : {}) }, desktopPort, ["--import", parentPort], true, onePasswordToken, toolCalls, desktopEngine);
-    child.send({ type: "openmausbot:desktop-mutation-token", token: ownerCapability });
-    return child;
-  };
-  let desktop = await startDesktop();
-  const cloudPort = await freePortBlock([0, 1]);
-  const cloudBase = `http://127.0.0.1:${cloudPort}`;
-  const startCloud = (more: NodeJS.ProcessEnv = {}) => start("cloud", { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
-    OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...cloudEnv, ...more }, cloudPort, [], false, cloudOnePasswordToken, 0, cloudEngine, cloudSignedIn);
-  let cloud = await startCloud();
+  const openedDesktop = await claimPort(async () => {
+    const desktopPort = await freePortBlock([0, 1]);
+    const desktopBase = `http://127.0.0.1:${desktopPort}`;
+    const startDesktop = async (dataDir?: string) => {
+      const child = await start("desktop", { OMB_DESKTOP_PARENT: "1", ...(dataDir ? { OMB_DATA_DIR: dataDir } : {}),
+        ...(broker && desktopInstallation ? { OMB_COMPOSIO_BROKER_URL: broker.url, OMB_COMPOSIO_BROKER_TOKEN: desktopInstallation.token } : {}) }, desktopPort, ["--import", parentPort], true, onePasswordToken, toolCalls, desktopEngine);
+      child.send({ type: "openmausbot:desktop-mutation-token", token: ownerCapability });
+      return child;
+    };
+    return { desktopBase, startDesktop, desktop: await startDesktop() };
+  });
+  let { desktopBase, startDesktop, desktop } = openedDesktop;
+  const openedCloud = await claimPort(async () => {
+    const cloudPort = await freePortBlock([0, 1]);
+    const cloudBase = `http://127.0.0.1:${cloudPort}`;
+    const startCloud = (more: NodeJS.ProcessEnv = {}) => start("cloud", { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
+      OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...cloudEnv, ...more }, cloudPort, [], false, cloudOnePasswordToken, 0, cloudEngine, cloudSignedIn);
+    return { cloudBase, startCloud, cloud: await startCloud() };
+  });
+  let { cloudBase, startCloud, cloud } = openedCloud;
 
   const mintCode = async (label: string) => {
     const body = JSON.stringify({ label, ttlSeconds: 300 });
@@ -275,8 +288,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const CAPABILITY_KEY = randomBytes(16).toString("hex");
   let teamFixture: CloudTeamFixture | null = null;
   if (team) {
-    const teamPort = await freePortBlock([0, 1]);
-    const teamBase = `http://127.0.0.1:${teamPort}`;
+    let teamPort = 0;
+    let teamBase = "";
     // Windows' child.kill("SIGTERM") ends a process at once, without Node's signal handlers, so the server never closes
     // its session registry and its next start drops every member's session, as after a crash. There the team server is
     // asked to stop over IPC and runs its own SIGTERM shutdown (as server/acp-shutdown.e2e.test.ts does).
@@ -290,7 +303,12 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       OMB_CLOUD_MACHINE_ID: "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: secret,
       OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, OMB_TEST_INTERNAL_CAPABILITY_KEY: CAPABILITY_KEY, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...team.env, ...more },
       teamPort, stopOverIpc ? ["--import", stopOnMessage] : [], stopOverIpc, onePasswordToken, 0, team.engine ?? "", true);
-    let teamServer = await startTeam();
+    const openedTeam = await claimPort(async () => {
+      teamPort = await freePortBlock([0, 1]);
+      teamBase = `http://127.0.0.1:${teamPort}`;
+      return startTeam();
+    });
+    let teamServer = openedTeam;
     const as: CloudTeamFixture["as"] = async (token, method, path, body, headers = {}) => {
       const init: RequestInit = { method, headers: { ...EDGE, authorization: `Bearer ${token}`, ...headers,
         ...(body === undefined || body instanceof Uint8Array ? {} : { "content-type": "application/json" }) } };
@@ -348,7 +366,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
           teamServer.send("stop");
           await waitForExit(teamServer, { graceMs: 10_000 });
         } else await waitForExit(teamServer, { signal: "SIGTERM" });
-        teamServer = await startTeam(more);
+        teamServer = await claimPort(() => startTeam(more));
       },
     };
   }
@@ -449,14 +467,19 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const reopened = () => { main.close(); main = wire(); };
   const desks: Array<{ close(): void }> = [];
   async function addDesk({ label }: { label: string }): Promise<CloudSendDesk> {
-    const name = `desktop-${desks.length + 2}`, deskPort = await freePortBlock([0, 1]), base = `http://127.0.0.1:${deskPort}`;
+    const name = `desktop-${desks.length + 2}`;
+    let deskPort = 0, base = "";
     const capability = randomBytes(32).toString("base64url");
     const startIt = async () => {
       const child = await start(name, { OMB_DESKTOP_PARENT: "1", OMB_ENVIRONMENT_LABEL: label }, deskPort, ["--import", parentPort], true, onePasswordToken, toolCalls, desktopEngine);
       child.send({ type: "openmausbot:desktop-mutation-token", token: capability });
       return child;
     };
-    let child = await startIt();
+    let child = await claimPort(async () => {
+      deskPort = await freePortBlock([0, 1]);
+      base = `http://127.0.0.1:${deskPort}`;
+      return startIt();
+    });
     const deskLocal: CloudSendDesk["local"] = async (method, path, body) => {
       const response = await remember(await fetch(`${base}${path}`, { method, headers: { "x-openmausbot-desktop-owner": capability, ...(body === undefined ? {} : { "content-type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }) }));
@@ -516,7 +539,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       async relaunch({ kill = true } = {}) {
         deskMain.close();
         await waitForExit(child, { signal: kill ? "SIGKILL" : "SIGTERM" });
-        child = await startIt();
+        child = await claimPort(() => startIt());
         await ready();
         deskMain = wireIt();
         listenIt();
@@ -547,10 +570,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       await waitForExit(desktop, { signal: kill ? "SIGKILL" : "SIGTERM" });
       if (cloudMore) {
         await waitForExit(cloud, { signal: "SIGTERM" });
-        cloud = await startCloud(cloudMore);
+        cloud = await claimPort(() => startCloud(cloudMore));
         owner = await pairOwner();
       }
-      desktop = await startDesktop(dataDir);
+      desktop = await claimPort(() => startDesktop(dataDir));
       for (let tries = 0; (await local("GET", "/api/bots")).status !== 200 && tries < 50; tries++) await new Promise((resolve) => setTimeout(resolve, 100));
       main = wire();
       listen();
