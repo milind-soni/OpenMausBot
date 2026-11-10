@@ -248,6 +248,41 @@ describe("internal mcp_server route, Full access", () => {
     expect(lines).toEqual(["Added MCP server notes · Turned on · Test: 2 tools"]);
   });
 
+  it("add of a server other bots get too tells the person which bots, and where to switch it off for one", async () => {
+    probeWith({ ok: true, tools: [{ name: "search_notes" }] });
+    const { post, lines } = fixture({ usedBy: { notes: ["Clive", "Mo"] } });
+    const { status, body } = await post({ action: "add", name: "notes", command: "notes-mcp" });
+    expect(status).toBe(201);
+    expect(body.text).toContain("It is on for your other bots too: Clive and Mo. Tell the person that, and that they can switch it off for one bot in that bot's settings, under Apps it can use.");
+    expect(lines).toEqual(["Added MCP server notes · Turned on · Test: 1 tool · Also on for Clive, Mo: switch it off for one in its settings, under Apps it can use"]);
+  });
+
+  it("add of a server no other bot gets says nothing about other bots", async () => {
+    probeWith({ ok: true, tools: [{ name: "search_notes" }] });
+    const { post, lines } = fixture();
+    const { body } = await post({ action: "add", name: "notes", command: "notes-mcp" });
+    expect(body.text).not.toContain("other bots");
+    expect(lines).toEqual(["Added MCP server notes · Turned on · Test: 1 tool"]);
+  });
+
+  it("enable of a server other bots get too tells the person which bots, and where to switch it off for one", async () => {
+    probeWith({ ok: true, tools: [{ name: "search" }] });
+    const { post, lines } = fixture({ servers: { linear: { ...linear, enabled: false } }, usedBy: { linear: ["Clive"] } });
+    const { status, body } = await post({ action: "enable", name: "linear" });
+    expect(status).toBe(200);
+    expect(body.text).toContain("It is on for your other bots too: Clive.");
+    expect(lines).toEqual(["Turned on MCP server linear · Test: 1 tool · Also on for Clive: switch it off for one in its settings, under Apps it can use"]);
+  });
+
+  it("enable of a server that was already on for everyone, joining only this bot's list, says nothing about other bots", async () => {
+    probeWith({ ok: true, tools: [{ name: "search" }] });
+    const { post, lines } = fixture({ servers: { linear }, mcpServers: [], usedBy: { linear: ["Clive"] } });
+    const { status, body } = await post({ action: "enable", name: "linear" });
+    expect(status).toBe(200);
+    expect(body.text).not.toContain("other bots");
+    expect(lines).toEqual(["Turned on MCP server linear · Test: 1 tool"]);
+  });
+
   it("add of an OAuth server returns \"needs sign-in\" and tells the bot to call sign_in", async () => {
     probeWith({ ok: false, error: probeModule.SIGN_IN_REQUIRED, auth: "required" });
     const { post, stored, mcpOAuth, lines } = fixture();

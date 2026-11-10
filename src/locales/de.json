@@ -140,6 +140,7 @@
   "server.mcp.on": "Eingeschaltet",
   "server.mcp.switchedOff": "Ausgeschaltet",
   "server.mcp.keysCleared": "Gespeicherte Schlüssel gelöscht",
+  "server.mcp.alsoOn": "Auch an für {names}: für einen Bot in seinen Einstellungen unter „Apps it can use“ ausschalten",
   "server.mcp.testTools.one": "Test: {count} Tool",
   "server.mcp.testTools.many": "Test: {count} Tools",
   "server.mcp.testSignIn": "Test: Anmeldung nötig",

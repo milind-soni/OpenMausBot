@@ -9,6 +9,7 @@ import { MCP_CONFIG_BUSY, runsElsewhere, type McpConfig, type McpConfigRefusal }
 import { MCP_KEY_EXPIRED, type McpApplied, type McpCardAction, type McpUpdateFields } from "../host/mcp-requests.ts";
 import type { BotKept, BotMcpServerAdd } from "../mcp-bot-servers.ts";
 import { BOT_STRIPPED_KEYS, botChangeLines, botListing, botMayChange, botServerTarget, isSecretRef, mcpOwner, mergeBotUpdate } from "../mcp-bot-rules.ts";
+import { nameList } from "../mcp-health.ts";
 import type { McpAuthState, McpOAuthManager } from "../mcp-oauth.ts";
 import type { McpProbeResult } from "../mcp-probe.ts";
 import { publicMcpUrl, type HostLookup } from "../mcp-public-url.ts";
@@ -236,9 +237,10 @@ async function add(deps: Deps, name: string, fields: Record<string, unknown>, si
   }
   joinBotList(deps, name);
   const outcome = await probe(deps, name, server, signal);
+  const others = sharedWith(deps.usedBy(name));
   deps.decide(`Added MCP server ${name} and turned it on`, deps.fullAccess() ? "full-access" : "level");
-  say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.on"], outcome.line);
-  return { status: 201, text: `Added MCP server ${name} and turned it on. ${outcome.text}${selection(deps, name)}${where} ${WHEN.live.arrive}` };
+  say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.on"], outcome.line, ...others.lines);
+  return { status: 201, text: `Added MCP server ${name} and turned it on. ${outcome.text}${selection(deps, name)}${where}${others.text} ${WHEN.live.arrive}` };
 }
 
 /** The update merged onto the saved entry, its secretRefs redeemed but not spent until `commit`. */
@@ -293,9 +295,10 @@ async function enable(deps: Ctx, name: string, server: StoredMcpServer, signal: 
   if ("error" in on) return refused(on);
   joinBotList(deps, name);
   const outcome = await probe(deps, name, server, signal);
+  const others = sharedWith(server.enabled ? [] : deps.usedBy(name));
   deps.decide(`Turned on MCP server ${name}`, "full-access");
-  say(deps, { action: "enable", name }, ["server.mcp.turnedOn", { name }], outcome.line);
-  return { status: 200, text: `Turned on MCP server ${name}. ${outcome.text}${selection(deps, name)} ${when(deps).arrive}` };
+  say(deps, { action: "enable", name }, ["server.mcp.turnedOn", { name }], outcome.line, ...others.lines);
+  return { status: 200, text: `Turned on MCP server ${name}. ${outcome.text}${selection(deps, name)}${others.text} ${when(deps).arrive}` };
 }
 
 function disable(deps: Deps, name: string): Outcome {
@@ -471,6 +474,14 @@ function joinBotList(deps: Deps, name: string): void {
 
 function selection(deps: Deps, name: string): string {
   return deps.canUse(name) ? "" : ` Your tool selection leaves ${name} out. The person can change that in your settings.`;
+}
+
+function sharedWith(others: readonly string[]): { text: string; lines: Line[] } {
+  if (!others.length) return { text: "", lines: [] };
+  return {
+    text: ` It is on for your other bots too: ${nameList(others)}. Tell the person that, and that they can switch it off for one bot in that bot's settings, under Apps it can use.`,
+    lines: [["server.mcp.alsoOn", { names: others.join(", ") }]],
+  };
 }
 
 function folderText(deps: Deps, server: StoredMcpServer, moved: ReadonlyArray<{ to: string }>): string {

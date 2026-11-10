@@ -272,6 +272,7 @@
   "server.mcp.on": "Turned on",
   "server.mcp.switchedOff": "Switched off",
   "server.mcp.keysCleared": "Saved keys cleared",
+  "server.mcp.alsoOn": "Also on for {names}: switch it off for one in its settings, under Apps it can use",
   "server.mcp.testTools.one": "Test: {count} tool",
   "server.mcp.testTools.many": "Test: {count} tools",
   "server.mcp.testSignIn": "Test: needs sign-in",
