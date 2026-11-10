@@ -5,12 +5,14 @@ import { t } from "@/lib/i18n";
 import { reportModelgoOffer } from "@/lib/modelgo-offer";
 import { MODELGO_URL } from "../../shared/modelgo";
 import { LinkButton, NoticeCard, NotNowButton, PRIMARY_BUTTON } from "./NoticeCard";
-import { ModelgoMark } from "./ProviderIcons";
+import { ModelgoMark, type IconProps } from "./ProviderIcons";
 
 export type ModelgoCardAction = "get_key" | "not_now" | "close";
 
+const CardMark = ({ className }: IconProps) => <ModelgoMark size={22} className={className} />;
+
 export function ModelgoOfferCard({ onDone }: { onDone: (action: ModelgoCardAction) => void }) {
-  return <NoticeCard titleId="modelgo-offer-title" notice="modelgo-offer" icon={ModelgoMark} title={t("modelgoOffer.title")} onDismiss={() => onDone("close")}>
+  return <NoticeCard titleId="modelgo-offer-title" notice="modelgo-offer" icon={CardMark} title={t("modelgoOffer.title")} onDismiss={() => onDone("close")}>
     <p className="mt-1 text-[13px] leading-[18px] text-ink-secondary">{t("modelgoOffer.line")}</p>
     <p data-modelgo-sponsor className="mt-1 text-[11px] leading-4 text-ink-tertiary">{t("modelgoOffer.sponsor")}</p>
     <div className="mt-3 flex flex-col gap-2">
