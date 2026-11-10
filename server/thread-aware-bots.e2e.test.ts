@@ -559,6 +559,9 @@ describe("start_thread on another model, reporting back", () => {
       expect([viaRoom.status, viaRoom.body.error]).toEqual([403, "Choose a teammate, not yourself"]);
       release("own-quiet");
       release(pm.threadId);
+      // The follow-up reports back too: its result lands in the opener's chat and the opener resumes with it.
+      await expect.poll(async () => (await messages(pm.threadId)).some((message) => message.roomRequest?.id === receipt.requestId && message.roomRequest.phase === "result"), { timeout: 15_000 }).toBe(true);
+      await expect.poll(() => JSON.stringify(promptsOf(pm.threadId)), { timeout: 15_000 }).toContain(`report on assignment ${receipt.requestId}: done`);
       await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
     } finally {
       await cleanup([pm.id]);
