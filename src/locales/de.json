@@ -3453,5 +3453,16 @@
   "settings.simple.more.title": "Weitere Einstellungen",
   "settings.simple.more.subtitle": "Backups, Limits und Einstellungen, die du selten änderst.",
   "settings.simple.more.limits": "Limits",
-  "settings.simple.more.open": "Öffnen"
+  "settings.simple.more.open": "Öffnen",
+  "settings.serverProfile.on": "Dieser Server läuft jetzt mit seinem gehärteten Profil. Bots arbeiten in einer Sandbox: Sie können die Einstellungen des Servers, KI-Schlüssel, gespeicherte Anmeldungen und die Chats anderer nicht lesen. Befehle, die direkt auf dem Server laufen, handeln ohne Anmeldung nicht mehr als sein Besitzer; nur einen Kopplungscode können sie noch erstellen.",
+  "settings.serverProfile.restart": "Jetzt kann sich mehr als eine Person anmelden. Starte diesen Server neu, um sein gehärtetes Profil einzuschalten. Es hält Bots von seinen Einstellungen, KI-Schlüsseln und den Chats anderer fern.",
+  "settings.serverProfile.unboxed": "Die Bots auf diesem Server laufen nicht in einer Sandbox. Ein Bot, der einer schädlichen Webseite folgt, könnte also die Einstellungen und KI-Schlüssel des Servers lesen. {fix}",
+  "settings.serverProfile.unboxedShared": "Die Bots auf diesem Server laufen nicht in einer Sandbox: Wer mit einem Bot chatten kann, kann ihn die Einstellungen des Servers, KI-Schlüssel, gespeicherte Anmeldungen und die Chats anderer lesen lassen. {fix}",
+  "settings.serverProfile.fix.switchedOff": "Entferne OMB_BOT_BOX=0 aus den Einstellungen des Servers und starte ihn neu.",
+  "settings.serverProfile.fix.notLinux": "Die Sandbox braucht Linux: Zieh diesen Server auf Linux um oder auf Docker auf einem Linux-Host.",
+  "settings.serverProfile.fix.noBwrap": "Installiere bubblewrap auf dem Server (unter Debian oder Ubuntu: sudo apt-get install -y bubblewrap) und starte ihn neu.",
+  "settings.serverProfile.fix.userns": "Das System des Servers muss das erst erlauben: Die Schritte stehen in der Self-Hosting-Anleitung im Abschnitt „The hardened profile“.",
+  "serverError.profile.cannotShare.switchedOff": "Dieser Server kann noch keine weiteren Personen aufnehmen: Die Sandbox seiner Bots ist ausgeschaltet. Entferne OMB_BOT_BOX=0 aus den Einstellungen des Servers und starte ihn neu.",
+  "serverError.profile.cannotShare.noBwrap": "Dieser Server kann noch keine weiteren Personen aufnehmen: Seine Bots können nicht in einer Sandbox laufen. Installiere bubblewrap auf dem Server (unter Debian oder Ubuntu: sudo apt-get install -y bubblewrap) und starte ihn neu.",
+  "serverError.profile.cannotShare.userns": "Dieser Server kann noch keine weiteren Personen aufnehmen: Sein System lässt Bots nicht in einer Sandbox laufen. Die Lösung steht in der Self-Hosting-Anleitung im Abschnitt „The hardened profile“; starte den Server danach neu."
 }

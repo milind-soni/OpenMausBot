@@ -9978,5 +9978,16 @@
   "phone.code.typeIntro": "Abra o app do {app} e digite este código de pareamento.",
   "phone.signIn.emailCode": "Código de login do seu e-mail",
   "settings.simple.account.noNameHint": "Ainda não definido",
-  "settings.simple.account.yourName": "Seu nome"
+  "settings.simple.account.yourName": "Seu nome",
+  "settings.serverProfile.on": "Este servidor agora roda com o perfil reforçado. Os bots trabalham em uma área isolada: não conseguem ler as configurações do servidor, as chaves de IA, os logins salvos nem as conversas de outras pessoas. Comandos executados no próprio servidor não agem mais como o dono sem entrar na conta; só ainda podem criar um código de pareamento.",
+  "settings.serverProfile.restart": "Agora mais de uma pessoa pode entrar. Inicie este servidor de novo para ativar o perfil reforçado, que mantém os bots longe das configurações, das chaves de IA e das conversas de outras pessoas.",
+  "settings.serverProfile.unboxed": "Os bots deste servidor não estão rodando em uma área isolada. Um bot que siga uma página maliciosa poderia ler as configurações e as chaves de IA do servidor. {fix}",
+  "settings.serverProfile.unboxedShared": "Os bots deste servidor não estão rodando em uma área isolada: qualquer pessoa que converse com um bot pode fazê-lo ler as configurações do servidor, as chaves de IA, os logins salvos e as conversas de outras pessoas. {fix}",
+  "settings.serverProfile.fix.switchedOff": "Remova OMB_BOT_BOX=0 das configurações do servidor e inicie-o de novo.",
+  "settings.serverProfile.fix.notLinux": "A área isolada precisa de Linux: mude este servidor para Linux ou para o Docker em um host Linux.",
+  "settings.serverProfile.fix.noBwrap": "Instale o bubblewrap no servidor (no Debian ou no Ubuntu: sudo apt-get install -y bubblewrap) e inicie-o de novo.",
+  "settings.serverProfile.fix.userns": "O sistema do servidor precisa permitir isso primeiro: os passos estão no guia de hospedagem própria, na seção “The hardened profile”.",
+  "serverError.profile.cannotShare.switchedOff": "Este servidor ainda não pode receber mais pessoas: a área isolada dos bots está desligada. Remova OMB_BOT_BOX=0 das configurações do servidor e inicie-o de novo.",
+  "serverError.profile.cannotShare.noBwrap": "Este servidor ainda não pode receber mais pessoas: os bots não conseguem rodar em uma área isolada. Instale o bubblewrap no servidor (no Debian ou no Ubuntu: sudo apt-get install -y bubblewrap) e inicie-o de novo.",
+  "serverError.profile.cannotShare.userns": "Este servidor ainda não pode receber mais pessoas: o sistema não deixa os bots rodarem em uma área isolada. A solução está no guia de hospedagem própria, na seção “The hardened profile”; inicie o servidor de novo depois."
 }

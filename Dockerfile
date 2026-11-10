@@ -220,11 +220,13 @@ CMD ["node", "/app/dist-server/cloud-home-start.js"]
 FROM runtime AS server
 # The bot box (server/bot-box): bubblewrap runs every bot turn in its own
 # namespaces, socat bridges a box's loopback ports to the server's gates.
-# Their own layer, so the Chrome layers beneath stay cached.
+# Their own layer, so the Chrome layers beneath stay cached. perl is
+# Debian's own (perl-base): the box's self-check makes one system call with
+# it, and this image has no python3.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends bubblewrap socat \
   && rm -rf /var/lib/apt/lists/* \
-  && bwrap --version && socat -V | head -1
+  && bwrap --version && socat -V | head -1 && perl -e 'exit 0'
 # Optional engine CLIs baked into the image (space-separated npm packages).
 ARG ENGINES=""
 RUN if [ -n "$ENGINES" ]; then HOME=/tmp/omb-build-home npm install -g $ENGINES && rm -rf /tmp/omb-build-home /tmp/node-compile-cache; fi

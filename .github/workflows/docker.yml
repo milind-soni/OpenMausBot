@@ -209,8 +209,9 @@ jobs:
           grep -Eq 'code=[A-Z2-9-]+' <<<"$(docker exec omb-hard openmausbot pair --label operator)"
           test "$(docker exec omb-hard stat -c '%a %U' /data/.openmausbot/operator-token)" = "600 maus"
           # The real box, as a hostile bot meets it: every check passes.
-          checks=$(docker exec omb-hard node dist-server/bot-box/box-check.js --public=none)
+          checks=$(docker exec omb-hard node dist-server/bot-box/box-check.js --public=none || true)
           echo "$checks"
+          jq -r '.results[] | select(.ok | not) | "failed: \(.id): \(.detail)"' <<<"$checks"
           jq -e '.box == "bwrap" and .failed == [] and .passed == .total and .total >= 29' <<<"$checks"
           jq -e '[.results[] | select(.ok) | .id] | index("config-hidden") != null and index("messages-db-hidden") != null and index("host-loopback-unreachable") != null and index("secret-not-on-disk") != null' <<<"$checks"
           # Take the data folder's cover away and exactly the file checks fail.

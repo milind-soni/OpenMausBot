@@ -49,6 +49,32 @@ export interface ProbeSpec {
 
 export interface ProbeResult { id: string; ok: boolean; detail: string }
 
+/** x86-64's add_key(2), the only numbers the box's filter is written for (seccomp.ts). */
+const ADD_KEY = 248;
+/** Each makes add_key(2) into the process keyring, which any user may, and prints `ok` or the errno it got. python3 is in
+ * the Cloud home's image; perl-base is an essential package of Debian and Ubuntu, so the self-hosted server's image, which
+ * has no python3, has it. Perl 5.36 refuses a string literal as a syscall argument ("Modification of a read-only value
+ * attempted"), so its three strings are variables. */
+export const KEYRING_PROBES: ReadonlyArray<{ command: string; args: string[] }> = [
+  { command: "python3", args: ["-c", `import ctypes;l=ctypes.CDLL(None,use_errno=True);r=l.syscall(${ADD_KEY},b'user',b'omb-box-probe',b'v',1,-2);print('ok' if r>=0 else 'errno %d' % ctypes.get_errno())`] },
+  { command: "perl", args: ["-e", `my ($type, $name, $value) = ("user", "omb-box-probe", "v"); my $r = syscall(${ADD_KEY}, $type, $name, $value, 1, -2); print $r >= 0 ? "ok" : "errno " . ($! + 0);`] },
+];
+const EPERM = "errno 1";
+
+/** Whether the box's seccomp filter refuses a kernel-keyring call, and what made the call. Security: with neither
+ * interpreter to make it the check fails rather than passes, since nothing else here can tell this filter from none. */
+export function keyringDenied(
+  run: (command: string, args: string[]) => { error?: Error; stdout?: string; stderr?: string; status: number | null } = (command, args) => spawnSync(command, args, { encoding: "utf8", timeout: 10_000 }),
+): [ok: boolean, detail: string] {
+  for (const probe of KEYRING_PROBES) {
+    const result = run(probe.command, probe.args);
+    if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") continue;
+    const text = (result.stdout || result.stderr || "").trim();
+    return [text === EPERM, `${probe.command}: ${text.slice(0, 60) || `exit ${result.status}`}`];
+  }
+  return [false, "could not be checked: neither python3 nor perl is in this image"];
+}
+
 /** A process's start, in clock ticks since boot: field 22 of /proc/<pid>/stat, counted after the command's last ")". */
 export function processStart(pid: number | "self", read: (path: string) => string = (path) => readFileSync(path, "utf8")): string | null {
   try {
@@ -170,13 +196,7 @@ export async function runProbe(spec: ProbeSpec, env: Record<string, string | und
   add("egress-metadata-refused", (await connectThroughGate(spec.egressPort, "169.254.169.254:80")) === "403", "CONNECT metadata");
   add("egress-private-refused", (await connectThroughGate(spec.egressPort, "10.0.0.1:443")) === "403", "CONNECT private");
   if (spec.publicTarget) add("egress-public-allowed", (await connectThroughGate(spec.egressPort, spec.publicTarget)) === "200", `CONNECT ${spec.publicTarget}`);
-  if (spec.seccomp) {
-    // add_key(2) into the process keyring: fine for any user, EPERM under the box's filter. python3 is in the image.
-    const probe = "import ctypes,os;l=ctypes.CDLL(None,use_errno=True);r=l.syscall(248,b'user',b'omb-box-probe',b'v',1,-2);print('ok' if r>=0 else os.strerror(ctypes.get_errno()))";
-    const result = spawnSync("python3", ["-c", probe], { encoding: "utf8", timeout: 10_000 });
-    const text = (result.stdout || result.stderr || "").trim();
-    add("keyring-denied", /Operation not permitted/.test(text), text.slice(0, 60) || `exit ${result.status}`);
-  }
+  if (spec.seccomp) add("keyring-denied", ...keyringDenied());
   if (spec.broker) {
     const { port, token, provider, path, keyNames, marker: key } = spec.broker;
     const keys = keyNames.filter((name) => !env[name] || !env[name]!.startsWith("omb_t0_"));
