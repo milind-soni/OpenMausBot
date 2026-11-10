@@ -234,15 +234,13 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
   };
   const close = step === "consent" ? onClose : () => { c.cancel(); onClose(); };
   const root = useRef<HTMLDivElement>(null);
-  // A modal dialog: move focus inside when it opens, and give it back to whatever had it (the Pair button) on close.
   useEffect(() => {
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const box = root.current;
     if (box && !box.contains(document.activeElement)) box.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     return () => { if (before?.isConnected) before.focus(); };
   }, []);
-  // Out of Settings' tree, Settings no longer steps aside for this dialog: take Escape and Tab first, so Escape closes
-  // only this dialog and Tab cycles through its controls instead of Settings'.
+  // Settings also handles Escape and Tab; capture them first so they act on this dialog only.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const box = root.current;
@@ -258,8 +256,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [close]);
-  // Portalled to the body: inside Settings, the glass pane's backdrop-filter makes it the box `fixed` is measured
-  // against, so the dialog was squeezed into that pane, see-through, and the QR was cut off when it scrolled.
+  // An ancestor with backdrop-filter becomes the containing block for `fixed`, so render into the body.
   const dialog = (
     <div ref={root} role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step}>
