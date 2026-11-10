@@ -312,7 +312,6 @@ describe("Mola provider", () => {
 
   describe("isStrictUtf8 validation", () => {
     it("recognizes valid UTF-8 text", async () => {
-      const { copyToMola } = await import("./mola.ts");
       const validUtf8 = Buffer.from("Hello, world! 日本語 emoji 🎉", "utf8");
       expect(validUtf8.equals(Buffer.from(validUtf8.toString("utf8"), "utf8"))).toBe(true);
     });
