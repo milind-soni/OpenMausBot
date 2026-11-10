@@ -34,7 +34,6 @@ export type BotPatch = Partial<
     | "replyStyle"
     | "memoryEnabled"
     | "xResearch"
-    | "appSandbox"
     | "voice"
     | "chiefOfStaff"
     | "managedSections"

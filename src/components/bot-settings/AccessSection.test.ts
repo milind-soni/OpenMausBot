@@ -14,14 +14,12 @@ const fixture = vi.hoisted(() => ({
   instances: [] as unknown[],
   capabilities: { host: { homeDir: undefined } as { homeDir: undefined; platform?: string }, localComputer: { available: false, reasonCode: "unsupported" } },
   apps: { phase: "loading", apps: [], connectedSlugs: [] } as import("./useBotApps").BotApps,
-  ownerOrAdmin: true as boolean | null,
 }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config ?? original.initialState.config, instances: fixture.instances as typeof original.initialState.instances }, dispatch: fixture.dispatch }) };
 });
 // The connected-apps list (Composio accounts plus the native Email connection) is seeded per test.
-vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.ownerOrAdmin }));
 vi.mock("./useBotApps", async (importOriginal) => ({
   ...await importOriginal<typeof import("./useBotApps")>(),
   useBotApps: () => fixture.apps,
@@ -43,7 +41,6 @@ beforeEach(() => {
   vi.stubGlobal("window", {});
   fixture.dispatch.mockReset();
   fixture.mcpError = false;
-  fixture.ownerOrAdmin = true;
   fixture.servers = null;
   fixture.config = null;
   fixture.instances = [];
@@ -423,31 +420,6 @@ describe("AccessSection per-app scopes", () => {
   it("shows no scope rows until the account list is known", () => {
     const html = render(makeBot({ connectorScopes: { apps: { gmail: "write" } } }));
     expect(html).not.toContain("Limit this bot to specific apps");
-  });
-
-  it("offers the sandbox switch, off by default, only to a bot with its own app grants", () => {
-    fixture.apps = { phase: "ready", connectedSlugs: ["gmail"], apps: [app("gmail", "Gmail")] };
-    const SANDBOX = /aria-label="Run code in the apps&#x27; sandbox"[^>]*aria-checked="(true|false)"|aria-checked="(true|false)"[^>]*aria-label="Run code in the apps&#x27; sandbox"/;
-    const off = render(makeBot({ connectorTools: { gmail: { tools: "*" } } }));
-    expect(off.match(SANDBOX)?.slice(1).find(Boolean)).toBe("false");
-    expect(off).toContain("Off: this bot uses only the app tools above.");
-    const on = render(makeBot({ connectorTools: { gmail: { tools: "*" } }, appSandbox: true }));
-    expect(on.match(SANDBOX)?.slice(1).find(Boolean)).toBe("true");
-    expect(on).toContain("below Full access it asks you first each time.");
-    expect(render(makeBot())).not.toContain("data-app-sandbox");
-  });
-
-  it("keeps an enabled sandbox switch while the app list is unknown or apps are off, and hides it from editors", () => {
-    const grants = { connectorTools: { gmail: { tools: "*" as const } } };
-    fixture.apps = { phase: "unknown", apps: [], connectedSlugs: [] };
-    expect(render(makeBot({ ...grants, appSandbox: true }))).toContain("data-app-sandbox");
-    expect(render(makeBot(grants))).not.toContain("data-app-sandbox");
-    fixture.apps = { phase: "ready", connectedSlugs: ["gmail"], apps: [app("gmail", "Gmail")] };
-    const appsOff = { ...makeDerived(), connectedAppsEnabled: false };
-    expect(render(makeBot({ ...grants, appSandbox: true, composio: false }), appsOff)).toContain("data-app-sandbox");
-    expect(render(makeBot({ ...grants, composio: false }), appsOff)).not.toContain("data-app-sandbox");
-    fixture.ownerOrAdmin = false;
-    expect(render(makeBot({ ...grants, appSandbox: true }))).not.toContain("data-app-sandbox");
   });
 });
 

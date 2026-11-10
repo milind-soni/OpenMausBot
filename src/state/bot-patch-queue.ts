@@ -28,7 +28,6 @@ export type BotUpdatePatch = Partial<
     | "voiceNotes"
     | "voiceNoteEveryReply"
     | "xResearch"
-    | "appSandbox"
     | "pinned"
     | "hidden"
     | "sidebarHidden"

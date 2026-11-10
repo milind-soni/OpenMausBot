@@ -309,7 +309,7 @@ export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" |
   speakReplies?: boolean;
   replyStyle?: import("../../shared/wire").WireBot["replyStyle"];
   voice?: string;
-  voiceNotes?: boolean; xResearch?: boolean; appSandbox?: boolean; voiceNoteEveryReply?: boolean | null; // null or absent: follows the Voice setting
+  voiceNotes?: boolean; xResearch?: boolean; voiceNoteEveryReply?: boolean | null; // null or absent: follows the Voice setting
   memoryEnabled?: boolean;
   pinned?: boolean;
   hidden?: boolean;

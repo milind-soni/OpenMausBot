@@ -19,6 +19,7 @@ let draftBot: any;
 let draftHelper: any;
 let outboundPolicyBot: any;
 let noRuleBot: any;
+let sandboxBot: any;
 const gmailDrafts = new Map<string, Record<string, unknown>>();
 let brokerOrigin = "";
 const relayed: unknown[] = [];
@@ -112,11 +113,14 @@ beforeAll(async () => {
   const noRuleCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full no sending rule fixture" }) });
   expect(noRuleCreated.status).toBe(201);
   noRuleBot = (await noRuleCreated.json() as any).bot;
+  const sandboxCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full sandbox fixture" }) });
+  expect(sandboxCreated.status).toBe(201);
+  sandboxBot = (await sandboxCreated.json() as any).bot;
   await waitForExit(fixture.child, { signal: "SIGTERM" });
   const botsFile = join(fixture.info.dataDir, "bots.json");
   const bots = JSON.parse(readFileSync(botsFile, "utf8"));
   const saved = bots.find((row: any) => row.id === fullBot.id);
-  for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot, noRuleBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
+  for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot, noRuleBot, sandboxBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
     full.approvalMode = "full";
     full.autoApprove = false;
     for (const task of full.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
@@ -519,28 +523,31 @@ it("still asks before arbitrary workbench code under Send without asking", async
   expect(relayed).toHaveLength(before);
 });
 
-it("runs sandbox code for a bot with app grants only after its sandbox switch is on, never inside a batch, and still asks", async () => {
-  const b = await bot("Sandbox switch");
+it("runs sandbox code for a bot with app grants only at Full access, only by a direct call", async () => {
+  const b = sandboxBot;
   expect((await api("PATCH", `/api/bots/${b.id}`, { connectorTools: { gmail: { tools: "*" } } })).status).toBe(200);
   const token = await mint(b.id, b.threadId);
   const before = relayed.length;
   const code = { code_to_execute: "print(1)" };
   const wrapped = () => relay(token, "COMPOSIO_MULTI_EXECUTE_TOOL", { tools: [{ tool_slug: "COMPOSIO_REMOTE_WORKBENCH", arguments: code }] });
-  const off = await relay(token, "COMPOSIO_REMOTE_WORKBENCH", code);
-  expect(off.body.result.isError).toBe(true);
-  expect(JSON.stringify(off.body.result)).toContain("Run code in the apps' sandbox");
-  expect((await wrapped()).body.result.isError).toBe(true);
-  expect((await api("PATCH", `/api/bots/${b.id}`, { appSandbox: "yes" })).status).toBe(400);
-  expect((await api("PATCH", `/api/bots/${b.id}`, { appSandbox: true }, member)).status).toBe(403);
-  expect((await api("PATCH", `/api/bots/${b.id}`, { appSandbox: true })).status).toBe(200);
-  const held = relay(token, "COMPOSIO_REMOTE_WORKBENCH", code);
-  const card = await pending(b.threadId);
-  expect(relayed).toHaveLength(before);
-  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "allow" });
-  expect((await held).body.result.isError).not.toBe(true);
+  const cardCount = (await cards(b.threadId)).filter(row => row.card?.outboundRequest).length;
+  expect((await relay(token, "COMPOSIO_REMOTE_WORKBENCH", code)).body.result.isError).not.toBe(true);
   expect(relayed).toHaveLength(before + 1);
-  expect((await wrapped()).body.result.isError).toBe(true);
+  expect((await cards(b.threadId)).filter(row => row.card?.outboundRequest), "Full access runs it without a card").toHaveLength(cardCount);
+  const batched = await wrapped();
+  expect(batched.body.result.isError).toBe(true);
+  expect(JSON.stringify(batched.body.result)).toContain("only at Full access");
   expect(relayed).toHaveLength(before + 1);
+  const low = await bot("Sandbox below Full access");
+  expect((await api("PATCH", `/api/bots/${low.id}`, { connectorTools: { gmail: { tools: "*" } } })).status).toBe(200);
+  const lowToken = await mint(low.id, low.threadId);
+  for (const name of ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL"]) {
+    const below = await relay(lowToken, name, { command: "echo 1" });
+    expect(below.body.result.isError).toBe(true);
+    expect(JSON.stringify(below.body.result)).toContain("only at Full access");
+  }
+  expect(relayed).toHaveLength(before + 1);
+  expect((await cards(low.threadId)).filter(row => row.card?.outboundRequest), "refused outright, never asked").toHaveLength(0);
 });
 
 it("tells a scoped bot its multi-execute arguments were unreadable, not that it lacks access", async () => {

@@ -138,18 +138,17 @@ describe("tools/list frame filtering", () => {
   });
 });
 
-describe("app sandbox switch", () => {
-  it("offers the sandbox tools only to a bot with app grants whose switch is on", () => {
+describe("the apps' sandbox", () => {
+  it("is offered to a bot with app grants only while its turn runs at Full access", () => {
     const gmail = grants({ gmail: { tools: "*" } });
-    expect(advertisedGrants({ connectorTools: gmail })).toBe(gmail);
-    expect(advertisedGrants({ connectorTools: gmail, appSandbox: false })).toBe(gmail);
-    expect(advertisedGrants({ appSandbox: true })).toBeUndefined();
-    const on = advertisedGrants({ connectorTools: gmail, appSandbox: true })!;
+    expect(advertisedGrants(gmail, false)).toBe(gmail);
+    expect(advertisedGrants(undefined, true)).toBeUndefined();
+    const full = advertisedGrants(gmail, true)!;
     expect(gmail).toEqual({ gmail: { tools: "*" } });
     for (const tool of ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL", "GMAIL_SEND_EMAIL"]) {
-      expect(connectorToolAdvertised(tool, on)).toBe(true);
+      expect(connectorToolAdvertised(tool, full)).toBe(true);
       expect(connectorToolAdvertised(tool, gmail)).toBe(tool === "GMAIL_SEND_EMAIL");
     }
-    expect(connectorToolAdvertised("SLACK_POST_MESSAGE", on)).toBe(false);
+    expect(connectorToolAdvertised("SLACK_POST_MESSAGE", full)).toBe(false);
   });
 });

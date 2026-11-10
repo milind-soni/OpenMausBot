@@ -4,17 +4,35 @@
 import { CONNECTOR_TOOL_NAME_PATTERN, type ConnectorToolGrant } from "../shared/wire.ts";
 import { EMAIL_SLUG } from "../shared/email.ts";
 
-/** The connected apps' sandbox: Composio's code tools. Code run there can reach any connected app, so a bot with per-app
- * grants gets them only when its person turns on "Run code in the apps' sandbox"; each run still asks below Full access. */
+/** The connected apps' sandbox: Composio's code tools. Code run there can reach any connected app, past a bot's per-app
+ * grants and scopes, so a bot that has either runs it only at Full access, and only by a direct call. */
 export const APP_SANDBOX_TOOLS: readonly string[] = ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL"];
 
 /** The service Composio's own tools are named for (COMPOSIO_REMOTE_WORKBENCH → composio). */
 export const APP_SANDBOX_SERVICE = "composio";
 
-/** A bot with per-app grants asked to run code in the apps' sandbox while its switch is off. */
-export const APP_SANDBOX_REFUSAL = "This call was not performed. A bot runs code in the connected apps' sandbox only by calling "
-  + "COMPOSIO_REMOTE_WORKBENCH or COMPOSIO_REMOTE_BASH_TOOL directly (never inside COMPOSIO_MULTI_EXECUTE_TOOL), and only once the person "
-  + "turns on \"Run code in the apps' sandbox\" in its settings, under Access → Connected apps. If that tool is not offered to you, ask them.";
+/** A bot with per-app grants asked to run code in the apps' sandbox below Full access, or inside a batch. */
+export const APP_SANDBOX_REFUSAL = "This call was not performed. A bot with its own connected-app grants runs code in the apps' "
+  + "sandbox only at Full access, and only by calling COMPOSIO_REMOTE_WORKBENCH or COMPOSIO_REMOTE_BASH_TOOL directly (never inside "
+  + "COMPOSIO_MULTI_EXECUTE_TOOL). Use a direct app tool, or tell the person this needs Full access.";
+
+const OPAQUE_CODE_REFUSAL = "OpenMausBot cannot verify this code against this bot's tool grants. Use a direct app tool.";
+
+/** A tools/call frame that calls the apps' sandbox directly. */
+function appSandboxCall(frame: unknown): boolean {
+  if (!frame || typeof frame !== "object" || Array.isArray(frame)) return false;
+  const { method, params } = frame as { method?: unknown; params?: unknown };
+  const name = params && typeof params === "object" && !Array.isArray(params) ? (params as { name?: unknown }).name : undefined;
+  return method === "tools/call" && typeof name === "string" && APP_SANDBOX_TOOLS.includes(name);
+}
+
+/** The relay's rule for the apps' sandbox: a direct call to it passes a bot's per-app grants and scopes only while the turn
+ * runs at Full access, judged again each time it is asked (at dispatch too). `refusal` is what a bot with grants is told
+ * when code it sent cannot be checked against them. */
+export function appSandboxRule(frame: unknown, fullAccess: () => boolean): { open(): boolean; refusal: string } {
+  const direct = appSandboxCall(frame);
+  return { open: () => direct && fullAccess(), refusal: direct ? APP_SANDBOX_REFUSAL : OPAQUE_CODE_REFUSAL };
+}
 
 /** The only Composio meta-tool whose arguments name target tools. */
 export const COMPOSIO_MULTI_EXECUTE_TOOL = "COMPOSIO_MULTI_EXECUTE_TOOL";
@@ -140,7 +158,7 @@ export function evaluateConnectorTools(
 
 /** Never lists what the bot could have called instead: enumerating adjacent grants teaches the model to probe. */
 export function connectorRefusalText(denials: ConnectorDenial[]): string {
-  if (denials.every((denial) => APP_SANDBOX_TOOLS.includes(denial.tool))) return APP_SANDBOX_REFUSAL;
+  if (denials.length && denials.every((denial) => APP_SANDBOX_TOOLS.includes(denial.tool))) return APP_SANDBOX_REFUSAL;
   const named = denials.map((denial) => '"' + denial.tool + '"').join(", ");
   const one = denials.length === 1;
   return [

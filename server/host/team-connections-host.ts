@@ -23,7 +23,7 @@ import { appLabel, ConnectionScopes, PeopleConnections, personAppOf, SCOPES_FILE
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolsFor } from "../connector-app-tools.ts";
 import type { ConnectorScopes } from "../../shared/connector-scopes.ts";
 
-type Bot = { id: string; name: string; connectorTools?: Parameters<typeof Composio.mcpIntegration>[1]["connectorTools"]; connectorScopes?: ConnectorScopes; appSandbox?: boolean };
+type Bot = { id: string; name: string; connectorTools?: Parameters<typeof Composio.mcpIntegration>[1]["connectorTools"]; connectorScopes?: ConnectorScopes };
 type Integration = { command: string; args: string[]; env: Record<string, string> };
 type McpBot = { id: string; name: string; mcpServers?: string[] };
 
@@ -55,6 +55,8 @@ export interface TeamConnectionsHostDeps {
   onPersonChanged?(person: string, kind: "app" | "mcp", id: string): void;
   /** The connected-apps service a member's own installation is made on; null: none here. */
   brokerUrl(): string | null;
+  /** Whether this bot's turn in this conversation runs at Full access: its tools/list then offers the apps' sandbox. */
+  fullAccess?(botId: string, threadId: string): boolean;
   composio: Pick<typeof Composio, "configured" | "mcpIntegration" | "connectedServices" | "verifiedConnectedServiceSlugs" | "authorizeService" | "removeService">;
 }
 
@@ -239,7 +241,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     async appsIntegrations(bot: Bot, threadId: string, generation: string, names: "dotted" | "plain" = "plain"): Promise<{ composio?: Integration; composioOwn?: Integration }> {
       const cfg = deps.cfg();
       const out: { composio?: Integration; composioOwn?: Integration } = {};
-      const base = { harnessUrl: deps.harnessUrl, botId: bot.id, threadId, connectorTools: advertisedGrants(bot) };
+      const base = { harnessUrl: deps.harnessUrl, botId: bot.id, threadId, connectorTools: advertisedGrants(bot.connectorTools, deps.fullAccess?.(bot.id, threadId) === true) };
       const shared = await deps.composio.mcpIntegration(cfg, { ...base, commsToken: deps.mint({ botId: bot.id, threadId, generation }) });
       if (shared) out.composio = await withAppTools(shared, bot, names);
       const person = personApps().length ? turnPerson(threadId, generation) : null;

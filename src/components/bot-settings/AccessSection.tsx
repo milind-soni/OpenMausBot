@@ -24,7 +24,6 @@ import { ToolBudgetLine } from "./ToolBudgetLine";
 import { useCloudPlan } from "../ProIntroduction";
 import { xResearchAction } from "@/lib/cloud-plan";
 import { useBotApps } from "./useBotApps";
-import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import {
   classifyConnectorTool,
   connectorServiceAccess,
@@ -507,19 +506,6 @@ function ResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: bo
   );
 }
 
-/** Lets a bot with per-app grants run code in the connected apps' sandbox, which some app jobs need (a Google Drive upload). */
-function AppSandboxRow({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
-  return (
-    <div className="mt-3 flex items-center justify-between gap-4 border-t border-hairline/40 pt-3">
-      <div>
-        <div className="text-[14px] font-medium text-ink">{t("botAccess.apps.sandbox.title")}</div>
-        <div className="mt-0.5 text-[13px] text-ink-secondary">{t(on ? "botAccess.apps.sandbox.on" : "botAccess.apps.sandbox.off")}</div>
-      </div>
-      <Switch checked={on} aria-label={t("botAccess.apps.sandbox.title")} onClick={() => onChange(!on)} data-app-sandbox="" />
-    </div>
-  );
-}
-
 function RecordStepsRow({ on, browserOn, myChrome, onChange }: { on: boolean; browserOn: boolean; myChrome: boolean; onChange: (on: boolean) => void }) {
   return (
     <div className="mt-3 flex items-center justify-between gap-4 border-t border-hairline/40 pt-3">
@@ -712,7 +698,6 @@ export function AccessSection({
   // The same list the Vault tab shows: Composio's connected accounts plus the native Email connection.
   const apps = useBotApps(bot);
   const inventoryReady = apps.phase === "ready";
-  const ownerOrAdmin = useOwnerOrAdmin();
   const connectedSlugs = apps.connectedSlugs;
   const appLabels = Object.fromEntries(apps.apps.map((app) => [app.slug, app.label]));
 
@@ -783,11 +768,6 @@ export function AccessSection({
             {!draft && <ConnectorScopesControl connectedSlugs={connectedSlugs} labels={appLabels} scopes={bot.connectorScopes} onChange={(connectorScopes) => patch({ connectorScopes })} />}
             <ConnectorToolsGrants bot={bot} patch={patch} slugs={connectedSlugs} />
           </>
-        )}
-        {/* Only an owner or admin may change it (the server refuses an editor). An enabled switch stays shown while the
-            app list is unknown or connected apps are off, so it can always be turned off. */}
-        {ownerOrAdmin === true && bot.connectorTools !== undefined && (bot.appSandbox === true || (connectedAppsEnabled && inventoryReady)) && (
-          <AppSandboxRow on={bot.appSandbox === true} onChange={(appSandbox) => patch({ appSandbox })} />
         )}
         {connectedAppsEnabled && connectedAppsConfigured && (
           <button

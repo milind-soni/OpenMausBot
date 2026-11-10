@@ -23,10 +23,11 @@ export const CONNECTOR_META_TOOLS: readonly string[] = [
   "COMPOSIO_WAIT_FOR_CONNECTIONS",
 ];
 
-/** What a bot's tools/list offers: its grants, and the sandbox's code tools while its sandbox switch is on. */
-export function advertisedGrants(bot: { connectorTools?: Record<string, ConnectorToolGrant>; appSandbox?: boolean }): Record<string, ConnectorToolGrant> | undefined {
-  if (bot.connectorTools === undefined || bot.appSandbox !== true) return bot.connectorTools;
-  return { ...bot.connectorTools, [APP_SANDBOX_SERVICE]: { tools: [...APP_SANDBOX_TOOLS] } };
+/** What a bot's tools/list offers: its grants, and the apps' sandbox's code tools while its turn runs at Full access (the
+ * relay judges each call again). */
+export function advertisedGrants(grants: Record<string, ConnectorToolGrant> | undefined, fullAccess: boolean): Record<string, ConnectorToolGrant> | undefined {
+  if (grants === undefined || !fullAccess) return grants;
+  return { ...grants, [APP_SANDBOX_SERVICE]: { tools: [...APP_SANDBOX_TOOLS] } };
 }
 
 const CONNECTION_TOOL_SUFFIXES = ["_MANAGE_CONNECTIONS", "_WAIT_FOR_CONNECTIONS"];

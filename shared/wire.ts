@@ -348,9 +348,6 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
    * actions), which spend the workspace's treg balance.
    * Absent/false = off: the person turns it on per bot. */
   xResearch?: boolean;
-  /** Whether this bot may run code in the connected apps' sandbox (Composio's workbench and bash tools), for jobs such as
-   * uploading a file to Google Drive. Absent/false = off; a bot with no per-app tool grants already has every tool. */
-  appSandbox?: boolean;
   /** Whether this bot uses native memory. Absent/true = enabled. */
   memoryEnabled?: boolean;
   /** Queue direct-chat messages behind outstanding delegated work. */
