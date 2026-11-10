@@ -7369,6 +7369,8 @@
   "botLimit.paused.badge": "一時停止中",
   "botLimit.paused.saveFailed": "保存できませんでした。もう一度お試しください。",
   "botLimit.paused.chooseAction": "起動しておくボットを選ぶ（{count} 体が一時停止中）",
+  "botLimit.created.title": "{name} を作成しました。いまは一時停止中です",
+  "botLimit.created.body": "Starter で起動しておけるボットは {count} 体なので、このボットは一時停止中です。起動しておく {count} 体を選ぶか、アップグレードしてすべて起こしてください。",
   "approval.yourComputer.browserSite": "{site} にサインインしているあなたの {app} を使う必要があります。今回だけ許可しますか？",
   "approval.yourComputer.browser": "サインインしているあなたの {app} を使う必要があります。今回だけ許可しますか？",
   "approval.yourComputer.site": "{site} にサインインしているあなたのブラウザーを使う必要があります。今回だけ許可しますか？",

@@ -7559,6 +7559,8 @@
   "botLimit.paused.badge": "Pausado",
   "botLimit.paused.saveFailed": "Não foi possível salvar. Tente de novo.",
   "botLimit.paused.chooseAction": "Escolher bots ativos ({count} pausados)",
+  "botLimit.created.title": "{name} criado, pausado por enquanto",
+  "botLimit.created.body": "O Starter mantém {count} bots ativos, então este está pausado. Escolha quais {count} ficam ativos ou faça upgrade para ativar todos.",
   "roomCard.restartNow": "Reiniciar agora",
   "roomCard.restartHint": "Leva cerca de um minuto e interrompe tudo que estiver em execução.",
   "roomCard.restarting": "Reiniciando este Cloud com a nova capacidade. Ele volta em cerca de um minuto.",
