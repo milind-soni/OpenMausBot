@@ -417,7 +417,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   it("says so, and does not finish, when the sandbox does not hold or the server cannot be prepared", () => {
     const failed = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: BOX_FAILED } });
     expect(failed.status).toBe(1);
-    expect(failed.stderr).toContain("MausBot is running, but its bots' sandbox failed its self-check, so bots are not safely separated from the server.");
+    expect(failed.stderr).toContain("MausBot is running, but its bots' sandbox failed its self-check (config-hidden), so bots are not safely separated from the server.");
     expect(failed.all).not.toContain("MausBot is running at");
     const untested = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: '{"box":"bwrap","failed":[],"results":[]}' } });
     expect(untested.stderr).toContain("its sandbox self-check did not test that a bot cannot read the server's settings");

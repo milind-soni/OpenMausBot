@@ -749,7 +749,10 @@ check_sandbox_runs() {
         *) fail "MausBot is running, but its sandbox self-check did not test that a bot cannot read the server's settings. Send us this line." ;;
       esac
       ;;
-    *) fail "MausBot is running, but its bots' sandbox failed its self-check, so bots are not safely separated from the server. See it with: cd $INSTALL_DIR && sudo docker compose exec omb node dist-server/bot-box/box-check.js --public=none  and send us what it prints." ;;
+    *)
+      failed=$(printf '%s' "$report" | sed -n 's/.*"failed":\[\([^]]*\)\].*/\1/p' | tr -d '"' | tr ',' ' ')
+      fail "MausBot is running, but its bots' sandbox failed its self-check${failed:+ ($failed)}, so bots are not safely separated from the server. See it with: cd $INSTALL_DIR && sudo docker compose exec omb node dist-server/bot-box/box-check.js --public=none  and send us what it prints."
+      ;;
   esac
 }
 
