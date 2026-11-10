@@ -16,8 +16,9 @@ import * as probeModule from "../mcp-probe.ts";
 import { listMcpServers, parseStoredMcpServer, type StoredMcpServer } from "../mcp-registry.ts";
 import { SecretVault } from "../secret-vault.ts";
 import type { OptionCardData, WireMessage } from "../../shared/wire.ts";
+import type { BotRecord } from "../store.ts";
 import { McpRequestService } from "../host/mcp-requests.ts";
-import { applyMcpChange, createInternalMcpRoutes, showMcpActivity, type InternalMcpDeps } from "./internal-mcp.ts";
+import { applyMcpChange, createInternalMcpRoutes, otherBotsGiven, showMcpActivity, type InternalMcpDeps } from "./internal-mcp.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
 const BOT = "kiwi";
@@ -246,6 +247,41 @@ describe("internal mcp_server route, Full access", () => {
     expect(body.text).toContain("The new tools arrive on your next turn.");
     expect(decided).toEqual([{ summary: "Added MCP server notes and turned it on", applied: "full-access" }]);
     expect(lines).toEqual(["Added MCP server notes · Turned on · Test: 2 tools"]);
+  });
+
+  it("add of a server other bots get too tells the person which bots, and where to switch it off for one", async () => {
+    probeWith({ ok: true, tools: [{ name: "search_notes" }] });
+    const { post, lines } = fixture({ usedBy: { notes: ["Clive", "Mo"] } });
+    const { status, body } = await post({ action: "add", name: "notes", command: "notes-mcp" });
+    expect(status).toBe(201);
+    expect(body.text).toContain("It is on for your other bots too: Clive and Mo. Tell the person that, and that they can switch it off for one bot in that bot's settings, under Apps it can use.");
+    expect(lines).toEqual(["Added MCP server notes · Turned on · Test: 1 tool · Also on for Clive, Mo: switch it off for one in its settings, under Apps it can use"]);
+  });
+
+  it("add of a server no other bot gets says nothing about other bots", async () => {
+    probeWith({ ok: true, tools: [{ name: "search_notes" }] });
+    const { post, lines } = fixture();
+    const { body } = await post({ action: "add", name: "notes", command: "notes-mcp" });
+    expect(body.text).not.toContain("other bots");
+    expect(lines).toEqual(["Added MCP server notes · Turned on · Test: 1 tool"]);
+  });
+
+  it("enable of a server other bots get too tells the person which bots, and where to switch it off for one", async () => {
+    probeWith({ ok: true, tools: [{ name: "search" }] });
+    const { post, lines } = fixture({ servers: { linear: { ...linear, enabled: false } }, usedBy: { linear: ["Clive"] } });
+    const { status, body } = await post({ action: "enable", name: "linear" });
+    expect(status).toBe(200);
+    expect(body.text).toContain("It is on for your other bots too: Clive.");
+    expect(lines).toEqual(["Turned on MCP server linear · Test: 1 tool · Also on for Clive: switch it off for one in its settings, under Apps it can use"]);
+  });
+
+  it("enable of a server that was already on for everyone, joining only this bot's list, says nothing about other bots", async () => {
+    probeWith({ ok: true, tools: [{ name: "search" }] });
+    const { post, lines } = fixture({ servers: { linear }, mcpServers: [], usedBy: { linear: ["Clive"] } });
+    const { status, body } = await post({ action: "enable", name: "linear" });
+    expect(status).toBe(200);
+    expect(body.text).not.toContain("other bots");
+    expect(lines).toEqual(["Turned on MCP server linear · Test: 1 tool"]);
   });
 
   it("add of an OAuth server returns \"needs sign-in\" and tells the bot to call sign_in", async () => {
@@ -1085,5 +1121,28 @@ describe("the activity line", () => {
     expect(thread.messages[0]!.tool?.label).toBeUndefined();
     expect(thread.messages).toHaveLength(2);
     expect(thread.messages[1]).not.toHaveProperty("turnId");
+  });
+});
+
+describe("which other bots a server notice names", () => {
+  const bot = (id: string, more: Partial<BotRecord> = {}) => ({ id, name: id.toUpperCase(), ...more }) as BotRecord;
+  const everyone = (_bot: BotRecord) => true;
+
+  it("names the other bots that get the server, not the sender or hidden ones", () => {
+    const sender = bot("a");
+    expect(otherBotsGiven([sender, bot("b"), bot("c", { hidden: true }), bot("d")], sender, (b) => b.id !== "d")).toEqual(["B"]);
+  });
+
+  it("leaves out a bot only admins see when people who are not admins see the sender", () => {
+    const sender = bot("a");
+    const bots = [sender, bot("b"), bot("secret", { visibility: "admins" }), bot("few", { visibility: { people: ["x@example.com"] } })];
+    expect(otherBotsGiven(bots, sender, everyone)).toEqual(["B"]);
+  });
+
+  it("names a restricted bot to a sender whose audience it covers", () => {
+    const sender = bot("a", { visibility: { people: ["x@example.com"] } });
+    const bots = [sender, bot("b"), bot("secret", { visibility: "admins" }), bot("few", { visibility: { people: ["x@example.com", "y@example.com"] } })];
+    expect(otherBotsGiven(bots, sender, everyone)).toEqual(["B", "FEW"]);
+    expect(otherBotsGiven(bots, bot("admin", { visibility: "admins" }), everyone)).toEqual(["A", "B", "SECRET", "FEW"]);
   });
 });

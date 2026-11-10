@@ -223,6 +223,9 @@ export function createLentMcp(deps: LentMcpDeps) {
   return {
     principal: (turn: Turn): string | null => deps.principal(turn),
 
+    /** The bot's servers that run on another computer, reachable now or not: who a change to one reaches. */
+    given: (bot: Bot): string[] => Object.keys(servers(bot)),
+
     /** A turn's servers that run on a lent computer it may use now, as servers at this server's address. One it can't
      * reach is left out, and lines() says why. */
     mounts(bot: Bot, turn: Turn): Record<string, McpServerSpec> {

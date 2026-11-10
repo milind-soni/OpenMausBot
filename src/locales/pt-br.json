@@ -254,6 +254,7 @@
   "server.mcp.on": "Ligado",
   "server.mcp.switchedOff": "Desligado",
   "server.mcp.keysCleared": "Chaves salvas removidas",
+  "server.mcp.alsoOn": "Também ligado para {names}: desligue para um deles nas configurações dele, em Apps que ele pode usar",
   "server.mcp.testTools.one": "Teste: {count} ferramenta",
   "server.mcp.testTools.many": "Teste: {count} ferramentas",
   "server.mcp.testSignIn": "Teste: precisa de login",
