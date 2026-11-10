@@ -291,7 +291,9 @@ describe("phones through MausBot Relay on a server", () => {
     expect(tunnelHolder({}, dir)).toBeNull();
     writeFileSync(account, JSON.stringify({ companionInstallationCredential: "omb_install_x" }));
     expect(tunnelHolder({}, dir)).toBeNull();
-    expect(tunnelHolder({ OMB_TUNNEL_SOCKET: join(dir, "t.sock") }, dir)).toBe("this server runs with --tunnel");
+    expect(tunnelHolder({ OMB_SERVES_TUNNEL: "1", OMB_TUNNEL_SOCKET: join(dir, "t.sock") }, dir)).toBe("this server runs with --tunnel");
+    // Docker's Caddy reaches the server over a socket too: that is no tunnel.
+    expect(tunnelHolder({ OMB_TUNNEL_SOCKET: "/run/openmausbot/http.sock" }, dir)).toBeNull();
     expect(tunnelHolder({ OMB_INSTALLATION_CREDENTIAL: "omb_install_y" }, dir)).toMatch(/^OMB_INSTALLATION_CREDENTIAL is set/);
     writeFileSync(account, JSON.stringify({ companionInstallationCredential: "omb_install_x", managedCompanionEndpointUrl: "https://c-0123456789abcdef0123456789abcdef.openmausbot.com" }));
     expect(tunnelHolder({}, dir)).toMatch(/holds a tunnel address/);
@@ -300,7 +302,7 @@ describe("phones through MausBot Relay on a server", () => {
 
     // `serve --tunnel` with OMB_PHONE_RELAY=1 in the environment, and a fleet container: off, and saying why.
     writeFileSync(account, JSON.stringify({ companionInstallationCredential: "omb_install_x" }));
-    for (const env of [{ OMB_PHONE_RELAY: "1", OMB_TUNNEL_SOCKET: join(dir, "t.sock") }, { OMB_PHONE_RELAY: "1", OMB_INSTALLATION_CREDENTIAL: "omb_install_y" }]) {
+    for (const env of [{ OMB_PHONE_RELAY: "1", OMB_SERVES_TUNNEL: "1", OMB_TUNNEL_SOCKET: join(dir, "t.sock") }, { OMB_PHONE_RELAY: "1", OMB_INSTALLATION_CREDENTIAL: "omb_install_y" }]) {
       let asked = 0;
       const logs: string[] = [];
       const sessions = new SessionRegistry({ file: join(dir, "sessions.json") });

@@ -732,7 +732,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   if (entry.staticDir) env.OMB_STATIC_DIR = entry.staticDir;
   if (entry.skillsDir && !process.env.OMB_SKILLS_DIR) env.OMB_SKILLS_DIR = entry.skillsDir;
   if (options.label && !process.env.OMB_ENVIRONMENT_LABEL) env.OMB_ENVIRONMENT_LABEL = options.label;
-  if (plan) env.OMB_TUNNEL_SOCKET = plan.origin.socketPath;
+  if (plan) Object.assign(env, { OMB_TUNNEL_SOCKET: plan.origin.socketPath, OMB_SERVES_TUNNEL: "1" });
   const lanRefusal = options.lan ? lanProblem() : null;
   if (lanRefusal) log(lanRefusal);
   if (options.lan && !lanRefusal) env.OMB_LAN = "1";

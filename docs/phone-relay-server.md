@@ -10,14 +10,16 @@ end-to-end encrypted connection the desktop app gives phones; the wire spec is
 It is off unless asked for, and it changes nothing about `--tunnel`, your own
 domain, `--public-url`, `--lan` or `--tailscale`.
 
-**For now `--relay` is only for a machine that has no tunnel address**, signed in
-with `openmausbot login --relay`. The control plane does not yet tell a server
-from a desktop: it gives back the tunnel of any installation that took a relay
-token in the last two days and then refuses it a tunnel for good. So the server
-keeps the relay off, and says why, when it serves `--tunnel`, runs on a fleet
+**In this release `--relay` is only for a machine that has no tunnel address**,
+signed in with `openmausbot login --relay`. A server says it is one
+(`kind: "server"`) when it registers, asks for its address and asks for a relay
+token, and the hosted control plane never gives a server's tunnel to the relay.
+A control plane that predates that rule gives back the tunnel of any
+installation that took a relay token in the last two days and then refuses it a
+tunnel for good, and a server may be pointed at one. So the server still keeps
+the relay off, and says why, when it serves `--tunnel`, runs on a fleet
 credential (`OMB_INSTALLATION_CREDENTIAL`), or holds a tunnel address from a
-plain `openmausbot login`. The same goes the other way: a machine that has used
-the relay cannot get a tunnel address until the control plane exempts servers.
+plain `openmausbot login`.
 
 ## Use it
 
@@ -37,8 +39,9 @@ service prints no pairing QR into its log (the credential would sit in the
 journal); `serve --relay` shows it only at a terminal, and `pair --phone` makes
 one whenever asked.
 
-With Docker, set `OMB_PHONE_RELAY=1` in `.env` (both compose files pass it
-through), `docker compose up -d`, then:
+With Docker, set `OMB_PHONE_RELAY=1` in `.env` (`deploy/docker-compose.yml`,
+the root `compose.yaml` and the compose file the installer writes all pass it to
+the server container), `docker compose up -d`, then:
 
 ```sh
 docker compose exec omb openmausbot login --relay
@@ -116,8 +119,11 @@ The one change to shared code: `E2ERegistry` took the sidecar's
 already satisfies, and a pairing window may carry the credential's SHA-256
 instead of the credential, because a server stores only the digest. The
 desktop computes the same values as before; its end-to-end, relay-client,
-malicious-relay, vector and sidecar tests pass unchanged. `relay-token.d.mts`
-and `relayToken` in `control-plane-client.d.mts` are type declarations only.
+malicious-relay, vector and sidecar tests pass unchanged. The control plane
+client and the account service take an optional `kind` that only the server
+passes, so the desktop's requests are the same bytes as before.
+`relay-token.d.mts` and the additions to the `.d.mts` files are type
+declarations only.
 
 ## The control plane
 
@@ -140,26 +146,23 @@ A server qualifies today; no control plane change is needed to get a token:
   not tokens. A published server reports a version such as `0.1.152`, which the
   route accepts; a development build reporting `unknown` is refused (400).
 
-What does need a control plane change, not in this pull request:
+**Servers keep their tunnel.** A server's tunnel serves browsers and the
+desktop app, not only phones. The server sends `kind: "server"` on
+`POST /v1/installations`, `POST .../self/endpoint` and `POST .../self/relay-token`
+(`openmausbot login`, `serve --tunnel`, a fleet container and `serve --relay`
+alike); the desktop app sends nothing new. The hosted control plane stores it,
+never marks a server's tunnel for the relay (`relay_proven`, `legacy_cutoff`)
+and never answers a server `relay_capable` (its README, "Self-hosted servers").
 
-- **Servers must be exempt from giving their tunnel back.** With the legacy
-  phone cutoff at 100%, the release cron gives back the tunnel of any
-  installation that took a relay token in the last two days at a relay-capable
-  version, and provisioning then answers it `409 relay_capable` ("retired") for
-  good. Neither reads the device counts a server reports, so nothing a server
-  sends can protect its tunnel. A server's tunnel serves browsers and the
-  desktop app too. Until the control plane tells a server apart, the server
-  protects itself: it never asks for a relay token while it serves a tunnel,
-  runs on a fleet credential, or holds a tunnel address (above). The `legacy`
-  count it reports (its sessions the relay does not carry) changes nothing
-  here.
-- **The change:** record the kind of installation (`"server"` from
-  `openmausbot login` and the fleet; desktop otherwise), and leave servers out
-  of the release cron, the cutoff and `relay_capable`. The relay-token schema
-  is strict, so the server must not send any new field until a Worker that
-  accepts it is deployed; registration is the safer place for it.
-- `relay_adoption` and `/healthz relayAdoption` now count servers with
-  desktops; the kind above would let them be reported apart.
+A control plane without that rule gives back the tunnel of any installation
+that took a relay token in the last two days at a relay-capable version, and
+then answers it `409 relay_capable` ("retired") for good; it reads no device
+counts, so nothing else a server sends protects its tunnel. So for this release
+the server also protects itself: it never asks for a relay token while it
+serves a tunnel (`serve --tunnel` marks it; the socket Docker's Caddy uses is
+not one), runs on a fleet credential, or holds a tunnel address (above). The
+`legacy` count it reports (its sessions the relay does not carry) changes
+nothing there.
 
 ## Security
 
@@ -260,9 +263,9 @@ again…".
 - Moving a phone already paired over HTTPS onto the relay without pairing
   again (trust on first use of `k` from `/api/companion/endpoints`). Small to
   medium, and needs the phone apps' behaviour confirmed.
-- The control plane's installation kind and its exemptions; then the server
-  can drop its tunnel refusal and allow `--relay` with `--tunnel`. Small, plus a
-  migration.
+- Dropping the server's own tunnel refusal and allowing `--relay` with
+  `--tunnel`, once no supported control plane predates the server exemption.
+  Small.
 - The same stream deadlines on the desktop's companion: its encrypted streams
   have the same gap, reachable only by a paired phone. Small.
 - Renewing the installation credential before its 90 days end. `serve

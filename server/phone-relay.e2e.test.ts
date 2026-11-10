@@ -30,6 +30,7 @@ let dataDir: string;
 let logPath: string;
 let base: string;
 const others: Array<{ child: ChildProcess; dataDir: string }> = [];
+const dockerSocket = join(tmpdir(), `omb-relay-e2e-docker-${process.pid}.sock`);
 
 /** A real server in a new data dir, signed in for the relay as `login --relay` leaves it: a credential, no tunnel address. */
 async function boot(extra: Record<string, string> = {}) {
@@ -69,11 +70,13 @@ beforeAll(async () => {
     }));
   });
   await new Promise<void>((resolve) => controlPlane.listen(0, "127.0.0.1", resolve));
-  ({ child, dataDir, logPath, base } = await boot());
+  // As Docker runs it: its Caddy reaches the server over this socket, which is no tunnel.
+  ({ child, dataDir, logPath, base } = await boot({ OMB_TUNNEL_SOCKET: dockerSocket }));
 }, 60_000);
 
 afterAll(async () => {
   await waitForExit(child, { signal: "SIGTERM", graceMs: 15_000 });
+  rmSync(dockerSocket, { force: true });
   for (const other of others) {
     await waitForExit(other.child, { signal: "SIGTERM", graceMs: 15_000 });
     await removeTempDir(other.dataDir);
@@ -93,7 +96,7 @@ describe("serve --relay", () => {
     await waitFor(async () => (await owner("/api/auth/pairing")).body.relay?.relay === "connected", 15_000);
     expect(readFileSync(logPath, "utf8")).toContain("phone relay: connected via relay1.openmausbot.com");
     // The control plane hears exactly the fields its strict schema takes.
-    expect(tokenRequests[0]).toEqual({ appVersion: expect.stringMatching(/^\d+\.\d+\.\d+/), devices: { e2e: 0, legacy: 0 } });
+    expect(tokenRequests[0]).toEqual({ appVersion: expect.stringMatching(/^\d+\.\d+\.\d+/), devices: { e2e: 0, legacy: 0 }, kind: "server" });
 
     const minted = await owner("/api/auth/pairing", { method: "POST", body: JSON.stringify({ scopes: ["client"], label: "Pixel" }) });
     expect(minted.status).toBe(200);
@@ -134,7 +137,7 @@ describe("serve --relay", () => {
   it("stays off on a server that serves a tunnel or runs on a fleet credential, and asks the control plane nothing", async () => {
     const asked = tokenRequests.length;
     const socket = join(tmpdir(), `omb-relay-e2e-${process.pid}-${Date.now()}.sock`);
-    const tunnel = await boot({ OMB_TUNNEL_SOCKET: socket });
+    const tunnel = await boot({ OMB_SERVES_TUNNEL: "1", OMB_TUNNEL_SOCKET: socket });
     others.push(tunnel);
     onTestFinished(() => rmSync(socket, { force: true }));
     const fleet = await boot({ OMB_INSTALLATION_CREDENTIAL: credential });

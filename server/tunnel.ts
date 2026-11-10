@@ -151,7 +151,7 @@ export function createTunnelAccount(options: {
     client,
     readCredentials: () => credentials.read(),
     updateCredentials: (derive, afterPersist) => credentials.update(derive, afterPersist),
-    identity: { name: options.machineName ?? hostname(), platform: platformName(), appVersion: options.version },
+    identity: { name: options.machineName ?? hostname(), platform: platformName(), appVersion: options.version, kind: "server" },
     newClientInstanceId: () => randomUUID(),
     ...(options.log ? { log: options.log } : {}),
     ...(options.relayOnly ? { onDemand: true, managedEndpointNeeded: async () => false, relay: { capable: () => true, legacyDevices: async () => 0 } } : {}),
@@ -187,7 +187,7 @@ export async function fleetAccess(options: { credential: string; version?: strin
   if (!controlPlane) throw new Error("OMB_CONTROL_PLANE_URL is set but is not an https address");
   const client = createControlPlaneClient({ baseURL: controlPlane, fetchImpl: options.fetchImpl });
   try {
-    const { endpoint, connectorToken } = await client.ensureEndpoint(options.credential, { appVersion: options.version });
+    const { endpoint, connectorToken } = await client.ensureEndpoint(options.credential, { appVersion: options.version, kind: "server" });
     return { endpoint: endpoint.url, token: connectorToken };
   } catch (error) {
     if (error instanceof ControlPlaneError && error.status === 401) {

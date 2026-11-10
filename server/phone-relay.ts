@@ -28,6 +28,8 @@ import { describeTunnelAccount, FLEET_CREDENTIAL_ENV, fleetCredential, openTunne
 import type { E2ESession } from "../companion/src/e2e/session.ts";
 
 export const PHONE_RELAY_ENV = "OMB_PHONE_RELAY";
+/** `serve --tunnel` sets it. OMB_TUNNEL_SOCKET alone is no tunnel: Docker's Caddy reaches the server over that socket. */
+export const SERVES_TUNNEL_ENV = "OMB_SERVES_TUNNEL";
 export const PHONE_RELAY_KEY_FILE = "phone-relay-key.json";
 export const PHONE_RELAY_PHONES_FILE = "phone-relay-phones.json";
 /** The relay admits 32 per host; 20 phones, 2 pairing windows and the live pairing sessions stay under it. */
@@ -145,7 +147,7 @@ function reply(res: ServerResponse, status: number, body: unknown): void {
  * desktop, and gives back the tunnel of any installation that recently took a relay token, then refuses it another. So
  * a machine that serves a tunnel, runs on a fleet credential, or holds a tunnel address from `login` never asks. */
 export function tunnelHolder(env: NodeJS.ProcessEnv, dataDir: string): string | null {
-  if (env.OMB_TUNNEL_SOCKET?.trim()) return "this server runs with --tunnel";
+  if (env[SERVES_TUNNEL_ENV] === "1") return "this server runs with --tunnel";
   if (fleetCredential(env)) return `${FLEET_CREDENTIAL_ENV} is set, and a fleet installation keeps its tunnel`;
   const account = openTunnelCredentials(dataDir);
   if (account.status === "unavailable") return `${account.file} could not be read, so this machine may hold a tunnel address`;
@@ -225,7 +227,7 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
     if (tunnelReason) throw Object.assign(new Error(tunnelReason), { code: TUNNEL_HELD });
     const credential = typeof stored === "string" ? stored : null;
     if (!client || !credential) throw Object.assign(new Error("signed out"), { code: "signed_out" });
-    return client.relayToken(credential, { appVersion: options.version, devices: devicesNow });
+    return client.relayToken(credential, { appVersion: options.version, devices: devicesNow, kind: "server" });
   });
 
   const tokens = createRelayTokenService({

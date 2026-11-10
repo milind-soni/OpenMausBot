@@ -72,6 +72,7 @@ describe("openmausbot serve --relay", () => {
       expect(await runLogin(options, io)).toBe(0);
       expect(lines).toEqual(["Signed in as vps@example.test.", "No public address reserved: phones reach this machine through MausBot Relay.", expect.stringMatching(/^Serve there with: {2}.*serve --relay$/)]);
       expect(stub.calls).toContain("POST /v1/installations");
+      expect([...stub.installations.values()].map((installation) => installation.kind)).toEqual(["server"]);
       expect(stub.calls.filter((call) => call.includes("/endpoint"))).toEqual([]);
       const file = join(dataDir, "tunnel-account.json");
       expect(JSON.parse(readFileSync(file, "utf8")).companionInstallationCredential).toMatch(/^omb_install_/);
