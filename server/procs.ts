@@ -9,11 +9,12 @@ import {
   type ExecFileOptions,
   type SpawnOptions,
 } from "node:child_process";
-import { closeSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
 import { basename, dirname, join, resolve } from "node:path";
 import { botBox, type WrappedSpawn } from "./bot-box/box.ts";
 import type { BoxRequest } from "./bot-box/plan.ts";
+import { homeProgramsDistrusted, serverMayRunFrom, serverPath } from "./bot-box/program-trust.ts";
 import { engineMemory } from "./engine-memory.ts";
 import { engineHomes } from "./engine-homes/engine-homes.ts";
 import type { HomedSpawn } from "./engine-homes/layout.ts";
@@ -198,6 +199,22 @@ export function sharedBoxScope(cwd: string): string | null {
   return basename(dirname(parent)) === "task-workspaces" ? parent : resolve(cwd);
 }
 
+/** Security (bot-box/program-trust.ts): a spawn outside the box neither starts a program from a folder a boxed bot can
+ * write nor looks one up there. */
+export function outsideBoxOptions<T extends { env?: NodeJS.ProcessEnv; cwd?: string | URL }>(command: string, opts: T): T {
+  if (!homeProgramsDistrusted()) return opts;
+  if (/[/\\]/.test(command)) {
+    const path = resolve(typeof opts.cwd === "string" ? opts.cwd : process.cwd(), command);
+    let real = path;
+    try { real = realpathSync(path); } catch {}
+    if (!serverMayRunFrom(path) || !serverMayRunFrom(real)) {
+      throw Object.assign(new Error(`${command} is in a folder the bots can write, so the server does not run it outside the bot box.`), { code: "EACCES" });
+    }
+  }
+  const env = opts.env ?? process.env;
+  return { ...opts, env: { ...env, PATH: serverPath(env.PATH) } };
+}
+
 export function spawnCli(
   cli: string,
   args: string[],
@@ -209,7 +226,7 @@ export function spawnCli(
   const homed = owner === "bot" || opts.engineHome ? engineHomes.forSpawn(opts.env ?? process.env) : null;
   const options: CliSpawnOptions = homed ? { ...opts, env: homed.env } : opts;
   const boxed = boxedSpawn(resolved, options, owner, homed);
-  const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = options;
+  const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = boxed ? options : outsideBoxOptions(resolved.command, options);
   // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
   const stdio = boxed?.extraFds.length && Array.isArray(spawnOpts.stdio) && spawnOpts.stdio.length === 3 ? [...spawnOpts.stdio, ...boxed.extraFds] : spawnOpts.stdio;
   const start = () => spawn(boxed?.command ?? resolved.command, boxed?.args ?? resolved.args, {
@@ -257,6 +274,7 @@ export function execCli(
   const resolved = resolveCli(cli, args);
   try {
     assertSafeCliArgv(resolved);
+    opts = outsideBoxOptions(resolved.command, opts);
   } catch (error) {
     queueMicrotask(() => cb(error instanceof Error ? error : new Error(String(error)), "", ""));
     return;
