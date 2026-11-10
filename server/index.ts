@@ -457,7 +457,7 @@ import { createScreenFrameSource, rememberTurnFrame, type ScreenCapture } from "
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 import { asSchedule, RoutineRequestService } from "./routine-requests.ts"; import { ownerSpokeOnly } from "./cloud-routine-level.ts"; import { routineRunCard, routineRunFallbackText } from "./routine-run-card.ts";
 import { activeRoutinesContext } from "./active-routines-context.ts";
-import { createRefusedHandoffs } from "./host/refused-handoffs.ts"; import { automationContextText, createAutomationReports, newestAutomationLines } from "./automation-reports.ts"; import { createAutomationDestinations } from "./automation-destinations.ts"; import { createProactive } from "./host/proactive.ts"; import { createFirstHourHooks, startFirstHour, welcomeDonePatch } from "./host/first-hour-host.ts"; import { greetingMessage } from "./host/first-hour.ts"; import { READ_AND_DRAFT_PARTS, READ_AND_DRAFT_REFUSAL, READ_AND_DRAFT_TOOLS, recordsAnswer } from "./read-and-draft.ts"; import { createPresenceRoutes } from "./routes/presence.ts"; import { needsYouNow } from "./today.ts";
+import { createRefusedHandoffs } from "./host/refused-handoffs.ts"; import { automationContextText, createAutomationReports, newestAutomationLines } from "./automation-reports.ts"; import { createAutomationDestinations } from "./automation-destinations.ts"; import { routineHome } from "./routine-home.ts"; import { createProactive } from "./host/proactive.ts"; import { createFirstHourHooks, startFirstHour, welcomeDonePatch } from "./host/first-hour-host.ts"; import { greetingMessage } from "./host/first-hour.ts"; import { READ_AND_DRAFT_PARTS, READ_AND_DRAFT_REFUSAL, READ_AND_DRAFT_TOOLS, recordsAnswer } from "./read-and-draft.ts"; import { createPresenceRoutes } from "./routes/presence.ts"; import { needsYouNow } from "./today.ts";
 import { engineLabel, LimitResetClock, nearLimitNote } from "./limit-resets.ts"; import { loadPlanUsage, planAccountsFromInstances } from "./plan-usage.ts"; import { LimitFailovers, limitBackupAllowed } from "./limit-failover.ts"; import { createLimitResetRoutes } from "./routes/limit-resets.ts";
 import { parseTriggerRequest, triggerTarget } from "./trigger-tools.ts"; import { WebhookRequestError, WebhookRequestService } from "./webhook-requests.ts"; import { createAppTriggerHost } from "./app-trigger-host.ts";
 import { appliesNow, directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
@@ -567,7 +567,7 @@ import {
   noteSeen,
   notFoundFor,
   pathSubject,
-  routineRunVisible, routineVisible,
+  routineForViewer, routineRunVisible, routineVisible,
   sameAudience,
   VisibleSet,
   type FrameContext,
@@ -999,9 +999,22 @@ function cloudOwnerApplied(action: string, routineId: string | undefined, wasOwn
   if (action === "create" || ((action === "update" || action === "pause" || action === "resume") && wasOwners)) cloudOwnersRoutine(routineId);
 }
 
+/** The person whose private chat a routine lives in on a Team Cloud (routine-home.ts); null anywhere else. */
+function teamRoutineHome(routine: Parameters<typeof routineHome>[0]): string | null {
+  return CLOUD_TEAM ? routineHome(routine, { privateTo: teamHost.privateTo, task: (botId, threadId) => store.taskByThread(botId, threadId) }) : null;
+}
+
+/** A turn's bot tools reach a private routine only in its person's own conversations. */
+function routineInTurn(routine: Parameters<typeof routineHome>[0], threadId: string): boolean {
+  const home = teamRoutineHome(routine);
+  return home === null || home === teamHost.privateTo(threadId);
+}
+
 function routineOpener(routineId: string): string {
   if (routineWriterInFlight) return routineWriterInFlight;
   const routine = routines?.listRoutines().find((candidate) => candidate.id === routineId);
+  const home = routine ? teamRoutineHome(routine) : null;
+  if (home) return home;
   if (routine && CLOUD_OWNER_KEY && cloudRoutineAuthors?.authored(routineId, routine)) return CLOUD_OWNER_KEY;
   const writer = cloudRoutineAuthors?.writer(routineId);
   if (writer && CLOUD_OWNER_KEY && writer === CLOUD_OWNER_KEY) return CLOUD_OWNER_KEY;
@@ -1139,7 +1152,7 @@ async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: s
 }
 
 const { viewerFor, threadOwner, visibleTo, forgetVisibility, threadShown, subjectVisible, hiddenRoutineTarget, roomFeedsBot, settleRoomFloor } = createVisibilityHost({ store: () => store, routines: () => routines,
-  team: Boolean(CLOUD_TEAM), audiencesFor: (viewer) => teamHost.audiencesFor(viewer), threadsReferencing }); if (CLOUD_TEAM) hideOthersSyncFolders(() => store.bots, threadShown); const notificationListed = notificationListedFor(threadShown, CLOUD_TEAM ? (auth, entry) => teamOwners.routing.notificationReaches(teamOwners.viewer(auth), entry) : undefined); const botAccess = createBotAccessHost({ visibleFor: (auth) => visibleTo(viewerFor(auth)), store: () => store, routines: () => routines, threadOwner, routineWriter: (id) => cloudRoutineAuthors?.writer(id) }), { levelOf } = botAccess; const accessRequests = createAccessRequests({ team: CLOUD_TEAM, store: () => store, people: () => teamOwners.people?.list() ?? [], profileName: (email) => teamHost.people.profile(personKey({ id: "", email })).name, inbox: () => teamMessages.inbox, visibleTo, levelOf, writeAccess: (bot, access) => writeAccess({ store, publicGroupState, broadcast, audienceChanged }, bot, access), record: (row, by) => appendAdminAction(DATA_DIR, { ...row, actor: { kind: "session", sessionId: "", label: by, email: by } }) });
+  team: Boolean(CLOUD_TEAM), audiencesFor: (viewer) => { const audiences = teamHost.audiencesFor(viewer); return audiences && { ...audiences, routineHome: teamRoutineHome }; }, threadsReferencing }); if (CLOUD_TEAM) hideOthersSyncFolders(() => store.bots, threadShown); const notificationListed = notificationListedFor(threadShown, CLOUD_TEAM ? (auth, entry) => teamOwners.routing.notificationReaches(teamOwners.viewer(auth), entry) : undefined); const botAccess = createBotAccessHost({ visibleFor: (auth) => visibleTo(viewerFor(auth)), store: () => store, routines: () => routines, threadOwner, routineWriter: (id) => cloudRoutineAuthors?.writer(id) }), { levelOf } = botAccess; const accessRequests = createAccessRequests({ team: CLOUD_TEAM, store: () => store, people: () => teamOwners.people?.list() ?? [], profileName: (email) => teamHost.people.profile(personKey({ id: "", email })).name, inbox: () => teamMessages.inbox, visibleTo, levelOf, writeAccess: (bot, access) => writeAccess({ store, publicGroupState, broadcast, audienceChanged }, bot, access), record: (row, by) => appendAdminAction(DATA_DIR, { ...row, actor: { kind: "session", sessionId: "", label: by, email: by } }) });
 
 function recentWorkFilter(threadId: string): { include?: (threadId: string) => boolean; privateThread?: (threadId: string) => boolean } {
   const include = CLOUD_TEAM ? (id: string) => teamHost.readableFrom(threadId)(id) && outsideLineage.mayReach(id, threadId) : CLOUD_HOME ? cloudOwnerOnlyThread : () => true; return { include: (id) => !botApiThread(id) && include(id), ...(CLOUD_TEAM ? { privateThread: (id: string) => teamHost.privateTo(id) !== null } : {}) };
@@ -3007,7 +3020,7 @@ function previewSystemPrompt(bot: BotRecord) {
   };
 }
 
-async function botOverview(bot: BotRecord): Promise<BotOverview> {
+async function botOverview(bot: BotRecord, shown: { routine(routine: Routine): boolean; run(run: RoutineRun): boolean } = { routine: () => true, run: () => true }): Promise<BotOverview> {
   const connectedApps = await connectedAppsFacts(
     composio.configured(cfg),
     composio.connectorAvailability(cfg),
@@ -3039,7 +3052,7 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
       managedSections: bot.managedSections,
     },
     routines: routines!.listRoutines()
-      .filter((routine) => routine.botId === bot.id)
+      .filter((routine) => routine.botId === bot.id && shown.routine(routine))
       .map((routine) => ({
         id: routine.id,
         name: routine.name,
@@ -3048,7 +3061,7 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
         nextRunAt: routine.nextRunAt,
       })),
     runs: routines!.listRuns()
-      .filter((run) => run.botId === bot.id)
+      .filter((run) => run.botId === bot.id && shown.run(run))
       .map((run) => ({
         routineId: run.routineId,
         status: run.status,
@@ -8833,7 +8846,10 @@ routines = new RoutineManager({
     const task = store.taskByThread(botId, threadId);
     return Boolean(bot && !bot.hidden && task && !task.routineRunId);
   },
-  resolveResultsThread: (routine, forceNew) => automationDestinations.routine(routine, forceNew),
+  resolveResultsThread: (routine, forceNew) => {
+    const home = teamRoutineHome(routine);
+    return automationDestinations.routine(routine, forceNew || Boolean(home && routine.resultsThreadId && teamHost.privateTo(routine.resultsThreadId) !== home));
+  },
   eventResultsThread: (event) => automationDestinations.event(event),
   frozenResultsThread: (botId, threadId) => wasOldestThread(store.tasks(botId), threadId) && !cloudGuestOpened(threadId),
   discardResultsThread: (botId, threadId) => {
@@ -12329,7 +12345,7 @@ ROUTES.push(createTeamRoutes({
   defaultSelection,
   defaultsPresetFor,
   packageImportDeps,
-  starterNotes, threadShown,
+  starterNotes, threadShown, routineShown: (auth) => (routine) => routineVisible(routine, visibleTo(viewerFor(auth))),
   ...skillExport(skillsHost),
 }));
 ROUTES.push(createBrowserSiteRoutes({
@@ -13355,7 +13371,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         return json(res, 200, { rooms: rooms.slice(0, 50), unpostable: unpostable.slice(0, 50) });
       }
-      const triggerContext = { from: internalSender, threadId: internalCapability.threadId, ownsThread: (botId: string, threadId: string) => Boolean(connectorThread(botId, threadId)), guestDriven: cloudGuestDriven(internalCapability.threadId), outsideDriven: () => outsideDrivenThread(internalCapability.threadId), canCommit: () => internalCapabilityIsActive(internalCapability) };
+      const triggerContext = { from: internalSender, threadId: internalCapability.threadId, ownsThread: (botId: string, threadId: string) => Boolean(connectorThread(botId, threadId)), guestDriven: cloudGuestDriven(internalCapability.threadId), outsideDriven: () => outsideDrivenThread(internalCapability.threadId), canCommit: () => internalCapabilityIsActive(internalCapability), routineShown: (routine: Routine) => routineInTurn(routine, internalCapability.threadId) };
       if (await dispatchRoutes([appTriggers.internalRoutes(triggerContext)], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/trigger-requests") {
         const from = internalSender;
@@ -13364,6 +13380,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
         const request = parseTriggerRequest(await readInternalBody(), (id) => routines!.listRoutines().some((routine) => routine.id === id) ? "schedule" : appTriggers.isApp(id) ? "app" : "webhook");
         if (!request.ok) return json(res, 400, { error: request.error });
+        const named = request.kind === "schedule" && request.proposal.routineId ? routines!.listRoutines().find((routine) => routine.id === request.proposal.routineId) : undefined;
+        if (named && !routineInTurn(named, fromThreadId)) return json(res, 404, { error: "No trigger with that id belongs to this bot. Call trigger_info without trigger_id to see its ids." });
         const target = triggerTarget(from, request.forBotId, (id) => store.bot(id));
         if ("error" in target) return json(res, target.status, { error: target.error });
         const forBot = target.forBot;
@@ -14701,7 +14719,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     if (path === "/api/routines" && method === "GET") {
       return json(res, 200, {
-        routines: routines!.listRoutines().filter((routine) => routineVisible(routine, visible)),
+        routines: routines!.listRoutines().filter((routine) => routineVisible(routine, visible)).map((routine) => routineForViewer(routine, visible)),
         runs: routineRunsFor((from, to) => routines!.listRuns(from, to), url.searchParams).filter((run) => routineRunVisible(run, visible)),
       });
     }
@@ -14977,7 +14995,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "GET") {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      return json(res, 200, await botOverview(bot));
+      return json(res, 200, await botOverview(bot, { routine: (routine) => routineVisible(routine, visible), run: (run) => routineRunVisible(run, visible) }));
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/history$/);

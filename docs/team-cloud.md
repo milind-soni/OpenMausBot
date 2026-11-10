@@ -27,8 +27,8 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   the team (or are removed), your private chats and everything only yours there are deleted, never handed to an admin
   (below). The Owner's export of the team's machine (the workspace backup, `OMB_CLOUD_EXPORT_ONLY`) leaves them out too
   (`server/workspace-backup-team-private.ts`): no private conversation, none of its work folders or files only it used, no
-  member's memory layer, no member's own MausBot, their inbox or anything under `people/`. Restoring such an export gives a
-  team back everything but those.
+  routine that lives in one nor any run that names one, no member's memory layer, no member's own MausBot, their inbox
+  or anything under `people/`. Restoring such an export gives a team back everything but those.
 - **Who is speaking.** A bot knows who wrote each line it reads. Your own typed line in your own chat with it is the
   only line that carries no note; every other line opens with one, written by the Cloud and never by the sender:
   `[From <who> · <what> · <authority>]`, as in `[From Ben (person) · message · their own request]` on each person's
@@ -296,7 +296,7 @@ Everything stored on a Team Cloud carries an audience (`server/audience.ts`):
 |---|---|---|
 | `team` | everyone who sees the bot | a bot's main chat, its own folder (`workspaces/<bot>`: MEMORY.md, memory/, skills), team files, routines nobody opened |
 | `room:<id>` | whoever sees the room | the room's threads, `workspaces/<bot>--room-<id>` |
-| `member:<person>` | that person only (never an Admin) | the conversations they opened (`thread-starters.json`), `workspaces/<bot>--member-<person>`, their uploads, `people/<person>/about.json` |
+| `member:<person>` | that person only (never an Admin) | the conversations they opened (`thread-starters.json`), `workspaces/<bot>--member-<person>`, their uploads, `people/<person>/about.json`, the routines that live in their private chats (below, "Routines") |
 
 **A turn reads only inputs whose audience includes everyone who will see its answer, and writes only into its own
 audience.** `mayRead(input, turn)` is true for the team's things and for the turn's own audience, nothing else.
@@ -381,6 +381,20 @@ On a My Cloud and on a desktop there is one person: every audience is the team's
 every browser keeps its old name and Chrome its old launcher, every engine keeps the server's HOME, and nothing here
 changes what those do.
 
+## Routines
+
+A routine lives where it was made or where it reports (`server/routine-home.ts`). One that names someone's private chat,
+the chat a bot made it in (`sourceThreadId`) or the one it reports into (`resultsThreadId`), is that person's alone, as
+the chat is: no other member and no Admin, the Super admin included, sees it or learns of it, in `GET /api/routines`,
+the `routine` and `routine.run` frames, a bot's overview, the Today counts, a team export or backup, the Owner's
+whole-machine export, or a bot's `trigger_info` and `trigger` tools in any other conversation; naming it by id (to
+change, run or delete it) answers 404 *no such routine*, and a file only such a routine carries is refused as one that
+does not exist. Its runs open their conversations as that person, and its results go to a chat of theirs, so a run
+lands where it always did, in their audience. The chat a routine opened for its own results (the bot's main thread
+chosen on the Automations page, which on a team is a chat of the writer's) does not make it theirs until they write in
+it. Every other routine is its place's: whoever sees the bot, or the group chat, sees it, without the id of a
+conversation they may not read.
+
 ## The shared chat's name
 
 A team bot's main chat is called *"Shared chat"* on every person's copy (`WireTask.sharedChat`), whatever its stored title,
@@ -460,7 +474,7 @@ listed.
 | No access | Nothing: the bot is not listed for them, and every route naming it, its conversations, its rooms, routines and files answers 404 as for one that does not exist |
 | Can view | See the bot, its main chat and the conversations shared with them (rooms, their own earlier chats), read only; open them and mark them read |
 | Can chat | Also write to it, start their own conversations, answer its cards, react, stop it, write in its rooms, run its routines and make routines for it (and change or delete their own) |
-| Can edit | Also change its instructions, profile and model, which of the team's connected apps and MCP servers it uses, any of its routines, its sharing, and approve a card that changes the bot itself (instructions, model, skills, team, triggers) |
+| Can edit | Also change its instructions, profile and model, which of the team's connected apps and MCP servers it uses, any of its routines but those in someone else's private chat, its sharing, and approve a card that changes the bot itself (instructions, model, skills, team, triggers) |
 
 Can edit never reaches what only an admin sets on any bot: what it may do on its computer (approval level, always
 allow, folders), where it runs, its department, whom it answers to or directs, connecting an app or making a webhook.
@@ -646,9 +660,9 @@ person as before, and `message_person` and the inbox do not exist.
 - **An engine that replaces its sign-in file by renaming.** Inside a box the rename is refused (the team's file is bound
   there); an engine that does not then write in place keeps a refreshed token for that process only.
 - **What a bot keeps per bot, not per audience.** Its data sheet, the skills it stages and its own profile are the bot's
-  (the team's), whichever chat wrote them; so are a routine's definition and schedule (its runs and results are the
-  conversation's). The Owner's whole-machine export leaves every member's private chats out (above), the Owner's own too: an
-  export is the team's, never anyone's alone.
+  (the team's), whichever chat wrote them; a routine is its place's (above, "Routines"). The Owner's whole-machine
+  export leaves every member's private chats out (above), the Owner's own too: an export is the team's, never anyone's
+  alone.
 - **Own apps with the team's own Composio project.** A member's own apps always use OpenMausBot's connected-apps
   service, even when the team connected a Composio project key of its own; an app that needs the project's own auth
   config can't be connected by each person.

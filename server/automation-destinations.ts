@@ -21,8 +21,13 @@ export interface AutomationDestinationDeps {
   } | null;
 }
 
-function legacyResultsThread(routineName: string, task: TaskRecord): boolean {
+function legacyResultsThread(routineName: string, task: Pick<TaskRecord, "title">): boolean {
   return task.title.endsWith(" · Results") || task.title === threadTitleFrom(`${routineName} · Results`);
+}
+
+/** The chat a routine opened for its own results, which no person has written in. */
+export function isOwnResultsChat(routineName: string, task: Pick<TaskRecord, "title" | "askedAt">): boolean {
+  return legacyResultsThread(routineName, task) && task.askedAt === undefined;
 }
 
 export function createAutomationDestinations(deps: AutomationDestinationDeps) {
