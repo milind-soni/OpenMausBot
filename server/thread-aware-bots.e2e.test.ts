@@ -506,6 +506,68 @@ describe("start_thread on another model, reporting back", () => {
     }
   }, 60_000);
 
+  it("lets the opener steer its own report-back thread while it runs and send it a follow-up after, never another thread of its own", async () => {
+    const pm = await createBot("Pam", "gated");
+    try {
+      const token = await heldTurn(pm, "Get a review of the diff.");
+      const opened = await api("POST", "/api/internal/threads", { title: "Review: steer", message: "Review the diff. [[gate:own-steer]]", reportBack: true }, token);
+      expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+      const { threadId, requestId } = opened.body;
+      await expect.poll(() => handoffs().find((node) => node.id === requestId)?.status, { timeout: 15_000 }).toBe("running");
+      await expect.poll(() => dumpOf("own-steer"), { timeout: 15_000 }).toBeTruthy();
+      const seen = () => JSON.stringify([...promptsOf("own-steer"), ...promptsOf(threadId)]);
+      // The opener's turn ends, and the person's next message asks it to steer the thread still running.
+      rmSync(join(gates, `${pm.threadId}.json`), { force: true });
+      release(pm.threadId);
+      await expect.poll(() => handoffs().find((node) => node.threadId === pm.threadId)?.status, { timeout: 15_000 }).toBe("waiting");
+      rmSync(join(gates, `${pm.threadId}.gate`), { force: true });
+      const nextSent = await api("POST", `/api/bots/${pm.id}/messages`, { text: "Have it check the tests too.", threadId: pm.threadId });
+      expect(nextSent.status).toBe(202);
+      const later = await liveToken(pm.threadId);
+
+      const steered = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Also check the tests.", thread: threadId }, later);
+      expect(steered.status, JSON.stringify(steered.body)).toBe(200);
+      expect(steered.body.receipts).toMatchObject([{ outcome: "injected", threadId, requestId }]);
+      expect((await messages(threadId)).find((message) => message.text === "Also check the tests.")).toMatchObject({ role: "user", steered: true, peerAsk: { botId: pm.id } });
+      release(threadId);
+      release("own-steer");
+      await expect.poll(() => handoffs().filter((node) => node.threadId === threadId).every((node) => node.status === "completed"), { timeout: 15_000 }).toBe(true);
+      // The running turn itself read the correction mid-turn (the fake CLI echoes steers into its reply), not just the stored thread.
+      expect((await messages(threadId)).some((message) => message.role === "bot" && message.text?.includes("steered:") && message.text.includes("Also check the tests."))).toBe(true);
+
+      const followUp = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "One more: check the docs.", thread: threadId }, later);
+      expect(followUp.status, JSON.stringify(followUp.body)).toBe(200);
+      const [receipt] = followUp.body.receipts;
+      expect(receipt).toMatchObject({ threadId });
+      await expect.poll(seen, { timeout: 15_000 }).toContain("One more: check the docs.");
+      await expect.poll(() => handoffs().find((node) => node.id === receipt.requestId)?.status, { timeout: 15_000 }).toBe("completed");
+      expect((await botState(pm.id)).tasks.filter((task: any) => task.title === "Review: steer")).toHaveLength(1);
+
+      const standing = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Do it again." }, later);
+      expect([standing.status, standing.body.error]).toEqual([403, "Choose a teammate, not yourself"]);
+      const quiet = await api("POST", "/api/internal/threads", { title: "Quiet job", message: "Tidy up. [[gate:own-quiet]]" }, later);
+      expect(quiet.status, JSON.stringify(quiet.body)).toBe(201);
+      const notReporting = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Faster.", thread: quiet.body.threadId }, later);
+      expect([notReporting.status, notReporting.body.error]).toEqual([403, "Choose a teammate, not yourself"]);
+      // Only the conversation that opened it may steer it, and never through a room.
+      const { task: other } = (await api("POST", `/api/bots/${pm.id}/tasks`, { title: "Other chat" })).body;
+      const fromOther = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Faster.", thread: threadId }, await mintedToken(pm.id, other.threadId));
+      expect([fromOther.status, fromOther.body.error]).toEqual([403, "Choose a teammate, not yourself"]);
+      const { group } = (await api("POST", "/api/groups", { name: "Steer room", memberIds: [pm.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: pm.id } } })).body;
+      const viaRoom = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Faster.", thread: threadId, groupId: group.id }, later);
+      expect([viaRoom.status, viaRoom.body.error]).toEqual([403, "Choose a teammate, not yourself"]);
+      release("own-quiet");
+      release(pm.threadId);
+      // The follow-up reports back too: its result lands in the opener's chat and the opener resumes with it.
+      await expect.poll(async () => (await messages(pm.threadId)).some((message) => message.roomRequest?.id === receipt.requestId && message.roomRequest.phase === "result"), { timeout: 15_000 }).toBe(true);
+      await expect.poll(() => JSON.stringify(promptsOf(pm.threadId)), { timeout: 15_000 }).toContain(`report on assignment ${receipt.requestId}: done`);
+      await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
+    } finally {
+      await cleanup([pm.id]);
+    }
+  }, 60_000);
+
   it("fails a report-back thread whose model can no longer run when its turn comes, instead of running it on the bot's own model", async () => {
     const pm = await createBot("Pam", "gated");
     try {

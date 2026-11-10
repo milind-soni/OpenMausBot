@@ -117,6 +117,20 @@ describe("sidebar virtual sections", () => {
     expect(home.section).toBe("Home");
   });
 
+  it("finds the viewer's own hidden MausBot in a search, never someone else's", () => {
+    const mine = { id: "nova", defaultBot: {}, sidebarHidden: true, section: "C Suite" };
+    const theirs = { id: "theirs", defaultBot: { person: "sam@example.com" }, section: "C Suite" };
+    expect(partitionSidebarBots([mine, theirs], { viewerEmail: null }).sectionedBots).toEqual([]);
+    expect(partitionSidebarBots([mine, theirs], { viewerEmail: null, searching: true }).sectionedBots).toEqual([mine]);
+    const plain = { id: "plain", sidebarHidden: true, section: "C Suite" };
+    expect(partitionSidebarBots([plain], { viewerEmail: null, searching: true }).sectionedBots).toEqual([]);
+    const hiddenMaus = { id: "maus", chiefOfStaff: true, sidebarHidden: true, defaultBot: {} };
+    const sharedChief = { id: "shared", chiefOfStaff: true };
+    const found = partitionSidebarBots([hiddenMaus, sharedChief], { viewerEmail: null, searching: true });
+    expect([found.unsectionedChief, ...found.unsectionedBots]).toEqual([hiddenMaus, sharedChief]);
+    expect(partitionSidebarBots([hiddenMaus, sharedChief], { viewerEmail: null }).unsectionedBots).toEqual([]);
+  });
+
   it("lists a group's pinned Chief with the pinned bots on every client; the main Chief keeps its own top slot", () => {
     const bots = [
       { id: "work-chief", chiefOfStaff: true, section: "Work", pinned: true },

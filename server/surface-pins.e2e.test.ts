@@ -141,6 +141,9 @@ describe("surface pin provenance against the real server", () => {
       driver: "claudeAgent", config: { cli: join(ROOT, "server/testing/fake-claude-cli.ts") },
       // The first computer call is what reaches the Boat, as with a real model.
       environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_DUMP: dumpFile, FAKE_CLAUDE_SLOW_FINISH_GATE: finishFile, FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1" },
+    }, teammate: {
+      driver: "claudeAgent", config: { cli: join(ROOT, "server/testing/fake-claude-cli.ts") },
+      environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_DUMP: join(home, "teammate-dump.json"), FAKE_CLAUDE_SLOW_FINISH_GATE: join(home, "teammate-finish"), FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1" },
     } } }));
   });
   afterAll(async () => {
@@ -460,4 +463,66 @@ describe("surface pin provenance against the real server", () => {
     await apiOk("DELETE", `/api/bots/${bot.id}`);
     await stop();
   });
+
+  it("lets a teammate's hand-off move to the built-in browser only, and returns the result from there", async () => {
+    // The teammate runs on its own fixture engine, so its turn waits on its own gate while the asker's turn ends.
+    const teammateDump = join(home, "teammate-dump.json"), teammateFinish = join(home, "teammate-finish");
+    rmSync(teammateDump, { force: true });
+    rmSync(teammateFinish, { force: true });
+    await start(true);
+    const asker = (await apiOk("POST", "/api/bots", { name: "Asker" })).bot;
+    const tester = (await apiOk("POST", "/api/bots", { name: "Tester" })).bot;
+    await apiOk("PATCH", `/api/bots/${tester.id}`, { modelSelection: { ...tester.modelSelection, instanceId: "teammate" } });
+    await stop();
+    editSavedBot(tester.id, saved => { saved.browserProfile = "guest"; });
+    await start(true);
+    const { task: own } = await apiOk("POST", `/api/bots/${asker.id}/tasks`, {});
+    resetTurn();
+    await apiOk("POST", `/api/bots/${asker.id}/messages`, { text: "Ask Tester to check the site.", threadId: own.threadId });
+    const askerToken = (await dump()).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const handed = await fetch(base + "/api/internal/coordinate-bots", { method: "POST",
+      headers: { authorization: `Bearer ${askerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ botIds: [tester.id], message: "Sign in to the shop and check the order page." }) });
+    expect(handed.status).toBeLessThan(400);
+    writeFileSync(finishFile, "finish");
+    const teammateTurn = (): Promise<any> => until((): any => {
+      if (!existsSync(teammateDump)) return null;
+      try { return JSON.parse(readFileSync(teammateDump, "utf8")); } catch { return null; }
+    }, Boolean);
+    const token = (await teammateTurn()).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const select = (body?: unknown) => fetch(base + "/api/internal/computer/select", { method: body ? "POST" : "GET",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const offered = await (await select()).json() as any;
+    expect(offered).toMatchObject({ canSelect: true });
+    expect(offered.options.map((option: any) => option.surface)).toEqual(["browser"]);
+    const refused = await select({ surface: "vm" });
+    expect(refused.status).toBe(403);
+    expect((await refused.json() as any).error).toMatch(/only to the built-in browser/);
+    expect(await (await select({ surface: "browser" })).json()).toMatchObject({ status: "pending", surface: "browser" });
+    const workThread = (await apiOk("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.id === tester.id)
+      .tasks.find((task: any) => task.openedBy?.botId === asker.id).threadId as string;
+    rmSync(teammateDump, { force: true });
+    // Hold the asker's own turn that resumes with the result, to check it is not offered the hand-off's browser move.
+    // Its first turn must have used up the finish gate before the gate is removed for the resumed turn.
+    await idle(asker.id, own.threadId);
+    rmSync(dumpFile, { force: true });
+    rmSync(finishFile, { force: true });
+    writeFileSync(teammateFinish, "finish");
+    const moved = await teammateTurn();
+    expect(JSON.stringify(moved.prompt)).toContain("Continue the handed-off request");
+    expect(moved.mcpConfig.mcpServers.browser).toBeDefined();
+    expect(savedTask(tester.id, workThread)).toMatchObject({ surface: "browser" });
+    const resumedToken = (await dump()).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const resumedOffer = await (await fetch(base + "/api/internal/computer/select", {
+      headers: { authorization: `Bearer ${resumedToken}` } })).json() as any;
+    expect(resumedOffer.canSelect).not.toBe(true);
+    writeFileSync(finishFile, "finish");
+    // The asker hears back from the browser turn, never from the turn that only asked to move.
+    const replies = async () => JSON.stringify((await apiOk("GET", `/api/threads/${own.threadId}/messages?limit=60`)).messages);
+    // "reply to: ..." is the fixture engine's own answer from the browser turn, not the prompt that started it.
+    expect(await until(replies, (text) => /reply to: [^"]*The computer selection is now the built-in browser/.test(text))).toBeTruthy();
+    await idle(tester.id, workThread);
+    await idle(asker.id, own.threadId);
+    await stop();
+  }, 60_000);
 });

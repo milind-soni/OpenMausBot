@@ -176,10 +176,11 @@ no configured account acts on (see **Several Cloudflare accounts**) are
 skipped. Rows run five at a time (the Workers limit is six connections
 awaiting headers), and a run stops
 starting new rows in an account as soon as that account's API answers `429`.
-At ten provider calls per row the default is about
-200 calls per run: a sixth of the API token's 1,200 requests per five minutes,
-and far below the Workers Paid limit of 10,000 subrequests per invocation. On
-Workers Free (50 subrequests per invocation) set the limit to 4. Failed
+At up to 14 provider calls per row (four of them only when a forced removal
+meets a tunnel that is still connected) the default is at most about 290 calls per
+run: under a quarter of the API token's 1,200 requests per five minutes, and far
+below the Workers Paid limit of 10,000 subrequests per invocation. On Workers
+Free (50 subrequests per invocation) set the limit to 3. Failed
 scheduled cleanups back off from five minutes through 15 minutes, one hour,
 six hours, and then 24 hours. Once a deletion has been pending for 24 hours,
 each eligible sweep emits a distinct aggregate operator-attention log without
@@ -586,8 +587,8 @@ no new endpoint while another account has room.
 Each account adds two Cloudflare reads to every cron run (a tunnel page and a
 DNS count), and each move two lookups in the old account. Tokens created by
 the same Cloudflare user share its 1,200 requests per five minutes. On
-Workers Free, four accounts with `OMB_CLEANUP_SWEEP_LIMIT` 4 use the whole
-50-subrequest budget, hence at most three extra accounts.
+Workers Free, three accounts with `OMB_CLEANUP_SWEEP_LIMIT` 3 use the whole
+50-subrequest budget; a fourth needs the limit at 2.
 
 ### MausBot Relay
 
@@ -660,9 +661,17 @@ hostname stay, so a later provisioning call returns the same address.
   release it would have said so. A computer that has been off is left to idle reclaim. One case is still judged by
   a stale release: a desktop that updated with the relay route turned off. Its tunnel is removed, its next request
   reports the real release and the same address comes back.
+- **Online computers.** Cloudflare refuses to delete a tunnel that has active connections (API error 1022, recorded as
+  `cf_tunnel_connected`), and a running desktop's cloudflared is connected. For a release, an owner's delete or a
+  revoked installation, the sweep then drops the tunnel's connections (`DELETE .../cfd_tunnel/{id}/connections`) and
+  deletes again at once, for at most two rounds, the last with `?cascade=true` (what `cloudflared tunnel delete
+  --force` sends; not in the public API reference); a deleted tunnel's connector token no longer connects. Idle reclaim never does this: a tunnel that answers
+  "still connected" is left, and its next attempt finds it connected and cancels.
 - **Backpressure.** A run marks at most what one cleanup sweep removes (`OMB_CLEANUP_SWEEP_LIMIT`, at most 20) minus
-  the rows already waiting for cleanup. While the sweep is failing or rate-limited nothing more is marked. A marked
-  row is a final delete: its owner is answered `409 endpoint_busy` until the sweep has removed it.
+  the rows already waiting for cleanup. While the sweep is failing or rate-limited nothing more is marked. A forced
+  removal still refused as connected after its rounds does not count as waiting: it backs off (5 minutes up to 24
+  hours) and retries while the sweep and the marking go on. A marked row is a final delete: its owner is answered
+  `409 endpoint_busy` until the sweep has removed it.
 - **Coming back.** `POST /v1/installations/self/endpoint` creates a tunnel again, with the same hostname, when the
   desktop reports an old phone (outside the cutoff), or the relay cannot carry it: `RELAY_DISABLED: "1"`, a lower
   `RELAY_ROLLOUT_PERCENT`, or `relay_blocked_at`. With the relay switched off the cron releases nothing on the
