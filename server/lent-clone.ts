@@ -5,9 +5,11 @@
 // the copy to Files, as for any other folder. The person chooses nothing.
 import { spawn } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
+import { botBox } from "./bot-box/box.ts";
 
 export const lentGit = z.object({
   repo: z.string().regex(/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/).refine((repo) => !repo.split("/").some((part) => part === "." || part === "..")),
@@ -21,14 +23,27 @@ type CloneRecord = { state: "cloning" | "cloned" | "failed"; at: number; repo: s
 const CLONE_MS = 10 * 60_000;
 const RETRY_MS = 24 * 60 * 60_000;
 
+/** Security: while the bot box is on (`boxed`), a boxed bot can write HOME, so git reads no config from there: a
+ * helper, an `insteadOf`, an fsmonitor or an `ext::` address a bot left would otherwise run outside the box. Its sign-in
+ * is then only what `~/.git-credentials` holds, read by git's own store helper, which runs nothing. */
+export function gitInvocation(args: string[], env: NodeJS.ProcessEnv = process.env, boxed = botBox.enabled(), home = homedir()): { args: string[]; env: NodeJS.ProcessEnv } {
+  const base = ["-c", "credential.interactive=never", "-c", "core.hooksPath=/dev/null"];
+  const quiet = { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/false", SSH_ASKPASS: "/bin/false", GCM_INTERACTIVE: "never", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" };
+  if (!boxed) return { args: [...base, ...args], env: { ...env, ...quiet } };
+  const kept = Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith("GIT_")));
+  return {
+    args: [...base, "-c", "protocol.ext.allow=never", "-c", "core.fsmonitor=false",
+      "-c", "credential.helper=", "-c", `credential.helper=store --file=${join(home, ".git-credentials")}`, ...args],
+    env: { ...kept, ...quiet, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+  };
+}
+
 /** git without a prompt: no terminal, no askpass, no credential dialog; only the sign-in My Cloud already has. */
 export function runGit(args: string[], timeoutMs = CLONE_MS): Promise<void> {
   return new Promise((resolve, reject) => {
     // The address is always https://github.com/<owner>/<name>.git (lentGit's repo), never one a computer sent.
-    const child = spawn("git", ["-c", "credential.interactive=never", "-c", "core.hooksPath=/dev/null", ...args], {
-      stdio: ["ignore", "ignore", "pipe"],
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/false", SSH_ASKPASS: "/bin/false", GCM_INTERACTIVE: "never", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" },
-    });
+    const run = gitInvocation(args);
+    const child = spawn("git", run.args, { stdio: ["ignore", "ignore", "pipe"], env: run.env });
     let error = "";
     child.stderr.on("data", (chunk) => { if (error.length < 4_000) error += chunk; });
     const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);

@@ -160,7 +160,7 @@ export function updateNpmEngineStaged(options: StagedNpmUpdate): Promise<void> {
 
 async function stagedOnce(options: StagedNpmUpdate, baseDir: string): Promise<void> {
   const { pkg, version } = options;
-  const env = npmEnvironment(options.env);
+  const env = npmEnvironment(options.env, undefined, undefined, baseDir);
   const staging = join(toolsDir(baseDir), `${STAGING_PREFIX}${randomUUID()}`);
   try {
     await mkdir(staging, { recursive: true, mode: 0o700 });
