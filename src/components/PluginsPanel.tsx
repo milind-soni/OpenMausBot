@@ -12,7 +12,7 @@ import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { pollConnector } from "@/lib/connector-poll";
 import { connectorConnect } from "@/lib/product-events";
 import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
-import { connectorServiceAccess, isConnectorToolGrantShape } from "@/lib/connector-grants";
+import { isConnectorToolGrantShape } from "@/lib/connector-grants";
 import {
   accountAliasTaken,
   accountToReconnect,
@@ -39,6 +39,8 @@ import { openBotSettings } from "./bot-panel/panel-link";
 import { openKeySettings } from "./keys/key-focus";
 import { lacksAdminScope } from "@/lib/admin-scope";
 import { SavedKeysReset } from "./SavedKeysReset";
+import { botAppScope } from "@/lib/bot-app-access";
+import { AppGrantPrompt, botsForApps, useAppGrants } from "./AppGrantPrompt";
 import { ServiceIcon, type ToolkitCard } from "./ServiceIcon"; import { AppsSection } from "./AppsSection";
 export { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
@@ -52,14 +54,6 @@ export function disconnectAccountConfirmation(
   return t("connectors.disconnectConfirm", { identity, service });
 }
 
-export function botsMissingConnectedApps(bots: Bot[], instances: InstanceInfo[]): Bot[] {
-  return bots.filter((bot) =>
-    !bot.hidden &&
-    bot.composio === false &&
-    instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)
-      ?.capabilities?.composioMcp === true);
-}
-
 export function botsWithLimitedServiceTools(bots: Bot[], instances: InstanceInfo[], slug: string): Bot[] {
   return bots.filter((bot) => {
     if (bot.hidden || bot.composio === false) return false;
@@ -71,10 +65,6 @@ export function botsWithLimitedServiceTools(bots: Bot[], instances: InstanceInfo
     if (grant === undefined) return true;
     return !isConnectorToolGrantShape(grant) || grant.tools !== "*";
   });
-}
-
-export function hasUsableConnectedApps(configured: boolean, phase: ConnectorInventoryPhase, stale: boolean, status: Record<string, ConnectorStatus>): boolean {
-  return configured && phase === "ready" && !stale && Object.values(status).some((service) => service.connected);
 }
 
 /** Whether a hosted app's card shows: it matches the search, and the filter is All, or Connected and it isn't known to be
@@ -113,12 +103,7 @@ export const APPS_PREVIEW_COUNT = 48;
 export const USED_BY_AVATAR_SIZE = 16;
 
 export function botsUsingService(bots: Bot[], instances: InstanceInfo[], slug: string): Bot[] {
-  return bots.filter((bot) =>
-    !bot.hidden &&
-    bot.composio !== false &&
-    instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)
-      ?.capabilities?.composioMcp === true &&
-    connectorServiceAccess(bot.connectorTools, slug).level !== "none");
+  return botsForApps(bots, instances).filter((bot) => botAppScope(bot, slug) !== null);
 }
 
 export function PluginsPanel() {
@@ -162,6 +147,7 @@ export function PluginsPanel() {
   const statusGenerations = useRef(new Map<string, number>());
   const latestStatusRequests = useRef(new Map<string, number>());
   const opening = useRef<ReturnType<typeof reserveConnectionPage> | null>(null);
+  const reconnecting = useRef(new Set<string>());
 
   /** A connection that finished or failed since a request no newer than this one no longer needs its sign-in page. */
   const forgetSettledUrls = (services: Record<string, ConnectorStatus>, requestGenerations: ReadonlyMap<string, number>) => {
@@ -240,6 +226,7 @@ export function PluginsPanel() {
     for (const stop of polls.current.values()) stop();
     polls.current.clear();
   }, []);
+  const appGrants = useAppGrants({ status, emailConnected, inventoryReady: inventoryPhase === "ready" && !stale });
 
   useEffect(() => {
     if (inventoryPhase !== "ready") return;
@@ -329,11 +316,12 @@ export function PluginsPanel() {
     }
   };
 
-  const startPolling = (slug: string, before: ConnectorStatus | undefined) => {
+  const startPolling = (slug: string, before: ConnectorStatus | undefined, firstConnection: boolean) => {
     polls.current.get(slug)?.();
     const stop = pollConnector(before, () => refreshStatus([slug]).then((services) => services[slug]), (result) => {
       if (polls.current.get(slug) === stop) polls.current.delete(slug);
       connectorConnect(slug, result);
+      if (result === "connected" && firstConnection) appGrants.appConnected(slug);
     });
     polls.current.set(slug, stop);
   };
@@ -345,6 +333,8 @@ export function PluginsPanel() {
     statusGenerations.current.set(slug, (statusGenerations.current.get(slug) ?? 0) + 1);
     setBusySlug(slug);
     setError(null);
+    if (replacing) reconnecting.current.add(slug);
+    const firstConnection = !reconnecting.current.has(slug) && !hasActiveConnection(status[slug]);
     try {
       const createdAt = Date.now();
       if (replacing) await api(`/api/connectors/${slug}/accounts/${encodeURIComponent(replacing.id)}`, { method: "DELETE" });
@@ -366,7 +356,7 @@ export function PluginsPanel() {
       }));
       setAliasSlug(null);
       setAliasDraft("");
-      startPolling(slug, status[slug]);
+      startPolling(slug, status[slug], firstConnection);
       if (!await launch.open(url) && opening.current === launch) {
         setError({ key: "connectors.popupBlockedContinue" });
       }
@@ -415,9 +405,6 @@ export function PluginsPanel() {
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
   const setupNotice = connectorSetupNotice({ configured, stale, setup, remoteClient });
-  const botsWithoutApps = hasUsableConnectedApps(configured, inventoryPhase, stale, status)
-    ? botsMissingConnectedApps(state.bots, state.instances)
-    : [];
   const chooseFilter = (next: AppsFilter) => {
     setCategory(null);
     if (next === "mcp") {
@@ -617,24 +604,6 @@ export function PluginsPanel() {
               </button>
             </div>
           )}
-          {botsWithoutApps.length > 0 && (
-            <div className="mb-3 rounded-xl bg-control/50 px-4 py-3 text-[13px] leading-relaxed text-ink-secondary">
-              <span className="font-medium text-ink">{t("connectors.perBot.title")}</span>{" "}
-              {t("connectors.perBot.body")}
-              <div className="mt-2 flex flex-wrap gap-2">
-                {botsWithoutApps.map((candidate) => (
-                  <button
-                    key={candidate.id}
-                    type="button"
-                    onClick={() => dispatch({ type: "updateBot", botId: candidate.id, patch: { composio: true } })}
-                    className={cn(pill, "bg-control text-ink hover:bg-raised-hover")}
-                  >
-                    {t("connectors.perBot.allow", { name: candidate.name })}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
           {configured && !remoteClient && source === "curated" && mode === "self-hosted" && filter !== "mcp" && (
             <div className="mb-3 text-[12px] text-ink-secondary">
               {t("connectors.featuredBefore")}{" "}
@@ -745,6 +714,17 @@ export function PluginsPanel() {
             </div>
           )}
         </div>
+        {appGrants.prompt && (
+          <AppGrantPrompt
+            key={appGrants.prompt.slug}
+            app={cards?.find((card) => card.slug === appGrants.prompt?.slug)?.label ?? appGrants.prompt.slug}
+            slug={appGrants.prompt.slug}
+            bots={appGrants.bots}
+            start={appGrants.prompt.start}
+            onDone={appGrants.done}
+            onDismiss={appGrants.dismiss}
+          />
+        )}
       </div>
     </div>
   );
@@ -765,6 +745,7 @@ export function PluginsPanel() {
     const policy = state.config?.managedPolicy, unavailableReason = policy?.apps && !policy.apps.allowAll && !policy.apps.allowlist.includes(card.slug) ? t("policy.managedBy", { organization: policy.organizationName })
       : managedConnectorUnavailableReason(mode, card.slug) ? t("connectors.selfHostOnlyReason") : null;
     const usedBy = connected || included ? botsUsingService(state.bots, state.instances, card.slug) : [];
+    const usedByLabel = t("apps.usedBy", { names: usedBy.map((candidate) => candidate.name).join(", ") });
     const description = unavailableReason ?? (
       pending
         ? authorizationUrl
@@ -793,8 +774,8 @@ export function PluginsPanel() {
               {usedBy.length > 0 && (
                 <span
                   className="ms-1 flex shrink-0 -space-x-1.5 rtl:space-x-reverse"
-                  title={t("apps.usedBy", { names: usedBy.map((candidate) => candidate.name).join(", ") })}
-                  aria-label={t("apps.usedBy", { names: usedBy.map((candidate) => candidate.name).join(", ") })}
+                  title={usedByLabel}
+                  aria-label={usedByLabel}
                   role="img"
                 >
                   {usedBy.slice(0, 3).map((candidate) => (
@@ -862,6 +843,23 @@ export function PluginsPanel() {
             }} className="mt-1.5 inline-block text-[12px] text-accent-text underline underline-offset-2">
               {t("connectors.openAuthorizationPage")}
             </a>
+          )}
+          {connected && !pending && (
+            <div data-app-bots={card.slug} className="mt-1.5 flex min-w-0 items-center gap-2 text-[12px] leading-5 text-ink-secondary">
+              <span className="min-w-0 truncate" title={usedBy.length ? usedByLabel : undefined}>
+                {usedBy.length ? usedByLabel : t("apps.usedByNone")}
+              </span>
+              {appGrants.canChange && (
+                <button
+                  type="button"
+                  onClick={() => appGrants.change(card.slug)}
+                  aria-label={t("apps.whichBots", { app: card.label })}
+                  className="ms-auto shrink-0 rounded-full px-2 text-[12px] font-medium leading-5 text-accent-text transition-colors hover:bg-raised-hover"
+                >
+                  {t("apps.usedByChange")}
+                </button>
+              )}
+            </div>
           )}
           {accounts.length > 0 && (
             <div className="mt-1.5 space-y-0.5">
