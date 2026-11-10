@@ -12,6 +12,9 @@ MausBot under **＋ → Connect to a server**.
 > to pair. If several people share one server, read
 > [Loopback trust](#loopback-trust-owner-or-service).
 
+For server feature switches, defaults and configuration-file instructions, see
+[Feature switches](feature-flags.md).
+
 ## Pick a way in
 
 | You have | Run | Link it prints |
