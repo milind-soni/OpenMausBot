@@ -173,6 +173,43 @@ sessions into `engine-homes/`, the old data folder's rename). They stay as
 they are. The marker does not replace them; it adds the one thing they cannot
 do, which is to stop an older version at the door.
 
+**What the marker protects today: nothing yet.** Both numbers are 1 and no
+version writes format 2, so the marker has never stopped a server, and a
+rollback of one release can still lose data without it noticing:
+
+- Many JSON stores accept only `"version": 1` and throw, or start empty, on
+  anything else: among them `server/command-allowlist.ts`, `server/fleet.ts`,
+  `server/bot-directory.ts`, `server/data/sheet.ts`, `server/pages/store.ts`,
+  `server/sentinel/store.ts` and `server/boat-delete-journal.ts`. A release
+  that raised one of those versions without raising `writes` would pass every
+  check here, and the release before it would start on that data and drop it.
+- The SQLite databases (`messages.db`, `runtime.db`, the cloud-sync store)
+  have no `PRAGMA user_version`. Their schema is judged by looking for
+  columns, so a change an older `INSERT` or `SELECT` breaks on is not seen.
+- Nothing ties a store's `version` or a schema change to `DATA_FORMAT`. The
+  rule holds only when whoever makes the change raises the numbers; review is
+  the only check.
+- The marker is one number for the whole folder. A workspace backup does not
+  carry it (it describes the folder it is in), so a backup a newer version
+  made, restored into an older server, is not stopped by it.
+- A marker that cannot be read (empty or full of NULs after a power loss, not
+  readable by the server's user) counts as format 1 while `writes` is 1, and
+  a marker that cannot be written is said in the log and skipped: the check
+  must never be the reason a healthy install does not start.
+
+For the rule to hold by itself, these would have to change:
+
+1. A test that fails when a store's `version`, a JSON store's shape or a
+   database's tables change without a change to `DATA_FORMAT`: every store's
+   version and every table's columns, recorded in the tree and compared.
+2. A store that meets a `version` higher than it knows refuses to start, with
+   the same plain line, instead of starting empty, so a missed bump stops the
+   server rather than losing the data.
+3. `PRAGMA user_version` on each SQLite database, raised with its schema and
+   checked when it opens.
+4. A workspace backup that records the format it was made in, and a restore
+   that refuses it in a server whose `reads` is lower.
+
 ## Adding a provider driver
 
 The SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately small. A driver PR should:

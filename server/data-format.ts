@@ -1,8 +1,9 @@
 // The data folder's format marker, and the rule that makes an update safe to roll back: what version N writes, version
 // N-1 can still read (CONTRIBUTING.md, "Changing how data is stored"). A server that finds data in a format it cannot
 // read refuses to start before it touches a file.
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeFileAtomic } from "./atomic.ts";
 
 /**
  * `writes`: the format this version leaves the data folder in. `reads`: the newest format it can read, which may be
@@ -26,39 +27,72 @@ export class DataFormatError extends Error {
   override name = "DataFormatError";
 }
 
-/** Null when the folder has no marker. Throws when the marker cannot be read: its format is then unknown. */
-export function readDataFormat(dataDir: string): DataFormatMarker | null {
+/** The marker in the folder; null when there is none, "unreadable" when there is one whose format cannot be told. */
+function markerIn(dataDir: string): DataFormatMarker | null | "unreadable" {
   const file = join(dataDir, DATA_FORMAT_FILE);
   if (!existsSync(file)) return null;
   try {
-    const marker = JSON.parse(readFileSync(file, "utf8")) as Partial<DataFormatMarker>;
-    if (typeof marker.format === "number" && Number.isInteger(marker.format) && marker.format >= 1) {
+    // A byte-order mark is what some editors put in front of JSON; the format behind it is still readable.
+    const marker = JSON.parse(readFileSync(file, "utf8").replace(/^\uFEFF/, "")) as Partial<DataFormatMarker> | null;
+    if (marker && typeof marker.format === "number" && Number.isInteger(marker.format) && marker.format >= 1) {
       return { format: marker.format, writtenBy: typeof marker.writtenBy === "string" ? marker.writtenBy : "unknown", writtenAt: typeof marker.writtenAt === "string" ? marker.writtenAt : "" };
     }
   } catch {
+  }
+  return "unreadable";
+}
+
+/**
+ * Null when the folder has no marker. A marker that cannot be read (empty or NUL-filled after a power loss, not
+ * readable by this user) is format 1 while no version writes anything newer (`writes` 1): there is then no newer format
+ * it could have recorded, and refusing would stop a healthy install. Once a version writes format 2 its format is
+ * unknown, and this throws.
+ */
+export function readDataFormat(dataDir: string, writes: number = DATA_FORMAT.writes): DataFormatMarker | null {
+  const marker = markerIn(dataDir);
+  if (marker !== "unreadable") return marker;
+  const file = join(dataDir, DATA_FORMAT_FILE);
+  if (writes <= 1) {
+    console.warn(`[data-format] ${file} cannot be read; taking the data as format 1, the only format any version has written.`);
+    return null;
   }
   throw new DataFormatError(`OpenMausBot startup failed: ${file} cannot be read, so this version cannot tell whether it understands the data in ${dataDir}. Nothing was changed. Restore that file from a backup, or the whole folder from the copy taken before the last update.`);
 }
 
 /** Throws, having changed nothing, when a newer version left the data in a format `reads` does not cover. */
-export function checkDataFormat(dataDir: string, version: string, reads: number = DATA_FORMAT.reads): void {
-  const marker = readDataFormat(dataDir);
-  if (!marker || marker.format <= reads) return;
-  throw new DataFormatError(
+export function checkDataFormat(dataDir: string, version: string, reads: number = DATA_FORMAT.reads, writes: number = DATA_FORMAT.writes): void {
+  const marker = readDataFormat(dataDir, writes);
+  if (marker && marker.format > reads) throw newerData(dataDir, version, marker);
+}
+
+function newerData(dataDir: string, version: string, marker: DataFormatMarker): DataFormatError {
+  return new DataFormatError(
     `OpenMausBot startup failed: the data in ${dataDir} was written by a newer OpenMausBot (${marker.writtenBy}), in a format this version (${version}) cannot read. Nothing was changed. `
     + `Install OpenMausBot ${marker.writtenBy} or newer, or put back the copy of the data taken before that update.`,
   );
 }
 
-/** Records that this version has run on the folder. Never lowers a marker: an older version that could read the data leaves it. */
-export function stampDataFormat(dataDir: string, version: string, format: { writes: number; reads: number } = DATA_FORMAT): void {
-  checkDataFormat(dataDir, version, format.reads);
-  const marker = readDataFormat(dataDir);
+/**
+ * Records that this version has run on the folder. Never lowers a marker: an older version that could read the data
+ * leaves it. Throws only DataFormatError, for data it cannot read; a marker it cannot write (a read-only folder, a file
+ * Windows holds open past the retries) is said in the log and the start goes on, since the data itself is fine.
+ */
+export function stampDataFormat(
+  dataDir: string,
+  version: string,
+  format: { writes: number; reads: number } = DATA_FORMAT,
+  write: (path: string, text: string) => void = writeFileAtomic,
+): void {
+  const marker = readDataFormat(dataDir, format.writes);
+  if (marker && marker.format > format.reads) throw newerData(dataDir, version, marker);
   if (marker && marker.format >= format.writes) return;
   const file = join(dataDir, DATA_FORMAT_FILE);
   const next: DataFormatMarker = { format: format.writes, writtenBy: version, writtenAt: new Date().toISOString() };
-  writeFileSync(`${file}.${process.pid}.tmp`, `${JSON.stringify(next, null, 2)}\n`);
-  renameSync(`${file}.${process.pid}.tmp`, file);
+  try {
+    write(file, `${JSON.stringify(next, null, 2)}\n`);
+  } catch (error) {
+    console.warn(`[data-format] could not write ${file} (${error instanceof Error ? error.message : String(error)}); starting without it.`);
+  }
 }
 
 export interface ReleasedDataFormat {
