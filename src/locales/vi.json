@@ -3358,7 +3358,6 @@
   "vm.isolation.shared": "Dùng chung",
   "vm.isolation.perBot": "Riêng cho từng bot",
   "vm.isolation.max": "Số desktop tối đa cho từng bot",
-  "vm.isolation.maxDetail": "Giới hạn dung lượng lưu trữ và mức sử dụng tài nguyên của máy host; mỗi desktop đang chạy có thể sử dụng tối đa 4 GB và 2 CPU.",
   "vm.isolation.maxAria": "Số desktop tối đa cho từng bot",
   "vm.idle.label": "Dừng desktop không hoạt động sau",
   "vm.idle.detail": "Áp dụng cho desktop dùng chung và riêng cho từng bot. Desktop đang chạy một lượt sẽ không bao giờ bị dừng. Tắt máy khi không hoạt động vẫn giữ nguyên các tệp và ứng dụng đã cài đặt.",
