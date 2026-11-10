@@ -205,16 +205,17 @@ function connectorAdds(args: unknown): { requests: ConnectorRequest[]; badAuthCo
 }
 
 /** Resolves to the harness's lines on which auth config each toolkit connects with, and on apps already connected, when it has any. */
-async function showConnectorCards(items: ConnectorRequest[]): Promise<string> {
+async function showConnectorCards(items: ConnectorRequest[]): Promise<{ notes: string; nothingToSignIn: boolean }> {
   const response = await fetch(`${HARNESS}/api/internal/connectors/request`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
     body: JSON.stringify({ botId: BOT_ID, threadId: THREAD_ID, items, resumeKey: randomUUID() }),
     signal: AbortSignal.timeout(30_000),
   });
-  const body = (await response.json().catch(() => ({}))) as { error?: unknown; authConfigNote?: unknown; connectedNote?: unknown };
+  const body = (await response.json().catch(() => ({}))) as { error?: unknown; authConfigNote?: unknown; connectedNote?: unknown; nothingToSignIn?: unknown };
   if (!response.ok) throw new Error(String(body.error ?? `could not show connection card (HTTP ${response.status})`));
-  return [body.authConfigNote, body.connectedNote].map((note) => (typeof note === "string" && note ? ` ${note}` : "")).join("");
+  const notes = [body.authConfigNote, body.connectedNote].map((note) => (typeof note === "string" && note ? ` ${note}` : "")).join("");
+  return { notes, nothingToSignIn: body.nothingToSignIn === true };
 }
 
 /** The harness's answer to a bot's search of the catalog. */
@@ -307,11 +308,13 @@ async function handle(received: Json): Promise<void> {
       return;
     }
     if (requests.length) {
-      const notes = await showConnectorCards(requests);
+      const { notes, nothingToSignIn } = await showConnectorCards(requests);
       const labels = requests.map((r) => (r.alias ? `${r.slug} (${r.alias})` : r.slug)).join(", ");
       send(textResult(
         id,
-        `OpenMausBot showed the user a secure connection card for ${labels}.${notes} End this turn now. The app will continue the task automatically after the connection finishes.`,
+        nothingToSignIn
+          ? `OpenMausBot showed the user a card that ${labels} is already connected; no sign-in started.${notes} Do not end this turn: carry on now.`
+          : `OpenMausBot showed the user a secure connection card for ${labels}.${notes} End this turn now. The app will continue the task automatically after the connection finishes.`,
       ));
       return;
     }

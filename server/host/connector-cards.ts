@@ -49,6 +49,8 @@ export function createConnectorCards(deps: ConnectorCardsDeps) {
     const connectionState: Record<string, { connected?: boolean }> = await deps.composio.connectionStatus(cfg, slugs).catch(() => ({}));
     requireActive();
     const messageIds: string[] = [];
+    // Every requested app is already connected: no sign-in starts, so nothing waits on these cards and no "connected" update follows.
+    const nothingToSignIn = items.every((item) => !item.alias && connectionState[item.slug]?.connected === true);
     // A card without an alias for an app that already has an account shows it connected; the bot must ask again with an alias to add another.
     const connectedNotes: string[] = [];
     for (const item of items) {
@@ -65,7 +67,7 @@ export function createConnectorCards(deps: ConnectorCardsDeps) {
       const connected = connectionState[item.slug]?.connected === true;
       const status = item.alias ? "required" : connected ? "connected" : "required";
       if (status === "connected") {
-        connectedNotes.push(`${toolkit.label} already has a connected account, so its card shows it connected and no new account was added. `
+        connectedNotes.push(`${toolkit.label} is already connected (it has an account, or needs no sign-in), so its card shows it connected and no new account was added. `
           + `To add another ${toolkit.label} account, call COMPOSIO_MANAGE_CONNECTIONS again with toolkits: [{"name": "${item.slug}", "alias": "<a short name for the new account>"}].`);
       }
       const language = deps.language(threadId);
@@ -76,13 +78,13 @@ export function createConnectorCards(deps: ConnectorCardsDeps) {
         kind: "connector",
         text: connectorCardText(toolkit.label, item.alias, language),
         ...(owner.group ? { from: { botId: owner.bot.id, name: owner.bot.name, color: owner.bot.color } } : {}),
-        connector: { slug: item.slug, label: toolkit.label, description, status, resumeKey, ...(item.alias ? { alias: item.alias } : {}) },
+        connector: { slug: item.slug, label: toolkit.label, description, status, resumeKey, ...(item.alias ? { alias: item.alias } : {}), ...(nothingToSignIn ? { resumed: true } : {}) },
       });
       messageIds.push(message.id);
     }
-    deps.maybeResume(threadId, resumeKey);
+    if (!nothingToSignIn) deps.maybeResume(threadId, resumeKey);
     const connectedNote = connectedNotes.join(" ");
-    return { status: 200, body: { messageIds, ...(authConfigNote ? { authConfigNote } : {}), ...(connectedNote ? { connectedNote } : {}) } };
+    return { status: 200, body: { messageIds, ...(authConfigNote ? { authConfigNote } : {}), ...(connectedNote ? { connectedNote } : {}), ...(nothingToSignIn ? { nothingToSignIn } : {}) } };
   }
   return { request };
 }

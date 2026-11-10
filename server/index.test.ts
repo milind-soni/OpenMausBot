@@ -12322,12 +12322,20 @@ describe("harness HTTP API", () => {
       const gmailCard = stored.find((message) => message.id === plain.body.messageIds[0]);
       expect(gmailCard.connector.status).toBe("connected");
       expect(plain.body.connectedNote).toBe(
-        `${gmailCard.connector.label} already has a connected account, so its card shows it connected and no new account was added. `
+        `${gmailCard.connector.label} is already connected (it has an account, or needs no sign-in), so its card shows it connected and no new account was added. `
         + `To add another ${gmailCard.connector.label} account, call COMPOSIO_MANAGE_CONNECTIONS again with toolkits: [{"name": "gmail", "alias": "<a short name for the new account>"}].`,
       );
+      expect(plain.body.nothingToSignIn).toBeUndefined();
+      expect(gmailCard.connector.resumed).toBeUndefined();
+      const only = await request([{ slug: "gmail" }], "connected-note-only");
+      expect(only.status).toBe(200);
+      expect(only.body.nothingToSignIn).toBe(true);
+      const onlyCard = ((await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages as any[]).find((message) => message.id === only.body.messageIds[0]);
+      expect(onlyCard.connector).toMatchObject({ status: "connected", resumed: true });
       const withAlias = await request([{ slug: "gmail", alias: "work" }], "connected-note-alias");
       expect(withAlias.status).toBe(200);
       expect(withAlias.body.connectedNote).toBeUndefined();
+      expect(withAlias.body.nothingToSignIn).toBeUndefined();
       const fresh = await request([{ slug: "notion" }], "connected-note-fresh");
       expect(fresh.status).toBe(200);
       expect(fresh.body.connectedNote).toBeUndefined();
