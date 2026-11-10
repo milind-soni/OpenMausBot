@@ -54,6 +54,8 @@ export interface AdmissionMessage {
   /** Steering into a turn waiting on a person's surface choice would race the choice. */
   pendingComputerSelection?: boolean;
   engineCanSteer?: boolean;
+  requireSteerRequestId?: boolean;
+  steerRequestId?: string;
   /** What the person chose for a message sent while the turn runs; absent means steer where the turn can take it. */
   followUp?: FollowUp;
   /** Room queues drain one item per turn, so only the head may jump into the live speaker's turn. */
@@ -102,7 +104,7 @@ export function admit(
       // cannot queues anyway, as it always has (person-first may still stop it for the person's message).
       if (message.followUp === "restart") return { action: "queue", chose: "restart" };
       if (message.engineCanSteer === true && message.followUp === "queue") return { action: "queue", chose: "queue" };
-      if (message.engineCanSteer !== true || message.pendingComputerSelection) return { action: "queue" };
+      if (message.engineCanSteer !== true || message.pendingComputerSelection || (message.requireSteerRequestId && !message.steerRequestId)) return { action: "queue" };
       if (imagesBlockSteer(message)) return { action: "queue", blockedBy: "images" };
       return { action: "steer" };
     }

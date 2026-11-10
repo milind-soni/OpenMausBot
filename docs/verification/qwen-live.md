@@ -48,6 +48,10 @@ realtime model is not a replacement tool-executing agent. Client playback
 credits are untrusted flow-control signals, not proof the user heard audio or
 consented. Qwen approvals require the existing clickable approval cards.
 
+When a running bot turn has no request identifier, a new Qwen spoken request
+waits in the existing queue so its eventual result can be matched and read out.
+Turns with a request identifier remain eligible for mid-turn steering.
+
 Completed turns are reclaimed while pending delegations retain their result
 route until the controller releases them after its final update. The 256-entry
 limits apply to live state; a long-running task must not be evicted to make
@@ -74,6 +78,7 @@ pnpm exec vitest run \
   server/qwen-live-credit.test.ts \
   server/qwen-live-credit-flow.test.ts \
   server/qwen-live-media.e2e.test.ts \
+  server/qwen-live-steering.e2e.test.ts \
   server/routes/live-media.test.ts \
   server/routes/live-media-heartbeat.test.ts \
   server/routes/live.test.ts \

@@ -89,6 +89,23 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("LiveCallController lifecycle", () => {
+  it.each(["qwen", "openai", "azure"] as const)("pins steering correlation to the %s call even if configured provider changes", async provider => {
+    const t = setup();
+    t.settings.provider = provider;
+    t.settings.endpoint = { ...ENDPOINT, provider };
+    await t.controller.start({ auth: owner, ...BOT, sdp: "offer", client: "web", transports: ["ws-pcm"] });
+    t.socket().open();
+    t.settings.provider = provider === "qwen" ? "openai" : "qwen";
+    t.settings.endpoint = { ...ENDPOINT, provider: t.settings.provider };
+    t.socket().receive({ type: "session.input_transcript.delta", delta: "Fixture request.", start_ms: 0, end_ms: 100 });
+    t.socket().receive({ type: "session.delegation.created", delegation: { id: "fixture-delegation", target: "client" }, offset_ms: 100,
+      request: { text: "Fixture request.", withoutEcho: "Fixture request." } });
+    await vi.advanceTimersByTimeAsync(DELEGATION_SETTLE_MS);
+    expect(t.deps.send).toHaveBeenCalledOnce();
+    expect(vi.mocked(t.deps.send).mock.calls[0][0].requireSteerRequestId).toBe(provider === "qwen" ? true : undefined);
+    await t.controller.shutdown();
+  });
+
   it.each(["session-revoked", "media-disconnected", "shutdown"])("releases queued credit playback on %s and refuses late control", async action => {
     const auth: Extract<RequestAuth, { kind: "session" }> = { kind: "session", via: "cookie", scopes: ["admin", "client"], session: { id: "fixture-session", tokenHash: "fixture", label: "fixture", scopes: ["admin", "client"], createdAt: 0, lastSeenAt: 0, expiresAt: 9999999999999 } };
     const f = await setupQwenMedia(auth);

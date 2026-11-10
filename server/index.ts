@@ -7289,7 +7289,7 @@ async function acceptDirectSend(
           engineCanSteerImages: engineSteersImages(instance),
           pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
           engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
-          followUp,
+          followUp, requireSteerRequestId: input.requireSteerRequestId, steerRequestId: directRequestOwners.get(threadId)?.messageId,
         });
         // A chosen wait (queue, or restart's Stop) is never cut short by person-first.
         const chose = busyAdmission.action === "queue" ? busyAdmission.chose : undefined;
@@ -12480,7 +12480,7 @@ function liveCallTitle(botId: string, threadId: string, excerpt: string): Promis
 }
 const liveCalls = new LiveCallController({
   store,
-  send: async ({ auth, botId, threadId, text, callId }) => {
+  send: async ({ auth, botId, threadId, text, callId, requireSteerRequestId }) => {
     if (!liveSignedIn(auth)) throw new LiveCallSignedOutError();
     const receipt = await acceptDirectSend({
       botId, threadId, text,
@@ -12488,7 +12488,7 @@ const liveCalls = new LiveCallController({
       sender: messageSender(auth),
       trigger: usageTriggerFor(auth),
       via: "call",
-      callId,
+      callId, requireSteerRequestId,
       personPresent: true,
     });
     if ("queued" in receipt) return { kind: "queued", queueId: receipt.queueId };

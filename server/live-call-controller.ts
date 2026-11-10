@@ -39,7 +39,7 @@ export type LiveRespondResult = { ok: true } | { ok: false; error: string };
 
 export interface LiveCallDeps {
   store: { onChange(listener: (change: StoreChange) => void): () => void };
-  send(input: { auth: RequestAuth; botId: string; threadId: string; text: string; callId: string }): Promise<LiveSendResult>;
+  send(input: { auth: RequestAuth; botId: string; threadId: string; text: string; callId: string; requireSteerRequestId?: boolean }): Promise<LiveSendResult>;
   respond(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "allow" | "deny" | "answer"; message?: string; callId?: string }): Promise<LiveRespondResult>;
   queued(botId: string, threadId: string, queueId: string): boolean;
   signedIn?(auth: RequestAuth): boolean;
@@ -604,7 +604,7 @@ export class LiveCallController {
     if (call.endpoint.provider !== "qwen") this.append(call, "thinking", LIVE_COPY.working, id);
     call.pendingSends += 1;
     try {
-      const result = await this.deps.send({ auth: call.auth, botId: call.state.botId, threadId: call.state.threadId, text: said, callId: call.state.callId });
+      const result = await this.deps.send({ auth: call.auth, botId: call.state.botId, threadId: call.state.threadId, text: said, callId: call.state.callId, ...(call.endpoint.provider === "qwen" ? { requireSteerRequestId: true } : {}) });
       if (call.state.status !== "live" || this.call !== call) return;
       if (result.kind === "queued") {
         call.queuedIds.add(result.queueId);

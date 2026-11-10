@@ -15,6 +15,7 @@ export interface DirectSendInput {
   trigger: UsageTrigger;
   via?: "call";
   callId?: string;
+  requireSteerRequestId?: boolean;
   dataContext?: DataContext;
   personPresent: boolean;
   app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
