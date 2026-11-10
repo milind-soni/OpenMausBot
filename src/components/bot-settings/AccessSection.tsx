@@ -506,6 +506,19 @@ function ResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: bo
   );
 }
 
+/** Lets a bot with per-app grants run code in the connected apps' sandbox, which some app jobs need (a Google Drive upload). */
+function AppSandboxRow({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <div className="mt-3 flex items-center justify-between gap-4 border-t border-hairline/40 pt-3">
+      <div>
+        <div className="text-[14px] font-medium text-ink">{t("botAccess.apps.sandbox.title")}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">{t(on ? "botAccess.apps.sandbox.on" : "botAccess.apps.sandbox.off")}</div>
+      </div>
+      <Switch checked={on} aria-label={t("botAccess.apps.sandbox.title")} onClick={() => onChange(!on)} data-app-sandbox="" />
+    </div>
+  );
+}
+
 function RecordStepsRow({ on, browserOn, myChrome, onChange }: { on: boolean; browserOn: boolean; myChrome: boolean; onChange: (on: boolean) => void }) {
   return (
     <div className="mt-3 flex items-center justify-between gap-4 border-t border-hairline/40 pt-3">
@@ -767,6 +780,7 @@ export function AccessSection({
           <>
             {!draft && <ConnectorScopesControl connectedSlugs={connectedSlugs} labels={appLabels} scopes={bot.connectorScopes} onChange={(connectorScopes) => patch({ connectorScopes })} />}
             <ConnectorToolsGrants bot={bot} patch={patch} slugs={connectedSlugs} />
+            {bot.connectorTools !== undefined && <AppSandboxRow on={bot.appSandbox === true} onChange={(appSandbox) => patch({ appSandbox })} />}
           </>
         )}
         {connectedAppsEnabled && connectedAppsConfigured && (

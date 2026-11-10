@@ -280,6 +280,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (body.voiceNoteEveryReply !== null && typeof body.voiceNoteEveryReply !== "boolean") return json(res, 400, { error: "voiceNoteEveryReply must be true, false or null" });
         patch.voiceNoteEveryReply = body.voiceNoteEveryReply ?? undefined;
       }
+      // Lets the bot run code that reaches every connected app: an admin decision, kept off a member editor's list.
+      if (body.appSandbox !== undefined) {
+        if (typeof body.appSandbox !== "boolean") return json(res, 400, { error: "appSandbox must be true or false" });
+        patch.appSandbox = body.appSandbox;
+      }
       // Spends the Cloud plan's monthly X research calls: an admin decision too.
       if (body.xResearch !== undefined) {
         if (typeof body.xResearch !== "boolean") return json(res, 400, { error: "xResearch must be true or false" });
@@ -626,6 +631,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         }
       }
       if (body.approvePeerComms === false && existingBot?.approvePeerComms === true) loosened.push("approvePeerComms");
+      if (body.appSandbox === true && existingBot?.appSandbox !== true) loosened.push("appSandbox");
       if (section !== undefined && sectionKey(existingBot?.section) !== sectionKey(section)) loosened.push("section");
       if (Array.isArray(patch.alwaysAllow) && patch.alwaysAllow.some((key) => !(existingBot?.alwaysAllow ?? []).includes(key))) {
         loosened.push("alwaysAllow");

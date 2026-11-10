@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  advertisedGrants,
   CONNECTOR_ALLOWED_TOOLS_MAX_BYTES,
   connectorToolAdvertised,
   filterToolsListFrame,
@@ -134,5 +135,21 @@ describe("tools/list frame filtering", () => {
     expect(filterToolsListFrame(noTools, grants({ gmail: { tools: "*" } }))).toBe(noTools);
     const nameless = { jsonrpc: "2.0" as const, id: 12, result: { tools: [{ description: "unnamed" }] } };
     expect(filterToolsListFrame(nameless, grants({ gmail: { tools: "*" } }))).toEqual(nameless);
+  });
+});
+
+describe("app sandbox switch", () => {
+  it("offers the sandbox tools only to a bot with app grants whose switch is on", () => {
+    const gmail = grants({ gmail: { tools: "*" } });
+    expect(advertisedGrants({ connectorTools: gmail })).toBe(gmail);
+    expect(advertisedGrants({ connectorTools: gmail, appSandbox: false })).toBe(gmail);
+    expect(advertisedGrants({ appSandbox: true })).toBeUndefined();
+    const on = advertisedGrants({ connectorTools: gmail, appSandbox: true })!;
+    expect(gmail).toEqual({ gmail: { tools: "*" } });
+    for (const tool of ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL", "GMAIL_SEND_EMAIL"]) {
+      expect(connectorToolAdvertised(tool, on)).toBe(true);
+      expect(connectorToolAdvertised(tool, gmail)).toBe(tool === "GMAIL_SEND_EMAIL");
+    }
+    expect(connectorToolAdvertised("SLACK_POST_MESSAGE", on)).toBe(false);
   });
 });

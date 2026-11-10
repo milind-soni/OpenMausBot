@@ -421,6 +421,18 @@ describe("AccessSection per-app scopes", () => {
     const html = render(makeBot({ connectorScopes: { apps: { gmail: "write" } } }));
     expect(html).not.toContain("Limit this bot to specific apps");
   });
+
+  it("offers the sandbox switch, off by default, only to a bot with its own app grants", () => {
+    fixture.apps = { phase: "ready", connectedSlugs: ["gmail"], apps: [app("gmail", "Gmail")] };
+    const SANDBOX = /aria-label="Run code in the apps&#x27; sandbox"[^>]*aria-checked="(true|false)"|aria-checked="(true|false)"[^>]*aria-label="Run code in the apps&#x27; sandbox"/;
+    const off = render(makeBot({ connectorTools: { gmail: { tools: "*" } } }));
+    expect(off.match(SANDBOX)?.slice(1).find(Boolean)).toBe("false");
+    expect(off).toContain("Off: this bot uses only the app tools above.");
+    const on = render(makeBot({ connectorTools: { gmail: { tools: "*" } }, appSandbox: true }));
+    expect(on.match(SANDBOX)?.slice(1).find(Boolean)).toBe("true");
+    expect(on).toContain("below Full access it asks you first each time.");
+    expect(render(makeBot())).not.toContain("data-app-sandbox");
+  });
 });
 
 describe("AccessSection parts", () => {

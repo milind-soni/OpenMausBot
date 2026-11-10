@@ -519,6 +519,30 @@ it("still asks before arbitrary workbench code under Send without asking", async
   expect(relayed).toHaveLength(before);
 });
 
+it("runs sandbox code for a bot with app grants only after its sandbox switch is on, never inside a batch, and still asks", async () => {
+  const b = await bot("Sandbox switch");
+  expect((await api("PATCH", `/api/bots/${b.id}`, { connectorTools: { gmail: { tools: "*" } } })).status).toBe(200);
+  const token = await mint(b.id, b.threadId);
+  const before = relayed.length;
+  const code = { code_to_execute: "print(1)" };
+  const wrapped = () => relay(token, "COMPOSIO_MULTI_EXECUTE_TOOL", { tools: [{ tool_slug: "COMPOSIO_REMOTE_WORKBENCH", arguments: code }] });
+  const off = await relay(token, "COMPOSIO_REMOTE_WORKBENCH", code);
+  expect(off.body.result.isError).toBe(true);
+  expect(JSON.stringify(off.body.result)).toContain("Run code in the apps' sandbox");
+  expect((await wrapped()).body.result.isError).toBe(true);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { appSandbox: "yes" })).status).toBe(400);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { appSandbox: true }, member)).status).toBe(403);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { appSandbox: true })).status).toBe(200);
+  const held = relay(token, "COMPOSIO_REMOTE_WORKBENCH", code);
+  const card = await pending(b.threadId);
+  expect(relayed).toHaveLength(before);
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "allow" });
+  expect((await held).body.result.isError).not.toBe(true);
+  expect(relayed).toHaveLength(before + 1);
+  expect((await wrapped()).body.result.isError).toBe(true);
+  expect(relayed).toHaveLength(before + 1);
+});
+
 it("tells a scoped bot its multi-execute arguments were unreadable, not that it lacks access", async () => {
   const b = await bot("Misshapen batch");
   await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "write" } } });

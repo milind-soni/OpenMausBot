@@ -1,7 +1,7 @@
 // Trims the connector bridge's tools/list to the bot's grants; call-time enforcement stays the authority. Whenever
 // filtering cannot run (no env var, malformed, oversized) the bridge relays the list untouched.
 import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN, type ConnectorToolGrant } from "../shared/wire.ts";
-import { serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
+import { APP_SANDBOX_SERVICE, APP_SANDBOX_TOOLS, serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
 
 export const CONNECTOR_ALLOWED_TOOLS_ENV = "OMB_CONNECTOR_ALLOWED_TOOLS";
 
@@ -22,6 +22,12 @@ export const CONNECTOR_META_TOOLS: readonly string[] = [
   "COMPOSIO_MANAGE_CONNECTIONS",
   "COMPOSIO_WAIT_FOR_CONNECTIONS",
 ];
+
+/** What a bot's tools/list offers: its grants, and the sandbox's code tools while its sandbox switch is on. */
+export function advertisedGrants(bot: { connectorTools?: Record<string, ConnectorToolGrant>; appSandbox?: boolean }): Record<string, ConnectorToolGrant> | undefined {
+  if (bot.connectorTools === undefined || bot.appSandbox !== true) return bot.connectorTools;
+  return { ...bot.connectorTools, [APP_SANDBOX_SERVICE]: { tools: [...APP_SANDBOX_TOOLS] } };
+}
 
 const CONNECTION_TOOL_SUFFIXES = ["_MANAGE_CONNECTIONS", "_WAIT_FOR_CONNECTIONS"];
 

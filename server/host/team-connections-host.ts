@@ -14,6 +14,7 @@ import type { CloudTeam, TeamRole } from "../cloud-team.ts";
 import type * as Composio from "../composio.ts";
 import type { AppConfig } from "../config.ts";
 import type { McpServerSpec } from "../contracts.ts";
+import { advertisedGrants } from "../connector-advertisement.ts";
 import { serviceSlugFor } from "../connector-verdict.ts";
 import { type McpOAuthManager, type McpSignInPhase, withMcpSignIn, withoutPendingSignIn } from "../mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "../mcp-registry.ts";
@@ -22,7 +23,7 @@ import { appLabel, ConnectionScopes, PeopleConnections, personAppOf, SCOPES_FILE
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolsFor } from "../connector-app-tools.ts";
 import type { ConnectorScopes } from "../../shared/connector-scopes.ts";
 
-type Bot = { id: string; name: string; connectorTools?: Parameters<typeof Composio.mcpIntegration>[1]["connectorTools"]; connectorScopes?: ConnectorScopes };
+type Bot = { id: string; name: string; connectorTools?: Parameters<typeof Composio.mcpIntegration>[1]["connectorTools"]; connectorScopes?: ConnectorScopes; appSandbox?: boolean };
 type Integration = { command: string; args: string[]; env: Record<string, string> };
 type McpBot = { id: string; name: string; mcpServers?: string[] };
 
@@ -220,7 +221,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     async appsIntegrations(bot: Bot, threadId: string, generation: string, names: "dotted" | "plain" = "plain"): Promise<{ composio?: Integration; composioOwn?: Integration }> {
       const cfg = deps.cfg();
       const out: { composio?: Integration; composioOwn?: Integration } = {};
-      const base = { harnessUrl: deps.harnessUrl, botId: bot.id, threadId, connectorTools: bot.connectorTools };
+      const base = { harnessUrl: deps.harnessUrl, botId: bot.id, threadId, connectorTools: advertisedGrants(bot) };
       const shared = await deps.composio.mcpIntegration(cfg, { ...base, commsToken: deps.mint({ botId: bot.id, threadId, generation }) });
       if (shared) out.composio = await withAppTools(shared, bot, names);
       const person = personApps().length ? turnPerson(threadId, generation) : null;
