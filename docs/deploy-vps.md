@@ -2,6 +2,79 @@
 
 From a blank Linux server to OpenMausBot running on it around the clock, reachable from your laptop, the desktop app and your phone, with your bots working while every laptop is closed. It assumes nothing beyond being able to open a terminal and paste commands. About twenty minutes, most of it waiting.
 
+## Quick start: one command on your own domain
+
+For a fresh Ubuntu 22.04 or 24.04 server (x86-64, at least 2 CPUs, 4 GB of memory and 20 GB of free disk) and a domain name whose A record already points at it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
+```
+
+The installer ([`deploy/install.sh`](https://github.com/milind-soni/OpenMausBot/blob/main/deploy/install.sh)) does path B below for you and ends with MausBot answering at `https://maus.example.com`.
+
+**It checks the server first, and changes nothing while it checks.** Each check that fails prints one sentence saying what to fix, and nothing is installed until all pass:
+
+| Check | Passes when |
+|---|---|
+| Operating system | Ubuntu 22.04 or 24.04 |
+| Processor | x86-64, 2 cores or more |
+| Memory | 4 GB or more (8 GB suggested) |
+| Free disk | 20 GB or more, where the install and Docker keep their files |
+| Docker | Docker 24 or newer with the Compose plugin, running, not rootless |
+| Ports | 80 and 443 are free |
+| DNS | the domain resolves to this server's public address |
+| Outbound | HTTPS reaches the image registries (`ghcr.io`, `pkg-containers.githubusercontent.com`, Docker Hub), Let's Encrypt and `raw.githubusercontent.com` |
+| User namespaces | switched on, for the bots' sandbox |
+| Bots' sandbox | AppArmor is on with its tools, as it is on a stock Ubuntu |
+| Clock | within five minutes of the internet's |
+| Version | a MausBot release to install was found |
+
+To run only the checks, add `--check`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --check --domain maus.example.com
+```
+
+If Docker is missing, the installer asks before installing it with Docker's official script (`get.docker.com`); `--install-docker` says yes ahead of time. It installs nothing else on the server.
+
+**Then it installs** everything under one folder, `/opt/openmausbot` (`--dir` picks another):
+
+| Path | What |
+|---|---|
+| `compose.yaml`, `Caddyfile` | the same server-plus-Caddy setup as path B, Caddy in its own container reaching the server over a socket; written again on every run |
+| `.env` | your settings: `DOMAIN`, the pinned version (`OMB_IMAGE`) and anything you add, such as [who may sign in with an email](self-hosting.md#sign-in-with-your-email). The installer keeps your lines |
+| `data/` | everything MausBot stores: chats, bots, engine sign-ins, paired devices. Never touched once it exists |
+| `caddy/` | the HTTPS certificates |
+| `update.sh` | the update command, once this repository has it (see below) |
+| `compose.box.yaml`, `box/` | the sandbox's settings and the files that prepare the server for it |
+
+`update.sh` and the sandbox's files are this repository's own, taken from the tag of the version being installed so they match it, and from `main` only when that tag does not have them. The installer says which it used.
+
+It runs the newest release, pinned by its version; once a `stable` channel is published it follows that instead. If that version has no bots' sandbox, the checks (`--check` too) say so before anything is downloaded. It never runs `latest`, which follows every commit. It then waits until the server reports healthy and `https://maus.example.com` answers with a valid certificate, and prints the address.
+
+**The bots' sandbox.** A MausBot version with the hardened profile runs every bot in a sandbox, away from the server's settings, keys and other bots' files, and Docker's defaults do not let a container build one. For such a version the installer prepares the server (a seccomp profile in `/etc/mausbot` and an AppArmor profile in `/etc/apparmor.d`, the two the MausBot connector installs), starts the server with the four security settings in `compose.box.yaml` (no `--privileged`, no added capability), and then runs the server's own self-check, which among other things confirms that a bot cannot read `config.json`. If a check fails that means a bot could reach something it must not, or that bots would not work, the installer names it and does not report success; so does a self-check that gives no answer, or a check the installer has never heard of. Five checks that are about neither (the kernel keyring, the sandbox's host name, the CPU list, a hosting provider's address, and reaching the public internet) only print a note. For a version without the hardened profile it says the sandbox is not there yet; run the install command again after updating to one that has it. `--no-sandbox` skips all of this, for a server only you sign in to on a host without AppArmor.
+
+**Sign in as the first admin** with a one-time link made on the server. Run in a terminal, the installer makes one and prints it when it finishes. It does not when its output goes anywhere else, such as a log, because whoever reads the link can sign in as the admin until it is used or expires. To make one yourself:
+
+```sh
+cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair --label "First admin"
+```
+
+Open the link it prints, or paste it into the desktop app under **＋ → Connect to a server**. To sign in with an emailed code instead, run the installer with `--email you@example.com`.
+
+- **Update:** `sudo /opt/openmausbot/update.sh`, which backs the data up, checks the new version's health and puts the old one back if it fails. The installer places it once this repository has it and prints the command when it finishes; until then, running the install command again moves to the newest release. `update.sh` pins the version by digest in `.env`, and a later run of the installer keeps that pin.
+- **Repair:** run the install command again. It checks the server, rewrites its own files and leaves `.env` and `data/` alone. That also moves an install made before Caddy got its own container: Caddy then shared the server's network, and HTTPS went down whenever the server restarted without it.
+- **Stop:** `--uninstall` stops the server and removes its containers. It deletes nothing: your data stays in `/opt/openmausbot/data`.
+- **Every other command in this guide** that starts `docker compose` for path B works from `/opt/openmausbot`.
+- **What the installer contacts:** the registries and Let's Encrypt from the table, GitHub's release list, this repository's files on `raw.githubusercontent.com`, and `cloudflare.com/cdn-cgi/trace` to learn the server's public address for the DNS check. It sends no telemetry.
+- **Behind a load balancer or NAT** that forwards ports 80 and 443 to the server, set `OMB_INSTALL_SKIP_DNS=1` to skip the DNS check.
+
+The installer also accepts the one-time code of a server connected to MausBot. That offering is not available yet.
+
+Not on Ubuntu, or prefer to do it by hand? Use one of the three ways below.
+
+## Three ways in, by hand
+
 Three ways to make the server reachable are covered. Pick one; the rest of the guide is the same. The short version of every path, including `--lan` and your own cloudflared or proxy (`--public-url`), is at the top of [Self-hosting](self-hosting.md#pick-a-way-in); this guide adds the server setup around it.
 
 | | You need | Who can reach it | Best for |
@@ -91,6 +164,8 @@ Skip to "Install and sign the engines in".
 ## Path B: your own domain, with Docker
 
 One container for the server plus Caddy for HTTPS at `https://maus.example.com`.
+
+The [installer](#quick-start-one-command-on-your-own-domain) does these steps for you on Ubuntu. Do them by hand on another system, to build your own image with `ENGINES`, or to see what it does.
 
 1. **Point a name at the server.** In your DNS provider add an **A record** (name `maus`, value the server's public IP). After a few minutes `ping maus.example.com` should answer with that IP. Ports 80 and 443 must be open; most providers open them by default.
 2. **Install Docker:**
@@ -286,6 +361,9 @@ curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy
 sudo bash update.sh --dir /opt/openmausbot
 ```
 
+An install made with the installer (`deploy/install.sh`) already has `update.sh` in
+its folder: `sudo /opt/openmausbot/update.sh`.
+
 Until a first version has been made stable, `./update.sh` takes the newest
 release instead, as **Check for updates** does then.
 
@@ -467,7 +545,32 @@ docker run --rm -v deploy_data:/data -v "$PWD/openmausbot-backup.XXXXXX":/b:ro a
 docker compose start
 ```
 
-Each backup creates a fresh private folder in the current directory, so it
+With the installer, the data is the folder `/opt/openmausbot/data`. This backs
+it up, with `.env`, into a private archive in `/opt/openmausbot`, the whole
+project stopped and started again around it:
+
+```sh
+cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'umask 077; tar --warning=no-file-ignored -czf "backup-$(date -u +%Y%m%dT%H%M%SZ).tgz" data .env'; sudo docker compose start
+```
+
+Copy the archive to another machine and keep it private.
+`--warning=no-file-ignored` keeps tar from listing the sockets in the data
+folder, which are not data: the server makes them again when it starts.
+
+To restore an archive, replace `backup-20261110T153000Z.tgz` with its name.
+The data as it is now is moved aside to `data.before-restore`, and the archive's
+data takes its place, with its owner and permissions. An archive without a
+`data/` folder changes nothing:
+
+```sh
+cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'set -e; tar -tzf backup-20261110T153000Z.tgz data/ >/dev/null; rm -rf data.before-restore; mv data data.before-restore; tar -xzpf backup-20261110T153000Z.tgz data'; sudo docker compose start
+```
+
+Once MausBot runs on the restored data, remove the old copy:
+`sudo rm -rf /opt/openmausbot/data.before-restore`. The restore leaves `.env` as
+it is. On a new server, install first with the same `--domain`, then restore.
+
+Each path B backup creates a fresh private folder in the current directory, so it
 cannot overwrite an older archive with more permissive access. Keep the
 archive inside that folder privately on another machine. Restore paths A and C
 with the server stopped, using the same paths and original ownership. After

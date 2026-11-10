@@ -112,6 +112,23 @@ would answer the whole internet over plain http. More options are in
 
 ### Docker with your own domain
 
+On a fresh Ubuntu 22.04 or 24.04 server (x86-64), one command checks the
+server, installs MausBot under `/opt/openmausbot` and ends with HTTPS on your
+domain:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
+cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair   # Link https://<DOMAIN>/pair#code=…
+```
+
+Add `--check` to only check the server. Running it again repairs;
+`sudo /opt/openmausbot/update.sh` updates, with a copy of the data first;
+`--uninstall` stops the server and keeps your data. The checks, the files it
+writes and what it contacts are in
+[Deploy on a VPS](deploy-vps.md#quick-start-one-command-on-your-own-domain).
+
+By hand, on any system with Docker:
+
 ```sh
 git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot/deploy
 cp .env.example .env                          # set DOMAIN (and ENGINES)
@@ -329,6 +346,10 @@ for Windows/WSL2 and Linux x64. It is separate from the Docker deployment below.
 For local Docker Desktop or private Tailscale access without a public domain,
 use the [local Compose setup](../deploy/local/README.md). It defaults to
 `http://localhost:8080` and supports optional `.env` overrides.
+
+On Ubuntu, the [installer](deploy-vps.md#quick-start-one-command-on-your-own-domain)
+sets this up with one command, keeping the data in `/opt/openmausbot/data`.
+The rest of this section is the same setup by hand.
 
 One tenant = one container for the server plus Caddy for HTTPS.
 Requirements: Docker with Compose, a DNS name pointing at the machine, and
@@ -1458,6 +1479,9 @@ own Clouds have run for 48 hours, named by the image tag `stable` and by
 (`GET /api/updates/check`, **Check for updates** in the app) compares the
 server with the stable version; `OMB_UPDATE_CHANNEL=newest` makes it follow
 every release instead.
+
+A server installed with the [installer](deploy-vps.md#quick-start-one-command-on-your-own-domain)
+updates with `sudo /opt/openmausbot/update.sh`, which the installer puts there.
 
 ```sh
 cd deploy && git pull && ./update.sh                                    # Docker: copy the data, update, roll back on failure
