@@ -1,7 +1,7 @@
 // A real server as a personal Cloud, told its plan as the Admin tells it, with the fake engine driving a real Chief turn.
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -18,7 +18,7 @@ const PACKAGE = JSON.parse(readFileSync(join(SERVER_DIR, "..", "shared", "packag
 const manifest = (name: string) => ({ format: "openmaus.team", version: 2, team: { name, members: [{ key: "helper", name: `${name} helper`, appearance: { color: "blue" } }] } });
 
 class Cloud {
-  home = mkdtempSync(join(tmpdir(), "omb-bot-limit-"));
+  home = mkdtempSync(join(tmpdir(), "omb-starter-bots-"));
   dataDir = join(this.home, ".openmausbot");
   gate = join(this.home, "finish");
   dump = join(this.home, "claude.json");
@@ -130,7 +130,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   }
 }
 
-const REFUSED = { status: 409, body: { code: "bot_limit" } };
+const made = (response: { status: number; body: any }) => {
+  expect(response.status, JSON.stringify(response.body)).toBe(201);
+  return response.body;
+};
 
 describe("a Starter Cloud's bots, on a real server", () => {
   let cloud: Cloud;
@@ -140,114 +143,119 @@ describe("a Starter Cloud's bots, on a real server", () => {
     await cloud.start();
     await cloud.tellPlan(tier);
   };
+  const paused = async () => ((await cloud.config()).pausedBots ?? []) as string[];
+  const send = (botId: string) => cloud.api("POST", `/api/bots/${botId}/messages`, { text: "Hello" });
 
-  it("makes five beside its MausBot, says so in config, then refuses each way of making one and writes nothing", async () => {
+  it("makes a sixth bot and a twentieth: each starts paused, the first five stay awake, and nothing says the plan is full", async () => {
     await starter();
-    expect(await cloud.config()).toMatchObject({ cloudStarter: true, botLimit: 5 });
-    const mausBot = (await cloud.bots()).filter((bot) => bot.defaultBot);
-    expect(mausBot).toHaveLength(1);
+    expect(await cloud.config()).toMatchObject({ cloudStarter: true, awakeLimit: 5, planTurns: { running: 2, waiting: 4 } });
+    expect((await cloud.config()).botLimit).toBeUndefined();
     await cloud.fill(5);
-    const held = (await cloud.bots()).map((bot) => bot.id).sort();
-    expect(held).toHaveLength(6);
+    const five = (await cloud.bots()).filter((bot) => !bot.defaultBot).map((bot) => bot.id);
+    expect(await paused()).toEqual([]);
 
-    const refused = await cloud.create("Sixth");
-    expect(refused).toMatchObject(REFUSED);
-    expect(refused.body.error).toBe("You've reached the 5 bots Starter includes. To create more, upgrade this Cloud.");
-    // What Duplicate and a paired device's New bot send.
-    expect(await cloud.api("POST", "/api/bots", {})).toMatchObject(REFUSED);
-    expect(await cloud.api("POST", "/api/teams/import?mode=add", manifest("Desk"))).toMatchObject(REFUSED);
-    expect(await cloud.api("POST", "/api/teams/import?mode=add", PACKAGE)).toMatchObject(REFUSED);
+    const sixth = made(await cloud.create("Sixth"));
+    expect(sixth.paused).toBe(true);
+    expect(await paused()).toEqual([sixth.bot.id]);
+    const refused = await send(sixth.bot.id);
+    expect(refused).toMatchObject({ status: 409, body: { code: "bot_paused" } });
+    expect(refused.body.error).toContain("Starter keeps 5 bots awake");
 
+    // What Duplicate and a paired device's New bot send, a template's manifest, and a package.
+    expect(made(await cloud.api("POST", "/api/bots", {})).paused).toBe(true);
+    made(await cloud.api("POST", "/api/teams/import?mode=add", manifest("Desk")));
+    made(await cloud.api("POST", "/api/teams/import?mode=add", PACKAGE));
+    // A Chief of Staff (one came with the package) hands out the work, so it never sleeps and isn't counted.
+    const counted = async () => (await cloud.bots()).filter((bot) => !bot.defaultBot && !bot.hidden && !bot.chiefOfStaff).map((bot) => bot.id as string);
+    while ((await counted()).length < 20) made(await cloud.create(`More ${Math.random()}`));
+
+    const all = await counted();
+    expect(all).toHaveLength(20);
+    const asleep = await paused();
+    expect(asleep).toHaveLength(15);
+    expect(all.filter((id) => !asleep.includes(id)).sort()).toEqual([...five].sort());
+    const text = JSON.stringify(await cloud.config());
+    expect(text).not.toMatch(/bot_limit|Starter includes/);
+  }, 180_000);
+
+  it("swaps the new bot in with one choice, and the one it replaced is paused", async () => {
+    await starter();
+    await cloud.fill(5);
+    const [first, ...rest] = (await cloud.bots()).filter((bot) => !bot.defaultBot).map((bot) => bot.id);
+    const sixth = made(await cloud.create("Sixth")).bot.id;
+    const chosen = await cloud.api("POST", "/api/starter/awake", { awake: [sixth, ...rest] });
+    expect(chosen).toEqual({ status: 200, body: { paused: [first] } });
+    expect(await send(first)).toMatchObject({ status: 409, body: { code: "bot_paused" } });
+    await cloud.restart();
+    expect(await paused()).toEqual([first]);
+  }, 120_000);
+
+  it("a Chief's create_bot and team setup make bots past five, and the bot is told the new one is paused", async () => {
+    await starter();
+    await cloud.fill(5);
     const { token, chief } = await cloud.chiefTurn();
     const tool = await cloud.internal("/api/internal/create-bot", token, { fromBotId: chief.id, fromThreadId: chief.threadId, name: "Scout", role: "Specialist", instructions: "Work." });
-    expect(tool).toMatchObject(REFUSED);
-    expect(tool.body.error).toContain("Explain this to the person");
-    expect(tool.body.error).toContain("Do not retry");
+    expect(tool.status, JSON.stringify(tool.body)).toBe(201);
+    expect(tool.body).toMatchObject({ state: "applied", name: "Scout" });
+    expect(tool.body.paused).toMatch(/^@Scout was created, and is paused: this Cloud's Starter plan keeps 5 bots awake/);
+    expect(await paused()).toEqual([tool.body.id]);
     const setup = await cloud.internal("/api/internal/team-setup-requests", token, { plan: { reason: "Add a specialist", newTeams: [],
-      operations: [{ action: "create", key: "scout", fields: { name: "Scout", title: "Specialist", soul: "Work.", modelSelection: CLAUDE } }] } });
-    expect(setup).toMatchObject(REFUSED);
-    expect(setup.body.error).toContain("Do not retry");
-
-    expect((await cloud.bots()).map((bot) => bot.id).sort()).toEqual(held);
+      operations: [{ action: "create", key: "writer", fields: { name: "Writer", title: "Specialist", soul: "Work.", modelSelection: CLAUDE } }] } });
+    expect(setup.status, JSON.stringify(setup.body)).not.toBe(409);
+    expect(JSON.stringify(setup.body)).not.toContain("bot_limit");
   }, 120_000);
 
-  it("takes a move and a restore at the limit, and a bot moved in keeps its id and conversation", async () => {
+  it("takes a move and a restore past five, and keeps the bots that were awake awake", async () => {
     await starter();
     await cloud.fill(5);
+    const five = (await cloud.bots()).filter((bot) => !bot.defaultBot).map((bot) => bot.id);
     const backup = await cloud.api("POST", "/api/teams/export", { format: "backup", name: "Saved" });
     expect(backup.status, JSON.stringify(backup.body)).toBe(200);
-
-    const moved = await cloud.api("POST", "/api/bots", { id: "from-the-laptop-1", threadId: "laptop-thread-1", name: "From the laptop", useDefaults: false });
-    expect(moved.status, JSON.stringify(moved.body)).toBe(201);
-    expect(moved.body.bot).toMatchObject({ id: "from-the-laptop-1", threadId: "laptop-thread-1" });
-    const after = (await cloud.bots()).length;
-
-    const restored = await cloud.api("POST", "/api/teams/import?mode=add", backup.body);
-    expect(restored.status, JSON.stringify(restored.body)).toBe(201);
-    expect(restored.body.bots.length).toBeGreaterThanOrEqual(6);
-    expect((await cloud.bots()).length).toBe(after + restored.body.bots.length);
-
-    // Over the limit now: every one stays, and a new one is still refused.
-    expect(await cloud.create("One more")).toMatchObject(REFUSED);
+    const moved = made(await cloud.api("POST", "/api/bots", { id: "from-the-laptop-1", threadId: "laptop-thread-1", name: "From the laptop", useDefaults: false }));
+    expect(moved.bot).toMatchObject({ id: "from-the-laptop-1", threadId: "laptop-thread-1" });
+    const restored = made(await cloud.api("POST", "/api/teams/import?mode=add", backup.body));
+    expect(restored.bots.length).toBeGreaterThanOrEqual(6);
+    const asleep = await paused();
+    expect(five.filter((id) => asleep.includes(id))).toEqual([]);
+    expect(asleep).toContain("from-the-laptop-1");
   }, 120_000);
 
-  it("keeps every bot of a downgraded Cloud, across a restart, and lifts the limit the moment it upgrades, with no restart", async () => {
+  it("keeps every bot of a downgraded Cloud, across a restart, and wakes them all the moment it upgrades, with no restart", async () => {
     await starter("pro");
-    expect((await cloud.config()).botLimit).toBeUndefined();
+    expect((await cloud.config()).awakeLimit).toBeUndefined();
     await cloud.fill(7);
     const seven = (await cloud.bots()).map((bot) => bot.id).sort();
+    expect(await paused()).toEqual([]);
 
     await cloud.tellPlan("starter");
-    expect(await cloud.config()).toMatchObject({ cloudStarter: true, botLimit: 5 });
-    expect((await cloud.bots()).map((bot) => bot.id).sort()).toEqual(seven);
-    expect(await cloud.create("New")).toMatchObject(REFUSED);
-
+    expect(await paused()).toHaveLength(2);
+    expect(made(await cloud.create("New")).paused).toBe(true);
     await cloud.restart();
-    expect((await cloud.bots()).map((bot) => bot.id).sort()).toEqual(seven);
-    expect(await cloud.create("New")).toMatchObject(REFUSED);
+    expect((await cloud.bots()).map((bot) => bot.id).filter((id) => seven.includes(id)).sort()).toEqual(seven);
+    expect(await paused()).toHaveLength(3);
 
     const pid = cloud.child!.pid;
     await cloud.tellPlan("pro");
-    expect((await cloud.config()).botLimit).toBeUndefined();
-    expect((await cloud.create("New")).status).toBe(201);
+    expect(await paused()).toEqual([]);
+    expect((await cloud.config()).awakeLimit).toBeUndefined();
+    expect(made(await cloud.create("Another")).paused).toBeUndefined();
     expect(cloud.child!.pid).toBe(pid);
   }, 120_000);
 
-  it("makes room when a bot is archived, and the MausBot never takes any", async () => {
-    await starter();
-    await cloud.fill(5);
-    const one = (await cloud.bots()).find((bot) => !bot.defaultBot);
-    expect((await cloud.api("PATCH", `/api/bots/${one.id}`, { hidden: true })).status).toBe(200);
-    expect((await cloud.create("In its place")).status).toBe(201);
-    expect(await cloud.create("And another")).toMatchObject(REFUSED);
-    expect((await cloud.bots()).filter((bot) => !bot.hidden)).toHaveLength(6);
-  }, 120_000);
-
-  it.each([["max"], ["personal"], ["team"]])("has no such limit on %s", async (tier) => {
+  it.each([["max"], ["personal"], ["team"]])("has no awake limit on %s", async (tier) => {
     await starter(tier);
-    expect((await cloud.config()).botLimit).toBeUndefined();
+    expect((await cloud.config()).awakeLimit).toBeUndefined();
     await cloud.fill(6);
-    expect((await cloud.api("POST", "/api/teams/import?mode=add", manifest("Desk"))).status).toBe(201);
+    expect(made(await cloud.api("POST", "/api/teams/import?mode=add", manifest("Desk")))).toBeTruthy();
+    expect(await paused()).toEqual([]);
   }, 120_000);
 
-  it("has no limit when the Admin never said a plan, whatever the machine", async () => {
+  it("has no awake limit when the Admin never said a plan, whatever the machine", async () => {
     cloud = new Cloud();
     await cloud.start();
     expect(await cloud.config()).toMatchObject({ cloudStarter: false });
-    expect((await cloud.config()).botLimit).toBeUndefined();
     await cloud.fill(6);
+    expect(await paused()).toEqual([]);
     expect(existsSync(join(cloud.dataDir, "cloud-plan-tier.json"))).toBe(false);
-  }, 120_000);
-
-  it("a Chief's create_bot works while there's room, up to the limit", async () => {
-    await starter();
-    await cloud.fill(4);
-    if (existsSync(cloud.dump)) unlinkSync(cloud.dump);
-    const { token, chief } = await cloud.chiefTurn();
-    const made = await cloud.internal("/api/internal/create-bot", token, { fromBotId: chief.id, fromThreadId: chief.threadId, name: "Fifth", role: "Specialist", instructions: "Work." });
-    expect(made.status, JSON.stringify(made.body)).toBe(201);
-    expect(made.body).toMatchObject({ state: "applied", name: "Fifth" });
-    const refused = await cloud.internal("/api/internal/create-bot", token, { fromBotId: chief.id, fromThreadId: chief.threadId, name: "Sixth", role: "Specialist", instructions: "Work." });
-    expect(refused).toMatchObject(REFUSED);
   }, 120_000);
 });

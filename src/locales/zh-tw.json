@@ -7520,6 +7520,8 @@
   "botLimit.paused.badge": "已暫停",
   "botLimit.paused.saveFailed": "無法儲存，請再試一次。",
   "botLimit.paused.chooseAction": "選擇保持運作的機器人（{count} 個已暫停）",
+  "botLimit.created.title": "已建立 {name}，暫時暫停",
+  "botLimit.created.body": "Starter 只讓 {count} 個機器人保持運作，所以這個已暫停。選擇要保持運作的 {count} 個，或升級以喚醒全部。",
   "roomCard.restartNow": "立即重新啟動",
   "roomCard.restartHint": "大約需要一分鐘，並會停止目前正在執行的工作。",
   "roomCard.restarting": "正在以新的大小重新啟動這個 Cloud，大約一分鐘後就會恢復。",

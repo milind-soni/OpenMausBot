@@ -26,13 +26,13 @@ export async function createConfiguredBot(
   approvals = desktopApprovalBridge(),
   visibility?: BotVisibility,
   reportsTo?: string,
-): Promise<{ bot: Bot; warnings: string[] }> {
+): Promise<{ bot: Bot; warnings: string[]; paused?: true }> {
   const template = await preparedBotTemplate(draft);
   const { chiefOfStaff, managedSections, toolScope, modelSelection, ...profile } = template.profile;
   if (!profile.name?.trim()) throw new Error(t("newBot.nameRequired"));
   const preset = draft.preset;
   const chosenAi = modelSelection?.instanceId && modelSelection.model ? { modelSelection, requireAvailableModel: true } : {};
-  const response = await request<{ bot: Bot }>("/api/bots", {
+  const response = await request<{ bot: Bot; paused?: true }>("/api/bots", {
     method: "POST", body: JSON.stringify({ name: profile.name, title: profile.title,
       description: profile.description, ...chosenAi, section: profile.section,
       useDefaults: false, ...(visibility !== undefined ? { visibility } : {}), ...(reportsTo ? { reportsTo } : {}),
@@ -100,5 +100,5 @@ export async function createConfiguredBot(
     try { await request(`/api/routines/${routine.id}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) }); }
     catch (error) { warnings.push(t("newBot.warning.routine", { error: error instanceof Error ? error.message : String(error) })); }
   }
-  return { bot, warnings };
+  return { bot, warnings, ...(response.paused ? { paused: true as const } : {}) };
 }
