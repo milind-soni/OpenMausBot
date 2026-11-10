@@ -18,10 +18,16 @@ const DAY = 24 * 3_600_000;
 
 async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
   const client = await ctx.client();
-  const [rawHealth, models] = await Promise.all([client.tool("get_system_health", {}), client.tool("list_available_models", {})]);
+  // A shared server lets a local caller without a session count its engines, not list them: in the server's container
+  // (`docker compose exec omb openmausbot doctor`, as deploy/update.sh runs it) that count is the answer.
+  const counted = (refusal: unknown) => (refusal as { status?: unknown })?.status === 403
+    ? client.json<Rec>("/api/health/engines").then((answer) => ({ counted: Number(answer?.engines) || 0 }), () => Promise.reject(refusal))
+    : Promise.reject(refusal);
+  const [rawHealth, models] = await Promise.all([client.tool("get_system_health", {}), client.tool("list_available_models", {}).catch(counted)]);
   const health = { ...rawHealth, endpoint: client.baseUrl };
   const instances: Rec[] = Array.isArray(models?.instances) ? models.instances : [];
   const availableEngines = instances.filter((instance) => instance.snapshot?.state === "available").map((instance) => instance.instanceId);
+  const availableCount = typeof models?.counted === "number" ? models.counted : availableEngines.length;
   const quietly = <T>(read: Promise<T>) => read.catch(() => null);
   const [server, session, config] = await Promise.all([
     quietly(client.json<Rec>("/.well-known/openmausbot/environment")),
@@ -34,19 +40,19 @@ async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
   if (!isOmb) problems.push(`${client.baseUrl} answered, but it is not OpenMausBot`);
   const tooOld = Boolean(server) && server!.capabilities?.jobs !== true;
   if (tooOld) problems.push(`OpenMausBot ${server!.version ?? "(unknown version)"} is too old for the headless commands: it cannot report a conversation's job`);
-  if (isOmb && !availableEngines.length) problems.push("no engine is available: set one up with `openmausbot engine set KIND --key-env VAR`");
+  if (isOmb && !availableCount) problems.push("no engine is available: set one up with `openmausbot engine set KIND --key-env VAR`");
   if (session?.kind === "session" && typeof session.expiresAt === "number" && session.expiresAt - Date.now() < 14 * DAY) {
     warnings.push(`this session expires in ${Math.max(0, Math.floor((session.expiresAt - Date.now()) / DAY))} days: get a new one with openmausbot connect`);
   }
   const browser = config?.browserEngine ?? null;
   if (browser && browser.kind !== "engine") warnings.push(`bots have no built-in browser here: ${browser.reason ?? "not installed"}${browser.installable ? " (install it with `openmausbot browser install`)" : ""}`);
-  const ok = isOmb && !tooOld && availableEngines.length > 0;
+  const ok = isOmb && !tooOld && availableCount > 0;
   const who = !session ? "unknown" : session.kind === "loopback"
     ? `this computer${session.trust === "service" ? " (as a local service, not the owner)" : " (the owner)"}`
     : `session "${session.label || "unnamed"}" with ${Array.isArray(session.scopes) && session.scopes.includes("admin") ? "full access" : "chat access"}${typeof session.expiresAt === "number" ? `, until ${new Date(session.expiresAt).toISOString().slice(0, 10)}` : ""}`;
   return {
     result: {
-      ok, health, availableEngines, instances,
+      ok, health, availableEngines, availableEngineCount: availableCount, instances,
       server: server ? { version: server.version, label: server.label, environmentId: server.environmentId, capabilities: server.capabilities } : null,
       session: session ? { kind: session.kind, ...(session.label !== undefined ? { label: session.label } : {}), scopes: session.scopes,
         ...(session.expiresAt !== undefined ? { expiresAt: session.expiresAt } : {}), ...(session.trust ? { trust: session.trust } : {}) } : null,
@@ -56,7 +62,7 @@ async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
     human: [
       `${server ? `OpenMausBot ${server.version} ("${server.label}")` : "OpenMausBot"} at ${client.baseUrl}: ${ok ? "ready" : "not ready"}`,
       `You are: ${who}`,
-      `Engines available: ${availableEngines.length ? availableEngines.join(", ") : "none"}`,
+      `Engines available: ${availableEngines.length ? availableEngines.join(", ") : availableCount ? `${availableCount} (which ones needs a session)` : "none"}`,
       ...(browser ? [`Bots' browser: ${browser.kind === "engine" ? `installed${browser.version ? ` (${browser.version})` : ""}` : "not available"}`] : []),
       ...problems.map((line) => `problem: ${line}`),
       ...warnings.map((line) => `warning: ${line}`),
