@@ -399,7 +399,7 @@ the person's picture from their team profile, or their initial when they have no
 
 | Route | Who | What |
 |---|---|---|
-| `GET /api/team/people` | any member | the members the Admin has paired here (`team-people.json`), each `{email, name, role, you?, pictureUrl?}` |
+| `GET /api/team/people` | any member | the members the Admin has paired here (`team-people.json`), each `{email, name, role, you?, pictureUrl?, here}` (below, "Who is here") |
 | `GET /api/team/people/<person>/picture?v=<version>` | the team's members | that member's picture (`<person>` is their person key). `pictureUrl` names it, and its `v` changes whenever they change it; it is revalidated on every use (`private, no-cache` with an ETag). A session that isn't a member of this team gets 403, anything off a team or not a current member's picture 404 |
 | `PUT /api/bots/<id>/reports-to {email}` | an Admin, or the bot's owner handing it over | one bot's owner; `null` hands it back to its creator |
 | `PUT /api/team/reports-to {botIds, email}` | an Admin | "Set who looks after all bots…" on a department |
@@ -628,6 +628,40 @@ leaves takes their inbox with them.
 On a My Cloud and on a desktop there are no team people: the @ list shows bots, `@you` and the profile name tag the one
 person as before, and `message_person` and the inbox do not exist.
 
+## Who is here
+
+The sidebar's People puts a dot on the face of each teammate who is here now, and lists them first after you; a
+screen reader hears *"Write to Ada. Here now"*. A bot's shared chat and a group chat show at the right of their header
+the faces of the others who have that conversation open right now (*"Ada and Ben have this open"* to a screen reader).
+A private chat shows none of it. Nothing says when someone was last here, and nothing says who is typing.
+
+- **Here.** A person is here while one of their sessions has the event stream open (`GET /api/events`), or a window of
+  theirs said so in the last 45 seconds, and for 45 seconds after the last of those ends, so a reconnect or a phone in
+  the background for a moment changes nothing. It is kept in memory only (`server/team-presence.ts`) and nothing about
+  it is written to disk. A restart forgets who was here until their apps reconnect.
+- **What the app sends.** `POST /api/presence/here {tab, threadId}` (any team session): `tab` is the window's own id,
+  `threadId` the conversation it shows, or null for none, a hidden window or a private chat. It is sent when the
+  conversation changes and every minute while the window shows. A window not heard from for about three minutes no
+  longer shows anything.
+- **What comes back.** `GET /api/team/people` gives each person `here`. On the event stream, outside the replay buffer
+  (frames with no `id`): `team.presence {email, here}` to everyone signed in, at most one every 5 seconds per person,
+  with the state it ends in, and `thread.presence {threadId, people}` to the people listed, at most one a conversation
+  every 0.75 seconds. `team.people` (replayed, like any frame) says someone joined, left or changed role: the app reads
+  the people and its own session again, so a role the Admin changed shows without reopening the team. A stream that
+  reconnects without its replay reads the people again and sends its window again. Types: `shared/team-presence.ts`.
+- **Private means private.** A conversation counts only when more than one person can read it (the team's or a group
+  chat's audience, with nobody's own MausBot in it) and the person sending can read it; anything else, a private chat
+  above all, is taken as no conversation and is never kept. Each list is checked again as it is sent, against who may
+  read the conversation then (`VisibleSet.thread`). So nobody, the Owner and every Admin included, learns from
+  presence that a person has a private chat open, which bot they talk to privately, or that a private chat exists: that
+  person only counts as here. `server/cloud-team-presence.e2e.test.ts` proves it from a member's and an admin's side.
+- **The People list itself** says *"Loading people…"* while it loads and *"Couldn't load people"* with **Try again** when
+  it cannot, and at phone width choosing a person closes the full-screen list.
+- **Older apps and servers.** A server that sends no `here` on the people list gets no `POST /api/presence/here` and the
+  app shows nothing of this; an older app on a newer server still counts as here by its stream and ignores the frames.
+
+On a My Cloud and on a desktop there is one person: no People list, no presence, nothing sent.
+
 ## What is not closed here
 
 - **Saved logins per member.** A login saved from a sign-in card is the team's (an Admin saves it, for every bot in the
@@ -639,6 +673,9 @@ person as before, and `message_person` and the inbox do not exist.
   team's sign-in files in each engine home, above); a member cannot sign an engine in as themselves, by design.
 - **A roster read from the Admin.** Without the Admin's `member-left` request (above), removal takes effect within the
   hour, and nothing is deleted.
+- **Someone invited who never opened the team.** The machine first learns of a member at their first pairing, so until
+  then they are in no People list, and nothing says they joined (`team.people`): the Admin sends no roster and no
+  "joined" of its own.
 - **Engine homes without a box, and engines outside the list.** Without the bot box (bubblewrap refused, or switched
   off) a shell reaches every file of the server's user, engine homes included; only the box keeps them apart. An engine
   whose sign-in file is not named in `engine-homes/layout.ts` starts signed out in every audience's home. Engines
