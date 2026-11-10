@@ -27,6 +27,21 @@ describe("the display a headless bot browser reports", () => {
     expect(await displayScreen("desktop", { platform: "linux", env: { DISPLAY: ":0", GDK_SCALE: "2" }, runCommand: answering(xrandr) })).toEqual({ width: 1920, height: 1080, deviceScaleFactor: 2 });
   });
 
+  it("takes an X display's scale from Xft.dpi when GDK_SCALE is not set, as Cinnamon, GNOME and KDE set it", async () => {
+    const xrandr = "Screen 0: minimum 8 x 8, current 3840 x 2160\nDP-1 connected primary 3840x2160+0+0 (normal left inverted right x axis y axis) 600mm x 340mm\n";
+    const desktop = (xrdb: string | Error) => async (file: string) => {
+      if (file === "xrandr") return xrandr;
+      if (xrdb instanceof Error) throw xrdb;
+      return xrdb;
+    };
+    const linux = (xrdb: string | Error, env: NodeJS.ProcessEnv = { DISPLAY: ":0" }) => displayScreen("desktop", { platform: "linux", env, runCommand: desktop(xrdb) });
+    expect(await linux("*customization:\t-color\nXft.dpi:\t192\nXft.antialias:\t1\n")).toEqual({ width: 1920, height: 1080, deviceScaleFactor: 2 });
+    expect(await linux("Xft.dpi: 144\n")).toEqual({ width: 2560, height: 1440, deviceScaleFactor: 1.5 });
+    expect(await linux("Xft.dpi:\t96\n")).toEqual({ width: 3840, height: 2160, deviceScaleFactor: 1 });
+    expect(await linux("*customization:\t-color\n")).toEqual({ width: 3840, height: 2160, deviceScaleFactor: 1 });
+    expect(await linux(new Error("no xrdb"))).toEqual({ width: 3840, height: 2160, deviceScaleFactor: 1 });
+  });
+
   it("is a declared 1920x1080 at 1x on a server or in a container, and when the desktop cannot be read", async () => {
     const never = async () => { throw new Error("should not run"); };
     expect(await displayScreen("server", { platform: "linux", env: {}, runCommand: never })).toEqual(SERVER_SCREEN);
