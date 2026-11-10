@@ -33852,7 +33852,10 @@
       "secretCard.modelgo.description": "b09e97c010524be77e50e4429d199218a3a3199a187f3edbacd81c9c661b1439",
       "native.teamLink.otherTitle": "d160e3032fd4f4fedabfad5fc84852563d0cf85dcdbf92e82f9a06359a8d8522",
       "native.teamLink.otherDetail": "11b8a9828b4afd5d0e6aef778751b00fe688893eee2e81e9865e834f21f8391d",
-      "native.teamLink.signIn": "bdfe6b9bdb9f911ecbe705d31d1dcc1b58295c05617c16d8b743cffa8084c2e0"
+      "native.teamLink.signIn": "bdfe6b9bdb9f911ecbe705d31d1dcc1b58295c05617c16d8b743cffa8084c2e0",
+      "composer.queued.stopAndSend": "87c1a8d4e59f78757cd4549151cb0d736016067816c2ff780b121616144f9331",
+      "composer.queued.stopAndSendAll": "58414c1551260488f933d956477c5fef7a27cbcf9ed1614b688bb81b79fe4350",
+      "composer.queued.stopAndSendNext": "02338a95dff6690ac551c64e81e1765afc5e69326918bca87ee64b189e074a6e"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -51346,7 +51349,10 @@
       "automations.run.waitingOnTeam": "9765029257ea4e83e5f94c3e6d2dd37e11b5aa9459e50eeb878aaba8fbecd833",
       "botLimit.created.title": "c8ed0785d466a4784db1862131dd84767f22eefd5ef7edabf794ae5a328df0f7",
       "botLimit.created.body": "5ab519ffccc837cc76b1e1c3437077b4f997add4e7226556ab395ebfd62074d8",
-      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2"
+      "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
+      "composer.queued.stopAndSend": "87c1a8d4e59f78757cd4549151cb0d736016067816c2ff780b121616144f9331",
+      "composer.queued.stopAndSendAll": "58414c1551260488f933d956477c5fef7a27cbcf9ed1614b688bb81b79fe4350",
+      "composer.queued.stopAndSendNext": "02338a95dff6690ac551c64e81e1765afc5e69326918bca87ee64b189e074a6e"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
