@@ -20,6 +20,7 @@ import { revealPhonePairing } from "../lib/phone-pairing";
 import { PhonesList } from "./PhonesList";
 import { PairedPhones } from "./PairedPhones";
 import { Card, Switch } from "./SettingsPrimitives";
+import { openExternalLink } from "../lib/app-links";
 import { productName } from "../lib/brand";
 import { useStore } from "@/state/store";
 
@@ -424,7 +425,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
                     </button>
                   )}
                   {tailscaleStatus.kind === "not-installed" && (
-                    <a href="https://tailscale.com/download" target="_blank" rel="noreferrer" className={button}>{t("remote.tailscale.getIt")}</a>
+                    <button type="button" className={button} onClick={() => void openExternalLink("https://tailscale.com/download")}>{t("remote.tailscale.getIt")}</button>
                   )}
                   {tailscaleStatus.kind === "signed-out" && (
                     <button type="button" className={button} disabled={c.busy || c.accountBusy} onClick={() => void c.act((companion) => setCompanionTailscale(companion, true))}>
