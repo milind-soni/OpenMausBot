@@ -271,5 +271,49 @@ describe("Mola provider", () => {
     });
   });
 
+  describe("copyToMola large file command generation", () => {
+    it("generates valid bash commands with paths containing spaces, quotes, and special chars", async () => {
+      const { execSync } = await import("node:child_process");
+      const { mkdtempSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+      
+      const tempDir = mkdtempSync(join(tmpdir(), "mola-test-"));
+      
+      try {
+        const testCases = [
+          { name: "file with spaces.txt", content: "hello spaces" },
+          { name: "file'with'quotes.txt", content: "hello quotes" },
+          { name: "file$with$dollar.txt", content: "hello dollar" },
+          { name: "file with spaces and 'quotes' and $dollar.txt", content: "complex" },
+        ];
+        
+        for (const { name, content } of testCases) {
+          const b64Part1 = join(tempDir, "part1.b64");
+          const b64Part2 = join(tempDir, "part2.b64");
+          const dest = join(tempDir, name);
+          
+          const base64Content = Buffer.from(content).toString("base64");
+          const mid = Math.floor(base64Content.length / 2);
+          const chunk1 = base64Content.slice(0, mid);
+          const chunk2 = base64Content.slice(mid);
+          
+          writeFileSync(b64Part1, chunk1);
+          writeFileSync(b64Part2, chunk2);
+          
+          const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
+          const command = `set -o pipefail; cat ${shellQuote(b64Part1)} ${shellQuote(b64Part2)} | base64 -d > ${shellQuote(dest)}`;
+          
+          execSync(command, { shell: "/bin/bash", cwd: tempDir });
+          
+          const result = readFileSync(dest, "utf8");
+          expect(result).toBe(content);
+        }
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
 });
 

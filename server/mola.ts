@@ -865,3 +865,136 @@ export async function molaAction(cfg: AppConfig, machineId: string, actionPayloa
     content: [{ type: "text" as const, text: JSON.stringify({ ok: true, data: body?.data }) }],
   };
 }
+
+const MOLA_WRITE_FILE_CHUNK_SIZE = 900 * 1024;
+
+function isStrictUtf8(buf: Buffer): boolean {
+  return Buffer.equals(buf, Buffer.from(buf.toString("utf8"), "utf8"));
+}
+
+export async function copyFromMola(
+  cfg: AppConfig,
+  machineId: string,
+  remotePath: string,
+  signal: AbortSignal,
+): Promise<{ content: Buffer } | { error: string }> {
+  const apiUrl = getMolaApiUrl(cfg);
+  const resource = resourcePath(apiUrl);
+  
+  const res = await molaFetch(cfg, `/${resource}/${machineId}/actions`, {
+    method: "POST",
+    body: JSON.stringify({ action: "read_file", path: remotePath }),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+  });
+  
+  const body: any = await res.json().catch(() => null);
+  
+  if (!res.ok || !body?.data?.content_base64) {
+    const errorMessage = body?.message || body?.error || "Failed to read file from Mola";
+    return { error: errorMessage };
+  }
+  
+  try {
+    const content = Buffer.from(body.data.content_base64, "base64");
+    return { content };
+  } catch (err) {
+    return { error: `Failed to decode file content: ${String(err)}` };
+  }
+}
+
+export async function copyToMola(
+  cfg: AppConfig,
+  machineId: string,
+  content: Buffer,
+  remotePath: string,
+  signal: AbortSignal,
+): Promise<{ ok: boolean } | { error: string }> {
+  const apiUrl = getMolaApiUrl(cfg);
+  const resource = resourcePath(apiUrl);
+  const isCloud = isCloudApi(apiUrl);
+  
+  if (isCloud) {
+    const isText = isStrictUtf8(content);
+    
+    if (isText && content.length < MOLA_WRITE_FILE_CHUNK_SIZE) {
+      const res = await molaFetch(cfg, `/${resource}/${machineId}/actions`, {
+        method: "POST",
+        body: JSON.stringify({ action: "write_file", path: remotePath, content: content.toString("utf8") }),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+      });
+      
+      const body: any = await res.json().catch(() => null);
+      
+      if (!res.ok) {
+        return { error: body?.message || body?.error || "Failed to write file to Mola" };
+      }
+      
+      return { ok: true };
+    }
+    
+    const base64 = content.toString("base64");
+    const chunkSize = MOLA_WRITE_FILE_CHUNK_SIZE;
+    const chunks: string[] = [];
+    
+    for (let i = 0; i < base64.length; i += chunkSize) {
+      const end = Math.min(i + chunkSize, base64.length);
+      let chunk = base64.slice(i, end);
+      if (chunk.length % 4 !== 0) {
+        const nextMultiple = Math.ceil(chunk.length / 4) * 4;
+        chunk = base64.slice(i, i + nextMultiple);
+      }
+      chunks.push(chunk);
+    }
+    
+    const tempFiles: string[] = [];
+    for (let idx = 0; idx < chunks.length; idx++) {
+      const tempPath = `/tmp/mola-upload-${Date.now()}-${idx}.b64`;
+      tempFiles.push(tempPath);
+      
+      const res = await molaFetch(cfg, `/${resource}/${machineId}/actions`, {
+        method: "POST",
+        body: JSON.stringify({ action: "write_file", path: tempPath, content: chunks[idx] }),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+      });
+      
+      const body: any = await res.json().catch(() => null);
+      
+      if (!res.ok) {
+        for (const tf of tempFiles) {
+          await runCommand(cfg, machineId, `rm -f ${shellQuote(tf)}`, { timeoutMs: 10_000, signal }).catch(() => {});
+        }
+        return { error: body?.message || body?.error || `Failed to write chunk ${idx}` };
+      }
+    }
+    
+    const catCmd = tempFiles.map(shellQuote).join(" ");
+    const command = `set -o pipefail; cat ${catCmd} | base64 -d > ${shellQuote(remotePath)}`;
+    
+    const result = await runCommand(cfg, machineId, isolatedRemoteCommand(command), { timeoutMs: 50_000, signal });
+    
+    for (const tf of tempFiles) {
+      await runCommand(cfg, machineId, `rm -f ${shellQuote(tf)}`, { timeoutMs: 10_000, signal }).catch(() => {});
+    }
+    
+    if (!result.ok) {
+      await runCommand(cfg, machineId, `rm -f ${shellQuote(remotePath)}`, { timeoutMs: 10_000, signal }).catch(() => {});
+      return { error: `Failed to decode and write file: exit ${result.exitCode}` };
+    }
+    
+    return { ok: true };
+  } else {
+    const res = await molaFetch(cfg, `/${resource}/${machineId}/actions`, {
+      method: "POST",
+      body: JSON.stringify({ action: "write_file", path: remotePath, content_base64: content.toString("base64") }),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+    });
+    
+    const body: any = await res.json().catch(() => null);
+    
+    if (!res.ok) {
+      return { error: body?.message || body?.error || "Failed to write file to Mola" };
+    }
+    
+    return { ok: true };
+  }
+}

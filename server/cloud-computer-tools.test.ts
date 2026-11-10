@@ -227,12 +227,12 @@ describe("cloud computer tools", () => {
       expect(result).toEqual({ isError: true, content: [{ type: "text", text: "Background process status checking (exec_status) is not supported on Mola because Mola does not support background command execution." }] });
     });
 
-    it("returns clear unsupported errors for file copy operations on Mola", async () => {
+    it("requires a working folder for file copy operations", async () => {
       const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "copy_from_computer", arguments: { path: "/tmp/file.txt" } } }, {
         cfg, boxId: () => "ml_test123", signal: new AbortController().signal, assertActive: () => {}, provider: "mola",
         gate: async () => ({ held: false }),
       });
-      expect(result).toEqual({ isError: true, content: [{ type: "text", text: "File copy operations (copy_from_computer, copy_to_computer) are not supported on Mola. Use exec with shell commands to transfer files." }] });
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: "This turn has no working folder to copy into or out of." }] });
     });
 
     it("returns clear unsupported errors for drag on Mola", async () => {

@@ -88,10 +88,39 @@ export async function runCloudComputerTool(
   if (problem) return { isError: true, content: [{ type: "text", text: problem }] };
   signal.throwIfAborted();
   if (COPY_TOOLS.has(name)) {
-    if (provider === "mola") {
-      return { isError: true, content: [{ type: "text", text: "File copy operations (copy_from_computer, copy_to_computer) are not supported on Mola. Use exec with shell commands to transfer files." }] };
-    }
     if (!folder) return { isError: true, content: [{ type: "text", text: "This turn has no working folder to copy into or out of." }] };
+    
+    if (provider === "mola") {
+      if (name === "copy_from_computer") {
+        const { path, to } = args as { path: string; to?: string };
+        const result = await mola.copyFromMola(cfg, boxId, path, signal);
+        if ("error" in result) return { isError: true, content: [{ type: "text", text: result.error }] };
+        
+        const destName = to || path.split("/").pop() || "file";
+        const destPath = require("node:path").join(folder, destName);
+        try {
+          await require("node:fs/promises").writeFile(destPath, result.content);
+          return { content: [{ type: "text", text: JSON.stringify({ path: destName, bytes: result.content.length }) }] };
+        } catch (err) {
+          return { isError: true, content: [{ type: "text", text: `Failed to write to working folder: ${String(err)}` }] };
+        }
+      } else {
+        const { from, path } = args as { from: string; path: string };
+        const sourcePath = require("node:path").join(folder, from);
+        let content: Buffer;
+        try {
+          content = await require("node:fs/promises").readFile(sourcePath);
+        } catch (err) {
+          return { isError: true, content: [{ type: "text", text: `Failed to read from working folder: ${String(err)}` }] };
+        }
+        
+        const result = await mola.copyToMola(cfg, boxId, content, path, signal);
+        if ("error" in result) return { isError: true, content: [{ type: "text", text: result.error }] };
+        
+        return { content: [{ type: "text", text: JSON.stringify({ path, bytes: content.length }) }] };
+      }
+    }
+    
     const copied = name === "copy_from_computer"
       ? await copyFromComputer(cfg, boxId, folder, args as { path: string; to?: string }, signal)
       : await copyToComputer(cfg, boxId, folder, args as { from: string; path: string }, signal);
@@ -169,7 +198,7 @@ async function runMolaAction(cfg: AppConfig, boxId: string, name: string, args: 
     case "get_screen_size":
       return { isError: true, content: [{ type: "text", text: "get_screen_size is not supported on Mola. Use screenshot to see the current desktop dimensions." }] };
     case "drag":
-      return { isError: true, content: [{ type: "text", text: "Drag operations are not supported on Mola. Use move, click with mousedown/mouseup, or exec with xdotool commands as a workaround." }] };
+      return { isError: true, content: [{ type: "text", text: "Drag operations are not supported on Mola. Use exec with xdotool commands as a workaround." }] };
     case "open_url":
       return { isError: true, content: [{ type: "text", text: "open_url is not supported on Mola. Use exec to launch a browser with the URL as a command-line argument." }] };
     default:
