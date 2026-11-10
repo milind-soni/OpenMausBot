@@ -9,7 +9,7 @@ passphrase, and never runs an agent remotely.
 ## Choosing the backend
 
 The published [Your own VPS guide](https://docs.openmausbot.com/docs/computers/byo-vps)
-shows the setup steps and configuration fields. In 0.1.151, the Simple layout can
+shows the setup steps and configuration fields. In 0.1.151 and 0.1.152, the Simple layout can
 hide the backend selector for an existing bot (#5225; selector fix #5228). The guide
 includes a stopped-app `bots.json` workaround for affected builds. Do not look for
 an Advanced-only Access page in that layout.
@@ -96,7 +96,7 @@ Host my-vps
 The app-level alias (Settings → API keys) is the default server for every bot. A bot can also be pointed at
 its own alias through the `vpsAlias` field in `bots.json`; omit the field to use the default.
 The older Advanced layout exposes this as Bot Settings → Access → **Server (SSH alias)**.
-For 0.1.151’s Simple-only layout, follow the stopped-app workaround in the published guide.
+If the selector is missing, follow the stopped-app workaround in the published guide.
 The bot's own server then wins for everything
 that matters to that bot — provisioning, status checks, previews, screenshots, watched desktop sessions, its
 computer tools, and deletion cleanup. The Settings inventory spans every server in play and tags each

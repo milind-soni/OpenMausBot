@@ -1,6 +1,6 @@
 ---
 title: Your own VPS (BYO)
-description: Use a Docker desktop on your Linux server as a bot’s computer, with setup steps and the 0.1.151 selector workaround.
+description: Use a Docker desktop on your Linux server as a bot’s computer, with setup steps and the 0.1.151 and 0.1.152 selector workaround.
 icon: Server
 ---
 
@@ -44,14 +44,14 @@ needed. In **Let it choose** (Auto), the per-bot
 **Start VPS automatically** switch permits creating or waking that container;
 leave it off to reuse only an already-ready VPS.
 
-<Callout type="warn" title="Existing bots in 0.1.151">
+<Callout type="warn" title="Existing bots in 0.1.151 and 0.1.152">
   The Simple layout can hide this selector and show **Connect Boat first** even
   when your SSH alias works. A connected alias alone does not change the bot’s
   backend. The selector regression is tracked in [#5225](https://github.com/milind-soni/OpenMausBot/issues/5225),
   with the UI fix in [#5228](https://github.com/milind-soni/OpenMausBot/pull/5228).
   If your installed build still lacks the selector, use the stopped-app workaround
   below. The older **Bot Settings → Access → Server (SSH alias)** directions do
-  not apply to that Simple-only layout.
+  not apply to that layout.
 </Callout>
 
 <div className="mx-auto max-w-xs">
