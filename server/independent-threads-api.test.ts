@@ -242,16 +242,16 @@ describe("independent bot tasks through the isolated control surface", () => {
     ]);
 
     writeFileSync(modelFile(models[1], "gate"), "finish");
-    await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("completed");
-    const result: string = handoff()!.result;
-    expect(result.startsWith("[OpenMausBot: nobody answered the approval for “Bash: npm run release-check” in time, so it did not run. Do not report it as done;")).toBe(true);
-    expect(result).toContain("reply to:");
-    expect(result).not.toContain("git push");
-    expect(result).not.toContain("npm run lint");
+    await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("waiting");
+    const question = handoff()!.question ?? "";
+    expect(question).toContain("“Bash: npm run release-check”");
+    expect(question).not.toContain("git push");
+    expect(question).not.toContain("npm run lint");
+    await expect.poll(async () => (await api("GET", `/api/threads/${workThread}/messages?limit=100`)).body.messages
+      .some((message: any) => message.card?.requestId?.startsWith("needs-input-") && message.card.options?.includes("Try again"))).toBe(true);
     await expect.poll(async () => (await api("GET", `/api/threads/${chief.activeTaskId}/messages?limit=100`)).body.messages
-      .find((message: any) => message.roomRequest?.id === requestId && message.roomRequest.phase === "result")?.tool?.output ?? "")
-      .toContain("nobody answered the approval for “Bash: npm run release-check”");
-    evidence.push({ requestId, result: result.slice(0, 400) });
+      .some((message: any) => message.tool?.name?.includes("needs your input") && message.tool.name.includes("npm run release-check"))).toBe(true);
+    evidence.push({ requestId, question: question.slice(0, 400) });
   }, 60_000);
 
   it.each(["finish", "fail"] as const)("tells a delegating bot that its teammate's approval went unanswered, so the step did not run (turn ends: %s)", async (ending) => {
@@ -337,8 +337,8 @@ describe("independent bot tasks through the isolated control surface", () => {
     await expect.poll(() => unanswered.find((answer) => answer.id === "unanswered-room")).toMatchObject({ behavior: "deny", source: "timeout" });
     rmSync(expiry, { force: true });
     writeFileSync(modelFile(models[1], "gate"), "finish");
-    await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("completed");
-    expect(handoff()!.result.startsWith("[OpenMausBot: nobody answered the approval for “Bash: npm run release-check” in time, so it did not run.")).toBe(true);
+    await expect.poll(() => handoff()?.status, { timeout: 20_000 }).toBe("waiting");
+    expect(handoff()!.question).toContain("“Bash: npm run release-check”");
   }, 60_000);
 
   it("ends a one-way notice whose recipient thread was deleted before it started, without restarting the sender", async () => {

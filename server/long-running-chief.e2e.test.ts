@@ -264,7 +264,7 @@ it("carries a consult-and-implement job over several teammate turns, through a s
   expect(mainThreads).toMatchObject({ [f.clive.id]: job, [f.mira.id]: f.mira.activeTaskId, [f.eli.id]: f.eli.activeTaskId });
 }), hostTimeout(120_000));
 
-it("tells the Chief what happened to each approval: allowed, denied, or never answered and not run", () => chiefJob(async (f) => {
+it("tells the Chief what happened to each approval: allowed or denied, and parks a hand-off on the person when nobody answered", () => chiefJob(async (f) => {
   f.script(f.clive.id,
     { key: "B0", match: ["PHASE-APPROVALS-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "CHECK-HISTORY: check the export module's recent history." } }], reply: "B0: Mira is checking." },
     { key: "B1", match: [SETTLED, "HISTORY-RESULT"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "PUSH-BRANCH: push the export branch.", rework: true } }], reply: "B1: pushing." },
@@ -289,28 +289,30 @@ it("tells the Chief what happened to each approval: allowed, denied, or never an
   await f.respond(f.mira.id, work, await f.openCard(work), "deny");
   await expect.poll(() => f.child(job, f.mira.id, "RUN-TESTS")?.status, { timeout: 20_000 }).toBe("running");
   await f.openCard(work);
-  await f.expireApprovals(() => terminal(f.child(job, f.mira.id, "RUN-TESTS")?.status));
+  await f.expireApprovals(() => f.child(job, f.mira.id, "RUN-TESTS")?.status === "waiting");
+  const parked = f.child(job, f.mira.id, "RUN-TESTS");
+  expect(parked.question).toContain("“Bash: pnpm test”");
+  await expect.poll(async () => (await f.rows(job)).some((name: string) => name.startsWith("Mira needs your input") && name.includes("pnpm test")), { timeout: 20_000 }).toBe(true);
+  const ask = await f.openCard(work);
+  expect(ask.card).toMatchObject({ requestType: "question", options: ["Try again"] });
+  expect(ask.card.requestId).toMatch(/^needs-input-/);
+  expect((await f.api("POST", `/api/bots/${f.mira.id}/respond`, { threadId: work, requestId: ask.card.requestId, behavior: "answer", message: "Try again" })).status).toBe(200);
+  await f.respond(f.mira.id, work, await f.openCard(work), "deny");
   await f.final(job, "APPROVALS-FINAL");
 
-  expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual(["B0", "B1", "B2", "B3"]);
-  expect(f.turns(f.mira.id).map((record: any) => [record.planKey, record.approval?.behavior])).toEqual([["MA", "allow"], ["MB", "deny"], ["MC", "deny"]]);
-  const settled = (await f.rows(job)).filter((name: string) => name.includes("@Mira"));
-  expect(settled).toEqual(["@Mira got your approval", "@Mira's request was denied", "Nobody answered @Mira's approval in time — that step did not run"]);
+  expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual(expect.arrayContaining(["B0", "B1", "B2", "B3"]));
+  expect(f.turns(f.mira.id).map((record: any) => [record.planKey, record.approval?.behavior])).toEqual([["MA", "allow"], ["MB", "deny"], ["MC", "deny"], ["MC", "deny"]]);
+  const rows = await f.rows(job);
+  expect(rows).toEqual(expect.arrayContaining(["@Mira got your approval", "@Mira's request was denied", "Nobody answered @Mira's approval in time — that step did not run"]));
   expect(f.child(job, f.mira.id, "CHECK-HISTORY").result).toBe("HISTORY-RESULT: checked the history.");
   expect(f.child(job, f.mira.id, "PUSH-BRANCH").result).toBe("PUSH-RESULT: not pushed; the push was denied.");
-  const unanswered = "[OpenMausBot: nobody answered the approval for “Bash: pnpm test” in time, so it did not run. Do not report it as done; it needs the person's approval.]";
-  expect(f.child(job, f.mira.id, "RUN-TESTS")).toMatchObject({ status: "completed", result: `${unanswered}\n\nTESTS-RESULT: I could not run the tests.` });
-  expect(f.prompt(f.turn("B3"))).toContain(JSON.stringify(unanswered.replace(/^\[/, "(")).slice(1, -1));
+  expect(f.child(job, f.mira.id, "RUN-TESTS")).toMatchObject({ status: "completed", result: "TESTS-RESULT: I could not run the tests." });
   expect(f.prompt(f.turn("B3"))).toContain("[From @Mira (bot) · report on assignment ");
-  expect((await f.cards(work)).map((message: any) => [message.card.subtitle, message.card.answered, message.card.dismissed, message.card.answeredBy?.kind]))
-    .toEqual([["git log --oneline -5 -- src/export", "allow", false, "loopback"], ["git push origin export", "deny", false, "loopback"], ["pnpm test", "deny", true, undefined]]);
+  const cards = (await f.cards(work)).map((message: any) => [message.card.subtitle, message.card.answered, message.card.dismissed, message.card.answeredBy?.kind]);
+  expect(cards).toEqual(expect.arrayContaining([["git log --oneline -5 -- src/export", "allow", false, "loopback"], ["git push origin export", "deny", false, "loopback"], ["pnpm test", "deny", true, undefined]]));
   await expect.poll(() => f.notifications.some((notification: any) => notification.kind === "done"), { timeout: 10_000 }).toBe(true);
-  expect(f.notifications.map((notification: any) => [notification.kind, notification.body])).toEqual([
-    ["approval", "git log --oneline -5 -- src/export"],
-    ["approval", "git push origin export"],
-    ["approval", "pnpm test"],
-    ["done", expect.stringContaining("APPROVALS-FINAL")],
-  ]);
+  expect(f.notifications.some((notification: any) => notification.kind === "question" && String(notification.body).includes("pnpm test")), "the parked ask reaches the person").toBe(true);
+  expect(f.notifications.filter((notification: any) => notification.kind === "done").map((notification: any) => notification.body)).toEqual([expect.stringContaining("APPROVALS-FINAL")]);
 }), hostTimeout(120_000));
 
 it.each(["SIGTERM", "SIGKILL"] as const)("wakes the Chief after a restart cuts its teammates mid-job, and it reports (%s)", (signal) => chiefJob(async (f) => {

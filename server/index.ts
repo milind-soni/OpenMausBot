@@ -3823,7 +3823,7 @@ function runRoomNode(node: HandoffView, group: GroupRecord, bot: BotRecord, sign
     });
     groupQueues.set(node.threadId, tracked.catch(() => {}));
     tracked.then(
-      () => finish({ ok: result.outcome === "settled", text: result.stopReason || result.replyText || result.outcome || "The addressed agent could not run" }),
+      () => finish({ ok: result.outcome === "settled", text: result.stopReason || result.replyText || result.outcome || "The addressed agent could not run", ...(result.approvalAsk ? { approvalAsk: result.approvalAsk } : {}) }),
       error => finish({ ok: false, text: error instanceof Error ? error.message : String(error) }),
     );
   });
@@ -4772,7 +4772,7 @@ onSteeredQueueChange(() => broadcast({ kind: "bot.queued", queues: publicBotQueu
 // Keyed by threadId: provider item and request ids are unique only within a thread.
 const toolMessageByItem = new Map<string, string>();
 const askMessageByRequest = new Map<string, string>();
-const unansweredApprovals = new UnansweredApprovals();
+const unansweredApprovals = new UnansweredApprovals(); const approvalAsk = (botId: string | undefined, threadId: string, turnId: string | undefined): { approvalAsk?: string } => { const asked = botId ? unansweredApprovals.ask(threadId, turnId, store.bot(botId)?.name ?? "A teammate", threadLanguage(threadId)) : undefined; return asked ? { approvalAsk: asked } : {}; };
 // Only native, live permission metadata becomes a remembered grant, never an imported transcript or display summary.
 const pendingCommandRules = new Map<string, { botId: string; candidate: CommandAllowlistCandidate }>();
 
@@ -5070,7 +5070,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const text = event.ok ? reply || event.stopReason || "The bot finished without a text reply"
         : stoppedTurnText(event.threadId, event.turnId, undefined, event.stopReason);
       const handoffPath = event.ok ? undefined : turnStops.read(event.threadId, event.turnId)?.handoffPath;
-      const outcome: DirectTurnOutcome = { ok: event.ok, text: unansweredApprovals.annotate(event.threadId, event.turnId, text.slice(0, 12_000), event.ok),
+      const outcome: DirectTurnOutcome = { ok: event.ok, text: unansweredApprovals.annotate(event.threadId, event.turnId, text.slice(0, 12_000), event.ok), ...approvalAsk(store.botByThread(event.threadId)?.id, event.threadId, event.turnId),
         ...(handoffPath ? { cap: { note: STEP_CAP_NOTE, handoffPath } } : {}) };
       const owner = directFollowupTurns.complete(event.threadId, event.turnId, outcome);
       if (owner) {
@@ -9575,7 +9575,7 @@ type GroupTurnOrchestration = {
   turnNote?: string;
   turnRestartNote?: string;
   followMentions: boolean;
-  result: { replyText?: string; outcome?: GroupMemberTurnOutcome; stopReason?: string | null };
+  result: { replyText?: string; outcome?: GroupMemberTurnOutcome; stopReason?: string | null; approvalAsk?: string };
   onClaimed?: () => void;
   onTurnStarted?: (turnId: string) => void;
   coordination?: { id: string; settle: (outcome: HostTurnResult) => void };
@@ -10395,7 +10395,7 @@ async function runClaimedGroupMemberTurn(
   roomReply = unansweredApprovals.annotate(threadId, providerTurnId,
     (orchestration ? turnTexts.map((text) => `\n${text}`).join("") : replyText).trim(), outcome === "settled");
   if (orchestration) {
-    orchestration.result.replyText = roomReply;
+    orchestration.result.replyText = roomReply; Object.assign(orchestration.result, approvalAsk(bot.id, threadId, providerTurnId));
     orchestration.result.outcome = outcome;
   }
   // A timed-out provider owns the room thread until its interrupt produces turn.completed: do not start the next member early.
@@ -10592,7 +10592,7 @@ async function runClaimedGroupMemberTurn(
     // Covers every early return that never produces a provider terminal event.
     unregisterSetupStall();
     revokeInternalCapabilityGeneration(threadId, internalGeneration);
-    settleDirectCoordination(internalGeneration, { ok: roomOutcome === "settled", ...(roomOutcome === "stalled" || setupStallReason !== undefined ? { stalled: true } : {}),
+    settleDirectCoordination(internalGeneration, { ok: roomOutcome === "settled", ...(roomOutcome === "stalled" || setupStallReason !== undefined ? { stalled: true } : {}), ...(orchestration?.result.approvalAsk ? { approvalAsk: orchestration.result.approvalAsk } : {}),
       text: roomOutcome === "settled" ? roomReply : orchestration?.result.stopReason || setupStallReason || roomFailure || roomReply || roomOutcome || "The turn did not run" });
     if (!retainRoomVmLease) releaseRoomVmLease();
     if (!providerDispatched && roomSpeaker && groupSpeakers.get(threadId) === roomSpeaker) {

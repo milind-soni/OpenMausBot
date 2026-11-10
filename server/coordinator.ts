@@ -89,6 +89,8 @@ export interface HostTurnResult {
   cards?: { question: string; ids: string[] };
   /** The question it ends on stayed in one person's private chat: only that person can answer it. */
   privateQuestion?: boolean;
+  /** An approval this turn asked for went unanswered: handed-off work a person started parks on this question. Never a grant. */
+  approvalAsk?: string;
   /** The host's stall watchdog stopped the turn, including a room turn a stall ended during setup, before it had an
    * outcome: it failed as `stalled`, not as a provider error. */
   stalled?: boolean;
