@@ -1211,6 +1211,14 @@ describe("the word that Advanced mode is back, in the Simple mode popup's place"
     expect(later).not.toContain(TITLE); expect(later).not.toContain("data-simple-mode-prompt");
   });
 
+  it("never says so once the person has switched to Simple before it showed", async () => {
+    storage.set(SIMPLE_MODE_PROMPT_KEY, "1");
+    setAdvancedMode(false);
+    expect(await launch()).not.toContain(TITLE);
+    expect(events()).toEqual([]);
+    expect(storage.get(ADVANCED_BACK_KEY)).toBe("due");
+  });
+
   it("never shows where nothing was put back", async () => {
     storage.set(SIMPLE_MODE_PROMPT_KEY, "1");
     for (const back of ["seen", undefined]) {

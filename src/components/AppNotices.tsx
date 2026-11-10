@@ -15,6 +15,7 @@ import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismi
 import { useTwoPlaces } from "@/lib/two-places";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { useAdvancedBackDue, useNewLookDue } from "@/lib/new-look";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { useSimpleModePromptSeen } from "@/lib/simple-mode-prompt";
 import { reportWhatsNew, WHATS_NEW_SOURCES, whatsNewAudience, whatsNewView, type WhatsNewAction, type WhatsNewSlide } from "@/lib/whats-new";
 import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
@@ -148,7 +149,8 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   // Every page with the app's chrome, desktop or Cloud, new install or not: once per browser, as the mode is. With Simple
   // the only mode, its place goes to the word about the new look, only where Advanced was on; a browser put back on
   // Advanced gets the word that it is back there instead.
-  const promptSeen = useSimpleModePromptSeen(), newLookDue = useNewLookDue(), advancedBack = useAdvancedBackDue();
+  const promptSeen = useSimpleModePromptSeen(), newLookDue = useNewLookDue(), backDue = useAdvancedBackDue(), advanced = useAdvancedMode();
+  const advancedBack = backDue && advanced;
   const simpleDue = SIMPLE_ONLY ? newLookDue : advancedBack || !promptSeen;
   const simpleBlocked = useOtherDialogOpen(simpleDue) || Boolean(state.liveCall && state.liveCall.status !== "ended");
   const boatHere = boatOfferRuns(now()) && brandStatus().source !== "file";
