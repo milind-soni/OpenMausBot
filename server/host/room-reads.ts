@@ -125,6 +125,11 @@ export function createPersonRooms(deps: PersonRoomsDeps) {
     reads,
     groupForPerson,
     taskForPerson,
+    /** A deleted room's or conversation's read lines go with it. */
+    forgetDeleted(change: { type: string; groupId?: string; threadId?: string }): void {
+      if (change.type === "group.deleted" && change.groupId) reads?.forgetRoom(change.groupId);
+      else if (change.type === "thread.deleted" && change.threadId) reads?.forgetRoom(threadReadKey(change.threadId));
+    },
     groupForAuth: (auth: RequestAuth, group: WireGroup): WireGroup => groupForPerson(group, auth.kind === "session" ? personKey(auth.session) : null),
     /** A `group` frame as `person`'s own room (`frameOf` writes the stream's frame for a payload), kept in `ownGroups` for
      * the rest of that frame's streams; null when it is the room as it is. */

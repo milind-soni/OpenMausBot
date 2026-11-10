@@ -30,3 +30,14 @@ it("sends a team order frame as each person's own list", () => {
   expect(orders.ownOrderFrame("p_cleo", { kind: "bots.order", botIds: ["a", "b"] })).toBeNull();
   expect(orders.ownOrderFrame("p_ada", { kind: "bot", bot: {} })).toBeNull();
 });
+
+it("orders a User's own list only, never an admin's, and sends each stream its own", () => {
+  const orders = createPersonBotOrder(mkdtempSync(join(tmpdir(), "bot-orders-")));
+  const session = (scopes: string[]) => ({ kind: "session", scopes, session: { id: "s", email: "ada@acme.test" } }) as never;
+  const ada = orders.personOf(session(["client"]))!;
+  expect(orders.personOf(session(["admin", "client"])), "an admin's order is the team's").toBeNull();
+  orders.reorder(ada, fleet("a", "b"), ["b", "a"]);
+  const frame = { kind: "bots.order", botIds: ["a", "b"] };
+  expect(orders.streamFrame({ person: { id: "", email: "ada@acme.test" }, admin: false }, frame)).toEqual({ kind: "bots.order", botIds: ["b", "a"] });
+  expect(orders.streamFrame({ person: { id: "", email: "ada@acme.test" }, admin: true }, frame)).toBeNull();
+});
