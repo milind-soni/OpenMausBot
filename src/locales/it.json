@@ -1539,6 +1539,8 @@
   "updatesConsent.failed": "Non è stato salvato. Riprova.",
   "newLook.title": "{app} ora ha un aspetto più semplice",
   "newLook.body": "Tutto ciò che ti serve è ancora qui; le impostazioni meno usate sono in Impostazioni → Altre impostazioni.",
+  "advancedBack.title": "La modalità avanzata è tornata",
+  "advancedBack.body": "Questo dispositivo è di nuovo in modalità avanzata. Puoi disattivarla quando vuoi in Impostazioni → Generale.",
   "settings.updatesConsent.title": "Novità del prodotto via email",
   "settings.updatesConsent.subtitle": "Novità e consigli, circa due volte al mese. Puoi disiscriverti quando vuoi.",
   "settings.updatesConsent.to": "Inviata a {email}.",

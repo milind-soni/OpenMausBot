@@ -1736,6 +1736,8 @@
   "simpleModePrompt.where": "「設定 → 一般」でいつでも切り替えられます。",
   "newLook.title": "{app} の見た目がシンプルになりました",
   "newLook.body": "必要な機能はすべてそのままです。あまり使わない設定は「設定 → その他の設定」にあります。",
+  "advancedBack.title": "詳細モードが戻りました",
+  "advancedBack.body": "このデバイスは再び詳細モードになりました。「設定 → 一般」でいつでもオフにできます。",
   "settings.openAtLogin.title": "ログイン時に開く",
   "settings.openAtLogin.subtitle": "このコンピューターにサインインしたときに {app} を開きます。自分で開かなくても、ボットとルーティンがすぐ使える状態になります。",
   "settings.openAtLogin.failed": "変更できませんでした。もう一度試すか、システム設定の「ログイン項目」を確認してください。",

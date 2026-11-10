@@ -1107,6 +1107,8 @@
   "settings.analytics.aria": "Gửi dữ liệu phân tích sử dụng",
   "newLook.title": "{app} giờ có giao diện đơn giản hơn",
   "newLook.body": "Mọi thứ bạn cần vẫn ở đây; các cài đặt ít dùng nằm trong Cài đặt → Cài đặt khác.",
+  "advancedBack.title": "Chế độ nâng cao đã trở lại",
+  "advancedBack.body": "Thiết bị này lại đang ở chế độ nâng cao. Bạn có thể tắt bất cứ lúc nào trong Cài đặt → Chung.",
   "settings.updates.startingDownload": "Đang bắt đầu tải xuống…",
   "settings.updates.preparing": "Tải xuống hoàn tất. macOS đang chuẩn bị bản cập nhật.",
   "settings.updates.readyInstall": "{app} {version} đã sẵn sàng — hãy cài đặt trong terminal",

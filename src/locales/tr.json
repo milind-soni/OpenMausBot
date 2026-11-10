@@ -1107,6 +1107,8 @@
   "settings.analytics.aria": "Kullanım analitiği gönder",
   "newLook.title": "{app} artık daha sade görünüyor",
   "newLook.body": "İhtiyacınız olan her şey hâlâ burada; daha az kullanılan ayarlar Ayarlar → Diğer ayarlar bölümünde.",
+  "advancedBack.title": "Gelişmiş mod geri döndü",
+  "advancedBack.body": "Bu cihaz yeniden gelişmiş modda. İstediğiniz zaman Ayarlar → Genel bölümünden kapatabilirsiniz.",
   "settings.updates.startingDownload": "İndirme başlatılıyor…",
   "settings.updates.preparing": "İndirme tamamlandı. macOS güncellemeyi hazırlıyor.",
   "settings.updates.readyInstall": "{app} {version} hazır — bir terminalde yükleyin",

@@ -1889,6 +1889,8 @@
   "simpleModePrompt.where": "Switch any time in Settings → General.",
   "newLook.title": "{app} has a simpler look",
   "newLook.body": "Everything you need is still here; rarer settings are under Settings → More settings.",
+  "advancedBack.title": "Advanced mode is back",
+  "advancedBack.body": "This device is on Advanced mode again. Turn it off any time in Settings → General.",
   "settings.openAtLogin.title": "Open at login",
   "settings.openAtLogin.subtitle": "Open {app} when you sign in to this computer, so your bots and routines are ready without opening it yourself.",
   "settings.openAtLogin.failed": "Could not change this. Try again, or check Login Items in your system settings.",

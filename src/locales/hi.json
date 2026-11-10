@@ -607,6 +607,8 @@
   "settings.analytics.aria": "उपयोग विश्लेषण भेजें",
   "newLook.title": "{app} अब और सरल दिखता है",
   "newLook.body": "आपकी ज़रूरत की हर चीज़ अब भी यहीं है; कम इस्तेमाल होने वाली सेटिंग्स सेटिंग्स → और सेटिंग्स में हैं।",
+  "advancedBack.title": "एडवांस्ड मोड वापस आ गया है",
+  "advancedBack.body": "यह डिवाइस फिर से एडवांस्ड मोड में है। इसे कभी भी सेटिंग्स → सामान्य में बंद करें।",
   "settings.updates.startingDownload": "डाउनलोड शुरू हो रहा है…",
   "settings.updates.preparing": "डाउनलोड पूरा। macOS अपडेट तैयार कर रहा है।",
   "settings.updates.readyInstall": "{app} {version} तैयार है — टर्मिनल में इंस्टॉल करें",
