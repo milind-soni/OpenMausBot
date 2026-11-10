@@ -2,6 +2,7 @@
 // boxes reach through unix sockets (egress-gate.ts, harness-gate.ts), and wraps each bot spawn (server/procs.ts spawnCli
 // with owner "bot") in bubblewrap by the plan (plan.ts). Nothing here changes a spawn when the box is off: the command,
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -16,7 +17,7 @@ import { openBoxEgressGate, type BoxEgressGate } from "./egress-gate.ts";
 import { boxEnvironment } from "./env.ts";
 import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
 import { procHidepid } from "./hidepid.ts";
-import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
+import { machineSeccompBytes, seccompSupported, seccompTable } from "./seccomp.ts";
 import { RELAY_SOCKET_NAME, boxUploadsDir, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
 import { openBoxRelay, type BoxRelay } from "./relay.ts";
 
@@ -163,7 +164,7 @@ export interface BoxReport {
 export function writeSeccompFile(dir: string): string | null {
   if (!seccompSupported()) return null;
   const file = join(dir, "seccomp.bpf");
-  writeFileSync(file, seccompBytes(), { mode: 0o600 });
+  writeFileSync(file, machineSeccompBytes()!, { mode: 0o600 });
   return file;
 }
 
@@ -184,8 +185,21 @@ export interface StartOptions {
   log?: (line: string) => void;
   /** The server runs the hardened profile (server/server-profile.ts): boxed by default, as a Cloud home is. */
   hardened?: boolean;
+  /** HOME is a person's own, not the engines': its sign-ins are hidden from bots (plan.ts homeGuards). */
+  guardHome?: boolean;
   /** Overrides for tests. */
   detect?: (env: Record<string, string | undefined>) => BoxDetection;
+  disablesUserns?: (bwrap: string) => boolean;
+}
+
+/** Whether this bubblewrap has `--disable-userns` (0.8.0, Debian 12 and Ubuntu 24.04; Ubuntu 22.04 ships 0.6.1). */
+export function bwrapDisablesUserns(bwrap: string): boolean {
+  try {
+    const help = spawnSync(bwrap, ["--help"], { encoding: "utf8", timeout: 5_000 });
+    return `${help.stdout}${help.stderr}`.includes("--disable-userns");
+  } catch {
+    return false;
+  }
 }
 
 export function defaultCodeRoots(): string[] {
@@ -225,6 +239,8 @@ export class BotBox {
     this.harness = await openHarnessGate({ socketPath: harnessSocket, port: options.port });
     this.credentials = await openCredentialBroker({ socketPath: brokerSocket });
     this.seccompFile = writeSeccompFile(dir);
+    // A self-hosted server in the hardened profile; a Cloud home's boxes are as they were.
+    const noNestedUserns = options.hardened === true && (options.disablesUserns ?? bwrapDisablesUserns)(this.detection.tools.bwrap);
     const bridges: BoxBridge[] = [
       { name: "egress", port: BOX_EGRESS_PORT, socket: egressSocket },
       { name: "harness", port: options.port, socket: harnessSocket },
@@ -233,11 +249,12 @@ export class BotBox {
     this.runner = new BoxRunner({
       bwrap: this.detection.tools.bwrap,
       bridge: { socat: this.detection.tools.socat, bridgeScript: BOX_BRIDGE_SCRIPT, node: process.execPath },
-      setup: { dataDir: options.dataDir, home: options.home, codeRoots: options.codeRoots ?? defaultCodeRoots(), engineRoots: options.engineRoots ?? engineInstallRoots(options.dataDir), bridges },
+      setup: { dataDir: options.dataDir, home: options.home, codeRoots: options.codeRoots ?? defaultCodeRoots(), engineRoots: options.engineRoots ?? engineInstallRoots(options.dataDir), bridges, noNestedUserns, ...(options.guardHome ? { guardHome: true } : {}) },
       denyEnv: options.denyEnv, seccompFile: this.seccompFile,
       broker: { port: BOX_BROKER_PORT, mintForProcess: this.credentials.mintForProcess, revoke: this.credentials.revoke },
     });
     log(`bot box: on (bubblewrap, ${this.detection.tools.socat ? "socat" : "node"} bridges, credential broker, seccomp ${this.seccompFile ? "on" : "unsupported here"})`);
+    if (options.hardened && !noNestedUserns) log("bot box: this bubblewrap is older than 0.8 and cannot stop a bot from making user namespaces of its own; update bubblewrap to close that");
     return this.detection;
   }
 
@@ -275,11 +292,12 @@ export class BotBox {
    * Chrome on. bubblewrap's options before `--`; null when turns are not boxed here. */
   browserBox(seccompFd: number, ro: readonly string[]): { bwrap: string; options: string[]; seccomp: string | null } | null {
     if (!this.runner || !this.detection.tools) return null;
-    const setup = { ...this.runner.setup, engineRoots: [] };
+    const setup = { ...this.runner.setup, engineRoots: [], noNestedUserns: false };
     const seccomp = this.seccompFile && !setup.mutate?.has("no-seccomp") ? this.seccompFile : null;
     const plan = planBox({ ...setup, seccompFd: seccomp ? seccompFd : undefined }, { command: "chrome", args: [], env: {}, net: "shared", ro });
-    const home = resolve(setup.home), dataDir = resolve(setup.dataDir);
-    const mounts = plan.mounts.filter((mount) => !(mount.kind === "bind" && mount.target === home) && !(mount.kind === "tmpfs" && mount.target === dataDir));
+    const home = resolve(setup.home);
+    // The cover over the data folder stays: the system folders the box shows may hold it (`/var/lib`, `/opt`).
+    const mounts = plan.mounts.filter((mount) => !(mount.kind === "bind" && mount.target === home));
     return { bwrap: this.detection.tools.bwrap, options: bwrapArgs({ ...plan, mounts }), seccomp };
   }
 
@@ -300,7 +318,7 @@ export class BotBox {
       refused: { egress: this.egress?.refused ?? 0, harness: this.harness?.refused ?? 0 },
       broker: { on: this.credentials !== null, ...(this.credentials?.stats() ?? { tokens: 0, forwarded: 0, refused: 0 }), unbrokered: [...this.unbrokered].sort() },
       hardening: {
-        seccomp: this.runner ? (this.seccompFile ? "on" : "unsupported") : "off", denied: this.seccompFile ? DENIED_SYSCALLS.length : 0,
+        seccomp: this.runner ? (this.seccompFile ? "on" : "unsupported") : "off", denied: this.seccompFile ? seccompTable()?.denied.length ?? 0 : 0,
         hidepid: process.platform === "linux" && procHidepid(), flyApiPrivate: process.platform === "linux" && existsSync("/.fly") ? flyApiPrivate() : true,
       },
     };

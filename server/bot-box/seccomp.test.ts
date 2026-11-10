@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DENIED_SYSCALLS, SECCOMP_ARCH_X86_64, seccompBytes, seccompProgram, seccompSupported, simulate } from "./seccomp.ts";
+import { DENIED_SYSCALLS, DENIED_SYSCALLS_ARM64, SECCOMP_ARCH_AARCH64, SECCOMP_ARCH_X86_64, machineSeccompBytes, seccompBytes, seccompProgram, seccompSupported, seccompTable, simulate } from "./seccomp.ts";
 
 const denied = (name: string) => DENIED_SYSCALLS.find(([n]) => n === name)![1];
 
@@ -31,7 +31,24 @@ describe("the box's seccomp filter", () => {
   it("every denied number is unique and the filter is x86-64 Linux only", () => {
     expect(new Set(DENIED_SYSCALLS.map(([, nr]) => nr)).size).toBe(DENIED_SYSCALLS.length);
     expect(seccompSupported("x64", "linux")).toBe(true);
-    expect(seccompSupported("arm64", "linux")).toBe(false);
+    expect(seccompSupported("arm64", "linux")).toBe(true);
+    expect(seccompSupported("riscv64", "linux")).toBe(false);
     expect(seccompSupported("x64", "darwin")).toBe(false);
+  });
+
+  it("refuses the same calls on arm64, by arm64's own numbers, and never runs another architecture's process", () => {
+    const table = seccompTable("arm64")!;
+    const program = seccompProgram(table.denied, table.arch);
+    expect(table.arch).toBe(SECCOMP_ARCH_AARCH64);
+    for (const [name, nr] of DENIED_SYSCALLS_ARM64) expect(simulate(program, SECCOMP_ARCH_AARCH64, nr), name).toBe("eperm");
+    // read, write, openat, clone, execve, unshare, socket, connect, futex, clone3
+    for (const nr of [63, 64, 56, 220, 221, 97, 198, 203, 98, 435]) expect(simulate(program, SECCOMP_ARCH_AARCH64, nr), String(nr)).toBe("allow");
+    expect(simulate(program, SECCOMP_ARCH_X86_64, 0)).toBe("kill");
+    expect(new Set(DENIED_SYSCALLS_ARM64.map(([, nr]) => nr)).size).toBe(DENIED_SYSCALLS_ARM64.length);
+    // The same calls as x86-64, less the two port-I/O calls arm64 does not have.
+    expect(DENIED_SYSCALLS_ARM64.map(([name]) => name).sort()).toEqual(DENIED_SYSCALLS.map(([name]) => name).filter((name) => name !== "iopl" && name !== "ioperm").sort());
+    expect(machineSeccompBytes("arm64")).toEqual(seccompBytes(program));
+    expect(machineSeccompBytes("x64")).toEqual(seccompBytes());
+    expect(machineSeccompBytes("riscv64")).toBeNull();
   });
 });

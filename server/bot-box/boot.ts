@@ -27,10 +27,11 @@ export async function startBotBoxAtBoot(options: {
   delayMs?: number;
   /** The server runs the hardened profile: its turns are boxed unless OMB_BOT_BOX says no. */
   hardened?: boolean;
+  guardHome?: boolean;
 }): Promise<BoxDetection> {
   const box = options.box ?? botBox;
   const log = options.log ?? ((line: string) => console.log(line));
-  const detection = await box.start({ dataDir: options.dataDir, home: options.home ?? homedir(), port: options.port, denyEnv: BOX_DENY_ENV, log, hardened: options.hardened });
+  const detection = await box.start({ dataDir: options.dataDir, home: options.home ?? homedir(), port: options.port, denyEnv: BOX_DENY_ENV, log, hardened: options.hardened, guardHome: options.guardHome });
   if (detection.box !== "bwrap" || !detection.tools || options.selfCheck === false) return detection;
   const tools = detection.tools;
   const timer = setTimeout(() => {

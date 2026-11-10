@@ -7,7 +7,7 @@ import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, writeSeccompFile } f
 import { processStart, seesProcess } from "./box-probe.ts";
 import { procHidepid } from "./hidepid.ts";
 import { visibleInBox } from "./plan.ts";
-import { DENIED_SYSCALLS, seccompBytes } from "./seccomp.ts";
+import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
 import { engineInstallRoots, npmEnginesPrefix } from "../engine-roots.ts";
 import { spawnCli } from "../procs.ts";
 import { waitForExit } from "../procs.ts";
@@ -99,7 +99,7 @@ describe("the box's hardening (T0c)", () => {
     expect(plain.extraFds).toEqual([]);
     const none = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() }).wrap({ command: "/usr/bin/x", args: [], env: {} });
     expect(none.extraFds).toEqual([]);
-    expect(writeSeccompFile(dir)).toBe(process.platform === "linux" && process.arch === "x64" ? file : null);
+    expect(writeSeccompFile(dir)).toBe(seccompSupported() ? file : null);
     expect(DENIED_SYSCALLS.length).toBeGreaterThan(30);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -212,7 +212,9 @@ describe("the box a bot's Chrome runs in", () => {
     expect(browser.bwrap).toBe("/usr/bin/bwrap");
     const bind = (target: string) => browser.options.some((arg, i) => arg === "--bind" && browser.options[i + 2] === target);
     expect(bind(home), "HOME is not the browser's").toBe(false);
-    expect(browser.options.join(" ")).not.toContain(`--tmpfs ${dataDir}`);
+    // The cover stays, and what the browser is given of the data folder comes after it.
+    expect(browser.options.indexOf(dataDir), "the data folder is covered").toBe(browser.options.indexOf("--tmpfs", browser.options.indexOf(dataDir) - 1) + 1);
+    expect(browser.options.indexOf(uploads)).toBeGreaterThan(browser.options.indexOf(dataDir));
     expect(browser.options.join(" "), "the engines are the turns' only").not.toContain(join(dataDir, "tools"));
     expect(browser.options).not.toContain("--unshare-net");
     expect(browser.options).toEqual(expect.arrayContaining(["--unshare-user", "--unshare-pid", "--die-with-parent"]));

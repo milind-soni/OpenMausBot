@@ -55,7 +55,14 @@ namespaces or the image has no `bwrap`, the box reports `off` with the reason, a
 server that must be boxed and is not either refuses to start or tells its admin, as that section says; a Cloud home
 only reports. Both images install `bubblewrap` and `socat` (the in-box bridges; without socat a bundled Node bridge
 does the same). On a self-hosted server in the profile each Chrome of the bots' browsers runs in a box of its own, as
-on a Team Cloud.
+on a Team Cloud; a turn's box is started with `--disable-userns` where bubblewrap has it (0.8), so a bot cannot make a
+user namespace of its own; and a person's HOME is guarded (`plan.ts` `homeGuards`). A Cloud home's boxes have neither
+of those two yet.
+
+Wherever it is on, the plan covers the data folder after every line outside it (`plan.ts` `coverDataFolder`), so a data
+folder under `/var/lib` or `/opt`, or one a later line holds, stays hidden; a path on a command line that is in the
+data folder, or holds it, is shown only when the caller named it or it is in a bot's folder; and the seccomp filter
+loads on arm64 as on x86-64, each by its own call numbers (`seccomp.ts`).
 
 Cost on Fly (measured, T0 build notes): about 5 ms and 3 MB per box, plus one socat per bridge.
 
@@ -118,7 +125,7 @@ or files, the base URL is the broker, a call with the token reaches the upstream
 | Network namespace + the two gates | every boxed process with its own network | reaching this machine's other listeners, the local network, link-local, metadata, Fly's private network; any route out except the egress gate; any server route except `/api/internal/*` | what the harness routes allow with a valid per-turn bearer; a public destination |
 | Environment allow-list | every boxed process | `OMB_CLOUD_*`, the server's placement, workspace credentials, any unlisted name | the engines' own settings |
 | Credential broker (T0b) | every boxed process with its own network | holding a provider key or an MCP header; using a token after its process or conversation ends; choosing the upstream | keys with no base-URL setting (named in the report); subscription logins |
-| seccomp filter (T0c) | every boxed process on x86-64 | 34 system calls that only reach the kernel's attack surface: mount family, kernel modules, bpf, perf, userfaultfd, the kernel keyring, `open_by_handle_at`, `setns`, kexec, reboot, swap, clock setting, I/O ports (EPERM); a process of another architecture (killed) | anything an engine, shell, git, npm, python or Chrome uses: all allowed |
+| seccomp filter (T0c) | every boxed process on x86-64 and arm64 | 34 system calls that only reach the kernel's attack surface: mount family, kernel modules, bpf, perf, userfaultfd, the kernel keyring, `open_by_handle_at`, `setns`, kexec, reboot, swap, clock setting, I/O ports (EPERM); a process of another architecture (killed) | anything an engine, shell, git, npm, python or Chrome uses: all allowed |
 | `hidepid=invisible` on the host's /proc (T0c) | the whole machine, set by the root supervisor at boot, which then starts itself again through `setpriv` without CAP_SYS_ADMIN and CAP_SETPCAP (an own server's connector grants those two only for that remount, and only to an image that drops them) | a `maus` process outside a box (the browser engine, a helper) listing or reading root's processes | `maus` processes seeing each other; a box has its own /proc anyway |
 | `/.fly` root-only (T0c) | the whole machine | a `maus` process reaching Fly's local API socket | nothing else |
 
