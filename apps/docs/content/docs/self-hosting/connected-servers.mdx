@@ -45,7 +45,7 @@ Every job is signed by the Admin for your server alone and is refused 15 minutes
 Three things to know:
 
 - **Not on the list, so refused:** `export-disk` (uploads an archive of the data to MausBot) and `import-disk` (replaces the data with an archive from elsewhere). They exist in the connector for servers MausBot operates itself.
-- **`update` needs your updater.** It works only when `update.sh` is in `/opt/openmausbot` and the connector's installer has set up the small systemd unit that runs it. Without either, the job is refused and nothing changes. The server installer does not put `update.sh` there yet: **planned**.
+- **`update` needs your updater.** It works only when `update.sh` is in `/opt/openmausbot` and the connector's installer has set up the small systemd unit that runs it. Without either, the job is refused and nothing changes. A server installer that puts `update.sh` there is not released yet: **planned**.
 - **`self-update` can change these rules**, because a new connector is new code. The new image comes only from MausBot's registry and its source is public, but images are not signed yet. To keep the connector you read, leave `self-update` out of your policy's job list (below).
 
 Until your team's Owner accepts the server in MausBot, it answers only `status` and `host-health`.
@@ -122,7 +122,7 @@ Traffic to the AI providers, engines and apps you set up is between your server 
 
 ## Planned
 
-- The server installer putting `update.sh` in place, so `update` works without a manual step.
+- A released server installer that puts `update.sh` in place, so `update` works without a manual step.
 - Backups to storage of yours outside the server (a bucket). Today a backup is a Docker volume on the same server.
 - A pause switch in Settings.
 - Signed connector images.

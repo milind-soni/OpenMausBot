@@ -169,8 +169,8 @@ Read at the commit that adds the customer-run mode. "Built" means the code is in
 ### Different from this document
 
 - **Updates on a connected server need `update.sh` in place.** The connector hands an update to
-  `/opt/openmausbot/update.sh`. The server installer does not put it there yet, so until it does the `update` job is
-  refused with `update_unavailable` and nothing changes.
+  `/opt/openmausbot/update.sh`. The installer places that file only once it and the update command have merged (see
+  In review), so until then the `update` job is refused with `update_unavailable` and nothing changes.
 - **Backups stay on the server.** `backup` copies the data to a Docker volume on the same server. A bucket the
   customer configures is phase 2.
 - **Pausing is a command.** `mausbot-connector pause`; a switch in Settings is planned. The heartbeat keeps going
