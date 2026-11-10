@@ -144,7 +144,7 @@ export function createRunOwners(deps: RunOwnersDeps) {
 
 export type RunOwners = ReturnType<typeof createRunOwners>;
 
-export type RouteRunOwners = Pick<RunOwners, "stopRefusal" | "removeRefusal" | "joinRefusal" | "retryRefusal">;
+export type RouteRunOwners = Pick<RunOwners, "shared" | "stopRefusal" | "removeRefusal" | "joinRefusal" | "retryRefusal">;
 
 /** The rule as a route asks it, by the request's sign-in. A route built without it (a server one person uses, or a
  * route's own test) refuses nothing and sees no admin, so nothing changes there. */
@@ -152,6 +152,8 @@ export function routeRunOwners(owners: RouteRunOwners | undefined, actorOf: ((au
   const by = (auth: RequestAuth): Actor => actorOf?.(auth) ?? { admin: false };
   return {
     admin: (auth: RequestAuth) => by(auth).admin,
+    /** Where several people write, who wrote a request decides who runs it again or rewords it, not who opened the conversation. */
+    decidesRetry: (threadId: string) => owners?.shared(threadId) ?? false,
     stopRefusal: (auth: RequestAuth, threadId: string) => owners?.stopRefusal(threadId, by(auth)) ?? null,
     removeRefusal: (auth: RequestAuth, threadId: string, sender: ResolvedSender | undefined) => owners?.removeRefusal(threadId, sender, by(auth)) ?? null,
     joinRefusal: (auth: RequestAuth, threadId: string, senders: ReadonlyArray<ResolvedSender | undefined>) => owners?.joinRefusal(threadId, senders, by(auth)) ?? null,

@@ -115,5 +115,6 @@ describe("a route built without the rule", () => {
     expect(owners.removeRefusal(auth, "t", { name: "Tom", id: TOM })).toBeNull();
     expect(owners.joinRefusal(auth, "t", [{ name: "Tom", id: TOM }])).toBeNull();
     expect(owners.retryRefusal(auth, "t", { name: "Tom", id: TOM })).toBeNull();
+    expect(owners.decidesRetry("t")).toBe(false);
   });
 });

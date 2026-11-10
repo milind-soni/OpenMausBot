@@ -668,7 +668,9 @@ run belongs to the person whose own request it answers (`server/host/run-owner.t
   ordinary line there. Stop stays the only interrupt. The app shows Stop, and Retry on a stopped request, only to the
   asker and to Owners and Admins (and to everyone for a run no person asked for). The server holds Retry to the same
   rule: running someone else's request again (`POST /api/bots/<bot>/messages/<id>/edit`, with the same words or new
-  ones) answers 403 with `code: "retry_not_yours"` and *"Only Priya or an admin can run this request again."* The stopped row records who pressed
+  ones) answers 403 with `code: "retry_not_yours"` and *"Only Priya or an admin can run this request again."* In a
+  shared conversation this rule alone decides it, whoever opened the conversation; renaming, deleting or otherwise
+  changing the conversation itself stays with whoever opened it and the Owner's side. The stopped row records who pressed
   Stop (`WireMessage.stoppedBy`): it reads "Maya stopped this." to everyone else and "You stopped this." to Maya.
 - **Who asked, for what is not a person's line** (read from the records the provenance labels come from, never from
   model text). A routine, a webhook and an app's event never run in a person's conversation: each runs in its own and

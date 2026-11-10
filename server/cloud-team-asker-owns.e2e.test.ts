@@ -149,6 +149,41 @@ it("Priya can stop her own run", async () => {
     { timeout: hostTimeout(10_000), interval: 100 }).toBe("Priya");
 }, hostTimeout(120_000));
 
+it("in the shared chat Ada started, Priya retries and rewords her own stopped request; Tom cannot, and nobody but Ada's side renames or deletes the chat", async () => {
+  await priyaRuns();
+  expect((await team.as(priya, "POST", `/api/bots/${botId}/interrupt`, { threadId: shared })).status).toBe(200);
+  await expect.poll(() => busy(), { timeout: hostTimeout(30_000), interval: 100 }).toBe(false);
+  const request = (await transcript(priya)).findLast((row) => row.role === "user" && row.kind === "text" && row.text === PRIYA_ASK)!;
+  const edit = (token: string, text: string) => team.as(token, "POST", `/api/bots/${botId}/messages/${request.id}/edit`, { text, threadId: shared });
+  const answeredAfter = (rows: Row[], id: string) => {
+    const at = rows.findIndex((row) => row.id === id);
+    return at >= 0 && rows.slice(at).some((row) => row.role === "bot" && row.kind === "text");
+  };
+
+  for (const text of [PRIYA_ASK, `${PRIYA_ASK} again`]) {
+    const refused = await edit(tom, text);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(refused.body).toMatchObject({ error: "Only Priya or an admin can run this request again.", code: "retry_not_yours" });
+  }
+  for (const token of [priya, tom]) {
+    const renamed = await team.as(token, "PATCH", `/api/bots/${botId}/tasks/${shared}`, { title: "Mine now" });
+    expect(renamed.status, JSON.stringify(renamed.body)).toBe(403);
+    expect(renamed.body.error).toBe("On this Cloud you can only change conversations you started.");
+    const deleted = await team.as(token, "DELETE", `/api/bots/${botId}/tasks/${shared}`);
+    expect(deleted.status, JSON.stringify(deleted.body)).toBe(403);
+    expect(deleted.body.error).toBe("On this Cloud you can only change conversations you started.");
+  }
+  expect(await busy(), "nothing ran for a refusal").toBe(false);
+
+  for (const text of [PRIYA_ASK, `${PRIYA_ASK} again`]) {
+    const retried = await edit(priya, text);
+    expect(retried.status, JSON.stringify(retried.body)).toBe(202);
+    expect(retried.body.message.sender?.name).toBe("Priya");
+    await expect.poll(async () => answeredAfter(await transcript(ada), retried.body.message.id), { timeout: hostTimeout(60_000), interval: 100 }).toBe(true);
+    await release();
+  }
+}, hostTimeout(180_000));
+
 it("Priya adding to her own run in the shared chat is steered into it, and person-first still answers her first", async () => {
   await priyaRuns();
   const stopsBefore = await personFirstStops();

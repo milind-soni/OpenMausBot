@@ -213,6 +213,26 @@ describe("running a request again where several people write", () => {
     expect((await edit(request.id, { threadId, text: request.text })).status).toBe(202);
   });
 
+  it("decides by who wrote the request, not by who started the conversation, and after a restart cut the run off", async () => {
+    const startedByOther = { cloudThreadRefusal: () => "On this Cloud you can only change conversations you started." };
+    for (const [by, text] of [[PRIYA, "Draft the launch post"], [PRIYA, "Draft the launch note"]] as const) {
+      const { store, threadId, state, edit } = await fixture({ ...team({ person: by, admin: false }), ...startedByOther });
+      const request = asked(store, threadId);
+      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "turn interrupted — OpenMausBot restarted", ok: false } });
+      expect((await edit(request.id, { threadId, text })).status).toBe(202);
+      expect(state.started).toMatchObject([{ text, opts: { editedMessageId: request.id } }]);
+    }
+    const { store, threadId, edit } = await fixture({ ...team({ person: TOM, admin: false }), ...startedByOther });
+    expect((await edit(asked(store, threadId).id, { threadId, text: "Draft the launch post" })).body).toEqual({ error: "Only Priya or an admin can run this request again.", code: "retry_not_yours" });
+  });
+
+  it("leaves a private chat to whoever started it", async () => {
+    const { store, threadId, state, edit } = await fixture({ ...team({ person: PRIYA, admin: false }, false), cloudThreadRefusal: () => "On this Cloud you can only change conversations you started." });
+    const request = asked(store, threadId);
+    expect(await edit(request.id, { threadId, text: request.text })).toEqual({ status: 403, body: { error: "On this Cloud you can only change conversations you started." } });
+    expect(state.started).toEqual([]);
+  });
+
   it("changes nothing in a private chat or on a personal install", async () => {
     for (const over of [team({ person: TOM, admin: false }, false), {}]) {
       const { store, threadId, edit } = await fixture(over);
