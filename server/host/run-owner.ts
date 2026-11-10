@@ -6,6 +6,7 @@
 // only until it ends. A private chat, a personal install and a My Cloud have one person, so nothing here applies there.
 import type { ResolvedSender, WireTask } from "../../shared/wire.ts";
 import type { RequestAuth } from "../request-auth.ts";
+import { shownPersonName } from "../../shared/bot-owner.ts";
 import type { WorkOrigin } from "../peer-provenance.ts";
 import { serverLine } from "../server-lines.ts";
 
@@ -78,20 +79,27 @@ export function createRunOwners(deps: RunOwnersDeps) {
   const lineAsker = (threadId: string, messageId: string | undefined): RunAsker =>
     messageId ? linePerson(deps.messages(threadId).find((line) => line.id === messageId)) : null;
 
+  const named = (owner: RunAsker): RunAsker => owner && { person: owner.person, name: shownPersonName(deps.personName(owner.person) ?? owner.name) };
+
   /** A routine, a webhook or an app's event runs nobody's request; work handed on for a person runs theirs. */
-  const asker = (threadId: string): RunAsker => {
+  const asker = (threadId: string): RunAsker => named(askerOf(threadId));
+  const askerOf = (threadId: string): RunAsker => {
     if (deps.isRoom(threadId)) return lineAsker(threadId, deps.roomRequestMessageId(threadId));
     const request = deps.directRequest(threadId);
     if (!request || request.stopped || request.automation !== undefined) return null;
     const own = lineAsker(threadId, request.messageId);
     if (own) return own;
     const handedFor = request.origin?.kind === "user" ? request.origin.person : undefined;
-    return handedFor ? { person: handedFor, name: deps.personName(handedFor) ?? handedFor } : null;
+    return handedFor ? { person: handedFor, name: handedFor } : null;
   };
 
   return {
     shared: deps.shared,
     asker,
+    /** A waiting line's writer as the chat names them, where several people write; nothing elsewhere. */
+    shownSender(threadId: string, sender: ResolvedSender): ResolvedSender | undefined {
+      return deps.shared(threadId) ? { ...sender, name: shownPersonName((sender.id && deps.personName(sender.id)) || sender.name) } : undefined;
+    },
     /** The conversation's wire field naming whose request runs, while it works where several people write. */
     askedBy(task: { threadId: string; busy?: boolean }): Pick<WireTask, "askedBy"> {
       const owner = task.busy && deps.shared(task.threadId) ? asker(task.threadId) : null;

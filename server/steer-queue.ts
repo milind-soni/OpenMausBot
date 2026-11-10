@@ -84,15 +84,15 @@ const changed = () => {
   }
 };
 
-/** Public pending chips only: never expose provider prompts or reply context. `named`: a conversation several people
- * write in, where each chip says whose it is. */
+/** Public pending chips only: never expose provider prompts or reply context. `shownSender`: where several people write,
+ * whose each chip is. */
 export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string) => boolean, whyHeld: (threadId: string, reason: SteerQueueReason | undefined) => string | undefined = () => undefined,
-  named: (threadId: string) => boolean = () => false): BotQueuedMessages {
+  shownSender: (threadId: string, sender: ResolvedSender) => ResolvedSender | undefined = () => undefined): BotQueuedMessages {
   return Object.fromEntries([...queues]
     .filter(([threadId, entry]) => ownsThread(entry.botId, threadId))
     .map(([threadId, entry]) => [threadId, entry.items.filter((item) => !item.rowId).map((item) => ({
       queueId: item.messageId, text: item.text, ...(item.reason ? { reason: item.reason, why: whyHeld(threadId, item.reason) } : {}),
-      ...(item.sender && named(threadId) ? { sender: item.sender } : {}),
+      ...(item.sender && shownSender(threadId, item.sender) ? { sender: shownSender(threadId, item.sender) } : {}),
     }))]));
 }
 

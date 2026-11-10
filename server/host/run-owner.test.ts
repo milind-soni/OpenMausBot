@@ -73,6 +73,14 @@ describe("who asked", () => {
     expect(owners({ origin: { kind: "user", request: "check the stock", person: TOM } }).asker("t")).toEqual({ person: TOM, name: "Tom" });
   });
 
+  it("names a person with no name set as the People list does", () => {
+    const dev = createRunOwners({ shared: () => true, directRequest: () => ({ messageId: "d1" }), roomRequestMessageId: () => undefined, isRoom: () => false,
+      messages: () => [{ id: "d1", role: "user", kind: "text", sender: { name: "dev@acme.test", id: TOM } }], personName: () => "dev@acme.test", language: () => undefined });
+    expect(dev.stopRefusal("t", { person: PRIYA, admin: false })).toBe("Only Dev or an admin can stop this.");
+    expect(dev.askedBy({ threadId: "t", busy: true })).toEqual({ askedBy: { name: "Dev", id: TOM } });
+    expect(dev.shownSender("t", { name: "dev@acme.test", id: TOM })).toEqual({ name: "Dev", id: TOM });
+  });
+
   it("names the asker in the refusal", () => {
     expect(owners({ messageId: "m1" }).stopRefusal("t", { person: TOM, admin: false })).toBe("Only Priya or an admin can stop this.");
     expect(owners({ messageId: "m1" }).stopRefusal("t", { person: PRIYA, admin: false })).toBeNull();

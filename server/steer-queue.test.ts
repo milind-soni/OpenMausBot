@@ -287,7 +287,7 @@ describe("steer-queue module", () => {
     const tom = { name: "Tom", id: "p_tom" }, priya = { name: "Priya", id: "p_priya" };
     queueSteeredMessage(bot.id, bot.threadId, "what is due", { sender: tom, first: true });
     queueSteeredMessage(bot.id, bot.threadId, "and the PR", { sender: priya, first: true, aheadOfOthers: "p_priya" });
-    expect(queuedSteerSnapshot((id) => id === bot.id, undefined, () => true)[bot.threadId]!.map((chip) => chip.sender?.name)).toEqual(["Priya", "Tom"]);
+    expect(queuedSteerSnapshot((id) => id === bot.id, undefined, (_threadId, sender) => sender)[bot.threadId]!.map((chip) => chip.sender?.name)).toEqual(["Priya", "Tom"]);
     expect(queuedSteerSnapshot((id) => id === bot.id)[bot.threadId]!.some((chip) => "sender" in chip)).toBe(false);
     bot.busy = false;
     drainSteeredMessages(store, run);

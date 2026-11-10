@@ -109,7 +109,7 @@ export interface BotMessageRouteDeps {
     decidedFor?: { id: string; name: string }, always?: boolean, rememberCommand?: boolean,
   ): Promise<RequestOutcome>;
   deliverLateQuestionAnswer(auth: RequestAuth, threadId: string, requestId: string, answer: string, cardMessage: Message, owner: BotRecord): Promise<{ queued: boolean }>;
-  stopThreadForPerson(botId: string, threadId: string): Promise<void>;
+  stopThreadForPerson(botId: string, threadId: string, by?: ResolvedSender): Promise<void>;
   /** Whoever asked owns the run, where several people write. */
   runOwners: Pick<RunOwners, "stopRefusal" | "removeRefusal" | "joinRefusal">;
   runActor(auth: RequestAuth): Actor;
@@ -777,7 +777,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (typeof expectedThreadId === "string" && store.taskByThread(bot.id, expectedThreadId)) {
         if (!stopReachesLiveTurn(turnId, liveTurn(expectedThreadId))) return json(res, 200, { ok: true, outcome: "already-stopped" });
         if (stopRefused(expectedThreadId)) return;
-        await stopThreadForPerson(bot.id, expectedThreadId);
+        await stopThreadForPerson(bot.id, expectedThreadId, messageSender(auth));
         return json(res, 200, { ok: true });
       }
       const directClaim = directTurnDispatchClaims.get(bot.threadId);
@@ -816,7 +816,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       }
       if (!stopReachesLiveTurn(turnId, liveTurn(expectedThreadId ?? bot.threadId))) return json(res, 200, { ok: true, outcome: "already-stopped" });
       if (stopRefused(expectedThreadId ?? bot.threadId)) return;
-      await stopThreadForPerson(bot.id, expectedThreadId ?? bot.threadId);
+      await stopThreadForPerson(bot.id, expectedThreadId ?? bot.threadId, messageSender(auth));
       return json(res, 200, { ok: true });
     }
     return PASS;
