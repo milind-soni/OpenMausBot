@@ -295,7 +295,7 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
       properties: {
         title: { type: "string", description: "The thread's name: one short line, at most 80 characters, specific enough to tell it apart from the others (for example \"QA: PR #412 login fix\")." },
-        message: { type: "string", description: "The complete first message of the thread — everything the run needs, since it will not see this conversation. Ask for what the person asked for and no more; anything else from this conversation must be marked as background, never as a requirement." },
+        message: { type: "string", description: "The complete first message of the thread — everything the run needs, since it will not see this conversation." },
         folder: { type: "string", description: "Optional: the name of one of your existing folders to file the thread under. Leave out unless the person named one." },
         model_selection: {
           type: "object",
