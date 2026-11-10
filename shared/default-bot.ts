@@ -34,3 +34,15 @@ export function viewersDefaultBot<T extends DefaultBotFields>(bots: readonly T[]
   return (person ? bots.find((bot) => bot.defaultBot && defaultBotPerson(bot) === person) : undefined)
     ?? bots.find((bot) => bot.defaultBot && !defaultBotPerson(bot));
 }
+
+/** A MausBot hidden from the sidebar comes back when it is renamed or moved to another department, unless the same
+ * change says whether to show it. Returns the patch to save. */
+export function reshowWhenMoved<P extends { name?: string; section?: string; sidebarHidden?: boolean }>(
+  bot: DefaultBotFields & { name: string; section?: string },
+  patch: P,
+): P {
+  if (!bot.defaultBot || !bot.sidebarHidden || Object.hasOwn(patch, "sidebarHidden")) return patch;
+  const renamed = patch.name !== undefined && patch.name.trim() !== bot.name.trim();
+  const moved = Object.hasOwn(patch, "section") && (patch.section?.trim() ?? "") !== (bot.section?.trim() ?? "");
+  return renamed || moved ? { ...patch, sidebarHidden: false } : patch;
+}

@@ -5,7 +5,15 @@
 // Admin's session's, read by main. Who can see a team's private chats is said by the team's own page, in the chat (T2's
 // TeamPrivateChatsLine), not here.
 import environments from "./environments.cjs";
-import { listedColors, ownCloudPlaces } from "./cloud-list.mjs";
+import { homeLook, listedColors, ownCloudPlaces } from "./cloud-list.mjs";
+
+/** My Cloud's saved place under the name the Admin lists it by now, so a rename there (Settings → Name and colour) reaches
+ * the switcher and the top bar too, not only at setup (cloud-home.mjs withCloudHome). Only the entry that is home. */
+function withHomeName(state, session) {
+  const look = homeLook(session), origin = environments.normalizeOrigin(session?.machine?.origin);
+  if (!look || !origin || !state.environments.some((entry) => entry.home === true && entry.origin === origin)) return state;
+  return environments.withEnvironmentLook(state, origin, { name: look.name });
+}
 
 const idOf = (value) => (typeof value === "string" && value ? value : null);
 /** What home-place.json may name: a team's Cloud, another Cloud of the person's own, a workspace of this computer's own
@@ -91,7 +99,8 @@ export function createHomePlaces({ store, environments: read, persist, makeId, h
       const { state: withTeams, left } = environments.reconcileTeams(read(), teams, makeId, homeOrigin());
       const clouds = Array.isArray(state.clouds) ? ownCloudPlaces(state.clouds) : null;
       const owned = environments.reconcileOwnClouds(withTeams, clouds, makeId, homeOrigin());
-      const next = clouds ? environments.withListedColors(owned, listedColors(state.clouds), homeOrigin()) : owned;
+      const coloured = clouds ? environments.withListedColors(owned, listedColors(state.clouds), homeOrigin()) : owned;
+      const next = withHomeName(coloured, state);
       if (next !== read()) persist(next);
       for (const name of left) places.left(name);
       if (current().team && !teams.some((team) => team?.id === current().team)) places.remember(null);

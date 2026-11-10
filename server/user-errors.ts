@@ -31,6 +31,7 @@ export const USER_ERROR = {
   "serverError.team.personalMove": "Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into {team}.",
   "serverError.team.memberLogin": "On {team} only an admin can save a login, and it is then used by every bot in {team}.",
   "serverError.team.signInFirst": "Sign in to {team} in the app first.",
+  "serverError.team.ownAppsNeedKey": "Your own apps can't be connected on {team} yet. Ask an admin to add the team's Composio key.",
   "serverError.chat.ownerOrAdmin": "Only the owner or an admin can do that.",
   "serverError.routine.checks": "Choose checks from calendar, mail and runs",
   "serverError.routine.checksRepeat": "Checks need a bot routine that repeats",

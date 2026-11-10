@@ -10,7 +10,7 @@ import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
 import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE } from "./AppChrome";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
 import { closePage, onPageOpened, openPage, openPageFor } from "@/lib/open-page";
-import { PAGE_HEIGHT, PAGE_PREVIEW_HEIGHT, PageFullScreen, PageNotes, PagePaneContext, PageToolbar, usePagePoint, usePageSave, usePageShare, usePageVersion } from "./PageTools";
+import { PAGE_HEIGHT, PAGE_PREVIEW_HEIGHT, PageFullScreen, PageNotes, PagePaneContext, PageToolbar, usePagePin, usePagePoint, usePageSave, usePageShare, usePageVersion } from "./PageTools";
 
 const WIDTH = "max-w-[760px]";
 const DOC_REUSE_MS = 60_000;
@@ -167,7 +167,8 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   }, [paneOpen, threadId, message.id, rev]);
   const share = usePageShare(threadId, message.id, message.publishedPage);
   const save = usePageSave(threadId, message.id, payload.title);
-  const tools = { version, point, share, save, room, ready: Boolean(current), fullScreen: { open: fullScreen, pane: Boolean(pane), toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
+  const pin = usePagePin({ botId, threadId, messageId: message.id }, payload.title);
+  const tools = { version, point, share, save, room, pin, ready: Boolean(current), fullScreen: { open: fullScreen, pane: Boolean(pane), toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
 
   const reloadNow = () => {
     setProblem(null);
