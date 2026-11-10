@@ -52,6 +52,8 @@ const SAME_RESET_MS = 5 * 60_000;
  * not show, that refusal holds it again. A guessed hold (no reset named) has no time to compare and runs out in an hour. */
 function holdGone(row: PlanProviderRow, limit: EngineLimit, held: number | undefined, guessed: boolean): boolean {
   if (held === undefined || guessed || limit.blocked || limit.usedPercent === null || limit.usedPercent >= 100) return false;
+  // OpenCode Go also refuses on its month, which its row carries as an extra line: a full month keeps the hold.
+  if (row.driver === "opencode" && row.extra.some((line) => line.label === "Monthly" && line.usedPercent >= 100)) return false;
   const windows = [windowLine("5-hour", row.fiveHour), windowLine("weekly", row.weekly)];
   return windows.every((line) => line === null || (line.resetsAt !== null && Math.abs(line.resetsAt - held) > SAME_RESET_MS));
 }
@@ -259,7 +261,7 @@ export class LimitResetClock {
   start(): void {
     if (this.timer) return;
     // While an engine is held its usage is read every few minutes too, so a limit that reset early ends the hold.
-    this.timer = setInterval(() => { if (this.refusals.size || this.options.waiting?.()) void this.ensureFresh(LIMIT_POLL_MS - 1_000); }, 60_000);
+    this.timer = setInterval(() => { if (this.holding() || this.options.waiting?.()) void this.ensureFresh(LIMIT_POLL_MS - 1_000); }, 60_000);
     this.timer.unref?.();
   }
 
@@ -274,6 +276,11 @@ export class LimitResetClock {
     const fixture = process.env.OMB_TEST_PLAN_USAGE_FILE;
     if (fixture) return Promise.resolve(fixtureUsage(fixture, this.now()));
     return loadPlanUsage({ accounts, refresh: force });
+  }
+
+  /** Whether any hold is still live; reading each one drops a hold that ran out, so polling stops with the last. */
+  private holding(): boolean {
+    return [...this.refusals.keys()].some((engine) => this.refusal(engine) !== null);
   }
 
   private refusal(engine: string): number | null {

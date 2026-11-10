@@ -456,6 +456,39 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     instance.stop();
   });
 
+  it("stops re-reading usage once the last hold ran out, a guessed one included", async () => {
+    vi.useFakeTimers({ now: NOW });
+    const loadUsage = vi.fn(async () => ({ ...report(claude([40, NOW + 3 * HOUR], [8, NOW + 5 * 24 * HOUR])), fetchedAt: iso(Date.now()) }));
+    const instance = new LimitResetClock({ accounts: () => accounts, loadUsage, waiting: () => false });
+    instance.start();
+    instance.noteLimit("claude", undefined);
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(loadUsage, "a guessed hold is polled too").toHaveBeenCalled();
+    // Nothing reads the hold meanwhile, so only the poll itself can notice it ran out.
+    await vi.advanceTimersByTimeAsync(2 * HOUR);
+    loadUsage.mockClear();
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(loadUsage).not.toHaveBeenCalled();
+    expect(instance.blockedUntil("claude"), "the guessed hold ran out").toBeNull();
+    instance.stop();
+    vi.useRealTimers();
+  });
+
+  it("keeps an OpenCode Go hold while its month is full, even with room in its rolling and weekly windows", () => {
+    const goAccounts = [{ id: "opencodeGo", name: "OpenCode", driver: "opencode" as const, environment: {} }];
+    const instance = new LimitResetClock({ accounts: () => goAccounts, now: () => NOW });
+    const go = (monthly: number) => row("opencodeGo", "opencode", parseOpenCodeUsage({ usage: {
+      rolling: { percent: 3, resetsAt: iso(NOW + 4 * HOUR) },
+      weekly: { percent: 8, resetsAt: iso(NOW + 5 * 24 * HOUR) },
+      monthly: { percent: monthly, resetsAt: iso(NOW + 20 * 24 * HOUR) },
+    } }));
+    instance.noteRefusal("opencodeGo", NOW + 23 * HOUR);
+    instance.noteUsage(report(go(100)));
+    expect(instance.blockedUntil("opencodeGo"), "a full month keeps it held").not.toBeNull();
+    instance.noteUsage(report(go(40)));
+    expect(instance.blockedUntil("opencodeGo")).toBeNull();
+  });
+
   it("ends a hold at once on Try again now, saved across a restart, and a new refusal holds it again", () => {
     const dir = mkdtempSync(join(tmpdir(), "limit-release-"));
     try {
