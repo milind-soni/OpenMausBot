@@ -346,7 +346,7 @@ same release without an npm install prompt or an implicit upgrade.
   does not update the installed package. For foreground `npx` usage, specify the
   desired release as `npx --yes openmausbot@X.Y.Z serve --tunnel`.
 - **Installed with the installer:** run the install command again.
-- **Path B:** `cd OpenMausBot/deploy && docker compose pull omb && docker compose up -d`.
+- **Path B:** `cd OpenMausBot/deploy && git pull && docker compose pull omb && docker compose up -d`. The `git pull` brings the current `docker-compose.yml` and `Caddyfile`. Building from source instead (`docker compose up -d --build`) needs about 6 GB of memory: on a smaller server, add swap first or use the published image.
 
 Routines and queued work survive a restart. A teammate turn running at that moment runs again once at the next start, told to check what it already did, and the bot that asked for it is told. A person's own turn and a running routine are not run again: the conversation says it was interrupted. Update between runs where you can.
 
@@ -373,13 +373,24 @@ any configured home/data-directory overrides, and workspaces outside the app
 directory. These are not included in the command above.
 
 For path B, the whole `/data` volume includes the container's CLI homes. From
-`OpenMausBot/deploy`, stop the app before archiving; `deploy_data` is the default
-volume name, so use your actual volume name if you changed the Compose project:
+`OpenMausBot/deploy`, stop the whole project before archiving, and start it
+again after; `deploy_data` is the default volume name, so use your actual
+volume name if you changed the Compose project:
 
 ```sh
-docker compose stop omb
+docker compose stop
 backup_dir=$(mktemp -d "$PWD/openmausbot-backup.XXXXXX")
 docker run --rm -v deploy_data:/data:ro -v "$backup_dir":/b alpine sh -c 'umask 077; tar czf /b/openmausbot-data.tgz -C /data .'
+docker compose start
+```
+
+To restore that archive, with the project stopped, replace what is in the
+volume with it (`openmausbot-backup.XXXXXX` is the folder the backup made):
+
+```sh
+docker compose stop
+docker run --rm -v deploy_data:/data -v "$PWD/openmausbot-backup.XXXXXX":/b:ro alpine sh -c 'find /data -mindepth 1 -delete && tar xzpf /b/openmausbot-data.tgz -C /data'
+docker compose start
 ```
 
 With the installer, the data is a folder, not a volume. Archive it the same way:
@@ -391,17 +402,19 @@ sudo tar czf "$backup_dir/openmausbot-data.tgz" -C /opt/openmausbot data
 sudo docker compose start omb
 ```
 
-Each command creates a fresh private folder in the current directory, so it
+Each backup creates a fresh private folder in the current directory, so it
 cannot overwrite an older archive with more permissive access. Keep the
-archive inside that folder privately on another machine. Restore with the server stopped,
-using the same paths and original ownership. After backup or restore, start the
-service with `sudo systemctl start openmausbot`, or `docker compose start omb`.
+archive inside that folder privately on another machine. Restore paths A and C
+with the server stopped, using the same paths and original ownership. After
+backup or restore, start the service with `sudo systemctl start openmausbot`.
+Stop and start the Docker project as a whole, as above, rather than `omb` on
+its own.
 
 ## The rules the setup relies on
 
 Read this before putting anything else in front of the server.
 
-- The server only ever listens on loopback (`127.0.0.1:8799`). Never publish that port yourself. The tunnel, Caddy and Tailscale each reach it from the same machine.
+- The server only ever listens on loopback (`127.0.0.1:8799`). Never publish that port yourself. The tunnel, Caddy and Tailscale each reach it from the same machine; path B's Caddy, in its own container, reaches it over a Unix socket (`OMB_TUNNEL_SOCKET`), and a request on that socket always counts as a remote one.
 - A request that arrives through a proxy or the tunnel is treated as remote and needs a session, whatever headers it carries. A proxy of your own (nginx, Traefik, Cloudflare Tunnel) must forward the real `Host` and add `X-Forwarded-For` and `X-Forwarded-Proto`, must not buffer the event stream, and must **not** rewrite `Host` to `127.0.0.1`.
 - Pairing is the login. Want a second wall in front of it? Path B's `Caddyfile` has a commented `basic_auth` block for a shared password.
 - The session cookie is marked `Secure`; do not serve this over plain HTTP on the public internet.

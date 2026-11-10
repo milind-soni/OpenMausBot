@@ -362,7 +362,9 @@ docker compose pull omb && docker compose up -d
 
 That uses the image CI publishes on every `main` push
 (`ghcr.io/milind-soni/openmausbot`, tagged `latest`, `sha-…` and `v…`).
-To build from your checkout instead: `docker compose up -d --build`.
+To build from your checkout instead: `docker compose up -d --build`. The
+build needs about 6 GB of memory: on a smaller server, add swap first or use
+the published image.
 
 Then sign the engine CLIs in **inside the container** (their logins live on
 the `data` volume, so they survive restarts and image upgrades) and mint a
@@ -386,8 +388,13 @@ What the stack does, so you can adapt it:
   `--build-arg ENGINES="…"` (or `ENGINES=` in `.env`) bakes engine CLIs
   into the image.
 - [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) runs Caddy
-  **in the server's network namespace**, so Caddy reaches the server on
-  `127.0.0.1` and the server never binds anything public.
+  in its own container. It reaches the server over two Unix sockets in a
+  shared in-memory volume (`OMB_TUNNEL_SOCKET`, `OMB_WEBHOOK_SOCKET`), so the
+  server never binds anything but loopback, and a request that comes through
+  Caddy is a remote one, as one through any proxy is. Caddy used to share the
+  server's network instead; then a server container restarted on its own (a
+  crash, `docker compose restart`, `stop omb`) came back in a new network and
+  left Caddy refusing HTTPS in the old one while both showed healthy.
 - [`deploy/Caddyfile`](../deploy/Caddyfile) terminates TLS and forwards
   the real `Host` plus `X-Forwarded-For`/`X-Forwarded-Proto`; the server's
   own pairing is the login. A shared-password `basic_auth` block is there,

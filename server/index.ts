@@ -9520,11 +9520,11 @@ let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
 try {
   webhookIngress = await listenWebhookIngress(webhooks, {
-    port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL,
+    port: WEBHOOK_PORT, socketPath: process.env.OMB_WEBHOOK_SOCKET?.trim() || undefined, publicBaseUrl: WEBHOOK_PUBLIC_URL,
     claimRequest: () => { cloudPower?.arrived("/hooks", {}); moveFreeze.assertTurns(); return workspaceMaintenance.request(); }, door: botApi.door,
   });
   const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
-  console.log(`openmausbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
+  console.log(`openmausbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${webhookIngress.socketServer ? ` and ${process.env.OMB_WEBHOOK_SOCKET?.trim()}` : ""}${advertised}`);
 } catch (error) {
   webhookIngressError = error instanceof Error ? error.message : String(error);
   console.error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
@@ -15453,7 +15453,8 @@ server.listen(PORT, listenHost(server), async () => {
   moveFreeze.hold(() => memoryUpkeep.start(), () => memoryUpkeep.stop());
 });
 
-// Tunnel requests have no peer address, which request-auth treats as proxied: a session is required, never loopback trust.
+// Requests on this socket (the phone tunnel, or the compose files' Caddy in its own container) have no peer address, which
+// request-auth treats as proxied: a session is required, never loopback trust.
 const TUNNEL_SOCKET = process.env.OMB_TUNNEL_SOCKET?.trim() || null;
 let tunnelListener: ReturnType<typeof createServer> | null = null;
 if (TUNNEL_SOCKET) {
@@ -15514,7 +15515,7 @@ const gracefulShutdown = createGracefulShutdown({
       memoryUpkeep.stop();
       cacheKeepWarm.dispose(); warmSummaries.dispose();
       skillReview.stop();
-      webhookIngress?.server.close();
+      webhookIngress?.server.close(); webhookIngress?.socketServer?.close();
       tunnelListener?.close(); stopCloudHomeConnectedApps();
     },
     async () => { await managedDesktop.close(); await registry.disposeAll(); },
