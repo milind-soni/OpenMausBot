@@ -161,7 +161,7 @@ const BUILT_IN_ICONS: ReadonlyArray<[RegExp, TraceToolIcon]> = [
   [/^(?:routine|routines|schedule|cron)(?:_[a-z_]+)?$|^[a-z_]*(?:routine|trigger)[a-z_]*$/, "routine"],
   [/^(?:publish_page|unpublish_page|[a-z_]*page_publish[a-z_]*|pages?_[a-z_]+)$/, "page"],
   [/^(?:show_html|show_widget|render_widget|show_chart|show_table|show_card|widget|[a-z_]*_card)$/, "widget"],
-  [/^(?:coordinate_bots|ask_bots?|delegate|task|agent|assignment_status|send_to_bot|raise_escalation|select_computer|create_bot)$/, "bots"],
+  [/^(?:coordinate_bots|ask_bots?|delegate|task|agent|assignment_status|send_to_bot|select_computer|create_bot)$/, "bots"],
   [/^(?:(?:open|start|list|close|retry)_threads?|list_bots|list_rooms|list_room_targets|post_to_room|create_room|manage_room)$/, "bots"],
   [/^(?:phone|android|adb)(?:_[a-z_]+)?$/, "phone"],
   [/^(?:todowrite|update_plan|plan|think)$/, "plan"],

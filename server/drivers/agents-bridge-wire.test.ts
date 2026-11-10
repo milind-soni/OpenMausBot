@@ -60,10 +60,9 @@ function profiles(): Record<string, Record<string, string>> {
   for (const name of ["skills+shared+voice", "skills+shared+voice+non-chief"]) {
     all[`${name}+cloud-home`] = { ...all[name]!, OMB_CLOUD_HOME: "1" };
   }
-  all["skills+shared+voice+escalations"] = { ...all["skills+shared+voice"]!, OMB_ESCALATIONS: "1" };
-  all["skills+shared+voice+escalations+x"] = { ...all["skills+shared+voice+escalations"]!, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" };
-  all["skills+shared+voice+escalations+x+team"] = { ...all["skills+shared+voice+escalations+x"]!, OMB_TEAM_PEOPLE: "1" };
-  all["skills+shared+voice+escalations+x+team+images"] = { ...all["skills+shared+voice+escalations+x+team"]!, OMB_IMAGE_GENERATION: "1" };
+  all["skills+shared+voice+x"] = { ...all["skills+shared+voice"]!, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" };
+  all["skills+shared+voice+x+team"] = { ...all["skills+shared+voice+x"]!, OMB_TEAM_PEOPLE: "1" };
+  all["skills+shared+voice+x+team+images"] = { ...all["skills+shared+voice+x+team"]!, OMB_IMAGE_GENERATION: "1" };
   all["default+legacy-switches"] = { ...all.default!, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1", OMB_ACTIVE_WAITS: "0" };
   for (const name of ["default", "skills+shared+voice"]) all[`${name}+mausbot`] = { ...all[name]!, OMB_MAUSBOT: "1" };
   all["default+no-computer-pick"] = { ...all.default!, OMB_COMPUTER_SELECTION: "0" };
@@ -76,42 +75,41 @@ const PROFILES = profiles();
 /** Refused by the server to every bot that is not a Chief of Staff. */
 const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
 /** The profile that mounts the most: its bridged list is checked in whole. */
-const FULL = "skills+shared+voice+escalations+x+team+images";
+const FULL = "skills+shared+voice+x+team+images";
 
 /** Bytes of each bridged list when its budget was last set. A list may not
  * exceed this by more than 2%, and may not undercut it by more than 2%
  * either: lock a saving in by lowering the number. A Chief's list is longer
  * than another bot's only by the Chief-only names in find_tool's description. */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 17508,
-  "voice": 18383,
-  "shared": 17548,
-  "shared+voice": 18423,
-  "skills": 17535,
-  "skills+voice": 18410,
-  "skills+shared": 17575,
-  "skills+shared+voice": 18450,
-  "non-chief": 17391,
-  "voice+non-chief": 18172,
-  "shared+non-chief": 17431,
-  "shared+voice+non-chief": 18212,
-  "skills+non-chief": 17418,
-  "skills+voice+non-chief": 18199,
-  "skills+shared+non-chief": 17458,
-  "skills+shared+voice+non-chief": 18239,
-  "skills+shared+voice+cloud-home": 18444,
-  "skills+shared+voice+non-chief+cloud-home": 18233,
-  "skills+shared+voice+escalations": 18468,
-  "skills+shared+voice+escalations+x": 18529,
-  "skills+shared+voice+escalations+x+team": 18529,
-  "default+legacy-switches": 17508,
-  "default+mausbot": 17560,
-  "skills+shared+voice+mausbot": 18502,
-  "default+no-computer-pick": 16296,
-  "default+room": 16235,
-  "non-chief+room": 16118,
-  "skills+shared+voice+escalations+x+team+images": 18451,
-  "default+images": 17524,
+  "default": 17799,
+  "voice": 18580,
+  "shared": 17839,
+  "shared+voice": 18620,
+  "skills": 17826,
+  "skills+voice": 18607,
+  "skills+shared": 17866,
+  "skills+shared+voice": 18647,
+  "non-chief": 17682,
+  "voice+non-chief": 18463,
+  "shared+non-chief": 17722,
+  "shared+voice+non-chief": 18503,
+  "skills+non-chief": 17709,
+  "skills+voice+non-chief": 18490,
+  "skills+shared+non-chief": 17749,
+  "skills+shared+voice+non-chief": 18530,
+  "skills+shared+voice+cloud-home": 18641,
+  "skills+shared+voice+non-chief+cloud-home": 18524,
+  "skills+shared+voice+x": 18708,
+  "skills+shared+voice+x+team": 18708,
+  "default+legacy-switches": 17799,
+  "default+mausbot": 17851,
+  "skills+shared+voice+mausbot": 18699,
+  "default+no-computer-pick": 16587,
+  "default+room": 16550,
+  "non-chief+room": 16433,
+  "skills+shared+voice+x+team+images": 18724,
+  "default+images": 17815,
 };
 
 type RpcAnswer = { id: number; result?: { tools?: unknown[]; content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };

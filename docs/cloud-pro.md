@@ -1717,9 +1717,32 @@ wait for the next read, `truncated: true`):
   "firstHour": { "startedAt": 1790000000000, "apps": ["gmail"], "look": "delivered",
     "ms": { "seen": 41000, "firstMessage": 52000, "offered": 61000, "firstApp": 118000, "firstLook": 171000, "briefOn": 172000, "phoneOffered": 172000 } },
   "value": { "sorted": 40, "drafted": 6, "prepped": 4, "routines": 0, "minutes": 110 },
-  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2 }
+  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2 },
+  "speed": { "windowS": 300, "steal": 1.2, "psi": { "cpu": 3.4, "memory": 0, "io": 0.8 }, "bootMs": 5400, "wakeMs": null,
+    "turnStarts": [12, 3, 1, 0, 0, 0] }
 }
 ```
+
+**`speed`** says how fast the machine is for this home (`server/cloud-speed.ts`),
+read from `/proc` when the report is built, with no timer or sampler of its
+own. `windowS` is how many seconds the CPU figures cover: since the previous
+read at least a minute before (a read sooner, such as the next page of the
+same poll, repeats the last figures), or since the process started. `steal`
+is the percent of all CPU time in that window the hypervisor ran something
+else on this machine's CPUs (`/proc/stat`). `psi` is the percent of the window
+in which some task waited for CPU, memory or disk (the kernel's pressure
+`some` line, the home's own cgroup's in a container, else the machine's).
+Each is `null` where the kernel doesn't expose it, and for a window whose
+counter went down. `bootMs` is this process's start to its server listening;
+`wakeMs`, on a boot that woke the home from a sleep it was stopped for with
+a request waiting, the time from the machine's start (the process's, in a
+container on a long-running server) to that request reaching the server.
+Fly's own start before that, and a resume from a suspend, are not in it.
+`turnStarts` counts people's messages since boot by how long each waited
+from being stored to its engine's turn starting: up to 0.5, 1, 2, 5 and 15
+seconds, and longer. A message sent while its thread runs a turn, a bot's, a
+routine's and a steer are not counted. Older homes don't send `speed`: the
+Admin reads that as unknown, never as zero.
 
 **`room`** is the last day's memory pressure where the home watches it (a Cloud
 home on Linux, `server/engine-memory.ts`), else `null`: how many tasks had to

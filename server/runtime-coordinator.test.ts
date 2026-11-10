@@ -91,9 +91,9 @@ const begun = (w: World, source: RoomAddress, generation: string, sourceText = "
 };
 
 const send = (w: World, source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,
-  opts: { approved?: boolean; rework?: boolean; batchKey?: string; sourceText?: string } = {}) => {
+  opts: { rework?: boolean; batchKey?: string; sourceText?: string } = {}) => {
   if (!parentId) begun(w, source, generation, opts.sourceText);
-  return w.coordinator.enqueue(source, generation, parentId, target, text, { approvalGranted: opts.approved ?? false, rework: opts.rework ?? false,
+  return w.coordinator.enqueue(source, generation, parentId, target, text, { rework: opts.rework ?? false,
     requestBatchKey: opts.batchKey });
 };
 
@@ -113,14 +113,14 @@ const roomRow = (patch: Partial<Assignment> = {}): Assignment => row({ assignee:
 
 describe("view: an Assignment as the legacy node", () => {
   it("projects the plain fields: ids, address, key = bot, text = brief, times, counts", () => {
-    expect(view(row({ startedAt: 1_500, executions: 2, restarts: 1, restart: "rerun", result: "half done", reportedAt: 3_000, approved: true, batchKey: "b1" }))).toEqual({
+    expect(view(row({ startedAt: 1_500, executions: 2, restarts: 1, restart: "rerun", result: "half done", reportedAt: 3_000, batchKey: "b1" }))).toEqual({
       id: "as_1", rootId: "gen-1", parentId: "gen-1", threadId: "builder-work", botId: "builder", key: "builder", text: "Build it",
       createdAt: 1_000, status: "queued", result: "half done", reported: true, executions: 2, startedAt: 1_500, lastProgressAt: 2_000,
-      approvalGranted: true, kind: "work", origin: { kind: "user", request: "Ship the CSV export" }, restarts: 1, restart: "rerun", requestBatchKey: "b1",
+      kind: "work", origin: { kind: "user", request: "Ship the CSV export" }, restarts: 1, restart: "rerun", requestBatchKey: "b1",
       mode: "work", reply: "resume",
     });
     const plain = view(base);
-    expect(plain).toMatchObject({ reported: false, approvalGranted: false, restarts: 0, lastProgressAt: 2_000 });
+    expect(plain).toMatchObject({ reported: false, restarts: 0, lastProgressAt: 2_000 });
     for (const absent of ["startedAt", "restart", "requestBatchKey", "groupId"]) expect(absent in plain).toBe(false);
   });
 
@@ -275,7 +275,6 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     expect(validation[1]!.text).toContain("terminal result · information only");
     expect(validation[1]!.text).toContain(JSON.stringify(result.replace("[From", "(From")));
     expect(validation[1]!.node.origin).toEqual(userOrigin);
-    expect(validation[1]!.node.approvalGranted).toBe(false);
     expect(validation[1]!.text).toContain("Your level for this is Ask");
     expect(w.coordinator.observeBackground(builder, node.id, command.boxId, command.processId, result)).toBe(false);
     await w.host.release(node.id, { ok: true, text: `Validated exit ${exitCode}` });
@@ -428,10 +427,10 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     const w = world((node) => node.botId === "builder" ? { ok: true, text: "Built it on branch csv-export." } : undefined);
     w.host.levels.builder = { level: "edits", driverKind: "claudeAgent" };
     w.host.chiefs.add("chief-chat");
-    const { node, duplicate } = send(w, chief, "gen-1", undefined, builder, "Build it", { approved: true });
+    const { node, duplicate } = send(w, chief, "gen-1", undefined, builder, "Build it");
     expect(duplicate).toBe(false);
     expect(node).toMatchObject({ status: "queued", rootId: "gen-1", parentId: "gen-1", botId: "builder", threadId: "builder-work", key: "builder",
-      text: "Build it", kind: "work", approvalGranted: true, reported: false, executions: 0, origin: userOrigin });
+      text: "Build it", kind: "work", reported: false, executions: 0, origin: userOrigin });
     expect(w.coordinator.has("gen-1")).toBe(true);
     expect(w.coordinator.node("gen-1")).toMatchObject({ id: "gen-1", rootId: "gen-1", status: "source", botId: "chief", threadId: "chief-chat",
       text: "Ship the CSV export", kind: "work", origin: userOrigin, executions: 1 });

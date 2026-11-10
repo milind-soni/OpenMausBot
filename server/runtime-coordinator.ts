@@ -88,7 +88,7 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   const node: HandoffView = {
     id: a.id, rootId: a.rootId, threadId: a.assignee.destination.threadId, botId: a.assignee.botId, key: a.assignee.botId,
     text: a.brief, createdAt: a.createdAt, status, result: a.result, reported: a.reportedAt !== undefined, executions: a.executions,
-    lastProgressAt: a.lastActivityAt, approvalGranted: a.approved ?? false, kind: kindOf(groupId, parent), restarts: a.restarts,
+    lastProgressAt: a.lastActivityAt, kind: kindOf(groupId, parent), restarts: a.restarts,
     mode: a.mode, reply: a.reply,
   };
   if (a.outcome !== undefined) node.outcome = a.outcome;
@@ -261,7 +261,7 @@ export class RuntimeCoordinator implements Coordinator {
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,
     options: HandoffOptions = {}): { node: HandoffView; duplicate: boolean } {
     this.ready();
-    const { approvalGranted = false, rework = false, requestBatchKey, thread } = options;
+    const { rework = false, requestBatchKey, thread } = options;
     const mode = options.mode ?? "work";
     const parent = parentId ? this.store.get(parentId) : this.store.get(generation);
     if (!parent) throw new Error(parentId ? NOT_RUNNING : NO_TURN);
@@ -302,7 +302,6 @@ export class RuntimeCoordinator implements Coordinator {
       ...(options.doneWhen ? { doneWhen: options.doneWhen } : {}),
       levels: { own: level.level, ...(level.chief !== undefined ? { chief: level.chief } : {}) },
       ...(level.driverKind !== undefined ? { driverKind: level.driverKind } : {}),
-      approved: approvalGranted,
       ...(target.groupId && requestBatchKey ? { batchKey: requestBatchKey } : {}),
     });
     if (!result.ok) {

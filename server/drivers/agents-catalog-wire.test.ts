@@ -49,12 +49,11 @@ function profiles(): Record<string, Profile> {
   for (const name of ["skills+shared+voice", "skills+shared+voice+non-chief"]) {
     all[`${name}+cloud-home`] = { env: { ...all[name]!.env, OMB_CLOUD_HOME: "1" } };
   }
-  all["skills+shared+voice+escalations"] = { env: { ...all["skills+shared+voice"]!.env, OMB_ESCALATIONS: "1" } };
   // Research is on only with a treg key or a Cloud plan and the bot's switch; the fullest profile carries it.
-  all["skills+shared+voice+escalations+x"] = { env: { ...all["skills+shared+voice+escalations"]!.env, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" } };
+  all["skills+shared+voice+x"] = { env: { ...all["skills+shared+voice"]!.env, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" } };
   // A Team Cloud mounts message_person; the fullest profile carries it.
-  all["skills+shared+voice+escalations+x+team"] = { env: { ...all["skills+shared+voice+escalations+x"]!.env, OMB_TEAM_PEOPLE: "1" } };
-  all["skills+shared+voice+escalations+x+team+images"] = { env: { ...all["skills+shared+voice+escalations+x+team"]!.env, OMB_IMAGE_GENERATION: "1" } };
+  all["skills+shared+voice+x+team"] = { env: { ...all["skills+shared+voice+x"]!.env, OMB_TEAM_PEOPLE: "1" } };
+  all["skills+shared+voice+x+team+images"] = { env: { ...all["skills+shared+voice+x+team"]!.env, OMB_IMAGE_GENERATION: "1" } };
   all["default+legacy-switches"] = {
     env: { ...all.default!.env, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1", OMB_ACTIVE_WAITS: "0" },
   };
@@ -79,39 +78,38 @@ const RESEARCH_TOOLS = ["x_search", "research_search", "research_endpoint", "res
 /** Only on the person's own Cloud: never on the fullest profile, a Team Cloud's. */
 const OWN_CLOUD_TOOLS = ["ask_for_computer"];
 /** The fullest profile, checked in whole; every other one is pinned by tool names, bytes and sha256. */
-const FULL = "skills+shared+voice+escalations+x+team+images";
+const FULL = "skills+shared+voice+x+team+images";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 60965,
-  "voice": 61746,
-  "shared": 63230,
-  "shared+voice": 64011,
-  "skills": 64041,
-  "skills+voice": 64822,
-  "skills+shared": 66306,
-  "skills+shared+voice": 67087,
-  "non-chief": 51749,
-  "voice+non-chief": 52530,
-  "shared+non-chief": 54014,
-  "shared+voice+non-chief": 54795,
-  "skills+non-chief": 54825,
-  "skills+voice+non-chief": 55606,
-  "skills+shared+non-chief": 57090,
-  "skills+shared+voice+non-chief": 57871,
-  "skills+shared+voice+cloud-home": 66339,
-  "skills+shared+voice+non-chief+cloud-home": 57123,
-  "default+legacy-switches": 60965,
-  "default+mausbot": 61616,
-  "skills+shared+voice+mausbot": 67738,
-  "skills+shared+voice+escalations": 67917,
-  "skills+shared+voice+escalations+x": 71756,
-  "skills+shared+voice+escalations+x+team": 71756,
-  "default+no-computer-pick": 59753,
-  "default+room": 58109,
-  "non-chief+room": 48893,
-  "skills+shared+voice+escalations+x+team+images": 72529,
-  "default+images": 61738,
+  "default": 61107,
+  "voice": 61888,
+  "shared": 63372,
+  "shared+voice": 64153,
+  "skills": 64183,
+  "skills+voice": 64964,
+  "skills+shared": 66448,
+  "skills+shared+voice": 67229,
+  "non-chief": 51891,
+  "voice+non-chief": 52672,
+  "shared+non-chief": 54156,
+  "shared+voice+non-chief": 54937,
+  "skills+non-chief": 54967,
+  "skills+voice+non-chief": 55748,
+  "skills+shared+non-chief": 57232,
+  "skills+shared+voice+non-chief": 58013,
+  "skills+shared+voice+cloud-home": 66481,
+  "skills+shared+voice+non-chief+cloud-home": 57265,
+  "default+legacy-switches": 61107,
+  "default+mausbot": 61758,
+  "skills+shared+voice+mausbot": 67880,
+  "skills+shared+voice+x": 71068,
+  "skills+shared+voice+x+team": 71068,
+  "default+no-computer-pick": 59895,
+  "default+room": 58251,
+  "non-chief+room": 49035,
+  "skills+shared+voice+x+team+images": 71841,
+  "default+images": 61880,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -247,13 +245,6 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("mounts raise_escalation only where chief escalations are on", () => {
-    const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
-    expect(names(wires["skills+shared+voice+escalations"]!).filter((tool) => tool !== "raise_escalation")).toEqual(names(wires["skills+shared+voice"]!));
-    for (const [name, profile] of Object.entries(PROFILES)) {
-      expect(names(wires[name]!).includes("raise_escalation"), name).toBe(profile.env.OMB_ESCALATIONS === "1");
-    }
-  });
 
   it("mounts message_person everywhere: every plan's bots can reach the person's Inbox", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);

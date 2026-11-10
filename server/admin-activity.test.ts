@@ -165,13 +165,13 @@ describe("what a row records", () => {
   });
 
   it("splits a bot's audience from its other permissions and ignores display fields", () => {
-    const before = botAuditSnapshot({ id: "b", color: "red", approvalMode: "ask", peers: ["x"] });
-    const after = botAuditSnapshot({ id: "b", color: "blue", approvalMode: "ask", peers: [], visibility: { people: ["ada@example.test"] } });
+    const before = botAuditSnapshot({ id: "b", color: "red", approvalMode: "ask" });
+    const after = botAuditSnapshot({ id: "b", color: "blue", approvalMode: "auto", visibility: { people: ["ada@example.test"] } });
     const rows = botChangeRows({ id: "b", name: "Payroll" }, before, after);
     expect(rows).toEqual([
       { category: "visibility", action: "visibility.update", target: { kind: "bot", id: "b", name: "Payroll" }, changed: ["visibility"],
         before: { visibility: "everyone" }, after: { visibility: { people: ["ada@example.test"] } } },
-      { category: "bot", action: "bot.update", target: { kind: "bot", id: "b", name: "Payroll" }, changed: ["peers"], before: { peers: ["x"] }, after: { peers: [] } },
+      { category: "bot", action: "bot.update", target: { kind: "bot", id: "b", name: "Payroll" }, changed: ["approvalMode"], before: { approvalMode: "ask" }, after: { approvalMode: "auto" } },
     ]);
     expect(botChangeRows({ id: "b" }, botAuditSnapshot({ color: "red" }), botAuditSnapshot({ color: "blue" }))).toEqual([]);
   });

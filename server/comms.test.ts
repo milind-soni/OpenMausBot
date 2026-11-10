@@ -548,7 +548,6 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
         description: "Design and review the user experience.",
         section: "Launch",
         autoApprove: false,
-        approvePeerComms: false,
         approvalMode: "full",
         modelSelection: defaultSelection,
       });
@@ -906,69 +905,6 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
   );
 
   it(
-    "runs an approved hand-off after a provider reload without asking for approval twice",
-    async () => {
-      rmSync(gateFile, { force: true });
-      await hideAll();
-      compatAnswer = "hang";
-      const helper = await named("ReloadHelper", { modelSelection: { instanceId: "helperCompat", model: "fake-model" } });
-      const asker = await named("ReloadAsker", { modelSelection: ASKER, approvePeerComms: true, approvalMode: "ask" });
-
-      // Start the ask while B is idle so the normal approval card is the
-      // first and only human decision for this exact peer message.
-      const { body: { run } } = await startRoutine(asker.id, "ask @ReloadHelper something");
-      let approvalCard: any;
-      await waitUntil(async () => {
-        const current = await bot(asker.id);
-        approvalCard = current.messages.find((m: any) => m.kind === "options" && m.card?.tool === "ask_bot" && !m.card?.answered);
-        return Boolean(approvalCard);
-      }, 20_000, "initial ask_bot approval card never appeared");
-
-      const held: string[] = [];
-      for (let index = 0; index < 3; index++) {
-        const task = index === 0 ? { threadId: helper.threadId } : (await api("POST", `/api/bots/${helper.id}/tasks`, { title: `Held ${index}` })).body.task;
-        held.push(task.threadId);
-        expect((await api("POST", `/api/bots/${helper.id}/messages`, { threadId: task.threadId, text: `hold until reload ${index}` })).status).toBe(202);
-      }
-      await waitUntil(async () => {
-        const current = await bot(helper.id);
-        return held.every((threadId) => current.tasks.find((task: any) => task.threadId === threadId)?.busy);
-      }, 15_000, "helper never became busy behind the approval card");
-      expect((await api("POST", `/api/bots/${asker.id}/respond`, {
-        requestId: approvalCard.card.requestId,
-        behavior: "allow",
-      })).status).toBe(200);
-
-      await waitUntil(async () => {
-        const current = await bot(asker.id);
-        return !current.busy && lastText(current.messages)?.text?.startsWith("peer says:") && assignments(helper.id, asker.id)[0]?.status === "queued";
-      }, 25_000, "approved ask was not retained as a queued consultation");
-      expect(assignments(helper.id, asker.id)[0]).toMatchObject({ approvalGranted: true, mode: "consult" });
-      expect((await runState(run.id)).status).toBe("waiting");
-
-      compatAnswer = "ping";
-      expect((await api("PUT", "/api/config", { openaiCompat: { key: `compat_retry_${Date.now()}`, url: compatUrl } })).status).toBe(200);
-
-      let finalAsker: any;
-      await waitUntil(async () => {
-        finalAsker = await bot(asker.id);
-        return Boolean(chip(finalAsker.messages, "ReloadHelper replied")?.tool.output?.includes("ping from fake"));
-      }, 30_000, "provider reload left the queued consultation stranded");
-      await waitUntil(async () => {
-        finalAsker = await bot(asker.id);
-        return lastText(finalAsker.messages)?.text === WOKE_WITH_RESULT && !finalAsker.busy;
-      }, 20_000, "resumed asker did not settle without re-asking");
-
-      const approvalCards = finalAsker.messages.filter((m: any) => m.kind === "options");
-      expect(approvalCards.filter((m: any) => m.card?.tool === "ask_bot")).toHaveLength(1);
-      expect(approvalCards.some((m: any) => m.card?.tool === "delegate_bot")).toBe(false);
-      expect(assignments(helper.id, asker.id)).toHaveLength(1);
-      expect(assignments(helper.id, asker.id)[0]).toMatchObject({ status: "completed", result: "ping from fake" });
-    },
-    90_000,
-  );
-
-  it(
     "reports a successful teammate turn with no text reply as a completed chip and resumes the requester",
     async () => {
       await hideAll();
@@ -1120,86 +1056,6 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     },
     45_000,
   );
-
-  it(
-    "blocks a consultation behind a card and only runs B after the user allows",
-    async () => {
-      await hideAll();
-      const helper = await named("Helper", { modelSelection: HELPER });
-      const asker = (await api("POST", "/api/bots")).body.bot;
-      // Peer review applies below Full access, so the asker is on Ask.
-      const approval = await api("PATCH", `/api/bots/${asker.id}`, { name: "Asker", modelSelection: ASKER, approvePeerComms: true, approvalMode: "ask" });
-      expect(approval.status).toBe(200);
-      expect(approval.body.bot.approvePeerComms).toBe(true);
-
-      const send = await startRoutine(asker.id, "hey @Helper needs approval");
-      expect(send.status).toBe(201);
-
-      let askerBot: any;
-      let helperBot: any;
-      let card: any;
-      await waitUntil(async () => {
-        askerBot = await bot(asker.id);
-        helperBot = await bot(helper.id);
-        card = askerBot.messages.find((m: any) => m.kind === "options" && m.card?.requestId && m.card?.tool === "ask_bot");
-        return Boolean(card);
-      }, 20_000, "approval card never appeared");
-      expect(helperBot.busy).toBeFalsy();
-      expect(assignments(helper.id, asker.id)).toEqual([]);
-      expect(helperBot.tasks).toHaveLength(1);
-
-      expect(card.card.allowKey).toBe(`ask_bot:${helper.id}`);
-      expect(card.card.options).toEqual(["Allow", "Deny", "Always allow"]);
-      expect(card.card.title).toContain("@Asker");
-      expect(card.card.title).toContain("@Helper");
-
-      const allow = await api("POST", `/api/bots/${asker.id}/respond`, { requestId: card.card.requestId, behavior: "allow" });
-      expect(allow.status).toBe(200);
-      await waitUntil(async () => {
-        askerBot = await bot(asker.id);
-        helperBot = await bot(helper.id);
-        return lastText(askerBot.messages)?.text === WOKE_WITH_RESULT && !helperBot.busy && !askerBot.busy;
-      }, 30_000, "B never ran after allow");
-      expect(askerBot.messages.some((m: any) => m.kind === "text" && m.role === "bot" && m.text?.startsWith("peer says:") && m.text.includes('"requestId"'))).toBe(true);
-      expect(assignments(helper.id, asker.id)[0]).toMatchObject({ mode: "consult", status: "completed", approvalGranted: true, result: "hello from fake acp" });
-      expect(chip(askerBot.messages, "Helper replied")?.tool.output).toBe("hello from fake acp");
-    },
-    60_000,
-  );
-
-  it("refuses the consultation and never starts B when the user denies", async () => {
-    await hideAll();
-    const helper = await named("Helper", { modelSelection: HELPER });
-    const asker = await named("Asker", { modelSelection: ASKER, approvePeerComms: true, approvalMode: "ask" });
-
-    const send = await startRoutine(asker.id, "hey @Helper do not allow");
-    expect(send.status).toBe(201);
-    const run = send.body.run;
-
-    let askerBot: any;
-    let card: any;
-    await waitUntil(async () => {
-      askerBot = await bot(asker.id);
-      card = askerBot.messages.find((m: any) => m.kind === "options" && m.card?.requestId && m.card?.tool === "ask_bot");
-      return Boolean(card);
-    }, 20_000, "deny test: card never appeared");
-
-    const deny = await api("POST", `/api/bots/${asker.id}/respond`, { requestId: card.card.requestId, behavior: "deny" });
-    expect(deny.status).toBe(200);
-
-    await waitUntil(async () => {
-      askerBot = await bot(asker.id);
-      const finalText = lastText(askerBot.messages);
-      return Boolean(finalText?.text && /denied by user/i.test(finalText.text)) && !askerBot.busy;
-    }, 20_000, "deny test: denial didn't reach A");
-    expect((await runState(run.id)).status).toBe("completed");
-
-    const helperBot = await bot(helper.id);
-    expect(helperBot.busy).toBeFalsy();
-    expect(assignments(helper.id, asker.id)).toEqual([]);
-    expect(helperBot.tasks).toHaveLength(1);
-    expect(helperBot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && m.text?.includes("hello from fake acp"))).toBe(false);
-  }, 50_000);
 
   it("gives a delegated teammate's turn the agents integration with the one tool surface", async () => {
     await hideAll();
