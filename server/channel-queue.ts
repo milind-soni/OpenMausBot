@@ -192,7 +192,7 @@ export function drainChannelMessages(
     if (entry.items.length === 0) queues.delete(threadId);
     let running: void | Promise<void>;
     try { running = run({ groupId: entry.groupId, threadId, items: group }); }
-    catch (error) { running = Promise.reject(error); }
+    catch (error) { console.warn("channel-queue: queued dispatch threw", error); running = Promise.reject(error); }
     void Promise.resolve(running).then(
       () => settleChatFollowups(ids, null),
       () => settleChatFollowups(ids, "interrupted"),

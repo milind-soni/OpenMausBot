@@ -246,9 +246,7 @@ export function drainSteeredMessages(
         group.some((item) => item.unattended === true),
         { trigger: group[0].trigger, sender: group[0].sender, peerAsk: group[0].peerAsk, origin: group[0].origin, ...(mentions.length ? { mentions } : {}) },
       );
-    } catch (error) {
-      running = Promise.reject(error);
-    }
+    } catch (error) { console.warn("steer-queue: queued dispatch threw", error); running = Promise.reject(error); }
     void Promise.resolve(running).then(
       () => settleChatFollowups(ids, null),
       () => settleChatFollowups(ids, "interrupted"),
