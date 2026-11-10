@@ -49,6 +49,10 @@ export function createLocalProfiles(deps: {
   onLocal(): boolean;
   busy(): Promise<{ name: string; what?: string } | null>;
   trash(dir: string): Promise<void>;
+  /** Asked once when a switch finds work under way in the workspace it would stop (`leaving`: its id, null for This
+   * computer's own copy; `target`: the one that would open, null likewise; `name`: who works there, "" when unknown).
+   * "wait": no time limit; "stop": at most settleMs from the answer; "cancel": nothing switches. */
+  ask?: ((input: { leaving: string | null; target: string | null; name: string }) => Promise<"wait" | "stop" | "cancel">) | null;
   reserved?(): string | null;
   allowed?(): boolean;
   remember?(place: { profile: string } | null): void;
