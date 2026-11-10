@@ -15456,8 +15456,7 @@ server.listen(PORT, listenHost(server), async () => {
   moveFreeze.hold(() => memoryUpkeep.start(), () => memoryUpkeep.stop());
 });
 
-// Requests on this socket (the phone tunnel, or the compose files' Caddy in its own container) have no peer address, which
-// request-auth treats as proxied: a session is required, never loopback trust.
+// Requests on this socket (the phone tunnel, or the compose files' Caddy in its own container) have no peer address, which request-auth treats as proxied: a session is required, never loopback trust.
 const TUNNEL_SOCKET = process.env.OMB_TUNNEL_SOCKET?.trim() || null;
 let tunnelListener: ReturnType<typeof createServer> | null = null;
 if (TUNNEL_SOCKET) {
