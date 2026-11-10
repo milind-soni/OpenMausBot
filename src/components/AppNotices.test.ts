@@ -1456,4 +1456,78 @@ describe("ModelGo's sponsor card", () => {
     expect(await relaunch(), "a Team Cloud's rules are no organization-managed desktop").toContain(TITLE);
   });
 
+  it("after an update, What's new takes the launch and the card follows it in that same launch once it closes, then never again", async () => {
+    returning(); desk.saved = null; storage.delete(WHATS_NEW_NOTICE);
+    const first = await launch();
+    expect(first).toContain("Meet the new MausBot Cloud"); expect(first, "never two at once").not.toContain(TITLE);
+    expect(events()).toEqual([]);
+    press("Not now"); await flush();
+    const after = await settle();
+    expect(after, "right after What's new closes").toContain(TITLE); expect(after).not.toContain("Meet the new MausBot Cloud");
+    expect(events()).toEqual([{ action: "shown", place: "popup" }]);
+    expect(launchNotice(), "What's new keeps the launch").toBe(WHATS_NEW_NOTICE);
+    expect(await launch(), "a reload in the same launch").toContain(TITLE);
+    press("Not now"); await flush();
+    await gone();
+  });
+
+  it("follows the product-updates question when that follows What's new", async () => {
+    desk.saved = null; storage.delete(WHATS_NEW_NOTICE);
+    const prefs = createDesktopPrefs({ read: () => null, write: () => {} });
+    const client = { state: vi.fn(() => account), updatesConsent: vi.fn(async () => ({ cloudContractVersion: 1, consent: null })), recordUpdatesConsent: vi.fn(async () => {}),
+      updatesConsentByEmail: vi.fn(async () => "R".repeat(43)), withdrawUpdatesConsent: vi.fn(async () => {}) };
+    registerUpdatesConsent({ ipcMain: { handle: (channel, handler) => void desk.handlers.set(channel, handler as Handler) }, page: event => (event as { page: Page }).page,
+      consent: createUpdatesConsent({ prefs, account: () => client as never, available: async () => true, now: () => now }) });
+    await launch(); press("Not now"); await flush();
+    const question = await settle();
+    expect(question).toContain("Get MausBot updates?"); expect(question).not.toContain(TITLE);
+    press("No thanks"); await flush();
+    expect(await settle(), "then the card, in the same launch").toContain(TITLE);
+  });
+
+  it("a notice to act on keeps its place: the move popup or a trial's notice comes first, and the card follows it once closed", async () => {
+    storage.delete(GROK_MOVE_NOTICE); returning();
+    vi.stubGlobal("document", { activeElement: null, body: null, documentElement: { dataset: {} }, getElementById: () => null,
+      querySelector: (selector: string) => selector === "[data-grok-move-popup]" ? { querySelectorAll: () => [] } : null, querySelectorAll: () => [] });
+    const grok = await launch();
+    expect(grok).toContain("data-grok-move-popup"); expect(grok).not.toContain(TITLE);
+    press("Not now"); await flush();
+    expect(await settle(), "after the move's popup").toContain(TITLE);
+    due(); session.clear(); f.values = [];
+    const running = trial("active");
+    account = paid({ trial: running }); snapshot = { status: "paid", tier: "pro", trial: running, notice: "active" }; offer = { ...PLAIN_OFFER };
+    const notice = await relaunch();
+    expect(notice).toContain("Your free trial ends on"); expect(notice).not.toContain(TITLE);
+    expect(await settle(), "it stays up alone").not.toContain(TITLE);
+    press("Manage subscription"); await flush();
+    expect(await settle(), "after the trial's notice").toContain(TITLE);
+  });
+
+  it("a card left up keeps the corner: the card waits for it to close", async () => {
+    returning(); storage.delete(STAR_NOTICE); storage.set(CLOUD_INTRO, "1"); storage.set(MODELGO_OFFER_NOTICE, "1");
+    expect(await launch()).toContain("Enjoying MausBot?");
+    due();
+    expect(await settle(), "the star took the launch and is still up").not.toContain(TITLE);
+    press("Not now"); await flush();
+    expect(await settle()).toContain(TITLE);
+  });
+
+  it("follows a closed notice only where it may show at all: not on a branded build, an organization that refuses it, a move to My Cloud or a call", async () => {
+    returning(); desk.saved = null; storage.delete(WHATS_NEW_NOTICE);
+    f.state.config.managedPolicy = { organizationName: "Acme", companyModelsOnly: true, allowedEngines: "all" };
+    await launch(); press("Not now"); await flush();
+    expect(await settle(), "an organization that refuses it").toBe("");
+    f.state.config.managedPolicy = undefined; f.brand = "file";
+    expect(await launch(), "a branded build").toBe("");
+    f.brand = "default"; f.state.liveCall = { status: "active" };
+    expect(await launch(), "a live call").toBe("");
+    f.state.liveCall = undefined;
+    const line = (move: unknown) => desk.handlers.set("cloud-send:notice", () => ({ ready: true, bots: [], move }));
+    line({ phase: "copy", chats: { done: 1, total: 5 } });
+    expect(await launch(), "while the bots move to My Cloud").toBe("");
+    line(undefined); now += DAY;
+    expect(await launch(), "then, still in the launch What's new took").toContain(TITLE);
+    expect(launchNotice()).toBe(WHATS_NEW_NOTICE);
+  });
+
 });
