@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { storedDeviceView, type DeviceView } from "../shared/device-view.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { teamSessionExpiresAt, type TeamMember, type TeamRole } from "./cloud-team.ts";
 import {
@@ -87,11 +88,14 @@ const sessionSchema = z.object({
   moveIn: z.string().regex(/^[\w-]{1,128}$/).optional(),
   /** An access token for a script (`openmausbot token create`): it ends at expiresAt and never renews. */
   token: z.literal(true).optional(),
-});
+  /** What this device is limited to. A damaged value shows nothing, and a device with a view is never an admin, whatever
+   * the file says. */
+  view: z.unknown().optional().transform(storedDeviceView),
+}).transform((session) => (session.view ? { ...session, scopes: ["client" as const] } : session));
 
 const fileSchema = z.object({ version: z.literal(1), sessions: z.array(sessionSchema) });
 
-export type SessionRecord = z.infer<typeof sessionSchema>;
+export type SessionRecord = Omit<z.infer<typeof sessionSchema>, "view"> & { view?: DeviceView };
 
 /** What the UI may see: never the hash. */
 export interface PublicSession {
@@ -105,6 +109,7 @@ export interface PublicSession {
   owner?: string;
   teamRole?: TeamRole;
   token?: true;
+  view?: DeviceView;
 }
 
 export interface PairingCode {
@@ -124,6 +129,7 @@ export interface PairingCode {
   memberCheckedAt?: number;
   /** The session it opens is an access token that lasts exactly this long. */
   tokenTtlMs?: number;
+  view?: DeviceView;
 }
 
 export interface PublicPairing {
@@ -132,6 +138,7 @@ export interface PublicPairing {
   scopes: Scope[];
   createdAt: number;
   expiresAt: number;
+  view?: DeviceView;
 }
 
 export type ExchangeResult =
@@ -188,6 +195,7 @@ function publicSession(record: SessionRecord): PublicSession {
   if (record.owner) view.owner = record.owner;
   if (record.teamRole) view.teamRole = record.teamRole;
   if (record.token) view.token = true;
+  if (record.view) view.view = record.view;
   return view;
 }
 
@@ -237,6 +245,7 @@ export class SessionRegistry {
   private codeFailures: Failures = new Map();
   private replays: Array<{ codeHash: string; attemptId: string; browser: boolean; result: ExchangeResult; expiresAt: number }> = [];
   private readonly onRevoked = new Set<(sessionId: string) => void>();
+  private readonly onChanged = new Set<(sessionId: string) => void>();
   private readonly onIssued = new Set<(session: Pick<SessionRecord, "id" | "scopes" | "email" | "teamRole" | "membershipAuthority">) => void>();
   private lastSeenWrites = new Map<string, number>();
   private readonly now: () => number;
@@ -335,6 +344,11 @@ export class SessionRegistry {
     return () => this.onIssued.delete(listener);
   }
 
+  onSessionChanged(listener: (sessionId: string) => void): () => void {
+    this.onChanged.add(listener);
+    return () => this.onChanged.delete(listener);
+  }
+
   onSessionRevoked(listener: (sessionId: string) => void): () => void {
     this.onRevoked.add(listener);
     return () => this.onRevoked.delete(listener);
@@ -362,12 +376,12 @@ export class SessionRegistry {
     }
   }
 
-  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number; tokenTtlMs?: number; browser?: boolean; owner?: string; member?: TeamMember; memberCheckedAt?: number } = {}): { id: string; code: string; credential: string; expiresAt: number } {
+  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number; tokenTtlMs?: number; browser?: boolean; owner?: string; member?: TeamMember; memberCheckedAt?: number; view?: DeviceView } = {}): { id: string; code: string; credential: string; expiresAt: number } {
     this.prune();
     const now = this.now();
     const code = generatePairingCode();
     const credential = generatePairingCredential();
-    const scopes = input.scopes?.length ? [...new Set(input.scopes)] : [...SCOPES];
+    const scopes: Scope[] = input.view ? ["client"] : input.scopes?.length ? [...new Set(input.scopes)] : [...SCOPES];
     this.refusePersonal(scopes);
     const pairing: PairingCode = {
       id: randomUUID(),
@@ -380,6 +394,7 @@ export class SessionRegistry {
       ...(input.browser ? { browser: true as const, ...(input.owner ? { owner: input.owner } : {}) } : {}),
       ...(input.member ? { member: input.member, ...(input.memberCheckedAt !== undefined ? { memberCheckedAt: input.memberCheckedAt } : {}) } : {}),
       ...(input.tokenTtlMs !== undefined && !input.browser && !input.member ? { tokenTtlMs: input.tokenTtlMs } : {}),
+      ...(input.view ? { view: input.view } : {}),
     };
     this.pairings.push(pairing);
     return { id: pairing.id, code, credential, expiresAt: pairing.expiresAt };
@@ -387,7 +402,7 @@ export class SessionRegistry {
 
   openPairings(): PublicPairing[] {
     this.prune();
-    return this.pairings.map((p) => ({ id: p.id, label: p.label, scopes: [...p.scopes], createdAt: p.createdAt, expiresAt: p.expiresAt }));
+    return this.pairings.map((p) => ({ id: p.id, label: p.label, scopes: [...p.scopes], createdAt: p.createdAt, expiresAt: p.expiresAt, ...(p.view ? { view: p.view } : {}) }));
   }
 
   /** Only a browser sign-in's 256-bit credential matches, so this consumes nothing and counts toward no lockout. */
@@ -483,6 +498,7 @@ export class SessionRegistry {
       ...(pairing.browser ? { cookieOnly: true as const, ...(pairing.owner ? { owner: pairing.owner } : {}) } : {}),
       ...(pairing.member ? { email: pairing.member.email, teamRole: pairing.member.role, membershipAuthority: "team" as const } : {}),
       ...(pairing.member && pairing.memberCheckedAt !== undefined ? { memberCheckedAt: pairing.memberCheckedAt } : {}),
+      ...(pairing.view ? { view: pairing.view } : {}),
     };
     if (pairing.member && pairing.memberCheckedAt === undefined) this.memberChecked(pairing.member, now);
     this.sessions.push(record);
@@ -746,6 +762,45 @@ export class SessionRegistry {
     const ended = this.sessions.filter((session) => session.membershipAuthority === "team" && session.email?.toLowerCase() === address && (keepRole === undefined || session.teamRole !== keepRole));
     for (const session of ended) this.revoke(session.id);
     return ended.length;
+  }
+
+  /** Limits a device to `view`, or lifts the limit with null. A view takes admin away and lifting it never gives admin
+   * back. Null when there is no such session; throws where only admin devices may connect. */
+  setView(id: string, view: DeviceView | null): PublicSession | null {
+    this.prune();
+    const record = this.sessions.find((s) => s.id === id);
+    if (!record) return null;
+    if (view) {
+      this.refusePersonal(["client"]);
+      record.view = view;
+      record.scopes = ["client"];
+    } else {
+      delete record.view;
+    }
+    // Requests already see the change; streams opened before it are ended even when the file cannot be written.
+    try {
+      this.persist();
+    } finally {
+      for (const listener of this.onChanged) listener(id);
+    }
+    return publicSession(record);
+  }
+
+  /** A view names a department by name: once it is deleted or renamed it drops out, so one made again under that name
+   * grants nothing. */
+  dropMissingSections(exists: (name: string) => boolean): void {
+    const kept = (sections: string[]) => sections.filter((name) => name === "" || exists(name));
+    for (const pairing of this.pairings) {
+      if (pairing.view) pairing.view = { ...pairing.view, sections: kept(pairing.view.sections) };
+    }
+    const changed = this.sessions.filter((record) => record.view && kept(record.view.sections).length !== record.view.sections.length);
+    if (!changed.length) return;
+    for (const record of changed) record.view = { ...record.view!, sections: kept(record.view!.sections) };
+    try {
+      this.persist();
+    } finally {
+      for (const record of changed) for (const listener of this.onChanged) listener(record.id);
+    }
   }
 
   revoke(id: string): boolean {

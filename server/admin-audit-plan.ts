@@ -1,4 +1,18 @@
+import type { AdminActionRow } from "./admin-activity.ts";
 import { requiredScope } from "./request-auth.ts";
+
+type AuditedSession = { id: string; label: string; email?: string; scopes: string[]; view?: unknown };
+
+/** A device signed out, or one whose view changed (which also takes its admin away). */
+export function sessionAuditRows(before: AuditedSession | undefined, now: readonly AuditedSession[]): Array<Omit<AdminActionRow, "at" | "actor">> {
+  if (!before) return [];
+  const target = { kind: "session", id: before.id, name: before.email ?? before.label };
+  const kept = now.find((session) => session.id === before.id);
+  if (!kept) return [{ category: "session", action: "session.revoke", target, before: { label: before.label, ...(before.email ? { email: before.email } : {}), scopes: before.scopes } }];
+  if (JSON.stringify(kept.view ?? null) === JSON.stringify(before.view ?? null)) return [];
+  return [{ category: "session", action: "session.view", target, changed: ["view"],
+    before: { scopes: before.scopes, view: before.view ?? "everything" }, after: { scopes: kept.scopes, view: kept.view ?? "everything" } }];
+}
 
 /** What an admin's write request changes, so the admin activity log can record it; null for reads and internal calls. */
 export interface AuditPlan {
@@ -32,7 +46,7 @@ export function adminAuditPlan(method: string, path: string, sharedComputers: bo
   m = /^\/api\/webhooks\/([\w-]+)(\/rotate)?$/.exec(path);
   if (m && ((m[2] && method === "POST") || (!m[2] && (method === "PATCH" || method === "DELETE")))) plan.webhookId = m[1];
   m = /^\/api\/auth\/sessions\/([\w-]+)$/.exec(path);
-  if (m && method === "DELETE") plan.sessionId = m[1];
+  if (m && (method === "DELETE" || method === "PATCH")) plan.sessionId = m[1];
   m = /^\/api\/groups\/([\w-]+)$/.exec(path);
   if (m && method === "PATCH") plan.roomId = m[1];
   m = /^\/api\/instances\/([\w.-]+)\/(install|auth\/complete|auth\/sign-out|claude-update|leftover-files\/remove)$/.exec(path);

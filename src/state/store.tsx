@@ -25,7 +25,7 @@ import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
-import { keepBotNavigation, keepGroupNavigation, navigatedSince, visibleMessages } from "./snapshot-navigation";
+import { firstChat, hydratedSelection, keepBotNavigation, keepGroupNavigation, navigatedSince, visibleMessages } from "./snapshot-navigation";
 export { visibleMessages } from "./snapshot-navigation";
 export { awayFromMainThread, botOpensTo, markedThread, openBot, openBotRow, openBotThread, openRoomThread, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
@@ -272,6 +272,8 @@ export interface TaskUsage {
 }
 
 export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "access" | "yourAccess" | "onlyPeopleAdded"> {
+  /** Sent only as a member of a room this device's view lists: it has no chat of its own here. */
+  roomOnly?: boolean;
   toolScope?: ToolScope;
   waitingForTeammates?: boolean;
   id: string;
@@ -900,11 +902,7 @@ export function reducer(state: AppState, action: Action): AppState {
   if (isNotificationFeedAction(action)) return { ...state, notifications: reduceNotificationFeed(state.notifications, action) };
   switch (action.type) {
     case "hydrate": {
-      const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
-      const resume = action.resumeId;
-      const resumed =
-        resume && (action.bots.some((b) => b.id === resume && !b.hidden) || action.groups.some((g) => g.id === resume)) ? resume : "";
-      const selectedId = state.selectedId && known(state.selectedId) ? state.selectedId : resumed || (action.bots[0]?.id ?? "");
+      const selectedId = hydratedSelection(state.selectedId, action.resumeId, action.bots, action.groups);
       const hydrated = {
         ...state,
         bots: action.bots.map((sent) => {
@@ -1058,7 +1056,7 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "groupDeleted": {
       const groups = state.groups.filter((g) => g.id !== action.groupId);
-      const selectedId = state.selectedId === action.groupId ? (state.bots[0]?.id ?? "") : state.selectedId;
+      const selectedId = state.selectedId === action.groupId ? firstChat(state.bots, groups) : state.selectedId;
       return { ...state, groups, selectedId };
     }
     case "instances":
@@ -1150,7 +1148,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "deleteBot": {
       const bots = state.bots.filter((b) => b.id !== action.botId);
       const selectedId =
-        state.selectedId === action.botId ? (bots.find((b) => !b.hidden)?.id ?? bots[0]?.id ?? "") : state.selectedId;
+        state.selectedId === action.botId ? (bots.find((b) => !b.hidden && !b.roomOnly)?.id ?? firstChat(bots, state.groups)) : state.selectedId;
       const { [action.botId]: _deleted, ...deletingBots } = state.deletingBots;
       return reconcileModelVariantSessions({ ...state, bots, selectedId, deletingBots });
     }

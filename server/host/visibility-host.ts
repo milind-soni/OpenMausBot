@@ -23,6 +23,9 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
   const store = { get bots() { return deps.store().bots; }, get groups() { return deps.store().groups; }, bot: (id: string) => deps.store().bot(id),
     group: (id: string) => deps.store().group(id), botByThread: (id: string) => deps.store().botByThread(id), groupByThread: (id: string) => deps.store().groupByThread(id) };
   function viewerFor(auth: RequestAuth): Viewer {
+    if (auth.kind === "session" && auth.session.view) {
+      return { kind: "member", view: auth.session.view, ...(auth.session.email ? { email: auth.session.email } : {}) };
+    }
     if (auth.kind === "loopback" || (auth.scopes.includes("admin") && !deps.team)) return SEES_EVERYTHING;
     if (auth.scopes.includes("admin")) return { kind: "all", email: auth.session.email ?? "" };
     return { kind: "member", ...(auth.session.email ? { email: auth.session.email } : {}) };
@@ -42,7 +45,8 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
     return owner ?? undefined;
   }
   function visibleTo(viewer: Viewer): VisibleSet {
-    const key = viewer.kind === "all" ? (viewer.email === undefined ? "*" : `admin:${viewer.email.trim().toLowerCase()}`) : `member:${viewer.email?.trim().toLowerCase() ?? ""}`;
+    const key = viewer.kind === "all" ? (viewer.email === undefined ? "*" : `admin:${viewer.email.trim().toLowerCase()}`)
+      : `member:${viewer.email?.trim().toLowerCase() ?? ""}${viewer.view ? `:${JSON.stringify(viewer.view)}` : ""}`;
     let set = visibleSets.get(key);
     if (!set) {
       set = new VisibleSet(store.bots, store.groups, viewer, threadOwner, deps.audiencesFor(viewer));
@@ -84,7 +88,7 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
   function subjectVisible(subject: PathSubject, visible: VisibleSet): boolean {
     switch (subject.kind) {
       case "bot":
-        return !store.bot(subject.id) || visible.bot(subject.id);
+        return !store.bot(subject.id) || visible.reaches(subject.id);
       case "thread":
         return !threadOwner(subject.id) || visible.thread(subject.id);
       case "group":
@@ -106,7 +110,7 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
   function hiddenRoutineTarget(body: unknown, visible: VisibleSet): string | null {
     if (visible.everything || !body || typeof body !== "object") return null;
     const { botId, groupId } = body as { botId?: unknown; groupId?: unknown };
-    if (typeof botId === "string" && store.bot(botId) && !visible.bot(botId)) return "no such bot";
+    if (typeof botId === "string" && store.bot(botId) && !visible.reaches(botId)) return "no such bot";
     if (typeof groupId === "string" && store.group(groupId) && !visible.group(groupId)) return "no such channel";
     return null;
   }
