@@ -51,6 +51,23 @@ describe.skipIf(detection.box !== "bwrap")(`paths on a boxed command line (${det
     expect((await run(["-c", cat, "sh", handed], { ro: [join(dataDir, "hook-tokens", "t")] })).out).toBe("a file the server hands this turn");
   }, 60_000);
 
+  it("still runs a configured server whose program is in the bot's own folder, with the bot known or not", async () => {
+    const program = join(dataDir, "workspaces", "bot-1", "tools", "server.sh");
+    mkdirSync(join(dataDir, "workspaces", "bot-1", "tools"), { recursive: true });
+    writeFileSync(program, "echo the bot's own server ran\n");
+    expect((await run([program], { configured: true })).out).toBe("the bot's own server ran\n");
+    const unknown = box.wrap({ command: "/bin/sh", args: [program], env: { ...ENV, HOME: home }, configured: true })!;
+    const out = await new Promise<string>((resolve) => {
+      const child = spawn(unknown.command, unknown.args, { env: unknown.env, stdio: ["ignore", "pipe", "pipe", ...unknown.extraFds] });
+      for (const fd of unknown.extraFds) try { closeSync(fd); } catch {}
+      let text = "";
+      child.stdout?.on("data", (chunk) => { text += chunk; });
+      child.stderr?.on("data", (chunk) => { text += chunk; });
+      child.once("exit", () => { unknown.release(); resolve(text); });
+    });
+    expect(out).toBe("the bot's own server ran\n");
+  }, 60_000);
+
   it("makes nothing of the data folder readable or writable through a configured server's environment", async () => {
     for (const name of ["XDG_CACHE_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR"]) {
       for (const value of [dataDir, settings, join(dataDir, "workspaces", "bot-2")]) {

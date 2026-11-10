@@ -209,7 +209,17 @@ linuxBox("the box plan", () => {
         const plan = ask(args);
         for (const file of server) expect(visibleInBox(plan, file), `${dataDir}: ${args.join(" ")}`).toBe("none");
       }
-      expect(visibleInBox(ask([join(dataDir, "workspaces", "b", "server.js")]), join(dataDir, "workspaces", "b", "server.js"))).toBe("rw");
+      // A server whose program is in the bot's own folder still finds it: with the bot known its folder is there
+      // anyway, and without one (a configured server run for a chat) the file itself is shown, read-only.
+      expect(visibleInBox(ask([join(dataDir, "workspaces", "b", "tools", "server.js")]), join(dataDir, "workspaces", "b", "tools", "server.js"))).not.toBe("none");
+      const noBot = planBox({ ...setup(), dataDir, home }, { command: "python3", args: [join(dataDir, "workspaces", "b", "tools", "server.py")], env: {}, configured: true });
+      expect(visibleInBox(noBot, join(dataDir, "workspaces", "b", "tools", "server.py"))).toBe("ro");
+      expect(visibleInBox(noBot, join(dataDir, "config.json"))).toBe("none");
+      // Never another bot's for a box that has a bot, and never the folder of every bot.
+      expect(visibleInBox(ask([join(dataDir, "workspaces", "other", "MEMORY.md")]), join(dataDir, "workspaces", "other", "MEMORY.md"))).toBe("none");
+      for (const all of [join(dataDir, "workspaces"), join(dataDir, "task-workspaces")]) {
+        expect(visibleInBox(planBox({ ...setup(), dataDir, home }, { command: "ls", args: [all], env: {}, configured: true }), join(all, "other", "MEMORY.md"))).toBe("none");
+      }
       expect(visibleInBox(ask(["--token", join(dataDir, "hook-tokens", "t", "token")], [join(dataDir, "hook-tokens", "t")]), join(dataDir, "hook-tokens", "t", "token"))).toBe("ro");
       expect(visibleInBox(ask(["--mcp-config", "/tmp/omb-mcp-1/mcp.json"]), "/tmp/omb-mcp-1/mcp.json")).toBe("ro");
       expect(visibleInBox(ask([]), join(dataDir, "bots", "b", "SOUL.md"))).toBe("ro");

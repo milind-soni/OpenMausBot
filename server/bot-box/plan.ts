@@ -233,14 +233,19 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     mounts.push({ kind: "ro", source: shown, target: shown, optional: true });
   }
   const readOnly = new Set<string>();
+  const inBotFolder = (path: string) => ["workspaces", "task-workspaces"].some((kind) => {
+    const [owner, ...rest] = relative(join(dataDir, kind), path).split(sep);
+    return owner !== undefined && ID.test(owner) && !rest.includes("..") && (botId ? owner === botId : true);
+  });
   const named = new Set((request.ro ?? []).map((path) => resolve(path)));
   if (botId && ID.test(botId)) named.add(join(dataDir, "bots", botId, "SOUL.md"));
   for (const path of [...(request.ro ?? []), ...argvPaths(request.args), ...(botId && ID.test(botId) ? [join(dataDir, "bots", botId, "SOUL.md")] : [])]) {
     const full = resolve(path);
     if (request.ro?.includes(path)) assertReadOnlySource(full);
     // Security: a command line is not a grant. A path on one that is in the data folder, or holds it, is shown only
-    // when the caller named it in `ro`.
-    if (!named.has(full) && (under(full, dataDir) || under(dataDir, full)) && !covered(full)) continue;
+    // when the caller named it in `ro`, or when it is in a bot's folder: this box's bot's, or any bot's where the caller
+    // gave no bot (a configured server's program lives in the folder of the bot that added it).
+    if (!named.has(full) && (under(full, dataDir) || under(dataDir, full)) && !covered(full) && !inBotFolder(full)) continue;
     // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
     if (covered(full) || readOnly.has(full)) continue;
     if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
