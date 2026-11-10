@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 
 import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
+import { createMoveLease } from "./move-lease.mjs";
 import { createMoveSession } from "./move-session.mjs";
 import { createMoveStatusReport, moveStatus } from "./move-status.mjs";
 import { createHomeAgain } from "./one-home-again.mjs";
@@ -145,7 +146,7 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
   let teamMove = null;
   // One owner session for the whole move, every pass and check and the switch: each new one is one of the Admin's codes.
   const moveSession = createMoveSession({ open: (target) => openOwnerSession(target, fetchImpl, { label: MOVE_LABEL, background: false }) });
-  const send = installCloudSend({ ...sendDeps, t, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }),
+  const send = installCloudSend({ ...sendDeps, t, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(init?.timeoutMs ?? 30_000) }),
     move: () => (home?.view() === null && other()?.view() ? other() : home), teamMove: () => teamMove, moveSession });
   teamMove = installTeamMove({ t, ipcMain: sendDeps.ipcMain, cloudPage: sendDeps.cloudPage, pageOrigin: sendDeps.pageOrigin, confirmMove: sendDeps.confirmMove, home: sendDeps.home, account: () => account(), fetch: fetchImpl, openTeam,
     file: () => join(dirname(journalFile()), "team-move-send.json"), journalFile: () => join(dirname(journalFile()), "team-moves.json"), ...(teamJournal ? { journal: teamJournal } : {}),
@@ -226,9 +227,13 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
     tempRoot: tempRoot(),
   });
 
+  // Two computers moving into one Cloud take turns at the heavy part (server/cloud-send-lease.ts).
+  const lease = createMoveLease({ session: () => moveSession.open(target()), holder: installation, log,
+    label: async () => String((await local.json("/api/cloud-connections").catch(() => null))?.computer?.label ?? "") });
   home = createOneHome({
     journal,
     t,
+    lease,
     // Every run starts here: the key watch is set up before any wait asks, so a key pressed since then counts.
     cloud: () => {
       typed();

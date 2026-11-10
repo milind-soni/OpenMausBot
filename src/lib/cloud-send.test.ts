@@ -21,6 +21,23 @@ describe("the one-time move's line", () => {
     expect(moveLine({ ...done, place: "Garage server", stayed: [{ name: "easy" }] }, "cloud")?.extra).toEqual(["easy: it only works on that computer, so bots here can't use it."]);
   });
 
+  it("says how far the check of what arrived is, that My Cloud is slow and when it goes on, and which computer it waits for", () => {
+    expect(moveLine({ phase: "finishing", checking: { step: "chats", done: 400, total: 1000, bots: 25 } }, "local")?.text).toBe("Moving to My Cloud… checking 25 bots' chats there, 40%");
+    expect(moveLine({ phase: "finishing", checking: { step: "chats", done: 1, total: 3, bots: 1 } }, "local")?.text).toBe("Moving to My Cloud… checking your bot's chats there, 33%");
+    expect(moveLine({ phase: "finishing", checking: { step: "files", done: 10, total: 100, bots: 25 } }, "local")?.text).toBe("Moving to My Cloud… checking your bots' files there, 10%");
+    expect(moveLine({ phase: "finishing", checking: { step: "manifest", done: 0, total: 0, bots: 0 } }, "local")?.text).toBe("Moving to My Cloud… checking that everything arrived");
+    const until = new Date(2026, 10, 9, 14, 5).getTime();
+    const time = new Intl.DateTimeFormat("en", { timeStyle: "short" }).format(until);
+    expect(moveLine({ phase: "copy", slow: { until } }, "local")).toMatchObject({ kind: "sending", text: `My Cloud is slow to answer. Your move goes on from where it was at ${time}.` });
+    expect(moveLine({ phase: "finishing", checking: { step: "chats", done: 5, total: 9, bots: 2 }, slow: { until } }, "local")?.text).toContain("My Cloud is slow to answer");
+    expect(moveLine({ phase: "copy", slow: { until }, failing: { error: "My Cloud did not answer." } }, "local")?.kind, "a day of failing still says so, with Try again").toBe("failed");
+    expect(moveLine({ phase: "copy", queued: { name: "Milind's Mac" } }, "local")?.text).toBe("Waiting for Milind's Mac to finish moving to My Cloud. Your bots move right after.");
+    expect(moveLine({ phase: "wait", queued: { name: "" } }, "local")?.text).toBe("Waiting for your other computer to finish moving to My Cloud. Your bots move right after.");
+    expect(moveLine({ phase: "finishing", checking: { step: "chats", done: 1, total: 2, bots: 3 }, place: "Garage server" }, "local")?.text).toBe("Moving to Garage server… checking 3 bots' chats there, 50%");
+    setLocale("pt-br");
+    expect(moveLine({ phase: "finishing", checking: { step: "chats", done: 400, total: 1000, bots: 25 } }, "local")?.text).toBe("Indo para o Cloud… conferindo as conversas de 25 bots lá, 40%");
+  });
+
   it("says where the move is on whichever page is open, and who it waits for", () => {
     expect(moveLine({ phase: "copy" }, "local")).toMatchObject({ kind: "sending", text: "Moving your bots to My Cloud…" });
     expect(moveLine({ phase: "copy", chats: { done: 34, total: 120 } }, "local")?.text).toBe("Moving your bots to My Cloud… 34 of 120 chats");

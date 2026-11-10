@@ -98,6 +98,32 @@ the reason in its tooltip. Both run the one retry, and both wait with a spinner
 while it runs. On My Cloud's page the menu says once what arrived, with the phone
 to pair and Got it.
 
+## A big workspace on a slow Cloud
+
+```sh
+node --test electron/cloud-send-big.node-test.mjs electron/one-home-check.node-test.mjs
+pnpm exec vitest run server/cloud-send-big.test.ts server/cloud-send-lease.test.ts
+```
+
+`electron/cloud-send-big.node-test.mjs` runs the real check (`createCloudSend`'s
+`check`) against a fake Cloud that takes, on a clock, the time a Fly Starter
+machine takes for each request's work, and cuts off a request that takes longer
+than its caller waits, as fetch does: 100 bots, 3,000 conversations (five of
+12,000 rows), 6,000 attachments and 2,000 bot files. The whole manifest in one
+answer, as the check asked for it before, takes about 19 minutes there; the
+check asks My Cloud's manifest without attachments and files, its files a bot at
+a time, and the chats 200 conversations to a request, and finishes with no
+request cut off. A Cloud that stops answering for minutes is waited for; one
+that stops for longer fails the check as unanswered with what it got done kept,
+and the next check asks only about the conversations not found whole yet.
+`electron/one-home-check.node-test.mjs` covers the move around it: such a check
+goes on in five minutes, not an hour, the line says how far the check is or that
+My Cloud is slow until when, and two computers moving into one Cloud take turns
+at the heavy part, the second saying which computer it waits for.
+`server/cloud-send-big.test.ts` builds 100 bots with 2,000 conversations in a
+real store and shows the server's answers read messages.db directly and never
+parse a conversation through the store.
+
 ## The real utility port
 
 ```sh

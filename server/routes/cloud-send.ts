@@ -3,7 +3,8 @@
 // carries, to check it by (server/cloud-send-manifest.ts); on a Cloud home, POST /api/cloud-send/verify-secrets: the
 // credentials' fingerprints (server/cloud-send-verify.ts); a move's own kinds, memory and bot files
 // (server/cloud-send-kinds.ts, cloud-send-memory.ts, cloud-send-files.ts), and what My Cloud keeps once a move is done and
-// what this computer says once the bots came home (server/cloud-send-arrived.ts). Admin scope (request-auth's default):
+// what this computer says once the bots came home (server/cloud-send-arrived.ts), and the lease that lets one computer at a
+// time move in (server/cloud-send-lease.ts). Admin scope (request-auth's default):
 // the owner's app reads them on this computer and on their own Cloud.
 import { z } from "zod";
 
@@ -11,6 +12,7 @@ import { botAvatarUrlSchema } from "../../shared/bot-avatar.ts";
 import { readAttachment } from "../attachments.ts";
 import { arrivedRoute, automationsOffRoute, homeRoute } from "../cloud-send-arrived.ts";
 import { moveFilesRoute } from "../cloud-send-files.ts";
+import { createMoveLeases, moveLeaseRoute } from "../cloud-send-lease.ts";
 import { automatedBot, moveBotParts, moveItems, moveKindsRoute, type MoveKindsDeps } from "../cloud-send-kinds.ts";
 import { cloudSendManifest } from "../cloud-send-manifest.ts";
 import { moveMemoryRoute, type MoveMemoryDeps } from "../cloud-send-memory.ts";
@@ -74,6 +76,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     ...(deps.move ? { move: { items: (bots: ReadonlySet<string>, only?: BotRecord) => moveItems(deps.move!, bots, only), botParts: (bot: BotRecord) => moveBotParts(bot, partHash) } } : {}),
   };
   const move = deps.move;
+  const leases = createMoveLeases();
   return async (ctx) => {
     const { req, res, path, method, url, json, readBody } = ctx;
     if (path !== "/api/cloud-send" && !path.startsWith("/api/cloud-send/")) return PASS;
@@ -86,6 +89,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     if (move && await moveKindsRoute(move, ctx)) return;
     if (move && await moveMemoryRoute({ ...move, bot: (id) => move.store.bot(id) ?? undefined }, ctx)) return;
     if (move && await moveFilesRoute({ dataDir: move.dataDir, bots: () => (bot ? move.store.bots.filter((entry) => entry.id === bot) : move.store.bots), owner: move.owner }, ctx)) return;
+    if (move && home && await moveLeaseRoute({ leases, owner: move.owner }, ctx)) return;
     if (move && home && await arrivedRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks, owner: move.owner, lineLanguage: deps.lineLanguage ?? (() => deps.config().language), ...(deps.connectionsMoved ? { stayed: deps.connectionsMoved } : {}) }, ctx)) return;
     if (move && deps.cloudHome && deps.automations && await automationsOffRoute({ automations: deps.automations, owner: move.owner }, ctx)) return;
     if (move && !deps.cloudHome && await homeRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks }, ctx)) return;
@@ -94,7 +98,8 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
       if (!deps.chats) return json(res, 404, { error: "not found" });
       res.setHeader("cache-control", "no-store");
       return json(res, 200, await cloudSendManifest({ summary: () => cloudSendSummary(sources, { move: true, ...(bot ? { bot } : {}) }), store: deps.chats.store, dataDir: deps.chats.dataDir,
-        connections: deps.connections ?? (async () => []), heads: threadHeads, ...(move ? { kinds: move, teamMemory: move.teamMemory } : {}), ...(bot ? { bot } : {}) }));
+        connections: deps.connections ?? (async () => []), heads: threadHeads, ...(move ? { kinds: move, teamMemory: move.teamMemory } : {}), ...(bot ? { bot } : {}),
+        attachments: url.searchParams.get("attachments") !== "0", files: url.searchParams.get("files") !== "0" }));
     }
     if (path === "/api/cloud-send/verify-secrets") {
       if (!home || !deps.connectionFingerprints) return json(res, 404, { error: "not found" });
