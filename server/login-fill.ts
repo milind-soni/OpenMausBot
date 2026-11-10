@@ -2,9 +2,10 @@
 // the engine's loopback relay (never on a command line), and the bot hears what was filled or why not, never a value.
 import { randomBytes } from "node:crypto";
 
-import { loginLabel, loginOriginCheck, loginPageCheck, type LoginPlace, type LoginSource } from "../shared/logins.ts";
+import { loginLabel, loginOriginCheck, loginPageCheck, loginPlace, loginSite, type LoginPlace, type LoginSource } from "../shared/logins.ts";
 import { scrubHeldSecrets } from "../shared/redact.ts";
 import type { SecretHold } from "./browser-secret-hold.ts";
+import type { CodeMiss } from "./email-code.ts";
 import { totpCode, type TotpKey } from "./totp.ts";
 
 /** Its secrets are read only when it is about to be filled. */
@@ -25,10 +26,34 @@ export interface FillLoginDeps {
   remember(value: string, kind: "password" | "code"): void;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /** Looks in the person's connected mailbox for a code the page asks for. Absent: no mailbox can be read in this turn. */
+  emailCode?(ask: EmailCodeAsk): Promise<EmailCodeAnswer>;
 }
+
+/** What the page says about where its code went. */
+export type CodeVia = "email" | "other" | "unknown";
+
+export interface EmailCodeAsk {
+  site: string;
+  /** Boxes the code goes into; more than one means one character each. */
+  boxes: number;
+  /** When this fill submitted the step that asked for it; null when the box was already there. */
+  askedAt: number | null;
+  via: CodeVia;
+  now(): number;
+  sleep(ms: number): Promise<void>;
+}
+
+export type EmailCodeAnswer =
+  | { kind: "code"; code: string; typed(): void }
+  | { kind: "miss"; why: CodeMiss }
+  | { kind: "no-mailbox" }
+  | { kind: "skip" };
 
 export interface FillLoginInput {
   username?: string;
+  /** Sign in with only this address: for a site that sends a code instead of asking for a password. */
+  email?: string;
   /** Submit what was filled; false leaves that to the bot. */
   submit?: boolean;
   candidates(pageHost: string): Promise<FillCandidate[]>;
@@ -47,6 +72,8 @@ export interface FillLoginOutcome {
   loginId?: string;
   filled?: FilledField[];
   held?: SecretHold;
+  /** The page wants an emailed code and no mailbox is connected: the person can be offered one. */
+  wantsMailbox?: boolean;
 }
 
 /** How long a filled secret may stay on a page before it is cleared, with page scripts refused there meanwhile. */
@@ -142,7 +169,10 @@ const FIND_FIELDS = `((nonce, step) => {
   if (username) username.setAttribute(MARK, key + "username");
   if (password) password.setAttribute(MARK, key + "password");
   boxes.forEach((el, index) => el.setAttribute(MARK, key + "code" + index));
-  return JSON.stringify({ href: location.href, username: Boolean(username), password: Boolean(password), code: boxes.length, human: humanCheck(), alert: alertText() });
+  const words = ((document.body && (document.body.innerText || document.body.textContent)) || "").toLowerCase().slice(0, 8000);
+  const emailed = /(?:sent|check|enter|emailed).{0,60}(?:e-?mail|inbox|\\S@\\S)|(?:e-?mail|inbox).{0,60}(?:code|sent)|code.{0,60}(?:e-?mail|inbox|\\S@\\S)/.test(words);
+  const via = emailed ? "email" : /authenticator|text message|\\bsms\\b|whatsapp/.test(words) ? "other" : "unknown";
+  return JSON.stringify({ href: location.href, username: Boolean(username), password: Boolean(password), code: boxes.length, via, human: humanCheck(), alert: alertText() });
 })`;
 
 /** "type" empties the field the way typing over it would, so a React-style form's state follows; "submit" only focuses it,
@@ -252,12 +282,27 @@ function pageAddress(href: string): string {
   try { const url = new URL(href); return `${url.origin}${url.pathname}`; } catch { return "the next page"; }
 }
 
+function siteOf(href: string): string | null {
+  const page = loginPageCheck(href);
+  return page.ok ? loginSite(page.pageHost) : null;
+}
+
 function sameDocumentUrl(a: string, b: string): boolean {
   return a.split("#", 1)[0] === b.split("#", 1)[0];
 }
 
 const FIELD_WORDS: Record<FilledField, string> = { username: "the username", password: "the password", code: "the one-time code" };
-const CODE_FROM_INBOX = "If the site sent it to the person's own email or phone, read it from their connected email or messages and type it in yourself; otherwise call request_sign_in so the person enters it.";
+const EMAIL_LOGIN = "An email sign-in";
+export const CODE_FROM_INBOX = "If the site sent it to the person's own email or phone, read it from their connected email or messages and type it in yourself; otherwise call request_sign_in so the person enters it.";
+
+const CODE_MISS: Record<CodeMiss, string> = {
+  "wrong-sender": "An email that looked like a sign-in code arrived, but not from an address of this site, so OpenMausBot did not use it.",
+  ambiguous: "The site's email held more than one possible code, or two different codes arrived, so OpenMausBot typed none rather than guess.",
+  used: "The only code in the site's email had already been tried here, so OpenMausBot did not type it again.",
+  "not-found": "No email with a code from this site arrived in the connected mailbox within about a minute.",
+  unreadable: "OpenMausBot could not read the connected mailbox just now.",
+};
+const FROM_MAILBOX = " OpenMausBot read the code from the person's connected email and typed it; you never see it or the email.";
 
 interface PageState { href: string; title: string; present: boolean; busy: boolean; submitted: boolean; leaving: boolean; alert: string; human: boolean }
 
@@ -286,7 +331,17 @@ export async function fillLogin(input: FillLoginInput, deps: FillLoginDeps): Pro
       : "The current page is not a web page fill_login can fill. Open the site's login page, then call fill_login." };
   }
   const pageHost = fillable.pageHost;
+  const runOptions = { submit: input.submit !== false, host: pageHost, deps, now, sleep };
+  const email = input.email?.trim();
+  if (email !== undefined && email !== "") {
+    if (!ADDRESS.test(email)) return { ok: false, host: pageHost, text: `${JSON.stringify(email.slice(0, 80))} is not an email address. Call fill_login with the person's whole address.` };
+    return new LoginRun(addressOnly(pageHost, email), { ...runOptions, addressOnly: true }).run();
+  }
   const all = await input.candidates(pageHost);
+  if (!all.length && deps.emailCode) {
+    const run = new LoginRun(addressOnly(pageHost, ""), { ...runOptions, addressOnly: true });
+    if (await run.onlyWantsACode()) return run.run();
+  }
   if (!all.length) {
     const trouble = input.trouble?.();
     const missing = trouble ? ` 1Password could not be read just now, so its logins may be missing: ${trouble}` : "";
@@ -307,7 +362,14 @@ export async function fillLogin(input: FillLoginInput, deps: FillLoginDeps): Pro
   if (!loginOriginCheck(pageUrl, login).ok) {
     return { ok: false, host: pageHost, text: `This page's host (${pageHost}) is not one the saved login for ${loginLabel(login)} fills on.` };
   }
-  return new LoginRun(login, { submit: input.submit !== false, host: pageHost, deps, now, sleep }).run();
+  return new LoginRun(login, runOptions).run();
+}
+
+const ADDRESS = /^[^\s@<>()",;:]{1,200}@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/iu;
+
+/** A sign-in with no saved password: it fills on the page's own site. */
+function addressOnly(pageHost: string, email: string): FillCandidate {
+  return { ...loginPlace(pageHost), id: "", username: email, source: "settings", secrets: async () => ({ password: "", totp: null }) };
 }
 
 interface Found {
@@ -315,6 +377,7 @@ interface Found {
   username: boolean;
   password: boolean;
   code: number;
+  via: CodeVia;
   human: boolean;
   alert: string;
 }
@@ -324,6 +387,7 @@ function found(value: Record<string, unknown> | null): Found | null {
   return {
     href: value.href, username: value.username === true, password: value.password === true,
     code: typeof value.code === "number" ? Math.min(Math.max(0, value.code), 12) : 0,
+    via: value.via === "email" || value.via === "other" ? value.via : "unknown",
     human: value.human === true, alert: typeof value.alert === "string" ? value.alert : "",
   };
 }
@@ -339,13 +403,19 @@ class LoginRun {
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly host: string;
-  private readonly deadline: number;
+  private deadline: number;
+  private readonly addressOnly: boolean;
+  private submittedAt: number | null = null;
+  private codeHelp: string = CODE_FROM_INBOX;
+  private fromMailbox = false;
+  private wantsMailbox = false;
   private readonly done = new Set<FilledField>();
   private secrets: { password: string; totp: TotpKey | null } | null = null;
   private secretUrl: string | null = null;
 
-  constructor(login: FillCandidate, options: { submit: boolean; host: string; deps: FillLoginDeps; now: () => number; sleep: (ms: number) => Promise<void> }) {
+  constructor(login: FillCandidate, options: { submit: boolean; host: string; deps: FillLoginDeps; now: () => number; sleep: (ms: number) => Promise<void>; addressOnly?: boolean }) {
     this.login = login;
+    this.addressOnly = options.addressOnly === true;
     this.submit = options.submit;
     this.host = options.host;
     this.deps = options.deps;
@@ -363,7 +433,7 @@ class LoginRun {
   }
 
   private who(): string {
-    return `${this.login.username || "the saved login"}${this.login.source === "1password" ? " (from 1Password)" : ""}`;
+    return `${this.login.username || (this.addressOnly ? EMAIL_LOGIN : "the saved login")}${this.login.source === "1password" ? " (from 1Password)" : ""}`;
   }
 
   private filledWords(): string {
@@ -372,7 +442,8 @@ class LoginRun {
 
   private outcome(ok: boolean, text: string, held?: SecretHold): FillLoginOutcome {
     const hold = held ?? (this.secretUrl ? { url: this.secretUrl, ms: SECRET_HOLD_MS } : undefined);
-    return { ok, host: this.host, loginId: this.login.id, filled: [...this.done], ...(hold ? { held: hold } : {}), text: scrubHeldSecrets(text) };
+    const said = `${text}${this.fromMailbox ? FROM_MAILBOX : ""}`;
+    return { ok, host: this.host, ...(this.addressOnly ? {} : { loginId: this.login.id }), filled: [...this.done], ...(hold ? { held: hold } : {}), ...(this.wantsMailbox ? { wantsMailbox: true } : {}), text: scrubHeldSecrets(said) };
   }
 
   /** Every password and code this run filled, on whatever document still has them. */
@@ -388,7 +459,7 @@ class LoginRun {
 
   private async failed(text: string): Promise<FillLoginOutcome> {
     await this.clear();
-    return this.outcome(false, `${text} The password was cleared from the page.`);
+    return this.outcome(false, `${text} ${this.addressOnly ? "The code was" : "The password was"} cleared from the page.`);
   }
 
   /** The fields a page shows; for a later step, waits up to `waitMs` for a password or code box. */
@@ -400,6 +471,14 @@ class LoginRun {
       if (ready || this.now() >= until) return fields;
       await this.sleep(POLL_MS);
     }
+  }
+
+  /** The page shows only a code box, so a code is all it needs: nothing here asks for a saved login. */
+  async onlyWantsACode(): Promise<boolean> {
+    const fields = await this.find(0, 0);
+    const only = Boolean(fields && fields.code > 0 && !fields.password && !fields.username && this.stillHere(fields.href));
+    if (!only) await this.page(UNMARK, this.nonce);
+    return only;
   }
 
   async run(): Promise<FillLoginOutcome> {
@@ -423,12 +502,19 @@ class LoginRun {
         if (step === 0) return this.outcome(false, `The page moved away from ${this.host} before anything was filled. Open its login page again, then call fill_login.`);
         return this.finish(true, `Submitted ${this.filledWords()} for ${this.who()}; the page is now ${pageAddress(fields.href)}, where this login is not used. Check you are signed in, or call request_sign_in.`);
       }
+      if (this.addressOnly && fields.password) {
+        return this.finish(false, step > 0
+          ? `Submitted ${this.filledWords()} for ${this.who()}, and ${this.host} now asks for a password, which this sign-in does not have. Call fill_login without email if a login is saved, or call request_sign_in.`
+          : `This page on ${this.host} asks for a password, which a sign-in with only an address does not have. Call fill_login without email if a login is saved, or call request_sign_in.`);
+      }
       if ((fields.password && this.done.has("password")) || (fields.code > 0 && this.done.has("code"))) {
         const said = fields.alert ? ` It said: “${fields.alert}”.` : "";
         return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}: it asked for it again, and nothing was submitted twice.${said} Check the saved login in Settings → Logins, or call request_sign_in.`);
       }
       if (step > 0 && !fields.password && fields.code === 0) {
         if (fields.human) return this.finish(true, `Submitted ${this.filledWords()} for ${this.who()}, and a human check (CAPTCHA) appeared. Call request_sign_in so the person finishes signing in.`);
+        if (this.addressOnly && this.done.has("code")) return this.finish(true, this.signedIn(fields.href, ""));
+        if (this.addressOnly) return this.finish(true, `Submitted ${this.filledWords()} for ${this.who()}, but no code box followed on ${this.host}. Look at the page: if it asks for something else, or sent a link, call request_sign_in so the person finishes.`);
         if (!this.done.has("password")) return this.finish(true, `Submitted ${this.filledWords()} for ${this.who()}, but no password box followed on ${this.host}. Look at the page, then call fill_login again once it shows the password box.`);
         return this.finish(true, this.signedIn(fields.href, ""));
       }
@@ -440,16 +526,17 @@ class LoginRun {
       if (typed.kind === "none") {
         await this.page(UNMARK, this.nonce);
         if (fields.code > 0 && !this.secretsHaveTotp()) {
+          const noKey = this.addressOnly ? "" : ", and the saved login has no 2FA key";
           return step > 0
-            ? this.outcome(true, `Submitted ${this.filledWords()} for ${this.who()}. The page now asks for a one-time code, and the saved login has no 2FA key. ${CODE_FROM_INBOX}`)
-            : this.outcome(false, `This page on ${this.host} asks for a one-time code, and the saved login has no 2FA key. ${CODE_FROM_INBOX}`);
+            ? this.outcome(true, `Submitted ${this.filledWords()} for ${this.who()}. The page now asks for a one-time code${noKey}. ${this.codeHelp}`)
+            : this.outcome(false, `This page on ${this.host} asks for a one-time code${noKey}. ${this.codeHelp}`);
         }
         return !fields.username && !fields.password && fields.code === 0
           ? this.outcome(false, `No login fields found on ${this.host}. Open its sign-in page (the one with the username, password or code box), then call fill_login again.`)
           : this.outcome(false, `Could not fill the login fields on ${this.host}: the page did not take the typing. Click the field once, then call fill_login again, or call request_sign_in.`);
       }
-      const codeMissing = fields.code > 0 && !this.secretsHaveTotp();
-      const codeNote = codeMissing ? ` The page also asks for a one-time code, and the saved login has no 2FA key: if it still needs one after the form is sent, ${CODE_FROM_INBOX[0]!.toLowerCase()}${CODE_FROM_INBOX.slice(1)}` : "";
+      const codeMissing = fields.code > 0 && !this.secretsHaveTotp() && !this.done.has("code");
+      const codeNote = codeMissing ? ` The page also asks for a one-time code, and the saved login has no 2FA key: if it still needs one after the form is sent, ${this.codeHelp[0]!.toLowerCase()}${this.codeHelp.slice(1)}` : "";
       if (!this.submit) return this.leave(`Submit the form now (its sign-in button, or Enter).${codeNote}`);
       if (fields.human) return this.leave(`It was not submitted: the page shows a human check (CAPTCHA). Call request_sign_in so the person completes it and presses the sign-in button.${codeNote}`);
       let sent: Submitted;
@@ -465,7 +552,7 @@ class LoginRun {
         return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}.${said} Check the saved login in Settings → Logins, or call request_sign_in.`);
       }
       if (step + 1 >= MAX_STEPS) return this.finish(true, this.signedIn(sent.href, sent.title));
-      const waitMs = !this.done.has("password") ? NEXT_STEP_WAIT_MS : this.secretsHaveTotp() && !this.done.has("code") ? 5_000 : 1_500;
+      const waitMs = !this.done.has("password") && !(this.addressOnly && this.done.has("code")) ? NEXT_STEP_WAIT_MS : this.secretsHaveTotp() && !this.done.has("code") ? 5_000 : 1_500;
       fields = await this.find(step + 1, waitMs);
       if (fields && this.stillHere(fields.href) && !fields.password && fields.code === 0 && !fields.human && this.done.has("password")) {
         return this.finish(true, this.signedIn(sent.href, sent.title));
@@ -502,6 +589,13 @@ class LoginRun {
     const key = `${this.nonce}:${step}:`;
     const typed: Array<[FilledField, string]> = [];
     let moved = false;
+    const typeCode = async (code: string) => {
+      this.deps.remember(code, "code");
+      const boxes = fields.code === 1 ? 1 : Math.min(fields.code, code.length);
+      let last = "";
+      for (let index = 0; index < boxes && !moved; index++) if (await fill(`code${index}`, boxes === 1 ? code : code[index]!)) last = `code${index}`;
+      if (last) typed.push(["code", last]);
+    };
     const fill = async (name: string, text: string, keep?: string) => {
       if (moved) return false;
       const result = await this.type(key + name, text, keep);
@@ -520,19 +614,42 @@ class LoginRun {
       const left = totp.period * 1000 - (this.now() % (totp.period * 1000));
       if (left < 3_000) await this.sleep(left + 250);
       const code = totpCode(totp, this.now());
-      this.deps.remember(code, "code");
-      const boxes = fields.code === 1 ? 1 : Math.min(fields.code, code.length);
-      let last = "";
-      for (let index = 0; index < boxes && !moved; index++) if (await fill(`code${index}`, boxes === 1 ? code : code[index]!)) last = `code${index}`;
-      if (last) typed.push(["code", last]);
+      await typeCode(code);
+    }
+    let emailed: Extract<EmailCodeAnswer, { kind: "code" }> | undefined;
+    if (!moved && fields.code > 0 && this.secrets && !this.secrets.totp && !fields.password && (!fields.username || this.done.has("username"))) {
+      const answer = await this.emailedCode(fields);
+      if (answer?.kind === "code") {
+        emailed = answer;
+        await typeCode(answer.code);
+      }
     }
     const checked = await this.page(CHECK_FIELDS, key);
     const held = checked ? typed.filter(([field]) => checked[field === "code" ? "code0" : field] === true) : [];
     if (moved && !held.length) return { kind: "moved" };
     if (!held.length) return { kind: "none" };
     for (const [field] of held) this.done.add(field);
+    if (emailed && held.some(([field]) => field === "code")) {
+      emailed.typed();
+      this.fromMailbox = true;
+    }
     if (held.some(([field]) => field !== "username")) this.secretUrl = fields.href;
     return { kind: "typed", last: held.at(-1)![1] };
+  }
+
+  /** The waited time is added to the run's own budget, which is for the page's answers. */
+  private async emailedCode(fields: Found): Promise<EmailCodeAnswer | null> {
+    const site = siteOf(fields.href);
+    if (!this.deps.emailCode || site === null) return null;
+    const waitStarted = this.now();
+    const answer = await this.deps.emailCode({ site, boxes: fields.code, askedAt: this.submittedAt, via: fields.via, now: this.now, sleep: this.sleep });
+    this.deadline += this.now() - waitStarted;
+    if (answer.kind === "miss") this.codeHelp = `${CODE_MISS[answer.why]} ${CODE_FROM_INBOX}`;
+    if (answer.kind === "no-mailbox") {
+      this.wantsMailbox = true;
+      this.codeHelp = "No email account is connected for OpenMausBot to read it.";
+    }
+    return answer;
   }
 
   /** Enter in the step's last field; when that sends nothing within two seconds, the form's sign-in button. */
@@ -555,6 +672,7 @@ class LoginRun {
         if (this.now() >= until) return state ?? "silent";
       }
     };
+    this.submittedAt = this.now();
     await this.deps.press("Enter");
     let state = await watch(ENTER_WAIT_MS, true);
     if (!settled(state) && !(state !== "silent" && sending(state))) {

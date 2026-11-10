@@ -258,6 +258,31 @@ export async function searchMessages(account: EmailAccount, guard: EmailGuard, i
   });
 }
 
+export interface InboxEntry { uid: number; at: number; from: string; subject: string }
+
+/** When the server received a message, which a sender can't write. A message naming anything but one sender has from "". */
+export function inboxEntry(message: { uid: number; internalDate?: unknown; envelope?: { from?: Address[]; subject?: string } }): InboxEntry {
+  const received = message.internalDate instanceof Date ? message.internalDate.getTime() : Number.NaN;
+  const senders = message.envelope?.from ?? [];
+  return { uid: message.uid, at: Number.isFinite(received) ? received : 0, from: senders.length === 1 ? senders[0]!.address ?? "" : "", subject: message.envelope?.subject ?? "" };
+}
+
+const DAY_MS = 86_400_000;
+
+/** The newest inbox messages received around `sinceMs` or later; the caller keeps the exact window. Never marks one read. */
+export async function recentInbox(account: EmailAccount, guard: EmailGuard, input: { sinceMs: number; limit: number }): Promise<InboxEntry[]> {
+  return imapSession(account, guard, async (client) => {
+    const lock = await client.getMailboxLock("INBOX", { readOnly: true });
+    try {
+      // IMAP SINCE compares whole dates in the server's own time zone (RFC 9051), so a day's margin keeps a message from being missed.
+      const uids = (await client.search({ since: new Date(input.sinceMs - DAY_MS) }, { uid: true })) || [];
+      const out: InboxEntry[] = [];
+      if (uids.length) for await (const message of client.fetch(uids.slice(-input.limit), QUERY, { uid: true })) out.push(inboxEntry(message));
+      return out.sort((a, b) => b.at - a.at);
+    } finally { lock.release(); }
+  });
+}
+
 export interface ReadMessage extends MessageSummary {
   cc: string[];
   replyTo: string[];
