@@ -328,7 +328,7 @@ import { createTtsRoutes } from "./routes/tts.ts";
 import { turnStartLogLine } from "./turn-log.ts";
 import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
-import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
+import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
 import { extractReplayImages, extractTurnImages, videoFramesWithin } from "./turn-images.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
 import { generateThreadTitle, llmThreadTitlesEnabled } from "./thread-title-generate.ts";
@@ -5451,7 +5451,7 @@ function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: 
   if (name === "SessionStart") {
     if (payload.source !== "compact") return { ok: true, ignored: `SessionStart ${String(payload.source ?? "")}` };
     const bot = store.bot(capability.botId);
-    const digests = store.activePath(threadId).filter((m) => m.kind === "digest" && m.digest).slice(-DIGESTS_AFTER_COMPACTION);
+    const digests = sinceFreshStart(store.activePath(threadId)).filter((m) => m.kind === "digest" && m.digest).slice(-DIGESTS_AFTER_COMPACTION);
     chip(`context compacted — re-sent the last ${digests.length} digest${digests.length === 1 ? "" : "s"}`);
     if (!digests.length) return { ok: true };
     const context = digests.map((m) => digestPromptLine(m.digest!, m.from?.name ?? store.bot(m.digest!.botId)?.name ?? bot?.name ?? "the bot")).join("\n");
@@ -6987,7 +6987,7 @@ function markTaskContextExternallyUpdated(bot: BotRecord, threadId: string): voi
 }
 
 function latestCompaction(messages: readonly Message[]) {
-  const record = messages.findLast(message => message.kind === "compaction" && message.compaction);
+  const record = messages.findLast(message => message.kind === "compaction" && message.compaction && !isFreshStart(message));
   return record?.compaction ? { ...record.compaction, id: record.id } : undefined;
 }
 
@@ -7023,7 +7023,7 @@ async function compactConversation(input: {
   const { bot, threadId, generation, instance, model, excludedIds, manual, idle } = input;
   const task = store.taskByThread(bot.id, threadId);
   if (!task || (!manual && cfg.context?.autoCompact === false)) return;
-  const messages = store.activePath(threadId);
+  const messages = sinceFreshStart(store.activePath(threadId));
   const context = directContext(bot, threadId, messages);
   const record = latestCompaction(messages);
   // A retry must apply the existing record before considering another fold.
@@ -7059,7 +7059,7 @@ async function compactConversation(input: {
     const summary = await draftSummary(fold.folded, { signal: controller.signal, generateText: sideJobs.text("compaction", bot.id, { instance })?.generateText });
     if (!idle && !directTurnClaimIsCurrent(bot.id, generation, threadId)) throw new DirectTurnSetupCancelled("context summarization stopped");
     controller.signal.throwIfAborted();
-    if (prefix !== JSON.stringify(store.activePath(threadId).slice(0, messages.length))) {
+    if (prefix !== JSON.stringify(sinceFreshStart(store.activePath(threadId)).slice(0, messages.length))) {
       if (manual) throw new Error("the conversation changed during summarization — please retry");
       return;
     }
@@ -7074,7 +7074,7 @@ async function compactConversation(input: {
 }
 
 const handoffs = new Handoffs({
-  order: (threadId) => store.activePath(threadId).filter(isContextMessage).map((m) => m.id),
+  order: (threadId) => sinceFreshStart(store.activePath(threadId)).filter(isContextMessage).map((m) => m.id),
   read: (botId, threadId, instanceId) => store.taskByThread(botId, threadId)?.handedMessages?.[instanceId],
   write: (botId, threadId, instanceId, state) => store.setHandedMessages(botId, threadId, instanceId, state),
   replies: (threadId, turnId) => store.activePath(threadId)
@@ -7795,7 +7795,7 @@ async function beginTurn(
         return;
       }
       const skipTranscript = new Set<string>([userMessage.id, ...(opts?.excludeMessageIds ?? [])]);
-      const activeMessages = store.activePath(threadId);
+      const activeMessages = sinceFreshStart(store.activePath(threadId));
       const coordinationChildren = opts?.coordination?.resumed
         ? new Set(coordinator.children(opts.coordination.id).map((child) => child.id)) : undefined;
       for (const m of activeMessages) {
@@ -12453,7 +12453,7 @@ function liveBotFor(botId: string): LiveBot {
   return { name: bot.name, title: bot.title, description: bot.description };
 }
 function liveHistoryFor(threadId: string): LiveHistoryMessage[] {
-  return liveHistoryFrom(store.activePath(threadId));
+  return liveHistoryFrom(sinceFreshStart(store.activePath(threadId)));
 }
 /** A signed-out or removed person's call must not keep reaching the bot or spending the key. */
 function liveSignedIn(auth: RequestAuth): boolean {
@@ -15351,7 +15351,7 @@ for (const row of chatFollowups()) {
     ...(row.kind === "bot" ? spokenLineFields(row.payload.via, row.payload.callId) : {}),
   });
   const recoveredTask = row.kind !== "channel" ? store.taskByThread(row.ownerId, row.threadId) : undefined;
-  const order = store.activePath(row.threadId).filter(isContextMessage).map((m) => m.id);
+  const order = sinceFreshStart(store.activePath(row.threadId)).filter(isContextMessage).map((m) => m.id);
   for (const [instanceId, state] of Object.entries(recoveredTask?.handedMessages ?? {})) {
     if (state.session !== undefined) store.setHandedMessages(row.ownerId, row.threadId, instanceId, recordHanded(state, order, [recovered.id]));
   }
