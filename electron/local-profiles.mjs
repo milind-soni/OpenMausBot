@@ -163,13 +163,12 @@ export function createLocalProfiles({ registry, clean, dataDir, home, window: sh
       if (mine !== turn) return false;
       if (!who) break;
       if (!asked) {
-        // The person chooses: wait for the work however long it takes, stop it (the SETTLE_MS limit as before), or stay.
         asked = true;
         let choice = "stop";
         try { choice = await ask({ leaving: running(), target, name: who.name || "" }); } catch {}
         if (mine !== turn) return false;
         if (choice === "cancel") { turn++; if (settling) { settling = null; tell(); } return false; }
-        until = choice === "wait" ? Infinity : now() + settleMs; // the minute starts once the person answered
+        until = choice === "wait" ? Infinity : now() + settleMs;
         continue;
       }
       if (now() >= until) { log(`local profiles: ${target} opens though ${who.name || who.what || "a turn"} still works`); break; }
