@@ -34,8 +34,8 @@ const codex = (primary: [number, number], secondary: [number, number]) => row("c
 }));
 const report = (...providers: PlanProviderRow[]): PlanUsageReport => ({ fetchedAt: iso(NOW), providers });
 
-describe("a Claude account whose usage meter is turned off", () => {
-  it("stops a full reading from holding it, even one fetched before the switch, and keeps a refusal's hold", () => {
+describe("a Claude account whose usage is not read", () => {
+  it("stops a full reading from holding it, even one saved before an update stopped reading it, and keeps a refusal's hold", () => {
     const account = { id: "claude", name: "Claude", driver: "claude" as const, environment: {} };
     let accounts: Array<typeof account & { noUsage?: true }> = [account];
     const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
