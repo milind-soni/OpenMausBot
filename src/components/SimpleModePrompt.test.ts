@@ -8,9 +8,6 @@ import { setLocale } from "@/lib/i18n";
 import { ADVANCED_MODE_KEY, readAdvancedMode, setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_MODE_PROMPT_KEY, simpleModePromptSeen } from "@/lib/simple-mode-prompt";
 
-// The popup only shows with the switch put back, and its cases flip the mode: they run that way until it goes.
-vi.mock("@/lib/simple-only", () => ({ SIMPLE_ONLY: false }));
-
 const analytics = vi.hoisted(() => ({ track: vi.fn() }));
 vi.mock("@/lib/analytics", () => analytics);
 const { SimpleModePrompt } = await import("./SimpleModePrompt");

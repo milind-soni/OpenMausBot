@@ -742,6 +742,8 @@
   "settings.analytics.aria": "Nutzungsstatistik senden",
   "newLook.title": "{app} sieht jetzt einfacher aus",
   "newLook.body": "Alles, was du brauchst, ist noch da; seltener genutzte Einstellungen findest du unter Einstellungen → Weitere Einstellungen.",
+  "advancedBack.title": "Der erweiterte Modus ist zurück",
+  "advancedBack.body": "Dieses Gerät ist wieder im erweiterten Modus. Du kannst ihn jederzeit unter Einstellungen → Allgemein ausschalten.",
   "settings.updates.startingDownload": "Download startet…",
   "settings.updates.preparing": "Download abgeschlossen. macOS bereitet das Update vor.",
   "settings.updates.readyInstall": "{app} {version} ist bereit — im Terminal installieren",
