@@ -16,8 +16,9 @@ import * as probeModule from "../mcp-probe.ts";
 import { listMcpServers, parseStoredMcpServer, type StoredMcpServer } from "../mcp-registry.ts";
 import { SecretVault } from "../secret-vault.ts";
 import type { OptionCardData, WireMessage } from "../../shared/wire.ts";
+import type { BotRecord } from "../store.ts";
 import { McpRequestService } from "../host/mcp-requests.ts";
-import { applyMcpChange, createInternalMcpRoutes, showMcpActivity, type InternalMcpDeps } from "./internal-mcp.ts";
+import { applyMcpChange, createInternalMcpRoutes, otherBotsGiven, showMcpActivity, type InternalMcpDeps } from "./internal-mcp.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
 const BOT = "kiwi";
@@ -1120,5 +1121,28 @@ describe("the activity line", () => {
     expect(thread.messages[0]!.tool?.label).toBeUndefined();
     expect(thread.messages).toHaveLength(2);
     expect(thread.messages[1]).not.toHaveProperty("turnId");
+  });
+});
+
+describe("which other bots a server notice names", () => {
+  const bot = (id: string, more: Partial<BotRecord> = {}) => ({ id, name: id.toUpperCase(), ...more }) as BotRecord;
+  const everyone = (_bot: BotRecord) => true;
+
+  it("names the other bots that get the server, not the sender or hidden ones", () => {
+    const sender = bot("a");
+    expect(otherBotsGiven([sender, bot("b"), bot("c", { hidden: true }), bot("d")], sender, (b) => b.id !== "d")).toEqual(["B"]);
+  });
+
+  it("leaves out a bot only admins see when people who are not admins see the sender", () => {
+    const sender = bot("a");
+    const bots = [sender, bot("b"), bot("secret", { visibility: "admins" }), bot("few", { visibility: { people: ["x@example.com"] } })];
+    expect(otherBotsGiven(bots, sender, everyone)).toEqual(["B"]);
+  });
+
+  it("names a restricted bot to a sender whose audience it covers", () => {
+    const sender = bot("a", { visibility: { people: ["x@example.com"] } });
+    const bots = [sender, bot("b"), bot("secret", { visibility: "admins" }), bot("few", { visibility: { people: ["x@example.com", "y@example.com"] } })];
+    expect(otherBotsGiven(bots, sender, everyone)).toEqual(["B", "FEW"]);
+    expect(otherBotsGiven(bots, bot("admin", { visibility: "admins" }), everyone)).toEqual(["A", "B", "SECRET", "FEW"]);
   });
 });

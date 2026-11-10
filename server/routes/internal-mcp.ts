@@ -4,6 +4,7 @@ import { relative } from "node:path";
 import type { McpChangeRequest } from "../../shared/mcp-request.ts";
 import type { WireMessage as Message } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
+import { audienceWithin } from "../bot-visibility.ts";
 import { SERVER_PREFIXES } from "../drivers/agents-bridge.ts";
 import { MCP_CONFIG_BUSY, runsElsewhere, type McpConfig, type McpConfigRefusal } from "../host/mcp-config.ts";
 import { MCP_KEY_EXPIRED, type McpApplied, type McpCardAction, type McpUpdateFields } from "../host/mcp-requests.ts";
@@ -15,6 +16,7 @@ import type { McpProbeResult } from "../mcp-probe.ts";
 import { publicMcpUrl, type HostLookup } from "../mcp-public-url.ts";
 import { isRemoteMcpServer, parseMcpServerMutation, parseStoredMcpServer, type StoredMcpServer, type StoredRemoteMcpServer, type StoredStdioMcpServer } from "../mcp-registry.ts";
 import { serverLine, type ServerLineKey } from "../server-lines.ts";
+import type { BotRecord } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 const PATH = "/api/internal/mcp-servers";
@@ -93,6 +95,12 @@ type Ctx = Deps & { approved?: true };
 type Outcome = { status: number; text: string; dropped?: string[] } | { status: number; error: string; busy?: true };
 /** Which call a line is about, to find that call's own row. */
 export type McpCall = { action: McpAction; name?: string };
+
+/** The names of the other bots `given` holds, leaving out hidden ones and any whose audience is narrower than the
+ * sender's: everyone who sees the sender's chat or room may see the names, so a restricted bot's name stays with its own audience. */
+export function otherBotsGiven(bots: readonly BotRecord[], sender: BotRecord, given: (bot: BotRecord) => boolean): string[] {
+  return bots.filter((bot) => bot.id !== sender.id && !bot.hidden && audienceWithin(sender.visibility, bot.visibility) && given(bot)).map((bot) => bot.name);
+}
 
 export function createInternalMcpRoutes(deps: InternalMcpDeps): RouteHandler {
   return async ({ res, path, method, json }) => {
