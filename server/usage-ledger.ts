@@ -51,6 +51,9 @@ export interface UsageRow {
   contextTokens?: number;
   contextWindow?: number;
   usageStatus?: TraceUsageStatus;
+  /** The turn ran on the quick model (`quick`), or on the bot's own model after `quickModel` refused (`fallback`). */
+  route?: "quick" | "fallback";
+  quickModel?: string;
 }
 
 export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine" | "department";

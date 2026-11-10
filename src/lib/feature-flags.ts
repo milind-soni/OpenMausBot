@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 
 export interface FeatureFlagConfig {
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; trainingData?: TrainingDataMode };
   browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
 }
 
@@ -96,4 +96,12 @@ export function savedStepsEnabled(config: FeatureFlagConfig | null | undefined):
 /** The server can run saved steps (a Mac, not Windows or a Cloud home); unsaid counts as no. */
 export function savedStepsHere(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.savedStepsHere === true;
+}
+
+export type TrainingDataMode = "off" | "local" | "share";
+
+/** Training data (docs/training-data.md): off unless the person chose to keep it, or to share it too. */
+export function trainingDataMode(config: FeatureFlagConfig | null | undefined): TrainingDataMode {
+  const mode = config?.features?.trainingData;
+  return mode === "local" || mode === "share" ? mode : "off";
 }

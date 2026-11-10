@@ -4,7 +4,7 @@ import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-
 import { engineReady } from "@/components/EngineLibrary";
 import { analyticsEnabled, track } from "@/lib/analytics";
 import {
-  allow, APP, CLOUD_TIER, CONNECTORS_MODE, DECIDER, EDITION, engineForDriver, LOCAL_VM_MODE, TRIAL_CREDIT, VOICE,
+  allow, APP, CLOUD_TIER, CONNECTORS_MODE, COUNT_BUCKETS, DECIDER, EDITION, engineForDriver, LOCAL_VM_MODE, TRAINING_DATA, TRIAL_CREDIT, VOICE,
   type EventProps, type KeyProvider, type PropValue,
 } from "@/lib/analytics-allowlist";
 import { trialRunning } from "@/lib/cloud-plan";
@@ -36,10 +36,28 @@ export interface UsageInput {
   computers: { cloudComputers: unknown; teamComputers: unknown } | null;
   platform: "desktop" | "browser";
   remoteClient: boolean;
+  /** Training data's mode and turns kept, and quick-model fallbacks in the last 30 days; null when not read. */
+  training?: { mode: unknown; turns: unknown; quickFallbacks: unknown } | null;
 }
 
 const count = (value: unknown): number | undefined => Number.isInteger(value) && (value as number) >= 0 ? value as number : undefined;
 const tally = <T,>(items: readonly T[], test: (item: T) => boolean) => items.filter(test).length;
+
+/** A count as a range, never the number itself. */
+export function countBucket(value: unknown): (typeof COUNT_BUCKETS)[number] | undefined {
+  const known = count(value);
+  if (known === undefined) return undefined;
+  return known === 0 ? "0" : known < 100 ? "1-99" : known < 1000 ? "100-999" : "1000+";
+}
+
+function trainingFacts(training: UsageInput["training"]): Record<string, PropValue | undefined> {
+  if (!training) return {};
+  return {
+    training_data: allow(typeof training.mode === "string" ? training.mode : undefined, TRAINING_DATA),
+    training_turns: countBucket(training.turns),
+    quick_fallbacks_30d: countBucket(training.quickFallbacks),
+  };
+}
 
 function keyProviders(config: ConfigStatus): KeyProvider[] {
   const ownVoice = config.tts?.configured === true && config.tts.included !== true;
@@ -145,6 +163,7 @@ export function buildUsageSnapshot(input: UsageInput): EventProps {
     decider_included: config.decider?.included === true,
     live_calls: config.live?.configured === true,
     ...deviceFacts(input.sessions, input.companionDevices),
+    ...trainingFacts(input.training),
     cloud_home: config.cloudHome === true,
     cloud_plan: input.cloud?.plan ?? "unknown",
     cloud_trial: input.cloud?.trial,
@@ -226,7 +245,8 @@ export async function sendDailySnapshot(state: SnapshotState, sources: UsageSour
   try {
     const config = state.config;
     const { companion, cloudAccount, cloudPlan } = sources;
-    const [apps, sessions, companionDevices, cloud, computers] = await Promise.all([
+    const month = { from: utcDay(now - 29 * 86_400_000), to: utcDay(now) };
+    const [apps, sessions, companionDevices, cloud, computers, training, models] = await Promise.all([
       settle(() => sources.connectedApps()),
       settle(() => sources.request<{ sessions?: unknown; current?: unknown }>("/api/auth/sessions")),
       companion ? settle(() => companion.state()) : null,
@@ -236,6 +256,8 @@ export async function sendDailySnapshot(state: SnapshotState, sources: UsageSour
       config.box?.configured
         ? settle(() => sources.request<{ cloudComputers?: unknown; teamComputers?: unknown }>("/api/computers/usage"))
         : { cloudComputers: 0, teamComputers: 0 },
+      settle(() => sources.request<{ mode?: unknown; turns?: unknown; available?: unknown }>("/api/training-data")),
+      settle(() => sources.request<{ models?: Array<{ fallbacks?: unknown }> }>(`/api/usage/models?from=${month.from}&to=${month.to}`)),
     ]);
     track("app_snapshot", buildUsageSnapshot({
       config,
@@ -254,6 +276,10 @@ export async function sendDailySnapshot(state: SnapshotState, sources: UsageSour
       computers: computers ? { cloudComputers: computers.cloudComputers, teamComputers: computers.teamComputers } : null,
       platform: sources.platform,
       remoteClient: sources.remoteClient,
+      training: training && training.available !== false ? {
+        mode: training.mode, turns: training.turns,
+        quickFallbacks: Array.isArray(models?.models) ? models.models.reduce((sum, row) => sum + (count(row.fallbacks) ?? 0), 0) : undefined,
+      } : null,
     }));
     return true;
   } finally {

@@ -11,6 +11,7 @@ import {
   USAGE_GROUPINGS,
   type UsageGroupBy,
 } from "../usage-ledger.ts";
+import { modelPerformance } from "../usage-models.ts";
 import { DETAIL_MAX, ERROR_MAX } from "../usage-trace/detail.ts";
 import type { ToolReceipt, TraceRecorder } from "../usage-trace/recorder.ts";
 import { createTraceService, PAGE_MAX, type TraceServiceDeps } from "../usage-trace/service.ts";
@@ -58,6 +59,13 @@ export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
       const found = await traces.detail(id, around === null ? null : Number(around), deps.canSee(auth));
       res.setHeader("cache-control", "no-store");
       return found ? json(res, 200, found) : json(res, 404, { error: "no such trace" });
+    }
+    if (method === "GET" && path === "/api/usage/models") {
+      const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));
+      if (!range) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });
+      await flushUsageLedger(deps.dataDir);
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, { from: range.from.toISOString(), to: range.to.toISOString(), models: modelPerformance(readUsage(deps.dataDir, range)) });
     }
     if (!(method === "GET" && (path === "/api/usage" || path === "/api/usage.csv"))) return PASS;
     const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));
