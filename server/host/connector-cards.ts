@@ -21,7 +21,7 @@ export interface ConnectorCardsDeps {
   maybeResume(threadId: string, resumeKey: string): void;
 }
 
-export type ConnectorCardAnswer = { status: 200; body: { messageIds: string[]; authConfigNote?: string } } | { status: 400 | 403 | 409; body: { error: string } };
+export type ConnectorCardAnswer = { status: 200; body: { messageIds: string[]; authConfigNote?: string; connectedNote?: string } } | { status: 400 | 403 | 409; body: { error: string } };
 
 export function createConnectorCards(deps: ConnectorCardsDeps) {
   async function request(capability: Capability, input: { botId?: unknown; threadId?: unknown; resumeKey?: unknown; items?: unknown; slugs?: unknown }, requireActive: () => void): Promise<ConnectorCardAnswer> {
@@ -49,6 +49,8 @@ export function createConnectorCards(deps: ConnectorCardsDeps) {
     const connectionState: Record<string, { connected?: boolean }> = await deps.composio.connectionStatus(cfg, slugs).catch(() => ({}));
     requireActive();
     const messageIds: string[] = [];
+    // A card without an alias for an app that already has an account shows it connected; the bot must ask again with an alias to add another.
+    const connectedNotes: string[] = [];
     for (const item of items) {
       const existing = deps.store.messagesFor(threadId).find(
         (message) => message.connector?.resumeKey === resumeKey && message.connector.slug === item.slug
@@ -62,6 +64,10 @@ export function createConnectorCards(deps: ConnectorCardsDeps) {
       requireActive();
       const connected = connectionState[item.slug]?.connected === true;
       const status = item.alias ? "required" : connected ? "connected" : "required";
+      if (status === "connected") {
+        connectedNotes.push(`${toolkit.label} already has a connected account, so its card shows it connected and no new account was added. `
+          + `To add another ${toolkit.label} account, call COMPOSIO_MANAGE_CONNECTIONS again with toolkits: [{"name": "${item.slug}", "alias": "<a short name for the new account>"}].`);
+      }
       const language = deps.language(threadId);
       // The app catalog's own words, when it has some, are English; ours are in the person's language.
       const description = item.alias ? connectorCardDescription(toolkit.label, item.alias, language) : toolkit.blurb || connectorCardDescription(toolkit.label, undefined, language);
@@ -75,7 +81,8 @@ export function createConnectorCards(deps: ConnectorCardsDeps) {
       messageIds.push(message.id);
     }
     deps.maybeResume(threadId, resumeKey);
-    return { status: 200, body: { messageIds, ...(authConfigNote ? { authConfigNote } : {}) } };
+    const connectedNote = connectedNotes.join(" ");
+    return { status: 200, body: { messageIds, ...(authConfigNote ? { authConfigNote } : {}), ...(connectedNote ? { connectedNote } : {}) } };
   }
   return { request };
 }

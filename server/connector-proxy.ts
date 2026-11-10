@@ -204,7 +204,7 @@ function connectorAdds(args: unknown): { requests: ConnectorRequest[]; badAuthCo
   return { requests: checked, badAuthConfig };
 }
 
-/** Resolves to the harness's line on which auth config each toolkit connects with, when it names one. */
+/** Resolves to the harness's lines on which auth config each toolkit connects with, and on apps already connected, when it has any. */
 async function showConnectorCards(items: ConnectorRequest[]): Promise<string> {
   const response = await fetch(`${HARNESS}/api/internal/connectors/request`, {
     method: "POST",
@@ -212,9 +212,9 @@ async function showConnectorCards(items: ConnectorRequest[]): Promise<string> {
     body: JSON.stringify({ botId: BOT_ID, threadId: THREAD_ID, items, resumeKey: randomUUID() }),
     signal: AbortSignal.timeout(30_000),
   });
-  const body = (await response.json().catch(() => ({}))) as { error?: unknown; authConfigNote?: unknown };
+  const body = (await response.json().catch(() => ({}))) as { error?: unknown; authConfigNote?: unknown; connectedNote?: unknown };
   if (!response.ok) throw new Error(String(body.error ?? `could not show connection card (HTTP ${response.status})`));
-  return typeof body.authConfigNote === "string" && body.authConfigNote ? ` ${body.authConfigNote}` : "";
+  return [body.authConfigNote, body.connectedNote].map((note) => (typeof note === "string" && note ? ` ${note}` : "")).join("");
 }
 
 /** The harness's answer to a bot's search of the catalog. */
@@ -307,11 +307,11 @@ async function handle(received: Json): Promise<void> {
       return;
     }
     if (requests.length) {
-      const authConfigNote = await showConnectorCards(requests);
+      const notes = await showConnectorCards(requests);
       const labels = requests.map((r) => (r.alias ? `${r.slug} (${r.alias})` : r.slug)).join(", ");
       send(textResult(
         id,
-        `OpenMausBot showed the user a secure connection card for ${labels}.${authConfigNote} End this turn now. The app will continue the task automatically after the connection finishes.`,
+        `OpenMausBot showed the user a secure connection card for ${labels}.${notes} End this turn now. The app will continue the task automatically after the connection finishes.`,
       ));
       return;
     }

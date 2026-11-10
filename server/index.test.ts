@@ -12302,6 +12302,41 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("tells the bot an app it asked to connect without an alias already has an account, and how to add another", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    connectorAccounts = [{ id: "ca_personal", alias: "personal", status: "ACTIVE", toolkit: { slug: "gmail" } }];
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const request = async (items: unknown[], resumeKey: string) => {
+        const response = await fetch(`${BASE}/api/internal/connectors/request`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, resumeKey, items }),
+        });
+        return { status: response.status, body: await response.json() as any };
+      };
+      const plain = await request([{ slug: "gmail" }, { slug: "slack" }], "connected-note-plain");
+      expect(plain.status).toBe(200);
+      const stored = (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages as any[];
+      const gmailCard = stored.find((message) => message.id === plain.body.messageIds[0]);
+      expect(gmailCard.connector.status).toBe("connected");
+      expect(plain.body.connectedNote).toBe(
+        `${gmailCard.connector.label} already has a connected account, so its card shows it connected and no new account was added. `
+        + `To add another ${gmailCard.connector.label} account, call COMPOSIO_MANAGE_CONNECTIONS again with toolkits: [{"name": "gmail", "alias": "<a short name for the new account>"}].`,
+      );
+      const withAlias = await request([{ slug: "gmail", alias: "work" }], "connected-note-alias");
+      expect(withAlias.status).toBe(200);
+      expect(withAlias.body.connectedNote).toBeUndefined();
+      const fresh = await request([{ slug: "notion" }], "connected-note-fresh");
+      expect(fresh.status).toBe(200);
+      expect(fresh.body.connectedNote).toBeUndefined();
+    } finally {
+      connectorAccounts = [];
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("checks a bot's auth_config_id in the person's Composio project before its card shows, and connects with it", async () => {
     expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
     const bot = (await api("POST", "/api/bots")).body.bot;
