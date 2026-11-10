@@ -9182,7 +9182,7 @@ const chiefPeerTargetRule = (noun: string) => (proposerBotId: string, targetBotI
 };
 const validateModelProposal = (selection: ModelSelection, current?: BotRecord): string | null => {
   const checked = checkedModelSelection(selection, undefined, true);
-  if (!checked.ok) return checked.error; if (registry.get(selection.instanceId)?.models.options.some((option) => option.id === selection.model && option.orgBlocked)) return "This account's organization turned that model off. Propose another one.";
+  if (!checked.ok) return checked.error; const unusable = registry.get(selection.instanceId)?.models.options.find((option) => option.id === selection.model && (option.orgBlocked || option.needsCliUpdate)); if (unusable) return unusable.orgBlocked ? "This account's organization turned that model off. Propose another one." : `That model needs version ${unusable.needsCliUpdate} of its engine's CLI. Update it, or propose another model.`;
   if (current?.approvalGrant) return "Wait for the approval-level confirmation before changing this bot's model";
   if (current) {
     const mode = approvalModeFor(current);

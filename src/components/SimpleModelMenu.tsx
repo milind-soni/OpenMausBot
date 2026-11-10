@@ -73,7 +73,7 @@ export function FavoriteStar({ instanceId, model, name }: { instanceId: string; 
 
 function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: MenuModelRow; onPick: SimpleMenuActions["onPick"] }) {
   const { option } = row;
-  const reason = row.blocked ? t("model.orgBlocked") : undefined;
+  const reason = row.blocked ? t(option.needsCliUpdate ? "chat.claudeUpdate.offer" : "model.orgBlocked") : undefined;
   return (
     <div className="group/model relative">
     <button

@@ -149,6 +149,7 @@ function currentRow(input: SimpleMenuInput): MenuCurrent {
   if (!active) return loading ? { ...row, pending: true } : { ...row, meta: t("model.simple.unavailable"), warning: true };
   if (!option && input.refreshing === active.instanceId) return { ...row, pending: true };
   if (option?.orgBlocked) return { ...row, meta: t("model.orgBlocked"), warning: true, blocked: true };
+  if (option?.needsCliUpdate) return { ...row, meta: t("engines.updateClaude"), warning: true, blocked: true };
   if (active.policy) return { ...row, meta: t("policy.managedBy", { organization: active.policy.organizationName }), warning: true };
   if (needsCli(active)) return { ...row, meta: t("model.setupRequired"), warning: true };
   if (needsSignIn(active) && !isCustomOnly(active) && !option?.custom) return { ...row, meta: t("model.signInRequired"), warning: true };
@@ -188,7 +189,7 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
         ...(repeated.has(option.label) && option.provider ? { route: option.provider } : {}),
         ...(detail ? { detail } : {}),
         current: currentSelection ? choiceIsSelected(option, currentSelection) : false,
-        blocked: option.orgBlocked === true,
+        blocked: option.orgBlocked === true || option.needsCliUpdate !== undefined,
       };
     };
     const mixed = own.length > 0 && own.length < all.length;

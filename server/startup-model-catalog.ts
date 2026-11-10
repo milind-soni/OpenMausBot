@@ -56,6 +56,7 @@ function catalogFrom(value: unknown): ModelCatalog | null {
       contextWindow?: unknown;
       variants?: unknown;
       orgBlocked?: unknown;
+      needsCliUpdate?: unknown;
     };
     if (typeof option.id !== "string" || typeof option.label !== "string") return null;
     const variants = variantList(option.variants);
@@ -70,6 +71,7 @@ function catalogFrom(value: unknown): ModelCatalog | null {
         : {}),
       ...(variants ? { variants } : {}),
       ...(option.orgBlocked === true ? { orgBlocked: true as const } : {}),
+      ...(typeof option.needsCliUpdate === "string" ? { needsCliUpdate: option.needsCliUpdate } : {}),
     });
   }
   return { default: raw.default, options };
