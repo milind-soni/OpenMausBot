@@ -33,7 +33,7 @@ export const MAX_PENDING_THREADS = 50;
 export const TOPIC_MAX_BYTES = 64 * 1024;
 
 export interface UpkeepEngine {
-  generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string>;
+  generateText?: (prompt: string, options?: { signal?: AbortSignal; timeoutMs?: number }) => Promise<string>;
 }
 
 export interface UpkeepBot {
@@ -227,7 +227,7 @@ async function askModel(engine: UpkeepEngine, prompt: string, timeoutMs = MODEL_
     timer.unref?.();
   });
   try {
-    const answer = await Promise.race([engine.generateText(prompt, { signal: expiry.signal }), expired]);
+    const answer = await Promise.race([engine.generateText(prompt, { signal: expiry.signal, timeoutMs }), expired]);
     return typeof answer === "string" ? answer : null;
   } catch {
     return null;
