@@ -166,6 +166,40 @@ describe("a tab that already showed a document when it was set up", () => {
   });
 });
 
+describe("the current document's lifecycle", () => {
+  it("ignores late events from the previous loader after a new init", () => {
+    const { session, emit } = eventSession();
+    const lifecycle = new Lifecycle(session, "main");
+    lifecycle.adopt("old", true);
+    emit("Page.lifecycleEvent", { frameId: "main", loaderId: "new", name: "init" });
+    emit("Page.lifecycleEvent", { frameId: "main", loaderId: "old", name: "load" });
+    expect(lifecycle.loaderId).toBe("new");
+    expect(lifecycle.reached("load", "new")).toBe(false);
+    emit("Page.lifecycleEvent", { frameId: "main", loaderId: "new", name: "load" });
+    expect(lifecycle.reached("load", "new")).toBe(true);
+  });
+
+  it("keeps a restored document loaded when the previous loader reports network idle", () => {
+    const { session, emit } = eventSession();
+    const lifecycle = new Lifecycle(session, "main");
+    lifecycle.adopt("old", true);
+    emit("Page.frameNavigated", { frame: { id: "main", loaderId: "restored" }, type: "BackForwardCacheRestore" });
+    emit("Page.lifecycleEvent", { frameId: "main", loaderId: "old", name: "networkIdle" });
+    expect(lifecycle.loaderId).toBe("restored");
+    expect(lifecycle.reached("load")).toBe(true);
+    expect(lifecycle.reached("domcontentloaded")).toBe(true);
+  });
+
+  it("still adopts the first observed loader and ignores subframe events", () => {
+    const { session, emit } = eventSession();
+    const lifecycle = new Lifecycle(session, "main");
+    emit("Page.lifecycleEvent", { frameId: "main", loaderId: "initial", name: "load" });
+    emit("Page.lifecycleEvent", { frameId: "child", loaderId: "child-loader", name: "init" });
+    expect(lifecycle.loaderId).toBe("initial");
+    expect(lifecycle.reached("load")).toBe(true);
+  });
+});
+
 describe("a command Chrome never answers", () => {
   it("is told apart from a page that is merely slow", async () => {
     const transport: CdpTransport = { send: () => {}, onMessage: () => {}, onClose: () => {}, close: () => {} };
