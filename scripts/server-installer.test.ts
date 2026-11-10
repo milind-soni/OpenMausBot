@@ -442,7 +442,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(asked.docker.some((call) => call.includes("box-check"))).toBe(false);
     const old = run(["--domain", "maus.example.com"], { env: { FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data"]' } });
     expect(old.status).toBe(0);
-    expect(old.stdout).toContain("note  MausBot v0.1.151 has no bots' sandbox yet. Run this command again after updating to a version that has it.");
+    expect(old.stdout).toContain("note  This MausBot version has no bots' sandbox yet. Run this command again after updating to a version that has it.");
     expect(readFileSync(join(old.install, ".env"), "utf8")).not.toContain("COMPOSE_FILE=");
     expect(old.calls.some((call) => call.includes("deploy/box/"))).toBe(false);
   });

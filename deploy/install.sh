@@ -724,7 +724,7 @@ prepare_sandbox() {
   if ! image_has_sandbox; then
     unset_env COMPOSE_FILE
     SANDBOX=absent
-    note "MausBot ${IMAGE##*[:@]} has no bots' sandbox yet. Run this command again after updating to a version that has it."
+    note "This MausBot version has no bots' sandbox yet. Run this command again after updating to a version that has it."
     return
   fi
   if ! fetch_sandbox; then
@@ -797,7 +797,7 @@ install_server() {
   write_compose
   write_caddyfile
   write_settings
-  say "Downloading MausBot (${IMAGE##*:})..."
+  say "Downloading MausBot..."
   compose pull -q || fail "MausBot could not be downloaded (Docker's message is above). Check this server's outbound HTTPS, then run this again."
   place_update
   prepare_sandbox
