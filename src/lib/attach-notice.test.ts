@@ -10,7 +10,7 @@ describe("attachment notices", () => {
   it("word every problem in English as before, and say nothing when there is none", () => {
     expect(attachNoticeText([])).toBeNull();
     expect(attachNoticeText([{ kind: "unsupported", names: ["a.bin", "b.bin"] }, { kind: "upload-failed", name: "c.pdf", reason: "disk full" }]))
-      .toBe("Unable to attach a.bin, b.bin. Choose a supported image, document, or audio file. (c.pdf: disk full)");
+      .toBe("Unable to attach a.bin, b.bin. Choose a supported image, document, audio, or video file. (c.pdf: disk full)");
     expect(attachNoticeText([{ kind: "too-large", name: "big.png", limitMb: 10 }])).toBe("big.png exceeds 10 MB");
   });
 
@@ -21,10 +21,10 @@ describe("attachment notices", () => {
       { kind: "unsupported" as const, names: ["b.bin"] },
       { kind: "image-limit" as const, names: ["left.png"] },
     ];
-    expect(attachNoticeText(problems)).toBe("A message takes up to 10 images, 40 MB in all. left.png wasn't attached. Unable to attach b.bin. Choose a supported image, document, or audio file. Archives can't be attached: unzip a.zip and attach the files inside. (c.pdf: disk full)");
+    expect(attachNoticeText(problems)).toBe("A message takes up to 10 images, 40 MB in all. left.png wasn't attached. Unable to attach b.bin. Choose a supported image, document, audio, or video file. Archives can't be attached: unzip a.zip and attach the files inside. (c.pdf: disk full)");
     expect(attachNoticeText([{ kind: "image-limit", names: ["a.png", "b.png"] }])).toBe("A message takes up to 10 images, 40 MB in all. a.png, b.png weren't attached.");
     setLocale("pt-br");
-    expect(attachNoticeText(problems)).toBe("Uma mensagem aceita até 10 imagens, com 40 MB no total. O arquivo left.png não foi anexado. Não foi possível anexar b.bin. Escolha um arquivo compatível: imagem, documento ou áudio. Arquivos compactados não podem ser anexados: descompacte a.zip e anexe os arquivos de dentro. (c.pdf: não foi possível enviar. Motivo: disk full)");
+    expect(attachNoticeText(problems)).toBe("Uma mensagem aceita até 10 imagens, com 40 MB no total. O arquivo left.png não foi anexado. Não foi possível anexar b.bin. Escolha um arquivo compatível: imagem, documento, áudio ou vídeo. Arquivos compactados não podem ser anexados: descompacte a.zip e anexe os arquivos de dentro. (c.pdf: não foi possível enviar. Motivo: disk full)");
     expect(attachNoticeText([{ kind: "image-limit", names: ["a.png", "b.png"] }])).toContain("Os arquivos a.png, b.png não foram anexados.");
   });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { TURN_IMAGE_MAX_BYTES as SERVER_TURN_IMAGE_MAX_BYTES, TURN_IMAGE_MAX_COUNT as SERVER_TURN_IMAGE_MAX_COUNT } from "../../server/turn-images";
-import { fitImagesToSlots, IMAGE_MAX_BYTES, imageBytesLeft, imageSlotsLeft, imagesThatFit, intakeFiles, TURN_IMAGE_MAX_BYTES, TURN_IMAGE_MAX_COUNT, type Attachment } from "./composer-attachments";
+import { composeMessage, fitImagesToSlots, IMAGE_MAX_BYTES, imageBytesLeft, imageSlotsLeft, imagesThatFit, intakeFiles, TURN_IMAGE_MAX_BYTES, TURN_IMAGE_MAX_COUNT, type Attachment } from "./composer-attachments";
 
 type Fake = { name: string; size: number; type: string; text: () => Promise<string> };
 const file = (name: string, type: string, size = 10): Fake => ({
@@ -19,6 +19,65 @@ const upload = async (f: Fake): Promise<Attachment> => ({
   mime: f.type,
 });
 const onDisk = (f: Fake) => `/Users/me/${f.name}`;
+
+describe("composer video uploads", () => {
+  it.each([
+    ["clip.mp4", "video/mp4", "video/mp4"],
+    ["clip.MP4", "", "video/mp4"],
+    ["clip.dat", "video/mp4; codecs=avc1", "video/mp4"],
+    ["recording.webm", "video/webm", "video/webm"],
+    ["recording.WEBM", "", "video/webm"],
+    ["phone.mov", "video/quicktime", "video/quicktime"],
+    ["phone.MOV", "application/octet-stream", "video/quicktime"],
+    ["voice.webm", "audio/webm", "audio/webm"],
+  ])("uploads %s privately as %s without consuming an image slot", async (name, type, mime) => {
+    const uploadedPath = "/private/attachments/uploaded.mp4";
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      path: uploadedPath, name, bytes: 4,
+    }), { status: 201, headers: { "content-type": "application/json" } }));
+    const getPath = vi.fn(() => "");
+    const uploadImage = vi.fn(async () => null);
+    const picked = new File([new Uint8Array([1, 2, 3, 4])], name, { type });
+    try {
+      const out = await intakeFiles([picked], { allowImages: true, imageSlots: 0, getPath, uploadImage });
+      expect(out.problems).toEqual([]);
+      expect(out.notice).toBeNull();
+      expect(out.attachments).toEqual([expect.objectContaining({ kind: "file", name, path: uploadedPath, size: 4 })]);
+      expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/files\?/),
+        expect.objectContaining({ method: "POST", headers: { "content-type": mime }, body: picked }));
+      expect(uploadImage).not.toHaveBeenCalled();
+      expect(getPath).not.toHaveBeenCalled();
+      expect(composeMessage("Watch this", out.attachments)).toContain(`<attached-file path="${uploadedPath}" name="${name}" />`);
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  it("keeps the file size limit for video before any upload", async () => {
+    const picked = Object.defineProperty(new File(["clip"], "large.mp4", { type: "video/mp4" }), "size", { value: 100 * 1024 * 1024 + 1 });
+    const fetch = vi.spyOn(globalThis, "fetch");
+    try {
+      const out = await intakeFiles([picked], { allowImages: true, getPath: () => "", uploadImage: async () => null });
+      expect(out.attachments).toEqual([]);
+      expect(out.problems).toEqual([{ kind: "too-large", name: "large.mp4", limitMb: 100 }]);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  it.each([["movie.avi", "video/x-msvideo"], ["movie.mkv", "video/x-matroska"]])("does not widen the upload whitelist to %s", async (name, type) => {
+    const fetch = vi.spyOn(globalThis, "fetch");
+    try {
+      const out = await intakeFiles([new File(["clip"], name, { type })], { allowImages: true, getPath: () => "", uploadImage: async () => null });
+      expect(out.attachments).toEqual([]);
+      expect(out.problems).toEqual([{ kind: "unsupported", names: [name] }]);
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+});
 
 describe("intakeFiles", () => {
   it("uploads a browser audio drop instead of requiring a Finder path", async () => {
@@ -164,7 +223,7 @@ describe("intakeFiles", () => {
     });
     expect(out.attachments).toEqual([]);
     expect(out.notice).toBe(
-      "Unable to attach run.exe. Choose a supported image, document, or audio file. Archives can't be attached: unzip 아카이브.zip and attach the files inside.",
+      "Unable to attach run.exe. Choose a supported image, document, audio, or video file. Archives can't be attached: unzip 아카이브.zip and attach the files inside.",
     );
   });
 

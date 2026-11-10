@@ -8287,7 +8287,7 @@
   "attach.imageLoading": "Carregando imagem…",
   "attach.imageFailed": "Não foi possível carregar esta imagem.",
   "attach.tooLarge": "{name} tem mais de {limit} MB",
-  "attach.unsupported": "Não foi possível anexar {names}. Escolha um arquivo compatível: imagem, documento ou áudio.",
+  "attach.unsupported": "Não foi possível anexar {names}. Escolha um arquivo compatível: imagem, documento, áudio ou vídeo.",
   "attach.uploadFailed": "{name}: não foi possível enviar. Motivo: {reason}",
   "botIdentity.ai.modelInvalid": "Use um ID de modelo com no máximo 200 caracteres e sem caracteres de controle",
   "botIdentity.ai.modelPlaceholder": "ID do modelo no seu provedor de imagens",

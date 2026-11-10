@@ -8319,7 +8319,7 @@
   "attach.imageLoading": "Loading image…",
   "attach.imageFailed": "This image could not be loaded.",
   "attach.tooLarge": "{name} exceeds {limit} MB",
-  "attach.unsupported": "Unable to attach {names}. Choose a supported image, document, or audio file.",
+  "attach.unsupported": "Unable to attach {names}. Choose a supported image, document, audio, or video file.",
   "attach.uploadFailed": "{name}: {reason}",
   "botIdentity.ai.modelInvalid": "Use a model ID of at most 200 characters without control characters",
   "botIdentity.ai.modelPlaceholder": "Model ID from your image provider",

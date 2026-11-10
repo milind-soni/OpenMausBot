@@ -8170,7 +8170,7 @@
   "attach.imageLoading": "正在載入圖片…",
   "attach.imageFailed": "無法載入這張圖片。",
   "attach.tooLarge": "{name} 超過 {limit} MB",
-  "attach.unsupported": "無法附加 {names}。請選擇支援的圖片、文件或音訊檔案。",
+  "attach.unsupported": "無法附加 {names}。請選擇支援的圖片、文件、音訊或影片檔案。",
   "attach.uploadFailed": "{name}：{reason}",
   "botIdentity.ai.modelInvalid": "請使用不超過 200 個字元、且不含控制字元的模型 ID",
   "botIdentity.ai.modelPlaceholder": "圖片供應商的模型 ID",
