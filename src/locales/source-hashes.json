@@ -33854,7 +33854,14 @@
       "apps.noBotsUse": "2fbf2fcb37d6688e989a842ebfaee2717f71e5d80f8de77eee87b97298fd591b",
       "browser.extensions.title": "fe3436af86b47d22f22d93da68119fcb749dbed0335b4dc99f254e02db236156",
       "browser.extensions.empty": "85494666424df419c354a92e4f107aebcfe4a636a3e54ff7ea3914284313c31e",
-      "browser.extensions.takeControl": "e8357ac6462e969a5a75175e9d79ed5030939cca831b530fd6a4472276264f16"
+      "browser.extensions.takeControl": "e8357ac6462e969a5a75175e9d79ed5030939cca831b530fd6a4472276264f16",
+      "webPanels.settings.chatPage": "5f91a43d9ab7b59e888918479fcbfe51b365743302ac0d9042dd35dfe3fadba5",
+      "webPanels.page.pageGone": "98a0b4b8583492387bbd9fbb96b8044b9fdc979baa40210d6d8e5489d9fb668a",
+      "chat.preview.pin": "d5112330c62b1d4f09810792611f10db67c27fcafdf8c81274ecd8a8656d2748",
+      "chat.preview.unpin": "ee3c716130546a45492c899f7486b67f880e5631a2b8b8065bb16be9956d0b43",
+      "chat.preview.pinHint": "f5f31cfdaf2c8d4a02bf609b4d9006246fd561a7c8e1b8d81985feea435682a8",
+      "chat.preview.unpinHint": "3df27bb21925a0a6ad3458a902df50be9e666b88a233d1a7c81b14f216c71e01",
+      "chat.preview.pinFull": "f3cb86a1f0b52a900f5f7a62701255b5f1fdc8189864d129ffa8e6d836778679"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

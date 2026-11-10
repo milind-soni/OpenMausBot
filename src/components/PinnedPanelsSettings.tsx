@@ -37,7 +37,7 @@ export function PinnedPanelsSettings() {
               <li key={panel.id} className="flex items-center gap-3 px-3 py-2">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[14px] font-medium text-ink">{panel.name}</p>
-                  <p className="truncate text-[12px] text-ink-secondary" title={panel.url}>{panel.url}</p>
+                  <p className="truncate text-[12px] text-ink-secondary" title={panel.url}>{panel.url ?? t("webPanels.settings.chatPage")}</p>
                 </div>
                 <button
                   type="button"
