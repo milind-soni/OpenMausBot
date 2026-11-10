@@ -16,7 +16,7 @@ import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { wideSchema } from "../testing/oversized-tool-schema.ts";
 import { schemaBytes, toolSchemaProfile } from "../tool-schema-profile.ts";
 
-const killProbe = vi.hoisted(() => ({ override: false, stopped: false, budgets: [] as number[] }));
+const killProbe = vi.hoisted(() => ({ override: false, stopped: false, budgets: [] as number[], holdMs: 0, active: 0, peak: 0 }));
 const spawned = vi.hoisted(() => [] as Array<{ owner?: string; opts: { env?: NodeJS.ProcessEnv; box?: unknown } }>);
 vi.mock("../procs.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../procs.ts")>();
@@ -29,7 +29,9 @@ vi.mock("../procs.ts", async (importOriginal) => {
     },
     killCliTree: (child: Parameters<typeof actual.killCliTree>[0], budget = 5_000) => {
       killProbe.budgets.push(budget);
-      const run = actual.killCliTree(child, budget);
+      killProbe.peak = Math.max(killProbe.peak, ++killProbe.active);
+      const run = (killProbe.holdMs ? new Promise((resolve) => setTimeout(resolve, killProbe.holdMs)).then(() => actual.killCliTree(child, budget)) : actual.killCliTree(child, budget))
+        .finally(() => { killProbe.active -= 1; });
       return killProbe.override ? run.then(() => killProbe.stopped) : run;
     },
   };
@@ -93,7 +95,7 @@ async function expectSkipped(f: ReturnType<typeof fixture>, reason: RegExp) {
   try {
     const session = await f.mount();
     expect(session.definitions).toEqual([]);
-    expect(session.skipped).toEqual([{ server: "audit", reason: expect.stringMatching(reason) }]);
+    expect(session.skipped).toEqual([{ server: "audit", reason: expect.stringMatching(reason), builtIn: false }]);
     expect(alive(f.read().pid)).toBe(false);
   } finally { warn.mockRestore(); }
 }
@@ -305,10 +307,67 @@ describe("Chat MCP session", () => {
   it.each([
     ["too many tools", `reply(message, {tools:Array.from({length:2001},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
     ["invalid RPC", `process.stdout.write('{"result":1}\\n');`],
-  ])("still fails startup for a harness mount and awaits child cleanup for %s", async (_label, response) => {
+  ])("skips a harness mount that fails startup and awaits child cleanup for %s", async (_label, response) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const f = fixture(`if (message.method === "tools/list") { ${response} continue; }`);
-    await expect(f.mount(true, true)).rejects.toThrow(/MCP/);
+    const session = await f.mount(true, true);
+    expect(session.definitions).toEqual([]);
+    expect(session.skipped).toEqual([{ server: "computer", reason: expect.stringMatching(/MCP/), builtIn: true }]);
     expect(alive(f.read().pid)).toBe(false);
+    warn.mockRestore();
+  });
+
+  it("keeps the turn going when a built-in server exits during startup, and says which one and why", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const exits = fixture(`if (message.method === "initialize") process.exit(3);`);
+    const session = await mountChatTools({ localComputer: exits.server, agents: ready.server }, ready.controller.signal, true);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["agents_write"]);
+    expect(session.skipped).toEqual([{ server: "computer", reason: "MCP server exited before the session closed (exit code 3)", builtIn: true }]);
+    expect(chatToolNotices(session)).toEqual(['Built-in MCP server "computer" was skipped for this turn: MCP server exited before the session closed (exit code 3)']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"computer"`));
+    await expect(session.execute("agents_write", { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:still works" });
+    warn.mockRestore();
+  });
+
+  it.each([["built-in", true], ["configured", false]])("skips a %s server that exits after listing its tools while another server is still mounting", async (_kind, builtIn) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const slow = fixture(`if (message.method === "tools/list") { setTimeout(() => reply(message, {tools:[{name:"write",description:"Fixture write",inputSchema:schema}]}), 600); continue; }`);
+    const leaves = fixture(`if (message.method === "tools/list") { reply(message, {tools:[{name:"write",description:"Fixture write",inputSchema:schema}]}); setTimeout(() => process.exit(5), 20); continue; }`);
+    const session = await mountChatTools(builtIn ? { agents: leaves.server, custom: { slow: slow.server } } : { custom: { leaves: leaves.server, slow: slow.server } }, slow.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["slow_write"]);
+    expect(session.skipped).toEqual([{ server: builtIn ? "agents" : "leaves", reason: "MCP server exited before the session closed (exit code 5)", builtIn }]);
+    expect(() => session.validate(builtIn ? "agents_write" : "leaves_write", { value: "x" })).toThrow("not advertised");
+    await expect(session.execute("slow_write", { value: "still works" }, slow.controller.signal)).resolves.toMatchObject({ ok: true });
+    warn.mockRestore();
+  });
+
+  it("cleans up several built-in servers that fail together at once, not one after another", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const bad = ["agents", "data", "email"].map(() => fixture(`if(message.method === "tools/list") { reply(message, {tools:[{name:"a",inputSchema:{type:"string"}}]}); continue; }`));
+    killProbe.holdMs = 100;
+    killProbe.peak = killProbe.active = 0;
+    try {
+      const session = await mountChatTools({ agents: bad[0]!.server, data: bad[1]!.server, email: bad[2]!.server }, bad[0]!.controller.signal);
+      sessions.push(session);
+      expect(session.skipped.map((entry) => entry.server)).toEqual(["agents", "data", "email"]);
+      expect(killProbe.peak).toBe(3);
+      for (const f of bad) expect(alive(f.read().pid)).toBe(false);
+    } finally { killProbe.holdMs = 0; warn.mockRestore(); }
+  });
+
+  it("names the signal, not an exit code, when a built-in server is terminated during startup", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const killed = fixture(`if (message.method === "initialize") process.kill(process.pid, "SIGTERM");`);
+    const session = await mountChatTools({ localComputer: killed.server, agents: ready.server }, ready.controller.signal, true);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["agents_write"]);
+    expect(session.skipped).toEqual([{ server: "computer", reason: "MCP server exited before the session closed (signal SIGTERM)", builtIn: true }]);
+    expect(session.skipped[0]!.reason).not.toMatch(/exit code/);
+    warn.mockRestore();
   });
 
   it("rejects untrusted transport error text without leaking it", async () => {
@@ -365,7 +424,8 @@ describe("Chat MCP session", () => {
     const session = await mountChatTools({custom:{ready:ready.server,failed:failed.server}},ready.controller.signal);
     sessions.push(session);
     expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
-    expect(session.skipped).toEqual([{ server: "failed", reason: expect.stringContaining("invalid result") }]);
+    expect(session.skipped).toEqual([{ server: "failed", reason: expect.stringContaining("invalid result"), builtIn: false }]);
+    expect(chatToolNotices(session)).toEqual([expect.stringMatching(/^MCP server "failed" was skipped for this turn: /)]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"failed"`));
     await vi.waitFor(() => expect(alive(failed.read().pid)).toBe(false));
     expect(alive(ready.read().pid)).toBe(true);
@@ -389,12 +449,49 @@ describe("Chat MCP session", () => {
     warn.mockRestore();
   });
 
-  it("still fails setup when a harness mount (not a configured server) fails", async () => {
+  it("skips a failed built-in server and keeps the configured ones", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const ready = fixture();
     const failed = fixture(`if(message.method === "tools/list") { reply(message,{tools:"invalid"}); continue; }`);
-    await expect(mountChatTools({ agents: failed.server, custom: { ready: ready.server } }, ready.controller.signal)).rejects.toThrow("invalid result");
-    expect(alive(ready.read().pid)).toBe(false);
+    const session = await mountChatTools({ agents: failed.server, custom: { ready: ready.server } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
+    expect(session.skipped).toEqual([{ server: "agents", reason: expect.stringContaining("invalid result"), builtIn: true }]);
     expect(alive(failed.read().pid)).toBe(false);
+    expect(alive(ready.read().pid)).toBe(true);
+    warn.mockRestore();
+  });
+
+  it.each([
+    ["a duplicate tool name", `reply(message, {tools:[{name:"a",inputSchema:schema},{name:"a",inputSchema:schema}]});`, /invalid or duplicate tool name/],
+    ["an input schema that is not an object", `reply(message, {tools:[{name:"a",inputSchema:{type:"string"}}]});`, /object input schema/],
+  ])("skips a built-in server whose tools have %s, closes it, and keeps the other servers", async (_what, listing, reason) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const bad = fixture(`if(message.method === "tools/list") { ${listing} continue; }`);
+    const session = await mountChatTools({ agents: bad.server, custom: { ready: ready.server } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
+    expect(session.skipped).toEqual([{ server: "agents", reason: expect.stringMatching(reason), builtIn: true }]);
+    expect(alive(bad.read().pid)).toBe(false);
+    expect(alive(ready.read().pid)).toBe(true);
+    await expect(session.execute("ready_write", { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true });
+    warn.mockRestore();
+  });
+
+  it("skips a built-in server whose tools overflow the 1MB catalog, closes it, and keeps the other servers' tools", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const big = fixture(`if(message.method === "tools/list") { reply(message, {tools:[{name:"big",description:"x".repeat(1_100_000),inputSchema:schema}]}); continue; }`);
+    const session = await mountChatTools({ agents: big.server, data: ready.server, custom: { custom_ready: fixture().server } }, ready.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map((definition) => definition.function.name)).toEqual(["data_write", "custom_ready_write"]);
+    expect(session.skipped).toEqual([{ server: "agents", reason: "MCP tool catalog exceeds the 1MB limit", builtIn: true }]);
+    expect(chatToolNotices(session)).toEqual(['Built-in MCP server "agents" was skipped for this turn: MCP tool catalog exceeds the 1MB limit']);
+    expect(() => session.validate("agents_big", { value: "x" })).toThrow("not advertised");
+    expect(alive(big.read().pid)).toBe(false);
+    await expect(session.execute("data_write", { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true });
+    warn.mockRestore();
   });
 
   it("skips a connected-apps mount that fails, and keeps the turn alive", async () => {
@@ -404,7 +501,7 @@ describe("Chat MCP session", () => {
     const session = await mountChatTools({ composio: refused.server, custom: { ready: ready.server } }, ready.controller.signal);
     sessions.push(session);
     expect(session.definitions.map((definition) => definition.function.name)).toEqual(["ready_write"]);
-    expect(session.skipped).toEqual([{ server: "composio", reason: expect.stringContaining("MCP request failed") }]);
+    expect(session.skipped).toEqual([{ server: "composio", reason: expect.stringContaining("MCP request failed"), builtIn: true }]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"composio"`));
     await vi.waitFor(() => expect(alive(refused.read().pid)).toBe(false));
     expect(alive(ready.read().pid)).toBe(true);
@@ -429,14 +526,15 @@ describe("Chat MCP session", () => {
     const missing = { command: join(ready.dir, "does-not-exist"), args: [], env: {} };
     const session = await mountChatTools({ composioOwn: missing, custom: { [OWN_APPS_SERVER]: ready.server } }, ready.controller.signal);
     sessions.push(session);
-    expect(session.skipped.map((entry) => entry.server)).toEqual([OWN_APPS_SERVER]);
+    expect(session.skipped).toEqual([{ server: OWN_APPS_SERVER, reason: expect.any(String), builtIn: true }]);
+    expect(chatToolNotices(session)).toEqual([expect.stringMatching(new RegExp(`^Built-in MCP server "${OWN_APPS_SERVER}" was skipped`))]);
     expect(alive(ready.read().pid)).toBe(true);
     expect(session.definitions).toHaveLength(1);
     await expect(session.execute(session.definitions[0]!.function.name, { value: "still works" }, ready.controller.signal)).resolves.toMatchObject({ ok: true });
     warn.mockRestore();
   });
 
-  it("fails setup when the Local VM lists no tools, but not when the owner's selection leaves none", async () => {
+  it("fails the turn when the Local VM lists no tools, but not when the owner's selection leaves none", async () => {
     const empty = fixture(`if(message.method === "tools/list") { reply(message,{tools:[]}); continue; }`);
     await expect(empty.mount(true, true)).rejects.toThrow("The Local VM listed no tools");
     expect(alive(empty.read().pid)).toBe(false);
@@ -811,6 +909,26 @@ describe("Chat MCP tool limit", () => {
     expect(names).not.toContain("computer_install_ffmpeg");
   });
 
+  it.each([
+    ["fails to start", `if(message.method === "tools/list") { reply(message, {tools:"invalid"}); continue; }`],
+    ["lists a tool the checks refuse", `if(message.method === "tools/list") { reply(message, {tools:[{name:"a",inputSchema:{type:"string"}}]}); continue; }`],
+  ])("lists the computer's own browser tools when the built-in browser %s", async (_how, body) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const failing = fixture(body);
+      const { session, names } = await mount({ localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" }, browser: failing.server });
+      expect(session.skipped.map((entry) => entry.server)).toEqual(["browser"]);
+      expect(names).toEqual(expect.arrayContaining(["computer_browser_navigate", "computer_get_browser_state", "computer_click"]));
+      expect(names).not.toContain("computer_install_ffmpeg");
+    } finally { warn.mockRestore(); }
+  });
+
+  it("hides the computer's own browser tools while the built-in browser is mounted", async () => {
+    const { names } = await mount({ localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" }, browser: catalog(syntheticToolNames("agent_browser", 3)) });
+    expect(names.filter((name) => /^computer_(?:browser_|get_browser_state$|page$)/.test(name))).toEqual([]);
+    expect(names).toEqual(expect.arrayContaining(["computer_click", "browser_agent_browser_1"]));
+  });
+
   it("caps built-ins that still overflow instead of failing the turn, keeping the agents server whole and saying what was left out", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -1001,7 +1119,7 @@ describe("Chat MCP startup budgets", () => {
       // stopped at 8 seconds: well short of the 30 a URL server gets
       await settleWithin(1_000, () => mounting.done);
       expect(mounting.error).toBeUndefined();
-      expect(mounting.value?.skipped).toEqual([{ server: "audit", reason: expect.stringMatching(/timed out/) }]);
+      expect(mounting.value?.skipped).toEqual([{ server: "audit", reason: expect.stringMatching(/timed out/), builtIn: false }]);
     } finally { vi.useRealTimers(); }
   });
 });
