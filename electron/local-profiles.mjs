@@ -139,7 +139,7 @@ export function createProfileRegistry({ dataDir, fs = nodeFs, now = Date.now, ra
  * what This Mac is called here (This Mac or This PC). `remember(place)`: the place the next launch opens:
  * the workspace that opened, or null once This computer's own copy is back.
  */
-export function createLocalProfiles({ registry, clean, dataDir, home, window: shown, showLocal, onLocal, busy, trash, reserved = () => null, allowed = () => true,
+export function createLocalProfiles({ registry, clean, dataDir, home, window: shown, showLocal, onLocal, busy, trash, ask = null, reserved = () => null, allowed = () => true,
   remember = () => {}, changed = () => {}, log = () => {}, fs = nodeFs, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = Date.now, settleMs = SETTLE_MS }) {
   /** Each switch asked for; a newer one (another tile, My Cloud) ends the wait of the one before. */
   let turn = 0;
@@ -150,17 +150,27 @@ export function createLocalProfiles({ registry, clean, dataDir, home, window: sh
   const running = () => clean.profile();
   const tell = () => { try { changed(); } catch {} };
 
-  /** Waits while the server that runs now still works and will stop for this switch, at most `settleMs`. False when a newer
-   * switch took over. */
+  /** Waits while the server that runs now still works and will stop for this switch, at most `settleMs`, or as long as it
+   * takes when `ask` says to wait. False when a newer switch took over or `ask` said to stay. */
   async function settle(mine, target, stops) {
     if (!stops) return true;
-    const until = now() + settleMs;
+    let until = now() + settleMs;
+    let asked = !ask;
     for (;;) {
       if (mine !== turn) return false;
       let who = null;
       try { who = await busy(); } catch {}
       if (mine !== turn) return false;
       if (!who) break;
+      if (!asked) {
+        asked = true;
+        let choice = "stop";
+        try { choice = await ask({ leaving: running(), target, name: who.name || "" }); } catch {}
+        if (mine !== turn) return false;
+        if (choice === "cancel") { turn++; if (settling) { settling = null; tell(); } return false; }
+        until = choice === "wait" ? Infinity : now() + settleMs;
+        continue;
+      }
       if (now() >= until) { log(`local profiles: ${target} opens though ${who.name || who.what || "a turn"} still works`); break; }
       if (settling?.id !== target || settling.name !== who.name) { settling = { id: target, name: who.name || "" }; tell(); }
       await sleep(SETTLE_POLL_MS);
