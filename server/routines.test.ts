@@ -11,6 +11,7 @@ import {
   nextOccurrence,
   RoutineManager,
   RoutineScheduleError,
+  type RoutineInput,
   type RoutineManagerOptions,
   type RoutineRun,
   type RoutineSchedule,
@@ -830,6 +831,28 @@ describe("persistent routine results destinations", () => {
   });
   const complete = (h: ReturnType<typeof resultsHarness>, threadId: string) => h.manager.handleRuntimeEvent({
     eventId: "complete", provider: "fake", threadId, createdAt: new Date().toISOString(), type: "turn.completed", ok: true,
+  });
+
+  describe("a one-time routine made in a chat", () => {
+    const once = { type: "once" as const, at: Date.now() + 3_600_000 };
+    const made = (schedule: RoutineInput["schedule"], threadId: string, resultsThreadId?: null, oneTimeReportsToItsChat = true) => {
+      const h = resultsHarness();
+      h.options.oneTimeReportsToItsChat = oneTimeReportsToItsChat;
+      return h.manager.create({ ...input(), schedule, ...(resultsThreadId === null ? { resultsThreadId } : {}) }, request("create", threadId));
+    };
+
+    it("reports there by choice, for a limit reset's one run too", () => {
+      expect(made(once, "chosen").resultsThreadId).toBe("chosen");
+      expect(made({ type: "limit_reset", engine: "claude", repeat: "once", at: Date.now() + 3_600_000 }, "chosen").resultsThreadId).toBe("chosen");
+    });
+
+    it("leaves a repeating routine, another bot's chat, an asked-for new thread and a home that opts out to the usual destination", () => {
+      expect(made({ type: "cron", expression: "0 9 1 * *", timeZone: "UTC" }, "chosen").resultsThreadId).toBeUndefined();
+      expect(made({ type: "limit_reset", engine: "claude", repeat: "every_reset", at: Date.now() + 3_600_000 }, "chosen").resultsThreadId).toBeUndefined();
+      expect(made(once, "foreign").resultsThreadId).toBeUndefined();
+      expect(made(once, "chosen", null).resultsThreadId).toBe("results-1");
+      expect(made(once, "chosen", undefined, false).resultsThreadId).toBeUndefined();
+    });
   });
 
   it("lazily reuses one persisted destination across fresh isolated executions", async () => {
