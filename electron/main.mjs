@@ -1667,7 +1667,7 @@ async function switchEnvironment(id) {
     }
   }
   if (entry && handSaved(entry) && !(await serverOpens(entry, { t: nativeT, fetch: (...args) => session.defaultSession.fetch(...args), dialog, forget: (gone) => forgetEnvironment(gone, false, true) }))) return;
-  persistEnvironments(withActive(environmentsState, id)); navigateMainWindow(activeOrigin()); if (entry && handSaved(entry) && homeWindow.cloudOrigin()) homePlaces.remember({ server: id });
+  persistEnvironments(withActive(environmentsState, id)); navigateMainWindow(activeOrigin()); if (entry && handSaved(entry)) homePlaces.remember({ server: id });
 }
 
 function createLocalEnvironment(name, dataDir) {

@@ -453,7 +453,7 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
   await context.switchEnvironment("cloud");
   assert.deepEqual(calls, ["remember:null", "connect"]);
   calls.length = 0; await context.switchEnvironment("vps");
-  assert.deepEqual(calls, ["remember:null", "look:vps", "active:vps", `navigate:${other.origin}`], "another server: the remembered team is let go");
+  assert.deepEqual(calls, ["remember:null", "look:vps", "active:vps", `navigate:${other.origin}`, 'remember:{"server":"vps"}'], "another server replaces the remembered team for the next launch");
   calls.length = 0; context.environmentsState = { ...context.environmentsState, activeId: environments.LOCAL_ID }; answers = false;
   await context.switchEnvironment("vps");
   assert.deepEqual(calls, ["remember:null", "look:vps"], "a server that doesn't answer: the window stays where it is");
@@ -476,6 +476,8 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
   signedIn = true; calls.length = 0; await context.switchEnvironment("cloud");
   assert.deepEqual(calls, ["remember:null", "connect", "active:cloud", `navigate:${origin}`], "signed in there already: it opens as any server does");
   context.cloudAccount = null; context.environmentsState = { environments: [entry, other], activeId: environments.LOCAL_ID };
+  calls.length = 0; await context.switchEnvironment("vps");
+  assert.deepEqual(calls, ["remember:null", "look:vps", "active:vps", `navigate:${other.origin}`, 'remember:{"server":"vps"}'], "a hand-saved server is remembered without a Cloud account");
   calls.length = 0; await context.switchEnvironment("cloud");
   assert.deepEqual(calls, ["remember:null", "active:cloud", `navigate:${origin}`]);
   context.homeWindow = { cloudOrigin: () => origin, asking: () => false, cancel: () => {} }; context.environmentsState = { environments: [entry, other], activeId: "vps" };

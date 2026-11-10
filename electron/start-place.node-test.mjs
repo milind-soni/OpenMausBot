@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { jsonFile } from "./desktop-prefs.mjs";
+import { createHomePlaces } from "./home-places.mjs";
+import { reopenSavedServer } from "./saved-server.mjs";
+import { world } from "./fixtures/home-window-world.mjs";
 
 import { openStartPlace } from "./start-place.mjs";
 
@@ -44,9 +52,6 @@ test("one that can't open now falls back to My Cloud and is forgotten: a removed
     assert.equal(w.steps.at(-1), "show", "My Cloud, as ever");
     assert.equal(w.remembered, null, "the next launch doesn't try it again");
   }
-  const local = launch({ remembered: { server: "env-1" }, kind: "computer", servers: ["env-1"] });
-  assert.equal(await local.run(), "cloud", "with this computer as home, a saved server is the Server menu's own as ever");
-  assert.deepEqual(local.steps, ["refresh", "show"]);
 });
 
 test("then This Mac, when My Cloud doesn't run either; neither when This Mac can't open, nor when this computer is home", async () => {
@@ -68,4 +73,55 @@ test("nobody signed in: home as ever, and the place stays remembered for when th
   assert.equal(await w.run(), "home");
   assert.deepEqual(w.steps, ["refresh", "show"]);
   assert.deepEqual(w.remembered, { profile: "work" });
+});
+
+
+test("a saved server reopens with this computer as home, including without a Cloud sign-in", async () => {
+  for (const opens of [{}, { cloud: null }]) {
+    const w = launch({ remembered: { server: "env-1" }, kind: "computer", opens, servers: ["env-1"] });
+    assert.equal(await w.run(), "remembered");
+    assert.deepEqual(w.steps, ["refresh", "server:env-1"]);
+    assert.equal(w.forgot, 0);
+  }
+});
+
+test("a signed-out Cloud place waits for its account instead of opening a saved server", async () => {
+  for (const remembered of [{ cloud: "c-b" }, { team: "team-acme" }]) {
+    const w = launch({ remembered, kind: "computer", opens: { cloud: null }, servers: ["env-1"] });
+    assert.equal(await w.run(), "home");
+    assert.deepEqual(w.steps, ["refresh", "show"]);
+    assert.deepEqual(w.remembered, remembered);
+  }
+});
+
+test("a fresh launch reads a persisted server with no Cloud account and checks it before navigating", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omb-start-server-"));
+  try {
+    const entry = { id: "vps", kind: "remote", origin: "https://vps.example.test" };
+    const state = { environments: [entry], activeId: "local" };
+    const makePlaces = () => createHomePlaces({ store: jsonFile(join(dir, "home-place.json")), environments: () => state,
+      persist: () => {}, makeId: () => "unused", homeOrigin: () => null });
+    makePlaces().remember({ server: entry.id });
+    const places = makePlaces(), w = world({ journal: null, state: null });
+    const checked = [], navigated = [];
+    assert.equal(await openStartPlace({ home: w.home, places, profiles: null, server: id => {
+      assert.equal(id, entry.id);
+      return reopenSavedServer(entry, { saved: () => [entry], fetch: async (url) => { checked.push(url); return new Response("{}"); },
+        opened: found => { navigated.push(found.origin); return true; } });
+    } }), "remembered");
+    assert.deepEqual(checked, [`${entry.origin}/.well-known/openmausbot/environment`]);
+    assert.deepEqual(navigated, [entry.origin]);
+    assert.deepEqual(w.local, []);
+    assert.deepEqual(places.remembered(), { server: entry.id });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test("an unavailable saved server falls back without a dialog or a Cloud sign-in", async () => {
+  for (const id of ["gone", "throws"]) {
+    const w = launch({ remembered: { server: id }, kind: "computer", opens: { cloud: null } });
+    await w.run();
+    assert.deepEqual(w.steps, ["refresh", `server:${id}`, "show"]);
+    assert.equal(w.remembered, null);
+  }
 });
