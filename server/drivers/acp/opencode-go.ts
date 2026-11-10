@@ -647,85 +647,94 @@ const support = (
   loadCatalog: OpenCodeCatalogLoader,
   ownAccess = new Map<string, boolean>(),
   sources: OpenCodeModelSources = {},
-  priceCatalogs = new Map<string, ModelCatalog>(),
-): AcpSupport => ({
-  driverKind: "opencodeGo",
-  displayName: "OpenCode",
-  models: NO_MODELS,
-  defaultCli: "opencode",
-  nativeSource: "opencode.acp",
-  loginNote: "OpenCode has no usable models. Add an OpenCode key in Settings → API keys.",
-  install: {
-    command: {
-      darwin: "npm install -g @opencode/cli",
-      linux: "npm install -g @opencode/cli",
-      win32: "npm install -g @opencode/cli",
+): AcpSupport => {
+  let priceCatalog: ModelCatalog | undefined;
+  let generation = 0;
+  const discover: OpenCodeCatalogLoader = async (...args) => {
+    const started = generation;
+    const catalog = await loadCatalog(...args);
+    if (started === generation) priceCatalog = catalog;
+    return catalog;
+  };
+  return {
+    driverKind: "opencodeGo",
+    displayName: "OpenCode",
+    models: NO_MODELS,
+    defaultCli: "opencode",
+    nativeSource: "opencode.acp",
+    loginNote: "OpenCode has no usable models. Add an OpenCode key in Settings → API keys.",
+    install: {
+      command: {
+        darwin: "npm install -g @opencode/cli",
+        linux: "npm install -g @opencode/cli",
+        win32: "npm install -g @opencode/cli",
+      },
+      docsUrl: "https://opencode.ai/docs/",
+      signInCommand: "opencode auth login",
+      needsNode: true,
+      standalone: OPENCODE_STANDALONE,
     },
-    docsUrl: "https://opencode.ai/docs/",
-    signInCommand: "opencode auth login",
-    needsNode: true,
-    standalone: OPENCODE_STANDALONE,
-  },
-  spawnArgs: () => ["acp"],
-  statusLog: { path: openCodeLogPath, parse: parseOpenCodeLogLine, shared: true },
-  // A folder outside git files its session under OpenCode's global project, which every non-git folder of the person's
-  // shares: a connection check or memory upkeep would show up in their history there.
-  oneShotFolder: discoveryDirectory,
-  shareProcess: true,
-  credentialEnv: ["OPENCODE_API_KEY", ...OPENCODE_PROVIDER_ENV],
-  selectModel: { configId: "model" },
-  fallbackModel: (sessionConfig, catalogDefault) => {
-    const offered = offeredModels(sessionConfig, "model");
-    if (catalogDefault && offered.includes(catalogDefault)) return catalogDefault;
-    return preferredOpenCodeModel(offered, catalogFromOpenCodeSession(sessionConfig)?.current) || null;
-  },
-  modelVariants: true,
-  ownMcpOverHttp: true,
-  // OpenCode 1.18.27's build agent lists 13 tools of its own (bash, read, edit, task, skill…); room for a newer CLI's.
-  engineTools: 24,
-  resolveTurnModel: (model, env) => model ? declareTypedOpenCodeModel(env, model) ?? ensureOpenCodeInjectModel(model, env) : model,
-  transformEnv: (env, config, instanceId, instanceEnvironment) => {
-    withholdProviderKeysWhenManaged(env, config, instanceId, instanceEnvironment);
-    declareLiveOpenCodeModels(env, sources.liveLists);
-    applyStandaloneSpawnEnv(OPENCODE_STANDALONE, env, config.cli);
-  },
-  spawnFingerprint: (env, config) => openCodeSpawnFingerprint(env, config.cli),
-  applyTurnEnv: (env, { fullAuto, botId, cwd }) => {
-    if (openMausOwnsWorkingFolder(cwd)) env.OPENCODE_DISABLE_PROJECT_CONFIG = "1";
-    if (!fullAuto) {
-      allowOwnedDirectories(env, botId, cwd);
-      return;
-    }
-      // A wildcard alone leaves OpenCode's more-specific external-directory and read rules in place.
-    env.OPENCODE_PERMISSION = JSON.stringify(Object.fromEntries([
-      "*", "external_directory", "read", "edit", "bash", "glob", "grep",
-      "list", "task", "lsp", "skill", "webfetch", "websearch", "codesearch",
-      "todoread", "todowrite", "doom_loop",
-    ].map((permission) => [permission, "allow"])));
-  },
-  pickAuthMethod: () => null,
-  authFailure: "continue",
-  isAuthenticated: async (env, config, instanceId) => {
-    ownAccess.set(instanceId, ownOpenCodeAccess(env));
-    return Boolean(env.OPENCODE_API_KEY)
-      || hasStoredOpenCodeAuth(env)
-      || await canRunOpenCode(env, config.cli, loadCatalog);
-  },
-  classifyError: classifyOpenCodeError,
-  promptUnreachedModel: openCodePromptUnreachedModel,
-  limitFacts: (text, model, instanceId) => openCodeLimitFacts(text, model, priceCatalogs.get(instanceId)),
-  describeAccountError: describeOpenCodeAccountError,
-  resolveModels: async (environment, config, instanceId, fresh) => {
-    priceCatalogs.delete(instanceId);
-    if (fresh) markOpenCodeCatalogRefreshed(instanceId, (sources.now ?? Date.now)());
-    await refreshLiveModelLists(environment, { lists: sources.liveLists, fetch: sources.fetch, now: sources.now });
-    declareLiveOpenCodeModels(environment, sources.liveLists);
-    const catalog = await loadCatalog(environment, config.cli, { refresh: fresh === true });
-    priceCatalogs.set(instanceId, catalog);
-    return mergeLocalInject(catalog, environment);
-  },
-  buildPromptText: (turn) => turn.system ? `${turn.system}\n\n${turn.text}` : turn.text,
-});
+    spawnArgs: () => ["acp"],
+    statusLog: { path: openCodeLogPath, parse: parseOpenCodeLogLine, shared: true },
+    // A folder outside git files its session under OpenCode's global project, which every non-git folder of the person's
+    // shares: a connection check or memory upkeep would show up in their history there.
+    oneShotFolder: discoveryDirectory,
+    shareProcess: true,
+    credentialEnv: ["OPENCODE_API_KEY", ...OPENCODE_PROVIDER_ENV],
+    selectModel: { configId: "model" },
+    fallbackModel: (sessionConfig, catalogDefault) => {
+      const offered = offeredModels(sessionConfig, "model");
+      if (catalogDefault && offered.includes(catalogDefault)) return catalogDefault;
+      return preferredOpenCodeModel(offered, catalogFromOpenCodeSession(sessionConfig)?.current) || null;
+    },
+    modelVariants: true,
+    ownMcpOverHttp: true,
+    // OpenCode 1.18.27's build agent lists 13 tools of its own (bash, read, edit, task, skill…); room for a newer CLI's.
+    engineTools: 24,
+    resolveTurnModel: (model, env) => model ? declareTypedOpenCodeModel(env, model) ?? ensureOpenCodeInjectModel(model, env) : model,
+    transformEnv: (env, config, instanceId, instanceEnvironment) => {
+      withholdProviderKeysWhenManaged(env, config, instanceId, instanceEnvironment);
+      declareLiveOpenCodeModels(env, sources.liveLists);
+      applyStandaloneSpawnEnv(OPENCODE_STANDALONE, env, config.cli);
+    },
+    spawnFingerprint: (env, config) => openCodeSpawnFingerprint(env, config.cli),
+    applyTurnEnv: (env, { fullAuto, botId, cwd }) => {
+      if (openMausOwnsWorkingFolder(cwd)) env.OPENCODE_DISABLE_PROJECT_CONFIG = "1";
+      if (!fullAuto) {
+        allowOwnedDirectories(env, botId, cwd);
+        return;
+      }
+        // A wildcard alone leaves OpenCode's more-specific external-directory and read rules in place.
+      env.OPENCODE_PERMISSION = JSON.stringify(Object.fromEntries([
+        "*", "external_directory", "read", "edit", "bash", "glob", "grep",
+        "list", "task", "lsp", "skill", "webfetch", "websearch", "codesearch",
+        "todoread", "todowrite", "doom_loop",
+      ].map((permission) => [permission, "allow"])));
+    },
+    pickAuthMethod: () => null,
+    authFailure: "continue",
+    isAuthenticated: async (env, config, instanceId) => {
+      ownAccess.set(instanceId, ownOpenCodeAccess(env));
+      return Boolean(env.OPENCODE_API_KEY)
+        || hasStoredOpenCodeAuth(env)
+        || await canRunOpenCode(env, config.cli, discover);
+    },
+    classifyError: classifyOpenCodeError,
+    promptUnreachedModel: openCodePromptUnreachedModel,
+    limitFacts: (text, model) => openCodeLimitFacts(text, model, priceCatalog),
+    describeAccountError: describeOpenCodeAccountError,
+    resolveModels: async (environment, config, instanceId, fresh) => {
+      priceCatalog = undefined;
+      generation++;
+      if (fresh) markOpenCodeCatalogRefreshed(instanceId, (sources.now ?? Date.now)());
+      await refreshLiveModelLists(environment, { lists: sources.liveLists, fetch: sources.fetch, now: sources.now });
+      declareLiveOpenCodeModels(environment, sources.liveLists);
+      const catalog = await discover(environment, config.cli, { refresh: fresh === true });
+      return mergeLocalInject(catalog, environment);
+    },
+    buildPromptText: (turn) => turn.system ? `${turn.system}\n\n${turn.text}` : turn.text,
+  };
+};
 
 /** OpenCode 1.18 reports a provider's account refusal as a JSON-RPC internal error wrapping an APIError:
  * `{code: -32603, message: "Internal error: Invalid API key.", data: {service: "session", errorName: "APIError"}}`. */
@@ -782,12 +791,21 @@ export function createOpenCodeDriver(
   loadCatalog: OpenCodeCatalogLoader = discoverOpenCodeModels,
   schedule: OpenCodeRefreshSchedule = {},
 ): ProviderDriver<AcpConfig> {
-  const ownAccess = new Map<string, boolean>();
-  const driver = createAcpDriver(support(loadCatalog, ownAccess, schedule));
+  const driver = createAcpDriver(support(loadCatalog, undefined, schedule));
   return {
     ...driver,
     async create(input) {
-      const instance = await driver.create(input);
+      const ownAccess = new Map<string, boolean>();
+      let disposed = false;
+      const discover: OpenCodeCatalogLoader = async (...args) => {
+        if (disposed) throw new Error("OpenCode instance is disposed");
+        const catalog = await loadCatalog(...args);
+        if (disposed) throw new Error("OpenCode instance is disposed");
+        return catalog;
+      };
+      const instance = await createAcpDriver(support(discover, ownAccess, schedule)).create(input);
+      const dispose = instance.dispose.bind(instance);
+      instance.dispose = async () => { disposed = true; await dispose(); };
       keepOpenCodeModelsFresh(instance, input.instanceId, schedule);
       const read = instance.snapshot.bind(instance);
       instance.snapshot = async () => {
