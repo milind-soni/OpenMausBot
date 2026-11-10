@@ -12,7 +12,7 @@ export function StatusActivityRow({ message }: { message: Message }) {
   const { dispatch } = useStore();
   const status = statusActivity(message);
   if (!status) return null;
-  if (status.kind === "stopped") return <CancelledTurnRow name={message.tool?.name} />;
+  if (status.kind === "stopped") return <CancelledTurnRow name={message.tool?.name} stoppedBy={message.stoppedBy} />;
   if (message.tool?.rescue) return <FirstReplyRescueRow rescue={message.tool.rescue} text={status.text} at={message.at} />;
   const Icon = status.kind === "recovery" ? RefreshCw : Info;
   // A notice that signing in fixes (an AI signed out) opens the place to sign in again.
