@@ -34,6 +34,11 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   (`server/workspace-backup-team-private.ts`): no private conversation, none of its work folders or files only it used, no
   member's memory layer, no member's own MausBot, their inbox or anything under `people/`. Restoring such an export gives a
   team back everything but those.
+- **The order of bots.** Each User's list of bots is in their own order (`bot-orders.json`): their reorder (`PUT
+  /api/bots/order`, any level, Can view included) changes only their list and reaches only their streams. Whoever has
+  never ordered theirs sees the team's order, which an Owner's or Admin's reorder sets: an admin's order is the team's,
+  for every admin and every User without their own. A bot added later takes its place in the team's order in every
+  list.
 - **Who is speaking.** A bot knows who wrote each line it reads. Your own typed line in your own chat with it is the
   only line that carries no note; every other line opens with one, written by the Cloud and never by the sender:
   `[From <who> · <what> · <authority>]`, as in `[From Ben (person) · message · their own request]` on each person's

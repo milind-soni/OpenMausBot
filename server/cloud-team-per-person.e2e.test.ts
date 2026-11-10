@@ -1,5 +1,5 @@
 // What each person on a Team Cloud keeps for themselves though the team shares the thing it is about (docs/team-cloud.md):
-// a bot's Shared chat's unread mark and a notification's read mark.
+// a bot's Shared chat's unread mark, a notification's read mark, and the order of their bots.
 // A real Team Cloud with the Owner, an Admin and two Users (Ada and Cleo), paired with the Admin's signed claims: one
 // person reading, marking or reordering changes nothing for another, and their streams hear only their own. The engine
 // is the synthetic Claude CLI.
@@ -22,7 +22,7 @@ type Note = { id: string; kind: string; threadId: string; read: boolean };
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
 let owner = "", admin = "", ada = "", cleo = "";
-let scout: Bot;
+let scout: Bot, pilot: Bot;
 
 const bots = async (token: string) => (await team.as(token, "GET", "/api/bots")).body.bots as Bot[];
 const mainChat = async (token: string) => (await bots(token)).find((bot) => bot.id === scout.id)!.tasks.find((task) => task.threadId === scout.mainThreadId)!;
@@ -69,9 +69,11 @@ beforeAll(async () => {
   admin = (await team.pair(ADMIN)).token!;
   ada = (await team.pair(ADA)).token!;
   cleo = (await team.pair(CLEO)).token!;
-  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout" });
-  expect(created.status, JSON.stringify(created.body)).toBe(201);
-  scout = created.body.bot;
+  for (const name of ["Scout", "Pilot"]) {
+    const created = await team.as(owner, "POST", "/api/bots", { name });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    if (name === "Scout") scout = created.body.bot; else pilot = created.body.bot;
+  }
 }, hostTimeout(120_000));
 
 afterAll(async () => {
@@ -150,3 +152,39 @@ it("reading a notification of the Shared chat is each person's own, and only the
     await cleos.close();
   }
 }, hostTimeout(120_000));
+
+it("each person orders their own bots; an Owner's or Admin's order is the team's default for whoever has not", async () => {
+  const order = async (token: string) => (await bots(token)).map((bot) => bot.id).filter((id) => id === scout.id || id === pilot.id);
+  const teams = await order(owner), flipped = [...teams].reverse();
+  for (const token of [admin, ada, cleo]) expect(await order(token)).toEqual(teams);
+  const cleos = await listen(cleo), adas = await listen(ada);
+  try {
+    const moved = await team.as(ada, "PUT", "/api/bots/order", { botIds: flipped });
+    expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+    expect((moved.body.botIds as string[]).filter((id) => id === scout.id || id === pilot.id)).toEqual(flipped);
+    expect(await order(ada)).toEqual(flipped);
+    for (const token of [owner, admin, cleo]) expect(await order(token), "Ada's order is Ada's alone").toEqual(teams);
+    await until(() => adas.frames().some((frame) => frame.kind === "bots.order"), 10_000);
+    await settle();
+    expect(cleos.frames().filter((frame) => frame.kind === "bots.order"), "Ada's order never reaches Cleo's stream").toEqual([]);
+  } finally {
+    await cleos.close();
+    await adas.close();
+  }
+  // The Owner sets the team's default: everyone who never ordered their own follows it, Ada keeps hers.
+  expect((await team.as(owner, "PUT", "/api/bots/order", { botIds: flipped })).status).toBe(200);
+  for (const token of [owner, admin, cleo]) expect(await order(token)).toEqual(flipped);
+  expect((await team.as(admin, "PUT", "/api/bots/order", { botIds: teams })).status).toBe(200);
+  for (const token of [owner, admin, cleo]) expect(await order(token), "an Admin's order is the default too").toEqual(teams);
+  expect(await order(ada), "Ada keeps the order she chose").toEqual(flipped);
+  // A bot made after she ordered hers takes its place in the team's order in her list too.
+  const created = await team.as(owner, "POST", "/api/bots", { name: "Atlas" });
+  expect(created.status).toBe(201);
+  const atlas = created.body.bot.id as string;
+  const three = async (token: string) => (await bots(token)).map((bot) => bot.id).filter((id) => [scout.id, pilot.id, atlas].includes(id));
+  const atlasAt = (await three(owner)).indexOf(atlas);
+  expect(await three(cleo)).toEqual(await three(owner));
+  expect((await three(ada)).indexOf(atlas)).toBe(atlasAt);
+  expect((await three(ada)).filter((id) => id !== atlas)).toEqual(flipped);
+}, hostTimeout(90_000));
+
