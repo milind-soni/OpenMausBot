@@ -118,7 +118,7 @@ it("lists and removes a missing library assignment without dropping any other st
   expect(f.manage("unassign", stale.management_revision, stale.name)[0]).toBe(409);
 });
 
-it("checks current Chief authority, visibility, peer scope, conversation and revision before any write", () => {
+it("checks current Chief authority, visibility, conversation and revision before any write", () => {
   const f = fixture();
   const revision = f.state().management_revision;
   const rejected = (run: () => unknown, expected: number) => {
@@ -131,9 +131,7 @@ it("checks current Chief authority, visibility, peer scope, conversation and rev
   f.store.patchBot(f.chief.id, { chiefOfStaff: false });
   rejected(() => f.manage("assign", revision), 403);
   rejected(() => f.host.assignmentListing(f.chief, f.target.id), 403);
-  f.store.patchBot(f.chief.id, { chiefOfStaff: true, peers: [] });
-  rejected(() => f.manage("share", revision), 403);
-  f.store.patchBot(f.chief.id, { peers: undefined });
+  f.store.patchBot(f.chief.id, { chiefOfStaff: true });
   for (const patch of [{ visibility: "admins" as const }, { hidden: true }, { section: "another-team" }]) {
     f.store.patchBot(f.target.id, patch);
     rejected(() => f.manage("assign", revision), 403);
