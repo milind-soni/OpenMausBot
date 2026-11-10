@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { detectBox, type BoxDetection } from "./bot-box/detect.ts";
 import { resolveLoopbackTrust } from "./request-auth.ts";
-import { PROFILE_REFUSED_EXIT_CODE, startServerProfile, type ProfileBootOptions } from "./server-profile-boot.ts";
+import { PROFILE_REFUSED_EXIT_CODE, admittedSignIns, startServerProfile, type ProfileBootOptions } from "./server-profile-boot.ts";
 import {
   OPERATOR_TOKEN_FILE, profileOutcome, readOperatorToken, resolveServerProfile, signInListsFor, startLogLines, wideningVerdict,
   type ProfileFacts, type ServerProfile,
@@ -67,7 +67,7 @@ describe("which profile a server runs", () => {
     expect(resolveServerProfile(facts({ env: { OMB_PROFILE: "standard", OMB_IMAGE: "server" } }))).toEqual({ name: "standard", reason: "switched-off", required: false, shared: false });
     const declined = resolveServerProfile(facts({ env: { OMB_PROFILE: "standard" }, signIn: { admins: [], members: ["you@example.com"] } }));
     expect(declined).toMatchObject({ name: "standard", shared: true });
-    expect(declined.warning).toMatch(/more than one person can sign in.*AI keys/);
+    expect(declined.warning).toMatch(/more than one person can sign in.*AI keys.*change its settings, including who may sign in/);
     expect(resolveServerProfile(facts({ env: { OMB_PROFILE: "off; rm -rf" } }))).toMatchObject({ name: "hardened", required: true, warning: expect.stringContaining("is not hardened or standard") });
   });
 
@@ -145,7 +145,7 @@ describe("a server that cannot box its bots", () => {
     expect(outcome).toEqual({ state: "unboxed", fault: "userns-refused", serviceTrust: true });
     const [line] = startLogLines(shared, outcome as never);
     expect(line).toMatchObject({ level: "warn" });
-    expect(line!.line).toMatch(/the bots are NOT sandboxed.*anyone who can chat with a bot can make it read this server's settings, AI keys/);
+    expect(line!.line).toMatch(/the bots are NOT sandboxed.*anyone who can chat with a bot can make it read this server's AI keys/);
   });
 
   it("leaves a one-owner server in the image exactly as it was when its host cannot box, and warns", () => {
@@ -203,14 +203,14 @@ describe("starting a server in its profile", () => {
   class Refused extends Error {}
   const boot = (over: Partial<ProfileBootOptions> & Pick<ProfileBootOptions, "dataDir">, detection = BOXED) => {
     const lines: string[] = [];
-    const wanted: boolean[] = [];
+    const wanted: boolean[] = [], guarded: boolean[] = [];
     const started = startServerProfile({
-      port: 1, cloudHome: false, env: {}, platform: "linux", fromSource: false, log: (level, line) => lines.push(`${level}: ${line}`),
-      startBox: async (hardened) => { wanted.push(hardened); return hardened ? detection : off("not-cloud"); },
+      port: 1, cloudHome: false, env: {}, platform: "linux", fromSource: false, checkLayout: () => ({ hidden: true }), log: (level, line) => lines.push(`${level}: ${line}`),
+      startBox: async (hardened, guardHome) => { wanted.push(hardened); guarded.push(guardHome); return hardened ? detection : off("not-cloud"); },
       refuse: (message) => { throw new Refused(message); },
       ...over,
     });
-    return { started, lines, wanted };
+    return { started, lines, wanted, guarded };
   };
   const SHARED_ENV = { OMB_SIGNIN_EMAILS: "me@example.com", OMB_SIGNIN_MEMBER_EMAILS: "you@example.com" };
 
@@ -241,6 +241,16 @@ describe("starting a server in its profile", () => {
     again.dismissNotice();
     expect(again.status()).toEqual({ profile: "hardened", boxed: true });
     expect((await boot({ dataDir: dir, env: SHARED_ENV }).started).status().notice).toBeUndefined();
+  });
+
+  it("guards HOME where it is a person's own or others' bots work in it, and not in the image one owner runs or on a Cloud", async () => {
+    const guards = async (over: Partial<ProfileBootOptions>) => { const run = boot({ dataDir: dataDir(), ...over }); await run.started; return run.guarded; };
+    expect(await guards({ env: SHARED_ENV })).toEqual([true]);
+    expect(await guards({ env: { ...SHARED_ENV, OMB_IMAGE: "server" } })).toEqual([true]);
+    expect(await guards({ env: { OMB_PROFILE: "hardened" } })).toEqual([true]);
+    expect(await guards({ env: { OMB_IMAGE: "server" } })).toEqual([false]);
+    expect(await guards({})).toEqual([false]);
+    expect(await guards({ cloudHome: true })).toEqual([false]);
   });
 
   it("says nothing to a new server that starts hardened", async () => {
@@ -300,6 +310,52 @@ describe("starting a server in its profile", () => {
     const cannot = await boot({ dataDir: dataDir(), probeBox: () => off("userns-refused") }).started;
     expect(cannot.wideningRefusal({ admins: [], members: [] }, { admins: [], members: ["you@example.com"] })).toBe("userns-refused");
     expect(cannot.status().notice).toBeUndefined();
+  });
+
+  it("does not say hardened over a data folder a boxed shell can still read, and writes nothing", async () => {
+    const dir = dataDir({ "sessions.json": IN_USE });
+    const visible = boot({ dataDir: dir, env: SHARED_ENV, checkLayout: () => ({ hidden: false, why: "a bot can see /var/lib/openmausbot/config.json" }) });
+    await expect(visible.started).rejects.toThrow(/sandbox is on, but it does not keep the server's own files from them here: a bot can see \/var\/lib\/openmausbot\/config\.json/);
+    expect(() => statSync(join(dir, "server-profile.json"))).toThrow();
+    expect(() => statSync(join(dir, OPERATOR_TOKEN_FILE))).toThrow();
+    let asked = 0;
+    await boot({ dataDir: dataDir(), checkLayout: () => { asked += 1; return { hidden: false, why: "x" }; } }).started;
+    await boot({ dataDir: dataDir({ "sessions.json": IN_USE }), env: SHARED_ENV, checkLayout: () => { asked += 1; return { hidden: false, why: "x" }; } }, off("no-bwrap")).started;
+    expect(asked, "only a boxed server is checked").toBe(0);
+  });
+
+  it("holds a sign-in list that lets a second person in until the next start, however it was changed", async () => {
+    const one = { admins: ["me@example.com"], members: [] as string[] }, two = { admins: ["me@example.com"], members: ["you@example.com"] };
+    const { started, lines } = boot({ dataDir: dataDir() });
+    const profile = await started;
+    expect(admittedSignIns(one)).toBe(one);
+    expect(profile.status().notice).toBeUndefined();
+    // Edited on disk (openmausbot access add): no route saw it, and it still lets nobody new in.
+    expect(admittedSignIns(two)).toBe(one);
+    expect(admittedSignIns({ admins: ["@example.com"], members: [] })).toBe(one);
+    expect(profile.status().notice).toEqual({ kind: "restart" });
+    expect(lines.filter((line) => line.includes("held as it was"))).toHaveLength(1);
+    // Taken back: nothing is owed.
+    expect(admittedSignIns(one)).toBe(one);
+    expect(profile.status().notice).toBeUndefined();
+
+    // An image whose host cannot box holds too; where the profile is on, or was declined, the list is as saved.
+    await boot({ dataDir: dataDir(), env: { OMB_IMAGE: "server" } }, off("userns-refused")).started;
+    expect(admittedSignIns(two)).toEqual({ admins: [], members: [] });
+    // Changed before anything asked: the list the server started with stays in force, not an empty one.
+    await boot({ dataDir: dataDir({ "config.json": { signIn: one } }) }).started;
+    expect(admittedSignIns(two)).toEqual(one);
+    await boot({ dataDir: dataDir(), env: SHARED_ENV }).started;
+    expect(admittedSignIns(two)).toBe(two);
+    for (const env of [{ OMB_PROFILE: "standard" }, {}]) {
+      await boot({ dataDir: dataDir(), env, fromSource: env.OMB_PROFILE === undefined }).started;
+      expect(admittedSignIns(two), JSON.stringify(env)).toBe(two);
+    }
+    // A shared server that cannot box keeps the people it started with and lets nobody new in, even from the disk.
+    await boot({ dataDir: dataDir({ "sessions.json": IN_USE, "config.json": { signIn: two } }) }, off("no-bwrap")).started;
+    expect(admittedSignIns(two)).toBe(two);
+    expect(admittedSignIns({ admins: ["me@example.com", "boss@example.com"], members: ["You@Example.com", "new@example.com"] })).toEqual({ admins: ["me@example.com"], members: ["You@Example.com"] });
+    expect(admittedSignIns({ admins: ["me@example.com"], members: [] })).toEqual({ admins: ["me@example.com"], members: [] });
   });
 
   it("leaves a Cloud home to its own rules: boxed by its role, no token, no notice", async () => {

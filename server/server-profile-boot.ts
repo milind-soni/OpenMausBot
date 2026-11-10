@@ -1,16 +1,18 @@
 // Turns the server's profile on at start (server-profile.ts decides which): starts the bot box, stops a server that must
 // be boxed and can't be, keeps what earlier starts ran in the data folder, and holds the notice Settings shows an admin.
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFileSync, rmSync, writeSync } from "node:fs";
+import { closeSync, mkdirSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 
-import type { SignInLists } from "./admin-activity.ts";
+import { sharedSignIn, type SignInLists } from "./admin-activity.ts";
 import { writeFileAtomic } from "./atomic.ts";
-import { startBotBoxAtBoot } from "./bot-box/boot.ts";
+import { botBox, startBotBoxAtBoot } from "./bot-box/boot.ts";
+import type { BotBox } from "./bot-box/box.ts";
 import { detectBox, type BoxDetection } from "./bot-box/detect.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
 import {
-  boxFault, profileOutcome, resolveServerProfile, signInListsFor, startLogLines, wideningVerdict, BOX_FIX, OPERATOR_TOKEN_FILE,
+  boxFault, profileOutcome, resolveServerProfile, signInListsFor, startLogLines, wideningVerdict, BOX_FIX, OPERATOR_TOKEN_FILE, PROFILE_ENV, SERVER_IMAGE_ENV,
   type BoxFault, type ProfileNotice, type ProfileOutcome, type ProfileRecord, type ProfileStatus, type ServerProfile,
 } from "./server-profile.ts";
 import { readMemoryOnlyFromRegularFiles } from "./workspace.ts";
@@ -70,6 +72,67 @@ export function writeOperatorToken(dataDir: string): string {
   return token;
 }
 
+/** What a boxed shell in this server's own layout says of the server's files. */
+export type LayoutVerdict = { hidden: true } | { hidden: false; why: string };
+
+/**
+ * Runs one boxed shell laid out as a bot's turn is here (the real data folder and HOME, a conversation folder of its
+ * own) and asks it whether a file the server just wrote in its data folder is there.
+ *
+ * Security: the plan covers the data folder wherever it is (bot-box/plan.ts coverDataFolder), and the self-check proves
+ * the box on a fixture. This proves the one thing a fixture cannot: that on this machine's layout the cover holds. A
+ * server never says "hardened" over a data folder a bot can read.
+ */
+export function checkLayout(dataDir: string, box: Pick<BotBox, "wrap" | "startOptions"> = botBox): LayoutVerdict {
+  const canary = join(dataDir, "box", `layout-${randomBytes(6).toString("hex")}`);
+  const bot = "omb-layout-check";
+  const cwd = join(dataDir, "task-workspaces", bot, "t"), own = join(dataDir, "workspaces", bot);
+  try {
+    for (const folder of [cwd, own]) mkdirSync(folder, { recursive: true, mode: 0o700 });
+    writeFileSync(canary, "the server's own\n", { mode: 0o600 });
+    const home = box.startOptions()?.home ?? dataDir;
+    // The paths ride as arguments: a command line is not a grant, so naming them shows nothing.
+    const script = 'for path in "$@"; do if [ -e "$path" ]; then echo "omb-layout:visible $path"; exit 0; fi; done; echo omb-layout:hidden';
+    const wrapped = box.wrap({
+      command: "/bin/sh", args: ["-c", script, "sh", canary, join(dataDir, "config.json"), join(dataDir, "sessions.json"), join(dataDir, OPERATOR_TOKEN_FILE)],
+      cwd, env: { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin", HOME: home }, botId: bot,
+    });
+    if (!wrapped) return { hidden: false, why: "the box is not on" };
+    let result: SpawnSyncReturns<string>;
+    try {
+      result = spawnSync(wrapped.command, wrapped.args, { env: wrapped.env, encoding: "utf8", timeout: 20_000, stdio: ["ignore", "pipe", "pipe", ...wrapped.extraFds] });
+    } finally {
+      for (const fd of wrapped.extraFds) try { closeSync(fd); } catch {}
+      wrapped.release();
+    }
+    const said = result.stdout.trim().split("\n").at(-1) ?? "";
+    if (said === "omb-layout:hidden") return { hidden: true };
+    if (said.startsWith("omb-layout:visible ")) return { hidden: false, why: `a bot can see ${said.slice("omb-layout:visible ".length)}` };
+    return { hidden: false, why: `a sandboxed command could not run (${(result.stderr.trim().split("\n").at(-1) ?? "").slice(0, 200) || result.error?.message || `exit ${result.status}`})` };
+  } catch (error) {
+    return { hidden: false, why: `the check could not run (${error instanceof Error ? error.message : String(error)})` };
+  } finally {
+    rmSync(canary, { force: true });
+    // The box makes the turn's uploads folder (box.ts) beside the two this made.
+    for (const folder of [join(dataDir, "task-workspaces", bot), own, join(dataDir, "box-uploads", bot)]) rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+let admit: <T extends SignInLists>(lists: T) => T = (lists) => lists;
+
+/**
+ * The sign-in lists this server honours now: the saved ones, except on a server that started as one person's and so
+ * trusts local requests as its owner. There a list that lets a second person in is held until the next start, which
+ * turns the profile on, and the lists as they last were for one person stay in force.
+ *
+ * Security: the lists are read on every request and can be edited on disk (`openmausbot access add`), while the profile
+ * and loopback trust are decided at start. Without the hold, the new person's bot would be the owner over loopback
+ * until someone restarted the server.
+ */
+export function admittedSignIns<T extends SignInLists>(lists: T): T {
+  return admit(lists);
+}
+
 export interface RunningProfile {
   profile: ServerProfile;
   outcome: Exclude<ProfileOutcome, { state: "refused" }>;
@@ -95,10 +158,12 @@ export interface ProfileBootOptions {
   /** This server runs from TypeScript source; by default, whether this module does. */
   fromSource?: boolean;
   log?: (level: "log" | "warn", line: string) => void;
-  /** Starts the box and says what it found; the real one by default. */
-  startBox?: (hardened: boolean) => Promise<Pick<BoxDetection, "box" | "reason">>;
+  /** Starts the box and says what it found; the real one by default. `guardHome`: HOME is a person's own here. */
+  startBox?: (hardened: boolean, guardHome: boolean) => Promise<Pick<BoxDetection, "box" | "reason">>;
   /** Stops the server with the sentence; the real one exits. */
   refuse?: (message: string) => never;
+  /** Whether the server's files are hidden from a boxed shell in this layout; the real check by default. */
+  checkLayout?: () => LayoutVerdict;
   /** Whether this host could box, for a `standard` server asked to take more people. */
   probeBox?: () => Pick<BoxDetection, "box" | "reason">;
 }
@@ -112,14 +177,18 @@ function refuseToStart(message: string): never {
 export async function startServerProfile(options: ProfileBootOptions): Promise<RunningProfile> {
   const env = options.env ?? process.env, dataDir = options.dataDir;
   const log = options.log ?? ((level, line) => (level === "warn" ? console.warn(line) : console.log(line)));
+  const startLists = signInListsFor(dataDir, env);
   const profile = resolveServerProfile({
     env, platform: options.platform, desktopManaged: env.OMB_DESKTOP_PARENT === "1", cloudHome: options.cloudHome,
-    hostedWorkspace: hostedWorkspaceConfigured(env), signIn: signInListsFor(dataDir, env),
+    hostedWorkspace: hostedWorkspaceConfigured(env), signIn: startLists,
     fromSource: options.fromSource ?? import.meta.url.endsWith(".ts"),
   });
   const hardened = profile.name === "hardened";
-  const startBox = options.startBox ?? ((wanted: boolean) => startBotBoxAtBoot({ dataDir, port: options.port, hardened: wanted }));
-  const detection = await startBox(hardened && !options.cloudHome);
+  const startBox = options.startBox ?? ((wanted: boolean, guardHome: boolean) => startBotBoxAtBoot({ dataDir, port: options.port, hardened: wanted, guardHome }));
+  // The image's HOME holds only what its owner put there for the engines; anyone else's HOME, or one others' bots
+  // work in, is guarded.
+  const selfHosted = hardened && !options.cloudHome;
+  const detection = await startBox(selfHosted, selfHosted && (profile.shared || env[SERVER_IMAGE_ENV] !== "server"));
   const boxed = detection.box !== "off";
   if (options.cloudHome) {
     if (profile.warning) log("warn", `server profile: ${profile.warning}`);
@@ -129,6 +198,12 @@ export async function startServerProfile(options: ProfileBootOptions): Promise<R
   const record: ProfileRecord = { inUse: serverInUse(dataDir), hardenedBefore: stored.hardenedSince !== undefined };
   const outcome = profileOutcome(profile, detection, record);
   if (outcome.state === "refused") return (options.refuse ?? refuseToStart)(outcome.message);
+  if (outcome.state === "hardened") {
+    const layout = (options.checkLayout ?? (() => checkLayout(dataDir)))();
+    if (!layout.hidden) {
+      return (options.refuse ?? refuseToStart)(`OpenMausBot did not start: its bots' sandbox is on, but it does not keep the server's own files from them here: ${layout.why}. The data folder is ${dataDir}. Nothing was changed. Please report this: it is a fault in OpenMausBot or in this server's bubblewrap, not in your settings. To run without the sandbox meanwhile, set ${PROFILE_ENV}=standard.`);
+    }
+  }
   for (const { level, line } of startLogLines(profile, outcome)) log(level, line);
 
   let operatorToken: string | undefined;
@@ -146,14 +221,43 @@ export async function startServerProfile(options: ProfileBootOptions): Promise<R
     rmSync(join(dataDir, OPERATOR_TOKEN_FILE), { force: true });
   }
 
-  let restartOwed = false;
+  let restartOwed = false, held = false;
+  // Only a server that took itself for one person's: a declined profile, a checkout run from source and the desktop app
+  // keep the behaviour they had.
+  const holds = profile.reason === "one-owner" || (profile.reason === "server-image" && outcome.state === "unboxed");
+  // The lists it started with let one person in (else it would not hold): they stay in force until the next start.
+  let oneOwners: SignInLists = startLists;
+  // A shared server that cannot box keeps the people it started with and takes no new ones, by any way in.
+  const frozen = outcome.state === "unboxed" && profile.required && outcome.fault !== "not-linux";
+  const norm = (entry: string) => entry.trim().toLowerCase();
+  const atStart = { admins: new Set(startLists.admins.map(norm)), members: new Set(startLists.members.map(norm)) };
+  let refusedNew = false;
+  admit = (lists) => {
+    if (frozen) {
+      const admins = lists.admins.filter((entry) => atStart.admins.has(norm(entry))), members = lists.members.filter((entry) => atStart.members.has(norm(entry)));
+      if (admins.length === lists.admins.length && members.length === lists.members.length) return lists;
+      if (!refusedNew) log("warn", "server profile: the sign-in list has people added since this server started. It cannot run its bots in a sandbox, so they are not let in; the people it started with still are.");
+      refusedNew = true;
+      return { ...lists, admins, members };
+    }
+    if (!holds) return lists;
+    if (!sharedSignIn(lists)) {
+      oneOwners = lists;
+      held = false;
+      restartOwed = false;
+      return lists;
+    }
+    if (!held) log("warn", "server profile: the sign-in list now lets more than one person in. They can sign in once this server has started again, which turns on its hardened profile; until then the list is held as it was.");
+    held = true;
+    return oneOwners as typeof lists;
+  };
   const notice = (): ProfileNotice | undefined => {
+    if (restartOwed || held) return { kind: "restart" };
     if (outcome.state === "unboxed") {
       // Where nobody else signs in the admin is told once; where others do, until it is fixed.
       const dismissible = !profile.shared;
       return dismissible && stored.unboxedRead ? undefined : { kind: "unboxed", fault: outcome.fault, shared: profile.shared, dismissible };
     }
-    if (restartOwed) return { kind: "restart" };
     return outcome.state === "hardened" && stored.announce ? { kind: "on" } : undefined;
   };
   return {
@@ -168,10 +272,7 @@ export async function startServerProfile(options: ProfileBootOptions): Promise<R
         profile, outcome, current, next,
         canBox: () => boxFault((options.probeBox ?? (() => detectBox({ env, platform: options.platform, hardened: true })))()),
       });
-      if (verdict === "restart") {
-        restartOwed = true;
-        log("warn", "server profile: more than one person can now sign in. Start this server again to turn on its hardened profile (the bots' sandbox, and local requests no longer trusted as the owner).");
-      }
+      if (verdict === "restart") restartOwed = true;
       return verdict !== null && verdict !== "restart" ? verdict.refuse : null;
     },
     dismissNotice: () => {

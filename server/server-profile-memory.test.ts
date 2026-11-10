@@ -18,7 +18,7 @@ describe.skipIf(process.platform === "win32")("memory in the hardened profile", 
     writeFileSync(own, "the bot's own notes");
     symlinkSync(settings, link);
     const boot = (env: NodeJS.ProcessEnv, box: "bwrap" | "off") => startServerProfile({
-      dataDir: root, port: 1, cloudHome: false, env, platform: "linux", fromSource: false, log: () => {},
+      dataDir: root, port: 1, cloudHome: false, env, platform: "linux", fromSource: false, checkLayout: () => ({ hidden: true }), log: () => {},
       startBox: async () => ({ box, reason: box === "off" ? "not-cloud" : null }),
     });
 

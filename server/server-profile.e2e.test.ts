@@ -148,7 +148,7 @@ describe.skipIf(process.platform === "win32")("a server started in its profile",
   it("starts a shared server whose operator declined the profile, as before, and warns on every start", async () => {
     const server = await start({ ...SHARED, OMB_PROFILE: "standard" }, up);
     await healthy(server);
-    expect(server.output()).toMatch(/server profile: OMB_PROFILE=standard on a server more than one person can sign in to: anyone who can chat with a bot can make it read this server's settings, AI keys/);
+    expect(server.output()).toMatch(/server profile: OMB_PROFILE=standard on a server more than one person can sign in to: anyone who can chat with a bot can make it read this server's AI keys/);
     expect(server.output()).toContain("server profile: standard (switched-off)");
     expect(server.output()).toContain("local requests: owner trust (self-hosted default)");
     expect((await local(server, "GET", "/api/config")).status).toBe(200);
