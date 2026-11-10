@@ -117,10 +117,11 @@ describe("the Chrome launcher", () => {
   it("on a Linux server keeps the download it started when agent-browser's PATH later shows a browser", async () => {
     const root = mkdtempSync(join(tmpdir(), "omb-launcher-"));
     folders.push(root);
-    let enginePath = posix.join(root, "bin");
+    // A drive-free PATH: on Windows a "C:" in the temp folder would be split at ":".
+    let enginePath = "/engine/bin";
     const env = { HOME: root };
     const real = chromeHost({ dataDir: join(root, "data"), env, platform: "linux", arch: "x64", enginePath: () => enginePath });
-    const host = { ...real, exists: (path: string) => path.startsWith(root) && existsSync(path), list: (folder: string) => folder.startsWith(root) ? real.list(folder) : [] };
+    const host = { ...real, exists: (path: string) => path === "/engine/extra/chromium" ? existsSync(join(root, "extra", "chromium")) : path.startsWith(root) && existsSync(path), list: (folder: string) => folder.startsWith(root) ? real.list(folder) : [] };
     let finish!: () => void;
     const install = vi.fn(async (options: Parameters<typeof installChromeForTesting>[0]) => {
       await new Promise<void>((resolve) => { finish = resolve; });
@@ -139,7 +140,7 @@ describe("the Chrome launcher", () => {
     // The login shell's PATH arrives while Chrome for Testing downloads, with a Chromium on it.
     mkdirSync(join(root, "extra"), { recursive: true });
     writeFileSync(join(root, "extra", "chromium"), "#!/bin/sh\n", { mode: 0o755 });
-    enginePath = posix.join(root, "extra");
+    enginePath = "/engine/extra";
     expect(chrome.env()).toEqual(launching);
     finish();
     await chrome.prepare();
