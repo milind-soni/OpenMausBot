@@ -3189,6 +3189,7 @@
   "model.variant.unavailableChoice": "A variante salva “{variant}” está indisponível. Escolha uma variante disponível.",
   "model.variant.unverifiedChoice": "A variante salva “{variant}” ainda não foi verificada nesta sessão.",
   "model.variant.none": "Nenhuma variante selecionada.",
+  "model.variant.on": "Ligado",
   "model.variant.sessionValue": "Sessão: {variant}.",
   "model.variant.clearHint": "Não enviar uma variante de raciocínio; o agente mantém o ajuste da sessão ou o que já estiver configurado",
   "model.variant.clear": "Limpar seleção de variante",

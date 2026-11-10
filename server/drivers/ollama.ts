@@ -1,7 +1,7 @@
 // Ollama's own API (docs/api.md in github.com/ollama/ollama): /api/tags lists the pulled models with their size and
 // details, /api/version answers with a version, and /api/show names a model's capabilities ("tools", "vision") from
 // v0.6.4. A default install takes no key on these routes or on the OpenAI-compatible ones under /v1.
-import type { LocalModel, OllamaState, OllamaStatus } from "../../shared/local-model.ts";
+import type { LocalModel, LocalModelThinking as OllamaThinking, OllamaState, OllamaStatus } from "../../shared/local-model.ts";
 import { isContextName } from "./ollama-context.ts";
 
 export const OLLAMA_PORT = "11434";
@@ -53,11 +53,29 @@ export function ollamaTags(payload: unknown): OllamaModel[] | null {
   return models;
 }
 
+function thinkingControls(described: unknown): OllamaThinking {
+  const values = described && typeof described === "object" ? (described as { values?: unknown }).values : undefined;
+  const choices = Array.isArray(values)
+    ? values.flatMap((value) => value === false ? ["off"] : value === true ? ["on"] : text(value) ? [text(value)!] : [])
+    : [];
+  return choices.length ? { choices, described: true } : { choices: ["off", "on"], described: false };
+}
+
 /** What /api/show says a model can do; empty when the server predates capabilities. */
-export function showCapabilities(show: unknown): Pick<OllamaModel, "tools" | "vision"> {
-  const capabilities = show && typeof show === "object" ? (show as { capabilities?: unknown }).capabilities : undefined;
+export function showCapabilities(show: unknown): Pick<OllamaModel, "tools" | "vision" | "thinking"> {
+  const { capabilities, thinking } = (show && typeof show === "object" ? show : {}) as { capabilities?: unknown; thinking?: unknown };
   if (!Array.isArray(capabilities) || !capabilities.every((entry) => typeof entry === "string")) return {};
-  return { tools: capabilities.includes("tools"), vision: capabilities.includes("vision") };
+  const controls = capabilities.includes("thinking") ? thinkingControls(thinking) : undefined;
+  return { tools: capabilities.includes("tools"), vision: capabilities.includes("vision"), ...(controls && controls.choices.length > 1 ? { thinking: controls } : {}) };
+}
+
+/** The `reasoning_effort` a thinking choice sends on /v1, undefined to leave the model's default. Ollama v0.12.6, which
+ * lists no controls in /api/show, refuses a level on any model without named levels, so "on" stays unsent there. */
+export function thinkingEffort(thinking: OllamaThinking | undefined, choice: string | undefined): string | undefined {
+  if (!thinking || !choice || !thinking.choices.includes(choice)) return undefined;
+  if (choice === "off") return "none";
+  if (choice === "on") return thinking.described ? "high" : undefined;
+  return choice;
 }
 
 /** False only for a model /api/show says cannot chat. */

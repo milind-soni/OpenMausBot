@@ -9,7 +9,7 @@ import { instanceLook } from "../provider-icon.ts";
 import { forgetServedModels } from "./ollama-context.ts";
 import {
   answeredAsOllama, findOllama, forgetOllamaAnswers, isOllamaServer, ollamaOrigin, ollamaTags, ollamaUnavailable,
-  probeOllama, showCapabilities,
+  probeOllama, showCapabilities, thinkingEffort,
 } from "./ollama.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
@@ -25,13 +25,13 @@ afterEach(async () => {
   }
 });
 
-interface FakeModel { name: string; size?: number; details?: Record<string, unknown>; capabilities?: string[] }
+interface FakeModel { name: string; size?: number; details?: Record<string, unknown>; capabilities?: string[]; thinking?: unknown }
 
 /** A server speaking Ollama's own routes and its OpenAI-compatible chat, recording each chat request. */
 async function fakeOllama(options: { models?: FakeModel[]; version?: string | null; tags?: boolean } = {}) {
   // Read per request, so a test can change what the server answers.
   const models = options.models ?? [];
-  const chats: Array<{ model: string; tools?: unknown[] }> = [];
+  const chats: Array<{ model: string; tools?: unknown[]; reasoning_effort?: string }> = [];
   const asked: string[] = [];
   const server = createServer(async (request, response) => {
     let data = "";
@@ -46,13 +46,13 @@ async function fakeOllama(options: { models?: FakeModel[]; version?: string | nu
     if (path === "/api/version" && options.version !== null) return json({ version: options.version ?? "0.12.6" });
     if (path === "/api/show") {
       const model = models.find((entry) => entry.name === (JSON.parse(data) as { model: string }).model);
-      return model ? json({ capabilities: model.capabilities, model_info: { "llama.context_length": 131_072 } }) : json({ error: "not found" }, 404);
+      return model ? json({ capabilities: model.capabilities, thinking: model.thinking, model_info: { "llama.context_length": 131_072 } }) : json({ error: "not found" }, 404);
     }
     if (path === "/api/ps") return json({ models: [] });
     if (path === "/api/create") return json({ status: "success" });
     if (path === "/v1/models") return json({ data: models.map((model) => ({ id: model.name })) });
     if (path === "/v1/chat/completions") {
-      chats.push(JSON.parse(data) as { model: string; tools?: unknown[] });
+      chats.push(JSON.parse(data) as { model: string; tools?: unknown[]; reasoning_effort?: string });
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "Hi." }, finish_reason: "stop" }] })}\n\n`);
       return response.end("data: [DONE]\n\n");
@@ -108,6 +108,28 @@ describe("Ollama's model list", () => {
     expect(showCapabilities({ capabilities: ["completion", "tools", "vision"] })).toEqual({ tools: true, vision: true });
     expect(showCapabilities({ capabilities: ["completion"] })).toEqual({ tools: false, vision: false });
     expect(showCapabilities({ model_info: {} })).toEqual({});
+  });
+
+  it("reads a thinking model's controls, or only that it thinks from a server that doesn't list them", () => {
+    expect(showCapabilities({ capabilities: ["completion", "thinking"], thinking: { values: ["low", "medium", "high"], default: "medium" } }).thinking).toEqual({ choices: ["low", "medium", "high"], described: true });
+    expect(showCapabilities({ capabilities: ["completion", "thinking"], thinking: { values: [false, true], default: true } }).thinking).toEqual({ choices: ["off", "on"], described: true });
+    expect(showCapabilities({ capabilities: ["completion", "thinking"] }).thinking).toEqual({ choices: ["off", "on"], described: false });
+    expect(showCapabilities({ capabilities: ["completion", "thinking"], thinking: { values: [true], default: true } }).thinking).toBeUndefined();
+    expect(showCapabilities({ capabilities: ["completion"], thinking: { values: [false, true] } }).thinking).toBeUndefined();
+  });
+
+  it("turns a thinking choice into what Ollama's /v1 takes", () => {
+    const listed = { choices: ["off", "on"], described: true };
+    const unlisted = { choices: ["off", "on"], described: false };
+    const levels = { choices: ["low", "high"], described: true };
+    expect(thinkingEffort(listed, "off")).toBe("none");
+    expect(thinkingEffort(unlisted, "off")).toBe("none");
+    expect(thinkingEffort(listed, "on")).toBe("high");
+    expect(thinkingEffort(unlisted, "on")).toBeUndefined();
+    expect(thinkingEffort(levels, "low")).toBe("low");
+    expect(thinkingEffort(levels, "medium")).toBeUndefined();
+    expect(thinkingEffort(levels, undefined)).toBeUndefined();
+    expect(thinkingEffort(undefined, "low")).toBeUndefined();
   });
 
   it("drops the /v1 the OpenAI-compatible routes sit under", () => {
@@ -374,6 +396,27 @@ describe("the chat engine on Ollama", () => {
       expect(asked).not.toContain("/api/tags");
       expect(instance.models.options.map((option) => option.id)).toEqual(["llama3.2:latest"]);
     } finally { await instance.dispose(); }
+  });
+
+  it("offers a thinking model's controls and sends the one picked, under the name that carries the window", async () => {
+    const thinker: FakeModel = { name: "qwen3:4b", size: GB, capabilities: ["completion", "tools", "thinking"], thinking: { values: [false, true], default: true } };
+    const { url, chats } = await fakeOllama({ models: [thinker, LLAMA] });
+    const instance = await create({ url: `${url}/v1`, catalog: "ollama" });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      expect(instance.adapter.capabilities.modelVariants).toBe(true);
+      expect(instance.models.options.map((option) => option.variants)).toEqual([[{ id: "off", label: "Off" }, { id: "on", label: "On" }], undefined]);
+      for (const [model, variant] of [["qwen3:4b", "off"], ["qwen3:4b", undefined], ["qwen3:4b", "on"], ["llama3.2:latest", "off"]] as const) {
+        const threadId = randomUUID();
+        await instance.adapter.sendTurn({ threadId, text: "hi", model, ...(variant ? { variant } : {}) });
+        await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId);
+      }
+      expect(chats.map((chat) => chat.reasoning_effort)).toEqual(["none", undefined, "high", undefined]);
+      expect(chats[0]!.model).toMatch(/-omb-\d+k$/);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
   });
 
   it("asks nothing of a server on this network that has a fixed model list", async () => {

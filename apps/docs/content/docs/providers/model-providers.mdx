@@ -258,6 +258,9 @@ address you added before keeps its name, key and model.
 - A model that can't call tools still chats, but its turns run without tools.
   The picker marks it **No tools**. Pick a model with tool support, such as
   `llama3.2` or `qwen3`, for work that needs tools.
+- A model that can think gets a thinking control in the picker: on or off, or
+  the levels Ollama lists for it. Turning it off is usually much faster on a
+  laptop.
 - When Ollama isn't running, can't be reached, or has no models yet, Settings
   says so and how to fix it. To get a first model, run `ollama pull llama3.2`.
 
