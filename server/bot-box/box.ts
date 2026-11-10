@@ -189,17 +189,33 @@ export interface StartOptions {
   guardHome?: boolean;
   /** Overrides for tests. */
   detect?: (env: Record<string, string | undefined>) => BoxDetection;
-  disablesUserns?: (bwrap: string) => boolean;
+  usernsGuard?: (bwrap: string) => UsernsGuard;
 }
 
-/** Whether this bubblewrap has `--disable-userns` (0.8.0, Debian 12 and Ubuntu 24.04; Ubuntu 22.04 ships 0.6.1). */
-export function bwrapDisablesUserns(bwrap: string): boolean {
+/** Whether a box here can be started with `--disable-userns`: "on"; "old", a bubblewrap before 0.8 (Ubuntu 22.04 ships
+ * 0.6.1); "refused", a host that will not let bubblewrap do what the option needs. */
+export type UsernsGuard = "on" | "old" | "refused";
+
+/**
+ * Tries `--disable-userns` once, as a box would use it.
+ *
+ * Having the option is not enough: bubblewrap applies it by writing /proc/sys/user/max_user_namespaces in the box's
+ * own user namespace, and a host can refuse that write. The bot box's AppArmor profile for Docker (connector/profiles,
+ * `deny @{PROC}/sys/** w`) does, so a box started with the option there fails to start at all.
+ */
+export function bwrapUsernsGuard(bwrap: string): UsernsGuard {
   try {
     const help = spawnSync(bwrap, ["--help"], { encoding: "utf8", timeout: 5_000 });
-    return `${help.stdout}${help.stderr}`.includes("--disable-userns");
+    if (!`${help.stdout}${help.stderr}`.includes("--disable-userns")) return "old";
+    const tried = spawnSync(bwrap, ["--unshare-user", "--disable-userns", "--ro-bind", "/", "/", "--", "/bin/sh", "-c", ":"], { stdio: "ignore", timeout: 5_000 });
+    return tried.status === 0 ? "on" : "refused";
   } catch {
-    return false;
+    return "old";
   }
+}
+
+export function bwrapDisablesUserns(bwrap: string): boolean {
+  return bwrapUsernsGuard(bwrap) === "on";
 }
 
 export function defaultCodeRoots(): string[] {
@@ -240,7 +256,8 @@ export class BotBox {
     this.credentials = await openCredentialBroker({ socketPath: brokerSocket });
     this.seccompFile = writeSeccompFile(dir);
     // A self-hosted server in the hardened profile; a Cloud home's boxes are as they were.
-    const noNestedUserns = options.hardened === true && (options.disablesUserns ?? bwrapDisablesUserns)(this.detection.tools.bwrap);
+    const usernsGuard = options.hardened === true ? (options.usernsGuard ?? bwrapUsernsGuard)(this.detection.tools.bwrap) : null;
+    const noNestedUserns = usernsGuard === "on";
     const bridges: BoxBridge[] = [
       { name: "egress", port: BOX_EGRESS_PORT, socket: egressSocket },
       { name: "harness", port: options.port, socket: harnessSocket },
@@ -254,7 +271,8 @@ export class BotBox {
       broker: { port: BOX_BROKER_PORT, mintForProcess: this.credentials.mintForProcess, revoke: this.credentials.revoke },
     });
     log(`bot box: on (bubblewrap, ${this.detection.tools.socat ? "socat" : "node"} bridges, credential broker, seccomp ${this.seccompFile ? "on" : "unsupported here"})`);
-    if (options.hardened && !noNestedUserns) log("bot box: this bubblewrap is older than 0.8 and cannot stop a bot from making user namespaces of its own; update bubblewrap to close that");
+    if (usernsGuard === "old") log("bot box: this bubblewrap is older than 0.8 and cannot stop a bot from making user namespaces of its own; update bubblewrap to close that");
+    if (usernsGuard === "refused") log("bot box: this host does not let bubblewrap stop a bot from making user namespaces of its own (--disable-userns); the rest of the box is on");
     return this.detection;
   }
 

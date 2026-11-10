@@ -55,9 +55,11 @@ namespaces or the image has no `bwrap`, the box reports `off` with the reason, a
 server that must be boxed and is not either refuses to start or tells its admin, as that section says; a Cloud home
 only reports. Both images install `bubblewrap` and `socat` (the in-box bridges; without socat a bundled Node bridge
 does the same). On a self-hosted server in the profile each Chrome of the bots' browsers runs in a box of its own, as
-on a Team Cloud; a turn's box is started with `--disable-userns` where bubblewrap has it (0.8), so a bot cannot make a
-user namespace of its own; and a person's HOME is guarded (`plan.ts` `homeGuards`). A Cloud home's boxes have neither
-of those two yet.
+on a Team Cloud; a turn's box is started with `--disable-userns` where a try of it at start worked (`box.ts`
+`bwrapUsernsGuard`: bubblewrap 0.8, and a host that lets it write `/proc/sys/user/max_user_namespaces`, which the
+`omb-home-narrow` AppArmor profile does not, so in Docker on a prepared host it is off and the log says so), so a bot
+cannot make a user namespace of its own; and a person's HOME is guarded (`plan.ts` `homeGuards`). A Cloud home's boxes
+have neither of those two.
 
 Wherever it is on, the plan covers the data folder after every line outside it (`plan.ts` `coverDataFolder`), so a data
 folder under `/var/lib` or `/opt`, or one a later line holds, stays hidden; a path on a command line that is in the

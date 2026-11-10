@@ -811,8 +811,12 @@ the server turns on by itself:
   start.
 - **A bot cannot make a sandbox inside its sandbox** (a user namespace of
   its own), which would hand it network and mount settings to configure and
-  the kernel code behind them. This needs bubblewrap 0.8 (Debian 12, Ubuntu
-  24.04, the Docker image); with an older one the log says the gap is open.
+  the kernel code behind them. This needs
+  bubblewrap 0.8 (Debian 12, Ubuntu 24.04) on a host that lets it set its
+  own namespace limit. The server tries it once at start and, where it
+  cannot, says so in the log and runs the rest of the sandbox. Docker on a
+  host prepared for the sandbox is one such place for now: the AppArmor
+  profile `prepare-host.sh` installs refuses the write that needs.
 - **Outside a container, the server user's own home is guarded.** A bot sees
   the home folder, but not `~/.ssh`, `~/.aws`, `~/.config/gcloud`,
   `~/.docker`, `~/.gnupg`, `~/.kube`, `~/.netrc`, `~/.git-credentials` or the

@@ -178,6 +178,28 @@ describe("BotBox", () => {
     expect(existsSync(relay.socketPath)).toBe(false);
   });
 
+  it.skipIf(process.platform === "win32")("hardened: a box gets --disable-userns only where a try of it worked, and the log says why not", async () => {
+    for (const [guard, line] of [["on", null], ["old", "older than 0.8"], ["refused", "this host does not let bubblewrap"]] as const) {
+      const box = new BotBox();
+      boxes.push(box);
+      const lines: string[] = [];
+      await box.start({
+        dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: {}, log: (entry) => lines.push(entry), hardened: true, usernsGuard: () => guard,
+        detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: "/usr/bin/bwrap", socat: null } }),
+      });
+      expect(box.wrap({ command: "/usr/bin/codex", args: [], env: {} })!.args.includes("--disable-userns"), guard).toBe(guard === "on");
+      expect(lines.filter((entry) => entry.includes("user namespaces")), guard).toHaveLength(line ? 1 : 0);
+      if (line) expect(lines.join("\n")).toContain(line);
+    }
+    // A Cloud home's box never tries it.
+    const cloud = new BotBox();
+    boxes.push(cloud);
+    let tried = false;
+    await cloud.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: {}, log: () => {}, usernsGuard: () => { tried = true; return "on"; }, detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: "/usr/bin/bwrap", socat: null } }) });
+    expect(tried).toBe(false);
+    expect(cloud.wrap({ command: "/usr/bin/codex", args: [], env: {} })!.args).not.toContain("--disable-userns");
+  });
+
   it("off: no relay", async () => {
     const box = new BotBox();
     boxes.push(box);
