@@ -173,7 +173,7 @@ export type CliOwner = "bot" | "openmausbot";
 /** The bot box (server/bot-box): a `bot` spawn runs in it where it is on; `box` asks for one for another owner, with more
  * paths or the host's network, and `false` keeps a spawn out of it. */
 export interface BoxSpawnOptions {
-  box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "botThreads" | "allowEnv" | "relay">;
+  box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "botThreads" | "allowEnv" | "relay" | "configured">;
   /** On a Team Cloud, runs in its conversation's engine home though it is not a bot's engine (a keep-warm ping). */
   engineHome?: boolean;
   /** A bot's own work that is not its engine (its browser, a helper engine): memory runs out on it first, as on a `bot`

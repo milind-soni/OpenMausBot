@@ -34,7 +34,8 @@ describe.skipIf(process.platform === "win32")("read-only file hardlinks", () => 
 
   it("refuses a read-only source hardlinked after planning", () => {
     const f = fixture();
-    const given = planBox(f, { command: "/bin/sh", args: ["--mcp-config", f.file], env: {} });
+    // In the data folder, so the caller names it: a command line alone shows nothing there.
+    const given = planBox(f, { command: "/bin/sh", args: ["--mcp-config", f.file], env: {}, ro: [f.file] });
     linkSync(f.file, f.alias);
     expect(() => bwrapArgs(given)).toThrow(/multiply-linked read-only file: .*; grant a separate single-link copy instead\./);
   });

@@ -69,11 +69,11 @@ describe("custom MCP probe", () => {
       return spawned[0]!.opts;
     };
     const anyBot = await opts({ asBot: {} });
-    expect(anyBot.box).toEqual({ allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"] });
+    expect(anyBot.box).toEqual({ allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"], configured: true });
     expect(anyBot).not.toHaveProperty("cwd");
     const folder = mkdtempSync(join(tmpdir(), "omb-probe-bot-"));
     try {
-      expect(await opts({ asBot: { id: "ada", cwd: folder } })).toMatchObject({ cwd: folder, box: { botId: "ada", allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"] } });
+      expect(await opts({ asBot: { id: "ada", cwd: folder } })).toMatchObject({ cwd: folder, box: { botId: "ada", allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"], configured: true } });
     } finally { await removeTempDir(folder); }
     const plain = await opts({});
     expect(plain).not.toHaveProperty("box");
