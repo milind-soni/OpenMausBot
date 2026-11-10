@@ -42,7 +42,10 @@ import { initialGreetingMessage } from "./initial-greeting.ts"; import { createD
 import { appsFromCreator } from "./inherited-apps.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
+import { buildTask, threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
+import { createBotFork, createGroupFork } from "./store-forks.ts";
 export { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
+export { threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
 export type {
   BotActivity, GroupDefaultResponder, OptionCardData,
   SecretRequestCardData, Surface, TaskClosedBy, TaskOpenedBy, TaskUsage,
@@ -137,14 +140,6 @@ export type StoreChange =
   | { type: "bots.order" }
   | { type: "group"; groupId: string }
   | { type: "group.deleted"; groupId: string };
-
-export const UNTITLED_THREAD = "New thread";
-
-/** Every title (a bot's or a person's) passes through here, so equality tells a machine-made title from a rename. */
-const TASK_TITLE_MAX = 80;
-export function threadTitleFrom(title?: string): string {
-  return title?.trim().slice(0, TASK_TITLE_MAX) || UNTITLED_THREAD;
-}
 
 export function titleFromLlm(raw: string): string | null {
   const line = raw
@@ -1019,21 +1014,9 @@ export class Store {
     const group = this.group(groupId);
     const source = this.groupTaskByThread(groupId, sourceThreadId);
     if (!group || !source) return null;
-    const history = this.forkHistory(sourceThreadId, messageId);
-    if (!history) return null;
-    const createdAt = Date.now();
-    const task: GroupTaskRecord = {
-      threadId: newId(),
-      title: titleFromMessage(history.at(-1)?.text ?? ""),
-      createdAt,
-      updatedAt: createdAt,
-      origin: { threadId: sourceThreadId, messageId },
-      ...(source.pinnedCwd !== undefined ? { pinnedCwd: source.pinnedCwd } : {}),
-    };
-    mdb.importThread(task.threadId, history, messageId, undefined, () => this.commitGroupChange(group, "the forked thread", () => {
-      group.tasks = [task, ...(group.tasks ?? [])];
-    }));
-    this.emit({ type: "group", groupId });
+    const task = createGroupFork(source, this.activePath(sourceThreadId), messageId,
+      (created) => this.commitGroupChange(group, "the forked thread", () => { group.tasks = [created, ...(group.tasks ?? [])]; }));
+    if (task) this.emit({ type: "group", groupId });
     return task;
   }
 
@@ -1174,13 +1157,6 @@ export class Store {
       cur = cur.parentId ? byId.get(cur.parentId) : undefined;
     }
     return path.reverse();
-  }
-
-  private forkHistory(threadId: string, messageId: string): Message[] | null {
-    const path = this.activePath(threadId);
-    const anchor = path.findIndex((message) => message.id === messageId);
-    if (anchor < 0 || path[anchor]?.kind !== "text" || !["user", "bot"].includes(path[anchor]!.role)) return null;
-    return structuredClone(path.slice(0, anchor + 1));
   }
 
   markTerminalAssistantMessage(threadId: string, turnId: string): Message | null {
@@ -2201,7 +2177,7 @@ export class Store {
     const bot = this.bot(botId);
     if (!bot) return null;
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
-    const task = this.buildTask(bot, title, projectId, openedBy, approvalMode, modelSelection, cwd);
+    const task = buildTask(bot, title, projectId, openedBy, approvalMode, modelSelection, cwd);
     this.commitBotChange(bot, "the new thread", () => {
       bot.tasks = [task, ...(bot.tasks ?? [])];
       if (activate) this.mirrorActiveTask(bot, task);
@@ -2214,39 +2190,10 @@ export class Store {
     const bot = this.bot(botId);
     const source = this.taskByThread(botId, sourceThreadId);
     if (!bot || !source) return null;
-    const history = this.forkHistory(sourceThreadId, messageId);
-    if (!history) return null;
-    const task = this.buildTask(bot, titleFromMessage(history.at(-1)?.text ?? ""), source.projectId, undefined,
-      undefined, source.modelSelection, source.cwd ?? undefined);
-    task.origin = { threadId: sourceThreadId, messageId };
-    task.lastReadMessageId = messageId;
-    mdb.importThread(task.threadId, history, messageId, undefined, () => this.commitBotChange(bot, "the forked thread", () => {
-      bot.tasks = [task, ...(bot.tasks ?? [])];
-    }));
-    this.emit({ type: "bot", botId });
+    const task = createBotFork(bot, source, this.activePath(sourceThreadId), messageId,
+      (created) => this.commitBotChange(bot, "the forked thread", () => { bot.tasks = [created, ...(bot.tasks ?? [])]; }));
+    if (task) this.emit({ type: "bot", botId });
     return task;
-  }
-
-  private buildTask(bot: BotRecord, title?: string, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: "ask" | "full",
-    modelSelection?: ModelSelection, cwd?: string): TaskRecord {
-    const createdAt = Date.now();
-    return {
-      threadId: newId(),
-      title: threadTitleFrom(title),
-      createdAt,
-      updatedAt: createdAt,
-      ...(cwd !== undefined ? { cwd } : {}),
-      ...(projectId ? { projectId } : {}),
-      ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
-      resumeCursors: {},
-      ...(modelSelection && !sameModelSelection(modelSelection, bot.modelSelection) ? { modelSelection: structuredClone(modelSelection) } : {}),
-      approvalMode: approvalMode ?? approvalModeFor(bot),
-      autoApprove: approvalMode ? false : Boolean(bot.autoApprove),
-      alwaysAllow: approvalMode ? [] : [...(bot.alwaysAllow ?? [])],
-      unread: false,
-      activity: "idle",
-      busy: false,
-    };
   }
 
   setTaskOpenedBy(botId: string, threadId: string, openedBy: TaskOpenedBy): TaskRecord | null {
@@ -2328,7 +2275,7 @@ export class Store {
     const doomed = new Set(deleted);
     mdb.deleteThreads(deleted, () => this.commitBotChange(bot, "the thread deletion", () => {
       const kept = bot.tasks!.filter((t) => !doomed.has(t.threadId));
-      const visible = nextOpenThread(kept) ?? this.buildTask(bot);
+      const visible = nextOpenThread(kept) ?? buildTask(bot);
       bot.tasks = kept.includes(visible) ? kept : [visible, ...kept];
       if (doomed.has(bot.threadId) || this.taskByThread(botId, bot.threadId)?.routineRunId) this.mirrorActiveTask(bot, visible);
       bot.unread = bot.tasks.some(taskCountsAsBotUnread);

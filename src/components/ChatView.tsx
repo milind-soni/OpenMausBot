@@ -3,12 +3,11 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { AlertTriangle, ChevronLeft, ChevronRight, Copy, Monitor, RefreshCw, Reply, Square, Webhook } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
 import { WorkingDots } from "@/components/WorkingIndicator";
-import { ACTION_ICON, ChatBusyContext, CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction, type MessageMenuItem } from "@/components/MessageActions";
-import { copyText } from "@/lib/copy-text";
+import { ChatBusyContext, CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "@/components/MessageActions";
 import { ReactAction, ReactionChips } from "@/components/Reactions";
-import { useBotMessageMenu, userMessageMenu } from "@/components/message-menu";
+import { replyAndCopy, useBotMessageMenu, userMessageMenu } from "@/components/message-menu";
 import { forkMessageItem, ForkLinks } from "@/components/ForkMessage";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { localSystemVoiceActive } from "@/lib/local-voice";
@@ -298,14 +297,6 @@ export function FailedTurnRow({ tool, engine, onRetry, botId, threadId, messageA
 }
 
 export { MessageBoundary };
-
-/** Simple mode keeps a message's Reply and Copy in its "…" menu, beside the one reaction button. */
-function replyAndCopy(onReply: () => void, text: string): MessageMenuItem[] {
-  return [
-    { key: "reply", icon: <Reply {...ACTION_ICON} />, label: t("chat.reply"), onSelect: onReply },
-    ...(text.trim() ? [{ key: "copy", icon: <Copy {...ACTION_ICON} />, label: t("chat.copyMessage"), onSelect: () => { void copyText(text); } }] : []),
-  ];
-}
 
 const Bubble = memo(function Bubble({
   message,

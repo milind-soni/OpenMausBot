@@ -1,5 +1,8 @@
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError, retryRequest, snapshotArrays } from "./api";
+import { loadOlderPage, MESSAGE_PAGE_SIZE, reduceOlderMessages } from "./message-history";
+export { MESSAGE_PAGE_SIZE } from "./message-history";
+import { reduceForkPanel, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
 import {
   createContext,
   useCallback,
@@ -583,7 +586,7 @@ export interface AppState {
   botCreationPending: boolean;
   computerOpen: boolean;
   inspectorOpen: boolean;
-  forkPanel: { kind: "bot" | "group"; ownerId: string; threadId: string; messages: Message[]; activeLeafId: string | null; loading: boolean } | null;
+  forkPanel: ForkPanelState | null;
   activityOpen: boolean;
   /** Shared across bots. Unpinned, it closes on a chat switch and when another side panel opens; pinned, it stays open. */
   notificationsOpen: boolean;
@@ -698,12 +701,7 @@ export type Action =
     }
   | { type: "deleteGroup"; groupId: string }
   | { type: "newGroupTask"; groupId: string }
-  | { type: "forkMessage"; kind: "bot" | "group"; ownerId: string; threadId: string; messageId: string }
-  | { type: "openForkPanel"; kind: "bot" | "group"; ownerId: string; threadId: string }
-  | { type: "forkPanelLoaded"; threadId: string; messages: Message[]; activeLeafId: string | null }
-  | { type: "forkPanelMessage"; threadId: string; message: Message; patch?: true }
-  | { type: "forkPanelActive"; threadId: string; activeLeafId: string }
-  | { type: "closeForkPanel" }
+  | ForkPanelAction
   | { type: "switchGroupTask"; groupId: string; threadId: string }
   | { type: "renameGroupTask"; groupId: string; threadId: string; title: string }
   | { type: "pinGroupTask"; groupId: string; threadId: string; pinned: boolean; title: string }
@@ -951,26 +949,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return state.loadingOlder[action.threadId]
         ? state
         : { ...state, loadingOlder: { ...state.loadingOlder, [action.threadId]: true } };
-    case "olderMessages": {
-      const { [action.threadId]: _done, ...loadingOlder } = state.loadingOlder;
-      if ((state.transcriptGeneration[action.threadId] ?? 0) !== action.generation) {
-        return { ...state, loadingOlder };
-      }
-      const prepend = <T extends { messages: Message[]; threadId: string; hasMore?: boolean }>(owner: T): T => {
-        const held = new Set(owner.messages.map((message) => message.id));
-        return {
-          ...owner,
-          // A page that raced an edit can overlap held rows; the held copy is newer.
-          messages: [...action.messages.filter((message) => !held.has(message.id)), ...owner.messages],
-          hasMore: action.hasMore,
-        };
-      };
-      const bots = state.bots.map((bot) => (bot.threadId === action.threadId ? prepend(bot) : bot));
-      const groups = state.groups.map((group) => (group.threadId === action.threadId ? prepend(group) : group));
-      const owner = [...bots, ...groups].find((candidate) => candidate.threadId === action.threadId);
-      const unreadDivider = placeUnreadDivider(state.unreadDivider, action.threadId, owner ? visibleMessages(owner) : [], action.hasMore);
-      return { ...state, loadingOlder, bots, groups, unreadDivider };
-    }
+    case "olderMessages":
+      return reduceOlderMessages(state, action);
     case "sectionDeleted":
       return {
         ...state, sections: action.sections,
@@ -1001,27 +981,9 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
-    case "forkMessage":
-      return state;
-    case "openForkPanel":
-      return { ...state, settingsOpen: false, computerOpen: false, inspectorOpen: false, activityOpen: false,
-        forkPanel: { kind: action.kind, ownerId: action.ownerId, threadId: action.threadId, messages: [], activeLeafId: null, loading: true } };
-    case "forkPanelLoaded":
-      if (state.forkPanel?.threadId !== action.threadId) return state;
-      return { ...state, forkPanel: { ...state.forkPanel, messages: [...action.messages, ...state.forkPanel.messages.filter((message) => !action.messages.some((loaded) => loaded.id === message.id))], activeLeafId: state.forkPanel.activeLeafId ?? action.activeLeafId, loading: false } };
-    case "forkPanelMessage": {
-      const panel = state.forkPanel;
-      if (panel?.threadId !== action.threadId) return state;
-      const messages = panel.messages.some((message) => message.id === action.message.id)
-        ? panel.messages.map((message) => message.id === action.message.id ? action.message : message)
-        : action.patch ? panel.messages : [...panel.messages, action.message];
-      return { ...state, forkPanel: { ...panel, messages, activeLeafId: action.patch ? panel.activeLeafId : action.message.id } };
-    }
-    case "forkPanelActive":
-      return state.forkPanel?.threadId === action.threadId
-        ? { ...state, forkPanel: { ...state.forkPanel, activeLeafId: action.activeLeafId } } : state;
-    case "closeForkPanel":
-      return state.forkPanel ? { ...state, forkPanel: null } : state;
+    case "forkMessage": case "openForkPanel": case "forkPanelLoaded":
+    case "forkPanelMessage": case "forkPanelActive": case "closeForkPanel":
+      return reduceForkPanel(state, action);
     case "showTeamMap":
     case "showFiles": case "showWebPanel":
       return {
@@ -1953,7 +1915,6 @@ export const initialState: AppState = {
 export { api, ApiError, liveCallFromFrame, nextLiveCallLookup };
 
 /** Messages per snapshot thread and per scrollback page: the server's own page maximum. */
-export const MESSAGE_PAGE_SIZE = 200;
 export const SWITCH_MESSAGE_COUNT = 80;
 
 type TrustedApprovalBridge = {
@@ -2346,33 +2307,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ) rawDispatch(action);
       switch (action.type) {
         case "loadOlderMessages": {
-          // The guard, not the reducer flag: stateRef still holds the pre-dispatch state.
-          if (olderPagesInFlight.has(action.threadId)) break;
-          olderPagesInFlight.add(action.threadId);
-          const current = stateRef.current;
-          const owner = [...current.bots, ...current.groups].find((candidate) => candidate.threadId === action.threadId);
-          const before = owner?.messages[0]?.id;
-          const generation = current.transcriptGeneration[action.threadId] ?? 0;
-          if (!before) {
-            olderPagesInFlight.delete(action.threadId);
-            rawDispatch({ type: "olderMessages", threadId: action.threadId, generation, messages: [], hasMore: false });
-            break;
-          }
-          api<{ messages: Message[]; hasMore?: boolean }>(
-            `/api/threads/${action.threadId}/messages?limit=${MESSAGE_PAGE_SIZE}&before=${encodeURIComponent(before)}`,
-          )
-            .finally(() => olderPagesInFlight.delete(action.threadId))
-            .then((page) => rawDispatch({
-              type: "olderMessages",
-              threadId: action.threadId,
-              generation,
-              messages: page.messages ?? [],
-              hasMore: Boolean(page.hasMore),
-            }))
-            .catch((error) => {
-              rawDispatch({ type: "olderMessages", threadId: action.threadId, generation, messages: [], hasMore: true });
-              showError(error);
-            });
+          loadOlderPage(action, stateRef.current, olderPagesInFlight, rawDispatch, showError);
           break;
         }
         case "notice":
@@ -2883,40 +2818,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           break;
         }
-        case "forkMessage": {
-          const owner = action.kind === "bot" ? "bots" : "groups";
-          void api<{ bot?: BotAnnouncement; group?: Partial<Group> & { id: string }; task: { threadId: string } }>(
-            `/api/${owner}/${action.ownerId}/tasks/${action.threadId}/forks`,
-            { method: "POST", body: JSON.stringify({ messageId: action.messageId }) },
-          ).then((result) => {
-            if (result.bot) dispatch({ type: "botPatched", bot: result.bot });
-            if (result.group) dispatch({ type: "groupPatched", group: result.group });
-            dispatch({ type: "openForkPanel", kind: action.kind, ownerId: action.ownerId, threadId: result.task.threadId });
-          }).catch(showError);
-          break;
-        }
-        case "openForkPanel": {
-          if (action.kind === "bot") {
-            void api(`/api/bots/${action.ownerId}/read`, { method: "POST", body: JSON.stringify({ threadId: action.threadId }) }).catch(() => {});
-          } else {
-            void api(`/api/groups/${action.ownerId}/read`, { method: "POST", body: JSON.stringify({ threadId: action.threadId }) }).catch(() => {});
-          }
-          const load = async () => {
-            const messages: Message[] = [];
-            let before: string | undefined;
-            let activeLeafId: string | null = null;
-            for (;;) {
-              const page = await api<{ messages: Message[]; hasMore?: boolean; activeLeafId: string | null }>(
-                `/api/threads/${action.threadId}/messages?limit=200${before ? `&before=${encodeURIComponent(before)}` : ""}`,
-              );
-              messages.unshift(...page.messages);
-              activeLeafId = page.activeLeafId;
-              if (!page.hasMore || !page.messages.length) break;
-              before = page.messages[0]!.id;
-            }
-            rawDispatch({ type: "forkPanelLoaded", threadId: action.threadId, messages, activeLeafId });
-          };
-          void load().catch(showError);
+        case "forkMessage": case "openForkPanel": {
+          runForkEffect(action, dispatch, rawDispatch, showError);
           break;
         }
         case "renameTask":

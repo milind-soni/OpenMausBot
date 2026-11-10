@@ -74,7 +74,7 @@ import { ActivityRun } from "./ActivityRun";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { useLiveToolIds } from "@/hooks/use-live-tool-ids";
-import { roomNeedsSetup } from "@/lib/room-setup";
+import { roomNeedsSetup, setupResponderMode, type RoomResponderMode } from "@/lib/room-setup";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
@@ -524,12 +524,6 @@ export const Transcript = memo(function Transcript({
     </>
   );
 });
-
-type RoomResponderMode = "lead" | "everyone" | "mentions" | "auto";
-
-function setupResponderMode(responder: GroupDefaultResponder): RoomResponderMode {
-  return responder.kind === "member" ? "lead" : responder.kind;
-}
 
 function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
   const { state, dispatch } = useStore();
