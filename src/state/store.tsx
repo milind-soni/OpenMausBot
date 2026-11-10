@@ -198,6 +198,8 @@ export interface Group extends Pick<WireGroup, "memberContext" | "queue"> {
 
 export interface GroupTask {
   threadId: string;
+  unread?: boolean;
+  lastReadMessageId?: string;
   origin?: import("../../shared/wire").ForkOrigin;
   title: string;
   createdAt: number;
@@ -1076,11 +1078,17 @@ export function reducer(state: AppState, action: Action): AppState {
       if (room) {
         return {
           ...(action.id === state.selectedId && state.activeView === "chat" ? state : closeUnpinnedTray(state)),
-          unreadDivider: openedUnreadDivider(state, room.threadId, room.unread, room.messages, room.lastReadMessageId, room.hasMore),
+          unreadDivider: openedUnreadDivider(state, room.threadId,
+            room.tasks?.find((task) => task.threadId === room.threadId)?.unread ?? room.unread,
+            room.messages, room.lastReadMessageId, room.hasMore),
           activeView: "chat",
           selectedId: action.id,
           forkPanel: null,
-          groups: state.groups.map((g) => (g.id === action.id ? { ...g, unread: false } : g)),
+          groups: state.groups.map((g) => {
+            if (g.id !== action.id) return g;
+            const tasks = g.tasks?.map((task) => task.threadId === g.threadId ? { ...task, unread: false } : task);
+            return { ...g, tasks, unread: tasks ? tasks.some((task) => task.unread) : false };
+          }),
         };
       }
       const opened = state.bots.find((b) => b.id === action.id);
@@ -2638,7 +2646,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const group = stateRef.current.groups.find((g) => g.id === id);
           if (bot?.unread) {
             api(`/api/bots/${id}/read`, { method: "POST", body: JSON.stringify({ threadId: bot.threadId }) }).catch(() => {});
-          } else if (group?.unread) {
+          } else if (group?.tasks?.find((task) => task.threadId === group.threadId)?.unread ?? group?.unread) {
             api(`/api/groups/${id}/read`, { method: "POST" }).catch(() => {});
           }
           break;
@@ -3158,7 +3166,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             frame.notification,
             (target) => openThread(dispatch, target, stateRef.current, showThreadsRef.current),
             stateRef.current.bots.find((bot) => bot.id === frame.notification.botId)?.avatarUrl,
-            visibleNotificationThread(stateRef.current),
+            visibleNotificationThread(stateRef.current, frame.notification.threadId),
           );
           rawDispatch({ type: "notificationReceived", entry: frame.notification });
           break;

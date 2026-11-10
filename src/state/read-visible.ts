@@ -25,11 +25,16 @@ export function markVisibleBotThreadsRead(state: AppState, bot: BotAnnouncement,
 
 export function markVisibleGroupThreadsRead(state: AppState, group: Partial<Group> & { id: string }, focused: boolean,
   post: SendRead = sendRead): void {
-  if (!group.unread || group.id !== state.selectedId || state.activeView !== "chat" || !focused) return;
-  group.unread = false;
+  if (group.id !== state.selectedId || state.activeView !== "chat" || !focused) return;
   const shown = state.groups.find((candidate) => candidate.id === group.id)?.threadId;
   const panel = state.forkPanel;
   const visibleThreads = [...new Set([shown, panel?.kind === "group" && panel.ownerId === group.id ? panel.threadId : undefined])]
     .filter((threadId): threadId is string => Boolean(threadId));
-  for (const threadId of visibleThreads) post(`/api/groups/${group.id}/read`, threadId);
+  for (const threadId of visibleThreads) {
+    const task = group.tasks?.find((candidate) => candidate.threadId === threadId);
+    if (!task?.unread && (group.tasks || !group.unread)) continue;
+    if (task) task.unread = false;
+    post(`/api/groups/${group.id}/read`, threadId);
+  }
+  group.unread = group.tasks ? group.tasks.some((task) => task.unread) : false;
 }

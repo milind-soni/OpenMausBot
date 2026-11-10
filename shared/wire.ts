@@ -792,6 +792,9 @@ export type GroupDefaultResponder =
 /** One independent conversation inside a user-created channel. */
 export interface GroupTask {
   threadId: string;
+  /** Replies in this conversation that have not been read. */
+  unread?: boolean;
+  lastReadMessageId?: string;
   /** The completed message whose visible history seeded this conversation. */
   origin?: ForkOrigin;
   title: string;

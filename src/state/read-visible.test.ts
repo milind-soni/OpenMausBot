@@ -16,11 +16,14 @@ it("marks both visible bot threads read while leaving a hidden task unread", () 
 });
 
 it("marks the main room and its open fork read", () => {
-  const group = { id: "room", unread: true } as Partial<Group> & { id: string };
+  const group = { id: "room", unread: true, tasks: [
+    { threadId: "main", unread: true }, { threadId: "fork", unread: true }, { threadId: "hidden", unread: true },
+  ] } as Partial<Group> & { id: string };
   const state = { selectedId: "room", activeView: "chat", groups: [{ id: "room", threadId: "main" }],
     forkPanel: { kind: "group", ownerId: "room", threadId: "fork" } } as unknown as AppState;
   const read: string[] = [];
   markVisibleGroupThreadsRead(state, group, true, (_path, threadId) => read.push(threadId));
   expect(read).toEqual(["main", "fork"]);
-  expect(group.unread).toBe(false);
+  expect(group.tasks?.map((task) => task.unread)).toEqual([false, false, true]);
+  expect(group.unread).toBe(true);
 });

@@ -63,6 +63,7 @@ it("forks a room conversation into a normal room task", async () => {
 
   const fork = store.forkGroupTask(room.id, sourceThreadId, anchor.id);
   expect(fork?.origin).toEqual({ threadId: sourceThreadId, messageId: anchor.id });
+  expect(fork?.lastReadMessageId).toBe(anchor.id);
   expect(store.group(room.id)?.threadId).toBe(sourceThreadId);
   expect(store.groupTasks(room.id).map((task) => task.threadId)).toContain(fork!.threadId);
   expect(store.activePath(fork!.threadId).map((message) => message.id)).toEqual([anchor.id]);
@@ -73,13 +74,29 @@ it("forks a room conversation into a normal room task", async () => {
   expect(store.groupTaskByThread(room.id, fork!.threadId)).toBeTruthy();
 });
 
+it("keeps a background room fork unread when the shown conversation is read", async () => {
+  const store = await freshStore();
+  const room = store.createGroup("Review", [store.createBot().id]);
+  const anchor = store.appendMessage(room.threadId, { role: "user", kind: "text", text: "Review this" });
+  const fork = store.forkGroupTask(room.id, room.threadId, anchor.id)!;
+  store.markGroupThreadUnread(room.id, fork.threadId, true);
+  expect(store.groupTaskByThread(room.id, fork.threadId)?.unread).toBe(true);
+  store.markGroupThreadUnread(room.id, room.threadId, false);
+  expect(store.group(room.id)?.unread).toBe(true);
+  expect(store.groupTaskByThread(room.id, fork.threadId)?.unread).toBe(true);
+  store.markGroupThreadUnread(room.id, fork.threadId, false);
+  expect(store.group(room.id)?.unread).toBe(false);
+  store.switchGroupTask(room.id, fork.threadId);
+  expect(store.group(room.id)?.lastReadMessageId).toBe(anchor.id);
+});
+
 it("keeps the source thread's effective permissions without inheriting a pending elevation", async () => {
   const store = await freshStore();
   const bot = store.createBot();
   const anchor = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Restricted work" });
-  store.patchTask(bot.id, bot.threadId, { approvalMode: "custom", autoApprove: false, alwaysAllow: ["provider-tool:example"] });
+  store.patchTask(bot.id, bot.threadId, { approvalMode: "custom", autoApprove: false, alwaysAllow: ["provider-tool:example"], outside: true, botApi: true });
   const restricted = store.forkTask(bot.id, bot.threadId, anchor.id)!;
-  expect(restricted).toMatchObject({ approvalMode: "custom", autoApprove: false, alwaysAllow: ["provider-tool:example"] });
+  expect(restricted).toMatchObject({ approvalMode: "custom", autoApprove: false, alwaysAllow: ["provider-tool:example"], outside: true, botApi: true });
   expect(restricted.alwaysAllow).not.toBe(store.taskByThread(bot.id, bot.threadId)?.alwaysAllow);
 
   store.bot(bot.id)!.approvalGrant = {

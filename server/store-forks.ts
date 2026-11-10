@@ -38,6 +38,7 @@ export function createGroupFork(source: GroupTaskRecord, path: Message[], messag
     createdAt,
     updatedAt: createdAt,
     origin: { threadId: source.threadId, messageId },
+    lastReadMessageId: messageId,
     ...(source.pinnedCwd !== undefined ? { pinnedCwd: source.pinnedCwd } : {}),
   };
   registerImportedFork(task, history, messageId, register);
@@ -55,6 +56,8 @@ export function createBotFork(bot: BotRecord, source: TaskRecord, path: Message[
   task.approvalMode = approval.mode;
   task.autoApprove = approval.mode === "auto";
   task.alwaysAllow = structuredClone(approval.alwaysAllow);
+  task.outside = source.outside;
+  task.botApi = source.botApi;
   task.origin = { threadId: source.threadId, messageId };
   task.lastReadMessageId = messageId;
   registerImportedFork(task, history, messageId, register);

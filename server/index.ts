@@ -3953,7 +3953,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
         const member = room ? store.bot(child.botId) : undefined;
         store.appendMessage(child.threadId, { role: "bot", kind: "activity",
           ...(member ? { from: { botId: member.id, name: member.name, color: member.color } } : {}), tool: failedTurnTool(cause) });
-        if (room) store.patchGroup(room.id, { unread: true });
+        if (room) store.markGroupThreadUnread(room.id, child.threadId, true);
         else store.patchTask(child.botId, child.threadId, { unread: true });
         return;
       }
@@ -3985,7 +3985,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
           withName: bot?.name ?? "Teammate", withColor: bot?.color ?? "blue" } }
           : { threadRef: { botId: child.botId, threadId: child.threadId, title: store.taskByThread(child.botId, child.threadId)?.title ?? "Teammate work" } }),
       });
-      if (group) store.patchGroup(group.id, { unread: true });
+      if (group) store.markGroupThreadUnread(group.id, child.threadId, true);
       else {
         if (!parent.parentId && parent.reply !== "poll") store.patchTask(parent.botId, parent.threadId, { unread: true });
         const source = store.bot(parent.botId);
@@ -5043,7 +5043,8 @@ const watchdog = new TurnWatchdog({
       if (stalledRoomSpeaker) {
         groupSpeakers.delete(turn.threadId);
         const remaining = group ? activeGroupSpeaker(group.id) : undefined;
-        store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null, unread: true });
+        store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null });
+        store.markGroupThreadUnread(group.id, turn.threadId, true);
       }
       // A cleared UI busy flag must not strand this finished generation's computer claim.
       releaseTurnResources(stalledResourceOwner);
@@ -6885,7 +6886,10 @@ bus.subscribe((event: RuntimeEvent) => {
         releaseTurnResources(turnResourceOwners.get(event.threadId));
         groupSpeakers.delete(event.threadId);
         const remaining = group ? activeGroupSpeaker(group.id) : undefined;
-        if (group) store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null, unread: true });
+        if (group) {
+          store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null });
+          store.markGroupThreadUnread(group.id, event.threadId, true);
+        }
         const speakingBot = store.bot(speaker.botId);
         if (speakingBot?.busy) store.setActivity(speakingBot.id, "idle");
       }
@@ -8707,7 +8711,7 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
   }
 
   if (statusChanged && ["waiting", "completed", "failed", "missed"].includes(run.status)) {
-    if (source.group) store.patchGroup(source.group.id, { unread: true });
+    if (source.group) store.markGroupThreadUnread(source.group.id, sourceThreadId, true);
     else store.patchTask(source.bot.id, sourceThreadId, { unread: true });
   }
   return sourceThreadId;
@@ -10231,7 +10235,8 @@ async function runClaimedGroupMemberTurn(
   ) {
     groupSpeakers.delete(threadId);
     const remaining = activeGroupSpeaker(group.id);
-    store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null, unread: true });
+    store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null });
+    store.markGroupThreadUnread(group.id, threadId, true);
     if (store.bot(bot.id)?.busy) {
       store.setActivity(bot.id, "idle");
     }
@@ -10422,7 +10427,8 @@ async function runClaimedGroupMemberTurn(
     const currentGroup = store.group(group.id);
     groupSpeakers.delete(threadId);
     const remaining = activeGroupSpeaker(group.id);
-    store.patchGroup(currentGroup?.id ?? group.id, { busyBotId: remaining?.botId ?? null, unread: true });
+    store.patchGroup(currentGroup?.id ?? group.id, { busyBotId: remaining?.botId ?? null });
+    store.markGroupThreadUnread(currentGroup?.id ?? group.id, threadId, true);
     const currentBot = store.bot(bot.id);
     if (currentBot?.busy) {
       store.setActivity(currentBot.id, "idle");
@@ -10445,7 +10451,8 @@ async function runClaimedGroupMemberTurn(
       if (speaker?.botId === bot.id) {
         groupSpeakers.delete(threadId);
         const remaining = activeGroupSpeaker(group.id);
-        store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null, unread: true });
+        store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null });
+        store.markGroupThreadUnread(group.id, threadId, true);
       }
       const currentBot = store.bot(bot.id);
       if (currentBot?.busy) {
@@ -10461,7 +10468,8 @@ async function runClaimedGroupMemberTurn(
   // Fallback only while this invocation still owns the room, or it would clear a newer speaker's state.
   groupSpeakers.delete(threadId);
   const remaining = activeGroupSpeaker(group.id);
-  store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null, unread: true });
+  store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null });
+  store.markGroupThreadUnread(group.id, threadId, true);
   if (store.bot(bot.id)?.busy) {
     store.setActivity(bot.id, "idle");
   }
@@ -14106,7 +14114,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         internalCapability.roomPosts = (internalCapability.roomPosts ?? 0) + 1;
         detachParkedAudio?.();
-        store.patchGroup(room.id, { unread: true });
+        store.markGroupThreadUnread(room.id, internalCapability.threadId, true);
         const chip: Omit<Message, "id" | "at"> = {
           role: "bot",
           kind: "activity",

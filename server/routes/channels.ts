@@ -40,7 +40,7 @@ export type MessagePage = { messages: Array<Message | Record<string, unknown>>; 
 
 export interface ChannelRouteDeps {
   store: Pick<Store,
-    | "group" | "groupTaskByThread" | "bot" | "switchGroupTask" | "patchGroupTask" | "patchGroup" | "messagesFor" | "groupTasks" | "deleteGroupTasks" | "deleteGroup"
+    | "group" | "groupTaskByThread" | "bot" | "switchGroupTask" | "patchGroupTask" | "patchGroup" | "markGroupThreadUnread" | "messagesFor" | "groupTasks" | "deleteGroupTasks" | "deleteGroup"
     | "createGroupTask" | "forkGroupTask" | "appendMessage">;
   cfg: Pick<AppConfig, "budgets">;
   /** What people's lines are called in this conversation (replies.ts PersonName). */
@@ -72,7 +72,7 @@ export interface ChannelRouteDeps {
   threadRead?(auth: RequestAuth, threadId: string): void;
   /** A Team Cloud: marks the room read or unread for this person alone and answers the room as they see it; null where a
    * room is read once for everyone. */
-  personMarkRoom?(auth: RequestAuth, room: GroupRecord, unread: boolean): WireGroup | null;
+  personMarkRoom?(auth: RequestAuth, room: GroupRecord, unread: boolean, threadId?: string): WireGroup | null;
   /** A room as this person has read it (a Team Cloud); the room itself anywhere else. */
   groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
   pageSize(raw: string | null): number | null | undefined;
@@ -212,7 +212,9 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!switched) return json(res, 404, { error: "no such channel task" });
       deps.threadRead?.(auth, switched.threadId);
       readThreadNotifications(switched.threadId, broadcast, notificationListed(auth));
-      const switchedSettings = own(publicGroupState(switched));
+      const personal = deps.personMarkRoom?.(auth, switched, false, switched.threadId);
+      const read = personal ? switched : store.markGroupThreadUnread(switched.id, switched.threadId, false, readCursor(switched.threadId).lastReadMessageId)!;
+      const switchedSettings = personal ?? own(publicGroupState(read));
       // "0": settings only (no `messages` key); a positive page: that tail; omitted: the whole transcript.
       const responseGroup = requestedMessages === "0"
         ? switchedSettings
@@ -305,12 +307,14 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       }
       sawThread(threadId);
       deps.threadRead?.(auth, threadId);
-      const personal = deps.personMarkRoom?.(auth, room, false);
+      const personal = deps.personMarkRoom?.(auth, room, false, threadId);
       if (personal) {
         readThreadNotifications(threadId, broadcast, notificationListed(auth));
         return json(res, 200, { group: personal });
       }
-      const group = store.patchGroup(room.id, { unread: false, ...(threadId === room.threadId ? readCursor(threadId) : {}) })!;
+      const group = room.dm
+        ? store.patchGroup(room.id, { unread: false, ...readCursor(threadId) })!
+        : store.markGroupThreadUnread(room.id, threadId, false, readCursor(threadId).lastReadMessageId)!;
       readThreadNotifications(threadId, broadcast, notificationListed(auth));
       broadcast({ kind: "group", group: publicGroupState(group) });
       return json(res, 200, { group: own(publicGroupState(group)) });
