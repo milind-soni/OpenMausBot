@@ -48,6 +48,12 @@ export function createPersonalReach(deps: PersonalReachDeps) {
   const listed = (from: RosterMember, target: RosterMember, threadId: string): boolean =>
     reaches(from, target, threadId) && deps.personBehind(from.id, threadId);
 
+  /** May this hand-off answer a question waiting in `answerThreadId`: only one in the same person's own chats. */
+  const mayAnswerIn = (fromThreadId: string, answerThreadId: string | undefined): boolean => {
+    const person = deps.privateTo(fromThreadId);
+    return person !== null && answerThreadId !== undefined && deps.privateTo(answerThreadId) === person;
+  };
+
   return {
     hides,
     reaches,
@@ -78,10 +84,14 @@ export function createPersonalReach(deps: PersonalReachDeps) {
       if (!chatPerson(from, threadId)) return `${name} can be given work only from this person's own private chats, and this chat is not one of them, so nothing was sent.`;
       return reaches(from, target, threadId) ? notBehind(target) : null;
     },
-    /** May this hand-off answer a question waiting in `answerThreadId`: only one in the same person's own chats. */
-    mayAnswerIn(fromThreadId: string, answerThreadId: string | undefined): boolean {
-      const person = deps.privateTo(fromThreadId);
-      return person !== null && answerThreadId !== undefined && deps.privateTo(answerThreadId) === person;
+    mayAnswerIn,
+    /** A hand-off to a bot outside a room that goes by this reach must open for the person whose chat this is, and may
+     * answer a question only in that person's own chats; anything else throws, so nothing is sent. */
+    checkHandOn(from: RosterMember, target: RosterMember, fromThreadId: string, opener: string | undefined, answering?: { threadId?: string }): void {
+      if (canReach(from, target) || !reaches(from, target, fromThreadId)) return;
+      if (opener !== deps.privateTo(fromThreadId) || (answering && !mayAnswerIn(fromThreadId, answering.threadId))) {
+        throw new Error("This stays in the person's own chats, and that is not one of them, so nothing was sent.");
+      }
     },
     /** For the system prompt, in a chat where this MausBot reaches beyond its audience. */
     prompt(from: RosterMember, threadId: string, peers: readonly RosterMember[]): string {

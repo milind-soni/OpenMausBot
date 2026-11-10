@@ -66,6 +66,16 @@ describe("a person's own MausBot reaching the team's bots", () => {
     expect(world().carries(mausbot, sales, "mine", placed("mine", "outside"))).toBe(false);
   });
 
+  it("hands on only in its person's own name, and leaves every other hand-off to the usual rules", () => {
+    expect(() => world().checkHandOn(mausbot, sales, "mine", key(MIRA))).not.toThrow();
+    expect(() => world().checkHandOn(mausbot, sales, "mine", key(MIRA), { threadId: "mine" })).not.toThrow();
+    expect(() => world().checkHandOn(mausbot, sales, "mine", key("ben@acme.test"))).toThrow(/person's own chats/);
+    expect(() => world().checkHandOn(mausbot, sales, "mine", key(MIRA), { threadId: "bens" })).toThrow(/person's own chats/);
+    expect(() => world().checkHandOn(mausbot, sales, "mine", key(MIRA), {})).toThrow(/person's own chats/);
+    expect(() => world().checkHandOn(mausbot, archive, "mine", key("ben@acme.test"))).not.toThrow();
+    expect(() => world().checkHandOn(sales, archive, "mine", key("ben@acme.test"))).not.toThrow();
+  });
+
   it("answers a waiting question only in its person's own chats", () => {
     expect(world().mayAnswerIn("mine", "mine")).toBe(true);
     expect(world().mayAnswerIn("mine", "bens")).toBe(false);
