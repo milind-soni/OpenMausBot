@@ -234,16 +234,21 @@ export function drainSteeredMessages(
     // A blank line keeps each message its own Markdown block; otherwise a trailing attachment tag merges into the next and stops being an image.
     const prompt = group.map((item) => item.prompt).join("\n\n");
     const mentions = group.flatMap((item) => item.mentions ?? []);
-    const running = run(
-      entry.botId,
-      threadId,
-      prompt,
-      last,
-      appended.map((message) => message.id),
-      // One unattended line makes the turn unattended: a person's words in the group cannot re-attend a bot's own.
-      group.some((item) => item.unattended === true),
-      { trigger: group[0].trigger, sender: group[0].sender, peerAsk: group[0].peerAsk, origin: group[0].origin, ...(mentions.length ? { mentions } : {}) },
-    );
+    let running: void | Promise<void>;
+    try {
+      running = run(
+        entry.botId,
+        threadId,
+        prompt,
+        last,
+        appended.map((message) => message.id),
+        // One unattended line makes the turn unattended: a person's words in the group cannot re-attend a bot's own.
+        group.some((item) => item.unattended === true),
+        { trigger: group[0].trigger, sender: group[0].sender, peerAsk: group[0].peerAsk, origin: group[0].origin, ...(mentions.length ? { mentions } : {}) },
+      );
+    } catch (error) {
+      running = Promise.reject(error);
+    }
     void Promise.resolve(running).then(
       () => settleChatFollowups(ids, null),
       () => settleChatFollowups(ids, "interrupted"),
