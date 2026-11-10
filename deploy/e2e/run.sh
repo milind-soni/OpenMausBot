@@ -26,6 +26,11 @@ step() { printf '\n== %s\n' "$*"; }
 fail() {
   printf 'FAILED: %s\n' "$*" >&2
   as_root docker compose --project-directory "$DIR" logs --tail 80 >"$OUT/compose.log" 2>&1 || true
+  if [ -f "$DIR/compose.box.yaml" ]; then
+    echo "the sandbox self-check, as it is now:"
+    (cd "$DIR" && sudo docker compose exec -T omb node dist-server/bot-box/box-check.js --public=none 2>&1 | tee "$OUT/box-check-failed.txt" | head -c 6000) || true
+    (cd "$DIR" && sudo docker compose logs omb 2>&1 | grep -E "bot box|server profile|local requests" | tail -n 10) || true
+  fi
   exit 1
 }
 contains() { # file words what
