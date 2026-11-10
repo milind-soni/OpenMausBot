@@ -144,6 +144,8 @@ export interface CoordinatorHost {
   names(node: HandoffView, parent?: HandoffView): EnvelopeNames;
   /** `restored` shows the question again only if the first showing never happened; a root parked on its own cards shows nothing more. */
   park(node: HandoffView, question: string, restored?: boolean): void;
+  /** Handed-off work has waited a day on the person; it closes at `closesAt` if nobody answers. Called once for each wait. */
+  remind?(node: HandoffView, closesAt: number): void;
   /** The level the target thread will really run with, so the envelope states the truth, and, when that came down a Chief's
    * chain, the Chief conversation's level. A Chief's level flows into a room with the hand-off, never onto the shared thread,
    * so it resolves from `source`, the requester's node, whose parents lead up the chain. */
