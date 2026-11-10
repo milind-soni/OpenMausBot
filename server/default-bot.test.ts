@@ -159,6 +159,21 @@ describe("MausBot, every person's helper", () => {
     expect(hiddenAfter(() => store.updateTeamMembers("Work", [maus.id], []))).toBe(false);
   });
 
+  it("shows a hidden MausBot again after its department is deleted or a reviewed setup renames it", () => {
+    const store = new Store(selection);
+    const maus = boot(store)!;
+    store.setBotsSection([maus.id], "Work");
+    store.patchBot(maus.id, { sidebarHidden: true });
+    expect(store.deleteSection("Work")).toBeUndefined();
+    expect(store.bot(maus.id)?.sidebarHidden).toBe(false);
+    store.patchBot(maus.id, { sidebarHidden: true });
+    store.applyTeamSetup({ version: 1, requestId: "setup-rename", botId: maus.id, threadId: maus.threadId,
+      reason: "Requested", createdAt: 1, requesterRevision: "fixture", newTeams: [], operations: [
+        { action: "update", botId: maus.id, fields: { name: "Nova" } },
+      ] });
+    expect(store.bot(maus.id)).toMatchObject({ name: "Nova", sidebarHidden: false });
+  });
+
   it("knows a renamed MausBot by its mark: no second one on update, Chief tools kept", () => {
     const store = new Store(selection);
     store.createBot({ name: "Writer" });

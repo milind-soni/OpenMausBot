@@ -124,8 +124,9 @@ export function partitionSidebarBots<T extends SidebarBot>(
   const sectionedBots = visible.filter(
     (bot) => !bot.chiefOfStaff && Boolean(bot.section) && !pinnedIds.has(bot.id),
   );
+  // A search can list two unsectioned Chiefs (the viewer's hidden MausBot and a shared Chief); the second is a bot row.
   const unsectionedBots = visible.filter(
-    (bot) => !bot.chiefOfStaff && !bot.section && !pinnedIds.has(bot.id),
+    (bot) => (!bot.chiefOfStaff || (options?.searching === true && bot !== unsectionedChief)) && !bot.section && !pinnedIds.has(bot.id),
   );
   return { unsectionedChief, pinnedBots, sectionChiefs, sectionedBots, unsectionedBots };
 }
