@@ -9,7 +9,7 @@ import { createTeamAwayEvents } from "./team-away-events.ts";
 const MAYA = "p_mayamayamayamayamayama", BEN = "p_benbenbenbenbenbenbenb";
 const audiences: Record<string, Audience> = { shared: "team", room: "room:g1", mayas: `member:${MAYA}`, bens: `member:${BEN}`, inbox: `member:${MAYA}` };
 
-function world(messages: Record<string, Partial<Message>[]> = {}) {
+function world(messages: Record<string, Partial<Message>[]> = {}, unread?: (person: string, threadId: string, groupId?: string) => boolean) {
   const events: AwayEvent[] = [];
   let unseen: { id: string }[] = [{ id: "line-1" }];
   const events_ = createTeamAwayEvents({
@@ -21,6 +21,7 @@ function world(messages: Record<string, Partial<Message>[]> = {}) {
       messagesFor: (threadId: string) => (messages[threadId] ?? []) as Message[],
     } as never,
     unseen: () => unseen,
+    ...(unread ? { unread } : {}),
     noticed: (event) => events.push(event),
   });
   return { events, ...events_, setUnseen: (next: { id: string }[]) => { unseen = next; } };
@@ -98,6 +99,17 @@ describe("what of a Team Cloud is worth an away email", () => {
       [BEN, "done:shared:u1", "shared", { kind: "finished", who: "Scout" }],
       [MAYA, "turn-failed:room:u2", "room", { kind: "failed", who: "Scout", place: "Q3 launch" }],
     ]);
+  });
+
+  it("drops finished work once that person, not someone else, has read the conversation past the reply", () => {
+    const read = new Set<string>();
+    const asked = { room: [{ id: "u2", role: "user", sender: { id: MAYA, name: "Maya" } }] } as Record<string, Partial<Message>[]>;
+    const { events, notified } = world(asked, (person, threadId, groupId) => !read.has(`${person}:${threadId}:${groupId}`));
+    notified(note({ kind: "done", threadId: "room", groupId: "g1" }), note({ kind: "done", threadId: "room", groupId: "g1" }));
+    read.add(`${BEN}:room:g1`);
+    expect(events[0]!.still!()).toBe(true);
+    read.add(`${MAYA}:room:g1`);
+    expect(events[0]!.still!()).toBe(false);
   });
 
   it("nothing from a private chat's finished work, a routine's own run, or what the inbox already took", () => {

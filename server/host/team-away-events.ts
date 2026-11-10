@@ -19,6 +19,8 @@ export interface TeamAwayEventsDeps {
   store: Pick<Store, "bot" | "groupByThread" | "activePath" | "messagesFor">;
   /** The lines in this person's inbox they have not opened and that still wait on them. */
   unseen(person: string): readonly { id: string }[];
+  /** A bot replied in this shared conversation after where this person has read it up to. */
+  unread?(person: string, threadId: string, groupId?: string): boolean;
   noticed(event: AwayEvent): void;
 }
 
@@ -69,9 +71,10 @@ export function createTeamAwayEvents(deps: TeamAwayEventsDeps) {
     const asked = deps.store.activePath(threadId).findLast((message) => message.role === "user" && !message.peerAsk && message.sender?.id);
     const person = asked?.sender?.id;
     if (!asked || !person) return;
-    const group = groupName(threadId, original.groupId);
+    const group = groupName(threadId, original.groupId), { groupId } = original;
     deps.noticed({
       person, about: `${original.kind}:${threadId}:${asked.id}`, conversation: threadId,
+      ...(deps.unread ? { still: () => deps.unread!(person, threadId, groupId) } : {}),
       item: { kind: original.kind === "done" ? "finished" : "failed", who: original.botName, ...(group ? { place: group } : {}) },
     });
   }

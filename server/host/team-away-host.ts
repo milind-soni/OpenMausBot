@@ -10,6 +10,7 @@ import type { SessionRecord } from "../sessions.ts";
 import type { Store } from "../store.ts";
 import type { Delivery, Item } from "./person-inbox.ts";
 import { createTeamAway } from "./team-away.ts";
+import { roomUnreadFor, threadReadKey } from "./room-reads.ts";
 import { createTeamAwayEvents } from "./team-away-events.ts";
 
 export interface TeamAwayHostDeps {
@@ -22,6 +23,8 @@ export interface TeamAwayHostDeps {
   audienceOf(threadId: string): Audience;
   store: Pick<Store, "bot" | "groupByThread" | "activePath" | "messagesFor">;
   unseen(person: string): readonly { id: string }[];
+  /** Where this person has read a shared conversation (a group chat's id, or `threadReadKey`) up to (room-reads.ts). */
+  readUpTo(key: string, person: string): string | undefined;
   session(auth: RequestAuth): SessionRecord | null;
 }
 
@@ -43,7 +46,8 @@ export function createTeamAwayHost(deps: TeamAwayHostDeps): TeamAwayHost {
     member: (person) => deps.people().find((one) => one.leftAt === undefined && personKey({ id: "", email: one.email }) === person),
     log: (line) => console.log(`team cloud: ${line}`), ...(windowMs > 0 ? { windowMs } : {}),
   });
-  const events = createTeamAwayEvents({ audienceOf: deps.audienceOf, store: deps.store, unseen: deps.unseen, noticed: away.noticed });
+  const events = createTeamAwayEvents({ audienceOf: deps.audienceOf, store: deps.store, unseen: deps.unseen, noticed: away.noticed,
+    unread: (person, threadId, groupId) => roomUnreadFor(deps.store.activePath(threadId), deps.readUpTo(groupId ?? threadReadKey(threadId), person), true) });
   return {
     delivered: events.delivered,
     notified: (original, routed, how) => { if (original) events.notified(original, routed, how); },
