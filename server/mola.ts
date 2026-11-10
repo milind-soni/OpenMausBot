@@ -869,8 +869,10 @@ export async function molaAction(cfg: AppConfig, machineId: string, actionPayloa
 const MOLA_WRITE_FILE_CHUNK_SIZE = 900 * 1024;
 
 function isStrictUtf8(buf: Buffer): boolean {
-  return Buffer.equals(buf, Buffer.from(buf.toString("utf8"), "utf8"));
+  return buf.equals(Buffer.from(buf.toString("utf8"), "utf8"));
 }
+
+const MOLA_READ_FILE_CHUNK_SIZE = 512 * 1024;
 
 export async function copyFromMola(
   cfg: AppConfig,
@@ -880,26 +882,81 @@ export async function copyFromMola(
 ): Promise<{ content: Buffer } | { error: string }> {
   const apiUrl = getMolaApiUrl(cfg);
   const resource = resourcePath(apiUrl);
+  const isCloud = isCloudApi(apiUrl);
   
-  const res = await molaFetch(cfg, `/${resource}/${machineId}/actions`, {
-    method: "POST",
-    body: JSON.stringify({ action: "read_file", path: remotePath }),
-    signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
-  });
-  
-  const body: any = await res.json().catch(() => null);
-  
-  if (!res.ok || !body?.data?.content_base64) {
-    const errorMessage = body?.message || body?.error || "Failed to read file from Mola";
-    return { error: errorMessage };
+  const sizeResult = await runCommand(cfg, machineId, isolatedRemoteCommand(`stat -c %s ${shellQuote(remotePath)}`), { timeoutMs: 10_000, signal });
+  if (!sizeResult.ok) {
+    return { error: `Failed to get file size: ${sizeResult.stderr || "unknown error"}` };
   }
   
-  try {
-    const content = Buffer.from(body.data.content_base64, "base64");
-    return { content };
-  } catch (err) {
-    return { error: `Failed to decode file content: ${String(err)}` };
+  const fileSize = parseInt(sizeResult.stdout.trim(), 10);
+  if (isNaN(fileSize)) {
+    return { error: `Invalid file size: ${sizeResult.stdout}` };
   }
+  
+  if (fileSize === 0) {
+    return { content: Buffer.alloc(0) };
+  }
+  
+  if (!isCloud || fileSize <= MOLA_READ_FILE_CHUNK_SIZE) {
+    const res = await molaFetch(cfg, `/${resource}/${machineId}/actions`, {
+      method: "POST",
+      body: JSON.stringify({ action: "read_file", path: remotePath }),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+    });
+    
+    const body: any = await res.json().catch(() => null);
+    
+    if (!res.ok) {
+      const errorMessage = body?.message || body?.error || "Failed to read file from Mola";
+      return { error: errorMessage };
+    }
+    
+    const contentBase64 = body?.data?.content_base64;
+    if (contentBase64 === undefined || typeof contentBase64 !== "string") {
+      return { error: "Missing or invalid content_base64 in response" };
+    }
+    
+    if (contentBase64 === "") {
+      return { content: Buffer.alloc(0) };
+    }
+    
+    try {
+      const content = Buffer.from(contentBase64, "base64");
+      return { content };
+    } catch (err) {
+      return { error: `Failed to decode file content: ${String(err)}` };
+    }
+  }
+  
+  const chunkSize = MOLA_READ_FILE_CHUNK_SIZE;
+  const chunks: Buffer[] = [];
+  
+  for (let offset = 0; offset < fileSize; offset += chunkSize) {
+    const length = Math.min(chunkSize, fileSize - offset);
+    const cmd = `tail -c +${offset + 1} ${shellQuote(remotePath)} | head -c ${length} | base64 -w0`;
+    
+    const result = await runCommand(cfg, machineId, isolatedRemoteCommand(cmd), { timeoutMs: 50_000, signal });
+    
+    if (!result.ok) {
+      return { error: `Failed to read chunk at offset ${offset}: ${result.stderr}` };
+    }
+    
+    try {
+      const chunk = Buffer.from(result.stdout.trim(), "base64");
+      chunks.push(chunk);
+    } catch (err) {
+      return { error: `Failed to decode chunk at offset ${offset}: ${String(err)}` };
+    }
+  }
+  
+  const content = Buffer.concat(chunks);
+  
+  if (content.length !== fileSize) {
+    return { error: `File size mismatch: expected ${fileSize}, got ${content.length}` };
+  }
+  
+  return { content };
 }
 
 export async function copyToMola(

@@ -161,7 +161,7 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
       placeholder: "boat_…", href: "https://docs.boat.dev/api-keys", analytics: "boat", shape: /^(boat|box)_/, warningKey: "keys.boat.warning" } },
   { id: "mola", section: "computers", labelKey: "keys.mola.label", purposeKey: "keys.purpose.mola", name: "Mola", env: ["MOLA_API_KEY"],
     words: ["mola", "cloud desktop", "cloud computer", "computer", "sandbox", "ubuntu", "omarchy"], mark: { icon: Monitor }, kind: "key",
-    target: { patch: (value) => ({ mola: { token: value } }), slot: "molaApiKey", verifiedOnSave: true,
+    target: { patch: (value) => ({ mola: { token: value } }), slot: "molaApiKey",
       saved: (config) => flag(config.mola),
       placeholder: "…", placeholderKey: "keys.mola.placeholder", href: "https://cloud.mola.sh", analytics: "mola" } },
   { id: "vps", section: "computers", labelKey: "keys.vps.label", purposeKey: "keys.purpose.vps", name: "VPS", env: [],

@@ -18,6 +18,7 @@ import {
 const MAPPINGS: Array<[ConfigCredentialTargetId, CredentialConfig]> = [
   ["xaiApiKey", { xai: { key: "secret" } }],
   ["boxToken", { box: { token: "secret" } }],
+  ["molaApiKey", { mola: { token: "secret" } }],
   ["opencodeGoApiKey", { opencodeGo: { apiKey: "secret" } }],
   ["ttsKey", { tts: { key: "secret" } }],
   ["fishAudioKey", { tts: { fishKey: "secret" } }],
@@ -68,7 +69,7 @@ describe("credential request allowlist", () => {
     expect(credentialIsConfigured({ tts: { key: "" } }, "ttsKey")).toBe(false);
     expect(credentialIsConfigured({ tts: { fishKey: "secret" } }, "fishAudioKey")).toBe(true);
     expect(credentialIsConfigured({ tts: { fishKey: "" } }, "fishAudioKey")).toBe(false);
-    expect(Object.keys(CREDENTIAL_TARGETS)).toHaveLength(19);
+    expect(Object.keys(CREDENTIAL_TARGETS)).toHaveLength(20);
   });
 
   it("names the desktop slot a key is saved in, and none for the 1Password token", () => {

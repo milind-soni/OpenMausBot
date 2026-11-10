@@ -15331,6 +15331,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           res.setHeader("cache-control", "private, no-store");
           return json(res, 200, await computerPreviews.capture(botId, () => mola.screenshotMola(cfg, botId)));
         }
+        if (["provision", "sleep"].includes(m[2]) && botHasActiveTurn(botId)) {
+          return json(res, 409, { error: CLOUD_COMPUTER_BUSY_ERROR });
+        }
+        if (m[2] !== "join" && bot.computer !== "cloud") {
+          return json(res, 409, { error: "Choose Cloud computer before changing or opening this cloud computer. Auto only checks existing computer state." });
+        }
         const releaseComputerLifecycle = claimBotComputerLifecycle(botId, m[2] === "join");
         try {
           if (m[2] === "provision") {
@@ -15354,6 +15360,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (m[2] === "remove") {
             return json(res, 409, { error: "Mola computers can be stopped with sleep; removal is not yet implemented" });
           }
+          return json(res, 400, { error: "unsupported Mola computer action" });
         } finally {
           releaseComputerLifecycle();
         }

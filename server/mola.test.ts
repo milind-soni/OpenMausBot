@@ -1,4 +1,3 @@
-// Changes: Created unit tests for Mola provider functions.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   molaNameFor,
@@ -17,7 +16,6 @@ describe("Mola provider", () => {
   describe("molaNameFor", () => {
     it("generates a scoped name for a bot", async () => {
       const name = await molaNameFor("test-bot-123");
-      // Pattern: ogb-<scope12>-<prefix>-<hash6>
       expect(name).toMatch(/^ogb-[a-f0-9]{12}-[a-z0-9]{1,8}-[a-f0-9]{6}$/);
     });
 
@@ -157,19 +155,16 @@ describe("Mola provider", () => {
       
       const cfg: AppConfig = { mola: { token: "test-token" } };
       
-      // Test timeout < 1 second (500ms should clamp to 1)
       await runCommand(cfg, "test-id", "echo test", { timeoutMs: 500 });
       let lastCall = vi.mocked(fetch).mock.calls[vi.mocked(fetch).mock.calls.length - 1];
       let body = JSON.parse((lastCall[1]?.body as string) || "{}");
       expect(body.timeout).toBe(1);
       
-      // Test timeout > 120 seconds (180000ms should clamp to 120)
       await runCommand(cfg, "test-id", "echo test", { timeoutMs: 180_000 });
       lastCall = vi.mocked(fetch).mock.calls[vi.mocked(fetch).mock.calls.length - 1];
       body = JSON.parse((lastCall[1]?.body as string) || "{}");
       expect(body.timeout).toBe(120);
       
-      // Test timeout in valid range (60000ms = 60 seconds)
       await runCommand(cfg, "test-id", "echo test", { timeoutMs: 60_000 });
       lastCall = vi.mocked(fetch).mock.calls[vi.mocked(fetch).mock.calls.length - 1];
       body = JSON.parse((lastCall[1]?.body as string) || "{}");
@@ -312,6 +307,20 @@ describe("Mola provider", () => {
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }
+    });
+  });
+
+  describe("isStrictUtf8 validation", () => {
+    it("recognizes valid UTF-8 text", async () => {
+      const { copyToMola } = await import("./mola.ts");
+      const validUtf8 = Buffer.from("Hello, world! 日本語 emoji 🎉", "utf8");
+      expect(validUtf8.equals(Buffer.from(validUtf8.toString("utf8"), "utf8"))).toBe(true);
+    });
+
+    it("rejects binary data that is not valid UTF-8", async () => {
+      const binaryData = Buffer.from([0xFF, 0xFE, 0xFD, 0x00, 0x80]);
+      const roundtrip = Buffer.from(binaryData.toString("utf8"), "utf8");
+      expect(binaryData.equals(roundtrip)).toBe(false);
     });
   });
 

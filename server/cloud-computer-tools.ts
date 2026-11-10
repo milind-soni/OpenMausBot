@@ -130,7 +130,8 @@ export async function runCloudComputerTool(
     if (provider === "mola") {
       const shot = await mola.screenshotMola(cfg, "", boxId, { signal });
       signal.throwIfAborted();
-      return { content: [{ type: "image", mimeType: "image/jpeg", data: shot.png }] };
+      const mimeType = shot.format === "jpeg" ? "image/jpeg" : "image/png";
+      return { content: [{ type: "image", mimeType, data: shot.png }] };
     }
     const shot = await screenshotBoat(cfg, "", boxId, { signal, nativeSize: true });
     signal.throwIfAborted();
@@ -167,18 +168,28 @@ export async function runCloudComputerTool(
 
 async function runMolaAction(cfg: AppConfig, boxId: string, name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<CloudComputerResult> {
   const a = args;
+  const molaButtons: Record<string, number> = { left: 1, middle: 2, right: 3 };
   
   switch (name) {
-    case "click":
-      return await mola.molaAction(cfg, boxId, { action: "click", x: Number(a.x), y: Number(a.y), button: String(a.button ?? "left"), count: Number(a.count ?? 1) }, signal);
+    case "click": {
+      const buttonName = String(a.button ?? "left");
+      const buttonNum = molaButtons[buttonName] ?? 1;
+      return await mola.molaAction(cfg, boxId, { action: "click", x: Number(a.x), y: Number(a.y), button: buttonNum, count: Number(a.count ?? 1) }, signal);
+    }
     case "move":
       return await mola.molaAction(cfg, boxId, { action: "move", x: Number(a.x), y: Number(a.y) }, signal);
     case "scroll":
       return await mola.molaAction(cfg, boxId, { action: "scroll", x: Number(a.x), y: Number(a.y), direction: String(a.direction), amount: Number(a.amount ?? 3) }, signal);
     case "type_text":
       return await mola.molaAction(cfg, boxId, { action: "type", text: String(a.text) }, signal);
-    case "key_press":
-      return await mola.molaAction(cfg, boxId, { action: "key", key: String(a.key) }, signal);
+    case "key_press": {
+      const key = String(a.key);
+      const result = await mola.molaAction(cfg, boxId, { action: "key", key }, signal);
+      if (result.isError && result.content[0]?.text?.includes("502")) {
+        return { isError: true, content: [{ type: "text", text: `Mola Cloud rejected key "${key}" (502); known Cloud issue with some key combinations` }] };
+      }
+      return result;
+    }
     case "exec": {
       if (a.background === true) {
         return { isError: true, content: [{ type: "text", text: "Background command execution (exec with background: true) is not supported on Mola. Run commands in the foreground or use a terminal multiplexer like tmux." }] };
