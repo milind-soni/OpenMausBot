@@ -20,8 +20,13 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   in the @ list too, and whatever is addressed to one of them reaches their inbox (below, "One inbox per person"). "New conversation"
   is yours alone: no other Member and no Admin, the Super admin included, sees it, writes in it or learns of it, in
   lists, counts, unread marks, searches, files, notifications, streams, a bot's tools or another bot. A group chat is
-  seen by whoever sees it, and its unread mark is each person's own: a bot's reply there is unread for everyone until
-  they read it, and one person reading it clears it for nobody else (`room-reads.json`). A bot's shared chats say who can read them, *"Shared · everyone in Acme can see"* or, on a bot set to Only people added (`onlyPeopleAdded` on everyone's copy of it), *"Shared · only people added and admins can see"*. Every private chat says so in its header, *"Private · only you"*, and the first one on a
+  seen by whoever sees it. Its unread mark, and that of a bot's shared chats, is each person's own: a bot's reply there is
+  unread for everyone until they read it, and one person reading it or marking it unread changes it for nobody else
+  (`room-reads.json`, a bot's chat as `thread:<id>`); each person's lists and stream carry only their own mark and read
+  line, and a read reaches only their own streams. A private chat keeps its one mark. A notification everyone who sees
+  a conversation gets (a "done", a mention) is one entry with each person's own read mark (`read_by` on the feed's
+  row, never sent): reading it, Read all and opening its conversation mark it read for that person alone and tell only
+  their own apps (`notifications.read`). A mark made before marks were each person's stays read for everyone. A person's read marks go when they leave the team. A bot's shared chats say who can read them, *"Shared · everyone in Acme can see"* or, on a bot set to Only people added (`onlyPeopleAdded` on everyone's copy of it), *"Shared · only people added and admins can see"*. Every private chat says so in its header, *"Private · only you"*, and the first one on a
   device also says it as a sentence: *"Your chats in Acme are private. Only you can see them: not other members, not
   Acme's admins."* The server marks such a conversation `private: true` on the wire (`WireTask.private`). When you leave
   the team (or are removed), your private chats and everything only yours there are deleted, never handed to an admin
@@ -29,6 +34,11 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   (`server/workspace-backup-team-private.ts`): no private conversation, none of its work folders or files only it used, no
   member's memory layer, no member's own MausBot, their inbox or anything under `people/`. Restoring such an export gives a
   team back everything but those.
+- **The order of bots.** Each User's list of bots is in their own order (`bot-orders.json`): their reorder (`PUT
+  /api/bots/order`, any level, Can view included) changes only their list and reaches only their streams. Whoever has
+  never ordered theirs sees the team's order, which an Owner's or Admin's reorder sets: an admin's order is the team's,
+  for every admin and every User without their own. A bot added later takes its place in the team's order in every
+  list. A person's own order goes when they leave the team.
 - **Who is speaking.** A bot knows who wrote each line it reads. Your own typed line in your own chat with it is the
   only line that carries no note; every other line opens with one, written by the Cloud and never by the sender:
   `[From <who> · <what> · <authority>]`, as in `[From Ben (person) · message · their own request]` on each person's
@@ -87,7 +97,10 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   sleep request as any home does ([Sleeping homes](cloud-pro.md#sleeping-homes-the-power-read-and-the-sleep-handshake)):
   not while any member used it in the last minutes, a turn or routine runs, or work one bot handed another is still
   moving (`handoff`). A member's app, phone or a webhook wakes it, and the Admin wakes it before a routine is due. Inbox
-  lines and open cards live on its volume, so a person's answer after a sleep finds them. It keeps every member's
+  lines and open cards live on its volume, so a person's answer after a sleep finds them. The chat any member has open
+  while they use the app (`POST /api/presence/active` with its `threadId`) counts as in front of them, a User's as an
+  Admin's: its engine and prompt cache stay warm a while. That is all it does; it never holds back anyone's
+  notification. It keeps every member's
   session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
 
 
