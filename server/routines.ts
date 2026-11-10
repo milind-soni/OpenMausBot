@@ -225,6 +225,7 @@ export interface RoutineManagerOptions {
   /** Every payload must be `{ kind, … }`: the server numbers and replays frames by it. */
   emit?: (payload: Record<string, unknown>) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
+  /** Why this bot takes no runs now, in the person's words (a Starter Cloud keeps only so many bots awake); null when it does. */ pausedText?: (botId: string) => string | null;
   goalState?: (groupId: string | undefined, coordinatorBotId: string) => "ready" | "busy" | "missing";
   createTask: (botId: string, title: string, run?: RoutineRun) => { threadId: string } | null;
   joinConversation?: (run: RoutineRun) => string | null;
@@ -425,7 +426,7 @@ export class RoutineManager {
   wakeHold(horizonMs = WAKE_HORIZON_MS) { return wakeHoldOf(this.routines, this.runs, this.now(), horizonMs); }
   /** A Cloud home's sleep check (server/routine-due.ts). */
   hasActiveRuns(): boolean { return activeRunsOf(this.runs, this.now()); }
-  nextDueAt(): number | null { return nextDueOf(this.routines, this.runs, this.now()); }
+  nextDueAt(): number | null { return nextDueOf(this.routines.filter((routine) => routine.target === "room-goal" || !this.options.pausedText?.(routine.botId)), this.runs, this.now()); }
 
   listRuns(from?: number, to?: number): RoutineRun[] {
     return this.runs
@@ -1122,10 +1123,9 @@ export class RoutineManager {
           }
           continue;
         }
-        if (state === "missing") {
-          this.failRun(run, this.missingTargetMessage(run.target));
-          continue;
-        }
+        if (state === "missing") { this.failRun(run, this.missingTargetMessage(run.target)); continue; }
+        const paused = run.target === "room-goal" ? null : this.options.pausedText?.(run.botId);
+        if (paused) { this.failRun(run, paused); continue; }
         const startedAt = this.now();
         const suffix = ` · ${new Date(startedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
         const title = `${run.routineName.slice(0, 80 - suffix.length).trimEnd()}${suffix}`;

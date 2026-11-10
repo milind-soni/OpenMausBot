@@ -5686,6 +5686,8 @@
   "botLimit.paused.badge": "En pausa",
   "botLimit.paused.saveFailed": "No se pudo guardar. Inténtalo de nuevo.",
   "botLimit.paused.chooseAction": "Elegir bots despiertos ({count} en pausa)",
+  "botLimit.created.title": "{name} creado, en pausa por ahora",
+  "botLimit.created.body": "Starter mantiene {count} bots despiertos, así que este está en pausa. Elige cuáles {count} siguen despiertos, o mejora el plan para despertarlos a todos.",
   "voice.search": "Busca voces o pega un enlace",
   "voice.noMatches": "Ninguna voz coincide",
   "voice.noMatchesHint": "Prueba con otro nombre o pega un enlace a la voz.",

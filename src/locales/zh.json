@@ -7269,6 +7269,8 @@
   "botLimit.paused.badge": "已暂停",
   "botLimit.paused.saveFailed": "无法保存，请重试。",
   "botLimit.paused.chooseAction": "选择在线的机器人（{count} 个已暂停）",
+  "botLimit.created.title": "已创建 {name}，暂时暂停",
+  "botLimit.created.body": "Starter 只让 {count} 个机器人保持在线，所以这个已暂停。选择保持在线的 {count} 个，或升级以唤醒全部。",
   "roomCard.restartNow": "立即重启",
   "roomCard.restartHint": "大约需要一分钟，并且会停止当前正在运行的任务。",
   "roomCard.restarting": "正在以新容量重启此 Cloud，大约一分钟后恢复。",
