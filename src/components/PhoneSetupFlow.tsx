@@ -355,8 +355,14 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
         if (gate !== "open") {
           setProvisioning(gate === "wait" || gate === "start");
           if (prepare) {
-            const next = await mutateCompanionBridgeState(companionMutationEpoch, () => prepare());
-            if (isCurrent()) setAccount(next);
+            void mutateCompanionBridgeState(companionMutationEpoch, () => prepare()).then((next) => {
+              if (isCurrent()) setAccount(next);
+            }).catch((cause: unknown) => {
+              if (!isCurrent()) return;
+              setProvisioning(false);
+              setError(normalizePhoneSetupActionError(cause, t("phone.error.pairingPrepare")));
+              dispatchFlow({ type: "reset" });
+            });
           }
           return;
         }
@@ -792,7 +798,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
     hostedReady: Boolean(state?.endpoints?.some((endpoint) => endpoint.kind === "hosted")),
     localFallback: flow.localFallback,
     tailscaleFallback: flow.tailscaleFallback,
-    tailscaleAvailable: Boolean(state && companionPairingRoute(state, "tailscale")),
+    tailscaleAvailable: Boolean(state && (companionPairingRoute(state, "tailscale") || state.routes?.tailscale.on)),
     pairingExpired: flow.pairingAttempted && !state?.pairing,
     setupTimedOut,
     setEmail: (next) => {
