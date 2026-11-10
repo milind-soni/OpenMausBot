@@ -263,6 +263,44 @@ export function spawnCli(
   return child;
 }
 
+/** execCli's answer for a spawn that runs in the bot box where it is on (`box`), as a bot's own would: an engine's
+ * status or catalog read that loads the engine's settings, extensions or MCP servers from a HOME a bot can write. */
+export function execCliBoxed(
+  cli: string,
+  args: string[],
+  opts: { env: NodeJS.ProcessEnv | Record<string, string | undefined>; cwd?: string; timeout: number; maxBuffer?: number; box: NonNullable<BoxSpawnOptions["box"]> },
+  cb: (err: (Error & { code?: number | string | null; killed?: boolean }) | null, stdout: string, stderr: string) => void,
+): void {
+  const limit = opts.maxBuffer ?? 1024 * 1024;
+  let child: ChildProcessByStdio<Writable, Readable, Readable>;
+  try {
+    child = spawnCli(cli, args, { env: opts.env as NodeJS.ProcessEnv, cwd: opts.cwd, stdio: ["pipe", "pipe", "pipe"], box: opts.box });
+  } catch (error) {
+    queueMicrotask(() => cb(error instanceof Error ? error : new Error(String(error)), "", ""));
+    return;
+  }
+  child.stdin.end();
+  let stdout = "", stderr = "", done = false, timedOut = false;
+  const finish = (err: (Error & { code?: number | string | null; killed?: boolean }) | null) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    cb(err, stdout, stderr);
+  };
+  child.stdout.on("data", (chunk: Buffer) => { if (stdout.length < limit) stdout += chunk.toString("utf8").slice(0, limit - stdout.length); });
+  child.stderr.on("data", (chunk: Buffer) => { if (stderr.length < limit) stderr += chunk.toString("utf8").slice(0, limit - stderr.length); });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void killCliTree(child, 0);
+  }, opts.timeout);
+  timer.unref?.();
+  child.once("error", (error) => finish(error));
+  child.once("close", (code) => {
+    if (timedOut) finish(cutOffError(cli, opts.timeout));
+    else finish(code === 0 ? null : Object.assign(new Error(`${cli} exited with code ${code}`), { code }));
+  });
+}
+
 const EXEC_KILL_GRACE_MS = 2_000;
 
 export function execCli(

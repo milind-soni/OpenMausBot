@@ -87,6 +87,21 @@ Groq model in the bot's picker, send a fixture turn, then clear the key and
 confirm the engine is unavailable. Never use the live app or a real key for
 this recipe.
 
+## ModelGo API setup
+
+```sh
+pnpm exec vitest run server/drivers/modelgo.test.ts server/provider-key-check.test.ts server/credential-request.test.ts src/components/keys/key-catalog.test.ts
+```
+
+These use a local stand-in for `https://api.modelgo.ai/v1`. They check the
+preset endpoint, that the server's key never goes to another host, the live
+model list, streaming and tool calls over chat completions, the plain sentences
+for HTTP 402 `billing_insufficient` and 403 `first_recharge_required`, and that
+a refused key never shows in events. They never call ModelGo. A chat and a tool
+call through this driver against the real API have not been run; use a real key
+before relying on them. `/models` has no field for tool support, so the picker
+keeps every model whose `output_modalities` includes text.
+
 ## Greenference API setup
 
 ```sh

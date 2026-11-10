@@ -8,7 +8,7 @@ import { saveKey } from "./key-save";
 
 const SLOTS: Array<[KeyId, string]> = [
   ["openai", "openaiApiKey"], ["anthropic", "anthropicApiKey"], ["openrouter", "openrouterApiKey"], ["mistral", "mistralApiKey"], ["cerebras", "cerebrasApiKey"],
-  ["groq", "groqApiKey"], ["greenference", "greenferenceApiKey"], ["meta", "metaApiKey"], ["deepseek", "deepseekApiKey"], ["openaiCompat", "openaiCompatApiKey"],
+  ["groq", "groqApiKey"], ["greenference", "greenferenceApiKey"], ["modelgo", "modelgoApiKey"], ["meta", "metaApiKey"], ["deepseek", "deepseekApiKey"], ["openaiCompat", "openaiCompatApiKey"],
 ];
 
 beforeEach(() => fixture.api.mockReset().mockResolvedValue({}));
