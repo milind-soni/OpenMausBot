@@ -31,6 +31,10 @@ export function rememberOwnChat(teamId: string, threadId: string) {
   if (current?.teamId === teamId && !current.opened?.includes(threadId)) current = { ...current, opened: [...(current.opened ?? []), threadId] };
 }
 
+/** A conversation this person started on a team (the session's list, and one this page just made before its task arrives):
+ * theirs alone, so it is never shown as the shared chat. */
+export const ownChatStarted = (threadId: string | undefined) => Boolean(threadId && current?.opened?.includes(threadId));
+
 /** A person's own conversation: private, open, and opened by a person (not a routine's report or a bot's thread). */
 const ownKind = (task: TaskLike) => task.private === true && !task.routineRunId && !task.openedBy && !task.archivedAt && !task.closedBy;
 const newest = (tasks: TaskLike[]) => [...tasks].sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0))[0];

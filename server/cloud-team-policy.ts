@@ -275,7 +275,7 @@ export function startTeamPolicyClient(options: TeamPolicyClientOptions): TeamPol
 let cloudTeam: TeamPolicyClient | null = null;
 
 /** A Team Cloud only; a My Cloud has no team, no rules and no fetch. */
-export function startCloudTeamPolicy(input: { cloudHome: CloudHomeConfig | null; dataDir: string; managed: ManagedDesktopPolicy; sessions: Pick<SessionRegistry, "closeMemberPhones"> }): void {
+export function startCloudTeamPolicy(input: { cloudHome: CloudHomeConfig | null; dataDir: string; managed: ManagedDesktopPolicy; sessions: Pick<SessionRegistry, "closeMemberPhones" | "closeMemberBrowsers"> }): void {
   const { cloudHome, managed, sessions } = input;
   if (!cloudHome?.team || cloudTeam) return;
   cloudTeam = startTeamPolicyClient({
@@ -283,7 +283,7 @@ export function startCloudTeamPolicy(input: { cloudHome: CloudHomeConfig | null;
     log: (line) => console.log(`team cloud: ${line}`),
     apply: (policy) => {
       managed.apply(policy);
-      if (policy && !policy.remoteAccess) sessions.closeMemberPhones();
+      if (policy && !policy.remoteAccess) { sessions.closeMemberPhones(); sessions.closeMemberBrowsers(); }
     },
   });
   const client = cloudTeam;

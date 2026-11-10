@@ -303,8 +303,9 @@ describe("CloudWelcome", () => {
     (window.ogb as Record<string, unknown>).cloudPlan = { state: vi.fn() };
     fixture.state.config.team = { id: "t-acme", name: "Acme" };
     render();
-    await vi.waitFor(() => expect(text()).toContain("Welcome to Studio Cloud"));
-    expect(host.querySelector('[data-welcome-files="folders"]')?.textContent).toContain(desktopText);
+    // On a team the welcome is the team's, by its name: never "My Cloud" or the Cloud's address.
+    await vi.waitFor(() => expect(text()).toContain("Welcome to Acme"));
+    expect(host.querySelector('[data-welcome-files="folders"]')?.textContent).toContain(desktopText.replace("Studio Cloud", "Acme"));
   });
 
   it("files and apps open Connected apps, then it is ready and says hi to the Chief of Staff", async () => {
