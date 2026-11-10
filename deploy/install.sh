@@ -672,9 +672,11 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    # Started with the server, not after it is healthy: Caddy reaches it over the socket
+    # whenever it answers, so `up` never waits on the server's health.
     depends_on:
       omb:
-        condition: service_healthy
+        condition: service_started
     environment:
       DOMAIN: ${DOMAIN}
     volumes:
