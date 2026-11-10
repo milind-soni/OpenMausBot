@@ -78,8 +78,8 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   with no conversation named (a phone) it is the person's own. Every Chrome runs in its own box (below).
 - **Phones.** Settings → *Open on your phone* (and *Connect your phone* in the account menu) shows a code made for the
   person signed in. The phone app scans it as any `/pair#code=` link and gets that person's session: their address,
-  their role, their chats, never another member's. The phone stays signed in while the person's app keeps checking in
-  with the Admin (it does so while the team is open in it) and ends within the hour after the last check. Under the code,
+  their role, their chats, never another member's. The phone stays signed in while it is used: the Cloud's roster check
+  (below, "Signed in without a desktop") asks the Admin about its person, as the desktop's re-pairing always did. Under the code,
   *Paired devices* lists the phones those codes opened as *device · member* (`GET /api/team/phones`): a member sees their
   own, the Super admin and Admins every member's. **Remove** (`DELETE /api/team/phones/<id>`, the same rule) signs that
   phone out at once and closes its open streams; the app windows the Admin signs in are not listed there.
@@ -90,6 +90,31 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   lines and open cards live on its volume, so a person's answer after a sleep finds them. It keeps every member's
   session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
 
+
+- **In a browser, with nothing installed.** The join page's Open <team> (and a User's team home on MausBot Cloud) signs the
+  browser in here as that person, at their role: the Admin's browser sign-in with their member claim, "Open Acme as
+  <address>" and one Continue (`/pair#signin=`, BrowserSignInPage). The browser is the same app, at phone width too.
+  When its session ends, the sign-in page offers "Open Acme with MausBot Cloud" (`teamSignIn` in
+  `/.well-known/openmausbot/environment`: the person's team page there, an address and nothing that signs anyone in).
+- **The first screen.** A User's first time in the team (TeamWelcome): "Welcome to Acme", who invited them (the Admin's
+  `member.invitedBy`, named from the people list), who else is in it with their pictures, the bots shared with them with one
+  line each, the privacy sentence (said here, so the first private chat doesn't say it again) and one action, Start a chat
+  with the first bot they can chat with. Shown once per person, in the app or a browser: kept in
+  `people/<person>/welcome.json` (`GET /api/me` `welcome: { invitedBy, welcomedAt, hints }`, `PUT /api/me/welcome {
+  welcomed: true }`). Admins get the Cloud's own welcome; on a team its own record (shown, done, hidden:
+  `TEAM_PERSONAL_HINTS`) is each person's too, kept in the same file, so one admin finishing it ends it for nobody else
+  (the Owner also keeps what the team's record said before). The Owner's last step offers Invite people, the team's People
+  page on MausBot Cloud.
+
+### Signed in without a desktop
+
+Every 5 minutes the Team Cloud asks the Admin about the people whose team sessions were used in the last hour and end
+within 20 minutes (`server/cloud-team-roster.ts`): `POST <Admin>/api/cloud/machines/team-member { v: 1, emails }`, at most
+50, signed with the bootstrap secret in its own context (`teamRosterSignature`). The answer is each address's role now,
+or null. A member at their role keeps their sessions (app windows, browsers, phones) another hour (`vouchMember`: a phone's
+`memberCheckedAt`, anyone else's `vouchedAt`); one the Admin no longer lists is signed out at once; one at another role
+loses the sessions of the old role. No answer, a refusal or an older Admin (404) changes nothing: every session still ends
+within the hour of the Admin's last word. A script's token and a move-in sign-in end as they were made to.
 
 ### Off a team
 
@@ -259,10 +284,13 @@ The Admin signs the usual pairing body with two more fields:
 The session carries `teamRole` and `membershipAuthority: "team"`: the sign-in list never revalidates or revokes it, and
 `/api/auth/session` answers `team: { id, name, role }`.
 
-**Membership lives on the Admin.** No roster read exists, so the machine checks membership at each pairing, which the
-Admin signs only for a current member. A team session therefore ends within the hour of its pairing
-(`TEAM_SESSION_MAX_MS`), however much it is used, and the app pairs again; a removed member's next pairing is refused by
-the Admin (404). A session is also kept only across a clean restart.
+**Membership lives on the Admin.** The machine checks membership at each pairing, which the Admin signs only for a current
+member, and through its roster check ("Signed in without a desktop"). A team session therefore ends within the hour of the
+Admin's last word about its member (`TEAM_SESSION_MAX_MS`); a removed member's next pairing is refused by the Admin (404).
+A session is also kept only across a clean restart.
+
+`member.invitedBy` (optional): who invited this member, by address. Kept for their welcome the first time it is said;
+a member's own request never sets it.
 
 **When someone leaves.** The Admin tells the machine when a member is removed or leaves: `POST
 /api/cloud/team/member-left` with `{ "email": "<address>" }`, signed with its body like the sleep request (400
@@ -637,8 +665,8 @@ person as before, and `message_person` and the inbox do not exist.
   into it is not reachable from its box.
 - **Per-member engine sign-ins.** Every audience's engine signs in as the team (its key through the broker, or the
   team's sign-in files in each engine home, above); a member cannot sign an engine in as themselves, by design.
-- **A roster read from the Admin.** Without the Admin's `member-left` request (above), removal takes effect within the
-  hour, and nothing is deleted.
+- **Removal without `member-left`.** Without the Admin's `member-left` request (above), removal takes effect at the next
+  roster check, within the hour at most, and nothing is deleted.
 - **Engine homes without a box, and engines outside the list.** Without the bot box (bubblewrap refused, or switched
   off) a shell reaches every file of the server's user, engine homes included; only the box keeps them apart. An engine
   whose sign-in file is not named in `engine-homes/layout.ts` starts signed out in every audience's home. Engines
@@ -652,3 +680,14 @@ person as before, and `message_person` and the inbox do not exist.
 - **Own apps with the team's own Composio project.** A member's own apps always use OpenMausBot's connected-apps
   service, even when the team connected a Composio project key of its own; an app that needs the project's own auth
   config can't be connected by each person.
+
+## The desktop app and a team it was invited to
+
+- **`openmausbot://team/<team id>`** (the join page's Open in the MausBot app; `electron/team-join.mjs`): the id only. Main
+  opens the team as the verified session lists it: signed in as the same address it reads the session again at once and
+  opens the team; signed out it starts its own browser sign-in and opens the team once signed in; signed in as someone
+  the team isn't listed for, main's own dialog says so and offers to sign in with another address (Add another account:
+  the one in use stays signed in). A link left waiting is dropped after 30 minutes. `openmausbot://cloud` is unchanged.
+- **Landing** (`landing` in the Admin's session: no Cloud of the account's own, invited into a team): the team opens first,
+  once per device (`team-landing.json`; a team opened here by any way counts), and no plan is pushed meanwhile: no trial
+  card, no Start free trial in Settings (`cloudPlanView` `invited`).

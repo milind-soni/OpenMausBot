@@ -104,6 +104,7 @@ import { createDesktopIncludedX } from "./included-x.mjs"; import { createDeskto
 import { cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
+import { createTeamJoin, createTeamLanding, takeTeamLink, teamIdFromLink } from "./team-join.mjs";
 import { createLendingTarget } from "./lending-target.mjs"; import { createOpenAtLogin, installOpenAtLogin } from "./open-at-login.mjs";
 import { cleanWorkspaceDir, createCleanWorkspace, profilesDir } from "./clean-workspace.mjs"; import { createLocalProfiles, createProfileRegistry } from "./local-profiles.mjs"; import { installOneHome } from "./one-home-main.mjs"; import { handSaved, installOwnHome } from "./own-home-main.mjs"; import { reopenSavedServer, serverOpens } from "./saved-server.mjs"; import { installTwoPlacesMain } from "./two-places-main.mjs";
 import { askForMicrophone, openPrivacySettings } from "./privacy-settings.mjs";
@@ -153,6 +154,21 @@ const cloudEntry = createCloudEntry({
   },
 });
 cloudEntry.fromLaunch(process.argv);
+const launchTeamLink = takeTeamLink(process.argv);
+// openmausbot://team/<id> (the join page's Open in the MausBot app): the team the Admin's session lists, signed in here first.
+const teamJoin = createTeamJoin({
+  account: () => (app.isPackaged && !desktopRemoteAccess ? ensureCloudAccount() : null),
+  addAccount: () => accountRing()?.addBrowser() ?? Promise.resolve(),
+  open: team => workspaceMenuAction(async () => { homeWindow.cancel(); await showHome({ place: { team: team.id, name: team.name } }); }),
+  ask: async ({ email }) => (await dialog.showMessageBox({ type: "question", buttons: [nativeT("native.teamLink.signIn"), nativeT("native.common.cancel")], defaultId: 0, cancelId: 1,
+    message: nativeT("native.teamLink.otherTitle"), detail: nativeT("native.teamLink.otherDetail", { email }) })).response === 0,
+  reveal: () => { if (!desktopTray?.show()) activateExistingWindow(appWindows()); },
+  log: line => slog(line),
+});
+if (launchTeamLink) teamJoin.request(launchTeamLink, { launch: true });
+// An invited person's first sign-in here: their team opens first, once (the Admin's `landing`).
+const landing = createTeamLanding({ store: jsonFile(path.join(app.getPath("userData"), "team-landing.json")),
+  open: team => workspaceMenuAction(async () => { homeWindow.cancel(); await showHome({ place: { team: team.id, name: team.name } }); }), log: line => slog(line) });
 let pendingPackageInstallUrl = pendingOrganizationEntry ? null : packageUrlFromCommandLine(process.argv);
 let pendingChatLink = pendingOrganizationEntry ? null : chatLinkFromCommandLine(process.argv);
 let organizationEntryReady = false;
@@ -243,6 +259,8 @@ function queueChatLink(rawLink) {
 }
 
 app.on("open-url", (event, url) => {
+  const teamLink = teamIdFromLink(url);
+  if (teamLink) { event.preventDefault(); teamJoin.request(teamLink); return; }
   if (!queueOrganizationEntry(url) && !cloudEntry.fromUrl(url) && !queuePackageInstall(url) && !queueChatLink(url)) return;
   event.preventDefault();
 });
@@ -253,6 +271,8 @@ app.on("second-instance", (_event, commandLine) => {
     return;
   }
   if (cloudEntry.fromArgs(commandLine)) return;
+  const teamLink = takeTeamLink(commandLine);
+  if (teamLink) { teamJoin.request(teamLink); return; }
   const packageUrl = packageUrlFromCommandLine(commandLine);
   if (packageUrl) pendingPackageInstallUrl = packageUrl;
   const chatLink = chatLinkFromCommandLine(commandLine);
@@ -815,7 +835,7 @@ function ensureCloudAccount() {
     platform: process.platform, deviceName: os.hostname().slice(0, 100) || "My computer", appVersion: app.getVersion(), origin: cloudTarget(process.env).origin,
     openBrowser: url => shell.openExternal(url), awaitingWake: () => cloudPower.awaiting(),
     onState: state => {
-      cloudSync.accountChanged(state.account?.id ?? null); rememberCloudHome(state);
+      cloudSync.accountChanged(state.account?.id ?? null); rememberCloudHome(state); teamJoin.changed(state); landing.changed(state);
       rememberedHome = rememberedCloudHome(rememberedHome, state);
       sendUpdaterState();
       cloudPower.changed(); computerSharing?.cloudChanged(); try { void oneHome.kick(); void homeWindow.changed(); announceAddedCloud(state); railChanged(); } catch {}
@@ -2620,7 +2640,7 @@ const homeWindow = createHomeWindow({ clean: cleanWorkspace, journal: oneHome.jo
   hosts: () => session.defaultSession, readyStore: jsonFile(path.join(app.getPath("userData"), "cloud-ready.json")), ownMove: () => ownHome?.underWay() ?? null,
   remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left, drop: homePlaces.drop,
   publish: view => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("home:state-changed", view); },
-  go: (url, origin, place) => { if (place?.kind === "team" || place?.kind === "own") { activatePlace(place); if (place.kind === "team") teamProfileSeeds.opened(place.origin); } else if (origin) activateCloud(origin); else if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(url, true); },
+  go: (url, origin, place) => { if (place?.kind === "team" || place?.kind === "own") { activatePlace(place); if (place.kind === "team") { teamProfileSeeds.opened(place.origin); landing.opened(place.id); } } else if (origin) activateCloud(origin); else if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(url, true); },
   reopen: (place, still) => reopenSavedServer(place, { still, saved: () => environmentsState.environments.filter(handSaved), fetch: (...args) => session.defaultSession.fetch(...args), opened: async (entry) => { homePlaces.remember(null); persistEnvironments(withActive(environmentsState, entry.id)); return navigateMainWindow(activeOrigin(), true); } }),
   showLocal: leaving => { if (!mainWindow || mainWindow.isDestroyed()) return createWindow(); if (!leaving) return; persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(rendererOrigin()); } });
 installHomeWindowIpc({ ipcMain, homeWindow, cloudPage: cloudPageAsking });
@@ -3068,6 +3088,7 @@ app.whenReady().then(async () => {
   const deliveredOrganizationEntry = await deliverOrganizationEntry();
   const deliveredCloudEntry = await cloudEntry.ready();
   if (!hiddenStart && !restoredOrganizationEntry && !deliveredOrganizationEntry && !deliveredCloudEntry) await showStartPlace();
+  void cloudAccountRestored().then(() => teamJoin.ready());
   // Reconcile incomplete setup and resume interrupted sign-out only once the local app is usable.
   if (hostedAccount) void hostedAccount.restore().catch(() => {});
   // Registering from an unreadable store would mint a second installation identity.
