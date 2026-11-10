@@ -1575,16 +1575,66 @@ describe("cards from the announcements file", () => {
     feed = [card("first-card"), card("second-card")];
     await launch(); press("Not now"); await flush();
     expect(events().at(-1)).toEqual({ id: "first-card", kind: "product", action: "close" });
+    expect(await settle(), "the same page").toBe("");
     expect(await launch(), "the same launch").toBe("");
     expect(await relaunch()).toContain("Title of second-card");
   });
 
-  it("waits behind the notices someone must act on and the built-in offers", async () => {
+  it("follows the built-in sponsor card in its launch once that closes, never beside it", async () => {
     storage.delete(MODELGO_OFFER_NOTICE);
     const first = await launch();
     expect(first).toContain("ModelGo"); expect(first).not.toContain("Title of phone-app");
     press("Not now"); await flush();
-    expect(await relaunch()).toContain("Title of phone-app");
+    const after = await settle();
+    expect(after).toContain("Title of phone-app"); expect(after).not.toContain("ModelGo");
+    expect(launchNotice()).toBe(MODELGO_OFFER_NOTICE);
+  });
+
+  it("follows a closed What's new in the same launch, then no other remote card that launch", async () => {
+    feed = [card("first-card"), card("second-card")];
+    returning(); desk.saved = null; storage.delete(WHATS_NEW_NOTICE); storage.set(CLOUD_INTRO, "1");
+    const popup = await launch();
+    expect(popup).toContain("Meet the new MausBot Cloud"); expect(popup, "never two at once").not.toContain("Title of first-card");
+    expect(events()).toEqual([]);
+    press("Not now"); await flush();
+    const after = await settle();
+    expect(after, "right after What's new closes").toContain("Title of first-card"); expect(after).not.toContain("Meet the new MausBot Cloud");
+    expect(launchNotice(), "What's new keeps the launch").toBe(WHATS_NEW_NOTICE);
+    expect(await launch(), "a reload in the same launch").toContain("Title of first-card");
+    press("Not now"); await flush();
+    expect(await settle(), "one remote card a launch").toBe("");
+    expect(await launch(), "nor after a reload").toBe("");
+    expect(await relaunch()).toContain("Title of second-card");
+  });
+
+  it("never over a notice to act on: the move popup keeps the corner, and the card follows it once closed", async () => {
+    storage.delete(GROK_MOVE_NOTICE); returning();
+    vi.stubGlobal("document", { activeElement: null, body: null, documentElement: { dataset: {} }, getElementById: () => null,
+      querySelector: (selector: string) => selector === "[data-grok-move-popup]" ? { querySelectorAll: () => [] } : null, querySelectorAll: () => [] });
+    const grok = await launch();
+    expect(grok).toContain("data-grok-move-popup"); expect(grok).not.toContain("Title of phone-app");
+    expect(await settle(), "it stays up alone").not.toContain("Title of phone-app");
+    press("Not now"); await flush();
+    expect(await settle(), "after the move's popup").toContain("Title of phone-app");
+  });
+
+  it("a card left up keeps the corner: a card that arrives meanwhile waits for it to close", async () => {
+    returning(); storage.delete(STAR_NOTICE); storage.set(CLOUD_INTRO, "1"); feed = [];
+    expect(await launch()).toContain("Enjoying MausBot?");
+    feed = [card("phone-app")]; forgetAnnouncementCards();
+    const still = await settle();
+    expect(still, "the star took the launch and is still up").toContain("Enjoying MausBot?"); expect(still).not.toContain("Title of phone-app");
+    press("Not now"); await flush();
+    expect(await settle()).toContain("Title of phone-app");
+  });
+
+  it("not after another remote card in the same launch, even with a third card due", async () => {
+    feed = [card("first-card"), card("second-card"), card("third-card")];
+    expect(await launch()).toContain("Title of first-card");
+    expect(launchNotice()).toBe("announcement");
+    press("Not now"); await flush();
+    expect(await settle()).toBe("");
+    expect(await launch(), "a reload").toBe("");
   });
 
   it("never in the launch the welcome took, nor over a live call", async () => {
