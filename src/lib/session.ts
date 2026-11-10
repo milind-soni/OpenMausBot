@@ -1,4 +1,6 @@
 import { storedDeviceView, type DeviceView } from "../../shared/device-view";
+import { t } from "./i18n";
+import { serverErrorText } from "./server-error";
 
 export interface EnvironmentDescriptor {
   environmentId: string;
@@ -118,6 +120,11 @@ export function newAttemptId(): string {
   return typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
 }
 
+function refusalText(body: unknown, res: Response): string {
+  const error = Reflect.get(Object(body), "error");
+  return serverErrorText(body, typeof error === "string" ? error : `${res.status} ${res.statusText}`);
+}
+
 export async function pairWithCode(
   input: { code: string; label: string; attemptId?: string; browser?: boolean },
   fetchImpl: typeof fetch = fetch,
@@ -131,12 +138,11 @@ export async function pairWithCode(
       body: JSON.stringify({ code: input.code, label: input.label, cookie: true, attemptId: input.attemptId ?? newAttemptId(), ...(input.browser ? { browser: true } : {}) }),
     });
   } catch (error) {
-    return { ok: false, error: `could not reach the server (${error instanceof Error ? error.message : String(error)})` };
+    return { ok: false, error: t("pair.unreachable", { error: error instanceof Error ? error.message : String(error) }) };
   }
   const body: unknown = await res.json().catch(() => ({}));
   if (res.ok) return { ok: true };
-  const error = Reflect.get(Object(body), "error");
-  return { ok: false, error: typeof error === "string" ? error : `${res.status} ${res.statusText}` };
+  return { ok: false, error: refusalText(body, res) };
 }
 
 export async function previewBrowserSignIn(credential: string, fetchImpl: typeof fetch = fetch): Promise<{ owner: string } | null> {
@@ -168,12 +174,11 @@ async function postAuth(path: string, body: Record<string, unknown>, fetchImpl: 
   try {
     res = await fetchImpl(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   } catch (error) {
-    return { ok: false, error: `could not reach the server (${error instanceof Error ? error.message : String(error)})` };
+    return { ok: false, error: t("pair.unreachable", { error: error instanceof Error ? error.message : String(error) }) };
   }
   const parsed: unknown = await res.json().catch(() => ({}));
   if (res.ok) return { ok: true };
-  const error = Reflect.get(Object(parsed), "error");
-  return { ok: false, error: typeof error === "string" ? error : `${res.status} ${res.statusText}` };
+  return { ok: false, error: refusalText(parsed, res) };
 }
 
 export function startEmailSignIn(email: string, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {

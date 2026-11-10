@@ -23,7 +23,7 @@ import {
   Zap,
 } from "lucide-react";
 
-import { accountMenuItems, cloudRowLabel, useAccounts } from "./AccountMenu";
+import { accountMenuItems, AccountsSheet, cloudRowLabel, useAccounts } from "./AccountMenu";
 import { AccountMoveStatus, useAccountMove, type AccountMoveKind } from "./AccountMove";
 import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";
@@ -42,7 +42,7 @@ import { useSidebarPhoneStatus } from "./SidebarPhoneButton";
 import { api, useStore, type Action } from "@/state/store";
 import { serverCheckPhase, serverUpdateRow, type ServerUpdateCheck, type ServerUpdatePhase } from "@/lib/server-update";
 import type { CloudAccountBridge, CloudAccountState } from "../../electron/cloud-account.mjs";
-import { useUpdaterState, type UpdaterState } from "@/lib/updater";
+import { updaterMessage, useUpdaterState, type UpdaterState } from "@/lib/updater";
 import { productName } from "../lib/brand";
 import { cloudColor } from "@/lib/cloud-look";
 import { cn } from "@/lib/cn";
@@ -112,7 +112,7 @@ export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): str
       ).replace("  ", " ");
     case "installing":
       return (
-        state?.message ||
+        updaterMessage(state) ||
         (state?.installMode === "handoff"
           ? t("sidebar.update.openingTerminal")
           : t("sidebar.update.installing"))
@@ -122,7 +122,7 @@ export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): str
     case "handed-off":
       return t("sidebar.update.handedOff");
     case "error":
-      return state?.message?.trim() || t("sidebar.update.failed");
+      return updaterMessage(state)?.trim() || t("sidebar.update.failed");
     case "up-to-date":
       return t("sidebar.update.upToDate");
     default:
@@ -700,6 +700,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         )}
       />
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      {accounts.sheet && <AccountsSheet adding={accounts.sheet.email} note={accounts.sheet.note} onClose={accounts.closeSheet} />}
       {phoneAppOpen && <PhoneAppDialog
         open
         onClose={() => setPhoneAppOpen(false)}

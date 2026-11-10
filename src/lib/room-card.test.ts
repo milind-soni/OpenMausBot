@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { CloudRoom, CloudUsage } from "../../electron/cloud-home.mjs";
 import { setLocale } from "@/lib/i18n";
-import { roomCardView, roomCauseText } from "@/lib/room-card";
+import { roomCardBusy, roomCardView, roomCauseText } from "@/lib/room-card";
 
 const usage: CloudUsage = { tier: "starter", resetsAt: Date.UTC(2026, 10, 1), meters: [], upgrades: [{ tier: "pro", amount: 4900 }, { tier: "max", amount: 9900 }] };
 const room = (over: Partial<CloudRoom> = {}): CloudRoom => ({ id: "offer-1", cause: { kind: "memory", waits: 3, waitMinutes: 6, stopped: 0 },
@@ -42,6 +42,13 @@ describe("the card", () => {
     expect(view({ room: { id: "tip-1", cause: { kind: "memory", waits: 0, waitMinutes: 0, stopped: 2 }, tip: true } })).toEqual({ id: "tip-1", kind: "memory",
       title: "This Cloud is short on room", cause: "2 tasks were stopped today to keep everything else running.", offer: null,
       tip: "You're on the biggest plan. To give it more room, run fewer bots at once and close browsers you're not using." });
+  });
+
+  it("counts a running turn as busy, unless a task is waiting for memory, which is when it speaks", () => {
+    expect(roomCardBusy([{ busy: true }, { busy: false }], false)).toBe(true);
+    expect(roomCardBusy([{ busy: true }], undefined)).toBe(true);
+    expect(roomCardBusy([{ busy: false }], false)).toBe(false);
+    expect(roomCardBusy([{ busy: true }], true)).toBe(false);
   });
 
   it("is never shown mid-turn, after Not now on this offer, beside the usage card, or without an offer", () => {

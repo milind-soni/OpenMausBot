@@ -24,6 +24,7 @@ export function nestedKeyStatus(cfg: AppConfig) {
     workersAiToken: keyStatus(cfg.decider?.workersAiToken),
     openaiImageApiKey: keyStatus(cfg.imageGen?.key),
     customImageApiKey: keyStatus(cfg.imageGen?.customApiKey),
+    geminiImageApiKey: keyStatus(cfg.imageGen?.geminiKey),
     openaiLiveKey: keyStatus(usableLiveKey(cfg.live)),
   };
 }

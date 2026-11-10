@@ -19,6 +19,7 @@ import type { ModelSelectionCheck } from "./bots-create.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { sawThread } from "../thread-presence.ts";
+import { refusalBody } from "../user-errors.ts";
 import { readThreadNotifications } from "./notifications.ts";
 
 export interface BotSettingsRouteDeps {
@@ -138,10 +139,10 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
         { selection: selected.modelSelection, busy: threadBusy(selected.id, selected.threadId) },
         true,
       );
-      if (!checked.ok) return json(res, checked.status, { error: checked.error });
+      if (!checked.ok) return json(res, checked.status, refusalBody(checked));
       if (activeGroupTurnForBot(existing.id)) {
         const groupChecked = checkedModelSelection(checked.selection, { selection: existing.modelSelection, busy: true });
-        if (!groupChecked.ok) return json(res, groupChecked.status, { error: groupChecked.error });
+        if (!groupChecked.ok) return json(res, groupChecked.status, refusalBody(groupChecked));
       }
       if ([existing, selected].some((owner) => {
         const mode = approvalModeFor(owner);

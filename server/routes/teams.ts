@@ -33,6 +33,7 @@ import { createTeamBackup, importTeamBackup } from "../team-backup.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "../team-library.ts";
 import { createTeamManifest, parseTeamManifest } from "../team-manifest.ts";
 import type { RequestAuth } from "../request-auth.ts";
+import { userErrorFields } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface TeamRouteDeps {
@@ -95,7 +96,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
             summary: packageSummary(exported.document),
           });
         } catch (error) {
-          if (error instanceof TeamExportError) return json(res, error.status, { error: error.message });
+          if (error instanceof TeamExportError) return json(res, error.status, { error: error.message, ...userErrorFields(error) });
           throw error;
         }
       }
@@ -145,7 +146,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
             choices: { skills: skills.available },
           });
         } catch (error) {
-          if (error instanceof TeamExportError) return json(res, error.status, { error: error.message, choices: { skills: skills.available } });
+          if (error instanceof TeamExportError) return json(res, error.status, { error: error.message, ...userErrorFields(error), choices: { skills: skills.available } });
           throw error;
         }
       }

@@ -46,7 +46,7 @@ const __APP_VERSION__: string;
     };
     dictation: {
       available: boolean;
-      engine: "apple-speech" | "none";
+      engine: "apple-speech" | "fish-audio" | "none";
       onDevice: boolean;
       reasonCode?: string;
     };
@@ -138,6 +138,7 @@ const __APP_VERSION__: string;
       /** This computer's page, and My Cloud's own page once it is the person's home: the window onto My Cloud. */
       home?: import("../../electron/home-window.mjs").HomeBridge;
       desktopNotices?: import("../../electron/desktop-prefs.mjs").DesktopNoticesBridge;
+      desktopNotifications?: import("../../electron/desktop-notifications.mjs").DesktopNotificationsBridge;
       /** This computer's own page only: the account's full name, for a first run's profile (system-name.mjs). */
       desktopProfile?: { systemName(): Promise<string | null> };
       desktopAnalytics?: import("../../electron/desktop-prefs.mjs").DesktopAnalyticsBridge;
@@ -171,7 +172,8 @@ const __APP_VERSION__: string;
          * places). Absent on an older app. */
         places?: () => Promise<import("../../electron/cloud-rail.mjs").RailState>;
         /** Opens a circle main listed, by its id, through main's own switch: only from the person's click. */
-        open?: (id: string) => Promise<unknown>;
+        /** Nothing for a place of the account in use; for another account's, how its switch went. */
+        open?: (id: string) => Promise<import("../../electron/cloud-account.mjs").RailOpenResult | undefined>;
         /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), a server's pairing link (`link`: the one pasted on the
          * sheet; without it, the clipboard's), or type its address. Resolves false when the person cancels Connect. */
         add?: (choice: "cloud" | "link" | "address", link?: string) => Promise<unknown>;
@@ -317,7 +319,7 @@ const __APP_VERSION__: string;
       onSpeechTranscript(
         cb: (line: { partial?: boolean; text?: string; error?: string }) => void,
       ): () => void;
-      onSpeechEnd(cb: (info: { code: number | null; reason?: string }) => void): () => void;
+      onSpeechEnd(cb: (info: { code: number | null; reason?: string; message?: string }) => void): () => void;
       /** Absolute path of a dropped File ("" when the drag carried no
        * file on disk). Absent in older builds of the shell. */
       getPathForFile?(file: File): string;
@@ -406,6 +408,8 @@ const __APP_VERSION__: string;
        * it there and reveals it. Resolves the chosen path, or null if the
        * user cancelled the dialog. */
       saveFile?(filePath: string): Promise<string | null>;
+      /** Desktop only: opens HTML this page already showed in the default browser, from a temp copy main writes. */
+      openHtmlInBrowser?(source: string, name: string): Promise<unknown>;
       /** Points this computer's file manager at a file a bot linked outside
        * its workspace, without opening or reading it. Local app only. */
       revealInFolder?(filePath: string): Promise<"shown" | "missing" | "invalid">;
@@ -415,7 +419,7 @@ const __APP_VERSION__: string;
       openAtLogin?: { state(): Promise<{ available: boolean; on: boolean }>; set(on: boolean): Promise<{ available: boolean; on: boolean }> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey",
+        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
         value: string,
       ): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). Updates
@@ -465,6 +469,11 @@ export interface UpdaterState {
   releaseNotes?: string;
   percent?: number;
   message?: string;
+  /** `message` as a code the window words in its own language; absent when main has only the updater's own words */
+  messageCode?: "tls" | "integrity" | "disk" | "permission" | "busy" | "feed" | "network" | "prepareTimeout" | "slowRestart" | "unavailable";
+  /** Fixed native.update.* wording beside its English fallback, including elevated-install details. */
+  messageKey?: string;
+  messageParams?: Record<string, string>;
   /** native work may still be running; recovery requires an app restart */
   retryable?: boolean;
   /**
@@ -491,6 +500,9 @@ export interface CompanionAccountState {
   email?: string;
   endpoint?: string;
   message?: string;
+  /** The HTTPS address was given back after 30 days with no paired phone
+   * seen. Opening the phone page calls prepare(), which brings it back. */
+  paused?: boolean;
 }
 
 export type AndroidUsbDevice = {

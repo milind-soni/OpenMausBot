@@ -249,3 +249,15 @@ describe("the inbox itself", () => {
     expect(f.team.inbox.personOf(f.inboxOf(CLEO).threadId)).toBe(key(CLEO.email));
   });
 });
+
+describe("what a confined conversation says", () => {
+  it("reaches the person it asks as a notification, and never lands as a line in anybody's inbox", () => {
+    const f = fixture({ confined: ["rep-shared"] });
+    f.bots.find((bot) => bot.id === "reporter")!.tasks.push({ threadId: "rep-shared", title: "Weekly numbers" });
+    f.store.appendMessage("rep-shared", { role: "bot", kind: "options", text: "Run a command?", card: card("req-1") });
+    const question = ask("reporter", "Reporter", "rep-shared");
+    expect(f.team.route(question)).toEqual({ ...question, forPerson: key(BEN.email) });
+    expect(f.notified).toEqual([]);
+    expect(f.team.needsYou(session(BEN.email))).toEqual([]);
+  });
+});

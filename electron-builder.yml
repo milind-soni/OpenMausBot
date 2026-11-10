@@ -45,6 +45,8 @@ files:
   - "!electron/resources/recorder-helper-Info.plist"
   - "!electron/resources/OpenMausBot Recorder.app/**"
   - "!**/node_modules/**"
+  - src/locales/*.json
+  - "!src/locales/source-hashes.json"
   - package.json
 
 asar: true

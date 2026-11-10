@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, beforeEach } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppConfig } from "./config.ts";
@@ -90,10 +90,43 @@ describe("skills library store", () => {
     writeFileSync(join(library.skillsLibraryRoot(), "skills", "audit", "SKILL.md"), SKILL("audit", "Tampered."), { mode: 0o600 });
     const [listing] = library.listLibrarySkills().filter((skill) => skill.name === "audit");
     expect(listing.enabled).toBe(false);
-    expect(listing.warnings).toContain("stored SKILL.md changed after review — enablement is blocked");
+    expect(listing.warnings).toContain("stored skill files changed after review — enablement is blocked");
     expect(library.readLibrarySkillFile("audit")).toBeNull();
     const approve = library.setLibrarySkillReviewState("audit", "approved");
-    expect(approve).toEqual({ error: "stored SKILL.md changed after review — the library entry cannot be approved" });
+    expect(approve).toEqual({ error: "stored skill files changed after review — the library entry cannot be approved" });
+  });
+
+  it("stores a whole skill folder, records its GitHub origin and blocks it once a file beside SKILL.md changes", () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-skills-library-"));
+    const github = { owner: "x", repo: "y", ref: "HEAD", commit: "b".repeat(40), path: "skills/folder-skill" };
+    mkdirSync(join(root, "skills", "folder-skill"), { recursive: true });
+    writeFileSync(join(root, "skills", "folder-skill", "left-by-a-crash.md"), "unreferenced");
+    const listing = library.installLibrarySkill({
+      name: "folder-skill",
+      instructions: SKILL("folder-skill"),
+      source: "github.com/x/y/skills/folder-skill",
+      reviewState: "approved",
+      files: [
+        { path: "references/guide.md", content: "# Guide\n" },
+        { path: "scripts/run.sh", content: "#!/bin/sh\necho run\n", executable: true },
+      ],
+      skippedFiles: ["video.mp4"],
+      github,
+      root,
+    });
+    expect(listing).toMatchObject({ name: "folder-skill", enabled: true, skippedFiles: ["video.mp4"], github, warnings: [] });
+    const folder = join(root, "skills", "folder-skill");
+    expect(readFileSync(join(folder, "references", "guide.md"), "utf8")).toBe("# Guide\n");
+    expect(existsSync(join(folder, "left-by-a-crash.md"))).toBe(false);
+    expect(library.readSkillLibraryIndex(root)["folder-skill"]).toMatchObject({ filesSha256: expect.stringMatching(/^[a-f0-9]{64}$/), github });
+
+    writeFileSync(join(folder, "scripts", "run.sh"), "#!/bin/sh\necho changed\n");
+    const [changed] = library.listLibrarySkills(root);
+    expect(changed).toMatchObject({ enabled: false, warnings: ["stored skill files changed after review — enablement is blocked"] });
+    expect(library.installLibrarySkill({ name: "escapes", instructions: SKILL("escapes"), source: "a", files: [{ path: "../x.md", content: "x" }], root }))
+      .toEqual({ error: expect.stringContaining("outside the skill folder") });
+    expect(existsSync(join(root, "skills", "x.md"))).toBe(false);
+    expect(library.readSkillLibraryIndex(root)["escapes"]).toBeUndefined();
   });
 
   it("toggles review state at library scope and emits an invalidation event", () => {

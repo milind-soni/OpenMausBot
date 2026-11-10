@@ -155,7 +155,7 @@ describe("phone MCP host", () => {
     await answerNext(h.jobs, IPHONE, () => ({ ok: true, result: { id: "evt-1" } }));
     expect((await pending as PhoneToolResult).isError).toBeUndefined();
     expect(h.messages).toEqual([{ threadId: TURN.threadId, message: {
-      role: "bot", kind: "activity", tool: { name: "mcp__device__PHONE_CREATE_EVENT", ok: true, summary: "Create event on Omkar's iPhone" },
+      role: "bot", kind: "activity", tool: { name: "mcp__device__PHONE_CREATE_EVENT", ok: true, summary: "Create event on Omkar's iPhone", summaryCode: "chat.notice.phone.write.PHONE_CREATE_EVENT", summaryParams: { phone: "Omkar's iPhone" } },
     } }]);
     // In a room the row names its author.
     h.state.inRoom = true;
@@ -163,7 +163,7 @@ describe("phone MCP host", () => {
     await answerNext(h.jobs, IPHONE, () => ({ ok: true, result: { deleted: true } }));
     await again;
     expect(h.messages[1]!.message).toEqual({
-      role: "bot", kind: "activity", tool: { name: "mcp__device__PHONE_DELETE_EVENT", ok: true, summary: "Delete event on Omkar's iPhone" },
+      role: "bot", kind: "activity", tool: { name: "mcp__device__PHONE_DELETE_EVENT", ok: true, summary: "Delete event on Omkar's iPhone", summaryCode: "chat.notice.phone.write.PHONE_DELETE_EVENT", summaryParams: { phone: "Omkar's iPhone" } },
       from: { botId: "chief", name: "MausBot", color: "teal" },
     });
     // A write the phone refused records no row and reaches the bot with the phone's reason.

@@ -5,6 +5,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 
 import { engineMemory } from "../../engine-memory.ts";
 import { appendNative } from "../native.ts";
+import { StderrTail } from "./exit-report.ts";
 import { acpRpcError } from "./rpc-error.ts";
 
 /** A catalog can contain credential-bearing native configuration, including late replies. */
@@ -34,7 +35,7 @@ export interface AcpConnection {
 export interface AcpInbound {
   request(msg: any): void;
   notification(msg: any): void;
-  exit(code: number | null): void;
+  exit(code: number | null, signal: NodeJS.Signals | null): void;
   error(error: Error): void;
   /** A tool or a question is open: silence then is no stall. */
   busy(): boolean;
@@ -55,8 +56,6 @@ export interface AcpHostOptions {
   source: string;
   /** What the native log keeps of a message (images and tool payloads bounded). */
   logMessage(msg: any): unknown;
-  /** Keep stderr for exit messages; off for providers that may print OAuth material there. */
-  keepStderr: boolean;
   /** A request for a session no thread holds: it must still be answered or the agent blocks. */
   unrouted(msg: any, send: (obj: unknown) => void): void;
 }
@@ -110,7 +109,8 @@ export class AcpHost {
   #lastOut: AcpLink | null = null;
   initResult: any = null;
   authenticated = false;
-  stderr = "";
+  /** The last stderr lines, masked, for the exit message. */
+  readonly stderrTail = new StderrTail();
   dead = false;
   /** Takes no new sessions; it ends when its last one closes. */
   draining = false;
@@ -151,18 +151,16 @@ export class AcpHost {
         this.#receive(msg);
       }
     });
-    child.stderr.on("data", (chunk) => {
-      if (!options.keepStderr) return;
-      this.stderr += chunk;
-      if (this.stderr.length > 8192) this.stderr = this.stderr.slice(-8192);
-    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => this.stderrTail.write(chunk));
     child.on("error", (error) => {
       this.dead = true;
       for (const link of this.#listening()) link.inbound?.error(error);
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       this.dead = true;
-      for (const link of this.#listening()) link.inbound?.exit(code);
+      this.stderrTail.flush();
+      for (const link of this.#listening()) link.inbound?.exit(code, signal);
     });
   }
 

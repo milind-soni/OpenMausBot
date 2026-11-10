@@ -16,7 +16,7 @@ import { serverLine, type ServerLineKey } from "../server-lines.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 const PATH = "/api/internal/mcp-servers";
-const ACTIONS = ["list", "add", "update", "enable", "disable", "test", "sign_in", "sign_out", "remove"] as const;
+const ACTIONS = ["list", "add", "update", "enable", "disable", "restart", "test", "sign_in", "sign_out", "remove"] as const;
 type McpAction = (typeof ACTIONS)[number];
 const MAX_TOOL_NAMES = 100;
 
@@ -28,6 +28,7 @@ const ASK_ADMIN = "Ask a workspace admin to add it.";
 const WHEN = {
   live: { arrive: "The new tools arrive on your next turn.", leave: "Its tools leave on your next turn." },
   approved: { arrive: "Its tools are yours from this turn.", leave: "Its tools are gone from this turn." },
+  restart: "This turn keeps talking to the old process; your next turn starts the new code.",
 };
 const ASKED: Record<McpCardAction, ServerLineKey> = { enable: "server.mcp.askedTurnOn", update: "server.mcp.askedChange", remove: "server.mcp.askedRemove" };
 
@@ -164,6 +165,7 @@ async function act(deps: Ctx, body: unknown, signal: AbortSignal): Promise<Outco
   if (!may.ok) return { status: 403, error: may.error };
   if (owner === "shared" && !deps.teamAdmin()) return { status: 403, error: ASK_ADMIN };
   if (action === "disable") return disable(deps, name);
+  if (action === "restart") return restart(deps, name, server, signal);
   if (action === "sign_out") return signOut(deps, name, server);
   // A deliberate exception to server/direct-apply.ts, which applies a bot's change at every level with Undo: turning an
   // MCP server on runs a command on the person's computer or sends their data to a new service, the kind of action the
@@ -290,6 +292,18 @@ function disable(deps: Deps, name: string): Outcome {
   return { status: 200, text: `Turned off MCP server ${name}. ${WHEN.live.leave}` };
 }
 
+/** Runs what is already on, as the next turn would anyway, so it takes no card at any level. */
+async function restart(deps: Deps, name: string, server: StoredMcpServer, signal: AbortSignal): Promise<Outcome> {
+  if (isRemoteMcpServer(server)) return { status: 400, error: `${name} is reached by its address, so it has no process to restart. Call mcp_server with action test to check it.` };
+  if (!server.enabled) return { status: 403, error: `${name} is off. Call mcp_server with action enable ${deps.fullAccess() ? "first" : "to ask the person to turn it on"}.` };
+  const restarted = deps.config.restart(name);
+  if ("error" in restarted) return refused(restarted);
+  const outcome = await probe(deps, name, server, signal);
+  deps.decide(`Restarted MCP server ${name}`, deps.fullAccess() ? "full-access" : "level");
+  say(deps, { action: "restart", name }, ["server.mcp.restarted", { name }], outcome.line);
+  return { status: 200, text: `Restarted MCP server ${name}. Its saved keys stay. ${outcome.text} ${WHEN.restart}` };
+}
+
 /** A sign-in is the person's own act, so it takes a card at every level; a personal server's card signs in the turn's
  * person. */
 function signIn(deps: Deps, name: string, server: StoredMcpServer, owner: ReturnType<typeof mcpOwner>): Outcome {
@@ -407,7 +421,7 @@ async function probe(deps: Deps, name: string, server: StoredMcpServer, signal: 
     const total = probed.total ?? probed.tools.length;
     const more = total > names.length ? ` and ${total - names.length} more` : "";
     return {
-      text: names.length ? `Test: it works. Its tools: ${names.join(", ")}${more}.` : "Test: it works, but it has no tools.",
+      text: names.length ? `Test: it started and listed its tools: ${names.join(", ")}${more}. That does not show what they return: call one to check.` : "Test: it started, but it has no tools.",
       line: [total === 1 ? "server.mcp.testTools.one" : "server.mcp.testTools.many", { count: String(total) }],
     };
   }

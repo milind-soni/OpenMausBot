@@ -308,11 +308,26 @@ describe("My Chrome on My Cloud, through the person's lent Chrome", () => {
     expect(engine).not.toHaveBeenCalled();
   });
 
+  it("each refusal names its own way out: a conversation refused on both counts is told both steps, in order", async () => {
+    const texts: Record<string, string> = {
+      "memory-changed-here": "tap Mark reviewed, then start a new conversation with this bot and ask there.",
+      "not-owner": "Only conversations you start with a bot, and routines you wrote, can use your Chrome.",
+      unproven: "Only conversations you start with a bot, and routines you wrote, can use your Chrome.",
+      "someone-else": SOMEONE_ELSE,
+    };
+    for (const [why, expected] of Object.entries(texts)) {
+      const { host, call } = onMyCloud(lender, (holder) => (holder.threadId === GUEST.threadId ? why as "not-owner" : null));
+      const browser = (await host.browserIntegration("scout", "mine", turn))!;
+      const answer = await call(browser, GUEST);
+      expect(answer.content[0]!.text, why).toContain(expected);
+      expect(answer.content[0]!.text, why).toContain("Only the person can change this");
+    }
+  });
   it("a conversation refused over a memory change is pointed to Memory, not to a new conversation", async () => {
     const { host, engine, call } = onMyCloud(lender, (holder) => (holder.threadId === GUEST.threadId ? "memory-changed" : null));
     const browser = (await host.browserIntegration("scout", "mine", turn))!;
     const answer = await call(browser, GUEST);
-    expect(answer).toEqual({ isError: true, content: [{ type: "text", text: "This bot's memory was changed in a conversation you didn't write. Review it in Memory to use your Chrome again." }] });
+    expect(answer).toEqual({ isError: true, content: [{ type: "text", text: expect.stringContaining("This bot's memory was changed in a conversation you didn't write, so it can't use your Chrome. In this bot's settings, open Memory, check what changed and tap Mark reviewed, then ask again here.") }] });
     expect(answer.content[0]!.text).not.toContain(SOMEONE_ELSE);
     expect(engine).not.toHaveBeenCalled();
   });

@@ -15,6 +15,7 @@ import { createAgentCard } from "../chat-widgets.ts";
 import { connectorCardText } from "../connector-card-text.ts";
 import type { DraftReply } from "../read-and-draft.ts";
 import { localDate, validZone } from "./check-plan.ts";
+import { FIRST_HOUR_OFFER_KEY } from "../../shared/person-wait.ts";
 import { firstHourWords, type FirstHourWords } from "./first-hour-words.ts";
 import { anyValue, minutesSaved, type ValueLedger, type ValueTally } from "./value-ledger.ts";
 
@@ -242,7 +243,7 @@ export function createFirstHour(deps: FirstHourDeps) {
       }
       const cards = await Promise.all(missing.map(async (slug) => ({ slug, ...(await deps.apps.card(slug).catch(() => ({ label: APP_NAME[slug], description: "" }))) })));
       if (!state || state.offeredAt || deps.threadBusy(place.bot.id, place.threadId)) return;
-      const key = `first-hour-${randomUUID()}`;
+      const key = `${FIRST_HOUR_OFFER_KEY}${randomUUID()}`;
       say(place.bot, place.threadId, words().connect);
       for (const card of cards) {
         deps.store.appendMessage(place.threadId, {

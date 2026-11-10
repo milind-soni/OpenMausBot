@@ -29,6 +29,8 @@ interface Host extends CoordinatorHost {
   validateAnswer: string | undefined;
   levels: Record<string, { level: Level; driverKind?: string }>;
   chiefs: Set<string>;
+  statusAsks?: string[];
+  statusAskers?: string[];
   release(id: string, outcome: Outcome): Promise<void>;
 }
 
@@ -430,6 +432,65 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
   });
 });
 
+// Modelled on a real day: the mail bot asked the chief of staff for yesterday's mailbox details, and before that was answered
+// the chief of staff, asked by the person in its own chat, asked the mail bot why mail failed. Both waited on each other and
+// worked the same problem in two places, each with its own plan.
+describe("RuntimeCoordinator: a request back to a bot that is waiting on you", () => {
+  const mail: RoomAddress = { botId: "mail", threadId: "mail-chat" };
+  const cos: RoomAddress = { botId: "cos", threadId: "cos-chat" };
+  const cosWork: RoomAddress = { botId: "cos", threadId: "cos-work-from-mail" };
+  const mailWork: RoomAddress = { botId: "mail", threadId: "mail-work-from-cos" };
+  const holdCos: Script = (node) => node.botId === "cos" && node.parentId !== undefined ? "hold" : undefined;
+
+  it("refuses it while the request it would answer is open, says which, and writes nothing", async () => {
+    const w = world(holdCos);
+    const asked = send(w, mail, "gen-mail", undefined, cosWork, "Do you have the mailbox details from yesterday?");
+    expect(() => send(w, cos, "gen-cos", undefined, mailWork, "Why can't you fetch mail?"))
+      .toThrow(`@mail is already waiting on you: it handed you a request (assignment ${asked.node.id}), and that has not reached you yet.`);
+    expect(w.coordinator.children("gen-cos")).toEqual([]);
+    w.coordinator.tick();
+    expect(w.coordinator.node(asked.node.id)?.status).toBe("running");
+    expect(() => send(w, cos, "gen-cos", undefined, mailWork, "Why can't you fetch mail?")).toThrow(/you are answering it in another conversation/);
+    await w.host.release(asked.node.id, { ok: true, text: "No details stored" });
+    expect(w.coordinator.node(asked.node.id)?.status).toBe("completed");
+    expect(send(w, cos, "gen-cos", undefined, mailWork, "Why can't you fetch mail?").node).toMatchObject({ botId: "mail", status: "queued" });
+  });
+
+  it("refuses a consultation the same way, and while the request waits on a question", async () => {
+    const w = world((node) => node.botId === "cos" && node.parentId !== undefined ? { ok: true, text: "NEEDS INPUT: Which mailbox?" } : undefined);
+    const asked = send(w, mail, "gen-mail", undefined, cosWork, "Do you have the mailbox details from yesterday?");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(asked.node.id)?.status).toBe("waiting");
+    begun(w, cos, "gen-cos");
+    expect(() => w.coordinator.enqueue(cos, "gen-cos", undefined, mailWork, "Which mailbox do you mean?", { mode: "consult" }))
+      .toThrow(/@mail is already waiting on you/);
+  });
+
+  it("lets it through once the asker stopped waiting: the person stopped that conversation while the answer was being written", async () => {
+    const w = world(holdCos);
+    const asked = send(w, mail, "gen-mail", undefined, cosWork, "Do you have the mailbox details from yesterday?");
+    w.coordinator.tick();
+    // The chief of staff's own request is another line of the person's than the one they stopped.
+    begun(w, cos, "gen-cos", "Mail worked yesterday", { origin: { kind: "user", request: "Mail worked yesterday, find out why" } });
+    w.coordinator.stopAwaitingDirect("mail-chat");
+    expect(send(w, cos, "gen-cos", undefined, mailWork, "Why can't you fetch mail?").node).toMatchObject({ botId: "mail", status: "queued" });
+    if (w.host.held.has(asked.node.id)) await w.host.release(asked.node.id, { ok: true, text: "No details stored" });
+  });
+
+  it("leaves a one-way notice, other teammates, rooms and the bot's own requester alone", async () => {
+    const w = world(holdCos);
+    send(w, mail, "gen-mail", undefined, cosWork, "Do you have the mailbox details from yesterday?");
+    begun(w, cos, "gen-cos");
+    expect(w.coordinator.enqueue(cos, "gen-cos", undefined, mailWork, "FYI: the person says it worked yesterday", { mode: "notify", reply: "none" }).node)
+      .toMatchObject({ botId: "mail", reply: "none" });
+    expect(send(w, cos, "gen-cos", undefined, tester, "Check the mail server").node).toMatchObject({ botId: "tester" });
+    expect(send(w, inRoom("cos"), "gen-room", undefined, inRoom("mail"), "Why can't you fetch mail?").node).toMatchObject({ botId: "mail", groupId: "g1" });
+    // A bot that never asked is not waiting: the mail bot may still ask the chief of staff again from another conversation.
+    expect(send(w, { botId: "mail", threadId: "mail-other" }, "gen-mail-2", undefined, { botId: "cos", threadId: "cos-work-2" }, "And the SMTP host?").node)
+      .toMatchObject({ botId: "cos" });
+  });
+});
+
 describe("RuntimeCoordinator: one answer to the same request from two teammates", () => {
   const lead: RoomAddress = { botId: "lead", threadId: "lead-chat" };
   const builderForLead: RoomAddress = { botId: "builder", threadId: "builder-work-2" };
@@ -696,7 +757,7 @@ describe("RuntimeCoordinator: stops", () => {
     expect(w.host.reports.map(r => r.child.id).sort()).toEqual([b.id, other.id, t.id].sort());
   });
 
-  it("stopAwaitingDirect drops what never started, leaves a working teammate, and stops the requester", async () => {
+  it("stopAwaitingDirect stops the requester and everything it handed out: what never started, and a teammate at work", async () => {
     const w = world(hold);
     const { node: b } = send(w, chief, "gen-1", undefined, builder, "Build it");
     const { node: t } = send(w, chief, "gen-1", undefined, tester, "Test it");
@@ -706,16 +767,69 @@ describe("RuntimeCoordinator: stops", () => {
     expect(w.coordinator.node(t.id)?.status).toBe("queued");
     expect(w.coordinator.outstandingDirect("chief-chat").map(n => n.id).sort()).toEqual([b.id, t.id].sort());
     expect(w.coordinator.assignerOf("builder-work")?.id).toBe("gen-1");
-    const left = w.coordinator.stopAwaitingDirect("chief-chat");
-    expect(left.map(n => n.id)).toEqual([b.id]);
+    w.coordinator.stopAwaitingDirect("chief-chat");
     expect(w.coordinator.node(t.id)).toMatchObject({ status: "cancelled", result: "Stopped before it started" });
+    expect(w.coordinator.node(b.id)).toMatchObject({ status: "cancelled", result: "Stopped with the request it was for", reported: true });
     expect(w.coordinator.node("gen-1")).toMatchObject({ status: "cancelled", result: "Stopped by user" });
-    expect(w.host.runs[0]!.signal.aborted).toBe(false);
+    expect(w.host.runs[0]!.signal.aborted).toBe(true);
     expect(w.coordinator.outstandingDirect("chief-chat")).toEqual([]);
     expect(w.coordinator.assignerOf("builder-work")).toBeUndefined();
-    await w.host.release(b.id, { ok: true, text: "built anyway" });
-    expect(w.coordinator.node(b.id)).toMatchObject({ status: "completed", result: "built anyway", reported: true });
-    expect(w.host.reports.at(-1)).toMatchObject({ child: { id: b.id }, parent: { id: "gen-1", status: "cancelled" } });
+    expect(w.coordinator.active()).toEqual([]);
+  });
+});
+
+describe("RuntimeCoordinator: a stop the person made is remembered", () => {
+  const tick = () => sleep(2);
+
+  it("keeps the work it stopped from coming back from that request, until the person asks again", async () => {
+    const w = world(hold);
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    begun(w, { botId: "tester", threadId: "tester-chat" }, "gen-2");
+    begun(w, { botId: "tester", threadId: "tester-other" }, "gen-4", "Order more paper", { origin: { kind: "user", request: "Order more paper" } });
+    w.coordinator.tick();
+    await tick();
+    w.coordinator.stopAwaitingDirect("builder-work");
+    expect(w.coordinator.node(node.id)?.status).toBe("cancelled");
+    await tick();
+    // The request that handed it out, in other words, and another conversation on the same line of the person's: refused.
+    expect(() => send(w, chief, "gen-1", undefined, builder, "Please build the CSV export after all")).toThrow("The person stopped this teammate's work on this request.");
+    expect(() => send(w, { botId: "tester", threadId: "tester-chat" }, "gen-2", undefined, builder, "Build it for me")).toThrow(/stopped this teammate's work/);
+    expect(w.coordinator.children("gen-2")).toEqual([]);
+    // Another request of the person's, other teammates, and the person asking again after the stop, go through.
+    expect(send(w, { botId: "tester", threadId: "tester-other" }, "gen-4", undefined, builder, "Order the paper").node).toMatchObject({ botId: "builder" });
+    expect(send(w, chief, "gen-1", undefined, tester, "Test it").node).toMatchObject({ botId: "tester", status: "queued" });
+    expect(send(w, { botId: "chief", threadId: "chief-2" }, "gen-3", undefined, builder, "Build it").node).toMatchObject({ botId: "builder", status: "queued" });
+  });
+
+  it("remembers every bot the stop ended, and nothing for a stop with another cause or work no person asked for", async () => {
+    const w = world(hold);
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    w.coordinator.tick();
+    begun(w, inRoom("other"), "gen-room");
+    await tick();
+    w.coordinator.stopAwaitingDirect("chief-chat");
+    expect(w.coordinator.node(node.id)?.status).toBe("cancelled");
+    await tick();
+    expect(() => send(w, inRoom("other"), "gen-room", undefined, builder, "Build it")).toThrow(/stopped this teammate's work/);
+    expect(() => send(w, inRoom("other"), "gen-room", undefined, chief, "Ship it")).toThrow(/stopped this teammate's work/);
+
+    const h = world(hold);
+    const first = send(h, chief, "gen-1", undefined, builder, "Build it");
+    h.coordinator.tick();
+    await tick();
+    h.coordinator.stopAwaitingDirect("builder-work", "Turn interrupted — provider settings changed");
+    expect(h.coordinator.node(first.node.id)?.status).toBe("cancelled");
+    expect(send(h, chief, "gen-1", undefined, builder, "Build it again").node).toMatchObject({ botId: "builder" });
+
+    const r = world(hold);
+    r.coordinator.beginTurn({ id: "gen-run", address: chief, brief: "Nightly export", level: "ask",
+      opener: { requester: { kind: "routine_run", runId: "run-1", botId: "chief", threadId: "chief-chat" }, origin: { kind: "routine", source: "routine", ref: "nightly" } } });
+    const nightly = r.coordinator.enqueue(chief, "gen-run", undefined, builder, "Export", {});
+    r.coordinator.tick();
+    await tick();
+    r.coordinator.stopAwaitingDirect("builder-work");
+    expect(r.coordinator.node(nightly.node.id)?.status).toBe("cancelled");
+    expect(r.coordinator.enqueue(chief, "gen-run", undefined, builder, "Export again", {}).node).toMatchObject({ botId: "builder" });
   });
 });
 
@@ -891,6 +1005,57 @@ describe("RuntimeCoordinator: modes and openers", () => {
     if (!parentId) begun(w, source, generation, sourceText, opener ? { opener, origin: undefined } : {});
     return w.coordinator.enqueue(source, generation, parentId, target, text, rest);
   };
+
+  describe("a reply that only acknowledges", () => {
+    const after = async (w: World, ask: { mode?: "consult" }, outcome: { text?: string; evidence?: { toolCalls?: number } }) => {
+      w.host.script = (node) => node.botId === "tester" ? { ok: true, text: outcome.text ?? "Noted, thanks.", ...(outcome.evidence ? { evidence: outcome.evidence } : {}) } : undefined;
+      handoff(w, chief, "gen-1", undefined, tester, "FYI: the mailbox moved.", ask);
+      ended(w, "gen-1");
+      w.coordinator.tick(); await flush(); w.coordinator.tick(); await flush();
+      return { resumed: w.host.runs.some(run => run.node.id === "gen-1"), asked: w.host.statusAsks, askers: w.host.statusAskers };
+    };
+    const asking = (answer: string | undefined | Error) => {
+      const w = world();
+      w.host.statusAsks = [];
+      w.host.statusAskers = [];
+      w.host.statusReply = async (asker, prompt) => {
+        w.host.statusAskers!.push(asker);
+        w.host.statusAsks!.push(prompt);
+        if (answer instanceof Error) throw answer;
+        return answer;
+      };
+      return w;
+    };
+
+    it("spends no requester turn on a plain ACK, and shows the helper both messages as data", async () => {
+      const { resumed, asked, askers } = await after(asking("ACK"), {}, {});
+      expect(resumed).toBe(false);
+      // The requester's engine answers, never the teammate's, whose engine is busy with the work itself.
+      expect(askers).toEqual(["chief"]);
+      expect(asked).toHaveLength(1);
+      expect(asked![0]).toContain("<sender_message>\nFYI: the mailbox moved.\n</sender_message>");
+      expect(asked![0]).toContain("<teammate_reply>\nNoted, thanks.\n</teammate_reply>");
+    });
+
+    it.each([["NEEDS", "NEEDS"], ["no answer", undefined], ["a chatty answer", "ACK, nothing needed"], ["a failed call", new Error("no engine")]])("wakes the requester on %s", async (_name, answer) => {
+      const { resumed, asked } = await after(asking(answer as string | undefined | Error), {}, {});
+      expect(resumed).toBe(true);
+      expect(asked).toHaveLength(1);
+    });
+
+    it("never asks about a question the requester sent, or work that used a tool, or a long reply", async () => {
+      for (const [ask, outcome] of [[{ mode: "consult" }, {}], [{}, { evidence: { toolCalls: 1 } }], [{}, { text: "x".repeat(601) }]] as const) {
+        const { resumed, asked } = await after(asking("ACK"), ask, outcome);
+        expect(resumed).toBe(true);
+        expect(asked).toEqual([]);
+      }
+    });
+
+    it("wakes the requester on a host with no helper", async () => {
+      const { resumed } = await after(world(), {}, {});
+      expect(resumed).toBe(true);
+    });
+  });
 
   it("consult: the child is a consultation, its turn opens with the consultation envelope, and the asker is resumed with the answer", async () => {
     const w = world((node) => node.botId === "tester" ? { ok: true, text: "Use the staging bucket." } : undefined);
@@ -1544,6 +1709,21 @@ describe("RuntimeCoordinator: who answers a teammate's question", () => {
     expect(answered.node).toMatchObject({ answer: "CSV", answeredBy: { kind: "default" } });
     expect(answered.text).toContain('Nobody was asked, at this level: go on with your default, "CSV", and say in one plain line what you chose.');
     expect(w.coordinator.node(node.id)?.status).toBe("completed");
+  });
+
+  it("at Full access keeps a question about which of the person's accounts to use for the person, not its requester", async () => {
+    const w = world(asks("No mail account is connected.\nNEEDS INPUT: Which email account should be connected — Gmail or another provider?\nDefault: Gmail"));
+    w.host.levels.builder = { level: "full" };
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Get the mail working");
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "waiting", question: "Which email account should be connected — Gmail or another provider?\nDefault: Gmail" });
+    expect(w.coordinator.node(node.id)?.decide).toBeUndefined();
+    w.coordinator.tick(); await flush();
+    const resume = w.host.runs.find(run => run.node.id === "gen-1")!;
+    expect(resume.text).toContain("waiting on Milind");
+    expect(resume.text).toContain("Only Milind can answer it, there: do not answer it for them or pass an answer on.");
+    expect(resume.text).not.toContain("yours to answer");
   });
 
   it("takes the requester's answer passed on by name over the default, and says which bot gave it", async () => {

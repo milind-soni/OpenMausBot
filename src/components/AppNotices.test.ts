@@ -240,7 +240,7 @@ describe("the card after the update", () => {
         card.props.onKeyDown(event); expect(event.preventDefault).toHaveBeenCalled();
       } else press(close);
       expect(storage.get(CLOUD_INTRO), close).toBe("1"); expect(hints()).toContain(CLOUD_INTRO);
-      expect(render()).toContain("You can add a Cloud any time from the menu at the top of the sidebar.");
+      expect(render()).toContain("You can add a Cloud any time from the menu on the left of the app.");
     }
     expect(track).toHaveBeenCalledWith("cloud_card_action", { action: "not_now" });
     expect(track).toHaveBeenCalledWith("cloud_card_action", { action: "close" });

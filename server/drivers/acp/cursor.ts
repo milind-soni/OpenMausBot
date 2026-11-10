@@ -5,6 +5,8 @@ import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { CURSOR_STANDALONE } from "./cursor-release.ts";
+import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { discoverAcpModels } from "./custom-model-catalog.ts";
 import type { AcpQuestionRequest } from "./question-requests.ts";
 import {
@@ -313,6 +315,38 @@ export async function probeCursorAuth(
   return false;
 }
 
+/** `cursor-agent --version` prints its build alone (`2026.10.22-27dcf5f`); curl, run by an install command pasted as
+ * the CLI path, answers `curl 7.88.1 (x86_64-pc-linux-gnu) …`. */
+export const CURSOR_CLI_VERSION = /^\d{4}\.\d{1,2}\.\d{1,2}(?:-[0-9a-z]+)?\s*$/i;
+
+/** `cursor-agent status --format json` (2026.10.22): `{"status":"unauthenticated","isAuthenticated":false,…}`. */
+export function readCursorStatus(code: number | null, output: string): DeviceSignInState {
+  const signedIn = code === 0 ? decodeCursorAuthStatus(firstJsonValue(output)) : null;
+  return signedIn === true ? "signed-in" : signedIn === false ? "signed-out" : "unknown";
+}
+
+/** Never the CLI's own words: its output carries the sign-in request. */
+function cursorLoginFailure(output: string): string {
+  if (/expired|timed? ?out/i.test(output)) return "The Cursor sign-in link expired. Start sign-in again for a new link.";
+  return "Cursor sign-in did not finish. Check the server's connection, then try again.";
+}
+
+/** `cursor-agent login` where the bots run: on a server it cannot open a browser, so it prints the link that finishes
+ * the sign-in (NO_OPEN_BROWSER keeps it from trying) and waits; the person opens that link on any device. The login lands
+ * in the server account's own Cursor home, which turns read. */
+export const CURSOR_SIGN_IN: DeviceSignIn = {
+  provider: "cursor",
+  product: "Cursor",
+  account: "Cursor",
+  homeEnv: "CURSOR_CONFIG_DIR",
+  homeDir: ".cursor",
+  loginArgs: ["login"],
+  env: { NO_OPEN_BROWSER: "1" },
+  install: "Install Cursor's CLI (https://cursor.com/docs/cli/installation) for the user running OpenMausBot, then try again.",
+  failure: cursorLoginFailure,
+  status: { args: ["status", "--format", "json"], read: readCursorStatus },
+};
+
 export function cursorCatalogFromSession(advertised: ModelCatalog["options"]): ModelCatalog | null {
   const discovered: ModelCatalog["options"] = [];
   const bases = new Set<string>();
@@ -440,11 +474,14 @@ const support = (run: typeof execCli): AcpSupport => ({
   driverKind: "cursorAgent",
   questionRequests: { "cursor/ask_question": CURSOR_ASK_QUESTION }, askTool: "AskQuestion",
   displayName: "Cursor",
+  cliVersion: CURSOR_CLI_VERSION,
   models: STATIC_CURSOR_MODELS,
   // Other coding agents can install a generic `agent` shim; `cursor-agent` is unambiguous.
   defaultCli: "cursor-agent",
   nativeSource: "cursor.acp",
-  loginNote: "Cursor CLI is not signed in — run `cursor-agent login` in a terminal, or set CURSOR_API_KEY",
+  // Turns read this too: the sign-in runs where the bots run, from the app, never on the person's own computer.
+  loginNote: "Cursor is not signed in where your bots run. Choose Cursor in the model picker and sign in from its card, or set CURSOR_API_KEY.",
+  deviceSignIn: CURSOR_SIGN_IN,
 
   install: {
     command: {
@@ -454,6 +491,8 @@ const support = (run: typeof execCli): AcpSupport => ({
     },
     docsUrl: "https://cursor.com/docs/cli/installation",
     signInCommand: "cursor-agent login",
+    // On Linux, Settings installs Cursor's own pinned build: a Cloud has no terminal for its installer.
+    standalone: CURSOR_STANDALONE,
   },
 
   // Global flags precede `acp`; `--force` is the documented auto-approve switch.

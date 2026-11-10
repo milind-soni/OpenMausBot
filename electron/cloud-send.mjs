@@ -20,6 +20,7 @@ import { collectConnections, releaseConnections, sendConnections } from "./cloud
 import { createMoveKinds, mergeRoutines } from "./cloud-send-kinds.mjs";
 import { botsOnCloud } from "./cloud-logins.mjs";
 import { checkChats, checkPassed, checkSecrets, manifestGaps, missingAttachments, roomsRemovedThere, roomsThatGo, rowIdChunks } from "./cloud-send-check.mjs";
+import nativeText from "./native-text.cjs";
 
 const LOCAL_ROUTE = /^\/api\/(?:cloud-send|cloud-send\?move=1|cloud-send\/manifest|cloud-send\/chats|cloud-send\/chats\?attachments=1|cloud-send\/kind\?key=[\w%.-]{1,300}|cloud-send\/memory|cloud-send\/memory\?bot=[\w-]{1,128}|cloud-send\/files|cloud-send\/files\?path=[\w%.()~!*'-]{1,12000}&offset=\d{1,16}&length=\d{1,9}|cloud-send\/chats\/rows\?thread=[\w-]{1,200}&after=\d{1,16}&id=[\w%.-]{0,600}|cloud-send\/chats\/ids\?thread=[\w-]{1,200}&from=\d{1,9}|cloud-send\/chats\/attachment\/[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}|cloud-connections|connectors\/connected|config|bots\?messages=0|bots\/[\w-]{1,128}\/(?:skills|skills\/[a-z0-9-]{1,64}|memory|memory\/file\?path=[\w%.-]{1,200})|attachments\/[A-Za-z0-9-]{1,80}\.(?:png|jpg|gif|webp))$/u;
 /** One request's chats: a few conversations' rows, well under My Cloud's body limit. */
@@ -55,11 +56,25 @@ export function unanswered(error, depth = 0) {
   return unanswered(error.cause, depth + 1);
 }
 
+/** Security: only a `serverError.*` key passes, so a server cannot make the page show any other catalog string. */
+export function namedRefusal(answer) {
+  if (answer.status !== 401 && answer.status !== 403) return null;
+  const key = answer.body?.errorKey, message = sentence(answer.body?.error);
+  if (typeof key !== "string" || !key.startsWith("serverError.") || !message) return null;
+  const params = record(answer.body.errorParams) ? Object.fromEntries(Object.entries(answer.body.errorParams).filter(([, value]) => typeof value === "string" || typeof value === "number")) : {};
+  return { message, errorKey: key, errorParams: params };
+}
+
 /** One plain sentence for a failed write, from what My Cloud answered. */
 function refusal(answer, fallback) {
-  if (answer.status === 401 || answer.status === 403) return "My Cloud did not let this app make the change. Open My Cloud in this app once, then try again.";
+  if (answer.status === 401 || answer.status === 403) return namedRefusal(answer)?.message ?? "My Cloud did not let this app make the change. Open My Cloud in this app once, then try again.";
   if (answer.status === 409 && /limited to \d+ bots/u.test(answer.body?.error ?? "")) return sentence(answer.body.error);
   return sentence(answer.body?.error) ? `My Cloud said: ${sentence(answer.body.error)}` : fallback;
+}
+
+function refusedError(code, answer, fallback) {
+  const named = namedRefusal(answer);
+  return Object.assign(new CloudSendError(code, refusal(answer, fallback)), named ? { errorKey: named.errorKey, errorParams: named.errorParams } : {});
 }
 
 /** My Cloud's own 1Password refusal speaks to someone pasting a token on My Cloud's page; here it was this computer's.
@@ -69,7 +84,7 @@ function onePasswordRefusal(answer) {
   if (answer.status === 400 && said && /did not accept the token|not a whole 1Password|service account token/iu.test(said)) {
     return Object.assign(new CloudSendError("refused", "My Cloud's 1Password did not accept this computer's token: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, and it goes to My Cloud by itself."), { final: true });
   }
-  return new CloudSendError("refused", refusal(answer, "My Cloud could not connect 1Password."));
+  return refusedError("refused", answer, "My Cloud could not connect 1Password.");
 }
 
 const pick = (source, names) => Object.fromEntries(names.filter((name) => source[name] !== undefined && source[name] !== null).map((name) => [name, source[name]]));
@@ -196,7 +211,7 @@ const movedResult = () => ({ moved: 0, memory: 0, files: { sent: 0, kept: 0 }, c
  * name the team gave it; never apps, keys, logins, settings or its notes about the person. `local` is then the bot's
  * own Cloud, and `label` names the person beside a file or bot of the same name.
  */
-export function createCloudSend({ local, cloud, handoff, store, onChange = () => {}, now = Date.now, engineWaitMs, space, team = null }) {
+export function createCloudSend({ local, cloud, handoff, store, onChange = () => {}, now = Date.now, engineWaitMs, space, team = null, t = nativeText.englishText.t }) {
   let saved = parseSendState(safeRead(store));
   let view = { cloud: "none", plan: null, local: null, theirs: null, chats: null };
   let running = null, progress = null;
@@ -373,7 +388,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const before = await session.call("GET", summaryRoute);
       if (before.status === 404) throw new CloudSendError("outdated", move ? OUTDATED_FOR_MOVE : "My Cloud needs an update before it can receive bots from this computer. It updates by itself; try again later.");
       const theirs = before.ok ? parseSendSummary(before.body) : null;
-      if (!theirs) throw new CloudSendError("unreachable", refusal(before, "My Cloud did not answer. Try again."));
+      if (!theirs) throw refusedError("unreachable", before, "My Cloud did not answer. Try again.");
       let computer = team ? { label: team.label } : null;
       if (move) {
         await assertTakesMove(session);
@@ -448,7 +463,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
    * could not let go of yet is kept and let go of on the next final pass. */
   async function moveConnections(origin, session, result, final) {
     const kept = entry(origin);
-    const failed = (id, label, error, last) => result.failed.push({ key: id, kind: "connection", label, error: sentence(error) ?? "It did not move.", ...(last ? { final: true } : {}) });
+    const failed = (id, label, error, last) => result.failed.push({ key: id, kind: "connection", label, error: sentence(error) ?? t("native.home.itemDidNotMove"), ...(last ? { final: true } : {}) });
     if (final && kept.release.length) {
       kept.release = await releaseConnections(kept.release, { local: connectionLocal, target: session }).catch(() => kept.release);
       persist();
@@ -456,11 +471,12 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     let collected;
     try { collected = await collectConnections(connectionLocal); }
     catch (error) { failed("connections", "Apps and keys", error?.message, false); return null; }
-    const moved = await sendConnections(collected, session, { local: connectionLocal, signIns: final, ...(engineWaitMs !== undefined ? { waitMs: engineWaitMs } : {}),
+    const moved = await sendConnections(collected, session, { local: connectionLocal, signIns: final, t, ...(engineWaitMs !== undefined ? { waitMs: engineWaitMs } : {}),
       onProgress: (step) => { progress = { done: step.done, total: step.total }; publish(); } });
     result.connections += moved.moved.length + moved.runsHere.length;
     for (const failure of moved.failed) failed(failure.id, failure.label, failure.message, failure.final);
     for (const held of moved.held ?? []) result.notes.push({ kind: "held", connection: held.label });
+    for (const stayed of moved.runsHere) if (!stayed.off) result.notes.push({ kind: "stayed", connection: stayed.label, ...(stayed.needs ? { needs: stayed.needs } : {}) });
     if (moved.release.length) {
       kept.release = [...kept.release.filter((held) => !moved.release.some((next) => next.id === held.id)), ...moved.release];
       persist();
@@ -512,7 +528,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       for (let i = 0; i < names.length; i += ATTACHMENT_NAMES) {
         const asked = names.slice(i, i + ATTACHMENT_NAMES);
         const checked = await session.call("POST", "/api/cloud-send/chats/attachments", { names: asked });
-        if (!checked.ok) throw new CloudSendError("refused", refusal(checked, "My Cloud could not take the chats' attachments."));
+        if (!checked.ok) throw refusedError("refused", checked, "My Cloud could not take the chats' attachments.");
         for (const name of Array.isArray(checked.body?.missing) ? checked.body.missing.filter((name) => asked.includes(name)) : []) {
           const file = await localBytes(`/api/cloud-send/chats/attachment/${name}`);
           if (!file) continue;
@@ -523,13 +539,13 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
               : "An attachment is bigger than My Cloud takes, so it did not go. Its chat went without it.", ...(stored.status === 413 ? { final: true } : {}) });
             continue;
           }
-          if (!stored.ok) throw new CloudSendError("refused", refusal(stored, "My Cloud could not take an attachment of the chats."));
+          if (!stored.ok) throw refusedError("refused", stored, "My Cloud could not take an attachment of the chats.");
         }
       }
       // Into a team: whose lines on My Cloud become the mover's there.
       const answer = await session.call("POST", "/api/cloud-send/chats", { v: 1, dataDir, ...(from ? { owner: from } : {}),
         conversations: batch.map(({ owner, threadId, task, rows, leaf, sent }) => ({ ...owner, threadId, task, rows, leaf, sent })) });
-      if (!answer.ok) throw new CloudSendError("refused", refusal(answer, "My Cloud could not add the chats."));
+      if (!answer.ok) throw refusedError("refused", answer, "My Cloud could not add the chats.");
       const accepted = new Set(Array.isArray(answer.body?.accepted) ? answer.body.accepted : []);
       const removed = new Set(Array.isArray(answer.body?.removed) ? answer.body.removed : []);
       for (const page of batch) {
@@ -584,7 +600,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     const flush = async () => {
       if (!batch.length) return;
       const answer = await session.call("POST", "/api/cloud-send/chats/owner", { v: 1, conversations: batch });
-      if (!answer.ok) throw new CloudSendError("refused", refusal(answer, "My Cloud could not keep the chats' lines as yours."));
+      if (!answer.ok) throw refusedError("refused", answer, "My Cloud could not keep the chats' lines as yours.");
       batch = []; ids = 0;
     };
     for (const threadId of threads) {
@@ -724,7 +740,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       created = await ctx.session.call("POST", "/api/bots", base);
       modelKept = false;
     }
-    if (!created.ok) throw new CloudSendError("refused", refusal(created, "My Cloud could not add this bot."));
+    if (!created.ok) throw refusedError("refused", created, "My Cloud could not add this bot.");
     ctx.cloudBots.add(bot.id);
     markCreated(ctx, row.key);
     const parts = Object.keys(BOT_PARTS).filter((part) => part !== "name" && (part !== "model" || modelKept));
@@ -779,15 +795,15 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const listed = await ctx.session.call("GET", `/api/bots/${botId}/skills`);
       const own = await ctx.session.call("GET", `/api/bots/${botId}/skills/${name}`);
       const entry = Array.isArray(listed.body?.skills) ? listed.body.skills.find((candidate) => candidate?.name === name) : null;
-      if (!own.ok || typeof own.body?.text !== "string" || !entry) throw new CloudSendError("refused", refusal(own, "My Cloud's copy of this skill could not be read, so it was left as it is."));
+      if (!own.ok || typeof own.body?.text !== "string" || !entry) throw refusedError("refused", own, "My Cloud's copy of this skill could not be read, so it was left as it is.");
       previous = { entry, text: own.body.text };
       const removed = await ctx.session.call("DELETE", `/api/bots/${botId}/skills/${name}`);
-      if (!removed.ok) throw new CloudSendError("refused", refusal(removed, "My Cloud could not replace this skill."));
+      if (!removed.ok) throw refusedError("refused", removed, "My Cloud could not replace this skill.");
     }
     const added = await install(skill, text.text);
     if (added.ok) return;
     if (previous) await install(previous.entry, previous.text).catch(() => null);
-    throw new CloudSendError("refused", refusal(added, "My Cloud could not add this skill."));
+    throw refusedError("refused", added, "My Cloud could not add this skill.");
   }
 
   async function sendSkill(ctx, row) {
@@ -796,7 +812,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     if (there && parts.length === 1 && parts[0] === "on") {
       const skill = (await localSkills(ctx, row.bot)).get(row.id);
       const set = await ctx.session.call("PATCH", `/api/bots/${row.bot}/skills/${row.id}`, { enabled: skill?.enabled === true });
-      if (!set.ok) throw new CloudSendError("refused", refusal(set, "My Cloud could not switch this skill."));
+      if (!set.ok) throw refusedError("refused", set, "My Cloud could not switch this skill.");
     } else {
       if (!ctx.cloudBots.has(row.bot)) throw new CloudSendError("no_bot", "Its bot is not on My Cloud.");
       await putSkill(ctx, row.bot, row.id, Boolean(there));
@@ -813,7 +829,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const doc = await localJson(`/api/bots/${botId}/memory/file?path=${encodeURIComponent(path)}`);
       if (!doc?.exists || typeof doc.text !== "string" || !doc.text.trim()) continue;
       const put = await ctx.session.call("PUT", `/api/bots/${botId}/memory/file`, { path, text: doc.text });
-      if (!put.ok) throw new CloudSendError("refused", refusal(put, "My Cloud could not save a memory note."));
+      if (!put.ok) throw refusedError("refused", put, "My Cloud could not save a memory note.");
     }
   }
 
@@ -830,7 +846,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       body = { language: config.language };
     } else return;
     const saved = await ctx.session.call("PATCH", "/api/config", body);
-    if (!saved.ok) throw new CloudSendError("refused", refusal(saved, "My Cloud could not save this setting."));
+    if (!saved.ok) throw refusedError("refused", saved, "My Cloud could not save this setting.");
     done(ctx, row.key, parts);
     ctx.result.settings.push(row.label);
   }
@@ -842,7 +858,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     const kept = botsOnCloud(login.bots, ctx.cloudBots);
     const saved = await ctx.session.call("POST", "/api/logins", { site: login.site, username: login.username, password: login.password,
       ...(login.totp ? { totp: login.totp } : {}), bots: kept, exactHost: login.exactHost === true });
-    if (!saved.ok) throw new CloudSendError("refused", refusal(saved, "My Cloud could not save the login."));
+    if (!saved.ok) throw refusedError("refused", saved, "My Cloud could not save the login.");
     if (Array.isArray(login.bots) && kept.length < login.bots.length) ctx.result.notes.push({ kind: "narrowed", login: row.label });
     done(ctx, row.key);
     ctx.result.logins++;
@@ -860,7 +876,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     for (const [vault, bots] of Object.entries(onePassword.grants ?? {})) {
       if (!VAULT_ID.test(vault)) continue;
       const granted = await ctx.session.call("PATCH", `/api/logins/1password/vaults/${encodeURIComponent(vault)}`, { bots: botsOnCloud(bots, ctx.cloudBots) });
-      if (!granted.ok && granted.status !== 404) throw new CloudSendError("refused", refusal(granted, "My Cloud connected 1Password but could not keep its vaults to the same bots."));
+      if (!granted.ok && granted.status !== 404) throw refusedError("refused", granted, "My Cloud connected 1Password but could not keep its vaults to the same bots.");
     }
     done(ctx, row.key);
     ctx.result.onePassword = true;
@@ -882,7 +898,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       await assertTakesMove(session);
       const here = await localJson(scoped("/api/cloud-send/manifest"));
       const answer = await session.call("GET", scoped("/api/cloud-send/manifest"));
-      if (!answer.ok) throw new CloudSendError("unreachable", refusal(answer, "My Cloud did not answer. Try again."));
+      if (!answer.ok) throw refusedError("unreachable", answer, "My Cloud did not answer. Try again.");
       const removed = new Set([...Object.entries(kept.off).filter(([, why]) => why === "removed").map(([key]) => key),
         ...Object.entries(kept.chats).filter(([, cursor]) => cursor === "removed").map(([threadId]) => threadId),
         ...roomsRemovedThere(here, answer.body, kept.chats)]);
@@ -896,7 +912,14 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const chats = await checkChats({ localJson, session, threads });
       const attachments = await missingAttachments(session, Array.isArray(here.attachments) ? here.attachments : []);
       const secrets = team ? { equal: [], differs: [], missing: [] } : await checkSecrets({ handoff, session, skip: new Set([...removed, ...refused]) });
-      return { ok: checkPassed({ gaps, chats, attachments, secrets }), gaps, chats, attachments, secrets };
+      const ok = checkPassed({ gaps, chats, attachments, secrets });
+      // What the person knows things by, for what stayed behind (move-gaps.mjs): bots and rooms by name, and the bot or room
+      // each conversation the check found short belongs to.
+      const short = new Set([...gaps.conversations, ...gaps.settings, ...chats.filter((entry) => entry.missing || entry.unstamped || entry.path === "broken").map((entry) => entry.threadId)]);
+      const names = ok ? {} : Object.fromEntries([...(here.items ?? []).filter((item) => item.kind === "bot" && item.id).map((item) => [item.id, item.label]),
+        ...(here.rooms ?? []).map((room) => [`room:${room.id}`, room.name])]);
+      const owners = ok ? {} : Object.fromEntries((here.conversations ?? []).filter((head) => short.has(head.threadId)).map((head) => [head.threadId, head.bot ?? `room:${head.room}`]));
+      return { ok, gaps, chats, attachments, secrets, names, owners };
     } finally {
       try { await session.close(); } catch {}
     }

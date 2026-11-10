@@ -130,18 +130,23 @@ test("signed out with a place remembered: the clean workspace opens, and the pla
   assert.deepEqual(w.went, []);
 });
 
-test("from the clean workspace, this account's own Clouds open as they do for anyone: My Cloud, and another of its own", async () => {
-  const mine = { ...other(), machine: { status: "ready", origin: CLIENT }, clouds: [{ ...CLIENT_A, id: "own", primary: true }, { ...CLIENT_A, id: "c-b", origin: "https://omb-c-b.fly.dev", name: "Client B" }] };
+test("another account with a Cloud of its own: that Cloud opens, with no clean workspace, and the frozen copy stays frozen", async () => {
+  const clean = cleanSide(), w = world({ clean, state: { ...other(), machine: { status: "ready", origin: CLIENT } } });
+  await w.home.show();
+  assert.equal(clean.enters, 0);
+  assert.equal(w.home.current().origin, CLIENT);
+  assert.equal(w.went.at(-1)?.[1], CLIENT);
+});
+
+test("from the clean workspace, another Cloud of this account's own, or a team, opens as for anyone, and the frozen copy stays stopped", async () => {
+  const mine = { ...other(), machine: null, clouds: [{ ...CLIENT_A, id: "c-b", primary: false }] };
   const clean = cleanSide(), w = world({ clean, state: mine });
   await w.home.show();
   assert.equal(clean.enters, 1);
-  await w.home.openCloud();
-  assert.equal(w.went.at(-1)?.[1], CLIENT, "its My Cloud");
-  assert.equal(clean.on, true, "the frozen copy stays stopped");
-  assert.equal(clean.leaves, 0);
   await w.home.show({ place: { cloud: "c-b" } });
-  assert.equal(w.went.at(-1)?.[1], "https://omb-c-b.fly.dev");
+  assert.equal(w.went.at(-1)?.[1], CLIENT);
   assert.equal(clean.on, true);
+  assert.equal(clean.leaves, 0);
 });
 
 test("the Sign in that switches account ends this sign-in first, as the screen's did", async () => {

@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type Server, type Socket } from "node:net";
 
+import { cloudLendingRefusalText, ONLY_THE_PERSON, type CloudLendingRefusal } from "../cloud-lending.ts";
 import type { ChromeRoute } from "../device-links.ts";
 
 export type LentChromeProblem = "offline" | "not-lent" | "no-chrome" | "unreachable" | "not-allowed";
@@ -171,7 +172,9 @@ export class LentChromeDoors {
   }
 }
 
-export function lentChromeGuidance(problem: LentChromeProblem | "memory-changed", lender: ChromeLender | null): string {
+const CHROME = { room: false, fromBefore: false, device: "Chrome" as const };
+
+export function lentChromeGuidance(problem: LentChromeProblem | CloudLendingRefusal | "memory-changed" | "memory-changed-here", lender: ChromeLender | null): string {
   const name = lender?.name ?? "your computer";
   const device = lender?.device ?? "computer";
   switch (problem) {
@@ -184,8 +187,14 @@ export function lentChromeGuidance(problem: LentChromeProblem | "memory-changed"
     case "unreachable":
       return `Chrome on ${name} did not accept the connection; it may be waiting for the person to click Allow. Tell them in one sentence to check Chrome on that ${device}.`;
     case "not-allowed":
-      return "Someone else wrote in this conversation, so it can't use your Chrome. Start a new conversation to use it.";
+    case "someone-else":
+      return `${cloudLendingRefusalText("someone-else", CHROME)} ${ONLY_THE_PERSON}`;
+    case "not-owner":
+    case "unproven":
+      return `${cloudLendingRefusalText("not-owner", CHROME)} ${ONLY_THE_PERSON}`;
     case "memory-changed":
-      return "This bot's memory was changed in a conversation you didn't write. Review it in Memory to use your Chrome again.";
+      return `${cloudLendingRefusalText("memory-changed", CHROME)} ${ONLY_THE_PERSON}`;
+    case "memory-changed-here":
+      return `${cloudLendingRefusalText("not-owner", { ...CHROME, memoryChanged: true })} ${ONLY_THE_PERSON}`;
   }
 }

@@ -551,14 +551,16 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
     const events = await openSse(`${fixture.info.url}/api/events`);
     try {
       const queued = await send(botId, waiting, "RESTORE_AFTER_RELOAD", "reload_queue_receipt");
-      expect(queued.body).toMatchObject({ queued: true, reason: "capacity", threadId: waiting });
-      const receipt = { queueId: queued.body.queueId, text: "RESTORE_AFTER_RELOAD", reason: "capacity" };
+      // The receipt says why it waits, in words a client shows as they are, on every surface that carries it.
+      const why = "Queued. Starts when this bot has a free thread slot.";
+      expect(queued.body).toMatchObject({ queued: true, reason: "capacity", why, threadId: waiting });
+      const receipt = { queueId: queued.body.queueId, text: "RESTORE_AFTER_RELOAD", reason: "capacity", why };
       expect((await api("GET", "/api/bots?messages=0")).body.botQueuedMessages).toEqual({ [waiting]: [receipt] });
       const enqueued = await events.until((frame) => frame.kind === "bot.queued" && frame.queues[waiting]?.[0]?.queueId === receipt.queueId);
       expect(enqueued.queues).toEqual({ [waiting]: [receipt] });
       const cancelReceipt = (await send(botId, cancelled, "CANCEL_AFTER_RELOAD")).body;
       const restored = (await api("GET", "/api/bots")).body.botQueuedMessages;
-      expect(restored[cancelled]).toEqual([{ queueId: cancelReceipt.queueId, text: "CANCEL_AFTER_RELOAD", reason: "capacity" }]);
+      expect(restored[cancelled]).toEqual([{ queueId: cancelReceipt.queueId, text: "CANCEL_AFTER_RELOAD", reason: "capacity", why }]);
       expect((await api("DELETE", `/api/bots/${botId}/queue/${restored[cancelled][0].queueId}`, { threadId: waiting })).status).toBe(404);
       expect((await api("DELETE", `/api/bots/${botId}/queue/${restored[cancelled][0].queueId}`, { threadId: cancelled })).status).toBe(200);
       const removed = await events.until((frame) => frame.kind === "bot.queued" && frame.seq > enqueued.seq + 1 && !frame.queues[cancelled]);

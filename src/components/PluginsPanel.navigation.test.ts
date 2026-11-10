@@ -58,6 +58,9 @@ vi.mock("./XCard", () => ({
   X_CARD_SEARCH: "x twitter treg tweets posts",
   XCard: () => createElement("div", { "data-x-card": true }, "X (Twitter)"),
 }));
+vi.mock("./EmailCard", () => ({
+  EmailCard: () => createElement("div", { "data-email-card": true }, "Email"),
+}));
 vi.mock("./PostizCard", () => ({
   PostizCard: () => createElement("div", { "data-postiz-card": true }, "Postiz"),
 }));
@@ -74,6 +77,7 @@ const HIGHLEVEL_CONNECTED = 21;
 const X_CONNECTED = 22;
 const CATEGORY = 20;
 const POSTIZ_CONNECTED = 23;
+const EMAIL_CONNECTED = 24;
 const MODE = 4;
 const SEARCH = 15;
 const HOSTED_CONNECTED = 18;
@@ -231,6 +235,24 @@ describe("Apps pop-up", () => {
     fixture.overrides.set(SEARCH, "twitter");
     expect(wrapper(render().nodes).props.className).toBe("contents");
     fixture.overrides.set(SEARCH, "gmail");
+    expect(wrapper(render().nodes).props.className).toBe("hidden");
+  });
+  it("shows the email card in the grid for every install and counts it once a mailbox is connected", () => {
+    const wrapper = (tree: Node[]) => tree.find((node) => node.props["data-native-card"] === "email")!;
+    const { html, nodes: tree } = render();
+    expect(nodes(wrapper(tree)).some((node) => node.props.onConnection !== undefined && node.props.refreshKey !== undefined)).toBe(true);
+    expect(wrapper(tree).props.className).toBe("contents");
+    expect(html).toContain("1 connected");
+    fixture.overrides.set(EMAIL_CONNECTED, true);
+    expect(render().html).toContain("2 connected");
+    fixture.overrides.set(TAB, "connected");
+    expect(wrapper(render().nodes).props.className).toBe("contents");
+    fixture.overrides.set(EMAIL_CONNECTED, false);
+    expect(wrapper(render().nodes).props.className).toBe("hidden");
+    fixture.overrides.set(TAB, "marketplace");
+    fixture.overrides.set(SEARCH, "imap");
+    expect(wrapper(render().nodes).props.className).toBe("contents");
+    fixture.overrides.set(SEARCH, "twitter");
     expect(wrapper(render().nodes).props.className).toBe("hidden");
   });
   it("leaves out the managed install's dead Twitter tile, which the X card replaces, unless it is already connected", () => {

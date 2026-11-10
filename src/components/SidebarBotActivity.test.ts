@@ -128,6 +128,8 @@ describe("group attention", () => {
     const idle = group("g", "Crew", "g0");
     const dm = group("d", "Bot DM", "d0", { working: true, dm: true });
     expect(sidebarGroupActivityTasks(idle, [], {})).toEqual([]);
+    const resting = { ...idle, tasks: [{ threadId: "card", title: "Rests on a card", createdAt: 1, activity: "waiting-on-you" as const }] };
+    expect(sidebarGroupActivityTasks(resting, [], {})).toEqual([expect.objectContaining({ threadId: "card", activity: "waiting-on-you", busy: false })]);
     expect(sidebarGroupActivityTasks(dm, [], {})).toEqual([]);
   });
 

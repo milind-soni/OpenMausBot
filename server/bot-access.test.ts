@@ -1,8 +1,12 @@
+import type { IncomingMessage } from "node:http";
+import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { accessFromVisibility, atLeast, sharedLevel, visibilityFromAccess } from "../shared/bot-access.ts";
 import { accessOf, memberBot, memberLevel, parseBotAccess, VisibleSet } from "./bot-visibility.ts";
-import { levelNeeded, relayedSendRefusal, setupCardRefusal } from "./host/bot-access-gate.ts";
+import { readBody } from "./harness/http.ts";
+import { createBotAccessGate, levelNeeded, relayedSendRefusal, setupCardRefusal } from "./host/bot-access-gate.ts";
+import type { RequestAuth } from "./request-auth.ts";
 import { memberBotPatchViolation } from "./request-auth.ts";
 import { settledAccess } from "./routes/bot-access.ts";
 import type { BotRecord } from "./store.ts";
@@ -71,6 +75,9 @@ describe("what a request needs", () => {
   it("reads at view, writes at chat, sharing at edit, and leaves a bot's own PATCH and routines to their routes", () => {
     expect(levelNeeded("GET", "/api/threads/t1/messages")).toBe("view");
     expect(levelNeeded("POST", "/api/bots/b1/read")).toBe("view");
+    expect(levelNeeded("POST", "/api/bots/b1/bot-api")).toBe("edit");
+    expect(levelNeeded("POST", "/api/bots/b1/bot-api/new-key")).toBe("edit");
+    expect(levelNeeded("GET", "/api/bots/b1/bot-api")).toBe("view");
     expect(levelNeeded("POST", "/api/groups/g1/read")).toBe("view");
     expect(levelNeeded("POST", "/api/bots/b1/tasks/t1")).toBe("view");
     expect(levelNeeded("POST", "/api/bots/b1/tasks/delete")).toBe("chat");
@@ -106,6 +113,27 @@ describe("what a request needs", () => {
     expect(setupCardRefusal({ modelRequest: {} }, bot, level("chat"))).toMatch(/edit/);
     expect(setupCardRefusal({ profileRequest: {} }, bot, level("edit"))).toBeNull();
     expect(setupCardRefusal({}, bot, level("chat"))).toBeNull();
+  });
+
+  it("keeps a view-only refusal's key and bot name on both path and parsed-body checks", async () => {
+    const bot = { id: "pay", threadId: "t-pay", visibility: { people: [BOB] }, access: { everyone: "none" as const, people: { [BOB]: "view" as const } } };
+    const visible = new VisibleSet([bot], [], { kind: "member", email: BOB }, undefined, { of: () => undefined, person: null });
+    const auth: RequestAuth = {
+      kind: "session", via: "bearer", scopes: ["client"],
+      session: { id: "bob", email: BOB, tokenHash: "0".repeat(64), label: "Bob", scopes: ["client"], createdAt: 0, lastSeenAt: 0, expiresAt: 1 },
+    };
+    const gate = createBotAccessGate({
+      botName: () => "Payroll", roomBots: () => undefined, threadOwner: () => ({ bot: "pay" }),
+      routine: () => undefined, run: () => undefined, routineWriter: () => undefined,
+    });
+    const stream = new PassThrough();
+    const req = stream as unknown as IncomingMessage;
+    const refusal = { error: "You can view Payroll, not chat with it.", errorKey: "serverError.bot.viewOnly", errorParams: { bot: "Payroll" } };
+    expect(gate(req, auth, "POST", "/api/bots/pay/messages", visible)).toEqual(refusal);
+    expect(gate(req, auth, "POST", "/api/groups", visible)).toBeNull();
+    const body = readBody(req);
+    stream.end(JSON.stringify({ memberIds: ["pay"] }));
+    await expect(body).rejects.toMatchObject({ message: refusal.error, status: 403, errorKey: refusal.errorKey, errorParams: refusal.errorParams });
   });
 
   it("relays another app's message only for someone who can chat with the bot", () => {

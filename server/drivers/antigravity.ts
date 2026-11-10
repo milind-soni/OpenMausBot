@@ -87,7 +87,6 @@ const support: AcpSupport = {
   sessionScopedApproval: true,
   resumeMethod: "resume",
   clientFileSystem: true,
-  redactStderr: true,
   sanitizeToolPayload: true,
 
   resolveCommand: async (env, config, instanceId) => {

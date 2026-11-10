@@ -85,6 +85,17 @@ describe("the sidebar tiles", () => {
   });
 });
 
+describe("a tile with a dot", () => {
+  it("lands on the thread the dot is about: a tile has no row under it to reach it from", () => {
+    const withWork = bot({ threadId: "main", mainThreadId: "main", unread: true, tasks: [{ threadId: "main", title: "Main", createdAt: 1 }, { threadId: "work", title: "@Scout · work", createdAt: 2, unread: true }] });
+    let tree: ReactNode;
+    function Capture() { tree = tile({ ...props(withWork), primary: true }); return tree; }
+    renderToStaticMarkup(createElement(Capture));
+    (find(tree, "data-sidebar-tile")!.props.onKeyDown as (event: KeyboardEvent) => void)({ key: "Enter", preventDefault: vi.fn() } as unknown as KeyboardEvent);
+    expect(dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "mausbot", threadId: "work" });
+  });
+});
+
 describe("the tile grid", () => {
   const main = bot({ chiefOfStaff: true });
   const pins = (count: number) => Array.from({ length: count }, (_, index) => bot({ id: `pin${index}`, name: `Pin ${index}`, pinned: true }));

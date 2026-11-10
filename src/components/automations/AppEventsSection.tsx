@@ -2,7 +2,7 @@ import { attemptLine, skippedToday } from "@/lib/app-automations";
 import { useAppTriggers, type AppTrigger } from "@/lib/app-triggers";
 import { lastWhen } from "@/lib/automations";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 
 const RECENT = 6;
 
@@ -30,7 +30,7 @@ export function AppEventsSection({ trigger }: { trigger: AppTrigger }) {
         })}</ul>}
       {service?.eventsPerDay && (
         <p className="mt-2 text-[11px] text-ink-tertiary">
-          {t("automations.app.limit", { count: service.eventsPerDay.toLocaleString(), place: t(service.plan === "cloud" ? "automations.app.placeCloud" : "automations.app.placeDesktop") })}
+          {t("automations.app.limit", { count: service.eventsPerDay.toLocaleString(intlLocale()), place: t(service.plan === "cloud" ? "automations.app.placeCloud" : "automations.app.placeDesktop") })}
         </p>
       )}
     </section>

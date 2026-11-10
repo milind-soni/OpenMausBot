@@ -23,6 +23,7 @@ export interface ChromeRailBridge {
 export interface ChromeRail {
   attach(window: unknown): void;
   refresh(): void;
+  holdOpen(on: boolean): void;
   expand(on: boolean): void;
   owns(event: unknown): boolean;
   shown(): boolean;

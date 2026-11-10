@@ -1,3 +1,4 @@
+import { type ServerText } from "../shared/server-text.ts";
 // Security invariants: only an "answer" may name an engine (a decline, or typed words matching no option, is "Not now"),
 // so a bot's own shell with decline-only service trust can never switch the engine or resend the person's message.
 // A request the job runtime still holds is never sent again: the runtime reruns its root itself.
@@ -100,9 +101,9 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
   /** A second press while the engine is read is the same answer, never another. */
   const answering = new Map<string, Promise<QuotaAnswer>>();
 
-  const notice = (threadId: string, text: string, ok: boolean, setup = false): void => {
+  const notice = (threadId: string, text: string, ok: boolean, setup = false, words?: ServerText): void => {
     // `notice:` makes it a status row every client shows, never a folded tool step; `setup`: signing in fixes it.
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ok, ...(setup ? { setup: true } : {}) } });
+    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ...(words ? { nameCode: words.key, nameParams: words.params } : {}), ok, ...(setup ? { setup: true } : {}) } });
   };
 
   const openCard = (threadId: string): Message | undefined => store.messagesFor(threadId)
@@ -172,19 +173,19 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     const why = scope === "signed-out" ? `while ${nameOf(current)} is signed out` : "after hitting the usage limit";
     const held = heldBy(botId, threadId, rootOf(threadId, request));
     const original = held ? undefined : resendable(store, threadId, request.messageId);
-    if (held === "card") notice(threadId, `switched to ${name}. Your request waits on a card above and continues on ${name} once you act on it.`, true);
-    else if (held === "runtime") notice(threadId, `switched to ${name}. Your request is still under way here and continues on ${name}.`, true);
-    else if (held === "busy") notice(threadId, `switched to ${name}. This conversation is working, so your message was not sent again.`, true);
+    if (held === "card") notice(threadId, `switched to ${name}. Your request waits on a card above and continues on ${name} once you act on it.`, true, false, { key: "chat.notice.backupCardWaiting", params: { name } });
+    else if (held === "runtime") notice(threadId, `switched to ${name}. Your request is still under way here and continues on ${name}.`, true, false, { key: "chat.notice.backupRequestUnderWay", params: { name } });
+    else if (held === "busy") notice(threadId, `switched to ${name}. This conversation is working, so your message was not sent again.`, true, false, { key: "chat.notice.backupConversationBusy", params: { name } });
     else if (held === "question") {
-      notice(threadId, `switched to ${name}. A teammate's question is waiting for your answer in this conversation, so your message was not sent again. Answer it, then send your message again.`, false);
+      notice(threadId, `switched to ${name}. A teammate's question is waiting for your answer in this conversation, so your message was not sent again. Answer it, then send your message again.`, false, false, { key: "chat.notice.backupQuestionWaiting", params: { name } });
     } else if (!original) {
-      notice(threadId, `switched to ${name}, but your message could not be found to send again. Send it again.`, false);
+      notice(threadId, `switched to ${name}, but your message could not be found to send again. Send it again.`, false, false, { key: "chat.notice.backupMessageMissing", params: { name } });
     } else {
-      notice(threadId, `continuing on ${name} ${why}`, true);
+      notice(threadId, `continuing on ${name} ${why}`, true, false, { key: scope === "signed-out" ? "chat.notice.backupContinuingSignedOut" : "chat.notice.backupContinuingLimit", params: { name, engine: nameOf(current) } });
       try {
         await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId));
       } catch (error) {
-        if (store.taskByThread(botId, threadId)) notice(threadId, `could not continue on ${name}: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false);
+        if (store.taskByThread(botId, threadId)) notice(threadId, `could not continue on ${name}: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false, false, { key: "chat.notice.backupCouldNotContinue", params: { name, error: (error instanceof Error ? error.message : String(error)).slice(0, 200) } });
       }
     }
     return true;

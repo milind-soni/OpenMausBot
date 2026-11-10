@@ -7,14 +7,17 @@ import type { Assignment } from "./types.ts";
 export const requesterDecides = (a: Pick<Assignment, "level" | "requester" | "origin">): boolean =>
   a.level === "full" && a.requester.kind === "bot_turn" && a.origin.kind !== "outside";
 
-// What only the person can do, however a bot words it: sign in (or pass a sign-in code), pay, or hand over a secret or
-// an account of their own. English and German stems; anything else a bot can decide.
+// What only the person can do, however a bot words it: sign in (or pass a sign-in code), pay, hand over a secret or an
+// account of their own, or say which of their accounts, mailboxes or logins to use. English and German stems; anything
+// else a bot can decide.
 const PERSON_ONLY = new RegExp([
   "sign(?:ed|ing)?[- ]?(?:in|on)", "log(?:ged|ging)?[- ]?in", "login", "2fa", "two[- ]factor", "one[- ]time (?:code|password)", "otp\\b",
   "verification code", "security code", "captcha", "passkey", "password", "passcode", "secret", "api[- ]?key", "access token",
   "credential", "pay\\b", "pays\\b", "paying", "payment", "purchas", "buy\\b", "buying", "credit card", "card details",
   "(?:your|their) (?:own )?accounts?\\b", "connect your", "anmeld", "einlogg", "passwort", "kennwort", "zugangsdaten", "schlüssel",
   "bezahl", "zahlung", "kaufen", "kreditkarte", "(?:ihr|dein)(?:em|en|e)? konto",
+  "which (?:of (?:your|their|his|her) )?(?:(?!of |the )[\\w-]+ ){0,3}[\\w-]*(?:accounts?|mailbox(?:es)?|inbox(?:es)?|logins?)\\b",
+  "welche[snm]? (?:(?!des |der |dem |von )[\\w-]+ ){0,3}[\\w-]*(?:konto|konten|postf|login|zugang|anmeldung)",
 ].map((stem) => `\\b${stem}`).join("|"), "iu");
 
 /** Whether a question asks for something no bot can give: a sign-in, a payment, a secret or the person's own account. */

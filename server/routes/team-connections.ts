@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 // A Team Cloud's connections, the team's or each person's.
 //   PUT /api/team/connection-scopes { kind: "app" | "mcp", id, scope: "team" | "person" }   an admin: who connects it
 //   GET /api/team/my-connections                                                           the person's own, and what is theirs to connect
@@ -154,9 +155,9 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
         const body = await readBody(req, 4096);
         const value = typeof body?.value === "string" ? body.value.trim() : "";
         if (value.length < 8 || value.length > 512 || !/^[\x21-\x7e]+(?: [\x21-\x7e]+)?$/.test(value)) return json(res, 400, { error: "Paste the key alone." });
-        if (body?.url !== undefined && (typeof body.url !== "string" || !body.url)) return json(res, 400, { error: "Send the MCP server address as text." });
+        if (body?.url !== undefined && (typeof body.url !== "string" || !body.url)) return json(res, 400, { ...userError("serverError.mcp.addressAsText") });
         const current = server(name);
-        if (!current || !isRemoteMcpServer(current) || (body?.url !== undefined && current.url !== body.url)) return json(res, 409, { error: "The MCP server address changed. Reload the server and try again." });
+        if (!current || !isRemoteMcpServer(current) || (body?.url !== undefined && current.url !== body.url)) return json(res, 409, { ...userError("serverError.mcp.addressChanged") });
         const headerKeys = Object.keys(current.headers);
         deps.host.people.putKey(person, email, name, { url: current.url, ...personKeyHeader(headerKeys, value) });
         return json(res, 200, { ok: true });

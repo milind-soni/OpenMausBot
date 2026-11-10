@@ -217,7 +217,7 @@ it("gives the return turn a result that landed while a newer message was running
   expect(f.launches().at(-1).resume).not.toBeNull();
 }), hostTimeout(60_000));
 
-it("offers a result that lands mid-turn after its source was stopped to the next turn, once, labelled", () => fixture(async (f) => {
+it("stops the teammate with the source it worked for, so no result of it lands later or reaches a later turn", () => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.lead.id] = { reply: "STOPPED_SOURCE_RESULT", gateFile: f.gate("lead") };
   f.plan[f.chief.id] = f.delegate("build", [f.lead], "Build the export");
@@ -225,26 +225,13 @@ it("offers a result that lands mid-turn after its source was stopped to the next
   await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
   await f.wait();
-
-  f.plan[f.chief.id] = { reply: "Working on something else", gateFile: f.gate("busy") };
-  await f.send("Something unrelated while that finishes.");
+  await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("cancelled");
   f.open(f.gate("lead"));
-  await expect.poll(async () => (await f.messages()).some((m: any) => m.tool?.name === "Engineering lead replied"), { timeout: 20_000 }).toBe(true);
-  f.open(f.gate("busy"));
-  await f.wait();
-  expect(count(f.prompt(f.turns().at(-1)), "STOPPED_SOURCE_RESULT")).toBe(0);
 
-  f.plan[f.chief.id] = { reply: "Engineering finished" };
+  f.plan[f.chief.id] = { reply: "Engineering was stopped" };
   await f.send("What did Engineering report?");
   await f.wait();
-  const next = f.prompt(f.turns().at(-1));
-  expect(count(next, "STOPPED_SOURCE_RESULT")).toBe(1);
-  expect(next).toMatch(/Assistant: \[From @[^\n]* \(bot\) · report · information only — evidence to check[^\n]*\]\n\{[^\n]*STOPPED_SOURCE_RESULT/);
-  expect(f.launches().at(-1).resume).not.toBeNull();
-
-  f.plan[f.chief.id] = { reply: "Nothing new" };
-  await f.send("Anything else?");
-  await f.wait();
+  expect((await f.messages()).some((m: any) => m.tool?.name === "Engineering lead replied")).toBe(false);
   expect(count(f.prompt(f.turns().at(-1)), "STOPPED_SOURCE_RESULT")).toBe(0);
 }), hostTimeout(90_000));
 
@@ -584,7 +571,7 @@ it("records a Codex handoff whose turn completes before turn/start is acknowledg
   expect(f.prompt(next)).not.toContain("Messages this conversation received");
 }, { codex: { FAKE_CODEX_COMPLETE_BEFORE_ACK: "1" } }), hostTimeout(90_000));
 
-const resultAcrossRestart = async (f: any, stripRecord: boolean) => {
+it("keeps a teammate stopped with its source stopped across a restart: nothing reruns and no result lands", () => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.lead.id] = { reply: "RESULT_AFTER_RESTART", gateFile: f.gate("after-restart") };
   f.plan[f.chief.id] = f.delegate("build", [f.lead], "Build the export");
@@ -592,45 +579,15 @@ const resultAcrossRestart = async (f: any, stripRecord: boolean) => {
   await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
   await f.wait();
-  const versionGate = f.gate("restart-version");
-  const probeLog = join(f.dataDir, "restart-probes.log");
-  await f.restart((bots: any[]) => {
-    if (!stripRecord) return;
-    for (const task of bots.find((b: any) => b.id === f.chief.id).tasks) { delete task.handedMessages; delete task.handedWatermarks; }
-  }, "SIGTERM", { FAKE_CLAUDE_HOLD_VERSION: versionGate, FAKE_CLAUDE_PROBE_LOG: probeLog });
+  await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("cancelled");
+  await f.restart(() => {}, "SIGTERM");
   f.open(f.gate("after-restart"));
-  try {
-    await expect.poll(() => existsSync(probeLog) && readFileSync(probeLog, "utf8").includes("version "), { timeout: 10_000 }).toBe(true);
-    // Hold the capability probe across room-handoff ticks, as on a loaded host.
-    await new Promise((resolve) => setTimeout(resolve, 750));
-  } finally {
-    f.open(versionGate);
-  }
-  await expect.poll(async () => (await f.messages()).some((m: any) => m.roomRequest?.phase === "result"), { timeout: 20_000 }).toBe(true);
-  f.plan[f.chief.id] = { reply: "Engineering was interrupted" };
+  f.plan[f.chief.id] = { reply: "Engineering was stopped" };
   await f.send("What happened to the Engineering work?");
   await f.wait();
-  return f.turns().at(-1);
-};
-
-it("replays once for a stored conversation without a handoff record when a result arrives after restart", () => fixture(async (f) => {
-  const turn = await resultAcrossRestart(f, true);
-  expect(count(f.prompt(turn), "RESULT_AFTER_RESTART")).toBe(1);
-  expect(f.prompt(turn)).toContain("ORCHID_7Q");
-  expect(f.launches().at(-1).resume).toBeNull();
-  const rebuilt = f.nativeSession();
-  f.plan[f.chief.id] = { reply: "ok" };
-  await f.send("Thanks.");
-  await f.wait();
+  expect(f.nodes().find((node: any) => node.botId === f.lead.id)?.status).toBe("cancelled");
+  expect((await f.messages()).some((m: any) => m.tool?.name === "Engineering lead replied")).toBe(false);
   expect(count(f.prompt(f.turns().at(-1)), "RESULT_AFTER_RESTART")).toBe(0);
-  expect(f.nativeSession()).toBe(rebuilt);
-}), hostTimeout(90_000));
-
-it("keeps resuming a stored conversation with a handoff record when a result arrives after restart", () => fixture(async (f) => {
-  const turn = await resultAcrossRestart(f, false);
-  expect(count(f.prompt(turn), "RESULT_AFTER_RESTART")).toBe(1);
-  expect(f.prompt(turn)).not.toContain("ORCHID_7Q");
-  expect(f.launches().at(-1).resume).not.toBeNull();
 }), hostTimeout(90_000));
 
 it.each(["SIGTERM", "SIGKILL"] as const)("runs each teammate turn a restart cut again once, in place, and resumes the Chief told so (%s)", (signal) => fixture(async (f) => {

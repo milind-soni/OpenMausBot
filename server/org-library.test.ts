@@ -227,6 +227,34 @@ describe("release files", () => {
   });
 });
 
+describe("adding from the shelf on a Starter Cloud", () => {
+  it("answers 409 at the limit, adds nothing, reports no broken package, and adds it once there is room", async () => {
+    const app = await installation();
+    for (let i = 0; i < 5; i++) app.store.createBot({ name: `Bot ${i}` });
+    const { createBotLimit } = await import("./host/starter-bot-limit.ts");
+    let starter = true;
+    const deps = { ...app.importDeps, botLimit: createBotLimit({ starter: () => starter, bots: () => app.store.bots }) };
+    const library = app.open();
+    const team = release("full-team.v2.json");
+    app.writeBlob(team.bytes);
+    library.applyRelay(relay(catalog([entry(TEAM_ID, team)])));
+    await library.settled();
+    const before = app.store.bots.length;
+    app.posted.length = 0;
+
+    expect(library.add(TEAM_ID, deps)).toMatchObject({ ok: false, status: 409, code: "bot_limit", error: expect.stringContaining("upgrade this Cloud") });
+    await library.settled();
+    expect(app.store.bots).toHaveLength(before);
+    expect(app.posted.flatMap((report: { packages: Array<{ state: string }> }) => report.packages).filter((row) => row.state === "failed")).toEqual([]);
+    expect(app.readState().adding ?? {}).toEqual({});
+
+    starter = false;
+    const added = library.add(TEAM_ID, deps);
+    expect(added).toMatchObject({ ok: true, status: 201 });
+    expect(app.store.bots.length).toBe(before + 3);
+  });
+});
+
 describe("the relay", () => {
   it("acknowledges before any work, then reconciles and reports", async () => {
     const app = await installation();

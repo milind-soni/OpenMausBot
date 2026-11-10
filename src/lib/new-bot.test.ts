@@ -47,6 +47,18 @@ beforeEach(() => { fixture.track.mockReset(); fixture.openBot.mockReset(); });
 afterEach(() => { vi.unstubAllGlobals(); setTeamPeople(null); setTeamChats(null); });
 
 describe("New bot", () => {
+  it("leaves a plan's refusal to the popup: no error line beside it, and no onError", async () => {
+    const onError = vi.fn();
+    const request = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === "/api/bot-defaults") return { defaults: { profile: {}, memory: {}, skills: [], routines: [] }, modelSelection: { instanceId: "claude", model: "sonnet" }, suggestedName: "Pixel" };
+      if (init?.method === "POST") throw Object.assign(new Error("You've reached the 5 bots Starter includes."), { body: { code: "bot_limit" } });
+      return {};
+    });
+    expect(await newBot(request as never, { onError })).toEqual([]);
+    expect(onError).not.toHaveBeenCalled();
+    expect(fixture.track).not.toHaveBeenCalled();
+  });
+
   it("makes nothing for a User on a team, however it was asked for", async () => {
     setTeamPeople({ ...team, admin: false });
     const { calls, request } = server();

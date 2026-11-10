@@ -10,6 +10,7 @@ import { phonePairingLink } from "../../shared/pairing-link.ts";
 import { teamRoleScopes, type CloudTeam, type TeamMember } from "../cloud-team.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { formatPairingCode, type PublicSession, type SessionRecord, type SessionRegistry } from "../sessions.ts";
+import { userError } from "../user-errors.ts";
 import { TEAM_VIEW_REFUSAL } from "./device-views.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
@@ -62,10 +63,10 @@ async function phones(deps: TeamPhoneRouteDeps, { res, auth, json }: RouteContex
   const team = deps.team;
   if (!team) return PASS;
   const viewer = auth.kind === "session" ? sessionMember(auth.session) : null;
-  if (!viewer || auth.kind !== "session") return json(res, 403, { error: `Sign in to ${team.name} in the app first.` });
+  if (!viewer || auth.kind !== "session") return json(res, 403, userError("serverError.team.signInFirst", { team: team.name }));
   const listed = visiblePhones(deps.sessions.memberPhones(), viewer.member, auth.scopes);
   if (removing === null) return json(res, 200, { phones: listed, current: auth.session.id });
-  if (!listed.some((phone) => phone.id === removing) || !deps.sessions.revoke(removing)) return json(res, 404, { error: "no such phone" });
+  if (!listed.some((phone) => phone.id === removing) || !deps.sessions.revoke(removing)) return json(res, 404, userError("serverError.team.noSuchPhone"));
   return json(res, 200, { ok: true });
 }
 
@@ -75,15 +76,15 @@ async function pairing(deps: TeamPhoneRouteDeps, { req, res, path, method, auth,
   if (!team) return PASS;
   const owner = auth.kind === "session" ? sessionMember(auth.session) : null;
   if (!owner || auth.kind !== "session") {
-    return path === TEAM_PHONE_PAIRING_PATH ? json(res, 403, { error: `Sign in to ${team.name} in the app first.` }) : PASS;
+    return path === TEAM_PHONE_PAIRING_PATH ? json(res, 403, userError("serverError.team.signInFirst", { team: team.name })) : PASS;
   }
-  if (!deps.sessions.isLive(auth.session.id)) return json(res, 401, { error: "Your session ended. Sign in again before creating a pairing code." });
+  if (!deps.sessions.isLive(auth.session.id)) return json(res, 401, userError("serverError.team.sessionEnded"));
   if (path === "/api/auth/pairing") {
     const body = await readBody(req);
     if (body && typeof body === "object" && "view" in body && (body as { view: unknown }).view != null) return json(res, 409, { error: TEAM_VIEW_REFUSAL });
   }
   const scopes = teamRoleScopes(owner.member.role).filter((scope) => auth.scopes.includes(scope));
-  if (!scopes.length) return json(res, 403, { error: `Sign in to ${team.name} in the app first.` });
+  if (!scopes.length) return json(res, 403, userError("serverError.team.signInFirst", { team: team.name }));
   const opened = deps.sessions.openPairing({ scopes, label: PHONE_LABEL, member: owner.member, memberCheckedAt: owner.checkedAt });
   const base = deps.publicBase(req, auth);
   const code = formatPairingCode(opened.code);

@@ -115,7 +115,7 @@ test("a server that needs this computer goes marked as running on it, and a serv
   assert.deepEqual(added, [["notes", COMPUTER], ["fetch", COMPUTER], ["lent", { environmentId: "env-other", label: "Studio iMac" }]]);
   assert.deepEqual(body("/api/mcp/servers/docs"), { type: "http", url: "https://docs.example/mcp", headers: {}, enabled: true, runsOn: null });
   assert.equal(target.calls.some(([method, route]) => method === "PATCH" && route === "/api/mcp/servers/fetch"), false, "a server switched off here stays off there");
-  assert.deepEqual(result.runsHere, [{ id: "mcp:notes", label: "notes" }, { id: "mcp:fetch", label: "fetch", needs: "uvx" }, { id: "mcp:lent", label: "lent" }]);
+  assert.deepEqual(result.runsHere, [{ id: "mcp:notes", label: "notes" }, { id: "mcp:fetch", label: "fetch", needs: "uvx", off: true }, { id: "mcp:lent", label: "lent" }]);
   assert.deepEqual(result.moved.map((item) => item.id), ["mcp:docs"]);
 });
 

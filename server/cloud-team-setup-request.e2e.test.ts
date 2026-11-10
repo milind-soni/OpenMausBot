@@ -87,7 +87,7 @@ it("refuses another person's press while a member's request waits, and the owner
   const main = bot.mainThreadId;
   expect((await team.as(ada, "POST", `/api/bots/${bot.id}/setup-request`, { threadId: main })).status).toBe(200);
   expect(await team.as(owner, "POST", `/api/bots/${bot.id}/setup-request`, { threadId: main })).toEqual({
-    status: 409, body: { error: "Someone else is setting this bot up." },
+    status: 409, body: { error: "Someone else is setting this bot up.", errorKey: "serverError.setup.someoneElse" },
   });
   expect((await team.as(owner, "DELETE", `/api/bots/${bot.id}/setup-request`, { threadId: main })).status).toBe(200);
   expect(await waiting(owner, bot.id, main)).toBeUndefined();

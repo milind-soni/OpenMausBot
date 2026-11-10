@@ -288,4 +288,5 @@ engines. What stays one at a time, and what the person sees:
 - One bot's browser: a call from another thread waits, the row says who has it, and a holder quiet for a minute gives it
   to the waiter. The holder's next call is refused once, so nothing lands on a page it did not open.
 - One computer: a turn takes it at its first screen call, not when it starts, and keeps it until it ends.
-- Memory on a Linux Cloud: a turn that would run the machine out says "Waiting for memory" and starts by itself.
+- Memory on a Linux Cloud: a turn that would run the machine out says "Waiting for memory", with what runs and what is ahead of it, and starts by itself. `OMB_TEST_MEMORY_GATE=1` runs the gate in a fixture on any OS, on the memory `<data dir>/host-memory.json` says; `server/memory-order.e2e.test.ts` shows whose turn goes next.
+- A Cloud that just woke: a hand-off starts at once. `OMB_TEST_RESUME_CLOCK=1` lets a fixture move `Date.now()` on as a wake does, by writing milliseconds to `<data dir>/resume-clock-ms`; `server/handoff-wake.e2e.test.ts` uses it.

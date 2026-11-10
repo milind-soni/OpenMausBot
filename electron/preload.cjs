@@ -23,6 +23,16 @@ ipcRenderer.on("chat:open", (_event, link) => {
   for (const listener of chatLinkListeners) listener(link);
 });
 
+let pendingNotificationOpen = null;
+const notificationOpenListeners = new Set();
+ipcRenderer.on("desktop-notifications:open", (_event, target) => {
+  if (!notificationOpenListeners.size) {
+    pendingNotificationOpen = target;
+    return;
+  }
+  for (const listener of notificationOpenListeners) listener(target);
+});
+
 // Only fixed actions are retained, never a destination supplied by a renderer.
 const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings", "cloud-add", "cloud-add-howto"]);
 let pendingSettingsAction = null;
@@ -64,7 +74,7 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
-const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "accountSheet", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame"]);
+const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
@@ -122,6 +132,14 @@ if (isLocalPage && !desktopRemoteClient && process.argv.includes("--omb-company-
 
 // main passes app.getVersion(): a server's page carries that server's version, so About asks this for the app's own.
 const appVersion = (process.argv.find((arg) => arg.startsWith("--omb-app-version="))?.slice("--omb-app-version=".length) ?? "").slice(0, 64);
+
+/** ipcRenderer wraps a main-process throw in "Error invoking remote method"; the page shows the text verbatim. */
+function invokeWithPlainError(channel, ...args) {
+  return ipcRenderer.invoke(channel, ...args).catch((error) => {
+    const message = String(error?.message ?? error);
+    throw new Error(message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, ""));
+  });
+}
 
 const bridge = {
   platform: process.platform,
@@ -366,13 +384,9 @@ const bridge = {
   },
   pickFolder: (current) => ipcRenderer.invoke("desktop:pick-folder", current),
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
-  /** ipcRenderer wraps a main-process throw in "Error invoking remote method"; the bubble shows the text verbatim. */
-  saveFile: (filePath) =>
-    ipcRenderer.invoke("desktop:save-file", filePath).catch((error) => {
-      const message = String(error?.message ?? error);
-      throw new Error(message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, ""));
-    }),
+  saveFile: (filePath) => invokeWithPlainError("desktop:save-file", filePath),
   revealInFolder: (filePath) => ipcRenderer.invoke("desktop:reveal-file", filePath),
+  openHtmlInBrowser: (source, name) => invokeWithPlainError("desktop:open-html", source, name),
   // This app's own logs folder (server.log, desktop-crashes.log, updater.log); the page names no path.
   openLogsFolder: () => ipcRenderer.invoke("desktop:open-logs"),
   openAtLogin: {
@@ -473,9 +487,16 @@ const bridge = {
     teams: () => ipcRenderer.invoke("cloud-send:teams"),
     moveToTeam: (botId, teamId, name) => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-move", String(botId), String(teamId), String(name ?? "")) : Promise.reject(new Error("Choose Move to move the bot.")),
+    moveToTeamCoded: (botId, teamId, name) => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:team-move-coded", String(botId), String(teamId), String(name ?? "")) : Promise.reject(new Error("Choose Move to move the bot.")),
     teamRetry: () => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-retry") : Promise.reject(new Error("Choose Try again to move.")),
     openTeam: teamId => ipcRenderer.invoke("cloud-send:team-open", String(teamId)),
+    // A team's own page: its person's bots on My Cloud, and one moved in once they agree in main's own confirm.
+    teamBring: () => ipcRenderer.invoke("cloud-send:team-bring"),
+    teamBringMove: botId => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:team-bring-move", String(botId)) : Promise.reject(new Error("Choose Move to move the bot.")),
+    teamBringStatus: () => ipcRenderer.invoke("cloud-send:team-bring-status"),
     // Settings → MausBot Cloud, Advanced: "Keep this computer's bots on this computer".
     keepHere: () => ipcRenderer.invoke("one-home:keep"),
     setKeepHere: on => isLocalPage || navigator.userActivation?.isActive === true
@@ -501,6 +522,12 @@ const bridge = {
   accounts: process.argv.includes("--omb-company-desktop=1") ? {
     list: () => ipcRenderer.invoke("accounts:list"),
     signOut: id => ipcRenderer.invoke("accounts:sign-out", String(id)),
+    addStart: email => ipcRenderer.invoke("accounts:add-start", String(email)),
+    addVerify: code => ipcRenderer.invoke("accounts:add-verify", String(code)),
+    addBrowser: () => ipcRenderer.invoke("accounts:add-browser"),
+    addReopen: () => ipcRenderer.invoke("accounts:add-reopen"),
+    addResult: () => ipcRenderer.invoke("accounts:add-result"),
+    addCancel: () => ipcRenderer.invoke("accounts:add-cancel"),
     sheetPending: () => ipcRenderer.invoke("accounts:sheet-pending"),
     sheetClosed: () => ipcRenderer.invoke("accounts:sheet-closed"),
     onChanged: cb => {
@@ -613,6 +640,19 @@ const bridge = {
     // when it was missing. Nothing asks main any more: never the first showing today, so that page reports nothing.
     shown: () => Promise.resolve(false),
   },
+  // A bot's notification, shown by main so its click outlives this page; older apps have no such key and the page shows its own.
+  desktopNotifications: {
+    show: (note) => ipcRenderer.invoke("desktop-notifications:show", note),
+    onOpen: (cb) => {
+      notificationOpenListeners.add(cb);
+      if (pendingNotificationOpen) {
+        const target = pendingNotificationOpen;
+        pendingNotificationOpen = null;
+        cb(target);
+      }
+      return () => notificationOpenListeners.delete(cb);
+    },
+  },
   desktopAnalytics: {
     enabled: () => {
       if (analyticsChoice === undefined) analyticsChoice = savedAnalyticsChoice();
@@ -633,6 +673,7 @@ const bridge = {
       languageListeners.add(listener);
       return () => { languageListeners.delete(listener); };
     },
+    shown: language => { ipcRenderer.send("desktop-language:shown", String(language)); },
   },
 };
 

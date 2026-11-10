@@ -5,7 +5,7 @@ import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-
 import { drainCoalesceHead } from "./admission.ts";
 import { spokenLineFields } from "./live-call-record.ts";
 import { workOriginSchema, type WorkOrigin } from "./peer-provenance.ts";
-import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
+import type { BotQueuedMessages, ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { BotRecord, Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 
@@ -42,10 +42,12 @@ interface QueueEntry {
     /** The person's row already in the transcript, steered into a turn that was stopped before it read it: it runs as
      * it is, never as a second copy. */
     rowId?: string;
+    /** Bot ids picked from the @ list. */
+    mentions?: string[];
   }>;
 }
 
-export type SteerQueueHead = Pick<QueueEntry["items"][number], "trigger" | "sender" | "peerAsk" | "origin">;
+export type SteerQueueHead = Pick<QueueEntry["items"][number], "trigger" | "sender" | "peerAsk" | "origin" | "mentions">;
 
 const queues = new Map<string, QueueEntry>();
 
@@ -83,12 +85,12 @@ const changed = () => {
 };
 
 /** Public pending chips only: never expose provider prompts or reply context. */
-export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string) => boolean):
-  Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason }>> {
+export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string) => boolean, whyHeld: (threadId: string, reason: SteerQueueReason | undefined) => string | undefined = () => undefined):
+  BotQueuedMessages {
   return Object.fromEntries([...queues]
     .filter(([threadId, entry]) => ownsThread(entry.botId, threadId))
     .map(([threadId, entry]) => [threadId, entry.items.filter((item) => !item.rowId).map((item) => ({
-      queueId: item.messageId, text: item.text, ...(item.reason ? { reason: item.reason } : {}),
+      queueId: item.messageId, text: item.text, ...(item.reason ? { reason: item.reason, why: whyHeld(threadId, item.reason) } : {}),
     }))]));
 }
 
@@ -105,7 +107,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number; mentions?: string[] } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -129,6 +131,7 @@ export function queueSteeredMessage(
     ...(options.reaction ? { reaction: options.reaction } : {}),
     ...(options.relay ? { relay: options.relay } : {}),
     ...(options.rowId ? { rowId: options.rowId } : {}),
+    ...(options.mentions?.length ? { mentions: options.mentions } : {}),
   };
   saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
   // `first`: ahead of everything queued but the person's own messages sent before it.
@@ -226,6 +229,7 @@ export function drainSteeredMessages(
     if (!last) continue;
     // A blank line keeps each message its own Markdown block; otherwise a trailing attachment tag merges into the next and stops being an image.
     const prompt = group.map((item) => item.prompt).join("\n\n");
+    const mentions = group.flatMap((item) => item.mentions ?? []);
     const running = run(
       entry.botId,
       threadId,
@@ -234,7 +238,7 @@ export function drainSteeredMessages(
       appended.map((message) => message.id),
       // One unattended line makes the turn unattended: a person's words in the group cannot re-attend a bot's own.
       group.some((item) => item.unattended === true),
-      { trigger: group[0].trigger, sender: group[0].sender, peerAsk: group[0].peerAsk, origin: group[0].origin },
+      { trigger: group[0].trigger, sender: group[0].sender, peerAsk: group[0].peerAsk, origin: group[0].origin, ...(mentions.length ? { mentions } : {}) },
     );
     void Promise.resolve(running).then(
       () => settleChatFollowups(ids, null),

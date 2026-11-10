@@ -5,6 +5,7 @@ import { currentTeamPeople, departmentOwner, type TeamPeople } from "@/state/tea
 import { openBot } from "@/state/thread-navigation";
 import type { BotSource } from "./analytics-allowlist";
 import { BotCreationDraft } from "./bot-creation-draft";
+import { isBotLimitRefusal } from "./bot-limit";
 import { createConfiguredBot } from "./create-configured-bot";
 import { t } from "./i18n";
 import { botCreated } from "./product-events";
@@ -74,6 +75,7 @@ export async function makeNewBot(action: Extract<Action, { type: "newBot" }>, bo
   try {
     made = await createNewBot(action.section, bots, currentTeamPeople(), request);
   } catch (cause) {
+    if (isBotLimitRefusal(cause)) return;
     const message = t("newBot.failed", { error: cause instanceof Error ? cause.message : String(cause) });
     if (action.onError) action.onError(message);
     else dispatch({ type: "error", message });

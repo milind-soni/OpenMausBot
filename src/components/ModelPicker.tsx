@@ -1,12 +1,13 @@
+import { engineDisplayName } from "@/lib/engine-rail";
+import { modelLabel, modelProvider } from "@/lib/model-label";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, KeyRound, Loader2, RefreshCw, X } from "lucide-react";
 import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
-import type { ModelVariantOption } from "../../shared/runtime-events";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, modelsAwaitEngine, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
-import { modelName, simpleModelMenu } from "@/lib/simple-model-menu";
+import { modelName, simpleModelMenu, variantSuffix } from "@/lib/simple-model-menu";
 import { choiceIsSelected, modelChoices, modelSelectionForPick, takesTypedModels, withTypedModels, type ModelChoice } from "@/lib/model-choices";
 export { modelSelectionForPick } from "@/lib/model-choices";
 import { pickerPlacement, type PickerPlacement } from "@/lib/picker-placement";
@@ -25,7 +26,8 @@ import { SimpleModelMenu, type SimpleThinking } from "./SimpleModelMenu";
 import { apiKeysLabel, ClaudeAccountSelect, engineStatus, FollowBotModelRow, ModelEngineRail, ModelRow, ModelSearch } from "./ModelPickerFull";
 import { MENU_LABEL, MENU_LINE, MENU_ROW, MENU_SEPARATOR, MENU_STROKE, MENU_TRAILING } from "./menu-recipe";
 import { modelMenuKey, modelMenuPointerMove } from "./model-menu-keys";
-import { offersReasoning, useRefocusAfterPick, variantChoices } from "./model-picker-reasoning";
+import { lockedWhileBusy, offersReasoning, useRefocusAfterPick, variantChoices, variantLabel } from "./model-picker-reasoning";
+import { BusyModelMenu } from "./ModelPickerBusyMenu";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
@@ -35,17 +37,11 @@ import { useAiSwitch } from "@/lib/ai-switch";
 import { usePickerPane } from "@/lib/model-picker-pane";
 import { threadsOnOwnModel } from "../../shared/thread-model";
 import { ThreadModelsLine } from "./ThreadModelsLine";
+import { USAGE_WARN_WIDENS, UsageBars, UsageMenuRows } from "./EngineUsage";
 import { Select } from "./Select";
 
 const COMPACT_MODEL_COUNT = 5;
 
-function modelLabel(instance: InstanceInfo | undefined, model: string): string {
-  return instance?.models.options.find((option) => option.id === model)?.label ?? model;
-}
-
-function modelProvider(instance: InstanceInfo | undefined, model: string): string | undefined {
-  return instance?.models.options.find((option) => option.id === model)?.provider;
-}
 
 export function effortLabel(level: EffortLevel): string {
   return t(`model.effort.${level}` as Parameters<typeof t>[0]);
@@ -121,9 +117,6 @@ export function EffortRow({
   );
 }
 
-const variantLabel = (option: ModelVariantOption, driverKind?: string): string =>
-  option.id === "default" && driverKind === "opencodeGo" ? t("model.variant.openCodeDefault") : option.label;
-
 export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label, compact = false, wide = false, quiet = false }: {
   bot: Bot;
   threadId?: string;
@@ -151,7 +144,7 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
     <div className={className}>
       <label className="flex items-center justify-between gap-3">
         {label}
-        <Select size="sm" variant={quiet ? "quiet" : "field"} aria-label={t("model.variant.label")} disabled={bot.busy} className={wide ? "flex-1" : "max-w-[65%]"}
+        <Select size="sm" variant={quiet ? "quiet" : "field"} aria-label={t("model.variant.label")} className={wide ? "flex-1" : "max-w-[65%]"}
           value={selection.variant === undefined ? "unset" : missing ? "missing" : String(options.findIndex((option) => option.id === selection.variant))}
           onChange={(event) => choose(options[Number(event.target.value)]?.id)}>
           <option value="unset">{t("model.variant.session")}</option>
@@ -173,9 +166,9 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
         </p>
       )}
       {selection.variant !== undefined && (
-        <button type="button" disabled={bot.busy} onClick={() => choose()}
+        <button type="button" onClick={() => choose()}
           title={t("model.variant.clearHint")}
-          className="mt-2 block text-[12px] text-ink-secondary underline underline-offset-2 hover:text-ink disabled:opacity-50">
+          className="mt-2 block text-[12px] text-ink-secondary underline underline-offset-2 hover:text-ink">
           {t("model.variant.clear")}
         </button>
       )}
@@ -185,12 +178,11 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
             <button
               key={option.id}
               type="button"
-              disabled={bot.busy}
               aria-pressed={selection.variant === option.id}
               title={t("model.variant.use", { variant: variantLabel(option, instance.driverKind) })}
               onClick={() => choose(option.id)}
               className={cn(
-                "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50",
+                "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
                 selection.variant === option.id ? "border-accent/60 bg-control text-ink" : "border-hairline/40 text-ink-secondary hover:bg-control/60 hover:text-ink",
               )}
             >
@@ -226,7 +218,8 @@ export function ModelPicker({
   const { state, dispatch: storeDispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStore();
   const [open, setOpen] = useState(false);
   const { bot, dispatch } = useAiSwitch({ bot: shown, threadId, contained, dispatch: storeDispatch, setOpen: (next) => (next ? openMenu() : setOpen(false)) });
-  const motion = useMenuMotion(open && !bot.busy);
+  const locked = lockedWhileBusy(state, bot, contained, threadId);
+  const motion = useMenuMotion(open && !locked);
   const [railId, setRailId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -417,7 +410,7 @@ export function ModelPicker({
   };
 
   const openMenu = () => {
-    if (bot.busy) return;
+    if (locked) return;
     if (active && isClaudeAccount(active)) lastClaudeIdRef.current = active.instanceId;
     if (active && signInFamily(active) === "openai") lastOpenaiIdRef.current = active.instanceId;
     const initial = pickerInstances.find((instance) => instance.instanceId === selection.instanceId) ?? pickerInstances[0];
@@ -446,9 +439,9 @@ export function ModelPicker({
   const profile = state.bots.find((candidate) => candidate.id === bot.id) ?? bot;
   const follows = threadId ? profile.tasks?.find((task) => task.threadId === threadId)?.followsBotModel : undefined;
   const botModelInstance = state.instances.find((instance) => instance.instanceId === profile.modelSelection.instanceId);
-  const botModelName = botModelInstance
-    ? `${botModelInstance.displayName} · ${modelLabel(botModelInstance, profile.modelSelection.model)}`
-    : profile.modelSelection.model;
+  const botModelName = botModelInstance ? `${engineDisplayName(botModelInstance)} · ${modelLabel(botModelInstance, profile.modelSelection.model)}${variantSuffix(botModelInstance, profile.modelSelection.model, profile.modelSelection.variant)}` : profile.modelSelection.model;
+  const busyUpdatesBotDefault = Boolean(threadId) && (simpleView ? simpleUpdatesBotDefault : scope === "bot")
+    && bot.modelSelection.instanceId === profile.modelSelection.instanceId && bot.modelSelection.model === profile.modelSelection.model;
   const ownModelThreads = threadsOnOwnModel(profile.modelSelection, profile.tasks ?? []).length;
 
   const pickBotModel = () => {
@@ -578,7 +571,7 @@ export function ModelPicker({
       : needsCli(active) ? t("model.setupRequired")
         : needsSignIn(active) && !isCustomOnly(active) && !currentOption?.custom ? t("model.signInRequired") : currentOption?.orgBlocked ? t("model.orgBlocked") : undefined;
   const summary = active
-    ? `${active.displayName} · ${modelLabel(active, selection.model)}${
+    ? `${engineDisplayName(active)} · ${modelLabel(active, selection.model)}${
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
       }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort
         ? ` · ${t(advanced ? "model.effort.summary" : "model.simple.thinkingSummary", { level: effortLabel(selection.effort) })}` : ""}`
@@ -591,7 +584,7 @@ export function ModelPicker({
     ref: triggerRef,
     "data-tour": "model",
     type: "button" as const,
-    disabled: Boolean(bot.busy),
+    disabled: locked,
     onClick: () => (open ? close(false) : openMenu()),
     onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
       if (event.key === "Escape" && open) {
@@ -603,7 +596,7 @@ export function ModelPicker({
         openMenu();
       }
     },
-    "aria-expanded": open && !bot.busy,
+    "aria-expanded": open && !locked,
     "aria-haspopup": "dialog" as const,
     "aria-controls": open ? menuId : undefined,
     title: `${summary}${followLine}${attentionLine}${busyLine}`,
@@ -617,19 +610,19 @@ export function ModelPicker({
         contained
           ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
           : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
-        !contained && active && !showActiveAccount && COMPACT_SQUARE,
+        !contained && active && !showActiveAccount && cn(COMPACT_SQUARE, USAGE_WARN_WIDENS),
       )}
     >
       {active && (contained
         ? <InstanceProviderMark instance={active} size={14} subtle />
         : <span className="flex shrink-0 group-disabled:opacity-50"><InstanceProviderMark instance={active} size={14} subtle /></span>)}
       {!contained && active && showActiveAccount && (
-        <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{active.displayName}</span>
+        <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{engineDisplayName(active)}</span>
       )}
       <span className={cn("flex min-w-0 items-center gap-1", !contained && active && "@max-4xl/chathead:hidden")}>
         <span className="max-w-[160px] truncate">
           {active && showActiveAccount && (
-            <span data-model-account className="text-ink-secondary">{active.displayName} · </span>
+            <span data-model-account className="text-ink-secondary">{engineDisplayName(active)} · </span>
           )}
           {modelLabel(active, selection.model)}
           {active && modelProvider(active, selection.model) && (
@@ -644,6 +637,7 @@ export function ModelPicker({
           </span>
         )}
       </span>
+      <UsageBars engine={selection.instanceId} compact={!contained} />
       <ChevronDown
         size={12}
         className={cn(
@@ -671,6 +665,8 @@ export function ModelPicker({
         {attention && <span data-model-attention className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-warning ring-[1.5px] ring-app" />}
       </span>
       <span className="min-w-0 max-w-[160px] truncate">{modelName(active, selection.model)}</span>
+      {selection.variant !== undefined && <span className="shrink-0 whitespace-pre">{variantSuffix(active, selection.model, selection.variant)}</span>}
+      <UsageBars engine={selection.instanceId} className="ml-1.5" />
       <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="ml-1 shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />
     </button>
   );
@@ -725,7 +721,7 @@ export function ModelPicker({
             <>
               <div className="shrink-0 px-3.5 pb-2 pt-3">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="truncate text-[14px] font-semibold leading-5 text-ink">{signInFamily(railInstance) ? SIGN_IN_FAMILY_LABEL[signInFamily(railInstance)!] : railInstance.displayName}</div>
+                  <div className="truncate text-[14px] font-semibold leading-5 text-ink">{signInFamily(railInstance) ? SIGN_IN_FAMILY_LABEL[signInFamily(railInstance)!] : engineDisplayName(railInstance)}</div>
                   <div className="flex shrink-0 items-center gap-1">
                     <button
                       type="button"
@@ -734,8 +730,8 @@ export function ModelPicker({
                       onClick={() => refreshModels(railInstance.instanceId)}
                       aria-label={
                         loadingInstances || refreshingId !== null
-                          ? t("model.refreshing", { name: railInstance.displayName })
-                          : t("model.refresh", { name: railInstance.displayName })
+                          ? t("model.refreshing", { name: engineDisplayName(railInstance) })
+                          : t("model.refresh", { name: engineDisplayName(railInstance) })
                       }
                       title={t("model.refreshTitle")}
                       className="flex size-7 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/[0.06] hover:text-ink disabled:cursor-wait"
@@ -783,7 +779,7 @@ export function ModelPicker({
                     className={cn(MENU_ROW, "text-ink-secondary hover:text-ink")}
                   >
                     <ChevronLeft size={16} strokeWidth={MENU_STROKE} className="shrink-0 rtl:-scale-x-100" aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate">{t("model.backTo", { name: railInstance.displayName })}</span>
+                    <span className="min-w-0 flex-1 truncate">{t("model.backTo", { name: engineDisplayName(railInstance) })}</span>
                   </button>
                 </div>
               )}
@@ -828,7 +824,7 @@ export function ModelPicker({
                     {pane === "main" && loadingList ? (
                       <div role="status" className={cn(MENU_LINE, "justify-center text-ink-tertiary")}>
                         <Loader2 size={14} className="shrink-0 animate-spin" aria-hidden="true" />
-                        {t("model.loadingModels", { name: railInstance.displayName })}
+                        {t("model.loadingModels", { name: engineDisplayName(railInstance) })}
                       </div>
                     ) : pane === "main" ? (
                       <>
@@ -965,12 +961,13 @@ export function ModelPicker({
       } : { width: popoverWidth }}
       className={cn("menu-surface z-[80] flex flex-col overflow-hidden", motion.className)}
     >
-      {simpleMenu ? (
+      <UsageMenuRows engine={selection.instanceId} />
+      {bot.busy ? <BusyModelMenu bot={shown} threadId={threadId} updateBotDefault={busyUpdatesBotDefault} variants={Boolean(active?.capabilities?.modelVariants)} /> : simpleMenu ? (
         <SimpleModelMenu
           menu={simpleMenu}
           query={query}
           bot={profile}
-          botModel={{ label: modelName(botModelInstance, profile.modelSelection.model), title: botModelName }}
+          botModel={{ label: modelName(botModelInstance, profile.modelSelection.model, profile.modelSelection.variant), title: botModelName }}
           thinking={thinking}
           idPrefix={menuId}
           onQuery={setQuery}

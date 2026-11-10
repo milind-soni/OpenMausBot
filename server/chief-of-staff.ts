@@ -23,6 +23,10 @@ const SPECIALISTS = "When a job needs a specialist you do not have (an ongoing a
 const sectionKey = (section?: string): string => section?.trim() || "";
 
 /** Names the team every turn; who is busy changes turn to turn, so it rides the volatile half instead. */
+/** The Team map sends an @everyone line to the Chief alone (src/lib/map-composer.ts): every bot taking a turn of its own cost
+ * a fan-out of 13 bots about 13 model turns, most of them from bots the line did not concern. */
+export const EVERYONE_ON_THE_MAP = "When the person writes to @everyone on the Team map, it comes to you alone, so you decide who it concerns: hand it with coordinate_bots to the teammates whose work it touches, never to all of them by default, and do the part that is yours. If it concerns nobody else, answer it yourself.";
+
 export function chiefOfStaffSystemPrompt(
   chiefId: string,
   bots: ChiefTeamMember[],
@@ -71,6 +75,7 @@ export function chiefOfStaffSystemPrompt(
     "Do the work yourself, bring in a teammate when one fits the job, and return one concise consolidated answer. Never invent a teammate's progress or result. Normal permission and approval rules still apply.",
     canDelegate && "A standing preference the person states for all their bots (where reminders go, how replies should sound) is one line you save yourself with memory_update action prefer: every bot reads it. Never send it to each bot with coordinate_bots.",
     canDelegate ? SPECIALISTS : "",
+    canDelegate && isChief ? EVERYONE_ON_THE_MAP : "",
     canDelegate && isChief
       ? "Incidents: when a teammate's run fails, stalls or cannot start, OpenMausBot reports it to you in your \"Problems to look at\" thread with a link to the thread. Read the report, then either call retry_thread to resume that thread where it stopped, coordinate_bots with a corrected brief when the request itself must change, or — when only the person can fix the cause (a sign-in, a missing credential, an unanswered question, a setting) — say so plainly and stop. Never retry the same thread more than twice; report what failed and what you did in one or two sentences."
       : "",

@@ -75,7 +75,7 @@ it("a bot asking for a teammate on the person's other place hears where it lives
 
   const onGarage = await coordinate(garage.base, ledger, "scout");
   expect(onGarage).toEqual({ status: 403, error: "Scout lives on Work laptop, the person's computer, not here. Bots work together only within one place, so it can't be reached from here. "
-    + "Tell the person plainly. Offer to bring their bots together on Garage server: in the app, right-click Garage server's circle at the window's left edge and choose \"Make Garage server my home\"." });
+    + "Tell the person plainly. Offer to bring their bots together on Garage server: in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\"." });
   const onComputer = await coordinate(fx.desktopBase, scout, "Ledger");
   expect(onComputer.status).toBe(403);
   expect(onComputer.error).toMatch(/^Ledger lives on Garage server, not here\. .* choose "Make Garage server my home"\.$/u);
@@ -98,6 +98,6 @@ it("a bot asking for a teammate on the person's other place hears where it lives
   const said = async () => ((await garage.as("GET", `/api/threads/${room.threadId}/messages?limit=200`)).body?.messages ?? [])
     .filter((row: { kind?: string; tool?: { name?: string } }) => row.kind === "activity" && row.tool?.name?.startsWith("Scout lives on"));
   await expect.poll(async () => (await said()).map((row: { tool: { name: string } }) => row.tool.name), { timeout: 30_000, interval: 200 }).toEqual([
-    "Scout lives on Work laptop, so that mention didn't reach it: bots work together only within one place. To bring your bots together on Garage server, in the app, right-click Garage server's circle at the window's left edge and choose \"Make Garage server my home\".",
+    "Scout lives on Work laptop, so that mention didn't reach it: bots work together only within one place. To bring your bots together on Garage server, in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\".",
   ]);
 }, hostTimeout(180_000));

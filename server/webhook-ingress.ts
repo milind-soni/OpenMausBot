@@ -16,7 +16,7 @@ export interface WebhookIngress {
   baseUrl: string;
 }
 
-function json(res: ServerResponse, status: number, body: JsonValue): void {
+export function json(res: ServerResponse, status: number, body: JsonValue): void {
   res.writeHead(status, {
     "content-type": "application/json",
     "cache-control": "no-store",
@@ -25,7 +25,7 @@ function json(res: ServerResponse, status: number, body: JsonValue): void {
   res.end(JSON.stringify(body));
 }
 
-async function readRawBody(req: IncomingMessage): Promise<string> {
+export async function readRawBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   try {
@@ -60,12 +60,12 @@ function parsePayload(raw: string, contentType: string): JsonValue {
   return raw;
 }
 
-function header(req: IncomingMessage, name: string): string | undefined {
+export function header(req: IncomingMessage, name: string): string | undefined {
   const value = req.headers[name];
   return Array.isArray(value) ? value[0] : value;
 }
 
-function bearerSecret(req: IncomingMessage): string {
+export function bearerSecret(req: IncomingMessage): string {
   const authorization = header(req, "authorization") ?? "";
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   return match?.[1]?.trim() || header(req, "x-openmaus-secret")?.trim() || "";
@@ -89,7 +89,10 @@ function eventName(req: IncomingMessage): string | undefined {
   )?.trim() || undefined;
 }
 
-export function createWebhookIngressHandler(manager: WebhookManager, claimRequest?: () => () => void) {
+/** Another public door on this receiver (a bot's API): true when it answered the request. */
+export type IngressDoor = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<boolean>;
+
+export function createWebhookIngressHandler(manager: WebhookManager, claimRequest?: () => () => void, door?: IngressDoor) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     let url: URL;
     try {
@@ -100,6 +103,7 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
     if (req.method === "GET" && url.pathname === "/health") {
       return json(res, 200, { app: "openmausbot-webhooks", ready: true });
     }
+    if (door && await door(req, res, url)) return;
     const match = url.pathname.match(/^\/hooks\/(wh_[A-Za-z0-9_-]+)(?:\/([^/]+))?$/);
     if (!match) return json(res, 404, { error: "Unknown webhook endpoint" });
     if (req.method !== "POST") return json(res, 405, { error: "Webhooks accept POST requests" });
@@ -167,11 +171,11 @@ export function advertisedWebhookBase(raw: string): string {
 
 export async function listenWebhookIngress(
   manager: WebhookManager,
-  options: { host?: string; port: number; publicBaseUrl?: string; claimRequest?: () => () => void },
+  options: { host?: string; port: number; publicBaseUrl?: string; claimRequest?: () => () => void; door?: IngressDoor },
 ): Promise<WebhookIngress> {
   const host = options.host ?? "127.0.0.1";
   const advertised = options.publicBaseUrl === undefined ? undefined : advertisedWebhookBase(options.publicBaseUrl);
-  const handle = createWebhookIngressHandler(manager, options.claimRequest);
+  const handle = createWebhookIngressHandler(manager, options.claimRequest, options.door);
   const server = createServer(IDLE_HTTP_SERVER, (req, res) => {
     handle(req, res).catch((error: unknown) => {
       console.error("webhooks: receiver failed", error);

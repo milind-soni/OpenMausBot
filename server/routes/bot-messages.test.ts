@@ -306,8 +306,8 @@ describe("POST /api/bots/:id/messages with widgetAction", () => {
     const widgetAction = { messageId: widgetId, ref: "confirm" };
     const first = post({ threadId, sendId: SEND, widgetAction });
     await vi.waitFor(() => expect(state.accepted).toHaveLength(1));
-    expect(await post({ threadId, sendId: OTHER_SEND, widgetAction })).toEqual({ status: 409, body: { error: "That answer is already on its way." } });
-    expect(await post({ threadId, widgetAction })).toEqual({ status: 409, body: { error: "That answer is already on its way." } });
+    expect(await post({ threadId, sendId: OTHER_SEND, widgetAction })).toEqual({ status: 409, body: { error: "That answer is already on its way.", errorKey: "serverError.chat.answerSent" } });
+    expect(await post({ threadId, widgetAction })).toEqual({ status: 409, body: { error: "That answer is already on its way.", errorKey: "serverError.chat.answerSent" } });
     expect(await post({ threadId, sendId: OTHER_SEND, widgetAction: { messageId: widgetId, ref: "cancel" } })).toMatchObject({ status: 409 });
     const same = post({ threadId, sendId: SEND, widgetAction });
     await vi.waitFor(() => expect(state.accepted).toHaveLength(2));

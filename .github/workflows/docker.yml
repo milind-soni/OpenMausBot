@@ -364,7 +364,7 @@ jobs:
           docker save omb-cloud-home:ci -o "$RUNNER_TEMP/home.tar"
           python3 - "$RUNNER_TEMP/server.tar" "$RUNNER_TEMP/home.tar" <<'PY'
           import json, re, sys, tarfile
-          cache = re.compile(r"^(root/\.npm|tmp/(npm-cache|omb-build-home|node-compile-cache|grok-install))/")
+          cache = re.compile(r"^(root/\.npm|tmp/(npm-cache|omb-build-home|node-compile-cache|grok-install|uv-install))/")
           for path in sys.argv[1:]:
               files = {}
               with tarfile.open(path) as image:

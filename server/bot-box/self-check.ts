@@ -133,6 +133,7 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
     harnessPort: serverPort, egressPort: BOX_EGRESS_PORT, privatePort, publicTarget, isolatedNet,
     // Checked whenever a filter is in the setup: the no-seccomp mutation leaves it out of the box, so the check must fail.
     seccomp: Boolean(options.seccompFile),
+    cpuList: existsSync("/sys/devices/system/cpu/possible"),
   };
   const wrapped = runner.wrap({
     command: process.execPath, args: [options.probeScript ?? BOX_PROBE_SCRIPT], cwd, botId: "probe",

@@ -18,9 +18,12 @@ export function localizeComputerProblem(problem: string | null | undefined): str
     "The existing Local VM is missing safety limits; recreate it": "computer.problem.missingLimits",
     "The existing Local VM is missing its durable folder; recreate it": "computer.problem.missingDurableFolder",
     "Per-bot Local VMs require Docker or Podman because Apple container requires a fixed host port": "computer.problem.perBotRuntime",
+    "Install a supported container runtime first": "computer.problem.noRuntime",
   };
   const key = exact[problem];
   if (key) return t(key);
+  const stopped = /^Start (\S+) first$/.exec(problem);
+  if (stopped) return t("computer.problem.startRuntime", { runtime: stopped[1]! });
   const desktopFailure = /^The Local VM desktop failed to start: (.+)$/.exec(problem);
   if (desktopFailure) return t("computer.problem.desktopFailed", { detail: desktopFailure[1]! });
   return problem;

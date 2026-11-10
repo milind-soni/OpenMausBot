@@ -94,10 +94,14 @@ hand real work to specialists with `coordinate_bots` — no new machinery requir
 
 ## Known gaps
 
-- **Take-turns calls are macOS-only**, because dictation is. The voice half
-  works everywhere. Live calls (GPT-Live, `server/live-call.ts`) need no
-  dictation, so they work in the desktop app on any computer and on the
-  phones, with the person's own OpenAI key. A Cloud's page, in a web browser
+- **Take-turns calls listen differently off the Mac.** On macOS the dictation
+  helper listens on-device. On Windows and Linux the page records the mic
+  (`src/lib/fish-speech.ts`) and `POST /api/tts/transcribe` sends each turn's
+  clip, silence trimmed, to Fish Audio speech-to-text with the saved Fish key.
+  Without that key Take turns is off. The voice half works everywhere. Live
+  calls (GPT-Live, `server/live-call.ts`) need no dictation, so they work in
+  the desktop app on any computer and on the phones, with the person's own
+  OpenAI key. Fish Audio has no talking model, so Live stays OpenAI or Azure. A Cloud's page, in a web browser
   or the desktop app, runs the same code, but no Live call has been made end
   to end on a real Cloud yet.
 - **Rooms don't speak yet**, though per-bot voices already exist (`bot.voice`).

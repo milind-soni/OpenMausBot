@@ -47,16 +47,18 @@ export function buildNotification(
   bot: Omit<NotifyBot, "threadId"> & { threadId?: string },
   threadId: string,
   detail: string,
-  extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string },
+  extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string; label?: string; app?: string },
 ): Notification | null {
   if (bot.notifications === false) return null;
 
   const body = summarize(detail);
   const language = conversationLanguage(threadId);
   const who = extra?.group ? serverLine(language, "server.notify.inRoom", { bot: bot.name, room: extra.group.name }) : bot.name;
-  const title = kind === "sign-in"
-    ? extra?.site ? serverLine(language, "server.notify.signIn", { who, site: extra.site }) : serverLine(language, "server.notify.signInWebsite", { who })
-    : serverLine(language, TITLE[kind] ?? "server.notify.done", { who });
+  const title = kind === "secret" ? serverLine(language, "server.notify.secret", { who, label: extra?.label ?? "" })
+    : kind === "sign-in"
+      ? extra?.app ? serverLine(language, "server.notify.connect", { who, app: extra.app })
+        : extra?.site ? serverLine(language, "server.notify.signIn", { who, site: extra.site }) : serverLine(language, "server.notify.signInWebsite", { who })
+      : serverLine(language, TITLE[kind] ?? "server.notify.done", { who });
 
   if ((kind === "done" || kind === "mention") && !body) return null;
 

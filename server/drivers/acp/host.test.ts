@@ -18,7 +18,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 10));
 function hostWith(key: string | null) {
   const { child, written, say } = fakeChild();
   const refused: any[] = [];
-  const host = new AcpHost(child, key, { source: "test.acp", logMessage: (msg) => msg, keepStderr: true, unrouted: (msg) => refused.push(msg) });
+  const host = new AcpHost(child, key, { source: "test.acp", logMessage: (msg) => msg, unrouted: (msg) => refused.push(msg) });
   const heard = new Map<string, any[]>();
   const link = (threadId: string, sessionId: string | null) => {
     const linked = host.link(threadId);
@@ -30,6 +30,23 @@ function hostWith(key: string | null) {
   };
   return { host, written, say, refused, heard, link };
 }
+
+describe("an ACP process's exit", () => {
+  it("hands each listening thread the code and signal, with the last stderr lines kept masked", async () => {
+    const { child } = fakeChild();
+    const host = new AcpHost(child, null, { source: "test.acp", logMessage: (msg) => msg, unrouted: () => {} });
+    const exits: Array<[number | null, NodeJS.Signals | null, string]> = [];
+    const linked = host.link("a");
+    linked.inbound = { request: () => {}, notification: () => {}, error: () => {}, busy: () => false, exit: (code, signal) => exits.push([code, signal, host.stderrTail.text]) };
+    const stderr = child.stderr as unknown as PassThrough;
+    stderr.write("starting\nOpen https://accounts.google.com/o/oauth2/v2/auth?state=private-state\n");
+    stderr.write("fatal: out of cheese");
+    await flush();
+    child.emit("close", null, "SIGABRT");
+    expect(exits).toEqual([[null, "SIGABRT", expect.stringMatching(/^starting \| Open https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?«redacted \d+ chars» \| fatal: out of cheese$/u)]]);
+    expect(exits[0]![2]).not.toContain("private-state");
+  });
+});
 
 describe("one ACP process for several threads", () => {
   it("gives each thread only its own session's traffic, and refuses a request for a session no thread holds", async () => {

@@ -2,10 +2,10 @@ import { useState } from "react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { localeChoices } from "@/locales";
-import { activeLocale, t } from "@/lib/i18n";
+import { activeLocale, activePackComplete, t } from "@/lib/i18n";
 import { withTourReset } from "@/lib/guided-tour";
 import { completionPatch } from "@/lib/onboarding";
-import { useUpdaterState } from "@/lib/updater";
+import { updaterMessage, useUpdaterState } from "@/lib/updater";
 import { productName } from "../lib/brand";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { NewBrowserSettings } from "./BrowserSettingsRows";
@@ -41,14 +41,14 @@ export function UpdatesRow({ title = t("settings.updates.title") }: { title?: st
               ? t("settings.updates.readyInstall", { app: productName(), version: s.version ?? "" })
               : t("settings.updates.ready", { app: productName(), version: s.version ?? "" })
             : s.status === "installing"
-              ? s.message ||
+              ? updaterMessage(s) ||
                 (s.installMode === "handoff"
                   ? t("settings.updates.openingTerminal")
                   : t("settings.updates.restarting"))
               : s.status === "handed-off"
                 ? t("settings.updates.handedOff")
                 : s.status === "error"
-                  ? t("settings.updates.failed", { message: s.message ?? t("settings.updates.unknownError") })
+                  ? t("settings.updates.failed", { message: updaterMessage(s) ?? t("settings.updates.unknownError") })
                   : t("settings.updates.latest");
   return (
     <SettingRow title={title} subtitle={label}>
@@ -186,7 +186,7 @@ export function LanguageRow({ simple = false }: { simple?: boolean }) {
   return (
     <SettingRow
       title={t("settings.language.title")}
-      subtitle={simple ? activeLocale() === "en" ? undefined : t("settings.simple.language.partial") : t("settings.language.subtitle")}
+      subtitle={activePackComplete() ? t("settings.language.subtitleComplete") : simple ? activeLocale() === "en" ? undefined : t("settings.simple.language.partial") : t("settings.language.subtitle")}
     >
       <Select size="sm" variant={simple ? "ghost" : "field"} className={simple ? undefined : "w-full max-w-[240px]"}
         value={current}

@@ -116,6 +116,12 @@ export function childrenSince(store: RuntimeStore, n: Assignment): Assignment[] 
   return store.children(n.id).filter(c => (store.events(c.id)[0]?.id ?? 0) > since);
 }
 
+/** Awaited children whose results the next turn of `n` would bring as news: finished since its last turn started. */
+export function settledSince(store: RuntimeStore, n: Assignment): Assignment[] {
+  const since = lastStartedId(store, n.id);
+  return awaited(store.children(n.id)).filter(c => isTerminal(c) && (store.events(c.id).at(-1)?.id ?? 0) > since);
+}
+
 export function wakeOwner(n: Assignment): Owner {
   const owner: Owner = {};
   if (n.requester.botId !== undefined) owner.botId = n.requester.botId;

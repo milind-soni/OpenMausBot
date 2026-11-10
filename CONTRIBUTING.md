@@ -268,7 +268,8 @@ select the remaining checks; see [CI job selection](docs/ci.md). Documentation-o
 PRs run the docs tests, while translation-only PRs run the locale subset. Runtime
 changes select broader tests and smokes.
 
-- **typecheck + lint** — the static job always runs the checks above, and adds typecheck, Electron syntax checks, and a production UI build when selected. It runs before the dependent jobs.
+- **preflight** — the static job always runs the checks above, in under a minute, before the dependent jobs.
+- **typecheck + build** — when selected, typecheck, Electron syntax checks and a production UI build, beside the shards.
 - **vitest (os, part)** — full platform suites use eight Linux or Windows shards and four macOS shards; subset jobs have their own file lists and shard counts. Windows jobs run on PRs whose changes can affect Windows or carry the `windows` label. macOS Vitest shards run in the nightly/manual full lane. Files run serially within each shard, balanced by recorded platform time. Use the [reproduction steps](docs/ci.md#vitest-shards) for the failing job.
 - **packaged server smoke (os)** — when selected, the server bundle is copied out of the repo and started with no `node_modules` in reach.
 - **Windows CUA host smoke**, **macOS smokes (packaged server + Electron)** — when selected, real Electron utility processes run against disposable homes; never the live app.

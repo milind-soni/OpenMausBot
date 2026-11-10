@@ -1,6 +1,7 @@
 // What one @devs report carries to the MausBot team's endpoint (POST /api/bug-reports on the Cloud origin): the person's
 // message, the bot's summary when it wrote one, and facts the server gathers itself. Never the conversation, never a
 // file. Everything passes redactReportText, and every field stays inside the endpoint's limits.
+import { withoutCitationMarkers } from "../src/lib/citations.ts";
 import { isSecretName, mask, redactSecretsInText } from "./redact.ts";
 import { clip, oneLine } from "./host/text-clip.ts";
 
@@ -89,7 +90,8 @@ export function environmentSecrets(env: NodeJS.ProcessEnv = process.env): string
 /** The app's own redaction (key shapes, Bearer tokens, secret-named values, private keys, URL passwords, held secrets),
  * then any authorization or cookie header, URL credentials and parameters, and the server's own secret values. */
 export function redactReportText(text: string, secrets: readonly string[] = environmentSecrets()): string {
-  let out = text;
+  // A quote's encoded copy goes first: redaction cannot read inside it, and its readable fallback stays.
+  let out = withoutCitationMarkers(text);
   for (const secret of secrets) if (out.includes(secret)) out = out.split(secret).join(mask(secret));
   out = out.replace(URL_IN_TEXT, (url: string, at: number, whole: string) => (whole.startsWith(URL_MASK, at + url.length) ? url : redactUrl(url)));
   out = out.replace(AUTHORIZATION, (_m, key: string, sep: string, value: string) => `${key}${sep}${mask(value)}`);

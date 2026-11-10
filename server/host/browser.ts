@@ -93,7 +93,7 @@ function lentDevice(device: NonNullable<EgressSetup["device"]>, holder: (session
 }
 
 type Spec = { command: string; args?: readonly string[]; env: Record<string, string> };
-type LendRefusal = CloudLendingRefusal | "memory-changed";
+type LendRefusal = CloudLendingRefusal | "memory-changed" | "memory-changed-here";
 const BOT_SESSION = /^bot-[A-Za-z0-9_.-]+$/;
 
 export function createBrowserHost(deps: BrowserHostDeps) {
@@ -138,8 +138,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return chromeRefusals.get(session) ?? null;
   }
   const lentChromeAllowed = (session: string) => chromeRefusal(session) === null;
-  /** A new conversation can't undo a memory change, so that refusal points to Memory instead. */
-  const refusedAs = (session: string) => (chromeRefusals.get(session) === "memory-changed" ? "memory-changed" : "not-allowed");
+  /** Each refusal has its own way out: a new conversation can't undo a memory change, for one. */
+  const refusedAs = (session: string) => chromeRefusals.get(session) ?? "not-allowed";
   // The desktop's idle time, not a Cloud home's shorter one: each reconnect may make Chrome ask the person to Allow again.
   const doors = lentChrome ? new LentChromeDoors({ route: () => lentChrome.route(), allowed: lentChromeAllowed, idleMs: () => browserIdleMs(cfg, { cloudHome: false }) }) : undefined;
   const doorUrls = new Map<string, string>();

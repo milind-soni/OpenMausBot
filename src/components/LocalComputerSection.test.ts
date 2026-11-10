@@ -17,7 +17,6 @@ import {
   LocalVmInventoryCard,
   cloudComputerActionPlan,
   cloudComputerInventoryState,
-  computerInventoryRequest,
   confirmComputerAction,
   localVmInventoryState,
   parseLocalVmIdleTimeoutMinutes,
@@ -31,6 +30,7 @@ import {
   type LocalVmInventoryInstance,
   type VpsComputerInventoryInstance,
 } from "./LocalComputerSection";
+import { computerInventoryRequest } from "@/lib/computer-requests";
 import { VpsComputersCard } from "./VpsComputersCard";
 
 const cloudVm: LocalVmInventoryInstance = {

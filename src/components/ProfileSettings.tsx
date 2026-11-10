@@ -191,7 +191,7 @@ export function ProfileFields() {
         onChange={(e) => setEmail(e.target.value)}
         onBlur={team ? undefined : save}
         readOnly={team}
-        placeholder="you@example.com"
+        placeholder={t("common.emailPlaceholder")}
         className={inputClass}
       />
       <AboutMeSettings />

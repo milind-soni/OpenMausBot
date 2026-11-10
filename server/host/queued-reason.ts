@@ -1,3 +1,4 @@
+import type { PersonWaitKind } from "../../shared/person-wait.ts";
 import type { HandoffView } from "../coordinator.ts";
 
 export interface QueuedReasonDeps {
@@ -8,7 +9,7 @@ export interface QueuedReasonDeps {
   /** The bot's threads that hold a slot now, and how many it may run at once when a bot starts the work. */
   slots(botId: string): { busy: { threadId: string; title: string }[]; limit: number };
   groupTurn(botId: string): boolean;
-  behindPerson(node: HandoffView): { kind: "approval" | "question" | "review"; title: string } | undefined;
+  behindPerson(node: HandoffView): { kind: PersonWaitKind; title: string } | undefined;
 }
 
 /** `showTitle`: name the busy threads it allows; only for the receiver itself, whose own threads they are. Otherwise just the count. */

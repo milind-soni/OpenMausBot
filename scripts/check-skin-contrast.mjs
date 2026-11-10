@@ -161,6 +161,9 @@ const PAIRS = [
   ["--color-danger", "--color-card", 4.5],
   ["--color-success", "--color-card", 4.5],
   ["--color-warning", "--color-card", 4.5],
+  // The usage card's and model menu's "At its limit", and the usage bars in the model button.
+  ["--color-warning", "--color-menu", 4.5],
+  ["--color-warning", "--color-composer", 3],
   // borders and dots are UI components, not text — AA asks 3:1 of them
   ["--color-hairline", "--color-app", 1.5],
   ["--color-accent", "--color-app", 3],

@@ -1,5 +1,6 @@
 // The config pins one deliberately unknown driver, so the suite is deterministic with or without agent CLIs installed.
 import { HIGHLEVEL_TOOLS } from "./highlevel/tools.js";
+import { EMAIL_TOOLS } from "./email/tools.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
@@ -4828,6 +4829,13 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("words a new bot's refused department access by key, keeping its English", async () => {
+    expect(await api("POST", "/api/bots", { settings: { managedSections: ["Nowhere"] } })).toEqual({ status: 400,
+      body: { error: "Only a Chief may manage existing additional departments", errorKey: "serverError.department.chiefOnlyExtra" } });
+    expect(await api("POST", "/api/bots", { settings: { chiefOfStaff: true, managedSections: [""] } })).toEqual({ status: 400,
+      body: { error: "Confirm additional department access (acknowledgePeerScope)", errorKey: "serverError.department.confirmExtra" } });
+  });
+
   it("rejects a sidebar section Chief collision without changing any bot", async () => {
     const incumbent = (await api("POST", "/api/bots")).body.bot;
     const incoming = (await api("POST", "/api/bots")).body.bot;
@@ -4845,6 +4853,7 @@ describe("harness HTTP API", () => {
         status: 409,
         body: {
           error: "A department can have only one Chief of Staff. Choose one Chief or use a department without one.",
+          errorKey: "serverError.department.oneChief",
         },
       });
 
@@ -5523,7 +5532,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("refuses paired model changes while the bot is working", async () => {
+  it("refuses paired model changes while the bot is working but saves a reasoning level", async () => {
     const instances = (await api("GET", "/api/instances")).body.instances;
     const claude = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
     const selection = { instanceId: claude.instanceId, model: claude.models.default };
@@ -5540,16 +5549,23 @@ describe("harness HTTP API", () => {
         return current?.busy;
       }).toBe(true);
 
-      const blocked = await api("PATCH", `/api/bots/${bot.id}/model`, {
-        ...selection,
-        effort: "high",
-      });
+      const otherModel = claude.models.options.find((option: { id: string }) => option.id !== selection.model).id;
+      const blocked = await api("PATCH", `/api/bots/${bot.id}/model`, { ...selection, model: otherModel });
       expect(blocked.status).toBe(409);
       expect(blocked.body.error).toMatch(/working.*stop it before changing models/i);
       const unchanged = (await api("GET", "/api/bots?messages=0")).body.bots.find(
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(unchanged.modelSelection).toEqual(selection);
+
+      // The reasoning level is read when each turn starts, so it can change while the bot works.
+      const effort = await api("PATCH", `/api/bots/${bot.id}/model`, { ...selection, effort: "high" });
+      expect(effort.status).toBe(200);
+      const saved = (await api("GET", "/api/bots?messages=0")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(saved.modelSelection).toEqual({ ...selection, effort: "high" });
+      expect(saved.busy).toBe(true);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`, {});
       await expect.poll(async () => {
@@ -9543,7 +9559,7 @@ describe("harness HTTP API", () => {
         expect(bot.messages[0].setupOffer).toBeUndefined();
         expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
         expect(await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).toEqual({
-          status: 409, body: { error: "This bot already has instructions. To change its job, type /setup and what you'd like it to do." },
+          status: 409, body: { error: "This bot already has instructions. To change its job, type /setup and what you'd like it to do.", errorKey: "serverError.setup.hasInstructions" },
         });
       } finally {
         await api("DELETE", `/api/bots/${bot.id}`);
@@ -9556,7 +9572,7 @@ describe("harness HTTP API", () => {
         // A plain chat model with its tools off cannot propose a profile.
         expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "plainApi", model: "fixture-plain-model" } })).status).toBe(200);
         expect(await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).toEqual({
-          status: 409, body: { error: "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead." },
+          status: 409, body: { error: "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead.", errorKey: "serverError.setup.noTools" },
         });
         expect(await messages(bot.threadId)).toHaveLength(1);
       } finally {
@@ -11825,6 +11841,75 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("turns a bot's own skill on, off or deletes it at once, with a receipt the person can undo", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { skillAuthoring: true });
+      const post = (body: Record<string, unknown>) => fetch(`${BASE}/api/internal/skills/stage`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, ...body }),
+      });
+      const latestCard = async (action: string) => {
+        const messages = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id).messages;
+        return messages.filter((message: any) => message.card?.skillRequest?.name === "switch-me" && message.card.skillRequest.action === action).at(-1).card;
+      };
+      const skill = async () => (await api("GET", `/api/bots/${bot.id}/skills`)).body.skills.find((entry: { name: string }) => entry.name === "switch-me");
+      const skillText = async () => (await api("GET", `/api/bots/${bot.id}/skills/switch-me`)).body.text;
+      const undo = (requestId: string) => api("POST", `/api/threads/${bot.threadId}/undo`, { requestId });
+      const skillMd = "---\nname: switch-me\ndescription: Keeps notes.\n---\n\n# Switch me\n";
+      const create = async () => expect((await post({ action: "create", source: "conversation", skill_md: skillMd })).status).toBe(201);
+      const change = async (action: string, title: string) => {
+        const response = await post({ action, skill_name: "switch-me" });
+        expect(response.status).toBe(201);
+        expect(await response.json()).toMatchObject({ state: "applied", name: "switch-me", action });
+        const receipt = await latestCard(action);
+        expect(receipt).toMatchObject({ answered: "allow", autoApplied: true, options: [], title });
+        return receipt;
+      };
+
+      await create();
+      expect(await skill()).toMatchObject({ enabled: true });
+
+      const off = await change("disable", "Skill \"switch-me\" turned off");
+      expect(await skill()).toMatchObject({ enabled: false });
+      expect((await post({ action: "disable", skill_name: "switch-me" })).status).toBe(422);
+      expect((await undo(off.requestId)).status).toBe(200);
+      expect(await skill()).toMatchObject({ enabled: true });
+      expect(await latestCard("disable")).toMatchObject({ undone: true });
+
+      const offAgain = await change("disable", "Skill \"switch-me\" turned off");
+      const on = await change("enable", "Skill \"switch-me\" turned on");
+      expect(await skill()).toMatchObject({ enabled: true });
+      expect((await undo(offAgain.requestId)).status, "the skill is on again since, so turning it back on is stale").toBe(409);
+      expect((await undo(on.requestId)).status).toBe(200);
+      expect(await skill()).toMatchObject({ enabled: false });
+
+      const gone = await change("delete", "Skill \"switch-me\" deleted");
+      expect(await skill()).toBeUndefined();
+      expect(gone.skillRequest.previous).toMatchObject({ preview: skillMd, enabled: false });
+      expect((await undo(gone.requestId)).status).toBe(200);
+      expect(await skill(), "a skill that was off comes back off").toMatchObject({ enabled: false });
+      expect(await skillText()).toBe(skillMd);
+
+      expect((await post({ action: "enable", skill_name: "switch-me" })).status).toBe(201);
+      const goneAgain = await change("delete", "Skill \"switch-me\" deleted");
+      await create();
+      expect((await undo(goneAgain.requestId)).status, "a skill of that name exists again").toBe(409);
+
+      const missing = await post({ action: "enable", skill_name: "not-there" });
+      expect(missing.status).toBe(422);
+      expect(((await missing.json()) as { error: string }).error).toContain("no skill named");
+      expect((await post({ action: "delete" })).status).toBe(400);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  }, 60_000);
+
   it("applies a bot's own learned skill at once and undoes it from its receipt", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
@@ -12559,6 +12644,8 @@ describe("harness HTTP API", () => {
         slack: [{ name: "SLACK_POST_MESSAGE", description: "a".repeat(240) }],
         // HighLevel's tools are listed whenever its relay is configured, so grants can be set before connecting.
         highlevel: HIGHLEVEL_TOOLS.map(({ name, description }) => ({ name, description })),
+        // So are email's, wherever a mailbox can be connected here.
+        email: EMAIL_TOOLS.map(({ name, description }) => ({ name, description })),
       },
     });
   });
@@ -12673,14 +12760,15 @@ describe("harness HTTP API", () => {
       });
       expect(saved.status).toBe(200);
       expect(saved.body.imageGen).toEqual({ provider: "custom", configured: true, model: "local/image",
+        primary: { provider: "custom", model: "local/image", configured: true }, fallback: null, ready: true, maxPerTurn: 4,
         customUrl: "http://127.0.0.1:4321/v1", customModel: "local/image",
-        openaiConfigured: true, xaiConfigured: false, customKeyConfigured: true });
+        openaiConfigured: true, xaiConfigured: false, customKeyConfigured: true, geminiConfigured: false, openrouterConfigured: false });
       for (const secret of ["openai-avatar-fixture", "custom-avatar-fixture"]) {
         expect(JSON.stringify(saved.body)).not.toContain(secret);
         expect(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).not.toContain(secret);
       }
       const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-      expect(disk.imageGen).toMatchObject({ key: "", customApiKey: "", provider: "custom" });
+      expect(disk.imageGen).toMatchObject({ key: "", customApiKey: "", primary: { provider: "custom" }, customModel: "local/image" });
 
       const preset = await api("PUT", "/api/config", { imageGen: { provider: "openai" } });
       expect(preset.body.imageGen).toMatchObject({ provider: "openai", configured: true, customKeyConfigured: true });

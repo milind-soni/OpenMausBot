@@ -53,6 +53,7 @@ test("actionable messages do not permit retrying failed native staging", async (
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(state.retryable, false);
   assert.match(state.message, /Free some space.*Quit and reopen/);
+  assert.equal(state.messageCode, "disk", "the window says it in its own language");
   await coordinator.check(true);
   coordinator.install();
   assert.equal(downloads, 1);

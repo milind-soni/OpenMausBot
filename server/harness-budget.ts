@@ -8,4 +8,4 @@ export const HARNESS_CALL_BUDGET_MS = 120_000;
  * Written out rather than imported, so the stdio proxy that reads this file loads neither the hold nor zod;
  * harness-mcp-proxy.test.ts holds it to the sum of the real constants. */
 export const DEVICE_PROXY_TIMEOUT_MS = 9 * 60_000 + 120_000 + 15_000 + 30_000;
-export const HARNESS_PROXY_TIMEOUTS_MS: Partial<Record<"browser" | "computer" | "data" | "highlevel" | "device", number>> = { device: DEVICE_PROXY_TIMEOUT_MS };
+export const HARNESS_PROXY_TIMEOUTS_MS: Partial<Record<"browser" | "computer" | "data" | "highlevel" | "email" | "device", number>> = { device: DEVICE_PROXY_TIMEOUT_MS };
