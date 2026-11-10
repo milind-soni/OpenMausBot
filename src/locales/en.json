@@ -1718,7 +1718,7 @@
   "settings.profile.aboutMe": "About me",
   "settings.profile.aboutMeHelp": "Shared with every bot in private and group chats. Saved automatically.",
   "settings.profile.awayEmails": "Email me when I'm away",
-  "settings.profile.awayEmailsHelp": "One email when a teammate mentions you, a bot waits on your answer or work you asked for finishes while you're not in the app. It never includes what anyone wrote.",
+  "settings.profile.awayEmailsHelp": "One email when a teammate mentions you, a bot is waiting on your answer, or work you asked for finishes while you're not in the app. It never includes what anyone wrote.",
   "settings.profile.awayEmailsError": "That didn't save. Try again.",
   "settings.profile.everyBotRules": "Rules for every bot",
   "settings.profile.everyBotRulesPlaceholder": "Every bot follows these. A bot's own instructions win where they differ.",

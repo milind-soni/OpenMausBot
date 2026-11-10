@@ -645,9 +645,10 @@ What leaves the machine is `POST /api/cloud/machines/team-away`, signed with the
 routine?, private? }], more? }], prefs?: [{ to, on }] }`. `key` is a SHA-256 of what it is about; `who` a teammate's or
 bot's name; `place` a group chat's or the bot's name. Never a message's words, a title or an id. From someone's private
 chat an item names no bot and no place (`private: true`; a teammate who wrote to you is named). Each person turns these
-off in Settings → Profile (`GET`/`PUT /api/me/away-emails`, kept in `people/<person>/away-emails.json`, which leaving
-deletes) or with the email's stop link; the Admin's answer lists who is off, and the switch follows. An older Admin's 404
-pauses asking for an hour. Nothing of this runs off a team.
+off with "Email me when I'm away" under Settings → General (a row of Account in Simple, in Profile in Advanced; `GET`/`PUT
+/api/me/away-emails`, kept in `people/<person>/away-emails.json`, which leaving deletes) or with the email's stop link; the
+Admin's answer lists who is off, and the switch follows. An older Admin's 404 pauses asking for an hour. The email's button
+opens the team's page on the Cloud site (`/cloud/team/<id>`), not a chat. Nothing of this runs off a team.
 
 ## What is not closed here
 
