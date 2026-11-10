@@ -416,6 +416,8 @@ app.whenReady().then(async () => {
   // the residual approval fold must use that same effective Auto mode.
   const customTarget = (await api("/api/bots", "POST", { modelSelection: { instanceId: "codex", model: "gpt-fake-default" } })).body.bot;
   await coordinator.request(child, customTarget.id, "custom");
+  // Bot-level Custom is executed as Ask until the grant commit clears it, and request() resolves when that commit is sent, not when the server has applied it. A thread opened in the gap keeps Ask.
+  await until(async () => (await api("/api/bots?messages=0")).body.bots.find((bot) => bot.id === customTarget.id)?.approvalMode === "custom");
   const customResponse = await api("/api/internal/coordinate-bots", "POST", { botIds: [customTarget.id], message: "Delegated Custom uses the native Auto reviewer", consult: true }, { authorization: `Bearer ${capability.body.token}` });
   assert.equal(customResponse.status, 200);
   const customThreadId = customResponse.body.receipts[0].threadId;
