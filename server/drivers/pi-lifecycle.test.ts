@@ -1,10 +1,11 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
 import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { botBox } from "../bot-box/box.ts";
 import { ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -155,6 +156,25 @@ it("preserves cancellation when the CLI closes after termination timed out", asy
     expect(instance.adapter.hasSession("late-exit")).toBe(false);
   } finally {
     kill.mockRestore();
+  }
+});
+
+it("makes the private turn MCP configuration available inside the bot box", async () => {
+  const wrap = vi.spyOn(botBox, "wrap").mockReturnValue(null);
+  try {
+    await instance.adapter.sendTurn({ threadId: "boxed-mcp", text: "wait" });
+    await events.until((event) => event.type === "item.started");
+    const request = wrap.mock.calls.map(([request]) => request).find(({ env }) => env.OMB_MCP_CONFIG);
+    const configPath = request?.env.OMB_MCP_CONFIG;
+    expect(configPath).toBeDefined();
+    expect(request?.rw).toEqual([dirname(configPath!)]);
+    expect(JSON.parse(readFileSync(configPath!, "utf8"))).toMatchObject({ askUser: true, mcpServers: {} });
+    if (process.platform !== "win32") expect(statSync(configPath!).mode & 0o777).toBe(0o600);
+    await instance.adapter.interruptTurn("boxed-mcp");
+    await events.until((event) => event.type === "turn.completed");
+    expect(existsSync(dirname(configPath!))).toBe(false);
+  } finally {
+    wrap.mockRestore();
   }
 });
 
