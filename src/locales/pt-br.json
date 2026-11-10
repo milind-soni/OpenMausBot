@@ -9082,6 +9082,7 @@
   "serverError.team.personalMove": "Os bots, as conversas e os logins de um computador só podem ir para o Cloud. Nada pessoal entra em {team}.",
   "serverError.team.memberLogin": "Em {team}, só um admin pode salvar um login. Todos os bots de {team} passam a usar esse login.",
   "serverError.team.signInFirst": "Primeiro, faça login em {team} no app.",
+  "serverError.team.ownAppsNeedKey": "Ainda não dá para conectar seus próprios apps em {team}. Peça a um admin para adicionar a chave do Composio da equipe.",
   "serverError.chat.ownerOrAdmin": "Só o dono ou um admin pode fazer isso.",
   "serverError.routine.checks": "Escolha o que verificar: agenda, e-mail e execuções.",
   "serverError.routine.checksRepeat": "As verificações precisam de uma rotina de bot que se repita.",
