@@ -8,6 +8,7 @@ import { afterEach, expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { AUTOMATION_REPLY_PROMPT } from "./system-prompt.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 import { launchRestartableServer } from "./testing/restartable-server.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
 
@@ -58,8 +59,8 @@ async function server(env: NodeJS.ProcessEnv = {}) {
     schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
   }, 201)).routine.id as string;
   const runNow = async (routineId: string) => (await api("POST", `/api/routines/${routineId}/run`, undefined, 201)).run.id as string;
-  const settled = (id: string, status = "completed") => expect.poll(async () => (await run(id))?.status, { timeout: 30_000 }).toBe(status);
-  const reported = (id: string, state: string) => expect.poll(async () => (await run(id))?.report?.state, { timeout: 30_000 }).toBe(state);
+  const settled = (id: string, status = "completed") => expect.poll(async () => (await run(id))?.status, { timeout: hostTimeout(30_000) }).toBe(status);
+  const reported = (id: string, state: string) => expect.poll(async () => (await run(id))?.report?.state, { timeout: hostTimeout(30_000) }).toBe(state);
   const savedBot = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id);
   const notified = () => events!.frames.filter((frame) => frame.kind === "notify").map((frame) => frame.notification as { kind: string; threadId: string; body: string });
   const header = (name: string) => `Routine ${JSON.stringify(name)} — do this now:`;
@@ -380,7 +381,7 @@ it("says in the main chat, once per run of failures, that an automation could no
   await s.settled(second, "failed");
   expect((await s.run(second)).error).toBe((await s.run(first)).error);
   expect(await s.lines()).toHaveLength(1);
-}, 120_000);
+}, hostTimeout(120_000));
 
 it("tells the main chat about a run missed while the computer was off, which has no conversation of its own", async () => {
   const restartable = await launchRestartableServer({ scripted: true });
@@ -400,7 +401,7 @@ it("tells the main chat about a run missed while the computer was off, which has
     saved.routines.find((each: any) => each.id === routine.id).nextRunAt = Date.now() - 13 * 3_600_000;
     writeFileSync(file, JSON.stringify(saved));
     await restartable.start();
-    await expect.poll(async () => (await api("GET", "/api/routines")).runs.map((run: any) => run.status), { timeout: 30_000 }).toEqual(["missed"]);
+    await expect.poll(async () => (await api("GET", "/api/routines")).runs.map((run: any) => run.status), { timeout: hostTimeout(30_000) }).toEqual(["missed"]);
     const missed = (await api("GET", "/api/routines")).runs[0];
     expect(missed).toMatchObject({ resultsThreadId: main });
     expect(missed.threadId).toBeUndefined();
@@ -452,7 +453,7 @@ it("leaves the images a run's tools returned in the run, and reports the files i
   });
   const { run: { id } } = await api("POST", `/api/routines/${routine.id}/run`);
   const run = async () => (await api("GET", "/api/routines")).runs.find((candidate: any) => candidate.id === id);
-  await expect.poll(async () => (await run())?.report?.state, { timeout: 30_000 }).toBe("posted");
+  await expect.poll(async () => (await run())?.report?.state, { timeout: hostTimeout(30_000) }).toBe("posted");
   const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=200`)).messages as any[];
   const inRun = (await messages((await run()).threadId)).flatMap((message) => message.attachments ?? []);
   expect(inRun).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "image", fromTool: true }), expect.objectContaining({ kind: "file", name: "brief.pdf" })]));

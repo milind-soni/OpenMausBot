@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -90,6 +90,26 @@ describe("Codex server-owned device authentication", () => {
   };
   const calls = () => readFileSync(join(home, "calls.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  // kill(pid, 0) is true for a zombie and for a pid the kernel has reused. This CLI is still running only when its
+  // process is in a live state.
+  const running = (pid: number) => {
+    if (!Number.isInteger(pid) || pid <= 1) return false;
+    if (process.platform !== "linux") return alive(pid);
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      const state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+      if (state === "Z" || state === "X") return false;
+    } catch {
+      return false;
+    }
+    // A live pid whose command line cannot be read is still the process we have to reap.
+    try {
+      return readFileSync(`/proc/${pid}/cmdline`).includes(basename(cli));
+    } catch {
+      return true;
+    }
+  };
+  const expectReaped = (pid: number) => expect.poll(() => running(pid), { timeout: 1_000 }).toBe(false);
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "omb-device-auth-"));
@@ -184,7 +204,7 @@ describe("Codex server-owned device authentication", () => {
         await expect.poll(() => existsSync(join(home, "logout-pid")), { timeout: 2500 }).toBe(true);
         pid = Number(readFileSync(join(home, "logout-pid"), "utf8"));
         await expect.poll(() => outcome, { timeout: 4000 }).toBe("failed");
-        expect(alive(pid)).toBe(false);
+        await expectReaped(pid);
         await expect(create("success").signOut()).resolves.toBeUndefined();
       } finally {
         if (pid !== undefined && alive(pid)) process.kill(-pid, "SIGKILL");
@@ -201,7 +221,7 @@ describe("Codex server-owned device authentication", () => {
         await expect.poll(() => existsSync(join(home, "logout-pid")), { timeout: 2500 }).toBe(true);
         pid = Number(readFileSync(join(home, "logout-pid"), "utf8"));
         await controller.dispose();
-        expect(alive(pid)).toBe(false);
+        await expectReaped(pid);
         await expect(create("success").signOut()).resolves.toBeUndefined();
       } finally {
         if (pid !== undefined && alive(pid)) {
@@ -293,7 +313,7 @@ describe("Codex server-owned device authentication", () => {
     const controller = create(mode);
     await expect(controller.start()).rejects.toThrow(message);
     await controller.cancel();
-    expect(alive(Number(readFileSync(join(home, "pid"), "utf8")))).toBe(false);
+    await expectReaped(Number(readFileSync(join(home, "pid"), "utf8")));
   });
 
   it("fails safely when the configured executable is missing", async () => {
@@ -304,7 +324,7 @@ describe("Codex server-owned device authentication", () => {
     const controller = create(mode, { startupTimeoutMs: 250 });
     await expect(controller.start()).rejects.toThrow("did not provide a sign-in code in time");
     await controller.cancel();
-    if (existsSync(join(home, "pid"))) expect(alive(Number(readFileSync(join(home, "pid"), "utf8")))).toBe(false);
+    if (existsSync(join(home, "pid"))) await expectReaped(Number(readFileSync(join(home, "pid"), "utf8")));
   });
 
   it("requires a confirmed ChatGPT login even after an exit-0 device command", async () => {
@@ -328,7 +348,7 @@ describe("Codex server-owned device authentication", () => {
     const pid = Number(readFileSync(join(home, "pid"), "utf8"));
     expect(alive(pid)).toBe(true);
     await controller.cancel();
-    expect(alive(pid)).toBe(false);
+    await expectReaped(pid);
     expect(await controller.get(start.flowId!)).toMatchObject({ phase: "cancelled", authorizationUrl: null });
     expect((await controller.get(start.flowId!)).userCode).toBeUndefined();
   });
@@ -339,7 +359,7 @@ describe("Codex server-owned device authentication", () => {
     const start = await controller.start();
     await expect.poll(async () => (await controller.get(start.flowId!)).phase, { timeout: 5000 }).toBe("expired");
     await controller.cancel();
-    expect(alive(Number(readFileSync(join(home, "pid"), "utf8")))).toBe(false);
+    await expectReaped(Number(readFileSync(join(home, "pid"), "utf8")));
   });
 
   it("locks shared credentials across instances and releases only after cancellation", async () => {

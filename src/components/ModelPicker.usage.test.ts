@@ -126,6 +126,18 @@ describe("the model button's usage bars", () => {
     });
   }
 
+  it("refreshes usage from the open model menu without selecting a model or closing it", async () => {
+    render();
+    flushSync(() => chip().click());
+    await settle();
+    fixture.api.mockClear();
+    flushSync(() => document.querySelector<HTMLButtonElement>("[data-usage-check]")!.click());
+    await settle();
+    expect(fixture.api).toHaveBeenCalledWith("/api/limit-resets?refresh=1");
+    expect(fixture.api.mock.calls.some(([path]) => String(path).startsWith("/api/bots/"))).toBe(false);
+    expect(document.querySelector("[data-model-picker-content]")).not.toBeNull();
+  });
+
   it("leave the menu without rows for an engine with no usage", async () => {
     remember([]);
     render();
