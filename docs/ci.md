@@ -102,10 +102,12 @@ builds the matrix.
 `OMB_VITEST_WORKERS` in `vite.config.ts`), one for each of the runner's vCPUs.
 Most of a shard's time is waiting on real servers and fake engines: one file at
 a time it took 16 minutes with the machine 70% idle, and four at a time 5.
-Windows and macOS shards, and every local run, still run one file at a time. So
+A Windows shard runs two files at a time: one at a time it took 9 to 14
+minutes and was the last job of every run that had one. macOS shards, and
+every local run, still run one file at a time. So
 that files side by side never share a port, each worker picks from its own
 (`server/testing/worker-port.ts`); a test that picks a port some other way can
-meet another file's. Four files share the runner's CPU, so test and hook
+meet another file's. Files share the runner's CPU, so test and hook
 timeouts double there, as on Windows (`server/testing/host-timeout.ts`).
 
 **Which files run where.** Linux runs every file. Most e2e files drive
@@ -158,6 +160,7 @@ For example, a full Windows shard 3/8 uses PowerShell syntax:
 ```powershell
 $env:OMB_VITEST_E2E = "host"
 $env:OMB_VITEST_SUBSET = ""
+$env:OMB_VITEST_WORKERS = "2"
 pnpm exec vitest run --shard=3/8
 ```
 

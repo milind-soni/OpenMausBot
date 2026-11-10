@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Mail } from "lucide-react";
 import type { UpdatesConsentBridge, UpdatesConsentState, UpdatesConsentStatus } from "../../electron/updates-consent.mjs";
 import { t } from "@/lib/i18n";
+import { Layer } from "./Layer";
 import { SettingRow, Switch } from "./SettingsPrimitives";
 
 export const UPDATES_CONSENT_POPUP = "[data-updates-consent-popup]";
@@ -52,7 +53,7 @@ export function UpdatesConsentDialog({ signedIn, onYes, onNo }: {
     setBusy(true); setError(null);
     void onYes(signedIn || !typed ? undefined : typed).catch(() => { setBusy(false); setError(t("updatesConsent.failed")); });
   };
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" onMouseDown={event => { if (event.target === event.currentTarget && !busy) onNo(); }}>
+  return <Layer modal><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6" onMouseDown={event => { if (event.target === event.currentTarget && !busy) onNo(); }}>
     <div role="dialog" aria-modal="true" aria-labelledby={TITLE} aria-describedby="updates-consent-body" data-updates-consent-popup="" tabIndex={-1}
       onKeyDown={event => { if (event.key === "Escape" && !busy) { event.preventDefault(); event.stopPropagation(); onNo(); } }}
       className="relative max-h-full w-full max-w-[400px] overflow-y-auto rounded-2xl border border-hairline/50 bg-panel p-6 text-ink shadow-2xl outline-none">
@@ -74,7 +75,7 @@ export function UpdatesConsentDialog({ signedIn, onYes, onNo }: {
         <button type="button" className={PRIMARY} disabled={busy} onClick={yes}>{t("updatesConsent.yes")}</button>
       </div>
     </div>
-  </div>;
+  </div></Layer>;
 }
 
 /** Settings → General: on exactly when this computer's answer (or the signed-in account's) is "opted_in". */

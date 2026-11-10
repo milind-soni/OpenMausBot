@@ -3,10 +3,11 @@ import type { Surface } from "../../shared/wire.ts";
 import type { BotLogins } from "../bot-logins.ts";
 import { BROWSER_CONTROL_REFUSAL } from "../browser-runtime.ts";
 import type { StepContext } from "../browser-steps.ts";
-import { fillLogin, type FillLoginDeps, type FillLoginOutcome } from "../login-fill.ts";
+import { CODE_FROM_INBOX, fillLogin, type FillLoginDeps, type FillLoginOutcome } from "../login-fill.ts";
 import { redactSecretsInText } from "../redact.ts";
 import type { BotRecord } from "../store.ts";
 import { surfaceLabel } from "../surface.ts";
+import type { LoginMailCodes } from "./login-mail-codes.ts";
 
 type Spec = { command: string; env: Record<string, string> };
 type Turn = { botId: string; threadId: string; generation: string };
@@ -32,13 +33,17 @@ export interface FillLoginTurnDeps {
   loginInput(session: string, spec: Spec, env: NodeJS.ProcessEnv): Pick<FillLoginDeps, "engine" | "insertText" | "press" | "click">;
   remember: FillLoginDeps["remember"];
   stepContext(bot: BotRecord, turn: Turn): StepContext;
+  /** Absent where no mailbox can be read for a sign-in. */
+  mailCodes?: Pick<LoginMailCodes, "find" | "offerConnect">;
+  /** False once the turn that asked has ended. */
+  turnActive?(turn: Turn): boolean;
 }
 
 const ONLY_IN_BROWSER = "fill_login types a password only into a page of your own browser, where OpenMausBot checks the page's site first";
 
 export function createFillLoginTurn(deps: FillLoginTurnDeps) {
   // Security: on a screen the server cannot prove which site a focused box belongs to, so a secret is never typed there.
-  function elsewhere(bot: BotRecord, turn: Turn, place: Surface | null): Answer {
+  function elsewhere(bot: BotRecord, turn: Turn, place: Surface | null, signsInByEmail: boolean): Answer {
     const current = deps.current(bot, turn.threadId);
     const where = place ? surfaceLabel(place) : null;
     const notHere = where ? `; it never types one on the screen of ${where}` : "";
@@ -49,7 +54,7 @@ export function createFillLoginTurn(deps: FillLoginTurnDeps) {
         : "your browser is not available here: it is not installed yet, or this AI model cannot use browser tools";
       return { ok: false, text: where ? `${ONLY_IN_BROWSER}${notHere}, and ${why}. ${signIn}` : `fill_login works in the built-in browser, and this conversation has none. ${signIn}` };
     }
-    if (!deps.logins.sitesFor(bot.id).length) {
+    if (!signsInByEmail && !deps.logins.sitesFor(bot.id).length) {
       const trouble = deps.onePasswordTrouble();
       return { ok: false, text: `You have no saved logins to fill${trouble ? ` (1Password could not be read just now: ${trouble})` : ""}. ${signIn}` };
     }
@@ -60,10 +65,17 @@ export function createFillLoginTurn(deps: FillLoginTurnDeps) {
     return { ok: false, text: `${ONLY_IN_BROWSER}${notHere}. OpenMausBot is moving this conversation to your own browser${chrome}. End this turn now without using the screen tools: the request continues there with your browser tools. Open the site's sign-in page in that browser, then call fill_login.` };
   }
 
-  async function fillLoginForTurn(bot: BotRecord, capability: Turn, rawUsername: unknown, rawSubmit: unknown): Promise<Answer> {
+  async function connectMailbox(bot: BotRecord, turn: Turn, outcome: FillLoginOutcome): Promise<Answer> {
+    const offer = await deps.mailCodes!.offerConnect(bot, turn).catch(() => ({ shown: false } as { shown: boolean; line?: string }));
+    if (offer.shown) return { ok: outcome.ok, text: `${outcome.text} OpenMausBot showed the person a secure Connect card for Gmail. End this turn now: you continue automatically once it is connected, then call fill_login again.` };
+    return { ok: outcome.ok, text: `${outcome.text} ${offer.line ?? CODE_FROM_INBOX}` };
+  }
+
+  async function fillLoginForTurn(bot: BotRecord, capability: Turn, rawUsername: unknown, rawSubmit: unknown, rawEmail?: unknown): Promise<Answer> {
     const threadId = capability.threadId;
     const place = deps.place(bot, threadId);
-    if (place !== "browser") return elsewhere(bot, capability, place);
+    const email = typeof rawEmail === "string" && rawEmail.trim() ? rawEmail.trim().slice(0, 320) : undefined;
+    if (place !== "browser") return elsewhere(bot, capability, place, email !== undefined);
     const current = deps.current(bot, threadId);
     if (current.browser === false || current.computer === "off" || !deps.builtInBrowserOn()) {
       return { ok: false, text: "The built-in browser is off for you here, so fill_login has nothing to fill. Call request_sign_in instead." };
@@ -78,6 +90,7 @@ export function createFillLoginTurn(deps: FillLoginTurnDeps) {
     try {
       const outcome = await deps.withSecretInput(session, spec, () => fillLogin({
         username,
+        ...(email ? { email } : {}),
         submit: rawSubmit !== false,
         candidates: (host) => deps.logins.candidates(bot.id, host),
         available: async () => deps.logins.sitesFor(bot.id),
@@ -85,8 +98,10 @@ export function createFillLoginTurn(deps: FillLoginTurnDeps) {
       }, {
         ...deps.loginInput(session, spec, env),
         remember: deps.remember,
+        ...(deps.mailCodes ? { emailCode: (ask) => deps.mailCodes!.find(current, capability, ask, () => deps.turnActive?.(capability) !== false) } : {}),
       }), deps.stepContext(current, capability));
       if (outcome.ok && outcome.loginId) deps.logins.markUsed(outcome.loginId);
+      if (outcome.wantsMailbox && deps.mailCodes) return await connectMailbox(current, capability, outcome);
       return { ok: outcome.ok, text: outcome.text };
     } catch (error) {
       if (error instanceof Error && error.message === BROWSER_CONTROL_REFUSAL) {

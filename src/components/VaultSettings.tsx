@@ -61,6 +61,7 @@ export function VaultSettings() {
   const [removeTotp, setRemoveTotp] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [keysOff, setKeysOff] = useState<string[]>([]);
 
   const load = async () => {
     try {
@@ -100,7 +101,13 @@ export function VaultSettings() {
   const remove = async (id: string, kind: "login" | "secret") => {
     if (deleting !== id) { setDeleting(id); return; }
     setBusy(true);
-    try { await (kind === "login" ? deleteLogin(id) : deleteSecret(id)); setDeleting(null); await load(); }
+    setKeysOff([]);
+    try {
+      if (kind === "login") await deleteLogin(id);
+      else setKeysOff(await deleteSecret(id));
+      setDeleting(null);
+      await load();
+    }
     catch (cause) { setError(cause instanceof Error && cause.message ? cause.message : t("settings.logins.deleteError")); }
     finally { setBusy(false); }
   };
@@ -250,6 +257,7 @@ export function VaultSettings() {
           </ul>
         )}
         <p className="text-[12px] leading-relaxed text-ink-tertiary">{t("settings.logins.limits")}</p>
+        {keysOff.length > 0 && <p role="status" className="text-[12px] leading-relaxed text-warning" data-vault-keys-off>{t("settings.vault.secret.keyOff", { servers: keysOff.join(", ") })}</p>}
         {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-hairline/30 pt-3" data-vault-keys>
           <div className="min-w-0 flex-1">
