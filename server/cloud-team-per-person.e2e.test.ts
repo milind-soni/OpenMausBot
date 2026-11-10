@@ -188,3 +188,10 @@ it("each person orders their own bots; an Owner's or Admin's order is the team's
   expect((await three(ada)).filter((id) => id !== atlas)).toEqual(flipped);
 }, hostTimeout(90_000));
 
+it("a User's open chat counts as in front of them, and nobody can name another person's private chat as theirs", async () => {
+  const opened = await team.as(ada, "POST", `/api/bots/${scout.id}/tasks`, { title: "Ada's notes" });
+  expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+  const private_ = opened.body.task.threadId as string;
+  expect((await team.as(ada, "POST", "/api/presence/active", { source: "desktop", threadId: private_ })).status).toBe(200);
+  for (const token of [cleo, owner]) expect((await team.as(token, "POST", "/api/presence/active", { source: "desktop", threadId: private_ })).status).toBe(404);
+}, hostTimeout(60_000));

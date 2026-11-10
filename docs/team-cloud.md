@@ -97,7 +97,10 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   sleep request as any home does ([Sleeping homes](cloud-pro.md#sleeping-homes-the-power-read-and-the-sleep-handshake)):
   not while any member used it in the last minutes, a turn or routine runs, or work one bot handed another is still
   moving (`handoff`). A member's app, phone or a webhook wakes it, and the Admin wakes it before a routine is due. Inbox
-  lines and open cards live on its volume, so a person's answer after a sleep finds them. It keeps every member's
+  lines and open cards live on its volume, so a person's answer after a sleep finds them. The chat any member has open
+  while they use the app (`POST /api/presence/active` with its `threadId`) counts as in front of them, a User's as an
+  Admin's: its engine and prompt cache stay warm a while. That is all it does; it never holds back anyone's
+  notification. It keeps every member's
   session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
 
 
