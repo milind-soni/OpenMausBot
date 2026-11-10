@@ -214,19 +214,13 @@ describe("a hosted address request that never settles", () => {
         return fake.bridge.companion.state();
       });
     }
-    let timeout: (() => void) | undefined;
-    const setTimeout = window.setTimeout.bind(window);
-    vi.spyOn(window, "setTimeout").mockImplementation((callback, delay, ...args) => {
-      if (delay === 30_000 && typeof callback === "function") {
-        timeout = () => callback(...args);
-      }
-      return setTimeout(callback, delay, ...args);
-    });
+    const timeouts = vi.spyOn(window, "setTimeout");
     await startPairing(fake);
     await vi.waitFor(() => expect(fake.bridge.companionAccount.prepare).toHaveBeenCalledOnce());
-    await vi.waitFor(() => expect(timeout).toBeDefined());
+    await vi.waitFor(() => expect(timeouts).toHaveBeenCalledWith(expect.any(Function), 30_000));
+    const [timeout, , ...args] = timeouts.mock.calls.filter(([, delay]) => delay === 30_000).at(-1)!;
     expect(fake.bridge.companion.refreshTailscale).not.toHaveBeenCalled();
-    flushSync(() => timeout!());
+    flushSync(() => timeout(...args));
     await vi.waitFor(() => expect(button(label)?.disabled).toBe(false));
     flushSync(() => button(label)!.click());
     await vi.waitFor(() => expect(host.querySelector('[aria-label="Device pairing QR code"]')).not.toBeNull());
