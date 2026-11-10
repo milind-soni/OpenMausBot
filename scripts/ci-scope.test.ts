@@ -522,7 +522,8 @@ describe("the repository's import graph", () => {
       .filter((file) => !/[/\\]ci-scope\.(?:mjs|test\.ts)$/.test(file));
     const mentionsTranslations = (file: string) => {
       const text = readFileSync(file, "utf8");
-      return [...text.matchAll(/locales/g)].some((match) => !/^locales\W{1,6}en\.json/.test(text.slice(match.index, match.index + 24)));
+      // A browser extension's own _locales folder is not one of ours.
+      return [...text.matchAll(/(?<!_)locales/g)].some((match) => !/^locales\W{1,6}en\.json/.test(text.slice(match.index, match.index + 24)));
     };
     const readers = new Set(files.filter(mentionsTranslations));
     const affected = files

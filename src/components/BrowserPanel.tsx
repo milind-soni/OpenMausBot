@@ -102,6 +102,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   useEffect(() => { setFallback(false); }, [bot.id, bot.browserProfile, scopedThread]);
   useEffect(() => {
     setTabs([]);
+    setExtensions(null);
     setNav(stream ? NO_NAV : { ...NO_NAV, canGoBack: true, canGoForward: true });
     setStarting(false);
     setGone(false);

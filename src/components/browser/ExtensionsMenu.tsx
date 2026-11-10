@@ -1,7 +1,7 @@
 // The browser panel's Extensions menu: the extensions installed in this bot's browser, each opening its own page for the
 // person holding the browser. The server picks the page from the extension's id; chrome:// pages never open from here.
 import { Puzzle } from "lucide-react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import { t } from "@/lib/i18n";
 
@@ -29,6 +29,9 @@ export function ExtensionsMenu({ ready, extensions, onList, onOpen }: {
   onOpen: (id: string) => void;
 }) {
   const menu = useRef<HTMLDetailsElement>(null);
+  // Control can arrive while the menu is already open: ask for the list then too.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (ready && menu.current?.open) onList(); }, [ready]);
   return (
     <details ref={menu} className="relative shrink-0" onToggle={(event) => { if (event.currentTarget.open && ready) onList(); }}>
       <summary className="list-none cursor-pointer rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink [&::-webkit-details-marker]:hidden" aria-label={t("browser.extensions.title")} title={t("browser.extensions.title")}><Puzzle size={16} /></summary>
