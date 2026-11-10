@@ -289,6 +289,15 @@ describe("a person's hold on the shared Local VM", () => {
     expect((await control(phone, a.id, { action: "release", controlLeaseId: id })).body.released).toBe(true);
   }, 20_000);
 
+  it("a phone's take of a Local VM needs a lease, so its hold can lapse; a phone's cloud take and a desktop's take do not", async () => {
+    const cloud = await newBot("Cumulus", { computer: "cloud" });
+    const refused = await control(phone, witness, { action: "take" });
+    expect(refused.status).toBe(400);
+    expect(await held(witness)).toBe(false);
+    expect((await control(phone, cloud.id, { action: "take" })).body.held).toBe(true);
+    expect((await control(api, witness, { action: "take" })).body.held).toBe(true);
+  }, 20_000);
+
   it("a desktop take of the shared desktop never lapses", async () => {
     const id = lease();
     expect((await control(api, witness, { action: "take", controlLeaseId: id })).body.owned).toBe(true);
@@ -665,7 +674,7 @@ describe("a person's hold on the shared Local VM", () => {
   it("a closing viewer's release by its open's lease, without a conversation, frees that Boat hold and leaves a phone's hold on the shared desktop", async () => {
     const a = await newBot("Ada");
     const onCloud = await newTask(a.id, "cloud");
-    await control(phone, witness, { action: "take" });
+    await control(phone, witness, { action: "take", controlLeaseId: lease() });
     const id = lease();
     expect((await control(api, a.id, { action: "take", controlLeaseId: id }, onCloud)).body.owned).toBe(true);
     expect((await control(api, a.id, { action: "release", controlLeaseId: id })).body.released).toBe(true);
@@ -947,7 +956,7 @@ describe("a person's hold on the shared Local VM", () => {
   it("a panel's hand-back without a lease, naming the shared VM from an unplaced conversation of a bot with a VPS, ends a phone's hold taken through another bot", async () => {
     const a = await newBot("Ada", { cloudBackend: "vps" });
     const unplaced = await newTask(a.id);
-    await control(phone, witness, { action: "take" });
+    await control(phone, witness, { action: "take", controlLeaseId: lease() });
     expect(await held(witness)).toBe(true);
     await control(api, a.id, { action: "release", target: "local/shared" }, unplaced);
     expect(await held(witness)).toBe(false);

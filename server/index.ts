@@ -15263,8 +15263,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const refusal = sharedVm.takeRefusal(controlKey);
         if (refusal) return json(res, 409, { error: refusal });
-        if (!controlLeaseId) return json(res, 200, shown(computerControl.take(controlKey)));
-        const result = computerControl.acquireLease(controlKey, controlLeaseId, { armed: sharedVm.armed(auth, bot, threadId, controlKey, body.target) });
+        const phoneVm = sharedVm.armed(auth, bot, threadId, controlKey, body.target);
+        if (!controlLeaseId) return phoneVm ? json(res, 400, { error: "A phone's take of a Local VM needs a controlLeaseId, so its hold can lapse when the phone goes away" }) : json(res, 200, shown(computerControl.take(controlKey)));
+        const result = computerControl.acquireLease(controlKey, controlLeaseId, { armed: phoneVm });
         return json(res, 200, { ...shown(result.snapshot), owned: result.owned, acquired: result.acquired });
       }
       return json(res, 405, { error: "method not allowed" });
