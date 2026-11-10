@@ -6,6 +6,7 @@ import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { useStore } from "@/state/store";
 import { Card, Switch } from "./SettingsPrimitives";
 import type { SkillsLibrarySkillWire } from "../../shared/wire";
+import { Layer } from "./Layer";
 import { Select } from "./Select";
 
 export function filterLibrarySkills(
@@ -369,7 +370,7 @@ export function SkillsSection() {
         </form>
       </Card>
 
-      {viewing && <SkillSourceDialog viewing={viewing} error={error} working={Boolean(working)} onClose={() => { if (!working) setViewing(null); }} onEnable={() => void toggle(viewing.skill, true)} />}
+      {viewing && <Layer modal><SkillSourceDialog viewing={viewing} error={error} working={Boolean(working)} onClose={() => { if (!working) setViewing(null); }} onEnable={() => void toggle(viewing.skill, true)} /></Layer>}
     </div>
   );
 }

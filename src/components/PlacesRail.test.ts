@@ -560,8 +560,8 @@ it("a click on another account's place asks main by its id; a refusal shows the 
   await click(host.querySelector('[data-rail-place="b1"]'));
   await act(async () => { await Promise.resolve(); });
   expect(workspaces.open.mock.calls).toEqual([["b1"]]);
-  expect(host.querySelector("[data-accounts-note]")?.textContent).toContain("moving to the Cloud");
-  expect(host.querySelector("[data-accounts-sign-out]")).toBeNull();
+  expect(document.querySelector("[data-accounts-note]")?.textContent).toContain("moving to the Cloud");
+  expect(document.querySelector("[data-accounts-sign-out]")).toBeNull();
 });
 
 it("a saved account whose sign-in ended: its tile says so, and a click opens the emailed code for that address", async () => {
@@ -573,7 +573,7 @@ it("a saved account whose sign-in ended: its tile says so, and a click opens the
   expect(host.querySelector('[data-rail-place="b1"]')?.getAttribute("title")).toBe(`My Cloud · ${BOB} · Sign in again`);
   await click(host.querySelector('[data-rail-place="b1"]'));
   await act(async () => { await Promise.resolve(); });
-  expect((host.querySelector("#cloud-add-email") as HTMLInputElement | null)?.value).toBe(BOB);
+  expect((document.querySelector("#cloud-add-email") as HTMLInputElement | null)?.value).toBe(BOB);
 });
 
 it("＋ offers Add another account while someone is signed in, and it opens the sign-in over the window", async () => {
@@ -581,10 +581,10 @@ it("＋ offers Add another account while someone is signed in, and it opens the 
   Object.assign(window, { ogb: { workspaces, cloudAdd, accounts } });
   await mount(createElement(PlacesRail));
   await click(host.querySelector("[data-rail-add]"));
-  await click(host.querySelector('[data-place-add-choice="account"]'));
+  await click(document.querySelector('[data-place-add-choice="account"]'));
   await act(async () => { await Promise.resolve(); });
-  expect(host.querySelector("[data-place-add-sheet]")).toBeNull();
-  expect((host.querySelector("#cloud-add-email") as HTMLInputElement | null)?.value).toBe("");
+  expect(document.querySelector("[data-place-add-sheet]")).toBeNull();
+  expect((document.querySelector("#cloud-add-email") as HTMLInputElement | null)?.value).toBe("");
 });
 
 it("past eight, ⋯ keeps the groups, each under its address, and search finds a place by its account's address", async () => {
