@@ -16,7 +16,6 @@ const fixture = vi.hoisted(() => ({
   switches: [] as ComponentProps<typeof Switch>[],
   ownerOrAdmin: null as boolean | null,
   updater: null as import("@/lib/updater").UpdaterState | null,
-  serverUpdate: null as ReturnType<typeof import("./SidebarProfileMenu").useServerUpdateItem>,
   rail: null as { available: boolean; hidden: boolean } | null,
   railHidden: [] as boolean[],
 }));
@@ -70,10 +69,7 @@ vi.mock("./UpdatesConsent", async (importOriginal) => ({
   ...await importOriginal<typeof import("./UpdatesConsent")>(),
   UpdatesConsentRow: marker("updatesConsent"),
 }));
-vi.mock("./SidebarProfileMenu", async (importOriginal) => ({
-  ...await importOriginal<typeof import("./SidebarProfileMenu")>(),
-  useServerUpdateItem: () => fixture.serverUpdate,
-}));
+vi.mock("./ServerUpdateRow", () => ({ ServerUpdateRow: marker("serverUpdate") }));
 vi.mock("@/lib/updater", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/updater")>(),
   useUpdaterState: () => fixture.updater,
@@ -89,7 +85,6 @@ beforeEach(() => {
   fixture.switches = [];
   fixture.ownerOrAdmin = null;
   fixture.updater = null;
-  fixture.serverUpdate = null;
   fixture.rail = null;
   fixture.railHidden = [];
   fixture.api.mockResolvedValue({});
@@ -245,14 +240,9 @@ describe("Settings in Simple mode", () => {
     for (const shown of ["Check for updates", "MARKER:updatesConsent;", "Replay welcome tour", "Diagnostics"]) expect(placement(html, shown), shown).toBe("shown");
   });
 
-  it("checks the server's version from a browser", () => {
+  it("shows the server's own update row from a browser", () => {
     vi.stubGlobal("window", {});
-    const onSelect = vi.fn();
-    fixture.serverUpdate = { phase: "up-to-date", pending: false, label: "Up to date", item: { key: "update", label: "Up to date", subtitle: "v1.2.3", icon: null, disabled: false, onSelect } };
-    const html = open("updates");
-    expect(html).toMatch(/>MausBot [^<]+<\/div>/);
-    expect(html).toContain("Up to date v1.2.3");
-    expect(placement(html, "Check for updates")).toBe("shown");
+    expect(placement(open("updates"), "MARKER:serverUpdate;")).toBe("shown");
   });
 
   it("opens the fold that holds a linked setting: API keys, Servers or this app as a client", () => {

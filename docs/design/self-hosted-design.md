@@ -62,7 +62,10 @@ The published lists of principles 5 and 6 are the docs page
   previous image and the backup, and report it.
 - The rule that makes rollback safe: version N's data must stay readable by N-1. The data directory carries a schema
   marker; a change that breaks the rule ships in two releases (read the new format first, write it one release later).
-- Standalone servers get the same update as one command they run themselves.
+- Standalone servers get the same update as one command they run themselves, or from **Update server** in the app on a
+  Docker install whose host has `deploy/update-runner.sh` (the installer adds it): the server only leaves a request
+  file, and root's runner on the host runs `update.sh` with no arguments taken from it. Not through the connector:
+  that needs enrolling, and its runner takes an image from its request.
 - Skew: desktop and phone apps work with any stable server from the last 90 days; an older server shows a banner.
 
 ## Entitlements

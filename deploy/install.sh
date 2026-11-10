@@ -647,6 +647,10 @@ services:
     volumes:
       - ./data:/data
       - edge:/run/openmausbot
+      # The Update server button (update-runner.sh): the server leaves a request in the first, reads the outcome in
+      # the second.
+      - ./server-update/request:/run/omb-update/request
+      - ./server-update/status:/run/omb-update/status:ro
     environment:
       OMB_PORT: "8799"
       OMB_WEBHOOK_PORT: "8800"
@@ -806,6 +810,32 @@ place_update() {
   if from_repository fetch_update; then note "update.sh is $SOURCE_NAME."; fi
 }
 
+fetch_runner() {
+  fetch deploy/update-runner.sh "$INSTALL_DIR/update-runner.sh" 755
+}
+
+data_owner() { # the data folder's user and group, as numbers: the server's container runs as them
+  stat -c '%u:%g' "$INSTALL_DIR/data" 2>/dev/null || stat -f '%u:%g' "$INSTALL_DIR/data" 2>/dev/null
+}
+
+# The Update server button: update-runner.sh (deploy/update-runner.sh) has systemd run update.sh when the server asks,
+# and nothing else. Without it, or without systemd, the app shows the command to run here instead.
+place_button() {
+  [ -f "$INSTALL_DIR/update.sh" ] || return 0
+  if ! from_repository fetch_runner; then
+    note "The app cannot update this server: update-runner.sh could not be downloaded. Update it with: sudo $INSTALL_DIR/update.sh"
+    return 0
+  fi
+  button_log=$(mktemp)
+  if sh "$INSTALL_DIR/update-runner.sh" --install --dir "$INSTALL_DIR" --user "$(data_owner)" --no-restart >"$button_log" 2>&1; then
+    note "The app can update this server: Settings, Updates, Update server."
+  else
+    reason=$(tail -n 1 "$button_log")
+    note "The app cannot update this server${reason:+ ($reason)}. Update it with: sudo $INSTALL_DIR/update.sh"
+  fi
+  rm -f "$button_log"
+}
+
 # The sandbox's host preparation and Compose settings are this repository's own (deploy/box, connector/profiles),
 # fetched and used as they are, all four from the same place.
 fetch_sandbox() {
@@ -948,6 +978,7 @@ install_server() {
   place_update
   prepare_sandbox
   prepare_data
+  place_button
   say "Starting MausBot..."
   compose_quietly up -d --remove-orphans || fail "MausBot could not be started (Docker's message is above). Fix that, then run this again."
   wait_healthy || fail "MausBot started but did not report healthy within $HEALTH_WAIT_S seconds. Its log: cd $INSTALL_DIR && sudo docker compose logs omb --tail 50"
@@ -1058,6 +1089,7 @@ run_uninstall() {
   command -v docker >/dev/null 2>&1 || fail "Docker isn't installed here, so MausBot isn't running. Your data is in $INSTALL_DIR/data."
   say "Stopping MausBot..."
   compose_quietly down --remove-orphans || fail "MausBot could not be stopped (Docker's message is above)."
+  if [ -f "$INSTALL_DIR/update-runner.sh" ]; then sh "$INSTALL_DIR/update-runner.sh" --remove --dir "$INSTALL_DIR" >/dev/null 2>&1 || true; fi
   say "MausBot is stopped and its containers are removed."
   say "Your data is kept in $INSTALL_DIR/data, your settings in $INSTALL_DIR/.env and the HTTPS certificates in $INSTALL_DIR/caddy."
   say "To start it again: $(command_line "--domain $(env_value DOMAIN)")"

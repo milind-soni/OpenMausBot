@@ -19,7 +19,7 @@ const BOX_PASSED = '{"box":"bwrap","total":31,"passed":31,"failed":[],"results":
 const BOX_FAILED = '{"box":"bwrap","total":31,"passed":30,"failed":["config-hidden"],"results":[{"id":"config-hidden","ok":false}]}';
 const FILES = "https://raw.githubusercontent.com/milind-soni/OpenMausBot";
 const SOURCE = `${FILES}/v0.1.151`;
-const REAL_TOOLS = ["sed", "awk", "grep", "cat", "head", "tail", "tr", "sort", "cut", "mkdir", "mktemp", "chmod", "chown", "mv", "rm", "dirname", "sh"];
+const REAL_TOOLS = ["sed", "awk", "grep", "cat", "head", "tail", "tr", "sort", "cut", "mkdir", "mktemp", "chmod", "chown", "mv", "rm", "dirname", "sh", "stat"];
 
 /** A server that passes every check: Ubuntu 24.04, x86-64, 4 cores, 8 GB, 80 GB free, Docker 27, free ports, a domain that points here. */
 const HEALTHY = {
@@ -82,6 +82,7 @@ case "$*" in
     for last; do :; done
     case "$*" in
       *deploy/box/prepare-host.sh*) printf '#!/bin/sh\\necho "prepare-host profiles=$MAUSBOT_PROFILES_DIR" >> "$FAKE_LOG"\\nexit "\${FAKE_PREPARE:-0}"\\n' > "$last" ;;
+      *deploy/update-runner.sh*) printf '#!/bin/sh\\necho "update-runner $*" >> "$FAKE_LOG"\\nexit "\${FAKE_RUNNER:-0}"\\n' > "$last" ;;
       *) printf 'the repository file\\n' > "$last" ;;
     esac ;;
   *"get.docker.com -o "*) exit 22 ;;
@@ -316,6 +317,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
       'docker image inspect -f {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/milind-soni/openmausbot:v0.1.151',
       "docker run --rm --network none --entrypoint id ghcr.io/milind-soni/openmausbot:v0.1.151 -u",
       "docker run --rm --network none --entrypoint id ghcr.io/milind-soni/openmausbot:v0.1.151 -g",
+      'docker image inspect -f {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/milind-soni/openmausbot:v0.1.151',
       "docker compose up -d --remove-orphans",
       "docker compose exec -T omb node dist-server/bot-box/box-check.js --public=none",
     ]);
@@ -571,6 +573,23 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(unpublished.status).toBe(0);
     expect(existsSync(join(unpublished.install, "update.sh"))).toBe(false);
     expect(unpublished.stdout).toContain("To update later, run this command again.");
+  });
+
+  it("adds the Update server button with update-runner.sh, before the server starts, and says when it could not", () => {
+    const first = run(["--domain", "maus.example.com"]);
+    expect(first.calls.some((call) => call.includes(`${SOURCE}/deploy/update-runner.sh -o `))).toBe(true);
+    const ids = `${process.getuid?.()}:${process.getgid?.()}`;
+    const button = first.calls.findIndex((call) => call === `update-runner --install --dir ${first.install} --user ${ids} --no-restart`);
+    expect(button).toBeGreaterThan(-1);
+    expect(button).toBeLessThan(first.calls.indexOf("docker compose up -d --remove-orphans"));
+    expect(first.stdout).toContain("  note  The app can update this server: Settings, Updates, Update server.");
+    const compose = readFileSync(join(first.install, "compose.yaml"), "utf8");
+    expect(compose).toContain("      - ./server-update/request:/run/omb-update/request\n      - ./server-update/status:/run/omb-update/status:ro\n");
+    const refused = run(["--domain", "maus.example.com"], { env: { FAKE_RUNNER: "1" } });
+    expect(refused.status).toBe(0);
+    expect(refused.stdout).toContain(`Update it with: sudo ${refused.install}/update.sh`);
+    const removed = run(["--uninstall"], {}, { dir: first.dir });
+    expect(removed.calls).toContain(`update-runner --remove --dir ${first.install}`);
   });
 
   // update.sh moves an install from before Caddy had its own container, writing these two files as the installer does.

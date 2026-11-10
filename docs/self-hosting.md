@@ -1482,6 +1482,10 @@ every release instead.
 
 A server installed with the [installer](deploy-vps.md#quick-start-one-command-on-your-own-domain)
 updates with `sudo /opt/openmausbot/update.sh`, which the installer puts there.
+Its admins can also press **Update server** in **Settings → Updates**, which runs
+that same script on the server; a Docker checkout gets the button with
+`sudo deploy/update-runner.sh --install`. [How it works and what it can and
+cannot do](deploy-vps.md#from-the-app-update-server).
 
 ```sh
 cd deploy && git pull && ./update.sh                                    # Docker: copy the data, update, roll back on failure

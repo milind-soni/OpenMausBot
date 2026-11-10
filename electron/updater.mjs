@@ -124,7 +124,23 @@ export function sendUpdaterState() {
   setState({});
 }
 
-export function registerUpdaterIpc({ pageAllowed: allowed }) {
+/** What a server's page learns when it asks for this app's own update; never the updater's state. */
+export async function updateForServerPage(confirmRestart) {
+  if (!updaterCoordinator) return "unavailable";
+  if (state.status !== "downloaded") await updaterCoordinator.check(true);
+  if (state.status === "downloaded") {
+    if (!(await confirmRestart(state.version ?? ""))) return "later";
+    updaterCoordinator.install();
+    return "installing";
+  }
+  if (state.status === "downloading" || state.status === "preparing" || state.status === "available") return "downloading";
+  return state.status === "error" ? "failed" : "current";
+}
+
+/** `serverPage`: the page this app's window shows, from a server in the Server menu, which may ask for this app's update
+ * (`update:for-server-page`) when that server is newer than the app. Nothing restarts until `confirmRestart`, this app's
+ * own dialog, says so. */
+export function registerUpdaterIpc({ pageAllowed: allowed, serverPage = () => false, confirmRestart = async () => false }) {
   pageAllowed = allowed;
   const guarded = (channel, handler) => (event) => {
     if (!pageAllowed(event)) throw new Error(`${channel} is only available in this app's window`);
@@ -133,6 +149,10 @@ export function registerUpdaterIpc({ pageAllowed: allowed }) {
   ipcMain.handle("update:get-state", guarded("update:get-state", view));
   ipcMain.handle("update:check", guarded("update:check", () => updaterCoordinator?.check(true)));
   ipcMain.handle("update:install", guarded("update:install", () => updaterCoordinator?.install()));
+  ipcMain.handle("update:for-server-page", (event) => {
+    if (!serverPage(event)) throw new Error("update:for-server-page is only available to the page this app's window shows");
+    return updateForServerPage(confirmRestart);
+  });
   ipcMain.handle("update:seen", guarded("update:seen", () => {
     if (!launch?.updated) return;
     updateSeen(quietRecord());

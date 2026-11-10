@@ -2950,7 +2950,7 @@ app.whenReady().then(async () => {
   }
   registerCuaIpc();
   androidDevice.registerIpc(ipcMain);
-  registerUpdaterIpc({ pageAllowed: updaterPageAllowed });
+  registerUpdaterIpc({ pageAllowed: updaterPageAllowed, serverPage: event => activePageOrigin(event) !== null, confirmRestart: async version => Boolean(mainWindow && !mainWindow.isDestroyed()) && (await dialog.showMessageBox(mainWindow, { type: "question", message: nativeT("native.update.forServer", { version }), detail: nativeT("native.update.forServerDetail"), buttons: [nativeT("native.update.restartNow"), nativeT("native.update.notNow")], defaultId: 0, cancelId: 1, noLink: true })).response === 0 });
   desktopPrefs = nativeText.prefs;
   updatesConsent = registerDesktopPrefs({ ipcMain, cloudAccount: () => cloudAccount, prefs: desktopPrefs, localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady),
     frame: { made: () => windowFrameMade, restarts: process.platform === "win32", changed: () => void broadcastDesktopCapabilities() },

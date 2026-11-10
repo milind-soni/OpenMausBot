@@ -340,6 +340,10 @@ services:
     volumes:
       - ./data:/data
       - edge:/run/openmausbot
+      # The Update server button (update-runner.sh): the server leaves a request in the first, reads the outcome in
+      # the second.
+      - ./server-update/request:/run/omb-update/request
+      - ./server-update/status:/run/omb-update/status:ro
     environment:
       OMB_PORT: "8799"
       OMB_WEBHOOK_PORT: "8800"
