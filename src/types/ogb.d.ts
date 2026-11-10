@@ -539,6 +539,9 @@ export interface CompanionAccountState {
   /** The HTTPS address was given back after 30 days with no paired phone
    * seen. Opening the phone page calls prepare(), which brings it back. */
   paused?: boolean;
+  /** The secure address was ended for old phone apps: a phone that has not used the encrypted connection must be
+   * updated and paired again. */
+  tunnelRetired?: boolean;
 }
 
 export type AndroidUsbDevice = {

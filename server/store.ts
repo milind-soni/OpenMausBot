@@ -10,7 +10,6 @@ import { ensureSections, readSections, changeEmptySection } from "./section-cont
 import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
 import type { BotProfilePatch } from "./bot-profile.ts";
-import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
 import { forgetBotMemoryJournal, journalFile } from "./memory-journal.ts";
@@ -436,22 +435,11 @@ export class Store {
       delete b.managedSections;
       botsMigrated = true;
     }
-    // A legacy ask_bot:@Name grant converts only when the name is unique; an ambiguous one stays inert.
-    for (const b of this.bots) {
-      if (!b.alwaysAllow?.length) continue;
-      let changed = false;
-      const migrated = b.alwaysAllow.map((key) => {
-        const match = key.match(/^(ask_bot|delegate_bot):@(.+)$/);
-        if (!match) return key;
-        const candidates = this.bots.filter((candidate) => candidate.name === match[2]);
-        if (candidates.length !== 1) return key;
-        changed = true;
-        return peerAllowKey(match[1] as PeerAction, candidates[0]!.id);
-      });
-      if (changed) {
-        b.alwaysAllow = [...new Set(migrated)];
-        botsMigrated = true;
-      }
+    for (const b of this.bots as Array<BotRecord & { peers?: unknown; approvePeerComms?: unknown }>) {
+      if (!("peers" in b) && !("approvePeerComms" in b)) continue;
+      delete b.peers;
+      delete b.approvePeerComms;
+      botsMigrated = true;
     }
     // Recover only app-issued provider-tool grants into bot defaults, never task/session grants such as shell commands.
     for (const b of this.bots) {
@@ -1386,7 +1374,7 @@ export class Store {
         next = { id: operation.botId, threadId: operation.threadId, name: operation.fields.name,
           title: "", description: "", soul: "", notifications: true, color: rotationColor(nextBots.length), unread: false,
           resumeCursors: {}, createdAt, ...operation.fields, modelSelection,
-          autoApprove: false, approvePeerComms: false,
+          autoApprove: false,
           // A restricted Chief never creates a bot everyone sees.
           ...(chief.visibility && chief.visibility !== "everyone" ? { visibility: structuredClone(chief.visibility) } : {}),
           // A Chief's new specialist reports to the Chief's own person.

@@ -116,26 +116,24 @@ describe("reviewed Chief team setup", () => {
     expect(h.peer.chiefOfStaff).toBe(true);
     expect((await h.resolve(replace.requestId))?.duplicate).toBe(true);
   });
-  it.each(["conflict", "scope", "busy", "peer", "revision"])("cancels promotion after a %s change without partial mutation", async change => {
+  it.each(["conflict", "scope", "busy", "revision"])("cancels promotion after a %s change without partial mutation", async change => {
     const h = harness(); h.peer.section = "Engineering";
     const card = h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }]);
     if (change === "conflict") h.bot("New Chief", { section: "Engineering", chiefOfStaff: true });
     if (change === "scope") h.chief.managedSections = [];
     if (change === "busy") h.peer.busy = true;
-    if (change === "peer") h.chief.peers = [];
     if (change === "revision") h.peer.chiefOfStaff = true;
     const before = structuredClone(h.store.bots);
     expect((await h.resolve(card.requestId))?.result.state).toBe("cancelled");
     expect(h.store.bots).toEqual(before);
     expect(h.apply).not.toHaveBeenCalled();
   });
-  it("rejects malformed leadership and promotion outside team or peer scope", () => {
+  it("rejects malformed leadership and promotion outside the team", () => {
     const h = harness();
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: "true" } }])).toThrow();
     h.peer.section = "Private";
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }])).toThrow(/authorized/);
-    h.peer.section = "Engineering"; h.chief.peers = [];
-    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { chiefOfStaff: true } }])).toThrow(/peer scope/);
+    h.peer.section = "Engineering";
     h.chief.chiefOfStaff = false;
     expect(() => h.propose([{ action: "update", botId: h.chief.id, fields: { chiefOfStaff: true } }])).toThrow(/Only an active Chief/);
     expect(h.messages).toHaveLength(0);
@@ -272,11 +270,9 @@ describe("reviewed Chief team setup", () => {
     expect((await h.resolve(card.requestId))?.result).toMatchObject({ state: "cancelled", error: "@Ada changed. This setup was cancelled; review a new proposal." });
     expect(h.apply).not.toHaveBeenCalled();
   });
-  it("preserves existing elevated permissions and peer allowlists", () => {
+  it("preserves existing elevated permissions", () => {
     const h = harness(); h.peer.approvalMode = "full";
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { modelSelection: { instanceId: "codex", model: "gpt-fixture" } } }])).toThrow(/incompatible/);
-    h.chief.peers = [];
-    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { title: "X" } }])).toThrow(/peer scope/);
   });
   it("routes separately confirmed deletion through lifecycle guards once and never permits self-deletion", async () => {
     const h = harness();

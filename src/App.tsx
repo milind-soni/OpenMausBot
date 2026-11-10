@@ -37,6 +37,7 @@ import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { HomeLine } from "@/components/HomeLine";
 import { useTeamChats } from "@/state/team-chats";
 import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
+import { useTeamPresence } from "@/state/team-presence";
 import { inboxVersion, useInboxLoader, useInboxPanel, useInboxReady } from "@/state/inbox";
 import { InboxPanel } from "@/components/inbox/InboxPanel";
 import { PlacesRail } from "@/components/PlacesRail";
@@ -132,7 +133,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     dispatch("section" in request ? { type: "toggleAppSettings", open: true, section: request.section } : { type: "togglePlugins", open: true, surface: request.surface });
   }, [dispatch]);
   useExternalChatLinks(state, dispatch); useDesktopNotificationOpens(state, dispatch);
-  usePresence(state, dispatch);
+  usePresence(state, dispatch); useTeamPresence(state);
   const [drawerOpen, setDrawerOpen] = useState(false);
   usePageLanguage(effectiveLanguage(useLanguageChoice(), state.config?.language), true);
   const [paletteOpen, setPaletteOpen] = useState(false);
