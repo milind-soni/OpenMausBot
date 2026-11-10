@@ -57,7 +57,10 @@ function enforceDeadlines(server: ReturnType<typeof createServer>, deadlines: E2
     const guard = timers.get(req.socket);
     if (!guard) return;
     guard.clear();
-    const body = setTimeout(() => req.socket.destroy(), deadlines.requestMs);
+    // Only an unfinished request: a handler that never reads a GET (an event stream, a download) leaves it unconsumed.
+    const body = setTimeout(() => {
+      if (!req.complete) req.socket.destroy();
+    }, deadlines.requestMs);
     body.unref?.();
     const done = () => clearTimeout(body);
     req.once("end", done);

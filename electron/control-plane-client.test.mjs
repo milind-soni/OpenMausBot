@@ -300,6 +300,35 @@ describe("control-plane desktop client", () => {
     expect(body()).toEqual({ appVersion: "0.1.153", devices: { e2e: 1, legacy: 0 } });
   });
 
+  it("asks once more without its kind when a control plane older than the field refuses it, and only then", async () => {
+    const bodies = [];
+    let answers = [];
+    const fetchImpl = vi.fn(async (_url, init) => {
+      bodies.push(init.body === undefined ? undefined : JSON.parse(init.body));
+      const next = answers.shift() ?? 200;
+      return next === 200
+        ? jsonResponse({ endpoint: { url: "https://c-opaque.mausbot.si" }, connectorToken: `eyJ${"x".repeat(80)}`, token: "a.b" })
+        : jsonResponse({ error: next === 400 ? "invalid_request" : "rate_limited" }, { status: next });
+    });
+    const client = createControlPlaneClient({ baseURL: "https://accounts.openmausbot.com", fetchImpl });
+
+    answers = [400];
+    await client.ensureEndpoint(INSTALL, { appVersion: "0.1.153", kind: "server" });
+    expect(bodies).toEqual([{ appVersion: "0.1.153", kind: "server" }, { appVersion: "0.1.153" }]);
+    bodies.length = 0;
+    answers = [400];
+    await client.relayToken(INSTALL, { appVersion: "0.1.153", devices: { e2e: 1, legacy: 0 }, kind: "server" });
+    expect(bodies).toEqual([{ appVersion: "0.1.153", devices: { e2e: 1, legacy: 0 }, kind: "server" }, { appVersion: "0.1.153", devices: { e2e: 1, legacy: 0 } }]);
+
+    // Once only, only for that refusal, and never for a request that carried no kind.
+    for (const [kind, refusals, calls] of [["server", [400, 400], 2], ["server", [429], 1], [undefined, [400], 1]]) {
+      bodies.length = 0;
+      answers = refusals;
+      await expect(client.ensureEndpoint(INSTALL, { appVersion: "0.1.153", kind })).rejects.toBeInstanceOf(ControlPlaneError);
+      expect(bodies, `${kind} ${refusals}`).toHaveLength(calls);
+    }
+  });
+
   it("reads why a relay-capable computer goes without a tunnel, and nothing else from the body", async () => {
     for (const [body, tunnel] of [
       [{ error: "relay_capable", tunnel: "retired" }, "retired"],

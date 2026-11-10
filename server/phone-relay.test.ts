@@ -53,6 +53,13 @@ function serverHandler(sessions: SessionRegistry, relay: () => PhoneRelay | null
       if (!paired.ok) return send(paired.status, { error: paired.error });
       return send(200, { token: paired.token, device: { id: paired.session.id }, serverName: "VPS", ...relay()?.pairedOver(req) });
     }
+    if (url.pathname === "/api/test-stream") {
+      // Like the event stream: answers for as long as the phone listens, and never reads the request.
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      const tick = setInterval(() => res.write("data: tick\n\n"), 100);
+      res.once("close", () => clearInterval(tick));
+      return;
+    }
     const gate = resolveRequestAuth(req, { sessions, cookieName: "omb_session", streamPath: "/api/events", url });
     if (url.pathname === "/api/health" && !gate.auth) return send(200, { app: "openmausbot" });
     if (!gate.auth) return send(gate.status, { error: gate.error });
@@ -390,6 +397,21 @@ describe("phones through MausBot Relay on a server", () => {
     body.write(`POST /api/pair HTTP/1.1\r\nHost: phone\r\nAuthorization: Bearer ${phone.token}\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{"a"`);
     expect(await bodyEnded).toBeGreaterThanOrEqual(550);
     expect(phone.session.state).toBe("open");
+
+    // A long answer to a request that was complete is never cut: an event stream lives far past the body deadline.
+    const listening = phone.session.openStream();
+    let ticks = 0;
+    let gone = false;
+    listening.on("data", (chunk: Buffer) => (ticks += chunk.toString().split("data: tick").length - 1));
+    listening.on("error", () => {});
+    listening.once("end", () => (gone = true));
+    listening.write("GET /api/test-stream HTTP/1.1\r\nHost: phone\r\n\r\n");
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    expect(gone).toBe(false);
+    const before = ticks;
+    await waitFor(() => ticks > before, 1_000);
+    expect(ticks).toBeGreaterThan(10);
+    listening.destroy();
     expect((await http(phone.session, "GET", "/api/health")).status).toBe(200);
   });
 

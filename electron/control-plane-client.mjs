@@ -66,6 +66,18 @@ const reportableAppVersion = (value) => {
  * a control plane older than the field refuses it. */
 const installationKind = (kind) => (kind === "desktop" || kind === "server" ? { kind } : {});
 
+/** `send(extra)` with the kind, and once more without it when the control plane refuses the request as invalid (400
+ * invalid_request): one older than the field refuses it, as it does any field it does not know. */
+async function withKind(kind, send) {
+  const extra = installationKind(kind);
+  try {
+    return await send(extra);
+  } catch (error) {
+    if (!extra.kind || error?.code !== "invalid_request" || error?.status !== 400) throw error;
+    return send({});
+  }
+}
+
 const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1_000;
 
 /** What `409 relay_capable` may say about the tunnel this computer goes without: old phone apps no longer get one
@@ -371,11 +383,11 @@ export function createControlPlaneClient({
             method: "POST",
             token: accountToken,
           })
-        : await request("/v1/installations", {
+        : await withKind(kind, (extra) => request("/v1/installations", {
             method: "POST",
             token: accountToken,
-            body: { clientInstanceId, name, platform, appVersion, ...installationKind(kind) },
-          });
+            body: { clientInstanceId, name, platform, appVersion, ...extra },
+          }));
       const installation = existing ?? validatedInstallation(result.payload.installation);
       const credential = stringValue(result.payload.credential);
       if (!installation || credential === null || !INSTALLATION_CREDENTIAL.test(credential)) {
@@ -403,11 +415,13 @@ export function createControlPlaneClient({
       }
       const version = reportableAppVersion(appVersion);
       const legacy = Number.isSafeInteger(legacyDevices) && legacyDevices >= 0 && legacyDevices <= 100 ? legacyDevices : null;
-      const body = { ...(version === null ? {} : { appVersion: version }), ...(legacy === null ? {} : { legacyDevices: legacy }), ...installationKind(kind) };
-      const { payload } = await request("/v1/installations/self/endpoint", {
-        method: "POST",
-        token: installationCredential,
-        ...(Object.keys(body).length ? { body } : {}),
+      const { payload } = await withKind(kind, (extra) => {
+        const body = { ...(version === null ? {} : { appVersion: version }), ...(legacy === null ? {} : { legacyDevices: legacy }), ...extra };
+        return request("/v1/installations/self/endpoint", {
+          method: "POST",
+          token: installationCredential,
+          ...(Object.keys(body).length ? { body } : {}),
+        });
       });
       const endpoint = validatedEndpoint(payload.endpoint);
       const connectorToken = boundedSecret(payload.connectorToken, 16_384);
@@ -423,11 +437,11 @@ export function createControlPlaneClient({
       }
       const version = reportableAppVersion(appVersion);
       if (version === null) throw new ControlPlaneError("invalid_request");
-      const { payload } = await request("/v1/installations/self/relay-token", {
+      const { payload } = await withKind(kind, (extra) => request("/v1/installations/self/relay-token", {
         method: "POST",
         token: installationCredential,
-        body: { appVersion: version, devices: { e2e: devices.e2e, legacy: devices.legacy }, ...installationKind(kind) },
-      });
+        body: { appVersion: version, devices: { e2e: devices.e2e, legacy: devices.legacy }, ...extra },
+      }));
       return payload;
     },
 

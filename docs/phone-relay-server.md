@@ -133,8 +133,10 @@ credential in `tunnel-account.json`, mode 0600. Plain `login` also reserves a
 tunnel address; `login --relay` reserves none (the account service's on-demand
 path, the one the desktop takes when the relay carries its phones), so a
 relay-only server never takes one of the scarce tunnels. The server asks
-`POST /v1/installations/self/relay-token` with exactly the body the desktop
-sends, `{appVersion, devices: {e2e, legacy}}`, hourly.
+`POST /v1/installations/self/relay-token` hourly with the desktop's body plus
+the server's kind, `{appVersion, devices: {e2e, legacy}, kind: "server"}`. A
+control plane older than `kind` answers `400 invalid_request`; the server then
+asks once more without it.
 
 A server qualifies today; no control plane change is needed to get a token:
 
