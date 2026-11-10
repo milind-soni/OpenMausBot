@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { setLocale } from "./i18n";
-import { newerVersion, serverCheckPhase, serverUpdateConfirmBody, serverUpdateRow, serverUpdateView, type ServerUpdateCheck, type ServerUpdateStatus } from "./server-update";
+import { newerVersion, SERVER_UPDATE_DEADLINE_MS, serverCheckPhase, serverUpdateConfirmBody, serverUpdateRow, serverUpdateView, type ServerUpdateCheck, type ServerUpdateStatus } from "./server-update";
 
 const check = (patch: Partial<ServerUpdateCheck> = {}): ServerUpdateCheck => ({
   current: "0.1.92",
@@ -108,7 +108,8 @@ describe("the Update server row", () => {
   const behind = check({ current: "0.1.150", available: true, latest: "0.1.151", command: "git pull && ./update.sh" });
   const button = (patch: Partial<ServerUpdateStatus> = {}): ServerUpdateStatus => ({
     mode: "button", current: "0.1.150", latest: "0.1.151", available: true, activeTurns: 0,
-    command: "cd /opt/openmausbot && sudo ./update.sh", rollback: "cd /opt/openmausbot && sudo ./update.sh --rollback", ...patch,
+    command: "cd /opt/openmausbot && sudo ./update.sh", rollback: "cd /opt/openmausbot && sudo ./update.sh --rollback",
+    logs: "cd /opt/openmausbot && sudo docker compose logs --tail 50 omb", ...patch,
   });
   const view = (input: Partial<Parameters<typeof serverUpdateView>[0]>) => serverUpdateView({ check: behind, status: button(), bundle: "0.1.150", app: null, ...input });
 
@@ -135,6 +136,17 @@ describe("the Update server row", () => {
     expect(view({ pressed: true })).toEqual(updating);
     expect(view({ status: button({ run: { outcome: "requested", from: "0.1.150", at: 1 } }) })).toEqual(updating);
     expect(view({ status: button({ run: { outcome: "running", from: "0.1.150", at: 1 } }) })).toEqual(updating);
+  });
+
+  it("after 15 minutes without the server, says it is not back and what to run on it", () => {
+    const running = button({ run: { outcome: "running", from: "0.1.150", at: 1 } });
+    expect(view({ status: running, waitedMs: SERVER_UPDATE_DEADLINE_MS - 1 }).label).toBe("Updating the server…");
+    expect(SERVER_UPDATE_DEADLINE_MS).toBe(15 * 60_000);
+    expect(view({ status: running, waitedMs: SERVER_UPDATE_DEADLINE_MS })).toEqual({
+      label: "The server isn't back yet", subtitle: "It has been updating for more than 15 minutes.", action: null, busy: true, noteTone: "danger",
+      note: "On the server, run: cd /opt/openmausbot && sudo docker compose logs --tail 50 omb To go back to the version before: cd /opt/openmausbot && sudo ./update.sh --rollback",
+    });
+    expect(view({ pressed: true, status: null, waitedMs: SERVER_UPDATE_DEADLINE_MS }).label).toBe("The server isn't back yet");
   });
 
   it("after the update, names the new version and asks this page to reload", () => {

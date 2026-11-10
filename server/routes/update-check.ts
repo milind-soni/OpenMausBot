@@ -16,7 +16,10 @@ export interface UpdateCheckRouteDeps {
   actor?(auth: RequestAuth, req: IncomingMessage): AdminActor;
 }
 
-/** SECURITY: a person's admin session, never loopback: on a server, loopback is a bot's shell or a process beside it. */
+/** SECURITY: a person's admin session, never loopback: on a server, loopback is a bot's shell or a process beside it. This
+ * guards the button only. The request file it leaves is in a folder of the server's user, so until the bots' sandbox is
+ * on for self-hosted servers anything running as that user, a bot included, can leave it too; what that can cause is
+ * only the standard update (server/server-update.ts). */
 export function mayUpdateServer(auth: RequestAuth): boolean {
   return auth.kind === "session" && auth.scopes.includes("admin");
 }
@@ -51,8 +54,9 @@ export function updateRouteDeps(where: {
   actor(auth: RequestAuth, req: IncomingMessage): AdminActor;
 }): UpdateCheckRouteDeps {
   const install = installKind({ ...where, serverRoot: SERVER_ROOT });
-  const check = createUpdateChecker({ current: serverVersion(), install, channel: updateChannel() });
+  const channel = updateChannel();
+  const check = createUpdateChecker({ current: serverVersion(), install, channel });
   const dir = process.env[SERVER_UPDATE_DIR_ENV]?.trim() || (install === "docker" ? SERVER_UPDATE_DIR : undefined);
-  const server = createServerUpdater({ dir, dataDir: where.dataDir, install, version: serverVersion(), check, activeTurns: where.activeTurns });
+  const server = createServerUpdater({ dir, dataDir: where.dataDir, install, version: serverVersion(), check, activeTurns: where.activeTurns, followsStable: channel === "stable" });
   return { check, server, actor: where.actor };
 }

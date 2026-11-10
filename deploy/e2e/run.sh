@@ -143,7 +143,7 @@ fi
 step "the Update server button: systemd watches for the server's request, which only the server's own folder takes"
 if [ -f "$ROOT/deploy/update-runner.sh" ]; then
   systemctl is-enabled --quiet openmausbot-update.path || fail "the button's path unit is not enabled"
-  sudo grep -qx "layout=installer" "$DIR/server-update/status/runner" || fail "the runner did not say it is there"
+  sudo grep -qx "layout=installer" /var/lib/openmausbot-update/status/runner || fail "the runner did not say it is there"
   in_server() { (cd "$DIR" && sudo docker compose exec -T omb sh -c "$1"); }
   in_server 'test -w /run/omb-update/request' || fail "the server cannot leave a request"
   if in_server 'echo x > /run/omb-update/status/last' 2>/dev/null; then fail "the server can write the runner's status"; fi

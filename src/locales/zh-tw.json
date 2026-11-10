@@ -9850,8 +9850,11 @@
   "serverUpdate.confirmBusy.other": "目前有 {count} 個聊天中的機器人正在回覆。",
   "serverUpdate.failed": "無法請求伺服器更新。請重試。",
   "activity.action.update.server": "請求更新伺服器",
-  "native.update.forServer": "此應用程式的版本 {version} 已就緒。現在重新啟動以安裝嗎？",
+  "native.update.forServer": "{server} 請求更新此應用程式。版本 {version} 已就緒。現在重新啟動以安裝嗎？",
   "native.update.forServerDetail": "應用程式重新啟動期間，這台電腦上執行的機器人會停止。",
   "native.update.restartNow": "立即重新啟動",
-  "native.update.notNow": "稍後再說"
+  "native.update.notNow": "稍後再說",
+  "serverUpdate.notBack": "伺服器尚未恢復",
+  "serverUpdate.notBackDetail": "更新已持續超過 15 分鐘。",
+  "serverUpdate.goBack": "要回到之前的版本：{command}"
 }

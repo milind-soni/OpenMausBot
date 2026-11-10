@@ -38,7 +38,7 @@ function mainRule() {
   const start = source.indexOf("function myCloud() {"), end = source.indexOf("const savedWorkspace = id =>", start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
-  expect(source.includes("registerUpdaterIpc({ pageAllowed: updaterPageAllowed, serverPage: event => activePageOrigin(event) !== null, confirmRestart: "), "main.mjs wires the updater to updaterPageAllowed").toBe(true);
+  expect(source.includes("registerUpdaterIpc({ pageAllowed: updaterPageAllowed, serverPage: event => activePageOrigin(event), confirmRestart: "), "main.mjs wires the updater to updaterPageAllowed").toBe(true);
   const signInStart = source.indexOf("function ensureCloudAccount() {"), signInEnd = source.indexOf("\n}\n", signInStart) + 3;
   expect(signInStart).toBeGreaterThanOrEqual(0);
   const window = { isDestroyed: () => false, webContents: null };
@@ -91,7 +91,7 @@ function mainRule() {
     context.cloudSignInRestored = true;
     signIn.options.onState(state);
   };
-  return { context, window, show, offered, launching, signedIn, pageAllowed: vm.runInContext("updaterPageAllowed", context), serverPage: (event) => vm.runInContext("activePageOrigin", context)(event) !== null };
+  return { context, window, show, offered, launching, signedIn, pageAllowed: vm.runInContext("updaterPageAllowed", context), serverPage: (event) => vm.runInContext("activePageOrigin", context)(event) ?? null };
 }
 
 async function load(pageAllowed, serverPage = undefined, confirmRestart = undefined) {
@@ -429,9 +429,9 @@ it("a server's page the window shows may ask for the app's own update: it learns
   const rule = mainRule();
   const other = page(OTHER);
   rule.show(other, "vps");
-  expect(rule.serverPage(other.event)).toBe(true);
-  expect(rule.serverPage({ sender: other.webContents, senderFrame: { url: `${CLOUD}/` } })).toBe(false);
-  expect(rule.serverPage({ sender: page(OTHER).webContents, senderFrame: { url: `${OTHER}/` } })).toBe(false);
+  expect(rule.serverPage(other.event)).toBe(OTHER);
+  expect(rule.serverPage({ sender: other.webContents, senderFrame: { url: `${CLOUD}/` } })).toBeNull();
+  expect(rule.serverPage({ sender: page(OTHER).webContents, senderFrame: { url: `${OTHER}/` } })).toBeNull();
   const answers = [];
   const confirmRestart = vi.fn(async (version) => { answers.push(version); return answers.length > 1; });
   const { updater, autoUpdater, handlers } = await load(rule.pageAllowed, rule.serverPage, confirmRestart);
@@ -440,14 +440,20 @@ it("a server's page the window shows may ask for the app's own update: it learns
   expect(await ask(other.event)).toBe("unavailable");
   updater.attachUpdaterWindow(rule.window);
   updater.startUpdater();
-  // Checked and downloaded at the page's request; the person said Not now.
+  // Checked and downloaded at the page's request; the person said Not now. Five asks at once open one dialog, which
+  // names the asking server.
+  vi.advanceTimersByTime(updater.SERVER_PAGE_ASK_COOLDOWN_MS);
+  expect(await Promise.all([1, 2, 3, 4, 5].map(() => ask(other.event)))).toEqual(["later", "later", "later", "later", "later"]);
+  expect(confirmRestart).toHaveBeenCalledTimes(1);
+  expect(confirmRestart).toHaveBeenCalledWith("2.0.0", OTHER);
   expect(await ask(other.event)).toBe("later");
-  expect(confirmRestart).toHaveBeenCalledWith("2.0.0");
+  expect(confirmRestart).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(updater.SERVER_PAGE_ASK_COOLDOWN_MS);
   expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
   await settle();
   // Not the updater's state: the page never hears it, only what its own request did.
   expect(other.webContents.send).not.toHaveBeenCalled();
   expect(await ask(other.event)).toBe("installing");
-  expect(confirmRestart).toHaveBeenLastCalledWith("2.0.0");
+  expect(confirmRestart).toHaveBeenLastCalledWith("2.0.0", OTHER);
   expect(autoUpdater.quitAndInstall).toHaveBeenCalledTimes(1);
 });

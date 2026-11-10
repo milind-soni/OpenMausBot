@@ -7459,8 +7459,11 @@
   "serverUpdate.confirmBusy.other": "지금 {count}개 채팅에서 봇이 답하고 있어요.",
   "serverUpdate.failed": "서버에 업데이트를 요청하지 못했어요. 다시 시도하세요.",
   "activity.action.update.server": "서버 업데이트 요청",
-  "native.update.forServer": "이 앱의 버전 {version}이(가) 준비됐어요. 지금 다시 시작해서 설치할까요?",
+  "native.update.forServer": "{server}에서 이 앱의 업데이트를 요청해요. 버전 {version}이(가) 준비됐어요. 지금 다시 시작해서 설치할까요?",
   "native.update.forServerDetail": "앱이 다시 시작되는 동안 이 컴퓨터에서 실행 중인 봇이 멈춰요.",
   "native.update.restartNow": "지금 다시 시작",
-  "native.update.notNow": "나중에"
+  "native.update.notNow": "나중에",
+  "serverUpdate.notBack": "서버가 아직 돌아오지 않았어요",
+  "serverUpdate.notBackDetail": "업데이트가 15분 넘게 이어지고 있어요.",
+  "serverUpdate.goBack": "이전 버전으로 돌아가려면: {command}"
 }

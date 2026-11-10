@@ -64,7 +64,10 @@ The published lists of principles 5 and 6 are the docs page
   marker; a change that breaks the rule ships in two releases (read the new format first, write it one release later).
 - Standalone servers get the same update as one command they run themselves, or from **Update server** in the app on a
   Docker install whose host has `deploy/update-runner.sh` (the installer adds it): the server only leaves a request
-  file, and root's runner on the host runs `update.sh` with no arguments taken from it. Not through the connector:
+  file, and root's runner on the host runs its own copy of `update.sh` with no arguments taken from it. Anything
+  running as the server's user can leave that file (bots too, while the sandbox is off on self-hosted servers), so such
+  a run goes by the image's label only, never removes an earlier copy of the data, and stops the server at most every
+  four minutes. Not through the connector:
   that needs enrolling, and its runner takes an image from its request.
 - Skew: desktop and phone apps work with any stable server from the last 90 days; an older server shows a banner.
 

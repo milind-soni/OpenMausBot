@@ -58,7 +58,15 @@ export function useServerUpdate() {
     void load();
   }, [load]);
 
-  const updating = !settled(status);
+  const updating = pressed || !settled(status);
+  const [waitingSince, setWaitingSince] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!updating) return void setWaitingSince(null);
+    setWaitingSince((since) => since ?? Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [updating]);
   useEffect(() => {
     if (!updating || !connected) return;
     let alive = true;
@@ -101,7 +109,8 @@ export function useServerUpdate() {
     }
   }, []);
 
-  const view: ServerUpdateView = serverUpdateView({ check, status, app: askableAppVersion(), checking, failed, pressed, appAnswer });
+  const waitedMs = waitingSince === null ? 0 : Math.max(0, now - waitingSince);
+  const view: ServerUpdateView = serverUpdateView({ check, status, app: askableAppVersion(), checking, failed, pressed, appAnswer, waitedMs });
   return { check, status, view: problem ? { ...view, note: problem, noteTone: "danger" as const } : view, load, readStatus, updateServer, updateApp };
 }
 

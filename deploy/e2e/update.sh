@@ -248,7 +248,7 @@ step "11. the Update server button: the server asks with a file, systemd runs th
 "${UPDATE[@]}" --rollback --yes >"$OUT/11-back.txt" 2>&1 || fail "could not go back to $FROM for the button's run"
 [ "$(version)" = "$FROM" ] || fail "not on $FROM before the button's run"
 cp "$ROOT/deploy/update.sh" "$DIR/update.sh"
-OMB_RUNNER_GAP_S=0 bash "$ROOT/deploy/update-runner.sh" --install --dir "$DIR" | tee "$OUT/11-install.txt"
+OMB_RUNNER_GAP_S=0 OMB_RUNNER_QUIET_S=0 bash "$ROOT/deploy/update-runner.sh" --install --dir "$DIR" | tee "$OUT/11-install.txt"
 [ "${PIPESTATUS[0]}" = 0 ] || fail "update-runner.sh --install failed"
 systemctl is-active --quiet openmausbot-update.path || fail "the path unit is not watching"
 wait_version "$FROM" || fail "$FROM did not come back with the button's folders"
@@ -256,12 +256,12 @@ in_server() { (cd "$DIR" && docker compose exec -T omb sh -c "$1"); }
 if in_server 'echo x > /run/omb-update/status/last' 2>/dev/null; then fail "the server can write the runner's status"; fi
 # As a server that wants more than "update now" would: flags, an image of its choosing, an older version.
 in_server "printf '%s\\n' --rollback --allow-older 'image=$REPO:v$FROM' 'version=0.1.1' > /run/omb-update/request/request" || fail "the server could not leave its request"
-for _ in $(seq 1 120); do grep -qx 'state=done' "$DIR/server-update/status/last" && grep -qx 'run=1' "$DIR/server-update/status/last" && break; sleep 3; done
-tee "$OUT/11-last.txt" <"$DIR/server-update/status/last"
-grep -qx 'result=updated' "$DIR/server-update/status/last" || fail "the button's update did not end as updated"
+for _ in $(seq 1 120); do grep -qx 'state=done' /var/lib/openmausbot-update/status/last && grep -qx 'run=1' /var/lib/openmausbot-update/status/last && break; sleep 3; done
+tee "$OUT/11-last.txt" </var/lib/openmausbot-update/status/last
+grep -qx 'result=updated' /var/lib/openmausbot-update/status/last || fail "the button's update did not end as updated"
 wait_version "$TO" || fail "after the button's update the server says $(version)"
 grep -qx "OMB_IMAGE=$STABLE" "$DIR/.env" || fail "the button's update did not pin the stable image"
-[ ! -e "$DIR/server-update/request/request" ] || fail "the request was left behind"
+[ ! -e /var/lib/openmausbot-update/request/request ] || fail "the request was left behind"
 journalctl -u openmausbot-update.service --no-pager >"$OUT/11-journal.txt" 2>&1 || true
 bash "$ROOT/deploy/update-runner.sh" --remove --dir "$DIR" >/dev/null || fail "update-runner.sh --remove failed"
 [ ! -e /etc/systemd/system/openmausbot-update.path ] || fail "--remove left the path unit"

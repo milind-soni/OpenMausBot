@@ -3491,8 +3491,11 @@
   "serverUpdate.confirmBusy.other": "Gerade antworten Bots in {count} Chats.",
   "serverUpdate.failed": "Der Server konnte nicht um ein Update gebeten werden. Versuch es noch einmal.",
   "activity.action.update.server": "Server-Update angefragt",
-  "native.update.forServer": "Version {version} dieser App ist bereit. Jetzt neu starten, um sie zu installieren?",
+  "native.update.forServer": "{server} bittet darum, diese App zu aktualisieren. Version {version} ist bereit. Jetzt neu starten, um sie zu installieren?",
   "native.update.forServerDetail": "Bots auf diesem Computer halten an, während die App neu startet.",
   "native.update.restartNow": "Jetzt neu starten",
-  "native.update.notNow": "Nicht jetzt"
+  "native.update.notNow": "Nicht jetzt",
+  "serverUpdate.notBack": "Der Server ist noch nicht zurück",
+  "serverUpdate.notBackDetail": "Das Update läuft schon über 15 Minuten.",
+  "serverUpdate.goBack": "Zurück zur Version davor: {command}"
 }

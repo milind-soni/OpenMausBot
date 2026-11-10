@@ -3197,8 +3197,11 @@
   "serverUpdate.confirmBusy.other": "अभी {count} चैट में बॉट जवाब दे रहे हैं।",
   "serverUpdate.failed": "सर्वर से अपडेट करने को नहीं कहा जा सका। फिर से कोशिश करें।",
   "activity.action.update.server": "सर्वर अपडेट करने को कहा",
-  "native.update.forServer": "इस ऐप का वर्ज़न {version} तैयार है। इंस्टॉल करने के लिए अभी रीस्टार्ट करें?",
+  "native.update.forServer": "{server} इस ऐप को अपडेट करने को कह रहा है। वर्ज़न {version} तैयार है। इंस्टॉल करने के लिए अभी रीस्टार्ट करें?",
   "native.update.forServerDetail": "ऐप रीस्टार्ट होने तक इस कंप्यूटर पर चल रहे बॉट रुक जाएँगे।",
   "native.update.restartNow": "अभी रीस्टार्ट करें",
-  "native.update.notNow": "अभी नहीं"
+  "native.update.notNow": "अभी नहीं",
+  "serverUpdate.notBack": "सर्वर अभी तक वापस नहीं आया",
+  "serverUpdate.notBackDetail": "यह 15 मिनट से ज़्यादा समय से अपडेट हो रहा है।",
+  "serverUpdate.goBack": "पिछले वर्ज़न पर लौटने के लिए: {command}"
 }

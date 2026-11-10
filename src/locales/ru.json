@@ -6938,8 +6938,11 @@
   "serverUpdate.confirmBusy.other": "Сейчас боты отвечают в чатах: {count}.",
   "serverUpdate.failed": "Не удалось попросить сервер обновиться. Попробуйте ещё раз.",
   "activity.action.update.server": "Запросил обновление сервера",
-  "native.update.forServer": "Версия {version} этого приложения готова. Перезапустить сейчас, чтобы установить её?",
+  "native.update.forServer": "{server} просит обновить это приложение. Версия {version} готова. Перезапустить сейчас, чтобы установить её?",
   "native.update.forServerDetail": "Боты на этом компьютере остановятся, пока приложение перезапускается.",
   "native.update.restartNow": "Перезапустить",
-  "native.update.notNow": "Не сейчас"
+  "native.update.notNow": "Не сейчас",
+  "serverUpdate.notBack": "Сервер ещё не вернулся",
+  "serverUpdate.notBackDetail": "Обновление идёт уже больше 15 минут.",
+  "serverUpdate.goBack": "Чтобы вернуть прежнюю версию: {command}"
 }

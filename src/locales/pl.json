@@ -6876,8 +6876,11 @@
   "serverUpdate.confirmBusy.other": "Boty odpowiadają teraz w czatach: {count}.",
   "serverUpdate.failed": "Nie udało się poprosić serwera o aktualizację. Spróbuj ponownie.",
   "activity.action.update.server": "Poproszono o aktualizację serwera",
-  "native.update.forServer": "Wersja {version} tej aplikacji jest gotowa. Uruchomić ponownie teraz, żeby ją zainstalować?",
+  "native.update.forServer": "{server} prosi o aktualizację tej aplikacji. Wersja {version} jest gotowa. Uruchomić ponownie teraz, żeby ją zainstalować?",
   "native.update.forServerDetail": "Boty działające na tym komputerze zatrzymają się na czas ponownego uruchomienia aplikacji.",
   "native.update.restartNow": "Uruchom ponownie teraz",
-  "native.update.notNow": "Nie teraz"
+  "native.update.notNow": "Nie teraz",
+  "serverUpdate.notBack": "Serwer jeszcze nie wrócił",
+  "serverUpdate.notBackDetail": "Aktualizacja trwa już ponad 15 minut.",
+  "serverUpdate.goBack": "Aby wrócić do poprzedniej wersji: {command}"
 }

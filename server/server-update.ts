@@ -2,9 +2,11 @@
 // a file in the request folder its host gave it; root's deploy/update-runner.sh on the host sees the file, runs update.sh
 // as an owner would and writes how that ended into the status folder, which this container sees read-only.
 //
-// SECURITY: the runner never reads the request file. Whatever is written here, the host runs `update.sh` with no
-// argument but its own folder: the stable version, a copy of the data first, a rollback when the new version is not
-// healthy. No version, image, URL, flag or path from a client or from this server reaches the host.
+// SECURITY: the runner never reads the request file. Whatever is written here, the host runs root's copy of `update.sh`
+// with no argument but the install's folder: the stable version, only when the running image's own label is older, a
+// copy of the data first, a rollback when the new version is not healthy. No version, image, URL, flag or path from a
+// client or from this server reaches the host. The route is an admin's only, but the folder is the server's user's:
+// until the bots' sandbox is on for self-hosted servers, a bot can leave the same file, and gets that same update.
 import { randomUUID } from "node:crypto";
 import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -139,6 +141,8 @@ export function serverUpdateStatus(input: {
   version: string;
   activeTurns: number;
   now: number;
+  /** The update check follows the stable channel, as update.sh does; with OMB_UPDATE_CHANNEL=newest it does not. */
+  followsStable?: boolean;
 }): ServerUpdateStatus {
   const { install, check, facts, pending, version, now } = input;
   const base = { current: version, available: check?.available === true, ...(check?.latest ? { latest: check.latest } : {}), activeTurns: input.activeTurns };
@@ -147,8 +151,11 @@ export function serverUpdateStatus(input: {
   const run = runOf(pending, facts.last, version, now);
   const retryAt = pending && now - pending.at < REQUEST_GAP_MS ? pending.at + REQUEST_GAP_MS : undefined;
   const extra = { ...(run ? { run } : {}), ...(retryAt ? { retryAt } : {}) };
-  if (runner) {
-    const own = { command: `cd ${runner.dir} && sudo ./update.sh`, rollback: `cd ${runner.dir} && sudo ./update.sh --rollback` };
+  if (runner && input.followsStable !== false) {
+    const own = {
+      command: `cd ${runner.dir} && sudo ./update.sh`, rollback: `cd ${runner.dir} && sudo ./update.sh --rollback`,
+      logs: `cd ${runner.dir} && sudo docker compose logs --tail 50 omb`,
+    };
     return { ...base, ...own, ...extra, mode: runner.held ? "held" : "button" };
   }
   const command = check?.command ?? updateCommand(install)?.command;
@@ -168,6 +175,7 @@ export function createServerUpdater(options: {
   version: string;
   check(): Promise<UpdateCheck>;
   activeTurns(): number;
+  followsStable?: boolean;
   now?: () => number;
 }): ServerUpdater {
   const now = options.now ?? Date.now;
@@ -178,7 +186,7 @@ export function createServerUpdater(options: {
     const check = await options.check().catch(() => null);
     const facts = readHostFacts(options.dir);
     const pending = readPending(options.dataDir);
-    const answer = serverUpdateStatus({ install: options.install, check, facts, pending, version: options.version, activeTurns: options.activeTurns(), now: now() });
+    const answer = serverUpdateStatus({ install: options.install, check, facts, pending, version: options.version, activeTurns: options.activeTurns(), now: now(), followsStable: options.followsStable });
     // A request the host never took is withdrawn, so a runner switched on later does not act on an old press.
     if (answer.run?.outcome === "not-started" && requestFile) rmSync(requestFile, { force: true, recursive: true });
     return answer;

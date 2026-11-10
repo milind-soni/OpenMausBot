@@ -124,12 +124,15 @@ export function sendUpdaterState() {
   setState({});
 }
 
-/** What a server's page learns when it asks for this app's own update; never the updater's state. */
-export async function updateForServerPage(confirmRestart) {
+/** How long a server's page's answer stands before it may ask again: one click never opens a second dialog. */
+export const SERVER_PAGE_ASK_COOLDOWN_MS = 10_000;
+let serverPageAsk = null;
+
+async function askForServerPage(confirmRestart, server) {
   if (!updaterCoordinator) return "unavailable";
   if (state.status !== "downloaded") await updaterCoordinator.check(true);
   if (state.status === "downloaded") {
-    if (!(await confirmRestart(state.version ?? ""))) return "later";
+    if (!(await confirmRestart(state.version ?? "", server))) return "later";
     updaterCoordinator.install();
     return "installing";
   }
@@ -137,10 +140,20 @@ export async function updateForServerPage(confirmRestart) {
   return state.status === "error" ? "failed" : "current";
 }
 
-/** `serverPage`: the page this app's window shows, from a server in the Server menu, which may ask for this app's update
- * (`update:for-server-page`) when that server is newer than the app. Nothing restarts until `confirmRestart`, this app's
- * own dialog, says so. */
-export function registerUpdaterIpc({ pageAllowed: allowed, serverPage = () => false, confirmRestart = async () => false }) {
+/** What a server's page learns when it asks for this app's own update; never the updater's state. Asks at once share
+ * one answer, and that answer stands for SERVER_PAGE_ASK_COOLDOWN_MS. `server`: the asking page's address, for the dialog. */
+export function updateForServerPage(confirmRestart, server = "", now = Date.now) {
+  if (serverPageAsk && (!serverPageAsk.done || now() - serverPageAsk.done < SERVER_PAGE_ASK_COOLDOWN_MS)) return serverPageAsk.answer;
+  const ask = { done: 0, answer: null };
+  ask.answer = askForServerPage(confirmRestart, server).finally(() => { ask.done = now(); });
+  serverPageAsk = ask;
+  return ask.answer;
+}
+
+/** `serverPage`: the address of the page this app's window shows when it may ask for this app's update
+ * (`update:for-server-page`), a server from the Server menu newer than the app; null for any other sender. Nothing restarts
+ * until `confirmRestart`, this app's own dialog naming that address, says so. */
+export function registerUpdaterIpc({ pageAllowed: allowed, serverPage = () => null, confirmRestart = async () => false }) {
   pageAllowed = allowed;
   const guarded = (channel, handler) => (event) => {
     if (!pageAllowed(event)) throw new Error(`${channel} is only available in this app's window`);
@@ -150,8 +163,9 @@ export function registerUpdaterIpc({ pageAllowed: allowed, serverPage = () => fa
   ipcMain.handle("update:check", guarded("update:check", () => updaterCoordinator?.check(true)));
   ipcMain.handle("update:install", guarded("update:install", () => updaterCoordinator?.install()));
   ipcMain.handle("update:for-server-page", (event) => {
-    if (!serverPage(event)) throw new Error("update:for-server-page is only available to the page this app's window shows");
-    return updateForServerPage(confirmRestart);
+    const server = serverPage(event);
+    if (!server) throw new Error("update:for-server-page is only available to the page this app's window shows");
+    return updateForServerPage(confirmRestart, server);
   });
   ipcMain.handle("update:seen", guarded("update:seen", () => {
     if (!launch?.updated) return;

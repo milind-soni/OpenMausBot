@@ -3635,8 +3635,11 @@
   "serverUpdate.confirmBusy.other": "Зараз боти відповідають у чатах: {count}.",
   "serverUpdate.failed": "Не вдалося попросити сервер оновитися. Спробуйте ще раз.",
   "activity.action.update.server": "Запит на оновлення сервера",
-  "native.update.forServer": "Версія {version} цього застосунку готова. Перезапустити зараз, щоб її встановити?",
+  "native.update.forServer": "{server} просить оновити цей застосунок. Версія {version} готова. Перезапустити зараз, щоб її встановити?",
   "native.update.forServerDetail": "Боти на цьому комп'ютері зупиняться, поки застосунок перезапускається.",
   "native.update.restartNow": "Перезапустити",
-  "native.update.notNow": "Не зараз"
+  "native.update.notNow": "Не зараз",
+  "serverUpdate.notBack": "Сервер ще не повернувся",
+  "serverUpdate.notBackDetail": "Оновлення триває вже понад 15 хвилин.",
+  "serverUpdate.goBack": "Щоб повернути попередню версію: {command}"
 }

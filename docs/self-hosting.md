@@ -1484,8 +1484,10 @@ A server installed with the [installer](deploy-vps.md#quick-start-one-command-on
 updates with `sudo /opt/openmausbot/update.sh`, which the installer puts there.
 Its admins can also press **Update server** in **Settings → Updates**, which runs
 that same script on the server; a Docker checkout gets the button with
-`sudo deploy/update-runner.sh --install`. [How it works and what it can and
-cannot do](deploy-vps.md#from-the-app-update-server).
+`sudo deploy/update-runner.sh --install`. Until the bots' sandbox is on for
+self-hosted servers, a bot can ask for the same update, so the runner allows only
+the standard forward update and keeps every copy of the data. [How it works and
+what it can and cannot do](deploy-vps.md#from-the-app-update-server).
 
 ```sh
 cd deploy && git pull && ./update.sh                                    # Docker: copy the data, update, roll back on failure

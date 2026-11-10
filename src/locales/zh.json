@@ -7678,8 +7678,11 @@
   "serverUpdate.confirmBusy.other": "目前有 {count} 个聊天中的机器人正在回复。",
   "serverUpdate.failed": "无法请求服务器更新。请重试。",
   "activity.action.update.server": "请求更新服务器",
-  "native.update.forServer": "此应用的版本 {version} 已就绪。现在重启以安装吗？",
+  "native.update.forServer": "{server} 请求更新此应用。版本 {version} 已就绪。现在重启以安装吗？",
   "native.update.forServerDetail": "应用重启期间，这台电脑上运行的机器人会停止。",
   "native.update.restartNow": "立即重启",
-  "native.update.notNow": "以后再说"
+  "native.update.notNow": "以后再说",
+  "serverUpdate.notBack": "服务器尚未恢复",
+  "serverUpdate.notBackDetail": "更新已持续超过 15 分钟。",
+  "serverUpdate.goBack": "要回到之前的版本：{command}"
 }

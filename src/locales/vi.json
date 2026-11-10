@@ -5617,8 +5617,11 @@
   "serverUpdate.confirmBusy.other": "Các bot đang trả lời trong {count} cuộc trò chuyện.",
   "serverUpdate.failed": "Không thể yêu cầu máy chủ cập nhật. Hãy thử lại.",
   "activity.action.update.server": "Đã yêu cầu cập nhật máy chủ",
-  "native.update.forServer": "Phiên bản {version} của ứng dụng này đã sẵn sàng. Khởi động lại ngay để cài đặt?",
+  "native.update.forServer": "{server} yêu cầu cập nhật ứng dụng này. Phiên bản {version} đã sẵn sàng. Khởi động lại ngay để cài đặt?",
   "native.update.forServerDetail": "Các bot đang chạy trên máy tính này sẽ dừng trong lúc ứng dụng khởi động lại.",
   "native.update.restartNow": "Khởi động lại ngay",
-  "native.update.notNow": "Để sau"
+  "native.update.notNow": "Để sau",
+  "serverUpdate.notBack": "Máy chủ vẫn chưa quay lại",
+  "serverUpdate.notBackDetail": "Việc cập nhật đã kéo dài hơn 15 phút.",
+  "serverUpdate.goBack": "Để quay về phiên bản trước: {command}"
 }

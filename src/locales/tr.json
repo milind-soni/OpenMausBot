@@ -5617,8 +5617,11 @@
   "serverUpdate.confirmBusy.other": "Şu anda {count} sohbette botlar yanıt veriyor.",
   "serverUpdate.failed": "Sunucudan güncellenmesi istenemedi. Yeniden deneyin.",
   "activity.action.update.server": "Sunucu güncellemesi istendi",
-  "native.update.forServer": "Bu uygulamanın {version} sürümü hazır. Yüklemek için şimdi yeniden başlatılsın mı?",
+  "native.update.forServer": "{server} bu uygulamanın güncellenmesini istiyor. {version} sürümü hazır. Yüklemek için şimdi yeniden başlatılsın mı?",
   "native.update.forServerDetail": "Uygulama yeniden başlarken bu bilgisayardaki botlar durur.",
   "native.update.restartNow": "Şimdi yeniden başlat",
-  "native.update.notNow": "Şimdi değil"
+  "native.update.notNow": "Şimdi değil",
+  "serverUpdate.notBack": "Sunucu henüz geri gelmedi",
+  "serverUpdate.notBackDetail": "Güncelleme 15 dakikadan uzun süredir devam ediyor.",
+  "serverUpdate.goBack": "Önceki sürüme dönmek için: {command}"
 }

@@ -71,6 +71,9 @@ export function newerVersion(a: string, b: string): boolean {
   return false;
 }
 
+/** An update that has not come back after this long is said to be stuck, with what to run on the server. */
+export const SERVER_UPDATE_DEADLINE_MS = 15 * 60_000;
+
 export type ServerUpdateAction = "check" | "update-server" | "update-app" | "reload" | null;
 
 /** The one row Settings → Updates shows for a self-hosted server: what is behind (the server, this app, or both) and the
@@ -130,11 +133,20 @@ export function serverUpdateView(input: {
   failed?: boolean;
   pressed?: boolean;
   appAnswer?: AppUpdateAnswer | null;
+  /** How long this page has been waiting for the server to come back from an update. */
+  waitedMs?: number;
 }): ServerUpdateView {
   const { check, status } = input;
   const bundle = input.bundle ?? appVersion();
   const outcome = status?.run?.outcome;
   if (input.pressed || outcome === "requested" || outcome === "running") {
+    if ((input.waitedMs ?? 0) >= SERVER_UPDATE_DEADLINE_MS) {
+      const how = [
+        status?.logs ? t("serverUpdate.runOnServer", { command: status.logs }) : "",
+        status?.rollback ? t("serverUpdate.goBack", { command: status.rollback }) : "",
+      ].filter(Boolean).join(" ");
+      return { label: t("serverUpdate.notBack"), subtitle: t("serverUpdate.notBackDetail"), ...(how ? { note: how, noteTone: "danger" as const } : {}), action: null, busy: true };
+    }
     return { label: t("serverUpdate.updating"), subtitle: t("serverUpdate.updatingDetail"), action: null, busy: true };
   }
   const note = runNote(status);

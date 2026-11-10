@@ -7790,8 +7790,11 @@
   "serverUpdate.confirmBusy.other": "いま {count} 件のチャットでボットが応答中です。",
   "serverUpdate.failed": "サーバーに更新を依頼できませんでした。もう一度お試しください。",
   "activity.action.update.server": "サーバーの更新を依頼しました",
-  "native.update.forServer": "このアプリのバージョン {version} の準備ができました。今すぐ再起動してインストールしますか？",
+  "native.update.forServer": "{server} がこのアプリの更新を求めています。バージョン {version} の準備ができました。今すぐ再起動してインストールしますか？",
   "native.update.forServerDetail": "アプリの再起動中は、このコンピューターで動いているボットが止まります。",
   "native.update.restartNow": "今すぐ再起動",
-  "native.update.notNow": "後で"
+  "native.update.notNow": "後で",
+  "serverUpdate.notBack": "サーバーはまだ戻っていません",
+  "serverUpdate.notBackDetail": "更新が始まってから 15 分以上たっています。",
+  "serverUpdate.goBack": "前のバージョンに戻すには：{command}"
 }

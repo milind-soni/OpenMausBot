@@ -2,29 +2,37 @@
 # The Update server button's host side, for a Docker Compose install (the installer's /opt/openmausbot, or the deploy/
 # folder of a git checkout). A server in a container cannot replace its own image, so it only leaves a file in a folder
 # it was given; systemd sees the file (openmausbot-update.path) and runs this, as root, outside every container. This
-# runs update.sh beside the Compose file, as an owner runs it, and writes how that ended where the server reads it.
+# runs root's own copy of update.sh on the install, and writes how that ended where the server reads it.
 #
-#   sudo ./update-runner.sh --install     adds the button to this install: systemd's two units and the two folders
+#   sudo ./update-runner.sh --install     adds the button to this install, or refreshes it (run it again after git pull)
 #   sudo ./update-runner.sh --remove      takes it away again (your data and update.sh stay)
 #
-# SECURITY: the request is a file that exists, and nothing else. This script never reads it, follows it or passes on
-# anything from it: the server can ask for one thing, "run ./update.sh now", which takes the stable version with a copy
-# of the data first and puts the old version back when the new one is not healthy. It cannot choose a version, an image,
-# a URL, a flag or a path, cannot roll back (an unfinished update is never undone without a person at a terminal), and
-# cannot ask more often than once every GAP_S seconds. The server's container sees the request folder (its own) and the
-# status folder read-only; it never sees this script, update.sh, .env or the Compose files.
+# SECURITY: anything that runs as the server's user can leave the request, a bot included where the bots' sandbox is
+# off, so the requester is treated as hostile. The request is a file that exists, and nothing else: this script never
+# reads it, follows it or passes on anything from it, and the only thing it can cause is the standard update, run by
+# root's copy of update.sh with OMB_UPDATE_BY_RUNNER=1: the stable version, only when the running image's own label is
+# older (never what the server says it runs), a copy of the data first that never removes the copies before it, and the
+# old version back when the new one is not healthy. It cannot choose a version, an image, a URL, a flag or a path,
+# cannot roll back, and cannot make updates that change something come closer than GAP_S seconds apart. Every file this
+# writes is in STATE, root's folder, of which the server's container sees only `request` (its own) and `status`
+# (read-only); it never sees this script, update.sh, .env or the Compose files.
 set -u
 
 SBIN_DIR=${OMB_SBIN_DIR:-/usr/local/sbin}
 SYSTEMD_DIR=${OMB_SYSTEMD_DIR:-/etc/systemd/system}
+STATE=${OMB_UPDATE_STATE_DIR:-/var/lib/openmausbot-update}
 POLICY=${OMB_UPDATE_POLICY:-/etc/mausbot/policy.json}
 GAP_S=${OMB_RUNNER_GAP_S:-240}
+QUIET_S=${OMB_RUNNER_QUIET_S:-30}
 UNIT=openmausbot-update
 RUNNER=openmausbot-update-runner
 INSTALLER_MARK="# Written by MausBot's installer (deploy/install.sh)"
 OVERRIDE_MARK="# Written by update-runner.sh --install"
 # Where the server's container finds the two folders (SERVER_UPDATE_DIR in server/server-update.ts).
 IN_CONTAINER=/run/omb-update
+REQUESTS="$STATE/request"
+STATUS="$STATE/status"
+UPDATER="$STATE/update.sh"
 
 say() { printf '%s\n' "$*"; }
 fail() {
@@ -43,7 +51,7 @@ while [ $# -gt 0 ]; do
     --dir) [ $# -ge 2 ] || fail "--dir needs a folder."; DIR=$2; shift ;;
     --user) [ $# -ge 2 ] || fail "--user needs UID:GID."; USER_IDS=$2; shift ;;
     --no-restart) RESTART=no ;;
-    -h | --help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail "Unknown option: $1" ;;
   esac
   shift
@@ -59,19 +67,31 @@ esac
 case "$DIR" in
   *[!A-Za-z0-9/._-]*) fail "The install's folder may hold only letters, digits, / . _ and -." ;;
 esac
-BUTTON="$DIR/server-update"
-REQUESTS="$BUTTON/request"
-STATUS="$BUTTON/status"
 
-# One `key=value` per line, written whole and renamed into place, in root's own folder.
+# Writes stdin to `target` through a temporary file in STATE, root's folder, never through a path in the install's
+# folder; a target that is a link is refused, never written through.
+place() { # target mode
+  [ ! -L "$1" ] || fail "$1 is a link, so it was left alone."
+  tmp=$(mktemp "$STATE/.place.XXXXXX") || fail "Could not write in $STATE."
+  if ! cat >"$tmp" || ! chmod "$2" "$tmp" || ! mv -f "$tmp" "$1"; then
+    rm -f "$tmp"
+    fail "Could not write $1."
+  fi
+}
 write_status() { # file, then key=value lines
   file=$1
   shift
-  printf '%s\n' "$@" >"$STATUS/$file.tmp" && chmod 644 "$STATUS/$file.tmp" && mv "$STATUS/$file.tmp" "$STATUS/$file"
+  printf '%s\n' "$@" | place "$STATUS/$file" 644
 }
-last_value() { sed -n "s/^$1=//p" "$STATUS/last" 2>/dev/null | head -n 1; }
+status_value() { sed -n "s/^$2=//p" "$STATUS/$1" 2>/dev/null | head -n 1; }
+number() { case "$1" in '' | *[!0-9]*) echo 0 ;; *) echo "$1" ;; esac; }
 held() { grep -Eq '"updates"[[:space:]]*:[[:space:]]*"hold"' "$POLICY" 2>/dev/null; }
 held_word() { if held; then echo yes; else echo no; fi; }
+# The server's container, and when it started: unchanged across a run, the run stopped nothing.
+server_mark() {
+  cid=$( (cd "$DIR" && docker compose ps -aq omb) 2>/dev/null | head -n 1)
+  [ -z "$cid" ] || docker inspect -f '{{.Id}} {{.State.StartedAt}}' "$cid" 2>/dev/null
+}
 
 # update.sh's exit code, as the server reads it (deploy/update.sh lists them).
 result_of() {
@@ -86,25 +106,29 @@ result_of() {
   esac
 }
 
+# systemd starts this when the request appears or the owner's policy changes: the policy's hold is said again either way.
 run_requested() {
+  [ -d "$STATUS" ] || exit 0
+  layout=$(status_value runner layout)
+  if [ -n "$layout" ]; then write_status runner "layout=$layout" "dir=$DIR" "held=$(held_word)"; fi
   [ -e "$REQUESTS/request" ] || [ -L "$REQUESTS/request" ] || exit 0
   # The server's file, in the server's folder: removed (a link itself, never what it names), never read.
   rm -rf -- "$REQUESTS/request"
-  [ -d "$STATUS" ] || exit 0
-  run=$(last_value run)
-  case "$run" in '' | *[!0-9]*) run=0 ;; esac
-  run=$((run + 1))
-  ran=$(last_value ran)
-  case "$ran" in '' | *[!0-9]*) ran=0 ;; esac
+  run=$(($(number "$(status_value last run)") + 1))
+  ran=$(number "$(status_value last ran)")
+  # Runs that change nothing are cheap, so they never use up the gap; they only come no closer than QUIET_S apart.
+  since=$(($(date +%s) - $(number "$(status_value last at)")))
+  if [ "$since" -lt "$QUIET_S" ]; then sleep $((QUIET_S - since)); fi
   now=$(date +%s)
   done_with() { write_status last "run=$run" state=done "result=$1" "at=$(date +%s)" "ran=$ran"; }
   if held; then done_with held; return; fi
   if [ $((now - ran)) -lt "$GAP_S" ]; then done_with too-soon; return; fi
-  if [ ! -f "$DIR/update.sh" ]; then done_with no-updater; return; fi
-  ran=$now
+  if [ ! -f "$UPDATER" ]; then done_with no-updater; return; fi
   write_status last "run=$run" state=running "at=$now" "ran=$ran"
+  before=$(server_mark)
   code=0
-  bash "$DIR/update.sh" --dir "$DIR" </dev/null || code=$?
+  OMB_UPDATE_BY_RUNNER=1 bash "$UPDATER" --dir "$DIR" </dev/null || code=$?
+  if [ -z "$before" ] || [ "$before" != "$(server_mark)" ]; then ran=$now; fi
   done_with "$(result_of "$code")"
 }
 
@@ -125,11 +149,12 @@ override_file() {
 
 check_override() {
   file=$(override_file)
+  [ ! -L "$file" ] || fail "$file is a link, so it was left alone."
   if [ -f "$file" ] && ! grep -qF "$OVERRIDE_MARK" "$file"; then
     fail "$file is yours, so it was left alone. Add this to its omb service, then run this again:
     volumes:
-      - ./server-update/request:$IN_CONTAINER/request
-      - ./server-update/status:$IN_CONTAINER/status:ro"
+      - $REQUESTS:$IN_CONTAINER/request
+      - $STATUS:$IN_CONTAINER/status:ro"
   fi
   if grep -q '^COMPOSE_FILE=' "$DIR/.env" 2>/dev/null; then
     fail "$DIR/.env names its Compose files (COMPOSE_FILE), so Compose would not read $file. Add $(basename "$file") to COMPOSE_FILE, then run this again."
@@ -137,21 +162,24 @@ check_override() {
 }
 
 write_override() {
-  file=$(override_file)
-  cat >"$file.tmp" <<OVERRIDE
+  place "$(override_file)" 644 <<OVERRIDE
 $OVERRIDE_MARK: the Update server button's two folders, the request one the server writes to and the status one
 # it reads. update-runner.sh --remove takes this file away.
 services:
   omb:
     volumes:
-      - ./server-update/request:$IN_CONTAINER/request
-      - ./server-update/status:$IN_CONTAINER/status:ro
+      - $REQUESTS:$IN_CONTAINER/request
+      - $STATUS:$IN_CONTAINER/status:ro
 OVERRIDE
-  mv "$file.tmp" "$file"
 }
 
-server_ids() { # the user and group the server's container runs as
-  (cd "$DIR" && docker compose exec -T omb sh -c 'echo "$(id -u):$(id -g)"' 2>/dev/null) | tr -d '\r' | tail -n 1
+# The user and group that own the server's /data on the host, as numbers: the container runs as them.
+data_owner() {
+  cid=$( (cd "$DIR" && docker compose ps -aq omb) 2>/dev/null | head -n 1)
+  [ -n "$cid" ] || return 0
+  source=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' "$cid" 2>/dev/null)
+  [ -n "$source" ] || return 0
+  stat -c '%u:%g' "$source" 2>/dev/null || stat -f '%u:%g' "$source" 2>/dev/null
 }
 
 install_button() {
@@ -163,35 +191,37 @@ install_button() {
   layout=$(layout_of)
   [ -n "$layout" ] || fail "There is no compose.yaml or docker-compose.yml in $DIR. Name the install's folder: --dir PATH"
   [ "$layout" = installer ] || check_override
-  [ -n "$USER_IDS" ] || USER_IDS=$(server_ids)
+  [ -n "$USER_IDS" ] || USER_IDS=$(data_owner)
   case "$USER_IDS" in
-    *[!0-9:]* | : | :* | *: | *:*:* | "") fail "Could not tell which user the server runs as. Start it first (docker compose up -d), or name it: --user UID:GID" ;;
+    *[!0-9:]* | : | :* | *: | *:*:* | "") fail "Could not tell who owns the server's data. Start it first (docker compose up -d), or name the owner: --user UID:GID" ;;
   esac
-  install -d -m 0755 -o 0 -g 0 "$BUTTON" "$STATUS"
+  [ ! -L "$STATE" ] || fail "$STATE is a link, so it was left alone."
+  install -d -m 0755 -o 0 -g 0 "$STATE" "$STATUS"
   install -d -m 0700 -o "${USER_IDS%%:*}" -g "${USER_IDS##*:}" "$REQUESTS"
   install -d -m 0755 "$SBIN_DIR"
-  if ! cp "$0" "$SBIN_DIR/$RUNNER.tmp" || ! chmod 0755 "$SBIN_DIR/$RUNNER.tmp" || ! mv "$SBIN_DIR/$RUNNER.tmp" "$SBIN_DIR/$RUNNER"; then
-    fail "Could not place $SBIN_DIR/$RUNNER."
-  fi
+  # Root's own copies: a checkout's folder is its owner's, so what root runs never comes from it at the time of a run.
+  place "$UPDATER" 755 <"$DIR/update.sh"
+  place "$SBIN_DIR/$RUNNER" 755 <"$0"
   # Root's own settings at the time of the install, never anything the server writes.
   extra=""
-  for name in OMB_STABLE_URL OMB_NEWEST_URL OMB_UPDATE_WAIT_S OMB_RUNNER_GAP_S; do
+  for name in OMB_STABLE_URL OMB_NEWEST_URL OMB_UPDATE_WAIT_S OMB_RUNNER_GAP_S OMB_RUNNER_QUIET_S; do
     value=$(printenv "$name" || true)
-    case "$value" in '' | *[!A-Za-z0-9:/._%-]*) ;; *) extra="$extra $name=$value" ;; esac
+    case "$value" in '' | *[!A-Za-z0-9:/._-]*) ;; *) extra="$extra $name=$value" ;; esac
   done
-  cat >"$SYSTEMD_DIR/$UNIT.path" <<UNIT
+  place "$SYSTEMD_DIR/$UNIT.path" 644 <<UNIT
 [Unit]
 Description=Runs MausBot's update.sh when the server asks (Settings, Update server)
 
 [Path]
 PathExists=$REQUESTS/request
+PathChanged=$POLICY
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-  cat >"$SYSTEMD_DIR/$UNIT.service" <<UNIT
+  place "$SYSTEMD_DIR/$UNIT.service" 644 <<UNIT
 [Unit]
-Description=MausBot's update.sh in $DIR, asked for from the app
+Description=MausBot's update.sh for $DIR, asked for from the app
 
 [Service]
 Type=oneshot
@@ -207,7 +237,7 @@ UNIT
     say "Restarting the server so it sees the button's folders..."
     (cd "$DIR" && docker compose up -d --no-build) >/dev/null || fail "docker compose up -d did not finish. Run it in $DIR."
   fi
-  say "The app can update this server now: Settings, Updates, Update server. To take that away: sudo $0 --remove"
+  say "The app can update this server now: Settings, Updates, Update server. After a git pull, run this again so it uses the new update.sh. To take the button away: sudo $0 --remove"
 }
 
 remove_button() {
@@ -216,9 +246,9 @@ remove_button() {
   rm -f "$SYSTEMD_DIR/$UNIT.path" "$SYSTEMD_DIR/$UNIT.service" "$SBIN_DIR/$RUNNER"
   if command -v systemctl >/dev/null 2>&1; then systemctl daemon-reload >/dev/null 2>&1 || true; fi
   for file in "$DIR/compose.override.yaml" "$DIR/docker-compose.override.yml"; do
-    if [ -f "$file" ] && grep -qF "$OVERRIDE_MARK" "$file"; then rm -f "$file"; fi
+    if [ -f "$file" ] && [ ! -L "$file" ] && grep -qF "$OVERRIDE_MARK" "$file"; then rm -f "$file"; fi
   done
-  rm -rf -- "$BUTTON"
+  if [ ! -L "$STATE" ]; then rm -rf -- "$STATE"; fi
   say "The app no longer updates this server. Update it here: cd $DIR && sudo ./update.sh"
 }
 

@@ -584,7 +584,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(button).toBeLessThan(first.calls.indexOf("docker compose up -d --remove-orphans"));
     expect(first.stdout).toContain("  note  The app can update this server: Settings, Updates, Update server.");
     const compose = readFileSync(join(first.install, "compose.yaml"), "utf8");
-    expect(compose).toContain("      - ./server-update/request:/run/omb-update/request\n      - ./server-update/status:/run/omb-update/status:ro\n");
+    expect(compose).toContain("      - /var/lib/openmausbot-update/request:/run/omb-update/request\n      - /var/lib/openmausbot-update/status:/run/omb-update/status:ro\n");
     const refused = run(["--domain", "maus.example.com"], { env: { FAKE_RUNNER: "1" } });
     expect(refused.status).toBe(0);
     expect(refused.stdout).toContain(`Update it with: sudo ${refused.install}/update.sh`);

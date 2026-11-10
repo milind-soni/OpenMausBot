@@ -347,38 +347,66 @@ environment.
 
 On a Docker install, the server's admins can update it from **Settings →
 Updates → Update server**, in the desktop app or a browser. It runs the
-`update.sh` described below, exactly as you would: the stable version, a copy
-of the data first, and the old version and its data back when the new one is
-not healthy. The app asks first (the server restarts, so anything running
-stops, and it says how many chats have a bot answering), shows "Updating the
-server…" while the server is away, reconnects by itself, then says which
-version it runs now, or that it went back and why. In the desktop app, once
-the server is newer than the app, the same row offers the app's own update.
+`update.sh` described below: the stable version, a copy of the data first, and
+the old version and its data back when the new one is not healthy. The app asks
+first (the server restarts, so anything running stops, and it says how many
+chats have a bot answering), shows "Updating the server…" while the server is
+away, reconnects by itself, then says which version it runs now, or that it
+went back and why. After 15 minutes without the server it says so, with the
+commands to see its log and to go back. In the desktop app, once the server is
+newer than the app, the same row offers the app's own update. With
+`OMB_UPDATE_CHANNEL=newest` the app shows the command instead, because
+`update.sh` takes the stable version.
 
-The installer sets this up. In a checkout of this repository, add it once,
-from `OpenMausBot/deploy` (it needs systemd, and restarts the server once):
+The installer sets this up. In a checkout of this repository, add it from
+`OpenMausBot/deploy` (it needs systemd, and restarts the server once), and run
+the same command again after each `git pull`, so the button uses the new
+`update.sh`:
 
 ```sh
 git pull && sudo ./update-runner.sh --install
 ```
 
 That places `/usr/local/sbin/openmausbot-update-runner`, the systemd units
-`openmausbot-update.path` and `openmausbot-update.service`, and two folders
-under `server-update/`: `request`, which only the server's container writes,
-and `status`, which it reads and cannot write. A checkout gets
-`docker-compose.override.yml` to mount them (an override of your own is left
-alone, and the script says what to add). `sudo ./update-runner.sh --remove`
-takes it all away.
+`openmausbot-update.path` and `openmausbot-update.service`, and root's folder
+`/var/lib/openmausbot-update`: root's own copy of `update.sh`, which is what
+the button runs (never the one in your checkout), `request`, which the server's
+container writes, and `status`, which it reads and cannot write. A checkout
+gets `docker-compose.override.yml` to mount the two (an override of your own,
+or a link, is left alone, and the script says what to add). `sudo
+./update-runner.sh --remove` takes it all away.
 
-What the server can ask for is one thing: "run `./update.sh` now". The runner
-never reads the request: no version, image, URL, flag or path from the app or
-the server reaches the host. It never rolls back by itself (an update an
-earlier run left unfinished waits for you at a terminal), runs at most once
-every four minutes, and does nothing while `/etc/mausbot/policy.json` holds
-updates (`"updates": "hold"`). Only an admin's own signed-in session may press
-it; members never see it, and Clouds that MausBot runs never show it. Without
-the runner (no systemd, an npm install, Podman) the app shows the command to
-run on the server instead.
+**Who can ask.** Only an admin's own signed-in session sees and presses the
+button; members never see it, and Clouds that MausBot runs never show it. The
+request itself is a file in a folder of the server's user, and until the bots'
+sandbox is on for self-hosted servers, bots run as that user: anything running
+on the server as that user, a bot or a prompt injection included, can leave the
+same file. So the runner treats whoever asks as hostile, and what any request
+can cause is only this:
+
+- the standard update, to the stable version, and only when the stable version
+  is newer than the running image's own label (never the version the server
+  says it runs; when the two disagree nothing changes);
+- a copy of the data first that never removes earlier copies, so a server that
+  damaged its own data cannot leave the damaged copy as the only one;
+- updates that stop the server at most once every four minutes (a run with
+  nothing to do stops nothing, uses up no time, and only waits 30 seconds
+  after the last run), and none while `/etc/mausbot/policy.json` holds updates
+  (`"updates": "hold"`).
+
+It cannot choose a version, image, URL, flag or path, cannot roll back (an
+update an earlier run left unfinished waits for you at a terminal), and cannot
+write the runner's status, `update.sh`, `.env` or the Compose files. The worst
+it can do is restart the server into the current stable version.
+
+**Copies of the data.** An update asked for from the app keeps every earlier
+copy (Docker volumes named `…_data-before-update-…`). A run of `./update.sh` at
+a terminal removes all but its own once that one has been checked, as above.
+To see them: `docker volume ls --filter label=com.mausbot.role=update-backup`;
+to remove one yourself: `docker volume rm <name>`.
+
+Without the runner (no systemd, an npm install, Podman) the app shows the
+command to run on the server instead.
 
 ### Path B (Docker): one command, with a way back
 

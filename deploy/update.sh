@@ -42,6 +42,9 @@ SERVICE=${OMB_UPDATE_SERVICE:-omb}
 WAIT_S=${OMB_UPDATE_WAIT_S:-120}
 ENGINE_WAIT_S=${OMB_UPDATE_ENGINE_WAIT_S:-120}
 POLL_S=${OMB_UPDATE_POLL_S:-5}
+# Set by update-runner.sh: an update the server asked for (the app's Update server button). Whatever runs as the server's
+# user can ask, so such a run trusts nothing the server says, and never removes an earlier copy of the data.
+BY_RUNNER=${OMB_UPDATE_BY_RUNNER:-}
 KEEP_TAG="openmausbot-before-update:local"
 BACKUP_ROLE="com.mausbot.role=update-backup"
 
@@ -340,10 +343,10 @@ services:
     volumes:
       - ./data:/data
       - edge:/run/openmausbot
-      # The Update server button (update-runner.sh): the server leaves a request in the first, reads the outcome in
-      # the second.
-      - ./server-update/request:/run/omb-update/request
-      - ./server-update/status:/run/omb-update/status:ro
+      # The Update server button (update-runner.sh, root's folder): the server leaves a request in the first, reads the
+      # outcome in the second.
+      - /var/lib/openmausbot-update/request:/run/omb-update/request
+      - /var/lib/openmausbot-update/status:/run/omb-update/status:ro
     environment:
       OMB_PORT: "8799"
       OMB_WEBHOOK_PORT: "8800"
@@ -680,6 +683,13 @@ if [ "$(inspect '{{.State.Running}}' "$CID")" = true ]; then J_running=yes; else
 # branch, not a version, and says the version of the release it was built after.
 RUNNING_VERSION=""
 [ "$J_running" = yes ] && RUNNING_VERSION=$(reported_version)
+if [ "$BY_RUNNER" = 1 ]; then
+  # SECURITY: a server that says it is older than its image would be "updated" down onto data a newer version wrote.
+  if [ -n "$RUNNING_VERSION" ] && [ "$RUNNING_VERSION" != "$J_previous_version" ]; then
+    refuse "The server says it is version $RUNNING_VERSION, but its image is ${J_previous_version:-not a released version}. An update asked for from the app goes by the image alone, so nothing was changed. To update anyway, run ./update.sh here."
+  fi
+  RUNNING_VERSION=$J_previous_version
+fi
 is_version "$RUNNING_VERSION" || RUNNING_VERSION=$J_previous_version
 
 CHANNEL=""
@@ -814,7 +824,9 @@ phase swap
 # The new copy is checked, and from here on an interruption puts it back: the copy from the update before may go now,
 # and with it the way back to that one.
 rm -f "$LAST"
-drop_older_copies
+# SECURITY: a server that damaged its own data and then asked for an update would otherwise leave this copy, of the
+# damaged data, as the only one. Copies from such updates stay until a person's own run removes them.
+[ "$BY_RUNNER" = 1 ] || drop_older_copies
 say "Starting $(new_name)…"
 if old_installer_layout; then
   if move_installer_layout; then say "Caddy moves to its own container, so HTTPS stays up whenever the server restarts on its own."

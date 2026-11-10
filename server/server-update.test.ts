@@ -74,8 +74,16 @@ describe("the button's state", () => {
     expect(status({})).toEqual({
       mode: "button", current: "0.1.150", latest: "0.1.151", available: true, activeTurns: 2,
       command: "cd /opt/openmausbot && sudo ./update.sh", rollback: "cd /opt/openmausbot && sudo ./update.sh --rollback",
+      logs: "cd /opt/openmausbot && sudo docker compose logs --tail 50 omb",
     });
     expect(status({ facts: { ...runner, runner: { ...runner.runner!, held: true } } }).mode).toBe("held");
+  });
+
+  it("shows the command, not the button, when the check follows every release, which update.sh does not take", () => {
+    const newest: UpdateCheck = { ...available, channel: "newest", latest: "0.1.152", command: "git pull && ./update.sh --version 0.1.152" };
+    expect(status({ check: newest, followsStable: false })).toMatchObject({ mode: "command", command: "git pull && ./update.sh --version 0.1.152" });
+    // Before a first version is made stable, the check and update.sh both take the newest release: the button stays.
+    expect(status({ check: { ...available, channel: "newest" }, followsStable: true }).mode).toBe("button");
   });
 
   it("shows the command to run instead wherever the button could not work", () => {
