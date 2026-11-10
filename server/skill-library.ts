@@ -17,6 +17,8 @@ export function skillsLibraryEnabled(cfg: AppConfig): boolean {
   return cfg.features?.skillsLibrary === true;
 }
 
+export const assignedSkillsSchema = z.array(z.string().min(1).max(64)).max(200);
+
 export interface SkillManifest {
   id: string;
   name: string;
@@ -146,6 +148,9 @@ export interface SkillLibraryEntry {
   sha256: string;
   importedAt: string;
   reviewState: LibraryReviewState;
+  /** A responsibility label only; it does not grant access or edit rights. */
+  maintainerBotId?: string;
+  maintainerVersion?: string;
   /** Available to every existing and future bot, unless a private skill shadows it. */
   everyBot?: boolean;
   license?: string;
@@ -196,6 +201,8 @@ const skillLibraryEntrySchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   importedAt: z.string(),
   reviewState: z.enum(["approved", "disabled"]),
+  maintainerBotId: z.string().min(1).max(200).optional(),
+  maintainerVersion: z.string().uuid().optional(),
   everyBot: z.boolean().optional(),
   license: z.string().optional(),
   compatibility: z.string().optional(),
@@ -301,6 +308,44 @@ function librarySkillListing(root: string, entry: SkillLibraryEntry): LibrarySki
     ...(entry.files ? { files: entry.files } : {}),
     ...(entry.github ? { github: entry.github } : {}),
   };
+}
+
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalValue(item)]));
+}
+
+export function libraryManagementRevision(entry: SkillLibraryEntry | { name: string; missing: true }, assignedBotIds: readonly string[]): string {
+  return createHash("sha256").update(JSON.stringify([canonicalValue(entry), [...assignedBotIds].sort()])).digest("hex");
+}
+
+export function transferLibraryMaintainer(input: {
+  name: string;
+  maintainerBotId: string;
+  baseRevision: string;
+  assignedBotIds: readonly string[];
+  root?: string;
+}): { entry: SkillLibraryEntry; revision: string } | { error: string } {
+  const root = input.root ?? skillsLibraryRoot();
+  if (!isSkillName(input.name)) return { error: "invalid skill name" };
+  const read = readSkillLibraryIndexState(root);
+  if ("error" in read) return read;
+  const entry = read.index[input.name];
+  if (!entry) return { error: "the shared skill no longer exists" };
+  if (libraryManagementRevision(entry, input.assignedBotIds) !== input.baseRevision || !libraryContentMatches(root, entry)) {
+    return { error: "the skill or its assignments changed; list it again before transferring responsibility" };
+  }
+  if (!input.maintainerBotId || input.maintainerBotId.length > 200) return { error: "invalid target bot" };
+  const next = { ...entry, maintainerBotId: input.maintainerBotId, maintainerVersion: randomUUID() };
+  read.index[input.name] = next;
+  try {
+    writeSkillLibraryIndex(root, read.index);
+  } catch {
+    return { error: "the maintainer could not be saved; the transfer was not applied" };
+  }
+  skillLibraryEvents.emit("invalidate", { kind: "maintainer", name: input.name });
+  return { entry: next, revision: libraryManagementRevision(next, input.assignedBotIds) };
 }
 
 export function setLibrarySkillEveryBot(

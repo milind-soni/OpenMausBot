@@ -752,26 +752,30 @@ const TOOL_DEFINITIONS = [
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      properties: { query: { type: "string", maxLength: 300, description: "Words about the task; returns the best matches and where to read each." } },
+      properties: {
+        query: { type: "string", maxLength: 300, description: "Words about the task; returns the best matches and where to read each." },
+        target_bot_id: { type: "string", description: "Chief: list a managed target's explicit assignments, library availability and management revisions, including stale names, before assign/share/unassign." },
+      },
     },
   },
   {
     name: "skill_manage",
     description:
-      "Submit a new or updated reusable SKILL.md, or turn one of your own skills on or off, or delete it. Never change a skill unless the user explicitly asked for that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged." + APPLIES_OUTCOME,
+      "Submit a new or updated reusable SKILL.md, switch or delete your own skill. Chiefs may share/assign/unassign one library skill or designate its maintainer. A maintainer is a responsibility label, not a grant. Unassign removes only an explicit assignment; every-bot access stays. Never change a skill unless the user explicitly asked for that named skill. Follow the applied or pending result." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         action: {
           type: "string",
-          enum: ["create", "update", "enable", "disable", "delete"],
-          description: "Create a uniquely named skill, update a learned one, or switch or delete one of your own.",
+          enum: ["create", "update", "enable", "disable", "delete", "share", "assign", "unassign", "transfer_maintainer"],
+          description: "Share and assign both add one existing enabled library skill to one target. Unassign also removes stale names. Private namesakes block assignment. Transfer designates responsibility without granting access.",
         },
         skill_name: {
           type: "string",
-          description: "Required for every action but create: the exact existing name from skills_list.",
+          description: "Required except create: the exact name from skills_list (target_bot_id lists stale assignments too).",
         },
+        target_bot_id: { type: "string", description: "Share/assign/unassign/transfer_maintainer: exact managed bot ID. Transfer requires existing access. No operation changes execution permissions or library scope." },
         skill_md: {
           type: "string",
           description:
@@ -798,7 +802,7 @@ const TOOL_DEFINITIONS = [
         },
         base_revision: {
           type: "string",
-          description: "Required to update a skill shared with your team: the revision skills_list shows for it, listed before you read the skill. A teammate's newer change makes the update fail; list and read it again.",
+          description: "Shared update: content revision from skills_list. Share/assign/unassign/transfer_maintainer: management_revision; list with target_bot_id for assignments. After applied, list again to verify.",
         },
         source: {
           type: "string",

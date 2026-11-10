@@ -7,6 +7,7 @@ import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
 import { createComputerSharing, type SharedFolder } from "../electron/computer-sharing.mjs";
 import { sessionCookieName } from "./request-auth.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 
 let fixture: VerificationServer;
 let connector: ReturnType<typeof createComputerSharing>;
@@ -30,7 +31,7 @@ const api = async (method: string, path: string, body?: unknown, headers: Record
 const rpc = (method: string, params?: unknown): Promise<any> => new Promise((resolve, reject) => {
   const id = ++sequence;
   // A shared terminal operation can legitimately run 30 seconds before its result crosses the connector and MCP boundaries.
-  const timeout = setTimeout(() => { waiting.delete(id); reject(new Error(`MCP ${method} ${JSON.stringify(params)} timed out`)); }, 40_000);
+  const timeout = setTimeout(() => { waiting.delete(id); reject(new Error(`MCP ${method} ${JSON.stringify(params)} timed out`)); }, hostTimeout(40_000));
   waiting.set(id, value => { clearTimeout(timeout); resolve(value); });
   proxy.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
 });
@@ -159,7 +160,7 @@ it("explicit edits and terminal work; old credentials and other sessions cannot 
   const cookie = `${sessionCookieName(Number(new URL(env.origin).port), grant.environmentId)}=${pairing.token}`;
   expect((await api("POST", `/api/shared-computers/${grant.id}/lease`, {}, { cookie, origin: "https://evil.invalid", "x-omb-computer-secret": grant.secret })).status).toBe(403);
   evidence.push("explicit hash-guarded edit and real terminal; cross-session, stale-secret, CSRF, local-control gate refusals");
-}, 60_000);
+}, hostTimeout(60_000));
 
 it("a big lent file changes by one passage, gains lines at its end, and is deleted only once read", async () => {
   await connector.save(env, { folders: [{ ...folder, write: true }], terminal: false, computer: false }, await connector.identity(env));

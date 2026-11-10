@@ -89,6 +89,7 @@ Use only mapped, tested commands:
 - [Team backups](team-backups.md)
 - [Sharing a whole team](team-sharing.md)
 - [The organization library](org-library.md)
+- [Shared skill assignment and maintainer management](skill-management.md)
 - [Preset bots](presets.md)
 - [Teams and shared instructions](teams.md)
 - [Full workspace backups](workspace-backups.md)

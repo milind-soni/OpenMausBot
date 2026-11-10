@@ -382,7 +382,7 @@ import {
 } from "./skills.ts";
 import { fetchSkillFromSource } from "./skill-fetch.ts";
 import { ensureTaskWorkspaceWithSkills, harnessSkillLinks } from "./skill-task-links.ts"; import { changedWords, createLendingLifts, handedInSince } from "./host/lending-lifts.ts"; import { deviceWord } from "./lent-computers.ts";
-import { parseSkillManageReferences, previousSkillVersion, skillCardCopy, skillRequestReferences } from "./skill-request-card.ts";
+import { parseSkillManageReferences, previousSkillVersion, skillCardCopy, skillRequestReferences } from "./skill-request-card.ts"; import { skillManagementRequest } from "./host/skill-management-request.ts";
 import { skillReferencesSha256 } from "./skill-storage.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import { skillExport } from "./skill-export.ts";
@@ -390,7 +390,7 @@ import { pickBotName } from "./names.ts";
 import { botSkillTemplateSchema, newBotDefaultsSchema } from "./new-bot-defaults.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { setupSuggestionsFor } from "./setup-suggestions.ts"; import { createSetupRequestRoutes } from "./routes/setup-request.ts";
-import { isSkillSwitchAction, type SkillRequestCardData } from "../shared/skill-request.ts"; import { createSkillSwitchHost } from "./host/skill-switch-host.ts";
+import { isSkillManagementAction, isSkillSwitchAction, type SkillRequestCardData } from "../shared/skill-request.ts"; import { createSkillSwitchHost } from "./host/skill-switch-host.ts";
 import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-folder.ts";
 import {
   botPersona,
@@ -13622,10 +13622,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!connectorThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
-        return json(res, 200, {
-          skills: skillsHost.harnessListing(from.id, listBotSkills(from)),
-          staged: listStagedSkillWrites(from.id).map(stagedSkillListing),
-        });
+        const targetId = url.searchParams.get("targetBotId");
+        if (targetId !== null) return json(res, ...skillsHost.assignmentListing(from, targetId));
+        return json(res, 200, { skills: skillsHost.harnessListing(from.id, listBotSkills(from)), staged: listStagedSkillWrites(from.id).map(stagedSkillListing) });
       }
       if (method === "POST" && path === "/api/internal/skills/stage") {
         if (!skillAuthoringEnabled(cfg)) return json(res, 403, { error: "skill authoring is not enabled in Settings" });
@@ -13636,7 +13635,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!connectorThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
-        const direct = appliesDirectly(from.id, fromThreadId);
+        const direct = appliesDirectly(from.id, fromThreadId); if (isSkillManagementAction(body.action)) return json(res, ...skillManagementRequest(skillsHost, from, fromThreadId, body, direct));
         if (isSkillSwitchAction(body.action)) { const staged = skillSwitch.stage(from, fromThreadId, body.action, body, direct); return json(res, staged.status, staged.body); }
         const persistence = skillProposalPersistence(from.id, fromThreadId, !direct);
         if (!persistence.ok) return json(res, persistence.status, { error: persistence.error });

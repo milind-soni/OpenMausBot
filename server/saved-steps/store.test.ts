@@ -45,8 +45,12 @@ describe("RecipeStore", () => {
   });
 
   it("keeps the 200 most recently used", () => {
-    for (let i = 0; i <= MAX_RECIPES; i++) store.save("b1", recipe(`r${i}`, `key ${i}`, 1_000 + i));
+    mkdirSync(join(dir, "b1"));
+    const recipes = Array.from({ length: MAX_RECIPES }, (_, i) => recipe(`r${i}`, `key ${i}`, 1_000 + i));
+    writeFileSync(file(), JSON.stringify({ version: 1, recipes }));
+    store.save("b1", recipe(`r${MAX_RECIPES}`, `key ${MAX_RECIPES}`, 1_000 + MAX_RECIPES));
     expect(onDisk().recipes).toHaveLength(MAX_RECIPES);
+    expect(onDisk().recipes.map((r) => r.id)).toEqual(Array.from({ length: MAX_RECIPES }, (_, i) => `r${MAX_RECIPES - i}`));
     expect(store.find("b1", "key 0")).toBeUndefined();
     expect(store.find("b1", "key 1")!.id).toBe("r1");
     expect(store.find("b1", `key ${MAX_RECIPES}`)!.id).toBe(`r${MAX_RECIPES}`);
