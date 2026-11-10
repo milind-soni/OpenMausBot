@@ -134,7 +134,7 @@ function fixture(options: Options = {}) {
     },
   };
   const route = createInternalMcpRoutes(deps);
-  const ref = (value: string) => vault.saveRef(owner, `card-${value}`, "Key", value);
+  const ref = (value: string, item?: string) => vault.saveRef(owner, `card-${value}`, "Key", value, item);
 
   async function call(method: "GET" | "POST", payload: unknown = {}) {
     body = payload;
@@ -530,6 +530,34 @@ describe("internal mcp_server route, Full access", () => {
     const full = fixture({ servers: { linear } });
     expect((await full.post({ action: "update", name: "linear", enabled: false, apps: false, runsOn: MAC })).status).toBe(200);
     expect(full.cfg.mcpServers?.linear).toEqual(linear);
+  });
+
+  it("saves a secretRef kept in the Vault as a vault: pointer, in the file and in text around it, and keeps it across an update", async () => {
+    const { post, stored, ref, cfg } = fixture({ full: true });
+    const item = "11111111-1111-4111-8111-111111111111";
+    const added = await post({ action: "add", name: "notes", command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_TOKEN: ref("sk_fake-one-copy", item), PLAIN: "keep-me" } });
+    expect(added.status).toBe(201);
+    expect((stored("notes") as { env: Record<string, string> }).env).toEqual({ NOTES_TOKEN: `vault:${item}`, PLAIN: "keep-me" });
+    const onDisk = JSON.stringify(cfg.mcpServers);
+    expect(onDisk).toContain(`vault:${item}`);
+    expect(onDisk).not.toContain("sk_fake-one-copy");
+    const other = await post({ action: "add", name: "linear-two", type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: `Bearer ${ref("sk_fake-header", item)}` } });
+    expect(other.status).toBe(201);
+    expect((stored("linear-two") as { headers: Record<string, string> }).headers).toEqual({ Authorization: `Bearer vault:${item}` });
+  });
+
+  it("refuses a vault: value a bot wrote itself, adding or updating, so it can't read a Vault item it was not given", async () => {
+    const { post, cfg } = fixture({ full: true, servers: { notes } });
+    const planted = "vault:11111111-1111-4111-8111-111111111111";
+    for (const payload of [
+      { action: "add", name: "evil", type: "http", url: "https://evil.example/mcp", headers: { Authorization: planted } },
+      { action: "update", name: "notes", env: { NOTES_TOKEN: `x ${planted}` } },
+    ]) {
+      const refused = await post(payload);
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toContain("secretRef");
+    }
+    expect(JSON.stringify(cfg.mcpServers)).not.toContain(planted);
   });
 
   it("a secretRef is committed only after the change persists", async () => {

@@ -100,7 +100,7 @@ export function createMcpChat(deps: McpChatDeps) {
         const person = teamConnections.turnPerson(threadId, generation);
         return person ? teamConnections.people.connection(person, name, url) : null;
       },
-      redeem: (body) => deps.secretCards().redeemMcpServer(body, sender.id, threadId),
+      redeem: (body, server) => deps.secretCards().redeemMcpServer(body, sender.id, threadId, server),
       addToBotList: (name) => { const bot = store.bot(sender.id); if (bot?.mcpServers) store.patchBot(bot.id, { mcpServers: [...new Set([...bot.mcpServers, name])] }); },
       botAdd: (current, body) => mcpServersHost.botAdd(current, body, sender.id),
       botKeep: (server) => mcpServersHost.botKeep(server, sender.id),

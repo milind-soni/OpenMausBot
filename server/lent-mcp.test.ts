@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { describe, expect, it, vi } from "vitest";
 
 import { createLentMcp, isLoopbackUrl, LENT_MCP_PATH, lentLine, needsTheirComputer, type HereChecks, type LentMcpDeps } from "./lent-mcp.ts";
+import type { StoredMcpServer } from "./mcp-registry.ts";
 import { PASS } from "./routes/table.ts";
 import type { SharedComputers } from "./shared-computers.ts";
 
@@ -13,7 +14,7 @@ const notes = { command: "/Users/ada/bin/notes-mcp", args: [], env: { NOTES_TOKE
 const here = (over: Partial<HereChecks> = {}): HereChecks => ({ exists: () => false, program: () => true, answers: async () => false, ...over });
 
 type Online = NonNullable<ReturnType<SharedComputers["runsOn"]>["online"]>;
-function fixture(options: { online?: Partial<Online> | null; known?: { lent: boolean } | null; principal?: string | null; servers?: Record<string, unknown>; mcpServers?: string[]; toolScope?: unknown; answer?: (operation: Record<string, unknown>) => unknown; lenders?: ReturnType<SharedComputers["mcpLenders"]>; here?: HereChecks; personal?: boolean; place?: string } = {}) {
+function fixture(options: { keys?: LentMcpDeps["keys"]; online?: Partial<Online> | null; known?: { lent: boolean } | null; principal?: string | null; servers?: Record<string, unknown>; mcpServers?: string[]; toolScope?: unknown; answer?: (operation: Record<string, unknown>) => unknown; lenders?: ReturnType<SharedComputers["mcpLenders"]>; here?: HereChecks; personal?: boolean; place?: string } = {}) {
   const requests: Array<{ operation: Record<string, unknown>; principal: string | null }> = [];
   const online = options.online === null ? null : { id: "mac-1", name: "Ada's Mac", platform: "darwin" as const, terminal: false, mcpServers: true, ...options.online };
   const computers: LentMcpDeps["computers"] = {
@@ -29,6 +30,7 @@ function fixture(options: { online?: Partial<Online> | null; known?: { lent: boo
   const minted: string[] = [];
   const lent = createLentMcp({
     cfg: () => ({ mcpServers: options.servers ?? { local, notes } }),
+    ...(options.keys ? { keys: options.keys } : {}),
     computers,
     policy: (servers) => servers,
     bot: (id) => (id === "kiwi" ? { id, ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}), toolScope: options.toolScope } : undefined),
@@ -114,6 +116,18 @@ describe("a server that runs on the person's computer, in a turn", () => {
     expect(called.json.mock.calls[0]![2].result).toEqual({ content: [{ type: "text", text: line("web") }], isError: true });
     expect(await lent.test("low", servers.low, "cloud-home", new AbortController().signal)).toEqual({ status: 409, error: line("low") });
     expect(requests.map((request) => (request.operation.server as { url: string }).url)).toEqual(["http://127.0.0.1:19501/mcp"]);
+  });
+
+  it("reads a server's Vault key when it goes out to the lent computer, and leaves out one the bot may not use", () => {
+    const POINTER = "vault:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const keyed = { ...notes, env: { NOTES_TOKEN: POINTER } };
+    const resolve = vi.fn((_name: string, server: StoredMcpServer) => ({ ok: true as const, server: { ...server, env: { NOTES_TOKEN: "saved-from-vault" } } as StoredMcpServer }));
+    const { lent, requests } = fixture({ online: { terminal: true }, servers: { notes: keyed }, keys: { resolve, warm: vi.fn() } as never });
+    expect(Object.keys(lent.mounts({ id: "kiwi" }, TURN))).toEqual(["notes"]);
+    expect(requests[0]!.operation.server).toMatchObject({ env: { NOTES_TOKEN: "saved-from-vault" } });
+    expect(resolve).toHaveBeenCalledWith("notes", expect.anything(), "kiwi");
+    resolve.mockReturnValueOnce({ ok: false, reason: "kept", why: "kept to other bots." } as never);
+    expect(lent.mounts({ id: "kiwi" }, TURN)).toEqual({});
   });
 
   it("a bot with no server on another computer costs its turn nothing: the lending gate isn't asked", () => {

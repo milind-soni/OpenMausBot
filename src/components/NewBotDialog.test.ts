@@ -56,8 +56,13 @@ function chooseStartingRole(dialog: Node[], value: string) {
   (select.props as unknown as { onChange: (event: { target: { value: string } }) => void }).onChange({ target: { value } });
 }
 function render(defaultsMode = false, onCreated?: () => void | Promise<void>) {
-  let tree!: ReturnType<typeof NewBotDialog>;
-  function Capture() { fixture.hook = 0; tree = NewBotDialog({ defaultsMode, onCreated, onClose: fixture.close }); return tree; }
+  let tree: ReactNode = null;
+  function Capture() {
+    fixture.hook = 0;
+    const editor = (NewBotDialog({ defaultsMode, onCreated, onClose: fixture.close }) as Node).props.children as Node;
+    tree = (editor.type as (props: unknown) => ReactNode)(editor.props);
+    return tree;
+  }
   const html = renderToStaticMarkup(createElement(Capture));
   return { html, nodes: nodes(tree) };
 }

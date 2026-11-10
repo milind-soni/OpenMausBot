@@ -8,6 +8,7 @@ import { audienceWithin } from "../bot-visibility.ts";
 import { SERVER_PREFIXES } from "../drivers/agents-bridge.ts";
 import { MCP_CONFIG_BUSY, runsElsewhere, type McpConfig, type McpConfigRefusal } from "../host/mcp-config.ts";
 import { MCP_KEY_EXPIRED, type McpApplied, type McpCardAction, type McpUpdateFields } from "../host/mcp-requests.ts";
+import { holdsVaultPointer } from "../vault/mcp-keys.ts";
 import type { BotKept, BotMcpServerAdd } from "../mcp-bot-servers.ts";
 import { BOT_STRIPPED_KEYS, botChangeLines, botListing, botMayChange, botServerTarget, isSecretRef, mcpOwner, mergeBotUpdate } from "../mcp-bot-rules.ts";
 import { nameList } from "../mcp-health.ts";
@@ -62,7 +63,8 @@ export interface InternalMcpDeps {
   signOut(name: string, url: string): Promise<void>;
   /** The person this turn acts for, testing their own connection to a personal server. */
   testAs(name: string, url: string): { oauth: McpOAuthManager; key?: { header: string; value: string } } | null;
-  redeem(body: Record<string, unknown>): { ok: true; value: Record<string, unknown>; commit(): void } | { ok: false; error: string };
+  /** `server`: the name the redeemed keys are for. A ref kept in the Vault comes back as a `vault:<id>` pointer, never its value. */
+  redeem(body: Record<string, unknown>, server: string): { ok: true; value: Record<string, unknown>; commit(): void } | { ok: false; error: string };
   addToBotList(name: string): void;
   botAdd(current: Record<string, unknown>, body: unknown): BotMcpServerAdd;
   /** The add path's folder rules for a command server the bot changes. */
@@ -161,6 +163,8 @@ async function act(deps: Ctx, body: unknown, signal: AbortSignal): Promise<Outco
   if (action === "list") return list(deps);
   if (typeof name !== "string" || !name) return { status: 400, error: `mcp_server ${String(action)} needs name.` };
   const fields = Object.fromEntries(Object.entries(rest).filter(([key]) => !BOT_STRIPPED_KEYS.includes(key)));
+  // Security: a pointer in a bot's own text would read a Vault item it was never given; only a redeemed secretRef makes one.
+  if (holdsVaultPointer(fields)) return { status: 400, error: `Use a secretRef from request_credential (delivery ref), not a vault: value.` };
   if (action === "add") return add(deps, name, fields, signal, typeof computer === "string" ? computer : undefined);
 
   const servers = deps.cfg().mcpServers ?? {};
@@ -218,7 +222,7 @@ async function add(deps: Deps, name: string, fields: Record<string, unknown>, si
   if (managed) return { status: 403, error: managed };
   if (!deps.teamAdmin()) return { status: 403, error: ASK_ADMIN };
   if (Object.hasOwn(deps.cfg().mcpServers ?? {}, name)) return { status: 409, error: `${name} already exists. Use update, or pick another name.` };
-  const redeemed = deps.redeem(trimmedRefs({ name, ...fields }));
+  const redeemed = deps.redeem(trimmedRefs({ name, ...fields }), name);
   if (!redeemed.ok) return { status: 400, error: redeemed.error };
   const added = deps.botAdd(deps.cfg().mcpServers ?? {}, redeemed.value);
   if (!added.ok) return { status: added.status, error: added.error };
@@ -262,7 +266,7 @@ function planUpdate(deps: Deps, name: string, existing: StoredMcpServer, fields:
   const merged = mergeBotUpdate(existing, fields);
   const signedIn = remote && deps.authState(name, existing.url) === "signed-in";
   const dropped = signedIn ? merged.dropped : merged.dropped.filter((item) => item !== "sign-in");
-  const redeemed = deps.redeem(trimmedRefs(merged.body));
+  const redeemed = deps.redeem(trimmedRefs(merged.body), name);
   if (!redeemed.ok) return { status: 400, error: redeemed.error };
   const parsed = parseMcpServerMutation(name, redeemed.value, existing);
   if (!parsed.ok) return { status: 400, error: parsed.error };
@@ -376,7 +380,7 @@ export async function applyMcpChange(deps: Deps, request: Pick<McpChangeRequest,
   if (parsed.ok && targetHash(parsed.server) !== request.targetHash) {
     return { state: "failed", text: `${name} changed since you were asked, so nothing was applied.`, note: serverLine(language, "server.mcp.card.changedSince", { name }) };
   }
-  if (fields && !deps.redeem(trimmedRefs(fields)).ok) return { state: "expired", text: MCP_KEY_EXPIRED, note: serverLine(language, "server.mcp.card.keyExpired") };
+  if (fields && !deps.redeem(trimmedRefs(fields), name).ok) return { state: "expired", text: MCP_KEY_EXPIRED, note: serverLine(language, "server.mcp.card.keyExpired") };
   const approved: Ctx = { ...deps, approved: true, fullAccess: () => true, teamAdmin: () => true, decide: () => {}, activity: () => {} };
   const outcome = await act(approved, { ...fields, action: request.action, name }, new AbortController().signal);
   if ("error" in outcome) return outcome.busy ? { state: "busy" } : { state: "failed", text: outcome.error };
