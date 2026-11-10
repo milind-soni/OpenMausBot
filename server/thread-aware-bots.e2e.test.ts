@@ -547,6 +547,14 @@ describe("start_thread on another model, reporting back", () => {
       expect(quiet.status, JSON.stringify(quiet.body)).toBe(201);
       const notReporting = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Faster.", thread: quiet.body.threadId }, later);
       expect([notReporting.status, notReporting.body.error]).toEqual([403, "Choose a teammate, not yourself"]);
+      // Only the conversation that opened it may steer it, and never through a room.
+      const { task: other } = (await api("POST", `/api/bots/${pm.id}/tasks`, { title: "Other chat" })).body;
+      const fromOther = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Faster.", thread: threadId }, await mintedToken(pm.id, other.threadId));
+      expect([fromOther.status, fromOther.body.error]).toEqual([403, "Choose a teammate, not yourself"]);
+      const { group } = (await api("POST", "/api/groups", { name: "Steer room", memberIds: [pm.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: pm.id } } })).body;
+      const viaRoom = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "Faster.", thread: threadId, groupId: group.id }, later);
+      expect([viaRoom.status, viaRoom.body.error]).toEqual([403, "Choose a teammate, not yourself"]);
       release("own-quiet");
       release(pm.threadId);
       await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
