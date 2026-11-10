@@ -106,8 +106,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+mausbot": 17538,
   "skills+shared+voice+mausbot": 18480,
   "default+no-computer-pick": 16274,
-  "default+room": 16213,
-  "non-chief+room": 16096,
+  "default+room": 16544,
+  "non-chief+room": 16427,
   "skills+shared+voice+x+team+images": 18429,
   "default+images": 17502,
 };

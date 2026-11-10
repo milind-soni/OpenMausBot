@@ -37,7 +37,7 @@ export function ShareBotButton({ bot, className, headerMenu, iconSize = 16 }: { 
 }
 
 /** "Bob can now chat · Undo", for a few seconds; Undo puts the sharing back as it was. */
-export function UndoToast({ text, onUndo, onDone }: { text: string; onUndo: () => Promise<unknown>; onDone: () => void }) {
+export function UndoToast({ text, onUndo, onDone, actionLabel = t("common.undo") }: { text: string; onUndo: () => Promise<unknown>; onDone: () => void; actionLabel?: string }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(onDone, TOAST_MS);
@@ -48,7 +48,7 @@ export function UndoToast({ text, onUndo, onDone }: { text: string; onUndo: () =
       <span className="min-w-0 flex-1">{failed ? t("botAccess.undoFailed") : text}</span>
       {!failed && (
         <button type="button" onClick={() => void onUndo().then(onDone, () => setFailed(true))} className="shrink-0 rounded-md px-1.5 py-0.5 font-medium text-accent hover:bg-raised">
-          {t("common.undo")}
+          {actionLabel}
         </button>
       )}
     </div>,
