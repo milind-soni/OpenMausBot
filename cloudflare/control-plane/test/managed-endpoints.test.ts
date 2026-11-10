@@ -210,6 +210,13 @@ class FakeCloudflare {
   rateLimitRetryAfter: string | null = null;
   readonly afterHooks = new Map<string, () => void>();
   readonly tunnels = new Map<string, FakeTunnel>();
+  /** Tunnel IDs with a connector up: a plain delete answers error 1022. */
+  readonly connectedTunnels = new Set<string>();
+  /** Connection cleanups after which cloudflared is back before the next request. */
+  reconnectsAfterCleanup = 0;
+  /** Whether `?cascade=true` deletes a connected tunnel. The API reference
+   * does not list it, so by default it is ignored. */
+  cascadeHonoured = false;
   dnsTotalCount: number | null = null;
   tunnelTotalCount: number | null = null;
   /** Answer the account-wide tunnel listing without `result_info`. */
@@ -431,10 +438,31 @@ class FakeCloudflare {
       this.after("delete_dns");
       return Response.json({ result: { id } });
     }
+    if (method === "DELETE" && url.pathname.endsWith("/connections")) {
+      const failed = await this.before("cleanup_connections");
+      if (failed) return failed;
+      const id = url.pathname.split("/").at(-2) ?? "";
+      this.connectedTunnels.delete(id);
+      if (this.reconnectsAfterCleanup > 0) {
+        this.reconnectsAfterCleanup -= 1;
+        this.connectedTunnels.add(id);
+      }
+      return jsonResult({});
+    }
     if (method === "DELETE" && url.pathname.includes("/cfd_tunnel/")) {
       const failed = await this.before("delete_tunnel");
       if (failed) return failed;
       const id = url.pathname.split("/").at(-1);
+      const cascade = this.cascadeHonoured && url.searchParams.get("cascade") === "true";
+      if (id && this.connectedTunnels.has(id) && !cascade) {
+        return Response.json({
+          errors: [{ code: 1_022, message: "Cannot delete a tunnel with active connections" }],
+          messages: [],
+          result: null,
+          success: false,
+        }, { status: 400 });
+      }
+      if (id) this.connectedTunnels.delete(id);
       for (const [name, tunnel] of this.tunnels) {
         if (tunnel.id === id) this.tunnels.delete(name);
       }
@@ -3670,7 +3698,7 @@ async function computerWithTunnel(
 type Computer = Awaited<ReturnType<typeof computerWithTunnel>>;
 
 /** The desktop's hourly relay-token request, which carries its phone counts. */
-async function reportPhones(worker: TestWorker, computer: Computer, devices: { e2e: number; legacy: number }, vars = relayVars()) {
+async function reportPhones(worker: TestWorker, computer: Pick<Computer, "appVersion" | "credential">, devices: { e2e: number; legacy: number }, vars = relayVars()) {
   const response = await call(worker, "/v1/installations/self/relay-token", {
     body: { appVersion: computer.appVersion, devices },
     env: { ...env, ...vars } as unknown as Env,
@@ -4056,5 +4084,409 @@ describe("the idle reclaim dry run", () => {
     await runScheduledCleanup(worker, { OMB_TUNNEL_OFFLINE_RECLAIM_DAYS: "1" });
     expect((await endpointState(twoDays.id)).status).toBe("deleted");
     expect((await endpointState(online.id)).status).toBe("ready");
+  });
+});
+
+describe("removing a tunnel whose computer is online", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    forgetTunnelRelease();
+  });
+
+  const minimum = (extra: Record<string, string> = {}) => relayVars({ TUNNEL_MIN_APP_VERSION: "0.1.145", ...extra });
+  const tunnelOf = (cloudflare: FakeCloudflare, computer: Computer) => {
+    const tunnel = cloudflare.tunnels.get(computer.state.tunnel_name);
+    if (!tunnel) throw new Error("fake tunnel missing");
+    return tunnel;
+  };
+  const tunnelDeletes = (cloudflare: FakeCloudflare, tunnelId: string) => deleteURLs(cloudflare)
+    .filter((url) => new URL(url).pathname.endsWith(`/cfd_tunnel/${tunnelId}`));
+  const connectionCleanups = (cloudflare: FakeCloudflare, tunnelId: string) => deleteURLs(cloudflare)
+    .filter((url) => new URL(url).pathname.endsWith(`/cfd_tunnel/${tunnelId}/connections`));
+  const retryNow = () => env.DB.prepare(
+    "UPDATE installation_endpoints SET last_cleanup_attempt_at = 0 WHERE status = 'deleting'",
+  ).run();
+
+  it("names Cloudflare's still-connected refusal and cleans up connections", async () => {
+    const tunnelId = "10000000-0000-4000-8000-000000000001";
+    const refused = new CloudflareAPI(readConfig(env).cloudflare, async () => Response.json({
+      errors: [{ code: 1_022, message: "Cannot delete a tunnel with active connections" }],
+      result: null,
+      success: false,
+    }, { status: 400 }));
+    await expect(refused.deleteTunnel(tunnelId)).rejects.toMatchObject({ code: "cf_tunnel_connected", status: 400 });
+
+    const seen: string[] = [];
+    const cleaned = new CloudflareAPI(readConfig(env).cloudflare, async (input, init) => {
+      seen.push(`${init?.method} ${new URL(input.toString()).pathname}`);
+      return jsonResult({});
+    });
+    await expect(cleaned.cleanupTunnelConnections(tunnelId)).resolves.toBeUndefined();
+    expect(seen).toEqual([`DELETE /client/v4/accounts/${PRIMARY_ACCOUNT}/cfd_tunnel/${tunnelId}/connections`]);
+    // A tunnel that is already gone has nothing to clean up.
+    const gone = new CloudflareAPI(readConfig(env).cloudflare, async () => jsonNotFound());
+    await expect(gone.cleanupTunnelConnections(tunnelId)).resolves.toBeUndefined();
+  });
+
+  it("drops the connections of a released tunnel and deletes it in the same attempt, and nothing hands it back", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "online-release@example.com");
+    const old = await computerWithTunnel(worker, cloudflare, owner.token, "online-release", "0.1.140");
+    const tunnel = tunnelOf(cloudflare, old);
+    connected(tunnel);
+    cloudflare.connectedTunnels.add(tunnel.id);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    cloudflare.calls.length = 0;
+
+    await runScheduledCleanup(worker, minimum());
+
+    expect(await endpointState(old.id)).toMatchObject({ status: "deleted", tunnel_id: null, dns_record_id: null, last_error_code: null });
+    expect(cloudflare.tunnels.has(old.state.tunnel_name)).toBe(false);
+    // Refused, connections dropped, deleted: back to back, as documented.
+    expect(deleteURLs(cloudflare).filter((url) => !url.includes("/dns_records/")).map((url) => new URL(url).pathname.split("/").slice(-2).join("/")))
+      .toEqual([`cfd_tunnel/${tunnel.id}`, `${tunnel.id}/connections`, `cfd_tunnel/${tunnel.id}`]);
+    expect(tunnelDeletes(cloudflare, tunnel.id).every((url) => !url.includes("cascade"))).toBe(true);
+
+    // The same old desktop asking again is refused before any provider call.
+    const creates = () => cloudflare.calls.filter((entry) => entry.method === "POST" && entry.url.endsWith("/cfd_tunnel")).length;
+    const before = creates();
+    const again = await askForTunnel(worker, old, 1, minimum());
+    expect(again.status).toBe(426);
+    await expect(again.json()).resolves.toEqual({ error: "update_required" });
+    expect(creates()).toBe(before);
+  });
+
+  it("deletes with cascade on the last round when cloudflared is back at once", async () => {
+    const cloudflare = new FakeCloudflare();
+    cloudflare.cascadeHonoured = true;
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "online-reconnect@example.com");
+    const old = await computerWithTunnel(worker, cloudflare, owner.token, "online-reconnect", "0.1.140");
+    const tunnel = tunnelOf(cloudflare, old);
+    cloudflare.connectedTunnels.add(tunnel.id);
+    cloudflare.reconnectsAfterCleanup = 2;
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    cloudflare.calls.length = 0;
+
+    await runScheduledCleanup(worker, minimum());
+
+    expect(await endpointState(old.id)).toMatchObject({ status: "deleted", tunnel_id: null });
+    expect(connectionCleanups(cloudflare, tunnel.id)).toHaveLength(2);
+    const deletes = tunnelDeletes(cloudflare, tunnel.id);
+    expect(deletes).toHaveLength(3);
+    expect(deletes.map((url) => new URL(url).searchParams.get("cascade"))).toEqual([null, null, "true"]);
+  });
+
+  it("stays inside its call budget, backs off, and keeps the release marking while a tunnel stays connected", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "online-stuck@example.com");
+    const first = await computerWithTunnel(worker, cloudflare, owner.token, "online-stuck-a", "0.1.140");
+    const second = await computerWithTunnel(worker, cloudflare, owner.token, "online-stuck-b", "0.1.140");
+    for (const each of [first, second]) cloudflare.connectedTunnels.add(tunnelOf(cloudflare, each).id);
+    cloudflare.reconnectsAfterCleanup = 1_000;
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const vars = minimum({ OMB_CLEANUP_SWEEP_LIMIT: "1" });
+    const firstTunnel = tunnelOf(cloudflare, first).id;
+    cloudflare.calls.length = 0;
+
+    await runScheduledCleanup(worker, vars);
+
+    expect(await endpointState(first.id)).toMatchObject({ status: "deleting", last_error_code: "cf_tunnel_connected", tunnel_id: firstTunnel });
+    expect(await endpointState(second.id)).toMatchObject({ status: "ready" });
+    // Bounded: the usual verified cleanup plus two rounds of cleanup and delete.
+    expect(connectionCleanups(cloudflare, firstTunnel)).toHaveLength(2);
+    expect(tunnelDeletes(cloudflare, firstTunnel)).toHaveLength(3);
+    expect(cleanupCalls(cloudflare).length).toBeLessThanOrEqual(14);
+
+    // Backing off, it neither takes the sweep's slot nor holds the release.
+    cloudflare.calls.length = 0;
+    await runScheduledCleanup(worker, vars);
+    expect(tunnelDeletes(cloudflare, firstTunnel)).toHaveLength(0);
+    expect(await endpointState(second.id)).toMatchObject({ status: "deleting", last_error_code: "cf_tunnel_connected" });
+
+    // Once the connector stays down both go.
+    cloudflare.reconnectsAfterCleanup = 0;
+    await retryNow();
+    await runScheduledCleanup(worker, vars);
+    await retryNow();
+    await runScheduledCleanup(worker, vars);
+    for (const each of [first, second]) expect(await endpointState(each.id)).toMatchObject({ status: "deleted", tunnel_id: null });
+    expect(cloudflare.tunnels.size).toBe(0);
+  });
+
+  it("records a failed connection cleanup, holds the release, and retries later", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "online-cleanup-fails@example.com");
+    const first = await computerWithTunnel(worker, cloudflare, owner.token, "online-cleanup-fails-a", "0.1.140");
+    const second = await computerWithTunnel(worker, cloudflare, owner.token, "online-cleanup-fails-b", "0.1.140");
+    const tunnel = tunnelOf(cloudflare, first);
+    cloudflare.connectedTunnels.add(tunnel.id);
+    cloudflare.failures.add("cleanup_connections");
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const vars = minimum({ OMB_CLEANUP_SWEEP_LIMIT: "1" });
+
+    await runScheduledCleanup(worker, vars);
+    expect(await endpointState(first.id)).toMatchObject({ status: "deleting", last_error_code: "cf_api_10000", tunnel_id: tunnel.id });
+    expect(tunnelDeletes(cloudflare, tunnel.id)).toHaveLength(1);
+    // A sweep that is failing for another reason still stops the marking.
+    await runScheduledCleanup(worker, vars);
+    expect(await endpointState(second.id)).toMatchObject({ status: "ready" });
+
+    cloudflare.failures.delete("cleanup_connections");
+    await retryNow();
+    await runScheduledCleanup(worker, vars);
+    expect(await endpointState(first.id)).toMatchObject({ status: "deleted", tunnel_id: null });
+    expect(cloudflare.tunnels.has(first.state.tunnel_name)).toBe(false);
+  });
+
+  it("never forces an idle reclaim: a tunnel still connected is left, then the reclaim is cancelled", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "online-idle@example.com");
+    const idle = await provisioned(worker, cloudflare, owner.token, "online-idle");
+    await quiet(idle.id, 30 * DAY_MS);
+    neverRan(idle.tunnel, 30);
+    // Its connector came up after the last check: Cloudflare refuses the delete.
+    cloudflare.connectedTunnels.add(idle.tunnel.id);
+    cloudflare.cascadeHonoured = true;
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    cloudflare.calls.length = 0;
+
+    await runScheduledCleanup(worker);
+
+    const marked = await endpointState(idle.id);
+    expect(marked).toMatchObject({ status: "deleting", last_error_code: "cf_tunnel_connected", tunnel_id: idle.tunnel.id });
+    expect(marked.reclaim_requested_at).not.toBeNull();
+    expect(connectionCleanups(cloudflare, idle.tunnel.id)).toHaveLength(0);
+    expect(tunnelDeletes(cloudflare, idle.tunnel.id)).toHaveLength(1);
+    expect(tunnelDeletes(cloudflare, idle.tunnel.id).some((url) => url.includes("cascade"))).toBe(false);
+
+    connected(idle.tunnel);
+    await retryNow();
+    await runScheduledCleanup(worker);
+
+    expect(await endpointState(idle.id)).toMatchObject({
+      last_error_code: "reclaim_cancelled",
+      reclaim_requested_at: null,
+      status: "error",
+      tunnel_id: idle.tunnel.id,
+    });
+    expect(cloudflare.tunnels.get(idle.state.tunnel_name)?.id).toBe(idle.tunnel.id);
+    expect(connectionCleanups(cloudflare, idle.tunnel.id)).toHaveLength(0);
+    expect(tunnelDeletes(cloudflare, idle.tunnel.id)).toHaveLength(1);
+  });
+
+  it("lets an owner delete an endpoint whose connector is still up", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "online-owner@example.com");
+    const endpoint = await provisioned(worker, cloudflare, owner.token, "online-owner");
+    connected(endpoint.tunnel);
+    cloudflare.connectedTunnels.add(endpoint.tunnel.id);
+
+    const deleted = await call(worker, "/v1/installations/self/endpoint", { method: "DELETE", token: endpoint.credential });
+
+    expect(deleted.status).toBe(204);
+    expect(await endpointState(endpoint.id)).toMatchObject({ status: "deleted", tunnel_id: null });
+    expect(connectionCleanups(cloudflare, endpoint.tunnel.id)).toHaveLength(1);
+  });
+});
+
+describe("self-hosted servers keep their tunnel", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    forgetTunnelRelease();
+  });
+
+  /** Tonight's switches: the old-phone cutoff on everyone, the reason from 0.1.152, the minimum at 0.1.145. */
+  const live = (extra: Record<string, string> = {}) => relayVars({
+    TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT: "100",
+    TUNNEL_REASON_MIN_VERSION: "0.1.152",
+    TUNNEL_MIN_APP_VERSION: "0.1.145",
+    RELAY_TUNNEL_RELEASE_PERCENT: "100",
+    RELAY_TUNNEL_RELEASE_DAYS: "1",
+    ...extra,
+  });
+
+  /** `openmausbot serve --tunnel` and `openmausbot login`: registration as any client sends it, `kind` only when given. */
+  async function register(worker: TestWorker, accountToken: string, clientInstanceId: string, appVersion: string, kind?: string) {
+    const response = await call(worker, "/v1/installations", {
+      body: { clientInstanceId, name: "home-server", platform: "linux", appVersion, ...(kind ? { kind } : {}) },
+      method: "POST",
+      token: accountToken,
+    });
+    expect(response.status).toBe(201);
+    const created = await response.json<{ credential: string; installation: { id: string } }>();
+    return { appVersion, credential: created.credential, id: created.installation.id };
+  }
+
+  /** What every released server and fleet container sends: its version and nothing else, unless `kind` is given. */
+  const provision = (worker: TestWorker, credential: string, body: Record<string, unknown> | undefined, vars = live()) =>
+    call(worker, "/v1/installations/self/endpoint", {
+      ...(body ? { body } : {}),
+      env: { ...env, ...vars } as unknown as Env,
+      method: "POST",
+      token: credential,
+    });
+
+  const storedKind = async (id: string) => (await env.DB.prepare("SELECT kind FROM installations WHERE id = ?")
+    .bind(id).first<{ kind: string | null }>())?.kind ?? null;
+
+  it("gives a server that does not say what it is a tunnel under the cutoff, and the capacity answer at the limit", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "server-unlabelled@example.com");
+    const server = await register(worker, owner.token, "server-unlabelled", "0.1.152");
+    const fleet = await register(worker, owner.token, "fleet-unlabelled", "0.1.150");
+
+    for (const each of [server, fleet]) {
+      const response = await provision(worker, each.credential, { appVersion: each.appVersion });
+      expect(response.status).toBe(200);
+      const body = await response.json<{ connectorToken: string; endpoint: { url: string } }>();
+      expect(body.connectorToken).toBe(CONNECTOR_TOKEN);
+      // And again, now that it holds one.
+      expect((await provision(worker, each.credential, { appVersion: each.appVersion })).status).toBe(200);
+    }
+    // No body at all, as a server with no version would send.
+    const bare = await register(worker, owner.token, "server-bare", "0.1.152");
+    expect((await provision(worker, bare.credential, undefined)).status).toBe(200);
+
+    // At the limit: the 503 it retries on, never relay_capable "full".
+    const late = await register(worker, owner.token, "server-late", "0.1.152");
+    cloudflare.providerErrors.set("create_tunnel", 1_045);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const full = await provision(worker, late.credential, { appVersion: "0.1.152" });
+    expect(full.status).toBe(503);
+    await expect(full.json()).resolves.toEqual({ error: "endpoint_capacity" });
+
+    // The minimum version still applies.
+    const old = await register(worker, owner.token, "server-old", "0.1.140");
+    const refused = await provision(worker, old.credential, { appVersion: "0.1.140" });
+    expect(refused.status).toBe(426);
+  });
+
+  it("stores the kind a client reports, and a server is never answered relay_capable even once it uses the relay", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "server-labelled@example.com");
+    const server = await register(worker, owner.token, "server-labelled", "0.1.153", "server");
+    expect(await storedKind(server.id)).toBe("server");
+    // Uses the relay (a relay token, phones reported) and sends what a desktop would: still a tunnel.
+    expect(await reportPhones(worker, server, { e2e: 1, legacy: 0 }, live())).toBe(200);
+    for (const body of [{ appVersion: "0.1.153", legacyDevices: 0 }, { appVersion: "0.1.153", legacyDevices: 2 }, { appVersion: "0.1.153" }]) {
+      const response = await provision(worker, server.credential, body);
+      expect(response.status).toBe(200);
+    }
+
+    // Reported later, on provisioning or with a relay token; the latest report wins.
+    const later = await register(worker, owner.token, "server-later", "0.1.153");
+    expect(await storedKind(later.id)).toBeNull();
+    expect((await provision(worker, later.credential, { appVersion: "0.1.153", kind: "server" })).status).toBe(200);
+    expect(await storedKind(later.id)).toBe("server");
+    const relayToken = (kind: unknown) => call(worker, "/v1/installations/self/relay-token", {
+      body: { appVersion: "0.1.153", devices: { e2e: 0, legacy: 0 }, kind },
+      env: { ...env, ...live() } as unknown as Env,
+      method: "POST",
+      token: later.credential,
+    });
+    expect((await relayToken("desktop")).status).toBe(200);
+    expect(await storedKind(later.id)).toBe("desktop");
+    expect((await relayToken("server")).status).toBe(200);
+    expect(await storedKind(later.id)).toBe("server");
+    expect((await relayToken("robot")).status).toBe(400);
+    expect((await provision(worker, later.credential, { appVersion: "0.1.153", kind: "robot" })).status).toBe(400);
+    const badRegistration = await call(worker, "/v1/installations", {
+      body: { clientInstanceId: "server-bad-kind", name: "x", platform: "linux", appVersion: "0.1.153", kind: "robot" },
+      method: "POST",
+      token: owner.token,
+    });
+    expect(badRegistration.status).toBe(400);
+  });
+
+  it("never marks a server's tunnel for the relay release or the cutoff, but the minimum version still removes it", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "server-cron@example.com");
+    const server = await register(worker, owner.token, "server-cron", "0.1.153", "server");
+    expect((await provision(worker, server.credential, { appVersion: "0.1.153" }, relayVars())).status).toBe(200);
+    expect(await reportPhones(worker, server, { e2e: 1, legacy: 0 })).toBe(200);
+    await clearSince(server.id, 5);
+    const desktop = await computerWithTunnel(worker, cloudflare, owner.token, "server-cron-desktop");
+    expect(await reportPhones(worker, desktop, { e2e: 1, legacy: 0 })).toBe(200);
+    await clearSince(desktop.id, 5);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    expect(await releaseHealth(worker, live())).toMatchObject({
+      relayProven: { eligible: 1 },
+      legacyPhoneCutoff: { eligible: 0 },
+    });
+    await runScheduledCleanup(worker, live());
+    expect((await endpointState(desktop.id)).status).toBe("deleted");
+    expect((await endpointState(server.id)).status).toBe("ready");
+    expect((await provision(worker, server.credential, { appVersion: "0.1.153" })).status).toBe(200);
+
+    // Below the minimum a server is treated as any installation.
+    const old = await register(worker, owner.token, "server-cron-old", "0.1.140", "server");
+    expect((await provision(worker, old.credential, { appVersion: "0.1.140" }, relayVars())).status).toBe(200);
+    await runScheduledCleanup(worker, live());
+    expect((await endpointState(old.id)).status).toBe("deleted");
+    expect((await endpointState(server.id)).status).toBe("ready");
+  });
+
+  it("answers every desktop exactly as before", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "server-desktops@example.com");
+    const answer = async (response: Response) => ({ status: response.status, body: response.status === 200 ? "endpoint" : await response.json() });
+    const relayDesktop = async (name: string) => {
+      const installation = await createInstallation(worker, owner.token, name, "0.1.152");
+      const computer = { appVersion: "0.1.152", credential: installation.credential, id: installation.installation.id };
+      expect(await reportPhones(worker, computer, { e2e: 1, legacy: 0 }, live())).toBe(200);
+      return computer;
+    };
+    const retired = { status: 409, body: { error: "relay_capable", tunnel: "retired" } };
+
+    // On the relay, no tunnel: no old phone, old phones, the companion not running (no count), or saying it is a desktop.
+    const none = await relayDesktop("desktop-none");
+    expect(await answer(await provision(worker, none.credential, { appVersion: "0.1.152", legacyDevices: 0 })))
+      .toEqual({ status: 409, body: { error: "relay_capable" } });
+    const phones = await relayDesktop("desktop-phones");
+    expect(await answer(await provision(worker, phones.credential, { appVersion: "0.1.152", legacyDevices: 2 }))).toEqual(retired);
+    const companionOff = await relayDesktop("desktop-companion-off");
+    expect(await answer(await provision(worker, companionOff.credential, { appVersion: "0.1.152" }))).toEqual(retired);
+    const saysDesktop = await createInstallation(worker, owner.token, "desktop-says-so", "0.1.152");
+    expect(await answer(await provision(worker, saysDesktop.credential, { appVersion: "0.1.152", kind: "desktop" }))).toEqual(retired);
+
+    // Holding a tunnel: kept while the relay has not carried it lately, given up once it has.
+    const holding = await computerWithTunnel(worker, cloudflare, owner.token, "desktop-holding", "0.1.152");
+    expect(await answer(await provision(worker, holding.credential, { appVersion: "0.1.152", legacyDevices: 2 }))).toEqual({ status: 200, body: "endpoint" });
+    expect(await reportPhones(worker, holding, { e2e: 0, legacy: 2 }, live())).toBe(200);
+    expect(await answer(await provision(worker, holding.credential, { appVersion: "0.1.152", legacyDevices: 2 }))).toEqual(retired);
+
+    // Cutoff off: an old phone gets a tunnel, none does not; at the limit a release that reads the reason pairs over
+    // the relay and an older one keeps the 503.
+    const off = live({ TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT: "0" });
+    const fresh = await relayDesktop("desktop-cutoff-off");
+    expect(await answer(await provision(worker, fresh.credential, { appVersion: "0.1.152", legacyDevices: 0 }, off)))
+      .toEqual({ status: 409, body: { error: "relay_capable" } });
+    expect(await answer(await provision(worker, fresh.credential, { appVersion: "0.1.152", legacyDevices: 1 }, off))).toEqual({ status: 200, body: "endpoint" });
+    cloudflare.providerErrors.set("create_tunnel", 1_045);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const atLimit = await relayDesktop("desktop-at-limit");
+    expect(await answer(await provision(worker, atLimit.credential, { appVersion: "0.1.152", legacyDevices: 1 }, off)))
+      .toEqual({ status: 409, body: { error: "relay_capable", tunnel: "full" } });
+    const older = await createInstallation(worker, owner.token, "desktop-older", "0.1.151");
+    expect(await answer(await provision(worker, older.credential, { appVersion: "0.1.151", legacyDevices: 1 }, off)))
+      .toEqual({ status: 503, body: { error: "endpoint_capacity" } });
+    // Below the minimum.
+    const old = await createInstallation(worker, owner.token, "desktop-old", "0.1.140");
+    expect(await answer(await provision(worker, old.credential, { appVersion: "0.1.140", legacyDevices: 0 })))
+      .toEqual({ status: 426, body: { error: "update_required" } });
   });
 });

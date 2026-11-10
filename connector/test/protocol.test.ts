@@ -22,7 +22,7 @@ describe("the connector protocol", () => {
     expect(checkJob({ id: "j2", type: "status" })).toEqual({ ok: true, job: { id: "j2", type: "status", args: {} } });
     expect(checkJob({ id: "j3", type: "shell", args: { command: "id" } })).toMatchObject({ ok: false, id: "j3", code: "unknown_job" });
     expect(checkJob({ id: "j4", type: "status", args: { verbose: true } })).toMatchObject({ ok: false, code: "invalid_args" });
-    expect(checkJob({ id: "j5", type: "update", args: { image: HOME, force: true } })).toMatchObject({ ok: false, code: "invalid_args", message: 'unknown argument "force"' });
+    expect(checkJob({ id: "j5", type: "update", args: { image: HOME, force: true } })).toMatchObject({ ok: false, code: "invalid_args", message: 'unknown argument "force"; this job takes image' });
     for (const bad of [null, [], "status", { type: "status" }, { id: "", type: "status" }, { id: "x".repeat(65), type: "status" }, { id: "a b", type: "status" }]) {
       expect(checkJob(bad)).toMatchObject({ ok: false, id: null, code: "invalid_job" });
     }
