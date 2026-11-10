@@ -214,7 +214,7 @@ describe("a routine someone else changed (email 1a1bca40)", () => {
       lentPlatform: () => "darwin",
     });
   }
-  const changed = "\"Morning inbox\" was changed outside your own chats, so it can't use your Mac. Open it and save it to make it yours again.";
+  const changed = "\"Morning inbox\" can't use your Mac because it isn't confirmed as yours: it was last changed or made outside your own chats. Open it and save it to make it yours again.";
 
   it("its scheduled run is told, by name, how to make it theirs again", () => {
     const host = routineRun();
@@ -228,7 +228,7 @@ describe("a routine someone else changed (email 1a1bca40)", () => {
     expect(routineRun({ ownerAuthored: true }).cloudLendingRefusalNotice(turn)).toBeNull();
     for (const host of [routineRun({ trigger: "webhook" }), routineRun({ trigger: "manual" }), routineRun({ flagged: true })]) {
       expect(host.cloudLendingRefusalNotice(turn)).not.toBeNull();
-      expect(host.cloudLendingRefusalNotice(turn)).not.toContain("was changed outside your own chats");
+      expect(host.cloudLendingRefusalNotice(turn)).not.toContain("isn't confirmed as yours");
     }
   });
 });
