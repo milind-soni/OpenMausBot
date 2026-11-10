@@ -2,13 +2,16 @@ import { useCallback, useId, useState } from "react";
 
 import { LIVE_VOICE_OPTIONS } from "../../shared/live-call";
 import { t } from "@/lib/i18n";
+import { qwenAudioOutput } from "@/lib/qwen-audio-output";
 import { liveDisclosure } from "@/lib/call-mode";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import type { LiveSettings } from "../../shared/wire";
 import { LiveKeySetup } from "./LiveKeySetup";
 import { LiveProviderSettings } from "./LiveProviderSettings";
+import { KeyRow } from "./keys/KeyRow";
 import { KeysLink } from "./keys/KeysLink";
 import { Select } from "./Select";
+import { QwenAudioOutputSettings } from "./QwenAudioOutputSettings";
 
 const IDLE_CHOICES = [1, 2, 3, 5, 10, 15, 30, 60];
 
@@ -24,6 +27,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
     dialog?.querySelector<HTMLElement>("select, input, button")?.focus();
   }, []);
   const azure = live.provider === "azure";
+  const qwen = live.provider === "qwen";
   const voice = live.voice || "marin";
   const known = LIVE_VOICE_OPTIONS.some((option) => option.id === voice);
 
@@ -61,14 +65,16 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
       role="dialog"
       tabIndex={-1}
       aria-label={t("call.live.settings")}
-      className="flex w-[300px] max-w-[90vw] flex-col gap-3 rounded-xl border border-hairline bg-panel p-3 text-[13px] text-ink shadow-lg"
+      className="flex max-h-[80dvh] w-[300px] max-w-[90vw] flex-col gap-3 overflow-y-auto rounded-xl border border-hairline bg-panel p-3 text-[13px] text-ink shadow-lg"
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         event.stopPropagation();
         onClose();
       }}
     >
+      {(qwen || qwenAudioOutput.getSnapshot().active) && <QwenAudioOutputSettings />}
       <LiveProviderSettings />
+      {!qwen && <>
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.voice")}</span>
         <Select
@@ -82,6 +88,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
         </Select>
       </label>
       <div className="-mt-2 text-[12px] text-ink-tertiary">{t("call.live.voiceNext")}</div>
+      </>}
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.readTyped")}</span>
         <input
@@ -106,6 +113,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
           ))}
         </Select>
       </label>
+      {qwen ? <KeyRow key={JSON.stringify([live.qwenRegion, live.qwenWorkspace])} id="liveKey" bare /> : <>
       <div className="flex items-center justify-between gap-2 border-t border-hairline/60 pt-2">
         <span className="text-ink-secondary">{t(azure ? "call.live.azureKey" : "call.live.key")}</span>
         <span className="flex gap-2">
@@ -124,7 +132,8 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
         <div className="-mt-2 text-[12px] text-ink-tertiary">{t(live.keySource === "openai" ? "call.live.keyFromApiKeys" : "call.live.needsKey")} <KeysLink id="openai" purpose="liveCalls" /></div>
       )}
       {changingKey && <LiveKeySetup compact onSaved={() => setChangingKey(false)} />}
-      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure })} {t(azure ? "call.live.azureCost" : "call.live.cost")}</div>
+      </>}
+      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, qwen })} {t(qwen ? "call.live.qwen.cost" : azure ? "call.live.azureCost" : "call.live.cost")}</div>
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );

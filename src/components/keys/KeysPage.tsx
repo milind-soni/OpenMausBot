@@ -73,10 +73,13 @@ function ElsewhereRow({ entry }: { entry: KeyEntry }) {
 }
 
 export function KeyCatalogRow({ entry }: { entry: KeyEntry }) {
+  const { state } = useStore();
+  const live = state.config?.live;
+  const editorKey = entry.id === "liveKey" ? JSON.stringify([live?.provider, live?.qwenRegion, live?.qwenWorkspace]) : entry.id;
   if (entry.kind === "uses" && entry.uses) return <KeyRow id={entry.uses} row={entry.id} />;
   if (entry.kind === "panel") return <PanelRow entry={entry} />;
   if (entry.kind === "elsewhere") return <ElsewhereRow entry={entry} />;
-  return <KeyRow id={entry.id}>{EXTRAS[entry.id]?.()}</KeyRow>;
+  return <KeyRow key={editorKey} id={entry.id}>{EXTRAS[entry.id]?.()}</KeyRow>;
 }
 
 function KeySection({ id, rows, open, onToggle }: { id: KeySectionId; rows: KeyEntry[]; open: boolean; onToggle: () => void }) {
@@ -148,7 +151,7 @@ export function KeysPage() {
   }, [focus]);
 
   // With Azure chosen, Live calls do not use the OpenAI key that row points at.
-  const azureLive = state.config?.live?.provider === "azure";
+  const azureLive = state.config?.live?.provider === "azure" || state.config?.live?.provider === "qwen";
   const rows = KEY_CATALOG.filter((entry) => keyMatches(entry, q) && !(azureLive && entry.id === "liveCalls"));
   const sections = KEY_SECTIONS.flatMap((section) => {
     const own = rows.filter((entry) => entry.section === section.id);

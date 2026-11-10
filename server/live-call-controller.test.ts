@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LiveCallState } from "../shared/wire.ts";
+import type { LiveCallState, LiveClientFailure } from "../shared/wire.ts";
 import {
   ATTACH_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CONSENT_SETTLE_MS, DELEGATION_SETTLE_MS, GOODBYE_MS, IDLE_CHECK_MS, PROGRESS_INTERVAL_MS,
   LiveCallBusyError, LiveCallController, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
@@ -8,6 +8,7 @@ import { LIVE_COPY } from "../shared/live-approval.ts";
 import { LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY, LiveSessionError, type LiveEndpoint } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
+import { createQwenLiveSession } from "./qwen-live-session.ts";
 
 class FakeSocket implements LiveSocket {
   readyState = 0;
@@ -71,10 +72,156 @@ function setup(overrides: Partial<LiveCallDeps> = {}) {
   return { controller, deps, sockets, frames, logs, settings, queue, listeners, emit, message, patch, setActivity, start, socket: () => sockets.at(-1)! };
 }
 
+async function setupQwenMedia(auth: RequestAuth = owner, bind = true) {
+  const provider = new FakeSocket("unused", "fixture");
+  const endpoint: LiveEndpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
+  const signedIn = vi.fn(() => true);
+  const t = setup({ signedIn, createSession: input => createQwenLiveSession({ ...input, bot: { name: "Fixture" }, history: [], upstream: provider }) });
+  t.settings.provider = "qwen"; t.settings.endpoint = endpoint;
+  const { call } = await t.controller.start({ auth, ...BOT, sdp: "", client: "web", transports: ["ws-pcm"] });
+  provider.open(); provider.receive({ type: "session.updated" });
+  const media = { bufferedAmount: 0, send: vi.fn(), close: vi.fn() };
+  if (bind) expect(t.controller.bindMedia(call.callId, auth, media, "credit-v1")).toBe(true);
+  return { ...t, provider, media, callId: call.callId, signedIn };
+}
+
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("LiveCallController lifecycle", () => {
+  it.each(["session-revoked", "media-disconnected", "shutdown"])("releases queued credit playback on %s and refuses late control", async action => {
+    const auth: Extract<RequestAuth, { kind: "session" }> = { kind: "session", via: "cookie", scopes: ["admin", "client"], session: { id: "fixture-session", tokenHash: "fixture", label: "fixture", scopes: ["admin", "client"], createdAt: 0, lastSeenAt: 0, expiresAt: 9999999999999 } };
+    const f = await setupQwenMedia(auth);
+    f.provider.receive({ type: "response.audio.delta", response_id: "r", delta: Buffer.alloc(1_920).toString("base64") });
+    const credit = { type: "playback.credit", epoch: 0, seq: 1, bytes: 960, contextState: "running" } as const;
+    expect(f.controller.playbackCredit(f.callId, credit)).toBe(true);
+    expect(f.controller.sessionRevoked("different-session")).toBeNull();
+    if (action === "session-revoked") f.controller.sessionRevoked(auth.session.id);
+    else if (action === "media-disconnected") f.controller.mediaDisconnected(f.callId);
+    else await f.controller.shutdown();
+    expect(f.controller.current()).toBeNull();
+    expect(f.media.close).toHaveBeenCalledOnce();
+    expect(f.provider.readyState).toBe(3);
+    expect(f.listeners.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(f.controller.playbackCredit(f.callId, credit)).toBe(false);
+    expect(f.controller.clientFailure(f.callId, { type: "client.failure", code: "audio-context", contextState: "closed", bufferedBytes: 0, queuedMs: 0, frameAgeMs: 0 })).toBe(false);
+    expect(f.logs.some(line => line.includes("source=client-untrusted"))).toBe(false);
+  });
+  it("refuses direct unbound, wrong-call, signed-out and non-finite client diagnostics without logging their contents", async () => {
+    const f = await setupQwenMedia(owner, false);
+    const failure = { type: "client.failure", code: "audio-context", contextState: "closed", bufferedBytes: 0, queuedMs: 0, frameAgeMs: 0 } as const;
+    expect(f.controller.clientFailure(f.callId, failure)).toBe(false);
+    expect(f.controller.playbackCredit(f.callId, { type: "playback.credit", epoch: 0, seq: 1, bytes: 960, contextState: "running" })).toBe(false);
+    expect(f.controller.bindMedia(f.callId, owner, f.media, "credit-v1")).toBe(true);
+    expect(f.controller.clientFailure("another-call", failure)).toBe(false);
+    for (const override of [{ bufferedBytes: NaN }, { queuedMs: Infinity }, { frameAgeMs: -1 }, { code: "never-log-this" }, { reason: "never-log-this" }]) {
+      expect(f.controller.clientFailure(f.callId, { ...failure, ...override } as LiveClientFailure)).toBe(false);
+    }
+    f.signedIn.mockReturnValue(false);
+    expect(f.controller.clientFailure(f.callId, failure)).toBe(false);
+    expect(f.logs.some(line => line.includes("source=client-untrusted"))).toBe(false);
+    expect(f.logs.join("\n")).not.toContain("never-log-this");
+    await f.controller.shutdown();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("does not treat consumed client credit as evidence to authorize Qwen spoken approval", async () => {
+    const f = await setupQwenMedia();
+    f.message({ id: "approval", kind: "options", card: { title: "Approval needed", subtitle: "synthetic operation", options: ["Allow", "Deny"], requestId: "r1", tool: "Bash" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.controller.playbackCredit(f.callId, { type: "playback.credit", epoch: 0, seq: 1, bytes: 24_000, contextState: "running" })).toBe(true);
+    f.provider.receive({ type: "response.audio.delta", response_id: "prompt", delta: Buffer.alloc(960).toString("base64") });
+    expect(f.controller.playbackCredit(f.callId, { type: "playback.credit", epoch: 0, seq: 2, bytes: 960, contextState: "running" })).toBe(true);
+    f.provider.receive({ type: "input_audio_buffer.speech_started", item_id: "yes", audio_start_ms: 1000 });
+    f.provider.receive({ type: "input_audio_buffer.speech_stopped", item_id: "yes", audio_end_ms: 2000 });
+    f.provider.receive({ type: "input_audio_buffer.committed", item_id: "yes" });
+    f.provider.receive({ type: "response.created", response: { id: "r-yes" } });
+    f.provider.receive({ type: "conversation.item.input_audio_transcription.completed", item_id: "yes", transcript: "yes" });
+    f.provider.receive({ type: "response.function_call_arguments.done", response_id: "r-yes", call_id: "yes-tool", name: "delegate_to_bot", arguments: "{}" });
+    await vi.advanceTimersByTimeAsync(DELEGATION_SETTLE_MS + CONSENT_SETTLE_MS);
+    expect(f.deps.respond).not.toHaveBeenCalled();
+    expect(f.deps.send).not.toHaveBeenCalled();
+    await f.controller.shutdown();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("ends a stalled credit playback with the fixed safe error and releases adapter and controller timers", async () => {
+    const provider = new FakeSocket("unused", "fixture");
+    const endpoint: LiveEndpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
+    const t = setup({ createSession: input => createQwenLiveSession({ ...input, bot: { name: "Fixture" }, history: [], upstream: provider }) });
+    t.settings.provider = "qwen"; t.settings.endpoint = endpoint;
+    const { call } = await t.controller.start({ auth: owner, ...BOT, sdp: "", client: "web", transports: ["ws-pcm"] });
+    provider.open(); provider.receive({ type: "session.updated" });
+    const media = { bufferedAmount: 0, send: vi.fn(), close: vi.fn() };
+    expect(t.controller.bindMedia(call.callId, owner, media, "credit-v1")).toBe(true);
+    provider.receive({ type: "response.audio.delta", response_id: "r", delta: Buffer.alloc(960).toString("base64") });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "error", error: "The call ended because audio playback stopped making progress." });
+    expect(t.logs.find(line => line.includes("call ended"))).toContain("errors=qwen-playback-stalled");
+    expect(provider.readyState).toBe(3);
+    expect(media.close).toHaveBeenCalledOnce();
+    expect(t.listeners.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(t.deps.send).not.toHaveBeenCalled();
+    expect(t.deps.respond).not.toHaveBeenCalled();
+  });
+  it("does not leave close timers behind when the explicit Qwen adapter closes synchronously", async () => {
+    const prepared = new FakeSocket("unused", "fixture");
+    prepared.send = (raw) => { if ((JSON.parse(raw) as { type: string }).type === "session.close") prepared.close(); };
+    const t = setup({ createSession: vi.fn(async () => ({ sessionId: "q1", sdp: "", socket: prepared })) });
+    t.settings.provider = "qwen";
+    t.settings.endpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
+    const call = await t.controller.start({ auth: owner, ...BOT, sdp: "offer", client: "web", transports: ["ws-pcm"] }); prepared.open();
+    await t.controller.end(call.call.callId);
+    expect(t.controller.current()).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("binds a Qwen media consumer to the exact starting session once and expires unbound calls", async () => {
+    const first: Extract<RequestAuth, { kind: "session" }> = { kind: "session", via: "cookie", scopes: ["admin", "client"],
+      session: { id: "session-one", userId: "same-person", tokenHash: "fixture", label: "fixture", scopes: ["admin", "client"], createdAt: 0, lastSeenAt: 0, expiresAt: 9999999999999 },
+    };
+    const other: RequestAuth = { ...first, session: { ...first.session, id: "session-two" } };
+    const prepared = Object.assign(new FakeSocket("unused", "fixture"), { bindMedia: vi.fn(() => true), appendPcm: vi.fn(() => true) });
+    const t = setup({ createSession: vi.fn(async () => ({ sessionId: "q1", sdp: "", socket: prepared })) });
+    t.settings.provider = "qwen";
+    t.settings.endpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
+    const call = await t.controller.start({ auth: first, ...BOT, sdp: "offer", client: "web", transports: ["ws-pcm"] });
+    prepared.open();
+    const media = { bufferedAmount: 0, send: vi.fn(), close: vi.fn() };
+    expect(t.controller.bindMedia(call.call.callId, other, media)).toBe(false);
+    expect(t.controller.bindMedia(call.call.callId, owner, media)).toBe(false);
+    expect(t.controller.bindMedia(call.call.callId, first, media)).toBe(true);
+    expect(t.controller.bindMedia(call.call.callId, first, media)).toBe(false);
+    expect(t.controller.inputMedia(call.call.callId, Buffer.from([0, 0]))).toBe(true);
+    t.controller.mediaDisconnected(call.call.callId);
+    expect(t.controller.current()).toBeNull();
+    expect(prepared.readyState).toBe(3);
+    const second = Object.assign(new FakeSocket("unused", "fixture"), { bindMedia: vi.fn(() => true), appendPcm: vi.fn(() => true) });
+    second.open();
+    t.deps.createSession = vi.fn(async () => ({ sessionId: "q2", sdp: "", socket: second }));
+    await t.controller.start({ auth: first, ...BOT, sdp: "offer", client: "web", transports: ["ws-pcm"] });
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(t.controller.current()).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(t.controller.current()).toBeNull();
+  });
+  it("refuses Qwen without a declared browser PCM transport before creating anything", async () => {
+    const t = setup();
+    t.settings.provider = "qwen";
+    t.settings.endpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
+    for (const input of [{ client: "ios", transports: ["ws-pcm"] }, { client: "android", transports: ["ws-pcm"] }, { client: "web" }, { client: "desktop", transports: [] }] as const) {
+      await expect(t.controller.start({ auth: owner, ...BOT, sdp: "offer", ...input })).rejects.toMatchObject({ status: 409, message: expect.stringContaining("ws-pcm") });
+    }
+    expect(t.deps.createSession).not.toHaveBeenCalled();
+    expect(t.controller.current()).toBeNull();
+  });
+  it("keeps the Qwen voice separate from native voice validation", async () => {
+    const t = setup();
+    t.settings.provider = "qwen";
+    t.settings.endpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
+    t.settings.qwenVoice = "longanqian_v3.1";
+    await t.controller.start({ auth: owner, ...BOT, sdp: "offer", client: "web", transports: ["ws-pcm"] });
+    expect(t.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ voice: "longanqian_v3.1" }));
+  });
   it("creates the session with the key and voice, attaches the sideband and goes live", async () => {
     const t = setup();
     const result = await t.controller.start({ auth: owner, ...BOT, client: "ios", sdp: "offer-sdp" });
@@ -494,6 +641,80 @@ describe("LiveCallController lifecycle", () => {
 });
 
 describe("LiveCallController relay", () => {
+  it("keeps Qwen typed readout and no-delegation approval announcements, while directing spoken approval to the chat card", async () => {
+    const t = setup({ personKey: () => "caller" });
+    t.settings.provider = "qwen";
+    t.settings.endpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
+    await t.controller.start({ auth: owner, ...BOT, sdp: "offer", client: "web", transports: ["ws-pcm"] }); t.socket().open();
+    t.message({ id: "typed", role: "user", text: "Typed request", sender: { id: "caller", name: "Caller" }, sendId: "typed-send" });
+    t.message({ id: "typed-answer", turnTerminal: true, requestMessageId: "typed", text: "Typed answer." });
+    t.message({ id: "approval", kind: "options", card: { title: "Approval needed", subtitle: "delete build", options: ["Allow", "Deny"], requestId: "r1", tool: "Bash" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary")).toContainEqual(expect.objectContaining({ delegation_id: null, request_id: "typed", thread_id: "t1", content: expect.stringContaining("Typed answer.") }));
+    expect(t.socket().appends("instructions")).toContainEqual(expect.objectContaining({ delegation_id: null, thread_id: "t1", content: expect.stringContaining("chat card") }));
+    t.socket().receive({ type: "session.delegation.created", delegation: { id: "approval-signal", target: "client" }, request: { text: "yes", withoutEcho: "yes" } });
+    await vi.advanceTimersByTimeAsync(DELEGATION_SETTLE_MS);
+    expect(t.deps.respond).not.toHaveBeenCalled();
+    expect(t.socket().appends("instructions").at(-1)?.content).toContain("chat card");
+    await t.controller.shutdown();
+  });
+  it("pins Qwen steered results to the accepted original request rather than claiming an unrelated terminal", async () => {
+    const t = setup({ send: vi.fn(async () => ({ kind: "steered" as const, messageId: "steer1", requestMessageId: "original-turn" })) });
+    t.settings.provider = "qwen";
+    t.settings.endpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
+    await t.controller.start({ auth: owner, ...BOT, sdp: "offer", client: "web", transports: ["ws-pcm"] }); t.socket().open();
+    t.socket().receive({ type: "session.delegation.created", delegation: { id: "c1", target: "client" }, request: { text: "steer", withoutEcho: "steer" } });
+    await vi.advanceTimersByTimeAsync(DELEGATION_SETTLE_MS);
+    t.message({ id: "wrong", turnTerminal: true, requestMessageId: "unrelated", text: "Foreign result." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary")).toHaveLength(0);
+    t.message({ id: "right", turnTerminal: true, requestMessageId: "original-turn", text: "Pinned result." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary")).toContainEqual(expect.objectContaining({ content: "Pinned result.", delegation_id: "c1", request_id: "original-turn" }));
+    await t.controller.shutdown();
+  });
+  it("keeps a Qwen terminal store result that arrives before its send receipt, but emits it only after the running ACK", async () => {
+    let accept!: (value: { kind: "started"; messageId: string }) => void;
+    const t = setup({ send: vi.fn(() => new Promise<{ kind: "started"; messageId: string }>((resolve) => { accept = resolve; })) });
+    t.settings.provider = "qwen";
+    t.settings.endpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
+    await t.controller.start({ auth: owner, ...BOT, sdp: "offer", client: "web", transports: ["ws-pcm"] }); t.socket().open();
+    t.socket().receive({ type: "session.delegation.created", delegation: { id: "c1", target: "client" }, request: { text: "request", withoutEcho: "request" } });
+    await vi.advanceTimersByTimeAsync(DELEGATION_SETTLE_MS);
+    t.message({ id: "early", turnTerminal: true, requestMessageId: "m1", text: "Early result." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary")).toHaveLength(0);
+    accept({ kind: "started", messageId: "m1" });
+    await vi.advanceTimersByTimeAsync(0);
+    const commands = t.socket().sent.filter((e) => ["session.delegation.accepted", "session.commentary.append"].includes(String(e.type)));
+    expect(commands).toMatchObject([{ type: "session.delegation.accepted", request_id: "m1" }, { type: "session.commentary.append", request_id: "m1", content: "Early result." }]);
+    await t.controller.shutdown();
+  });
+  it("accepts only correlated Qwen final ASR, ACKs after acceptance and associates each old result with its original request", async () => {
+    let accept!: (value: { kind: "started"; messageId: string }) => void;
+    const send = vi.fn().mockImplementationOnce(() => new Promise((resolve) => { accept = resolve; })).mockResolvedValueOnce({ kind: "started", messageId: "m2" });
+    const t = setup({ send });
+    t.settings.provider = "qwen";
+    t.settings.endpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
+    await t.controller.start({ auth: owner, ...BOT, sdp: "offer", client: "web", transports: ["ws-pcm"] });
+    t.socket().open();
+    t.socket().receive({ type: "session.input_transcript.delta", delta: "ambient must not become a request", start_ms: 0, end_ms: 1000 });
+    t.socket().receive({ type: "session.delegation.created", delegation: { id: "c1", target: "client" }, offset_ms: 1000,
+      request: { text: "first server-final request", withoutEcho: "first server-final request" } });
+    await vi.advanceTimersByTimeAsync(DELEGATION_SETTLE_MS);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ text: "first server-final request" }));
+    expect(t.socket().sent.filter((e) => e.type === "session.delegation.accepted")).toHaveLength(0);
+    expect(t.socket().appends("thinking")).toHaveLength(0);
+    accept({ kind: "started", messageId: "m1" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().sent).toContainEqual(expect.objectContaining({ type: "session.delegation.accepted", delegation_id: "c1", request_id: "m1", status: "running" }));
+    t.socket().receive({ type: "session.delegation.created", delegation: { id: "c2", target: "client" }, request: { text: "second request", withoutEcho: "second request" } });
+    await vi.advanceTimersByTimeAsync(DELEGATION_SETTLE_MS);
+    t.message({ id: "answer-old", text: "Original result.", turnTerminal: true, requestMessageId: "m1" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary")).toContainEqual(expect.objectContaining({ content: "Original result.", delegation_id: "c1", request_id: "m1", thread_id: "t1" }));
+    await t.controller.shutdown();
+  });
   async function live(overrides: Partial<LiveCallDeps> = {}) {
     const t = setup(overrides);
     await t.start();

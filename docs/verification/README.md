@@ -280,6 +280,11 @@ record row, against the fake GPT-Live in a disposable workspace. `control-omb`
 cannot start a call, so the recipe also calls the harness's own routes. It
 proves no real audio, OpenAI key or phone.
 
+The [Qwen Audio Realtime checks](qwen-live.md) cover the opt-in web PCM
+transport, provider-bound credentials, card-only approvals, bounded media
+queues, pause/resume and heartbeat cleanup. Native mobile calls remain a
+separate, unqualified client integration.
+
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.
 

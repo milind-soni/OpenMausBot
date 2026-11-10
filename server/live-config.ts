@@ -1,5 +1,6 @@
 // Live calls' settings in config.json: schema, type and environment overrides, kept out of server/config.ts.
 import { z } from "zod";
+import { qwenConfigSchema, qwenSavePatch, type QwenLiveConfig } from "./qwen-live-config.ts";
 
 export const LIVE_KEY_NEEDS_ENDPOINT = "Save the Azure endpoint first: a Live key works only with the endpoint it was saved for.";
 const NOWHERE = "nowhere";
@@ -8,6 +9,7 @@ const NOWHERE = "nowhere";
 export const liveConfigSchema = z.object({
   key: z.string().optional(),
   keyFor: z.string().max(300).optional(),
+  qwen: qwenConfigSchema.optional(),
   provider: z.enum(["openai", "azure"]).optional(),
   azureEndpoint: z.string().trim().max(300).optional(),
   azureDeployment: z.string().trim().max(64).optional(),
@@ -17,6 +19,7 @@ export const liveConfigSchema = z.object({
 });
 
 export interface LiveConfig {
+  qwen?: QwenLiveConfig;
   key?: string;
   keyFor?: string;
   provider?: "openai" | "azure";
@@ -50,6 +53,10 @@ export function usableLiveKey(live: LiveConfig | undefined): string | undefined 
  * OMB_OPENAI_LIVE_KEY at the next launch: "nowhere" keeps that copy unusable until a key is saved again. */
 export function liveSavePatch(current: LiveConfig | undefined, patch: LiveConfig): LiveConfig {
   const { keyFor: _fromRequest, ...asked } = patch;
+  if (asked.qwen) asked.qwen = qwenSavePatch(current?.qwen, asked.qwen);
+  if (asked.provider !== undefined && current?.qwen && asked.qwen?.enabled !== true) {
+    asked.qwen = { ...current.qwen, ...asked.qwen, enabled: false };
+  }
   const target = liveKeyTarget({ ...current, ...asked });
   if (asked.key?.trim()) {
     if (!target) throw Object.assign(new Error(LIVE_KEY_NEEDS_ENDPOINT), { status: 400 });

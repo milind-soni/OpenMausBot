@@ -1,7 +1,8 @@
 // The provider key is never read or written here; without one a start answers 409 `needsKey`. A phone can never send device-revoked.
 import type { IncomingMessage } from "node:http";
 import { z } from "zod";
-import type { LiveProvider, LiveSettings } from "../../shared/wire.ts";
+import type { LiveSettings, LiveSettingsPatch } from "../../shared/wire.ts";
+import { qwenModelSchema, qwenRegionSchema, qwenVoiceSchema, qwenWorkspaceSchema } from "../qwen-live-config.ts";
 import { azureLiveDeployment, azureOpenAiRoot, LiveSessionError, MAX_SDP_BYTES } from "../live-call.ts";
 import { LiveCallBusyError, type LiveCallController } from "../live-call-controller.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
@@ -10,7 +11,7 @@ export interface LiveRouteDeps {
   calls: Pick<LiveCallController, "start" | "end" | "current" | "deviceRevoked">;
   resolveTarget(botId: string, threadId: string | undefined): { botId: string; botName: string; threadId: string } | null;
   settings(): LiveSettings;
-  saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
+  saveSettings(patch: LiveSettingsPatch): Promise<LiveSettings>;
 }
 
 const id = z.string().regex(/^[\w-]{1,120}$/);
@@ -20,11 +21,16 @@ const sessionBody = z.object({
   // Not trimmed: the SDP offer goes to OpenAI byte for byte.
   sdp: z.string().min(1).refine((sdp) => Buffer.byteLength(sdp) <= MAX_SDP_BYTES),
   client: z.enum(["desktop", "web", "ios", "android"]),
+  transports: z.array(z.literal("ws-pcm")).max(1).optional(),
 }).strict();
 const endBody = z.object({ callId: z.string().min(1).max(120) }).strict();
 // Strict, so `key` is refused rather than ignored: the key is saved only through the credential store or PUT /api/config.
 const settingsBody = z.object({
-  provider: z.enum(["openai", "azure"]).optional(),
+  provider: z.enum(["openai", "azure", "qwen"]).optional(),
+  qwenRegion: qwenRegionSchema.optional(),
+  qwenWorkspace: qwenWorkspaceSchema.optional(),
+  qwenModel: qwenModelSchema.optional(),
+  qwenVoice: qwenVoiceSchema.optional(),
   // "" clears the field. Anything else must be an https Azure OpenAI host, since the key is sent there.
   azureEndpoint: z.string().trim().max(300).refine((url) => url === "" || azureOpenAiRoot(url) !== null).optional(),
   azureDeployment: z.string().trim().max(64).refine((name) => name === "" || azureLiveDeployment(name) === name).optional(),
@@ -61,8 +67,10 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
       if (!target) return json(res, 404, { error: "That bot or chat does not exist." });
       try {
         const device = companionDevice(req);
-        const { call, sdp } = await deps.calls.start({ auth, ...(device ? { device } : {}), ...target, client: parsed.data.client, sdp: parsed.data.sdp });
-        return json(res, 201, { call, transport: { type: "webrtc", sdp } });
+        const { call, sdp, transport } = await deps.calls.start({ auth, ...(device ? { device } : {}), ...target, client: parsed.data.client, sdp: parsed.data.sdp,
+          ...(parsed.data.transports ? { transports: parsed.data.transports } : {}),
+        });
+        return json(res, 201, { call, transport: transport ?? { type: "webrtc", sdp } });
       } catch (error) {
         if (error instanceof LiveCallBusyError) return json(res, 409, { error: error.message, activeCall: error.call });
         if (error instanceof LiveSessionError) {

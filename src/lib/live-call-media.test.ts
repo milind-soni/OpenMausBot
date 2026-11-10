@@ -74,12 +74,98 @@ const windowIs = (dictation: Partial<DesktopCapabilities["dictation"]>) => () =>
 afterEach(() => { resetLiveMedia(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("live call media", () => {
+  it("passes the server transport credit capability to the real PCM session boundary", async () => {
+    const createPcmSession = vi.fn(() => ({ close: vi.fn() }));
+    configureLiveMedia({ ...fakes(), createPcmSession });
+    request.mockImplementationOnce(async () => ({ call, transport: { type: "ws-pcm", path: "/api/live/media", inputSampleRate: 16000, outputSampleRate: 24000, playbackFlow: "credit-v1" } }));
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    expect(createPcmSession).toHaveBeenCalledWith(expect.objectContaining({ callId: "c1", playbackFlow: "credit-v1" }));
+  });
+  it("a PCM disconnect releases media, ends the exact server call and ignores late callbacks", async () => {
+    let options: any;
+    const pcm = { close: vi.fn() };
+    configureLiveMedia({ ...fakes(), createPcmSession: (input) => { options = input; return pcm; } });
+    request.mockImplementationOnce(async () => ({ call, transport: { type: "ws-pcm", path: "/api/live/media", inputSampleRate: 16000, outputSampleRate: 24000 } }));
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    options.onReady(); onServerCall({ ...call, status: "live" });
+    setLiveMuted(true); expect(track.enabled).toBe(false);
+    options.onFailure("fixture disconnect");
+    await Promise.resolve();
+    expect(liveMedia()).toMatchObject({ phase: "failed", action: "retry", notice: "fixture disconnect" });
+    expect(track.stopped).toBe(true); expect(pcm.close).toHaveBeenCalledOnce();
+    expect(endRequests()).toEqual(["c1"]); expect(currentCall()).toBeNull();
+    options.onReady(); options.onEvent(JSON.stringify({ type: "session.output_transcript.delta", delta: "late" }));
+    expect(liveMedia().phase).toBe("failed"); expect(liveMedia().caption).toBe("");
+    expect(request.mock.calls.filter(([path]) => path === "/api/live/session")).toHaveLength(1);
+  });
+
+  it("a PCM call that never becomes media-ready times out and releases its server slot", async () => {
+    vi.useFakeTimers();
+    const pcm = { close: vi.fn() };
+    configureLiveMedia({ ...fakes(), createPcmSession: () => pcm });
+    request.mockImplementationOnce(async () => ({ call, transport: { type: "ws-pcm", path: "/api/live/media", inputSampleRate: 16000, outputSampleRate: 24000 } }));
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    onServerCall({ ...call, status: "live" });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(liveMedia()).toMatchObject({ phase: "failed", notice: "Call dropped: the audio could not connect." });
+    expect(pcm.close).toHaveBeenCalledOnce(); expect(track.stopped).toBe(true);
+    expect(endRequests()).toEqual(["c1"]); expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("revoking a PCM call releases it without allowing old callbacks to restart it", async () => {
+    let options: any;
+    const pcm = { close: vi.fn() };
+    configureLiveMedia({ ...fakes(), createPcmSession: (input) => { options = input; return pcm; } });
+    request.mockImplementationOnce(async () => ({ call, transport: { type: "ws-pcm", path: "/api/live/media", inputSampleRate: 16000, outputSampleRate: 24000 } }));
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    onServerCall({ ...call, status: "ended", endReason: "signed-out" });
+    expect(pcm.close).toHaveBeenCalledOnce(); expect(track.stopped).toBe(true);
+    options.onReady();
+    expect(liveMedia()).toMatchObject({ phase: "ended", notice: "Call ended: you were signed out." });
+  });
+  it("cancels ICE listeners and their timer when hanging up during offer gathering", async () => {
+    vi.useFakeTimers();
+    const gathering = new GatheringPeer();
+    peer = gathering;
+    const starting = startLiveCall({ botId: "b1", threadId: "t1" });
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    expect(gathering.waiting).not.toBeNull();
+    await hangUpLiveCall();
+    expect(gathering.waiting).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    await starting;
+    expect(request).not.toHaveBeenCalled();
+  });
+  it("negotiates ws-pcm and keeps the microphone while retiring the unused WebRTC peer", async () => {
+    let options: any;
+    const pcm = { close: vi.fn() };
+    const createPcmSession = vi.fn((input: any) => { options = input; return pcm; });
+    configureLiveMedia({ ...fakes(), createPcmSession });
+    request.mockImplementationOnce(async () => ({ call, transport: { type: "ws-pcm", path: "/api/live/media", inputSampleRate: 16000, outputSampleRate: 24000 } }));
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    const body = JSON.parse(String(request.mock.calls[0][1].body));
+    expect(body.transports).toEqual(["ws-pcm"]);
+    expect(peer.remote).toBeNull();
+    expect(peer.closed).toBe(true);
+    expect(track.stopped).toBe(false);
+    expect(createPcmSession).toHaveBeenCalledOnce();
+    expect(options.callId).toBe("c1");
+    onServerCall({ ...call, status: "live" });
+    expect(liveMedia().phase).toBe("starting");
+    options.onReady();
+    expect(liveMedia().phase).toBe("live");
+    options.onEvent(JSON.stringify({ type: "session.output_transcript.delta", delta: "hello" }));
+    expect(liveMedia().caption).toBe("hello");
+    await hangUpLiveCall();
+    expect(track.stopped).toBe(true);
+    expect(pcm.close).toHaveBeenCalled();
+  });
   it("sends the offer as a desktop call and applies the answer", async () => {
     configureLiveMedia({ ...fakes(), capabilities: windowIs({ available: true, engine: "apple-speech", onDevice: true }) });
     await startLiveCall({ botId: "b1", threadId: "t1" });
     expect(request).toHaveBeenCalledWith("/api/live/session", expect.objectContaining({ method: "POST" }));
     const body = JSON.parse(String(request.mock.calls[0][1].body));
-    expect(body).toEqual({ botId: "b1", threadId: "t1", sdp: "v=0\r\noffer\r\n", client: "desktop" });
+    expect(body).toEqual({ botId: "b1", threadId: "t1", sdp: "v=0\r\noffer\r\n", client: "desktop", transports: ["ws-pcm"] });
     expect(peer.remote).toBe("answer");
     expect(liveMedia()).toMatchObject({ phase: "starting", callId: "c1", botId: "b1" });
     expect(currentCall()).toBe("b1");

@@ -17,6 +17,15 @@ describe("call mode", () => {
     expect(CALL_MODES.map((mode) => t(mode.label))).toEqual(["Take turns", "Live"]);
   });
 
+  it("names Qwen, server-side key storage and limited headphone use before a Qwen call", () => {
+    const hint = callModeHint("live", { qwen: true });
+    expect(hint).toContain("Alibaba Cloud Qwen");
+    expect(hint).toContain("key stays with OpenMausBot");
+    expect(hint).toContain("never in the browser");
+    expect(hint).toContain("headphones");
+    expect(hint).not.toContain("OpenAI");
+  });
+
   it("says, where Live is chosen, what a Live call sends to OpenAI", () => {
     const live = callModeHint("live");
     expect(live).toContain("A Live call sends your voice to OpenAI, along with the chat's recent messages, the bot's answers and the details of any approval it asks for. The OpenAI key stays on your computer.");

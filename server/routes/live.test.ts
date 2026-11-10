@@ -66,6 +66,24 @@ function deps(overrides: Partial<LiveRouteDeps> = {}): LiveRouteDeps & { saved: 
 }
 
 describe("live routes", () => {
+  it("negotiates ws-pcm without returning a fake SDP answer", async () => {
+    const d = deps();
+    const transport = { type: "ws-pcm" as const, path: "/api/live/media" as const, inputSampleRate: 16000 as const, outputSampleRate: 24000 as const };
+    vi.mocked(d.calls.start).mockResolvedValue({ call: d.calls.current()!, sdp: "", transport });
+    const result = await request(d, "POST", "/api/live/session", { botId: "bot1", sdp: "offer", client: "web", transports: ["ws-pcm"] });
+    expect(result.status).toBe(201);
+    expect(result.body).toEqual({ call: d.calls.current(), transport });
+    expect(d.calls.start).toHaveBeenCalledWith(expect.objectContaining({ transports: ["ws-pcm"] }));
+  });
+  it("accepts the independent Qwen settings but refuses keys, arbitrary targets and native Qwen voice confusion", async () => {
+    const patch = { provider: "qwen", qwenRegion: "cn-beijing", qwenWorkspace: "team-1", qwenModel: "qwen-audio-3.1-realtime-flash", qwenVoice: "longanqian_v3.1" };
+    const d = deps();
+    expect((await request(d, "PATCH", "/api/live/settings", patch)).status).toBe(200);
+    expect(d.saved).toEqual([patch]);
+    for (const bad of [{ ...patch, key: "evil" }, { ...patch, qwenKey: "evil" }, { ...patch, qwenWorkspace: "a.evil.invalid" }, { ...patch, qwenModel: "anything" }, { voice: "longanqian_v3.1" }]) {
+      expect((await request(d, "PATCH", "/api/live/settings", bad)).status).toBe(400);
+    }
+  });
   it("starts a call and returns the answer", async () => {
     const d = deps();
     const res = await request(d, "POST", "/api/live/session", { botId: "bot1", sdp: "v=0\r\n", client: "ios" });

@@ -6,10 +6,14 @@ import {
 } from "../shared/live-approval.ts";
 import { clampAppend, commentaryChunks, LiveTranscript } from "../shared/live-call.ts";
 import { signInWaits } from "../shared/sign-in-request.ts";
-import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason, LiveProvider } from "../shared/wire.ts";
+import type { LiveCallRecord, LiveCallState, LiveClient, LiveEndReason, LiveProvider, LivePcmTransport, LivePlaybackCredit, LiveClientFailure } from "../shared/wire.ts";
 import { LIVE_NEEDS_KEY, liveAuthHeaders, liveCallSummaryLine, liveProviderName, LiveSessionError, liveVoice, spokenHangUp, type LiveEndpoint } from "./live-call.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
+import { QWEN_VOICE, qwenVoiceSchema } from "./qwen-live-config.ts";
+import type { LiveMediaConsumer } from "./qwen-live-socket.ts";
+import type { LiveSocket } from "./live-socket.ts";
+import { liveClientFailureSchema } from "./live-media-protocol.ts";
 
 export const DELEGATION_SETTLE_MS = 700;
 export const CONSENT_SETTLE_MS = 1_200;
@@ -26,18 +30,10 @@ const MAX_REVOKED_DEVICES = 200;
 /** GPT-Live's own delegation of a spoken yes/no may land this far past the decision on the session timeline. */
 const DECISION_ECHO_MS = 3_000;
 
-export interface LiveSocket {
-  readonly readyState: number;
-  onopen: ((event: unknown) => void) | null;
-  onmessage: ((event: { data: unknown }) => void) | null;
-  onclose: ((event: unknown) => void) | null;
-  onerror: ((event: unknown) => void) | null;
-  send(data: string): void;
-  close(code?: number, reason?: string): void;
-}
+export type { LiveSocket } from "./live-socket.ts";
 
 export type LiveActivity = "idle" | "working" | "waiting";
-export type LiveSendResult = { kind: "started" | "steered"; messageId: string } | { kind: "queued"; queueId: string };
+export type LiveSendResult = { kind: "started" | "steered"; messageId: string; requestMessageId?: string } | { kind: "queued"; queueId: string };
 export type LiveRespondResult = { ok: true } | { ok: false; error: string };
 
 export interface LiveCallDeps {
@@ -50,10 +46,10 @@ export interface LiveCallDeps {
   activity(botId: string, threadId: string): LiveActivity;
   broadcast(frame: { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }): void;
   /** `endpoint` null, or a `setupProblem`, refuses the call with that message (409). */
-  settings(): { key: string; endpoint: LiveEndpoint | null; setupProblem?: string | null; provider?: LiveProvider; voice: string; readTypedReplies: boolean; idleMinutes: number };
+  settings(): { key: string; endpoint: LiveEndpoint | null; setupProblem?: string | null; provider?: LiveProvider; voice: string; qwenVoice?: string; readTypedReplies: boolean; idleMinutes: number };
   /** Why this caller may not hold a call through Azure OpenAI; null when they may. Required, so no wiring can leave it out. */
   azureRefusal(auth: RequestAuth): string | null;
-  createSession(input: { key: string; endpoint: LiveEndpoint; sdp: string; botId: string; threadId: string; voice: string }): Promise<{ sessionId: string; sdp: string }>;
+  createSession(input: { key: string; endpoint: LiveEndpoint; sdp: string; botId: string; threadId: string; voice: string }): Promise<{ sessionId: string; sdp: string; transport?: LivePcmTransport; socket?: LiveSocket }>;
   openSocket(url: string, key: string, endpoint: LiveEndpoint): LiveSocket;
   attachUrl(sessionId: string, endpoint: LiveEndpoint): string;
   speakable(text: string): string[];
@@ -101,11 +97,17 @@ interface Call {
   sessionId: string;
   socket: LiveSocket | null;
   attached: boolean;
+  mediaBound: boolean;
+  playbackFlow?: "credit-v1";
   transcript: LiveTranscript;
   heardThroughMs: number;
   lastDecision: { throughMs: number; copy: string } | null;
   eventCounter: number;
   activeDelegation: string | null;
+  requestDelegations: Map<string, string>;
+  queueDelegations: Map<string, string>;
+  pendingSends: number;
+  earlyAnswers: Map<string, Message>;
   lastProgressAt: number;
   lastActivityAt: number;
   lastActivity: LiveActivity;
@@ -156,8 +158,54 @@ export class LiveCallController {
     return this.call && this.call.state.status !== "ended" ? { ...this.call.state } : null;
   }
 
-  async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp: string }): Promise<{ call: LiveCallState; sdp: string }> {
+  bindMedia(callId: string, auth: RequestAuth, media: LiveMediaConsumer, playbackFlow?: "credit-v1"): boolean {
+    const call = this.call;
+    if (!call || call.state.callId !== callId || call.endpoint.provider !== "qwen" || call.mediaBound || !["connecting", "live"].includes(call.state.status)) return false;
+    const same = auth.kind === "session" && call.auth.kind === "session" ? auth.session.id === call.auth.session.id
+      : auth.kind === "loopback" && call.auth.kind === "loopback" && auth.trust === call.auth.trust && auth.companionDevice === call.auth.companionDevice;
+    if (!same || this.deps.signedIn?.(call.auth) === false || this.deps.signedIn?.(auth) === false) return false;
+    if (!call.socket?.bindMedia?.(media, playbackFlow)) return false;
+    call.mediaBound = true;
+    call.playbackFlow = playbackFlow;
+    return true;
+  }
+
+  playbackCredit(callId: string, credit: LivePlaybackCredit): boolean {
+    const call = this.call;
+    if (!call || call.state.callId !== callId || !call.mediaBound || !call.playbackFlow || this.deps.signedIn?.(call.auth) === false) return false;
+    return call.socket?.playbackCredit?.(credit) ?? false;
+  }
+
+  clientFailure(callId: string, failure: LiveClientFailure): boolean {
+    const call = this.call;
+    if (!call || call.state.callId !== callId || !call.mediaBound || !call.playbackFlow || call.endpoint.provider !== "qwen" || !["connecting", "live"].includes(call.state.status) || this.deps.signedIn?.(call.auth) === false) return false;
+    const parsed = liveClientFailureSchema.safeParse(failure);
+    if (!parsed.success) return false;
+    const { code, contextState, bufferedBytes, queuedMs, frameAgeMs } = parsed.data;
+    this.deps.log(`[live] media failure source=client-untrusted code=${code} contextState=${contextState} bufferedBytes=${bufferedBytes} queuedMs=${queuedMs} frameAgeMs=${frameAgeMs}`);
+    this.recordError(call, `qwen-client-${code}`);
+    this.finish(call, "error", "The call ended because the client audio failed.");
+    return true;
+  }
+
+  inputMedia(callId: string, pcm: Uint8Array): boolean {
+    const call = this.call;
+    if (!call || call.state.callId !== callId || !call.mediaBound || this.deps.signedIn?.(call.auth) === false) return false;
+    this.touch(call);
+    return call.socket?.appendPcm?.(pcm) ?? false;
+  }
+
+  mediaDisconnected(callId: string): void {
+    const call = this.call;
+    if (call?.state.callId === callId) this.finish(call, "connection-lost");
+  }
+
+  async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp: string; transports?: readonly string[] }): Promise<{ call: LiveCallState; sdp: string; transport?: LivePcmTransport }> {
     const settings = this.deps.settings();
+    const qwen = settings.provider === "qwen" || settings.endpoint?.provider === "qwen";
+    if (qwen && (!input.transports?.includes("ws-pcm") || !["web", "desktop"].includes(input.client) || input.device)) {
+      throw new LiveSessionError("Qwen Live needs a web or desktop client with ws-pcm support.", 409);
+    }
     // First: someone refused here is not told about a running call, or sent to set Azure up.
     if (settings.provider === "azure" || settings.endpoint?.provider === "azure") {
       const refusal = this.deps.azureRefusal(input.auth);
@@ -171,11 +219,11 @@ export class LiveCallController {
     const key = settings.key.trim();
     const endpoint = settings.endpoint;
     if (settings.setupProblem || !key || !endpoint) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
-    const voice = liveVoice(settings.voice);
+    const voice = qwen ? qwenVoiceSchema.parse(settings.qwenVoice ?? QWEN_VOICE) : liveVoice(settings.voice);
     const call = this.newCall(input, key, endpoint, voice);
     // Taken before the first await: a second start in the same tick is refused.
     this.call = call;
-    let session: { sessionId: string; sdp: string };
+    let session: { sessionId: string; sdp: string; transport?: LivePcmTransport; socket?: LiveSocket };
     try {
       session = await this.deps.createSession({ key, endpoint, sdp: input.sdp, botId: input.botId, threadId: input.threadId, voice });
     } catch (error) {
@@ -184,7 +232,8 @@ export class LiveCallController {
       throw error;
     }
     if (this.call !== call) {
-      this.closeOrphan(session.sessionId, key, endpoint);
+      if (session.socket) session.socket.close();
+      else this.closeOrphan(session.sessionId, key, endpoint);
       throw new LiveSessionError("The call was cancelled.", 503);
     }
     try {
@@ -199,14 +248,17 @@ export class LiveCallController {
       // Set before attach: a sideband that fails at once runs finish, which clears this interval.
       call.idleTimer = setInterval(() => this.guarded(call, () => this.checkIdle(call)), IDLE_CHECK_MS);
       call.idleTimer.unref?.();
-      this.attach(call);
+      this.attach(call, session.socket);
+      if (qwen) this.later(call, () => {
+        if (!call.mediaBound) this.finish(call, "connection-lost", "The audio connection was not opened.");
+      }, 15_000);
     } catch (error) {
       const sidebandOpened = call.socket !== null;
       this.finish(call, "error", "The call could not start.");
       if (!sidebandOpened) this.closeOrphan(session.sessionId, key, endpoint);
       throw error;
     }
-    return { call: { ...call.state }, sdp: session.sdp };
+    return { call: { ...call.state }, sdp: session.sdp, ...(session.transport ? { transport: session.transport } : {}) };
   }
 
   async end(callId: string): Promise<LiveCallState | null> {
@@ -250,11 +302,16 @@ export class LiveCallController {
       sessionId: "",
       socket: null,
       attached: false,
+      mediaBound: false,
       transcript: new LiveTranscript(),
       heardThroughMs: 0,
       lastDecision: null,
       eventCounter: 0,
       activeDelegation: null,
+      requestDelegations: new Map(),
+      queueDelegations: new Map(),
+      pendingSends: 0,
+      earlyAnswers: new Map(),
       lastProgressAt: 0,
       lastActivityAt: this.now(),
       lastActivity: "idle",
@@ -285,10 +342,10 @@ export class LiveCallController {
     };
   }
 
-  private attach(call: Call): void {
+  private attach(call: Call, prepared?: LiveSocket): void {
     let socket: LiveSocket;
     try {
-      socket = this.deps.openSocket(this.deps.attachUrl(call.sessionId, call.endpoint), call.key, call.endpoint);
+      socket = prepared ?? this.deps.openSocket(this.deps.attachUrl(call.sessionId, call.endpoint), call.key, call.endpoint);
     } catch {
       this.finish(call, "sideband-lost", `The call could not connect to ${liveProviderName(call.endpoint.provider)}.`);
       return;
@@ -315,6 +372,7 @@ export class LiveCallController {
       if (call.pendingEnd) this.finish(call, call.pendingEnd);
       else this.finish(call, "sideband-lost", `The call connection to ${liveProviderName(call.endpoint.provider)} dropped.`);
     };
+    if (socket.readyState === SOCKET_OPEN) socket.onopen({});
   }
 
   private closeOrphan(sessionId: string, key: string, endpoint: LiveEndpoint): void {
@@ -347,7 +405,7 @@ export class LiveCallController {
     call.state.status = "ending";
     this.emit(call);
     if (!this.command(call, { type: "session.close" })) this.finish(call, call.pendingEnd);
-    else this.later(call, () => this.finish(call, call.pendingEnd ?? reason), CLOSE_TIMEOUT_MS);
+    else if (this.call === call) this.later(call, () => this.finish(call, call.pendingEnd ?? reason), CLOSE_TIMEOUT_MS);
     return done;
   }
 
@@ -443,6 +501,7 @@ export class LiveCallController {
         }
         return;
       case "session.input_transcript.delta":
+        if (call.endpoint.provider === "qwen") { this.touch(call); return; }
         call.transcript.addInput(String(event.delta ?? ""), Number(event.start_ms), Number(event.end_ms));
         call.heardThroughMs = Math.max(call.heardThroughMs, Number(event.end_ms) || 0);
         this.touch(call);
@@ -457,9 +516,11 @@ export class LiveCallController {
         if (delegation?.target !== "client" || typeof delegation.id !== "string") return;
         const id = delegation.id;
         const offset = Number(event.offset_ms) || 0;
+        const request = call.endpoint.provider === "qwen" ? event.request as { text: string; withoutEcho: string } | undefined : undefined;
+        if (call.endpoint.provider === "qwen" && (!request || typeof request.text !== "string" || typeof request.withoutEcho !== "string")) return;
         call.stats.delegations += 1;
         this.touch(call);
-        this.later(call, () => this.delegate(call, id, offset), DELEGATION_SETTLE_MS);
+        this.later(call, () => this.delegate(call, id, offset, request), DELEGATION_SETTLE_MS);
         return;
       }
       case "session.usage.updated":
@@ -473,7 +534,10 @@ export class LiveCallController {
         return;
       }
       case "error": {
-        this.recordError(call, String((event.error as { code?: unknown } | undefined)?.code ?? "error"));
+        const code = String((event.error as { code?: unknown } | undefined)?.code ?? "error");
+        this.recordError(call, code);
+        if (call.endpoint.provider === "qwen" && code === "qwen-playback-stalled") this.finish(call, "error", "The call ended because audio playback stopped making progress.");
+        if (call.endpoint.provider === "qwen" && code === "qwen-provider-voice") this.finish(call, "error", "The selected voice is not supported by the realtime model. Choose another voice in Call settings.");
         return;
       }
       default:
@@ -482,9 +546,9 @@ export class LiveCallController {
   }
 
 
-  private async delegate(call: Call, id: string, offsetMs: number): Promise<void> {
+  private async delegate(call: Call, id: string, offsetMs: number, request?: { text: string; withoutEcho: string }): Promise<void> {
     if (call.state.status !== "live" || call.goodbye) return;
-    const heard = call.transcript.takeRequestParts(offsetMs);
+    const heard = request ?? call.transcript.takeRequestParts(offsetMs);
     const said = heard.text;
     // Only the person's own words, never what the voice said back, and all of them: "don't" may be lost in the echo.
     if (spokenHangUp(heard.withoutEcho) && spokenHangUp(said)) {
@@ -494,6 +558,10 @@ export class LiveCallController {
       return;
     }
     if (call.approval && !call.approval.submitted) {
+      if (call.endpoint.provider === "qwen") {
+        this.append(call, "instructions", "Spoken approval cannot be verified on this PCM call. Please use the Allow or Deny buttons on the chat card.", id);
+        return;
+      }
       await this.decide(call, heard.withoutEcho, id, said);
       return;
     }
@@ -525,14 +593,27 @@ export class LiveCallController {
     }
     call.activeDelegation = id;
     call.stats.sentToBot += 1;
-    this.append(call, "thinking", LIVE_COPY.working, id);
+    if (call.endpoint.provider !== "qwen") this.append(call, "thinking", LIVE_COPY.working, id);
+    call.pendingSends += 1;
     try {
       const result = await this.deps.send({ auth: call.auth, botId: call.state.botId, threadId: call.state.threadId, text: said, callId: call.state.callId });
-      if (result.kind === "queued") call.queuedIds.add(result.queueId);
+      if (call.state.status !== "live" || this.call !== call) return;
+      if (result.kind === "queued") {
+        call.queuedIds.add(result.queueId);
+        call.queueDelegations.set(result.queueId, id);
+      }
       else if (result.kind === "steered") {
         call.pendingCall.add(result.messageId);
-        call.claimNextTerminal = true;
+        if (call.endpoint.provider !== "qwen") call.claimNextTerminal = true;
+        else if (result.requestMessageId) {
+          call.pendingCall.add(result.requestMessageId);
+          if (!call.requestDelegations.has(result.requestMessageId)) call.requestDelegations.set(result.requestMessageId, id);
+        }
       } else call.pendingCall.add(result.messageId);
+      if (result.kind !== "queued") call.requestDelegations.set(result.messageId, id);
+      if (call.endpoint.provider === "qwen") this.command(call, { type: "session.delegation.accepted", delegation_id: id,
+        request_id: result.kind === "queued" ? result.queueId : result.messageId, thread_id: call.state.threadId, status: "running",
+      });
     } catch (error) {
       if (error instanceof LiveCallSignedOutError) {
         this.endSignedOut(call, id);
@@ -542,6 +623,17 @@ export class LiveCallController {
       this.recordError(call, "send-failed");
       if (call.goodbye) return;
       this.append(call, "commentary", `The request could not be sent to ${call.botName}${detail ? `: ${detail}` : "."}`, id);
+    } finally {
+      call.pendingSends -= 1;
+      if (call.state.status === "live" && this.call === call) {
+        for (const [messageId, answer] of call.earlyAnswers) {
+          if (answer.requestMessageId && call.pendingCall.has(answer.requestMessageId)) {
+            call.earlyAnswers.delete(messageId);
+            this.onAnswer(call, answer);
+          }
+        }
+      }
+      if (!call.pendingSends) call.earlyAnswers.clear();
     }
   }
 
@@ -626,6 +718,12 @@ export class LiveCallController {
     if (message.role === "user") {
       if (type !== "message" || message.kind !== "text") return;
       if (message.via === "call") {
+        if (call.endpoint.provider === "qwen" && message.callId !== call.state.callId) return;
+        if (message.queueId) {
+          const delegation = call.queueDelegations.get(message.queueId);
+          if (delegation) call.requestDelegations.set(message.id, delegation);
+          call.queueDelegations.delete(message.queueId);
+        }
         if (message.queueId) call.queuedIds.delete(message.queueId);
         call.pendingCall.add(message.id);
       } else if (this.typedByCaller(call, message)) {
@@ -678,7 +776,7 @@ export class LiveCallController {
   private onAnswer(call: Call, message: Message): void {
     const request = message.requestMessageId;
     const batch = request === undefined ? [] : call.batches.get(request) ?? [request];
-    const forCall = batch.some((id) => call.pendingCall.has(id)) || call.claimNextTerminal || (request === undefined && call.pendingCall.size > 0);
+    const forCall = batch.some((id) => call.pendingCall.has(id)) || (call.endpoint.provider !== "qwen" && (call.claimNextTerminal || (request === undefined && call.pendingCall.size > 0)));
     const typed = !forCall && request !== undefined ? call.typedTexts.get(request) : undefined;
     const settle = () => {
       for (const id of batch) {
@@ -687,7 +785,13 @@ export class LiveCallController {
         call.batches.delete(id);
       }
     };
-    if (!forCall && typed === undefined) return;
+    if (!forCall && typed === undefined) {
+      if (call.endpoint.provider === "qwen" && call.pendingSends) {
+        if (call.earlyAnswers.size >= 64) this.finish(call, "error", "The call reached its pending result limit.");
+        else call.earlyAnswers.set(message.id, message);
+      }
+      return;
+    }
     if (!forCall && !this.deps.settings().readTypedReplies) {
       // Off means nothing about a typed exchange reaches OpenAI, not even as context.
       settle();
@@ -706,8 +810,15 @@ export class LiveCallController {
       call.claimNextTerminal = false;
     }
     call.stats.replies += 1;
-    const delegationId = forCall ? call.activeDelegation : null;
-    for (const chunk of chunks) this.append(call, "commentary", chunk, delegationId);
+    const delegationId = forCall ? call.endpoint.provider === "qwen"
+      ? batch.map((id) => call.requestDelegations.get(id)).find(Boolean) ?? null : call.activeDelegation : null;
+    for (const chunk of chunks) {
+      if (call.endpoint.provider === "qwen") this.command(call, { type: "session.commentary.append", content: clampAppend(chunk), delegation_id: delegationId,
+        request_id: request, thread_id: call.state.threadId, status: "completed",
+      });
+      else this.append(call, "commentary", chunk, delegationId);
+    }
+    for (const id of batch) call.requestDelegations.delete(id);
   }
 
   private onCard(call: Call, message: Message): void {
@@ -729,7 +840,9 @@ export class LiveCallController {
     } else if (kind === "approval") {
       call.approval = { requestId: card.requestId, messageId: message.id, submitted: false };
       call.transcript.consumeAll();
-      this.append(call, "instructions", LIVE_COPY.permissionRequest(spokenApprovalPrompt(card)));
+      this.append(call, "instructions", call.endpoint.provider === "qwen"
+        ? `Please use the Allow or Deny buttons on the chat card; spoken approval cannot be verified on this PCM call. ${spokenApprovalPrompt(card)}`
+        : LIVE_COPY.permissionRequest(spokenApprovalPrompt(card)));
     } else {
       call.question = { requestId: card.requestId, messageId: message.id, submitted: false };
       call.transcript.consumeAll();
@@ -791,7 +904,9 @@ export class LiveCallController {
 
 
   private append(call: Call, kind: AppendKind, content: string, delegationId: string | null = call.activeDelegation): boolean {
-    return this.command(call, { type: `session.${kind}.append`, delegation_id: delegationId, content: clampAppend(content) });
+    return this.command(call, { type: `session.${kind}.append`, delegation_id: delegationId, content: clampAppend(content),
+      ...(call.endpoint.provider === "qwen" ? { thread_id: call.state.threadId } : {}),
+    });
   }
 
   private command(call: Call, event: Record<string, unknown>): boolean {

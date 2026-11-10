@@ -1,11 +1,12 @@
 // Its data channel may only send session.close; everything else about the call runs on the harness.
 import { useSyncExternalStore } from "react";
-import type { LiveCallState, LiveEndReason } from "../../shared/wire";
+import type { LiveCallState, LiveEndReason, LivePcmTransport } from "../../shared/wire";
 import { api, ApiError } from "@/state/store";
 import { openExternalLink } from "./app-links";
 import { endCall, startCall } from "./call";
 import { desktopCapabilitiesNow } from "./desktop";
 import { t } from "./i18n";
+import { createPcmMedia, type PcmMediaOptions, type PcmMediaSession } from "./live-pcm-media";
 
 export type LiveMediaPhase = "idle" | "starting" | "live" | "ending" | "ended" | "failed";
 
@@ -36,6 +37,7 @@ export interface LiveMediaState {
 export interface LiveMediaDeps {
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
   createPeer(): RTCPeerConnection;
+  createPcmSession(options: PcmMediaOptions): PcmMediaSession;
   request<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T>;
   playRemote(track: MediaStreamTrack): Promise<void> | void;
   stopRemote(): void;
@@ -68,6 +70,7 @@ const defaults: LiveMediaDeps = {
     if (typeof RTCPeerConnection === "undefined") throw new LiveUnsupportedError(t("call.live.unsupported"));
     return new RTCPeerConnection();
   },
+  createPcmSession: createPcmMedia,
   request: (path, init) => api(path, init),
   playRemote: async (track) => {
     audio ??= Object.assign(document.createElement("audio"), { autoplay: true });
@@ -95,11 +98,15 @@ let generation = 0;
 let microphone: MediaStream | null = null;
 let peer: RTCPeerConnection | null = null;
 let channel: RTCDataChannel | null = null;
+let pcm: PcmMediaSession | null = null;
+let pcmMode = false;
+let pcmReady = false;
 let heardTimer: ReturnType<typeof setTimeout> | null = null;
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 let closeTimer: ReturnType<typeof setTimeout> | null = null;
 let connectTimer: ReturnType<typeof setTimeout> | null = null;
 let stopGestureWait: (() => void) | null = null;
+let stopIceWait: (() => void) | null = null;
 let serverCall: LiveCallState | null = null;
 let serverAttached = false;
 const watchers = new Set<() => void>();
@@ -219,21 +226,34 @@ export async function startLiveCall(target: { botId: string; threadId: string })
     if (mine !== generation) return;
     const sdp = connection.localDescription?.sdp;
     if (!sdp) throw new Error(t("call.live.noOffer"));
-    const result = await deps.request<{ call: LiveCallState; transport: { sdp: string } }>("/api/live/session", {
+    const result = await deps.request<{ call: LiveCallState; transport: { type: "webrtc"; sdp: string } | LivePcmTransport }>("/api/live/session", {
       method: "POST",
-      body: JSON.stringify({ botId: target.botId, threadId: target.threadId, sdp, client: liveClient(deps.capabilities()) }),
+      body: JSON.stringify({ botId: target.botId, threadId: target.threadId, sdp, client: liveClient(deps.capabilities()), transports: ["ws-pcm"] }),
       timeoutMs: 35_000,
     });
     if (mine !== generation) {
       void endOnServer(result.call.callId);
       return;
     }
+    pcmMode = result.transport.type === "ws-pcm";
     const seen = serverCall;
     set({ callId: result.call.callId });
     applyServerCall(result.call);
     // The SSE frame can overtake this response; it was ignored then because the id was not known yet.
     if (seen?.callId === result.call.callId) applyServerCall(seen);
     if (mine !== generation) return;
+    if (result.transport.type === "ws-pcm") {
+      if (result.transport.path !== "/api/live/media" || result.transport.inputSampleRate !== 16_000 || result.transport.outputSampleRate !== 24_000) throw new Error(t("call.live.droppedNoAudio"));
+      retirePeer();
+      connectTimer = setTimeout(() => { if (mine === generation) void dropped(t("call.live.droppedNoAudio")); }, MEDIA_CONNECT_TIMEOUT_MS);
+      pcm = deps.createPcmSession({
+        stream, callId: result.call.callId, playbackFlow: result.transport.playbackFlow,
+        onReady: () => { if (mine === generation) { pcmReady = true; stopConnectWait(); goLiveWhenReady(); } },
+        onEvent: (raw) => { if (mine === generation) onChannelMessage(raw); },
+        onFailure: (message) => { if (mine === generation) void dropped(message); },
+      });
+      return;
+    }
     await connection.setRemoteDescription({ type: "answer", sdp: result.transport.sdp });
     if (mine !== generation) return;
     if (connection.connectionState !== "connected") {
@@ -368,7 +388,7 @@ function applyServerCall(call: LiveCallState | null) {
 }
 
 function goLiveWhenReady() {
-  if (state.phase !== "starting" || !serverAttached || channel?.readyState !== "open") return;
+  if (state.phase !== "starting" || !serverAttached || !(pcmMode ? pcmReady : channel?.readyState === "open")) return;
   set({ phase: "live", startedAt: Date.now() });
 }
 
@@ -462,22 +482,31 @@ function sendClose() {
 }
 
 function stopCapturing() {
+  pcm?.close();
+  pcm = null;
   microphone?.getTracks().forEach((track) => track.stop());
   microphone = null;
 }
 
 function release() {
+  stopIceWait?.();
+  stopIceWait = null;
   for (const timer of [heardTimer, closeTimer, noticeTimer, connectTimer]) if (timer) clearTimeout(timer);
   heardTimer = closeTimer = noticeTimer = connectTimer = null;
   stopGestureWait?.();
   stopGestureWait = null;
   stopCapturing();
-  try { channel?.close(); } catch {}
-  channel = null;
-  try { peer?.close(); } catch {}
-  peer = null;
+  retirePeer();
+  pcmMode = pcmReady = false;
   deps.stopRemote();
   if (state.botId) endCall(state.botId);
+}
+
+function retirePeer() {
+  if (channel) { channel.onopen = channel.onmessage = null; try { channel.close(); } catch {} }
+  channel = null;
+  if (peer) { peer.ontrack = peer.onconnectionstatechange = null; try { peer.close(); } catch {} }
+  peer = null;
 }
 
 function busyText(call: LiveCallState): string {
@@ -488,16 +517,17 @@ function busyText(call: LiveCallState): string {
 function iceGathered(connection: RTCPeerConnection, timeoutMs: number): Promise<void> {
   if (connection.iceGatheringState === "complete") return Promise.resolve();
   return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      connection.removeEventListener("icegatheringstatechange", onState);
-      resolve();
-    }, timeoutMs);
-    function onState() {
-      if (connection.iceGatheringState !== "complete") return;
+    const done = () => {
       clearTimeout(timeout);
       connection.removeEventListener("icegatheringstatechange", onState);
+      if (stopIceWait === done) stopIceWait = null;
       resolve();
+    };
+    const timeout = setTimeout(done, timeoutMs);
+    function onState() {
+      if (connection.iceGatheringState === "complete") done();
     }
+    stopIceWait = done;
     connection.addEventListener("icegatheringstatechange", onState);
   });
 }

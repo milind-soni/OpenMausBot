@@ -49,7 +49,7 @@ export interface LiveEndpoint {
 }
 
 export function liveProviderName(provider: LiveProvider): string {
-  return provider === "azure" ? "Azure OpenAI" : "OpenAI";
+  return provider === "qwen" ? "Qwen" : provider === "azure" ? "Azure OpenAI" : "OpenAI";
 }
 
 /** Only a loopback http URL is accepted, read at call time. */
