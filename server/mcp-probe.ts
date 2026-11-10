@@ -75,10 +75,28 @@ function publicProbeError(kind: "spawn" | "timeout" | "protocol" | "closed" | "c
 }
 
 function redactConfiguredValues(value: string, secrets: Record<string, string>): string {
-  const alternatives = [...new Set(Object.values(secrets))].filter(Boolean)
-    .sort((a, b) => b.length - a.length)
-    .map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  return alternatives.length ? value.replace(new RegExp(alternatives.join("|"), "g"), "[redacted]") : value;
+  const ranges: [number, number][] = [];
+  for (const secret of new Set(Object.values(secrets))) {
+    if (!secret) continue;
+    for (let start = value.indexOf(secret); start !== -1; start = value.indexOf(secret, start + 1)) {
+      ranges.push([start, start + secret.length]);
+    }
+  }
+  ranges.sort((a, b) => a[0] - b[0]);
+  let redacted = "";
+  let cursor = 0;
+  for (let i = 0; i < ranges.length; i++) {
+    const start = ranges[i][0];
+    let end = ranges[i][1];
+    // Search the original metadata, then merge crossing or nested matches:
+    // replacing one value first must not hide the start of another secret.
+    while (i + 1 < ranges.length && ranges[i + 1][0] < end) {
+      end = Math.max(end, ranges[++i][1]);
+    }
+    redacted += value.slice(cursor, start) + "[redacted]";
+    cursor = end;
+  }
+  return redacted + value.slice(cursor);
 }
 
 /** Bounded and redacted: `secrets` are configured values a careless server might echo. */
