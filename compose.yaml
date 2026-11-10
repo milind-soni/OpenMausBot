@@ -58,9 +58,12 @@ services:
           export OMB_UPSTREAM_SCHEME=https
         fi
         exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    # Started with the server, not after it is healthy: Caddy reaches it over the socket
+    # whenever it answers, so `up` never waits on the server's health, and HTTPS is back
+    # as soon as a restarted server is.
     depends_on:
       omb:
-        condition: service_healthy
+        condition: service_started
     volumes:
       - ./deploy/local/Caddyfile:/etc/caddy/Caddyfile:ro
       - edge:/run/openmausbot
