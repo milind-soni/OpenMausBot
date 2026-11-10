@@ -40,7 +40,8 @@ export function limitNoticeText(facts: LimitNoticeFacts, timeZone?: string): str
 export function signedOutNoticeText(facts: { engine: string; bot: string; backup?: string; where: string; stuck?: readonly string[] }): string {
   if (facts.backup) return `${facts.engine} is signed out ${facts.where}, so ${facts.bot} is using ${facts.backup} meanwhile. Sign in again in Settings → AI to keep using ${facts.engine}.`;
   const stuck = facts.stuck ?? [];
-  const shown = stuck.slice(0, 3).join(", ") + (stuck.length > 3 ? ` and ${stuck.length - 3} more` : "");
+  const shown = stuck.length > 3 ? `${stuck.slice(0, 3).join(", ")} and ${stuck.length - 3} more`
+    : stuck.length > 1 ? `${stuck.slice(0, -1).join(", ")} and ${stuck.at(-1)}` : stuck[0];
   return `${facts.engine} is signed out ${facts.where}. Sign in again in Settings → AI to keep using it.${stuck.length ? ` Until then ${shown} can't run: ${stuck.length === 1 ? "it has" : "they have"} no backup.` : ""}`;
 }
 

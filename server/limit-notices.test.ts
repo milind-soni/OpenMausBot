@@ -67,6 +67,8 @@ describe("the notice", () => {
   it("names up to three bots a signed-out AI leaves stuck, and none when a backup carries on", () => {
     const base = { engine: "Claude", bot: "Kai", where: "on the Cloud" };
     expect(signedOutNoticeText({ ...base, stuck: ["Kai"] })).toBe("Claude is signed out on the Cloud. Sign in again in Settings → AI to keep using it. Until then Kai can't run: it has no backup.");
+    expect(signedOutNoticeText({ ...base, stuck: ["Kai", "Rosa"] })).toContain("Until then Kai and Rosa can't run: they have no backup.");
+    expect(signedOutNoticeText({ ...base, stuck: ["Kai", "Rosa", "Lin"] })).toContain("Until then Kai, Rosa and Lin can't run: they have no backup.");
     expect(signedOutNoticeText({ ...base, stuck: ["Kai", "Rosa", "Lin", "Ada", "Bo"] })).toContain("Until then Kai, Rosa, Lin and 2 more can't run: they have no backup.");
     expect(signedOutNoticeText({ ...base, stuck: [] })).toBe("Claude is signed out on the Cloud. Sign in again in Settings → AI to keep using it.");
     expect(signedOutNoticeText({ ...base, backup: "Codex", stuck: ["Kai"] })).not.toContain("Until then");
