@@ -141,9 +141,11 @@ export function createBotMove({ journal, local, send, session, lease = null, rea
     retry: () => engine.retry(),
     /** The bots on their way now, by id. */
     moving: () => moves().filter((move) => move.phase !== "done").flatMap((move) => list(move.bots).map((bot) => bot.id)),
-    /** Everything is moving now instead: a choice still on its way stops, and its bots go on here until that move takes them. */
+    /** Everything is moving now instead: a choice still on its way stops, and its bots go on here until that move takes them.
+     * One at its switch is past the point of no return (My Cloud has switched its automations on), so it finishes: let go
+     * here, its bots would run in both places. */
     async drop() {
-      for (const move of moves().filter((entry) => entry.phase !== "done")) {
+      for (const move of moves().filter((entry) => entry.phase !== "done" && entry.phase !== "switch")) {
         for (const bot of list(move.bots)) await local.call("DELETE", `/api/bot-moves/${bot.id}`).catch(() => null);
         const left = parseTeamMoves(journal.read());
         journal.write({ ...left, moves: left.moves.filter((entry) => entry.bot.id !== move.bot.id) });

@@ -156,6 +156,18 @@ test("Move everything stops a choice still on its way, and its bots go on here u
   answering = null;
 });
 
+test("Move everything leaves a choice at its switch to finish: My Cloud already runs its bots", async () => {
+  const w = world();
+  w.move.start(bots(2));
+  await settle(w);
+  w.journal = { ...w.journal, moves: w.journal.moves.map((move) => ({ ...move, phase: "switch" })) };
+  w.holds.set("b0", "moving"); w.holds.set("b1", "moving");
+  await w.move.drop();
+  assert.equal(w.holds.get("b0"), "moving", "not let go here while My Cloud runs it");
+  assert.equal(w.journal.moves.length, 1);
+  assert.equal(w.journal.moves[0].phase, "switch");
+});
+
 test("it waits its turn at My Cloud behind another computer's move, and lets go when it is done", async () => {
   let asks = 0;
   const released = [];
