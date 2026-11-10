@@ -117,6 +117,8 @@ export interface PersonInboxDeps {
   ensureOwnBot?(email: string): void;
   /** What waits on this inbox's person may have changed: its bot goes out to them again. */
   changed?(threadId: string): void;
+  /** A line reached a person's inbox. */
+  delivered?(item: Item, delivery: Delivery): void;
   now?: () => number;
 }
 
@@ -301,6 +303,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     };
     items.push(item);
     save();
+    deps.delivered?.(item, delivery);
     mark(at.threadId);
     store.patchTask(at.bot.id, at.threadId, { unread: true });
     if (delivery.representable && deps.representative) void represent(item, delivery, at.bot);

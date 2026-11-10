@@ -809,6 +809,27 @@ A private chat shows none of it. Nothing says when someone was last here, and no
   app shows nothing of this; an older app on a newer server still counts as here by its stream and ignores the frames.
 
 On a My Cloud and on a desktop there is one person: no People list, no presence, nothing sent.
+## When you are away
+
+A member who has no live stream on the team (no app or phone open on it) is away, and three things reach them by one
+email, which the Admin sends (openmaus-cloud docs/team-cloud.md "When you are away"): a teammate or bot mentioned them
+or passed them a message; a question, approval or sign-in waits on their answer (routed to them, or in their own private
+chat) for at least 5 minutes; work they asked for in a shared chat or group chat, or a routine's report routed to them,
+finished or failed. The first thing opens a 10-minute window and everything in it goes in one email; finished work is
+left out when a question or mention from the same conversation is in it, and is told once per conversation per stretch
+away. At least 30 minutes between two emails, at most 6 a day, and never the same thing twice. Coming back before it
+goes, answering, or opening the line drops it. `server/host/team-away.ts` decides; `team-away-events.ts` says what is
+worth one; "away" is one function (`here`) so presence can replace it.
+
+What leaves the machine is `POST /api/cloud/machines/team-away`, signed with the bootstrap secret (`omb-team-away-v1`):
+`{ v: 1, notices: [{ id, to, language?, items: [{ kind: "mention" | "waiting" | "finished" | "failed", key, who?, place?,
+routine?, private? }], more? }], prefs?: [{ to, on }] }`. `key` is a SHA-256 of what it is about; `who` a teammate's or
+bot's name; `place` a group chat's or the bot's name. Never a message's words, a title or an id. From someone's private
+chat an item names no bot and no place (`private: true`; a teammate who wrote to you is named). Each person turns these
+off with "Email me when I'm away" under Settings → General (a row of Account in Simple, in Profile in Advanced; `GET`/`PUT
+/api/me/away-emails`, kept in `people/<person>/away-emails.json`, which leaving deletes) or with the email's stop link; the
+Admin's answer lists who is off, and the switch follows. An older Admin's 404 pauses asking for an hour. The email's button
+opens the team's page on the Cloud site (`/cloud/team/<id>`), not a chat. Nothing of this runs off a team.
 
 ## What is not closed here
 
