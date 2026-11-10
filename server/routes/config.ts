@@ -540,6 +540,16 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         if (externalSecretStorage) {
           // Supplied credentials are already in the OS-encrypted store: tombstone them so no older plaintext survives the merge.
           const persisted = structuredClone(patch);
+          if (persisted.openai?.key !== undefined) persisted.openai.key = "";
+          if (persisted.anthropic?.key !== undefined) persisted.anthropic.key = "";
+          if (persisted.openrouter?.key !== undefined) persisted.openrouter.key = "";
+          if (persisted.mistral?.key !== undefined) persisted.mistral.key = "";
+          if (persisted.cerebras?.key !== undefined) persisted.cerebras.key = "";
+          if (persisted.groq?.key !== undefined) persisted.groq.key = "";
+          if (persisted.greenference?.key !== undefined) persisted.greenference.key = "";
+          if (persisted.meta?.key !== undefined) persisted.meta.key = "";
+          if (persisted.deepseek?.key !== undefined) persisted.deepseek.key = "";
+          if (persisted.openaiCompat?.key !== undefined) persisted.openaiCompat.key = "";
           if (persisted.xai?.key !== undefined) persisted.xai.key = "";
           if (persisted.composio?.apiKey !== undefined) persisted.composio.apiKey = "";
           if (persisted.box?.token !== undefined) persisted.box.token = "";
