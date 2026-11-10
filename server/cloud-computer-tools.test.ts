@@ -240,7 +240,7 @@ describe("cloud computer tools", () => {
         cfg, boxId: () => "ml_test123", signal: new AbortController().signal, assertActive: () => {}, provider: "mola",
         gate: async () => ({ held: false }),
       });
-      expect(result).toEqual({ isError: true, content: [{ type: "text", text: "Drag operations are not supported on Mola. Use move, click with mousedown/mouseup, or exec with xdotool commands as a workaround." }] });
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: "Drag operations are not supported on Mola. Use exec with xdotool commands as a workaround." }] });
     });
 
     it("returns clear unsupported errors for get_screen_size on Mola", async () => {
