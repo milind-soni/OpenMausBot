@@ -114,6 +114,39 @@ describe("the Chrome launcher", () => {
     expect(chrome.describe()).toBe("Chrome for Testing 153 (downloaded)");
   });
 
+  it("on a Linux server keeps the download it started when agent-browser's PATH later shows a browser", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-launcher-"));
+    folders.push(root);
+    let enginePath = posix.join(root, "bin");
+    const env = { HOME: root };
+    const real = chromeHost({ dataDir: join(root, "data"), env, platform: "linux", arch: "x64", enginePath: () => enginePath });
+    const host = { ...real, exists: (path: string) => path.startsWith(root) && existsSync(path), list: (folder: string) => folder.startsWith(root) ? real.list(folder) : [] };
+    let finish!: () => void;
+    const install = vi.fn(async (options: Parameters<typeof installChromeForTesting>[0]) => {
+      await new Promise<void>((resolve) => { finish = resolve; });
+      const path = chromeForTestingExecutable(options.dataDir, options.pin);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, "#!/bin/sh\n", { mode: 0o755 });
+      return path;
+    });
+    const chrome = new ChromeLauncher({
+      dataDir: join(root, "data"), env, platform: "linux", arch: "x64", host, engine: () => ({ managed: true }), install,
+      calibrate: async () => identity("153", "Not_A Brand"), screen: async () => ({ width: 1440, height: 900 }), sidecars: sidecars(), log: () => {}, checkLauncher: async () => {},
+    });
+    const launching = { AGENT_BROWSER_EXECUTABLE_PATH: chrome.path, AGENT_BROWSER_HIDE_SCROLLBARS: "0" };
+    expect(chrome.env()).toEqual(launching);
+    await vi.waitFor(() => expect(install).toHaveBeenCalledOnce());
+    // The login shell's PATH arrives while Chrome for Testing downloads, with a Chromium on it.
+    mkdirSync(join(root, "extra"), { recursive: true });
+    writeFileSync(join(root, "extra", "chromium"), "#!/bin/sh\n", { mode: 0o755 });
+    enginePath = posix.join(root, "extra");
+    expect(chrome.env()).toEqual(launching);
+    finish();
+    await chrome.prepare();
+    expect(chrome.env()).toEqual(launching);
+    expect(install).toHaveBeenCalledOnce();
+  });
+
   it("uses Chrome for Testing when the installed Google Chrome cannot start headless", async () => {
     const machine = mac();
     const install = vi.fn(async (options: Parameters<typeof installChromeForTesting>[0]) => {

@@ -107,7 +107,9 @@ export class ChromeLauncher implements BrowserLaunch {
   }
 
   plan(): ChromePlan {
-    return resolveChromePlan(this.host, this.options.engine ? this.options.engine() : this.managedEngine());
+    // Once a download has started, a browser agent-browser's PATH shows later must not switch a session's launcher.
+    const downloading = this.state.kind === "preparing" || this.state.kind === "downloading";
+    return resolveChromePlan(this.host, this.options.engine ? this.options.engine() : this.managedEngine(), { downloading });
   }
 
   /** What agent-browser's environment gains: nothing while the engine keeps its own browser. */

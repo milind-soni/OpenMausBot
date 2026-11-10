@@ -119,7 +119,8 @@ export function engineFindsLinuxBrowser(host: ChromeHost): boolean {
     || cached(host.env.PLAYWRIGHT_BROWSERS_PATH || join(host.home, ".cache", "ms-playwright"), "chromium-");
 }
 
-export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null): ChromePlan {
+/** `downloading`: a Chrome for Testing download is under way, so a browser agent-browser finds later does not replace it. */
+export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null, options: { downloading?: boolean } = {}): ChromePlan {
   const { env, platform } = host;
   if (env.OMB_BROWSER_LEGACY_SHELL?.trim() === "1") return { kind: "legacy", reason: "OMB_BROWSER_LEGACY_SHELL=1" };
   const named = env.OMB_CHROME_PATH?.trim() || env.AGENT_BROWSER_EXECUTABLE_PATH?.trim();
@@ -139,7 +140,7 @@ export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null)
   if (pin) {
     const executable = chromeForTestingExecutable(host.dataDir, pin);
     if (host.exists(executable)) return { kind: "chrome", chrome: { path: executable, source: "downloaded" }, fallback: null };
-    if (platform === "linux" && engineFindsLinuxBrowser(host)) return { kind: "legacy", reason: "agent-browser found a browser on this server" };
+    if (platform === "linux" && !options.downloading && engineFindsLinuxBrowser(host)) return { kind: "legacy", reason: "agent-browser found a browser on this server" };
     return { kind: "download", pin };
   }
   return { kind: "legacy", reason: installed ? "Google Chrome here is managed by an organization" : "no Chrome is installed and none is pinned for this platform" };
