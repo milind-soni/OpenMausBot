@@ -5141,6 +5141,8 @@
   "computer.tab.computer": "Screen",
   "computer.tab.routines": "Routines",
   "routines.list": "Routine list",
+  "routines.botPaused": "This routine's bot is paused on this plan, so it won't run.",
+  "routines.botPausedSwap": "Swap awake bots",
   "routines.logs": "Run logs",
   "routines.results.label": "Post results to",
   "routines.results.keep": "Keep current destination",
