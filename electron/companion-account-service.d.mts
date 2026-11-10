@@ -12,6 +12,7 @@ export declare const COMPANION_INSTALLATION_CREDENTIAL_FIELD: string;
 export declare const COMPANION_INSTALLATION_EXPIRY_FIELD: string;
 export declare const COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD: string;
 export declare const COMPANION_ENDPOINT_PAUSED_FIELD: string;
+export declare const COMPANION_TUNNEL_RETIRED_FIELD: string;
 export declare const PHONE_UNUSED_RELEASE_MS: number;
 
 export type CredentialDocument = Record<string, unknown>;
@@ -36,6 +37,9 @@ export interface CompanionAccountState {
   message?: string;
   /** The address was given back after 30 days with no paired phone seen; prepare() brings it back. */
   paused?: true;
+  /** The secure address was ended for old phone apps: a phone that has not used the encrypted connection must be
+   * updated and paired again. */
+  tunnelRetired?: true;
 }
 
 export interface CompanionAccountService {

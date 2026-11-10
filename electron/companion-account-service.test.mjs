@@ -8,6 +8,7 @@ import {
   COMPANION_ACCOUNT_USER_ID_FIELD,
   COMPANION_CLIENT_INSTANCE_FIELD,
   COMPANION_ENDPOINT_PAUSED_FIELD,
+  COMPANION_TUNNEL_RETIRED_FIELD,
   COMPANION_ENDPOINT_RELEASE_PENDING_FIELD,
   COMPANION_INSTALLATION_CREDENTIAL_FIELD,
   COMPANION_INSTALLATION_EXPIRY_FIELD,
@@ -1427,6 +1428,47 @@ describe("Companion account on demand", () => {
     expect(client.ensureEndpoint).toHaveBeenCalledWith(expect.any(String), { appVersion: "1.2.3", legacyDevices: 0 });
     expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com" });
     f.service.dispose();
+  });
+
+  it("stops the connector, forgets the address and says so when old phone apps no longer get a tunnel", async () => {
+    const retired = new ControlPlaneError("relay_capable", 409, "", 0, "retired");
+    expect(retired.tunnel).toBe("retired");
+    expect(new ControlPlaneError("relay_capable", 409, "", 0, "anything").tunnel).toBeNull();
+    expect(new ControlPlaneError("endpoint_capacity", 503, "", 0, "retired").tunnel).toBeNull();
+    const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(retired)) });
+    const f = onDemandFixture({ client, relay: { capable: () => true, legacyDevices: async () => 1 } });
+    f.companion.need = true;
+    const state = await f.service.retry();
+    expect(client.ensureEndpoint).toHaveBeenCalledWith(expect.any(String), { appVersion: "1.2.3", legacyDevices: 1 });
+    expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com", tunnelRetired: true });
+    expect(f.store.read()[COMPANION_TUNNEL_RETIRED_FIELD]).toBe(true);
+    expect(f.store.read()).not.toHaveProperty(MANAGED_COMPANION_ENDPOINT_FIELD);
+    expect(f.stopManagedEndpoint).toHaveBeenCalled();
+
+    // The relay fails later and the control plane hands the address back: the notice goes with it.
+    client.ensureEndpoint.mockImplementation(async () => ({ endpoint: { url: ENDPOINT }, connectorToken: CONNECTOR_TOKEN }));
+    const back = await f.service.retry();
+    expect(back).not.toHaveProperty("tunnelRetired");
+    expect(f.store.read()).not.toHaveProperty(COMPANION_TUNNEL_RETIRED_FIELD);
+    f.service.dispose();
+  });
+
+  it("carries on over the relay with no notice when the accounts are full or no old phone is paired", async () => {
+    for (const tunnel of ["full", null]) {
+      const refused = new ControlPlaneError("relay_capable", 409, "", 0, tunnel);
+      const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(refused)) });
+      const f = onDemandFixture({ client, relay: { capable: () => true, legacyDevices: async () => 1 } });
+      f.companion.need = true;
+      await expect(f.service.retry()).resolves.toEqual({ available: true, status: "ready", email: "ada@example.com" });
+      expect(f.store.read()).not.toHaveProperty(MANAGED_COMPANION_ENDPOINT_FIELD);
+      expect(f.store.read()).not.toHaveProperty(COMPANION_TUNNEL_RETIRED_FIELD);
+      f.service.dispose();
+    }
+  });
+
+  it("tells a desktop below the minimum version to update", async () => {
+    const message = friendlyCompanionAccountError(new ControlPlaneError("update_required", 426));
+    expect(message).toBe("This version of MausBot can no longer make secure links. Update MausBot, then try again. Local Wi-Fi and Tailscale pairing still work.");
   });
 
   it("signs a relay-capable computer in without a tunnel when no phone needs one", async () => {
