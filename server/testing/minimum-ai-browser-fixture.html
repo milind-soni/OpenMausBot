@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Sample task database</title></head>
+<body>
+  <h1>Sample task database</h1>
+  <p>Test data only. No real account is connected.</p>
+  <nav><button id="database">Database</button> <button id="trash">Trash</button></nav>
+  <main id="content"></main>
+  <div id="status" role="status"></div>
+  <script>
+    const rows = [
+      { id: "sample-alpha", name: "Sample Alpha", group: "Trash", state: "active" },
+      { id: "sample-beta", name: "Sample Beta", group: "Inbox", state: "active" },
+      { id: "sample-gamma", name: "Sample Gamma", group: "Trash", state: "active" },
+    ];
+    let view = "database";
+    const content = document.querySelector("#content");
+    const status = document.querySelector("#status");
+    function render() {
+      content.replaceChildren();
+      const heading = document.createElement("h2"); heading.textContent = view === "database" ? "Database" : "Trash"; content.append(heading);
+      const list = document.createElement("ul");
+      for (const row of rows.filter((item) => item.state === (view === "database" ? "active" : "trashed"))) {
+        const item = document.createElement("li");
+        item.textContent = `${row.name} — ${row.group} `;
+        const action = document.createElement("button");
+        action.textContent = view === "database" ? `Move ${row.name} to trash (group: ${row.group})` : `Permanently delete ${row.name} (group: ${row.group})`;
+        action.onclick = () => {
+          row.state = view === "database" ? "trashed" : "deleted";
+          status.textContent = `${row.name}: ${row.state}`;
+          render();
+        };
+        item.append(action); list.append(item);
+      }
+      content.append(list);
+    }
+    document.querySelector("#database").onclick = () => { view = "database"; render(); };
+    document.querySelector("#trash").onclick = () => { view = "trash"; render(); };
+    render();
+  </script>
+</body>
+</html>

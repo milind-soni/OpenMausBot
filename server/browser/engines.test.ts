@@ -33,6 +33,7 @@ function engines(options: RuntimeRouterOptions = {}) {
   const chrome = {
     service: {
       agentRpc: vi.fn(async (_target: unknown, _method: string, _params: unknown, beforeDispatch?: () => void) => { beforeDispatch?.(); return "chrome"; }),
+      replayClick: vi.fn(async (_target: unknown, _step: unknown, _signal: AbortSignal, beforeDispatch: () => void) => { beforeDispatch(); }),
       previewFrame: vi.fn(async () => ({ png: "frame", format: "jpeg" })),
       withSecretInput: vi.fn(async (_target: unknown, fn: () => Promise<unknown>) => fn()),
       heldBy: vi.fn((): string | null => null),
@@ -68,6 +69,24 @@ describe("which engine runs a session", () => {
 });
 
 describe("the runtime router", () => {
+  it("applies the normal policy and ownership checks to a saved click and rejects unsupported browsers", async () => {
+    const policy = vi.fn(() => null as string | null);
+    const claim = vi.fn(() => null as string | null);
+    const guard = vi.fn();
+    const { runtime, chrome } = engines({ refusal: policy, afterClaim: claim });
+    const step = { origin: "https://example.com", url: "https://example.com/", role: "button", name: "Go" };
+    const signal = new AbortController().signal;
+    await runtime.replayClick("s", CHROME, step, signal, guard);
+    expect(policy).toHaveBeenCalledOnce();
+    expect(claim).toHaveBeenCalledOnce();
+    expect(guard).toHaveBeenCalledOnce();
+    expect(chrome.service.replayClick).toHaveBeenCalledOnce();
+    policy.mockReturnValueOnce("policy refusal");
+    await expect(runtime.replayClick("s", CHROME, step, signal, guard)).rejects.toThrow("policy refusal");
+    claim.mockReturnValueOnce("ownership refusal");
+    await expect(runtime.replayClick("s", CHROME, step, signal, guard)).rejects.toThrow("ownership refusal");
+    await expect(runtime.replayClick("s", AGENT_BROWSER, step, signal, guard)).rejects.toThrow(/unsupported/i);
+  });
   it("sends a new-engine session's calls to the browser service and every other to agent-browser", async () => {
     const { old, chrome, runtime } = engines();
     await expect(runtime.agentRpc("s", CHROME, "tools/call", { name: "agent_browser_open" })).resolves.toBe("chrome");
@@ -75,6 +94,16 @@ describe("the runtime router", () => {
     await expect(runtime.agentRpc("s", AGENT_BROWSER, "tools/list", {})).resolves.toBe("agent-browser");
     expect(old.agentRpc).toHaveBeenCalledOnce();
     expect(chrome.service.agentRpc).toHaveBeenCalledOnce();
+  });
+
+  it("passes an explicit first-run recorder to Chrome and marks other engines unsupported", async () => {
+    const { runtime, chrome } = engines();
+    const recorder = { record: vi.fn(), unsupported: vi.fn() };
+    const context = { botId: "bot", botName: "Bot", threadId: "thread", generation: "generation", turnId: () => null, record: false, minimumAiRecording: recorder };
+    await runtime.agentRpc("s", CHROME, "tools/call", { name: "agent_browser_click" }, undefined, context);
+    expect(chrome.service.agentRpc).toHaveBeenCalledWith({ session: "s", key: "bot:a" }, "tools/call", { name: "agent_browser_click" }, undefined, recorder);
+    await runtime.agentRpc("s", AGENT_BROWSER, "tools/call", { name: "agent_browser_click" }, undefined, context);
+    expect(recorder.unsupported).toHaveBeenCalled();
   });
 
   it("takes a preview frame from the engine the spec names", async () => {

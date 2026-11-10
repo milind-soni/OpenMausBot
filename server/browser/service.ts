@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 import { scrubHeldSecrets } from "../../shared/redact.ts";
 import { BrowserLanes } from "../browser-lane.ts";
+import { listBrowserTargets, replayBrowserClick, safeBrowserFillTarget, type BrowserClickStep, type BrowserFillStep, type BrowserListQuery, type BrowserRecording } from "../minimum-ai/browser-replay.ts";
 import { BROWSER_CALL_DEFAULTS, type BrowserTiming } from "../browser-runtime.ts";
 import { SecretHolds, type SecretHold } from "../browser-secret-hold.ts";
 import { scrubBrowserResult } from "../browser-tool-shape.ts";
@@ -22,7 +23,7 @@ import { isUnanswered } from "./cdp/errors.ts";
 import type { CdpPage } from "./cdp/page.ts";
 import { browserRoot, profileDir, profileHash, profileKind, removeProfile, workspaceId } from "./chrome/profile.ts";
 import { BROWSER_CONTROL_REFUSAL, ProfileControl, type TakeResult } from "./control.ts";
-import { executeTool, personUrl, toolFailure, type ToolContext } from "./dispatch.ts";
+import { agentUrl, executeTool, personUrl, toolFailure, type ToolContext } from "./dispatch.ts";
 import { HealthShown, pageHealthLine } from "./health.ts";
 import type { HoldLimits } from "./hold.ts";
 import { errorResult, shapeResult, textResult, withParts, type ToolResult } from "./shape.ts";
@@ -411,7 +412,79 @@ export class BrowserService {
 
   // Bot calls.
 
-  async agentRpc(target: BrowserTarget, method: "tools/list" | "tools/call", params: unknown, beforeDispatch?: () => void): Promise<unknown> {
+  async listTargets(target: BrowserTarget, query: BrowserListQuery, signal: AbortSignal, beforeDispatch: () => void): Promise<BrowserClickStep[]> {
+    const profile = this.profile(target);
+    if (!profile.run || profile.stopping || profile.control.uncertain) throw new Error("The browser is not ready for a saved action");
+    profile.calls++;
+    const deadline = Date.now() + this.#options.callBudgetMs;
+    try {
+      const work = this.#lanes.run(profile.key, async () => {
+        beforeDispatch(); signal.throwIfAborted();
+        if (!profile.run || profile.stopping || profile.control.uncertain) throw new Error("The browser is not ready for a saved action");
+        const tab = profile.active();
+        if (!tab || profile.tabs.list().length !== 1) throw new Error("A saved action requires exactly one open browser tab");
+        return profile.control.agent(tab, async () => {
+          const snapshot = await tab.page.snapshot();
+          signal.throwIfAborted(); beforeDispatch();
+          if (profile.active() !== tab || profile.control.uncertain || tab.page.url() !== query.url) throw new Error("Browser control or page changed");
+          return textResult(JSON.stringify(listBrowserTargets(snapshot, query)));
+        });
+      }, this.#options.laneWaitMs);
+      const outcome = await this.#withinBudget(profile, "saved browser target lookup", work, deadline);
+      if (!outcome || outcome.isError) throw new Error(outcome?.content.find((part) => part.type === "text")?.text ?? LANE_BUSY);
+      const text = outcome.content.find((part) => part.type === "text")?.text;
+      if (typeof text !== "string") throw new Error("Browser target lookup returned no result");
+      return JSON.parse(text) as BrowserClickStep[];
+    } finally { profile.calls--; profile.lastUsed = Date.now(); }
+  }
+
+  /** Resolve and click in one browser lane, preserving the normal user-control and caller-authorization gates. */
+  async replayClick(target: BrowserTarget, step: BrowserClickStep, signal: AbortSignal, beforeDispatch: () => void): Promise<void> {
+    return this.#replayTarget(target, step, signal, beforeDispatch);
+  }
+
+  async replayFill(target: BrowserTarget, step: BrowserFillStep, signal: AbortSignal, beforeDispatch: () => void): Promise<void> {
+    return this.#replayTarget(target, step, signal, beforeDispatch);
+  }
+
+  async #replayTarget(target: BrowserTarget, step: BrowserClickStep | BrowserFillStep, signal: AbortSignal, beforeDispatch: () => void): Promise<void> {
+    const profile = this.profile(target);
+    if (!profile.run || profile.stopping || profile.control.uncertain) throw new Error("The browser is not ready for a saved action");
+    profile.calls++;
+    const deadline = Date.now() + this.#options.callBudgetMs;
+    try {
+      const work = this.#lanes.run(profile.key, async () => {
+        beforeDispatch(); signal.throwIfAborted();
+        if (!profile.run || profile.stopping || profile.control.uncertain) throw new Error("The browser is not ready for a saved action");
+        const tab = profile.active();
+        if (!tab || profile.tabs.list().length !== 1) throw new Error("A saved action requires exactly one open browser tab");
+        return profile.control.agent(tab, async () => {
+          await replayBrowserClick(step, async (run) => run({
+            snapshot: async () => tab.page.snapshot(),
+            click: async (ref) => {
+              signal.throwIfAborted(); beforeDispatch();
+              if (profile.control.owner !== null || tab.control.controller !== null || profile.active() !== tab || profile.control.uncertain) throw new Error("Browser control changed before the saved action");
+              if (tab.page.url() !== step.url) throw new Error("The browser is on a different page");
+              if ("kind" in step) {
+                if (!await safeBrowserFillTarget(tab.page, ref, step)) throw new Error("The saved form field is sensitive or unsupported");
+                signal.throwIfAborted(); beforeDispatch();
+                if (Date.now() >= deadline || profile.control.owner !== null || profile.control.uncertain || profile.active() !== tab || tab.page.url() !== step.url) throw new Error("Browser control or page changed before the saved action");
+              }
+              profile.control.call = "saved browser click";
+              try { if ("kind" in step) await tab.page.fill({ ref }, step.value); else await tab.page.click({ ref }, { timeoutMs: Math.max(1, deadline - Date.now()) }); signal.throwIfAborted(); beforeDispatch(); }
+              catch (error) { if (isUnanswered(error)) profile.control.latch("saved browser click"); throw error; }
+              finally { profile.control.call = null; }
+            },
+          }), signal);
+          return textResult("Saved click completed.");
+        });
+      }, this.#options.laneWaitMs);
+      const outcome = await this.#withinBudget(profile, "saved browser click", work, deadline);
+      if (!outcome || outcome.isError) throw new Error(outcome?.content.find((part) => part.type === "text")?.text ?? LANE_BUSY);
+    } finally { profile.calls--; profile.lastUsed = Date.now(); }
+  }
+
+  async agentRpc(target: BrowserTarget, method: "tools/list" | "tools/call", params: unknown, beforeDispatch?: () => void, recording?: BrowserRecording): Promise<unknown> {
     if (method === "tools/list") return { tools: TOOL_LIST.map((tool) => ({ ...tool })) };
     if (method !== "tools/call") throw new Error("Unsupported browser method.");
     const profile = this.profile(target);
@@ -422,14 +495,18 @@ export class BrowserService {
     const started = performance.now();
     let result: ToolResult | null;
     try {
-      const work = () => this.#call(profile, params, deadline, beforeDispatch);
+      const work = () => this.#call(profile, params, deadline, beforeDispatch, recording);
       const call = name === RESTART_TOOL || profile.control.uncertain ? work() : this.#lanes.run(profile.key, work, this.#options.laneWaitMs);
       result = await this.#withinBudget(profile, name, call, deadline);
+    } catch (error) {
+      recording?.unsupported("A browser action did not complete reliably");
+      throw error;
     } finally {
       profile.calls--;
       profile.lastUsed = Date.now();
     }
     const final = result ?? errorResult(LANE_BUSY);
+    if (final.isError) recording?.unsupported("A browser action did not complete reliably");
     this.#options.onTiming?.({ session: profile.session, tool: name, outcome: final.isError ? "error" : "ok", totalMs: performance.now() - started, inFlight: profile.control.agents, chars: final.content.reduce((sum, part) => sum + (part.type === "text" ? part.text.length : 0), 0) });
     if (profile.reopened && profile.run) {
       const note = reopenedNote(profile.reopened, profile.temporary);
@@ -451,15 +528,17 @@ export class BrowserService {
     return profile.control.lostCall === null ? errorResult(BROWSER_STUCK) : lostCallResult(call);
   }
 
-  async #call(profile: ProfileState, params: unknown, deadline: number, beforeDispatch?: () => void): Promise<ToolResult> {
+  async #call(profile: ProfileState, params: unknown, deadline: number, beforeDispatch?: () => void, recording?: BrowserRecording): Promise<ToolResult> {
     const name = toolNameOf(params);
     const control = profile.control;
     if (name === RESTART_TOOL) {
+      recording?.unsupported("Restarting the browser cannot be recorded");
       beforeDispatch?.();
       await this.#agentRestart(profile);
       return textResult("Browser restarted. Open pages were closed back to one blank tab; sign-ins are kept. Open the page you need again and check whether the interrupted action already happened before repeating it.");
     }
     if (control.uncertain) {
+      recording?.unsupported("The browser state is uncertain");
       if (control.owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
       const lost = control.lostCall;
       if (lost === null) return errorResult(BROWSER_STUCK);
@@ -469,6 +548,8 @@ export class BrowserService {
     }
     const parsed = parseToolCall(name, (params as { arguments?: unknown } | null)?.arguments);
     if (!parsed.ok) return errorResult(parsed.error);
+    const observation = new Set(["agent_browser_snapshot", "agent_browser_get_url", "agent_browser_get_title", "agent_browser_get_text", "agent_browser_screenshot", "agent_browser_status"]);
+    if (recording && parsed.call.name !== "agent_browser_click" && parsed.call.name !== "agent_browser_fill" && parsed.call.name !== "agent_browser_open" && !observation.has(parsed.call.name)) recording.unsupported("The browser action is not supported for recording");
     let run: Running;
     try {
       run = await this.running(profile);
@@ -479,10 +560,19 @@ export class BrowserService {
     if (control.owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
     control.call = parsed.call.name;
     try {
-      const result = await executeTool(this.#context(profile, run, deadline), parsed.call);
+      const result = await executeTool({ ...this.#context(profile, run, deadline), recording, beforeRecordedAction: beforeDispatch }, parsed.call);
       beforeDispatch?.();
+      if (recording && parsed.call.name === "agent_browser_open") {
+        try {
+          const address = new URL(agentUrl(parsed.call.input.url ?? ""));
+          const text = result.content.filter((part) => part.type === "text").map((part) => part.text).join(" ");
+          if (result.isError || parsed.call.input.tab !== undefined || !["https:", "http:"].includes(address.protocol) || address.username || address.password || profile.tabs.list().length !== 1 || profile.active()?.page.url() !== address.href || /site answered HTTP [45]\d\d|waiting at .*sign-in|HTTP sign-in/i.test(text)) throw new Error();
+          recording.record({ kind: "open", url: address.href });
+        } catch { recording.unsupported("The navigation could not be recorded reliably"); }
+      }
       return shapeResult(result, parsed.call.name);
     } catch (error) {
+      recording?.unsupported("A browser action did not complete reliably");
       if (isUnanswered(error)) {
         control.latch(parsed.call.name);
         return lostCallResult(parsed.call.name);

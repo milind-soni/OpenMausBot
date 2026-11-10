@@ -1,5 +1,6 @@
-import type { CalendarCall } from "./calendar-calls";
-import type { Routine, RoutineRun, RoutineSchedule } from "./routines";
+import type { CalendarCall, CalendarCallAttachment } from "./calendar-calls";
+import type { Routine, RoutineContextAttachment, RoutineRun, RoutineSchedule } from "./routines";
+import type { Attachment } from "./composer-attachments";
 import { nextCronRuns } from "../../shared/routine-schedule";
 import { intlLocale, t } from "@/lib/i18n";
 
@@ -7,6 +8,24 @@ export const CALENDAR_SLOT_MINUTES = 5;
 const ROUTINE_MARKER_MINUTES = 30;
 const MAX_RECEIPTS_PER_ROUTINE_PER_RANGE = 12;
 const MAX_CRON_PROJECTIONS_PER_DAY = 12;
+
+export function toContextAttachments(attachments: Attachment[]): Array<RoutineContextAttachment | CalendarCallAttachment> {
+  return attachments.flatMap((attachment) => attachment.kind === "paste" || attachment.kind === "citation" ? [] : [{
+    id: attachment.id, kind: attachment.kind, name: attachment.name, path: attachment.path, size: attachment.size,
+  }]);
+}
+
+export function nextHour(): number {
+  const date = new Date(Date.now() + 60 * 60_000);
+  date.setMinutes(0, 0, 0);
+  return date.getTime();
+}
+
+export function endOfLocalDate(dateInput: string): number {
+  const date = new Date(`${dateInput}T00:00`);
+  date.setHours(23, 59, 59, 999);
+  return date.getTime();
+}
 
 export type RoutineCalendarItem = {
   id: string;

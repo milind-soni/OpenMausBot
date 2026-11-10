@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { removeTempDir } from "../testing/cleanup.ts";
 import { forbiddenCommand } from "./cdp/testing/real-chrome.ts";
@@ -66,6 +66,101 @@ function setup(options: Partial<BrowserServiceOptions> = {}, startUrls?: string[
 }
 
 describe("the bots' browser tools", () => {
+  it("lists current named targets through the browser lane and permission gate", async () => {
+    const { service, target, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const guard = vi.fn();
+    const query = { origin: "https://example.com", url: "https://example.com/form", role: "button", prefix: "G" };
+    expect(await service.listTargets(target, query, new AbortController().signal, guard)).toEqual([{ origin: query.origin, url: query.url, role: "button", name: "Go" }]);
+    expect(guard).toHaveBeenCalledTimes(2);
+    await expect(service.listTargets(target, query, new AbortController().signal, () => { throw new Error("revoked"); })).rejects.toThrow("revoked");
+  });
+  it("captures an actual bot click and marks an unsupported action as incomplete", async () => {
+    const { service, target, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    await call("agent_browser_snapshot");
+    const recording = { record: vi.fn(), unsupported: vi.fn() };
+    const click = await service.agentRpc(target, "tools/call", { name: "agent_browser_click", arguments: { ref: "e2" } }, undefined, recording);
+    expect(click).not.toHaveProperty("isError", true);
+    expect(recording.record).toHaveBeenCalledWith({ origin: "https://example.com", url: "https://example.com/form", role: "button", name: "Go" }, ["Go"]);
+    await service.agentRpc(target, "tools/call", { name: "agent_browser_press", arguments: { key: "Tab" } }, undefined, recording);
+    expect(recording.unsupported).toHaveBeenCalled();
+  });
+  it("captures an ordinary navigation as part of the first run", async () => {
+    const { service, target } = setup();
+    const recording = { record: vi.fn(), unsupported: vi.fn() };
+    const result = await service.agentRpc(target, "tools/call", { name: "agent_browser_open", arguments: { url: "https://example.com/form" } }, undefined, recording);
+    expect(result).not.toHaveProperty("isError", true);
+    expect(recording.record).toHaveBeenCalledWith({ kind: "open", url: "https://example.com/form" });
+    expect(recording.unsupported).not.toHaveBeenCalled();
+  });
+  it("records and replays a non-secret form fill using a fresh target", async () => {
+    const { service, target, call, backend } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    await call("agent_browser_snapshot");
+    const recording = { record: vi.fn(), unsupported: vi.fn() };
+    const first = await service.agentRpc(target, "tools/call", { name: "agent_browser_fill", arguments: { ref: "e1", text: "Ada" } }, undefined, recording);
+    expect(first).not.toHaveProperty("isError", true);
+    const step = { kind: "fill" as const, origin: "https://example.com", url: "https://example.com/form", role: "textbox", name: "Name", value: "Ada" };
+    expect(recording.record).toHaveBeenCalledWith(step, ["Name"]);
+    await call("agent_browser_fill", { ref: "e1", text: "Other" });
+    await service.replayFill(target, step, new AbortController().signal, () => {});
+    expect([...backend.chrome.pages.values()][0]!.elements.find((element) => element.name === "Name")?.value).toBe("Ada");
+  });
+  it("checks authority again after recording a snapshot and before the bot clicks", async () => {
+    const { service, target, call, text } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    await call("agent_browser_snapshot");
+    const recording = { record: vi.fn(), unsupported: vi.fn() };
+    let checks = 0;
+    const result = await service.agentRpc(target, "tools/call", { name: "agent_browser_click", arguments: { ref: "e2" } }, () => { if (++checks === 2) throw new Error("access revoked"); }, recording);
+    expect(result).toHaveProperty("isError", true);
+    expect(recording.unsupported).toHaveBeenCalled();
+    expect(recording.record).not.toHaveBeenCalled();
+    expect(text(await call("agent_browser_read"))).not.toContain("Hello");
+  });
+  it("replays a named click through the browser control and permission checks", async () => {
+    const { service, target, call, text } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const guard = vi.fn();
+    await service.replayClick(target, { origin: "https://example.com", url: "https://example.com/form", role: "button", name: "Go" }, new AbortController().signal, guard);
+    expect(guard).toHaveBeenCalledTimes(3);
+    expect(text(await call("agent_browser_read"))).toContain("Hello");
+    const denied = () => { throw new Error("permission revoked"); };
+    await expect(service.replayClick(target, { origin: "https://example.com", url: "https://example.com/form", role: "button", name: "Go" }, new AbortController().signal, denied)).rejects.toThrow(/permission revoked/);
+  });
+  it("does not click when authorization is withdrawn after the snapshot or a person controls the browser", async () => {
+    const { service, target, call, text } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    let checks = 0;
+    await expect(service.replayClick(target, { origin: "https://example.com", url: "https://example.com/form", role: "button", name: "Go" }, new AbortController().signal, () => { if (++checks === 2) throw new Error("permission revoked"); })).rejects.toThrow(/permission revoked/);
+    expect(text(await call("agent_browser_read"))).not.toContain("Hello");
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 2560, maxHeight: 1600 }, () => {});
+    await viewer.input({ type: "takeControl" });
+    await expect(service.replayClick(target, { origin: "https://example.com", url: "https://example.com/form", role: "button", name: "Go" }, new AbortController().signal, () => {})).rejects.toThrow(BROWSER_CONTROL_REFUSAL);
+    await viewer.input({ type: "releaseControl" });
+    expect(text(await call("agent_browser_read"))).not.toContain("Hello");
+  });
+  it("does not start a saved action after the browser becomes uncertain while waiting for its lane", async () => {
+    const { service, target, call, text } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    await expect(service.replayClick(target, { origin: "https://example.com", url: "https://example.com/form", role: "button", name: "Go" }, new AbortController().signal, () => {
+      service.profile(target).control.latch("earlier action");
+    })).rejects.toThrow(/not ready|uncertain/i);
+    expect(text(await call("agent_browser_read"))).not.toContain("Hello");
+  });
+  it("stops when the page changes between the snapshot and click", async () => {
+    const { service, target, call, text } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const page = service.profile(target).active()!.page;
+    let checks = 0;
+    const changedUrl = vi.spyOn(page, "url");
+    await expect(service.replayClick(target, { origin: "https://example.com", url: "https://example.com/form", role: "button", name: "Go" }, new AbortController().signal, () => {
+      if (++checks === 2) changedUrl.mockReturnValue("https://example.com/other");
+    })).rejects.toThrow(/different page/);
+    changedUrl.mockRestore();
+    expect(text(await call("agent_browser_read"))).not.toContain("Hello");
+  });
   it("advertises 21 tools and restart_browser, with OpenMausBot's names and no launch settings", async () => {
     const { service, target } = setup();
     const listed = await service.agentRpc(target, "tools/list", {}) as { tools: Array<{ name: string; inputSchema: { properties?: Record<string, unknown> } }> };

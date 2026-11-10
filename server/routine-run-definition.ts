@@ -1,7 +1,29 @@
 import { cloneAttachments } from "./routine-attachments.ts";
-import type { Routine, RoutineManagerOptions, RoutineRun } from "./routines.ts";
+import { cloneSchedule } from "./routine-schedules.ts";
+import type { Routine, RoutineManagerOptions, RoutineRequestOwner, RoutineRun } from "./routines.ts";
 
 export type ResultsThreadAllocation = { botId: string; threadId: string };
+
+export function routineRequestOwnerKey(owner: RoutineRequestOwner): string {
+  return JSON.stringify([owner.requestId, owner.messageId, owner.botId, owner.threadId]);
+}
+
+export function cloneRoutine(routine: Routine): Routine {
+  return { ...routine, schedule: cloneSchedule(routine.schedule), attachments: cloneAttachments(routine.attachments) };
+}
+
+export function cloneRun(run: RoutineRun): RoutineRun {
+  return { ...run, attachments: cloneAttachments(run.attachments), denials: run.denials ? [...run.denials] : undefined };
+}
+
+export function pauseFailedWorkflow(run: RoutineRun, routines: Routine[]): Routine | undefined {
+  if (run.executionMode !== "minimum-ai") return undefined;
+  const routine = routines.find((item) => item.id === run.routineId);
+  if (!routine || !routine.enabled) return undefined;
+  routine.enabled = false;
+  routine.nextRunAt = null;
+  return routine;
+}
 
 export function resolveRoutineResultsThread(
   routine: Routine,
@@ -23,8 +45,9 @@ export function resolveRoutineResultsThread(
 }
 
 export function routineRunDefinition(routine: Routine): Pick<RoutineRun,
-  "routineName" | "prompt" | "durationMinutes" | "timeoutMinutes" | "attachments" | "target" | "groupId" | "botId" | "runOn" | "access" | "deliver"> {
+  "executionMode" | "routineName" | "prompt" | "durationMinutes" | "timeoutMinutes" | "attachments" | "target" | "groupId" | "botId" | "runOn" | "access" | "deliver"> {
   return {
+    ...(routine.executionMode === "minimum-ai" ? { executionMode: "minimum-ai" as const } : {}),
     routineName: routine.name,
     prompt: routine.prompt,
     durationMinutes: routine.durationMinutes,

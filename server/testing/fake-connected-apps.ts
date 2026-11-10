@@ -18,6 +18,11 @@ export interface FakeConnectedApps {
   threads: Record<string, unknown[]>;
   /** While set, every Gmail tool answers with this error, as Composio passes Google's on. */
   gmailError?: string;
+  workflowSchemas?: boolean;
+  workflowNotion?: boolean;
+  workflowBoth?: boolean;
+  workflowDelayMs?: number;
+  notionRecords?: Array<{ id: string; group: string }>;
   /** Every tool call that reached the service, with its arguments and the whole multi-execute item. */
   calls: Array<{ tool: string; arguments: unknown; item: Record<string, unknown> }>;
   close(): Promise<void>;
@@ -37,6 +42,18 @@ export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
   };
 
   function answer(slug: string, args: unknown): unknown {
+    if (fake.workflowNotion && slug === "NOTION_QUERY_DATABASE") {
+      const rows = fake.notionRecords ?? [];
+      const offset = Number(field(args, "start_cursor") ?? 0);
+      return { results: rows.slice(offset, offset + 2), has_more: offset + 2 < rows.length, ...(offset + 2 < rows.length ? { next_cursor: String(offset + 2) } : {}) };
+    }
+    if (fake.workflowNotion && slug === "NOTION_DELETE_BLOCK") {
+      const id = field(args, "block_id");
+      const index = fake.notionRecords?.findIndex((row) => row.id === id) ?? -1;
+      if (index < 0) throw new ToolFailure(NOT_FOUND);
+      fake.notionRecords!.splice(index, 1);
+      return { id, archived: true };
+    }
     if (slug.startsWith("GMAIL_") && fake.gmailError) throw new ToolFailure(fake.gmailError);
     if (slug === CALENDAR_LIST_TOOL) return { items: fake.events };
     if (slug === CALENDARS_TOOL) return { items: fake.calendars };
@@ -62,7 +79,7 @@ export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
     for await (const chunk of req) raw += chunk;
     res.setHeader("content-type", "application/json");
     if (req.method === "GET" && req.url === "/v1/connectors/connected") {
-      return res.end(JSON.stringify({ services: Object.fromEntries(Object.entries(fake.connected).map(([slug, connected]) => [slug, { connected }])) }));
+      return res.end(JSON.stringify({ services: Object.fromEntries(Object.entries(fake.connected).map(([slug, connected]) => [slug, fake.workflowSchemas ? { connected, status: connected ? "ACTIVE" : "not_connected", accounts: connected ? [{ id: `fake-${slug}-account`, status: "ACTIVE" }] : [] } : { connected }])) }));
     }
     // A connection card's status check: the services it names.
     if (req.method === "GET" && req.url?.startsWith("/v1/connectors?")) {
@@ -83,9 +100,21 @@ export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
         return res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { tools: [{ name: "COMPOSIO_MULTI_EXECUTE_TOOL", description: "Run app tools", inputSchema: { type: "object" } }] } }));
       }
       if (body.method === "tools/call") {
+        if (fake.workflowSchemas && (body.params?.name === "COMPOSIO_SEARCH_TOOLS" || body.params?.name === "COMPOSIO_GET_TOOL_SCHEMAS")) {
+          fake.calls.push({ tool: body.params.name, arguments: body.params.arguments, item: {} });
+          const mail = { tool_slug: "GMAIL_FETCH_EMAILS", description: "Read messages from the sample mailbox", input_schema: { type: "object", properties: { user_id: { type: "string" }, query: { type: "string" } }, required: ["user_id", "query"], additionalProperties: false }, output_schema: { type: "object", properties: { messages: { type: "array", items: { type: "object", properties: { subject: { type: "string" }, sender: { type: "string" } } } } } } };
+          const tools = fake.workflowNotion ? [
+            ...(fake.workflowBoth ? [mail] : []),
+            { tool_slug: "NOTION_QUERY_DATABASE", description: "List sample database records, two per page", input_schema: { type: "object", properties: { database_id: { type: "string" }, start_cursor: { type: "string" } }, required: ["database_id"], additionalProperties: false }, output_schema: { type: "object", properties: { results: { type: "array", items: { type: "object", properties: { id: { type: "string" }, group: { type: "string" } } } }, has_more: { type: "boolean" }, next_cursor: { type: ["string", "null"] } } } },
+            { tool_slug: "NOTION_DELETE_BLOCK", description: "Archive one sample record by ID", input_schema: { type: "object", properties: { block_id: { type: "string" } }, required: ["block_id"], additionalProperties: false }, output_schema: { type: "object", properties: { id: { type: "string" }, archived: { type: "boolean" } } } },
+          ] : [mail];
+          const text = JSON.stringify({ successful: true, data: { tools } });
+          return res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text }] } }));
+        }
         const item = body.params?.name === "COMPOSIO_MULTI_EXECUTE_TOOL" ? body.params.arguments?.tools?.[0] ?? {} : { tool_slug: body.params?.name, arguments: body.params?.arguments };
         const slug = String(item.tool_slug ?? "");
         fake.calls.push({ tool: slug, arguments: item.arguments, item });
+        if (fake.workflowDelayMs && slug === GMAIL_FETCH_TOOL) await new Promise<void>((resolve) => setTimeout(resolve, fake.workflowDelayMs));
         let response: { successful: boolean; data: unknown; error: string | null };
         try {
           response = { successful: true, data: answer(slug, item.arguments), error: null };

@@ -207,6 +207,15 @@ describe("the setup card's answers", () => {
 });
 
 describe("who writes a small job", () => {
+  it("uses Codex's isolated background text call for explicit workflow setup, with normal usage accounting", async () => {
+    const { jobs, codex, state } = setup({ helper: null });
+    const text = jobs.text("minimum-ai-plan", "codex");
+    expect(text?.via).toBe("engine");
+    expect(await text!.generateText("plan a workflow")).toBe("codex's own engine wrote this");
+    expect(codex.calls).toHaveLength(1);
+    expect(state.booked[0]?.row).toMatchObject({ instanceId: "codex", trigger: { kind: "bot", botId: "codex" } });
+    expect(jobs.text("minimum-ai-plan", "grok")).toBeNull();
+  });
   it("is the bot's own engine whenever it can: the helper is never called", async () => {
     const { jobs, state, claude, openrouter } = setup({ helper: { instanceId: "openrouter" } });
     for (const job of ["compaction", "memory", "skill-review", "setup-suggestions"] as const) {

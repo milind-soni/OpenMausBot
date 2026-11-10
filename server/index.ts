@@ -116,7 +116,9 @@ import { boatDeletionSnapshot } from "./boat-delete-journal.ts";
 import { liveDecisionRefusal } from "../shared/live-approval.ts"; import type { PersonWaitKind } from "../shared/person-wait.ts";
 import { vpsLeftBehindNotice } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
-import { connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
+import { connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools, serviceSlugForCandidates } from "./connector-verdict.ts";
+import { createMinimumAiHost } from "./minimum-ai/host.ts"; import { createGatedWorkflowRelay } from "./minimum-ai/gated-connector.ts"; import { botWorkflowPlanner } from "./minimum-ai/planning.ts"; import { createRecordingTurns } from "./minimum-ai/recording-turn.ts";
+import { chromeTarget } from "./browser/engines.ts";
 import { connectorCardDescription, connectorCardText, signInCardText } from "./connector-card-text.ts";
 import { BOT_LIMIT_CODE, BOT_PAUSED_CODE } from "../shared/bot-limit.ts"; import { createBotLimit } from "./host/starter-bot-limit.ts"; import { createStarterAwake } from "./host/starter-awake.ts"; import { createStarterCaps } from "./host/starter-caps.ts"; import { createStarterAwakeRoutes } from "./routes/starter-awake.ts"; import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts"; import { chiefLevel, readTeamRolesWith } from "./chief-level.ts"; import { defaultBotRefusal, ensureDefaultBot } from "./default-bot.ts";
 import { buildRecall, recallRooms, recallThreadIds, withRecalled } from "./recall.ts";
@@ -1624,6 +1626,7 @@ const MAX_CREATED_BOT_INSTRUCTIONS = 4_000;
 const INTERNAL_CAPABILITY_ORPHAN_MS = 30 * 24 * 60 * 60_000;
 const internalCapabilities = new Map<string, InternalCapability>();
 const activeInternalGenerationByThread = new Map<string, string>();
+const minimumAiRecordingTurns = createRecordingTurns();
 const turnCallSignals = createTurnCallSignals(internalCapabilityIsActive);
 const internalGenerationByProviderTurn = new ProviderTurnGenerationRegistry();
 const computerSelectionTurns = new Map<string, {
@@ -5056,6 +5059,8 @@ watchdog.start(); const idleThreads = createIdleThreads({ store, claims: directT
 
 bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
+  if (event.type === "item.started" && event.itemType === "tool") minimumAiRecordingTurns.started(event.threadId, event.itemId, bridgedToolTitle(event.threadId, event.title ?? "", event.input));
+  if (event.type === "item.completed" && event.itemType === "tool") minimumAiRecordingTurns.completed(event.threadId, event.itemId, event.ok);
   turnStops.note(event);
   if (event.type === "request.opened") watchdog.setWaitingOnHuman(event.threadId, true);
   else if (event.type === "request.resolved") watchdog.setWaitingOnHuman(event.threadId, false);
@@ -8669,7 +8674,7 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
   const sourceThreadId = source.threadId;
   const existing = store.messagesFor(sourceThreadId).find((message) => message.kind === "routine.run" && message.routineRun?.runId === run.id);
   // A bot's run speaks in its own lines; a room goal, a run that began before those existed, and one with no chat of its bot to speak in that works elsewhere keep a card.
-  const card = existing || run.target === "room-goal" || (run.threadId !== sourceThreadId && !automationReports.speaksFor(run)) ? routineRunCard(run) : null;
+  const card = existing || run.executionMode === "minimum-ai" || run.target === "room-goal" || (run.threadId !== sourceThreadId && !automationReports.speaksFor(run)) ? routineRunCard(run) : null;
   const statusChanged = card !== null && existing?.routineRun?.status !== run.status;
   if (existing && card) {
     store.patchMessage(sourceThreadId, existing.id, { text: routineRunFallbackText(card, threadLanguage(sourceThreadId)), routineRun: card });
@@ -8772,7 +8777,86 @@ const limitFailovers = new LimitFailovers({ file: join(DATA_DIR, "limit-failover
 const automationDestinations = createAutomationDestinations({ store, mainThread: botMainThread, runs: () => routines?.listRuns() ?? [],
   cloud: CLOUD_HOME ? { owner: CLOUD_OWNER_KEY!, opener: (id, routine) => (routine && teamRoutines.opener(routine)) || routineOpener(id), reportFromOthers: cloudReportFromOthers, opened: (threadId, person) => threadStarters.set(threadId, person), outside: (threadId) => outsideLineage.mark(threadId) } : null });
 const routineModelChecks: RoutineModelChecks = { check: (raw) => checkedModelSelection(raw), bot: (botId) => store.bot(botId), engineSwitchNeedsAsk };
+async function minimumAiBrowserFor(routine: Routine, threadId?: string) {
+  const bot = store.bot(routine.botId);
+  if (!bot || bot.browser === false || bot.computer === "off" || !builtInBrowserEnabled(cfg)) throw new Error("Enable this bot's browser before recording");
+  const audience = teamHost.browserAudience(threadId ?? bot.threadId);
+  const browser = await browserIntegration(bot.id, bot.browserProfile, undefined, audience);
+  if (!browser || !chromeTarget(browser.session, browser.spec)) throw new Error("Recording requires the built-in Chrome browser engine");
+  return { bot, browser, audience };
+}
+const minimumAiBrowser = {
+  binding: async (routine: Routine) => {
+    const { browser } = await minimumAiBrowserFor(routine);
+    const target = chromeTarget(browser.session, browser.spec)!;
+    return [`browser:${target.session}:${target.key}`];
+  },
+  firstRun: async (routine: Routine, signal: AbortSignal) => {
+    await minimumAiBrowserFor(routine);
+    signal.throwIfAborted();
+    const task = store.createTask(routine.botId, `Minimum AI: ${routine.name}`, false);
+    if (!task) throw new Error("Could not create the first-run conversation");
+    const recording = minimumAiRecordingTurns.begin(task.threadId, routine.botId);
+    let finish!: (result: HostTurnResult) => void, fail!: (error: Error) => void;
+    const settled = new Promise<HostTurnResult>((resolve, reject) => { finish = resolve; fail = reject; });
+    void settled.catch(() => {});
+    const abort = () => {
+      recording.cancel();
+      cancelDirectTurnDispatch(routine.botId, task.threadId);
+      revokeInternalCapabilitiesForThread(task.threadId);
+      void runningTurnInstance(store.bot(routine.botId), task.threadId)?.adapter.interruptTurn(task.threadId).catch(() => {});
+      fail(new Error("The first run was stopped; review its effects before retrying"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      signal.throwIfAborted();
+      await startTurn(routine.botId, routine.prompt, { threadId: task.threadId, runOn: routine.runOn, automationSource: "manual", unattended: true, onSettled: finish, onDispatchError: (message) => fail(new Error(message)) });
+      const outcome = await settled;
+      signal.throwIfAborted();
+      return recording.finish(outcome.ok && !outcome.cap && !outcome.cards && !outcome.stalled);
+    } catch (error) { recording.cancel(); throw error; }
+    finally { signal.removeEventListener("abort", abort); }
+  },
+  withSession: async <T>(routine: Routine, existingThread: string | undefined, work: (perform: (step: import("./minimum-ai/browser-workflow.ts").BrowserOperation, signal: AbortSignal) => Promise<unknown>) => Promise<T>): Promise<T> => {
+    const task = existingThread ? null : store.createTask(routine.botId, "Minimum AI browser check", false);
+    const threadId = existingThread ?? task?.threadId;
+    if (!threadId) throw new Error("Could not create a browser conversation");
+    if (threadBusy(routine.botId, threadId) || activeInternalGenerationByThread.has(threadId)) {
+      if (task) store.deleteTask(routine.botId, threadId);
+      throw new Error("This conversation is already running");
+    }
+    const generation = beginInternalCapabilityGeneration(threadId);
+    let capability: InternalCapability | null = null;
+    try {
+      const { bot, browser, audience } = await minimumAiBrowserFor(routine, threadId);
+      const bearer = mintInternalCapability({ botId: bot.id, threadId, generation, kind: "browser", browserSession: browser.session, depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }, { perTurn: true });
+      capability = authorizedInternalCapability(`Bearer ${bearer}`);
+      if (!capability) throw new Error("Browser permission is unavailable");
+      const held = capability;
+      const guard = () => {
+        if (!internalCapabilityIsActive(held)) throw new Error("Browser permission expired");
+        const current = store.bot(bot.id);
+        if (!current || current.browser === false || current.computer === "off" || !builtInBrowserEnabled(cfg) || currentBrowserSession(current.id, current.browserProfile, audience) !== browser.session) throw new Error("Browser access changed");
+        if (!claimTurnResource(held, `browser:${browser.session}`)) throw new Error("Another conversation is using this browser");
+      };
+      return await work(async (step, signal) => {
+        const refused = await browserSeats.take(held, browser.session, signal);
+        if (refused) throw new Error(refused);
+        guard();
+        const result = "kind" in step && step.kind === "list" ? await browserRuntime.listTargets(browser.session, browser.spec, step, signal, guard) : await browserRuntime.replaySteps(browser.session, browser.spec, [step], signal, guard);
+        guard(); browserSeats.used(held, browser.session);
+        return result;
+      });
+    } finally {
+      if (capability) releaseTurnResources(capability);
+      revokeInternalCapabilityGeneration(threadId, generation);
+      if (task && store.messagesFor(threadId).length === 0) { store.deleteTask(routine.botId, threadId); sessionCredentials.delete(threadId); }
+    }
+  },
+};
+const minimumAiHost = process.env.OMB_MINIMUM_AI_EXPERIMENT === "1" && !CLOUD_HOME && !CLOUD_TEAM ? createMinimumAiHost({ dataDir: DATA_DIR, browser: minimumAiBrowser, owner: ownerOrAdmin, routine: (id) => routines?.listRoutines().find((routine) => routine.id === id), services: () => composio.connectedServices(cfg), permitted: (botId, tool, slugs) => { const bot = store.bot(botId); return Boolean(bot && bot.composio !== false && evaluateConnectorTools([tool], bot.connectorTools, slugs).allowed && connectorAccessDecision(bot.connectorScopes, [{ slug: tool }], slugs).ok); }, serviceFor: serviceSlugForCandidates, planner: (botId) => botWorkflowPlanner(sideJobs, botId), withRelay: async (botId, _routineId, existingThread, work) => { const task = existingThread ? null : store.createTask(botId, "Minimum AI setup", false); const threadId = existingThread ?? task?.threadId; if (!threadId) throw new Error("Could not create a setup thread"); const generation = beginInternalCapabilityGeneration(threadId); const bearer = mintInternalCapability({ botId, threadId, generation, depth: 0, kind: "connectors", skillAuthoring: false, createdBots: 0, openedThreads: 0 }, { perTurn: true }); try { return await work(createGatedWorkflowRelay({ endpoint: `http://127.0.0.1:${PORT}/api/internal/connectors/mcp`, bearer })); } finally { revokeInternalCapabilityGeneration(threadId, generation); if (task && store.messagesFor(threadId).length === 0) { store.deleteTask(botId, threadId); sessionCredentials.delete(threadId); } } } }) : null; if (minimumAiHost) ROUTES.push(minimumAiHost.routes);
 routines = new RoutineManager({
+  ...(minimumAiHost ? { runWorkflow: (run, signal) => minimumAiHost.runWorkflow(run, signal) } : {}),
   emit: broadcast, limitResetAt: (engine) => limitClock.resetAt(engine), checks: proactive.checks,
   limitBackup: (botId, scope) => { const bot = store.bot(botId); return quotaSwitchEnabled() ? Boolean(bot && limitTakeover.backups(botId, bot.modelSelection, scope, approvalModeFor(bot)).length) : Boolean(bot && startupBackups(bot, cfg.automaticRecovery).length); },
   launchId: DESKTOP_MANAGED && /^[\w-]{1,100}$/.test(process.env.OMB_DESKTOP_LAUNCH_ID ?? "")
@@ -8862,7 +8946,7 @@ routines = new RoutineManager({
     const bot = store.bot(run.botId);
     if (!bot || alert === null || run.deliver === "brief") return;
     const said = alert?.detail ?? run.error, detail = said ? `${run.routineName}: ${said}` : run.routineName;
-    automationReports.runFailed(run, said ?? "");
+    if (run.executionMode !== "minimum-ai") automationReports.runFailed(run, said ?? "");
     const notificationBot = routineSourceOwner(run)?.bot ?? bot;
     notify(buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
     reportIncident({ kind: "routine-failed", bot, threadId: run.threadId ?? bot.threadId, detail });
@@ -11776,7 +11860,7 @@ function configStatus() {
       preserveInstalledApps: localVmPreservesInstalledApps(cfg),
     },
     features: {
-      skillAuthoring: skillAuthoringEnabled(cfg),
+      skillAuthoring: skillAuthoringEnabled(cfg), minimumAi: process.env.OMB_MINIMUM_AI_EXPERIMENT === "1" && !CLOUD_HOME && !CLOUD_TEAM,
       skillReview: cfg.features?.skillReview === true,
       skillReviewSteps: skillReviewSteps(cfg),
       skillsLibrary: skillsLibraryEnabled(cfg),
@@ -13116,6 +13200,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             params = { ...params, arguments: { ...params.arguments, files: await uploadPaths(upload.files.map((file, i) => ({ file, name: attachmentNameInThread(internalCapability.threadId, params.arguments.files[i]) })), browser.session, browser.spec) } };
           } catch (error) { requireActiveInternalCapability(); if (!(error instanceof BrowserUploadRefusal)) throw error; return json(res, 200, { result: { isError: true, content: [{ type: "text", text: error.message }] } }); }
         }
+        const recording = body.method === "tools/call" ? minimumAiRecordingTurns.browserCall(internalCapability.threadId, bot.id, internalCapability.generation) : undefined;
         const result = await browserRuntime.agentRpc(browser.session, browser.spec, body.method, params, () => {
           requireActiveInternalCapability();
           const current = store.bot(bot.id);
@@ -13126,7 +13211,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (body.method === "tools/call" && !claimTurnResource(internalCapability, `browser:${browser.session}`)) {
             throw Object.assign(new Error("another thread is using this browser — pause browser work until that thread finishes"), { status: 409 });
           }
-        }, stepContext(bot, internalCapability, () => liveTurnByThread.get(internalCapability.threadId) ?? null));
+        }, { ...stepContext(bot, internalCapability, () => liveTurnByThread.get(internalCapability.threadId) ?? null), ...(recording ? { minimumAiRecording: recording } : {}) });
         requireActiveInternalCapability(); if (body.method === "tools/call") browserSeats.used(internalCapability, browser.session);
         return json(res, 200, { result });
       }
@@ -14653,6 +14738,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     };
     if (path === "/api/routines" && method === "POST") {
       const body = await readBody(req);
+      if (body?.executionMode === "minimum-ai" && (!minimumAiHost || body.enabled !== false)) return json(res, 400, { error: "Minimum AI must be set up and approved before it can be enabled" });
       const refused = routineBodyRefusal(body); if (refused) return json(res, refused.status, { error: refused.error });
       const writer = auth.kind === "session" ? actorKey(auth) : CLOUD_NOBODY_KEY;
       const routine = withRoutineWriter(writer, () => routines!.create(teamRoutines.justMe(auth, body)));
@@ -14673,6 +14759,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     routineMatch = path.match(/^\/api\/routines\/([\w-]+)$/);
     if (routineMatch && method === "PATCH") {
       const body = await readBody(req);
+      if (body?.executionMode === "minimum-ai" && (!minimumAiHost || body.enabled !== false)) return json(res, 400, { error: "Minimum AI must be set up and approved before it can be enabled" });
+      if (body?.enabled === true && (body.executionMode === "minimum-ai" || (body.executionMode === undefined && routines!.listRoutines().find((routine) => routine.id === routineMatch![1])?.executionMode === "minimum-ai")) && (!minimumAiHost || !await minimumAiHost.canEnable(auth, routineMatch[1]).catch(() => false))) return json(res, 400, { error: "Review and approve this workflow before enabling it" });
       const refused = routineBodyRefusal(body, routines!.listRoutines().find((candidate) => candidate.id === routineMatch![1])); if (refused) return json(res, refused.status, { error: refused.error });
       const authors = cloudRoutineAuthors ?? phones.routineAuthors;
       const before = authors ? routines!.listRoutines().find((candidate) => candidate.id === routineMatch![1]) : undefined;

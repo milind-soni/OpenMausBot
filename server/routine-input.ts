@@ -48,6 +48,9 @@ export function routineThreadModel(routine: Pick<Routine, "botId" | "modelSelect
 }
 
 export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine, "id" | "createdAt" | "updatedAt" | "nextRunAt"> {
+  if (input.executionMode != null && input.executionMode !== "minimum-ai") throw new Error("Choose a valid execution mode");
+  if (input.executionMode === "minimum-ai" && (input.target === "room-goal" || input.runOn === "cloud")) throw new Error("Minimum AI currently supports bot tasks on this server only");
+  if (input.executionMode === "minimum-ai" && (input.attachments?.length || input.continuity || input.checks?.length || input.deliver || input.modelSelection || input.schedule?.type === "limit_reset")) throw new Error("Minimum AI does not yet support attachments, continuity, AI checks, brief delivery, model overrides or limit-reset schedules");
   const name = String(input.name ?? "").trim().slice(0, 80);
   const prompt = String(input.prompt ?? "").trim().slice(0, 20_000);
   const botId = String(input.botId ?? "").trim();
@@ -89,6 +92,7 @@ export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine,
   if (input.access != null && input.access !== "read-and-draft") throw userErrorThrown("serverError.routine.access");
   if (input.deliver != null && (input.deliver !== "brief" || target !== "bot")) throw userErrorThrown("serverError.routine.deliver");
   return {
+    ...(input.executionMode === "minimum-ai" ? { executionMode: "minimum-ai" as const } : {}),
     name,
     prompt,
     target,

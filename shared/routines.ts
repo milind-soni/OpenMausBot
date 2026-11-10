@@ -121,6 +121,7 @@ export function isRoutineProblemRun(run: { status: RoutineRunStatus }): boolean 
 export type RoutineRunStatusFilter = "all" | "problems" | RoutineRunStatus;
 
 export interface Routine {
+  executionMode?: "minimum-ai";
   id: string;
   name: string;
   prompt: string;
@@ -171,6 +172,7 @@ export interface Routine {
 }
 
 export interface RoutineRun {
+  executionMode?: "minimum-ai";
   id: string;
   routineId: string;
   routineName: string;
@@ -227,6 +229,7 @@ export interface RoutineRun {
 }
 
 export interface RoutineInput {
+  executionMode?: "minimum-ai" | null;
   name: string;
   prompt: string;
   target?: RoutineTarget;

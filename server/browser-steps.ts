@@ -11,6 +11,7 @@ import {
 } from "./browser-page-health.ts";
 import { RelayPorts, RelayTimeout, relay, relayPorts, relayTarget, type RelayTarget } from "./browser-relay.ts";
 import type { BrowserSpawnSpec } from "./browser-runtime.ts";
+import type { BrowserRecording } from "./minimum-ai/browser-replay.ts";
 import { sanitizeUrl, scrubBrowserResult } from "./browser-tool-shape.ts";
 import { browserEgress } from "./browser/egress/registry.ts";
 
@@ -21,6 +22,7 @@ export interface StepContext {
   generation: string;
   turnId: () => string | null;
   record: boolean;
+  minimumAiRecording?: BrowserRecording;
   label?: string;
 }
 
@@ -179,9 +181,11 @@ function pageKey(href: string): string | null {
 
 export class RefIndex {
   private refs = new Map<string, { role: string; name: string; inFrame: boolean }>();
+  private frameContext = new Set<string>();
 
   replace(texts: readonly string[], refs?: unknown): void {
     this.refs.clear();
+    this.frameContext.clear();
     const frames: number[] = [];
     for (const text of texts) {
       for (const line of text.split("\n")) {
@@ -192,7 +196,7 @@ export class RefIndex {
         const ref = /\[ref=(e\d+)\]/u.exec(line)?.[1];
         let name = item[3] ?? "";
         try { name = JSON.parse(`"${name}"`) as string; } catch {}
-        if (ref) this.refs.set(ref, { role: item[2]!, name, inFrame: frames.length > 0 });
+        if (ref) { this.refs.set(ref, { role: item[2]!, name, inFrame: frames.length > 0 }); this.frameContext.add(ref); }
         if (item[2]!.toLowerCase() === "iframe") frames.push(indent);
       }
     }
@@ -204,11 +208,31 @@ export class RefIndex {
     }
   }
 
-  clear(): void { this.refs.clear(); }
+  clear(): void { this.refs.clear(); this.frameContext.clear(); }
 
   get(selector: string): { role: string; name: string; inFrame: boolean } | undefined {
     const ref = /^@?(e\d+)$/u.exec(selector.trim())?.[1];
     return ref ? this.refs.get(ref) : undefined;
+  }
+
+  /** A saved target must resolve to exactly one current, top-level accessibility element. */
+  uniqueTarget(role: string, name: string, complete: boolean): string | null {
+    if (!complete || !role.trim() || !name.trim()) return null;
+    const matches = [...this.refs].filter(([, entry]) => entry.role === role && entry.name === name);
+    return matches.length === 1 && this.frameContext.has(matches[0]![0]) && !matches[0]![1].inFrame ? `@${matches[0]![0]}` : null;
+  }
+
+  matchingTargets(role: string, prefix: string): Array<{ role: string; name: string }> {
+    if (!role.trim() || !prefix.trim()) throw new Error("A role and literal prefix are required");
+    const matches = [...this.refs].filter(([, entry]) => entry.role === role && entry.name.startsWith(prefix));
+    if (matches.length > 500 || matches.some(([ref, entry]) => !this.frameContext.has(ref) || entry.inFrame || !entry.name || this.uniqueTarget(entry.role, entry.name, true) !== `@${ref}`)) throw new Error("The browser targets are ambiguous or incomplete");
+    return matches.map(([, entry]) => ({ role: entry.role, name: entry.name }));
+  }
+
+  namedTargets(role: string): string[] {
+    const matches = [...this.refs].filter(([, entry]) => entry.role === role && entry.name);
+    if (matches.length > 500 || matches.some(([ref, entry]) => !this.frameContext.has(ref) || entry.inFrame)) throw new Error("The browser targets are incomplete");
+    return matches.map(([, entry]) => entry.name);
   }
 }
 

@@ -88,6 +88,7 @@ export function loadModelSelection(value: unknown): ModelSelection | undefined {
 }
 
 export function loadRoutine(routine: Routine, now: number): Routine | null {
+  if (routine.executionMode !== undefined && routine.executionMode !== "minimum-ai") return null;
   const schedule = loadSchedule(routine.schedule, now);
   if (!schedule) return null;
   const target = loadTarget(routine.target);
@@ -121,6 +122,7 @@ export function loadRun(run: RoutineRun): RoutineRun {
   const target = loadTarget(run.target);
   const loaded: RoutineRun = {
     ...run,
+    ...(run.executionMode !== undefined && run.executionMode !== "minimum-ai" ? { status: "failed" as const, error: "Invalid automation execution mode", finishedAt: Date.now() } : {}),
     target,
     goalStatus: loadGoalStatus(run.goalStatus, target),
     groupId: loadGroupId(run.groupId, target),
