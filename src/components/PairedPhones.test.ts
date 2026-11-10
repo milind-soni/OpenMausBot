@@ -37,6 +37,18 @@ describe("paired phones", () => {
     expect(phoneSubtitle(phone(), false, true)).toMatch(/^Last seen /);
   });
 
+  it("on a phone whose older app lost its way in, says to update and pair again, with Pair again right there", () => {
+    const retired = { ...c, account: { available: true, status: "ready", tunnelRetired: true } } as unknown as PhoneSetupController;
+    const rowFor = (device: PhoneDevice, controller: PhoneSetupController, onPairAgain?: () => void) =>
+      createElement(PhoneRow, { device, connected: false, state: state(), c: controller, onRemoved: () => {}, onPairAgain });
+    const markup = renderToStaticMarkup(rowFor(phone(), retired, () => {}));
+    expect(markup).toContain("This phone has an older MausBot app. Update the app, then pair it again here.");
+    expect(markup).toMatch(/<button type="button"[^>]*>Pair again<\/button>/);
+    expect(renderToStaticMarkup(rowFor(phone(), retired)), "no way to pair from here: no button").not.toContain("Pair again");
+    expect(renderToStaticMarkup(rowFor(phone({ e2eAt: NOW }), retired, () => {})), "a phone on the encrypted connection").not.toContain("older MausBot app");
+    expect(renderToStaticMarkup(rowFor(phone(), c, () => {})), "the link not ended").not.toContain("older MausBot app");
+  });
+
   it("lists connected phones first, then the most recently seen", () => {
     const order = sortPhones(
       [phone({ id: "a", lastSeenAt: 3 }), phone({ id: "b", lastSeenAt: 1 }), phone({ id: "c", lastSeenAt: 2 })],

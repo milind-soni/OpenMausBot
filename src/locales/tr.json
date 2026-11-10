@@ -5584,5 +5584,10 @@
   "settings.simple.more.title": "Diğer ayarlar",
   "settings.simple.more.subtitle": "Yedekler, sınırlar ve nadiren değiştirdiğiniz ayarlar.",
   "settings.simple.more.limits": "Sınırlar",
-  "settings.simple.more.open": "Aç"
+  "settings.simple.more.open": "Aç",
+  "phoneUpdate.title": "Telefonunuzda MausBot'u güncelleyin",
+  "phoneUpdate.body": "{phone} cihazında MausBot uygulamasının eski bir sürümü var ve artık Wi-Fi ağınızın dışından bu bilgisayara bağlanamıyor. O telefonda uygulamayı güncelleyin, ardından yeniden eşleştirin.",
+  "phoneUpdate.bodyMany": "{count} telefonunuzda MausBot uygulamasının eski bir sürümü var ve artık Wi-Fi ağınızın dışından bu bilgisayara bağlanamıyor. Her telefonda uygulamayı güncelleyin, ardından yeniden eşleştirin.",
+  "phoneUpdate.open": "Telefon ve cihazlar'ı aç",
+  "remote.devices.pairAgain": "Yeniden eşleştir"
 }

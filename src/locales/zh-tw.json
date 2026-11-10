@@ -9817,5 +9817,10 @@
   "remote.client.endsDec7": "這種連線方式將於 12 月 7 日停止。之後請在另一台電腦的「手機和裝置」中重新配對這台電腦。",
   "phone.code.pairingCode": "配對碼",
   "phone.code.typeIntro": "開啟 {app} 應用程式並輸入這個配對碼。",
-  "phone.signIn.emailCode": "電子郵件中的登入碼"
+  "phone.signIn.emailCode": "電子郵件中的登入碼",
+  "phoneUpdate.title": "請更新手機上的 MausBot",
+  "phoneUpdate.body": "{phone} 上的 MausBot 應用程式是舊版本，離開你的 Wi-Fi 後已無法連線到這台電腦。請在那支手機上更新應用程式，然後重新配對。",
+  "phoneUpdate.bodyMany": "你有 {count} 支手機上的 MausBot 應用程式是舊版本，離開你的 Wi-Fi 後已無法連線到這台電腦。請在每支手機上更新應用程式，然後重新配對。",
+  "phoneUpdate.open": "開啟「手機和裝置」",
+  "remote.devices.pairAgain": "重新配對"
 }

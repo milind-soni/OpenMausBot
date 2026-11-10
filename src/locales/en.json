@@ -10080,5 +10080,10 @@
   "phone.code.typeIntro": "Open the {app} app and type this pairing code.",
   "phone.signIn.emailCode": "Sign-in code from your email",
   "settings.simple.account.noNameHint": "Not set yet",
-  "settings.simple.account.yourName": "Your name"
+  "settings.simple.account.yourName": "Your name",
+  "phoneUpdate.title": "Update MausBot on your phone",
+  "phoneUpdate.body": "{phone} has an older version of the MausBot app, which can no longer connect to this computer away from your Wi-Fi. Update the app on that phone, then pair it again.",
+  "phoneUpdate.bodyMany": "{count} of your phones have an older version of the MausBot app, which can no longer connect to this computer away from your Wi-Fi. Update the app on each phone, then pair it again.",
+  "phoneUpdate.open": "Open Phone & devices",
+  "remote.devices.pairAgain": "Pair again"
 }

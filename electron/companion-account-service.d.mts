@@ -23,6 +23,7 @@ export declare function resolveCompanionControlPlaneURL(options?: {
   environment?: NodeJS.ProcessEnv;
 }): string;
 export declare function companionAccountCleanupPending(credentials: CredentialDocument): boolean;
+export declare function companionTunnelRetired(credentials: CredentialDocument): boolean;
 /** true while a pairing window is open or a paired device was seen in the
  * last 30 days (or is connected, or has no known last-seen time); "unused"
  * when devices are paired but none was seen for 30 days; false only for a

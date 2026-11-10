@@ -7426,5 +7426,10 @@
   "remote.client.endsDec7": "이 연결 방식은 12월 7일에 끝납니다. 그 후에는 다른 컴퓨터의 휴대폰 및 기기에서 이 컴퓨터를 다시 페어링하세요.",
   "phone.code.pairingCode": "페어링 코드",
   "phone.code.typeIntro": "{app} 앱을 열고 이 페어링 코드를 입력하세요.",
-  "phone.signIn.emailCode": "이메일로 받은 로그인 코드"
+  "phone.signIn.emailCode": "이메일로 받은 로그인 코드",
+  "phoneUpdate.title": "휴대폰의 MausBot을 업데이트하세요",
+  "phoneUpdate.body": "{phone}의 MausBot 앱은 이전 버전이라 이제 Wi-Fi 밖에서는 이 컴퓨터에 연결할 수 없습니다. 그 휴대폰에서 앱을 업데이트한 다음 다시 페어링하세요.",
+  "phoneUpdate.bodyMany": "휴대폰 {count}대의 MausBot 앱이 이전 버전이라 이제 Wi-Fi 밖에서는 이 컴퓨터에 연결할 수 없습니다. 각 휴대폰에서 앱을 업데이트한 다음 다시 페어링하세요.",
+  "phoneUpdate.open": "휴대폰 및 기기 열기",
+  "remote.devices.pairAgain": "다시 페어링"
 }

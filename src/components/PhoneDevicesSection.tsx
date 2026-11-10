@@ -17,6 +17,7 @@ import {
 } from "./PhoneSetupFlow";
 import { companionPairingMode } from "../lib/phone-setup";
 import { revealPhonePairing } from "../lib/phone-pairing";
+import { showTunnelRetiredNotice } from "../lib/phone-link";
 import { PhonesList } from "./PhonesList";
 import { PairedPhones } from "./PairedPhones";
 import { Card, Switch } from "./SettingsPrimitives";
@@ -29,6 +30,7 @@ export {
   companionPairingMode,
   loadCompanionBridgeState,
   shouldHydrateCompanionEmail,
+  showTunnelRetiredNotice,
 };
 
 export interface CompanionPanelStatus {
@@ -141,14 +143,6 @@ export function shouldResumePausedAddress(
   state: Pick<CompanionState, "enabled" | "devices" | "error"> | null,
 ): boolean {
   return account?.paused === true && account.available && state?.enabled === true && !state.error && state.devices.length > 0;
-}
-
-/** The secure address was ended for old phone apps and a phone here still depends on it: say what to do, once. */
-export function showTunnelRetiredNotice(
-  account: Pick<CompanionAccountState, "tunnelRetired"> | null,
-  state: Pick<CompanionState, "devices"> | null,
-): boolean {
-  return account?.tunnelRetired === true && Boolean(state?.devices.some((device) => !device.e2eAt));
 }
 
 export const relative = (at: number) => {
@@ -368,6 +362,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
   const tailscaleOn = state.routes?.tailscale?.on === true;
   const httpsOn = state.routes?.https?.on === true;
   const hosted = state.endpoints?.find((endpoint) => endpoint.kind === "hosted");
+  const pairAgain = c.busy || remoteBlocked ? undefined : () => setPairing("device");
   const pairButton = (label: string) => (
     <button type="button" disabled={c.busy || Boolean(remoteBlocked)} title={managedBy ?? undefined} onClick={() => setPairing("device")}
       className="w-fit rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white disabled:opacity-40" data-pair-device="">
@@ -387,7 +382,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
         ) : (
           <div className="flex flex-col gap-3 rounded-xl border border-hairline/40 bg-card px-4 py-3">
             <div className="text-[13px] font-medium text-ink">{t("devices.simple.yourPhone")}</div>
-            <PairedPhones c={c} state={state} />
+            <PairedPhones c={c} state={state} onPairAgain={pairAgain} />
             <div className="text-[12px] text-ink-secondary">
               {reachLine(state)}{" "}
               <button type="button" className="text-accent hover:underline" onClick={() => setShowRoutes(true)}>{t("devices.change")}</button>
@@ -416,7 +411,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
           </p>
         )}
         <OpenCodeRow c={c} state={state} />
-        {pairedCount ? <PairedPhones c={c} state={state} /> : !state.pairing && <div className="text-[12px] text-ink-secondary">{t("devices.pairedNone")}</div>}
+        {pairedCount ? <PairedPhones c={c} state={state} onPairAgain={pairAgain} /> : !state.pairing && <div className="text-[12px] text-ink-secondary">{t("devices.pairedNone")}</div>}
         <PhonesList />
       </section>
 

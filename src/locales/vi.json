@@ -5584,5 +5584,10 @@
   "settings.simple.more.title": "Cài đặt khác",
   "settings.simple.more.subtitle": "Sao lưu, giới hạn và các cài đặt bạn ít khi thay đổi.",
   "settings.simple.more.limits": "Giới hạn",
-  "settings.simple.more.open": "Mở"
+  "settings.simple.more.open": "Mở",
+  "phoneUpdate.title": "Cập nhật MausBot trên điện thoại",
+  "phoneUpdate.body": "{phone} đang dùng phiên bản cũ của ứng dụng MausBot, nên không thể kết nối với máy tính này khi ở ngoài Wi-Fi của bạn nữa. Hãy cập nhật ứng dụng trên điện thoại đó, rồi ghép nối lại.",
+  "phoneUpdate.bodyMany": "{count} điện thoại của bạn đang dùng phiên bản cũ của ứng dụng MausBot, nên không thể kết nối với máy tính này khi ở ngoài Wi-Fi của bạn nữa. Hãy cập nhật ứng dụng trên từng điện thoại, rồi ghép nối lại.",
+  "phoneUpdate.open": "Mở Điện thoại và thiết bị",
+  "remote.devices.pairAgain": "Ghép nối lại"
 }

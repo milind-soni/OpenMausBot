@@ -6705,5 +6705,10 @@
   "settings.simple.more.title": "Altre impostazioni",
   "settings.simple.more.subtitle": "Backup, limiti e impostazioni che cambi di rado.",
   "settings.simple.more.limits": "Limiti",
-  "settings.simple.more.open": "Apri"
+  "settings.simple.more.open": "Apri",
+  "phoneUpdate.title": "Aggiorna MausBot sul telefono",
+  "phoneUpdate.body": "{phone} ha una versione precedente dell'app MausBot, che non può più collegarsi a questo computer fuori dalla tua Wi-Fi. Aggiorna l'app su quel telefono, poi abbinalo di nuovo.",
+  "phoneUpdate.bodyMany": "{count} dei tuoi telefoni hanno una versione precedente dell'app MausBot, che non può più collegarsi a questo computer fuori dalla tua Wi-Fi. Aggiorna l'app su ogni telefono, poi abbinalo di nuovo.",
+  "phoneUpdate.open": "Apri Telefono e dispositivi",
+  "remote.devices.pairAgain": "Abbina di nuovo"
 }

@@ -6843,5 +6843,10 @@
   "settings.simple.more.title": "Więcej ustawień",
   "settings.simple.more.subtitle": "Kopie zapasowe, limity i ustawienia, które rzadko zmieniasz.",
   "settings.simple.more.limits": "Limity",
-  "settings.simple.more.open": "Otwórz"
+  "settings.simple.more.open": "Otwórz",
+  "phoneUpdate.title": "Zaktualizuj MausBot na telefonie",
+  "phoneUpdate.body": "{phone} ma starszą wersję aplikacji MausBot, która nie może już łączyć się z tym komputerem poza Twoją siecią Wi-Fi. Zaktualizuj aplikację na tym telefonie, a potem sparuj go ponownie.",
+  "phoneUpdate.bodyMany": "Twoje telefony ({count}) mają starszą wersję aplikacji MausBot, która nie może już łączyć się z tym komputerem poza Twoją siecią Wi-Fi. Zaktualizuj aplikację na każdym telefonie, a potem sparuj go ponownie.",
+  "phoneUpdate.open": "Otwórz Telefon i urządzenia",
+  "remote.devices.pairAgain": "Sparuj ponownie"
 }

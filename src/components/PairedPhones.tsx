@@ -23,12 +23,13 @@ export function phoneSubtitle(device: PhoneDevice, connected: boolean, e2eEnable
   return parts.join(" · ");
 }
 
-export function PhoneRow({ device, connected, state, c, onRemoved, defaultOpen = false }: {
+export function PhoneRow({ device, connected, state, c, onRemoved, onPairAgain, defaultOpen = false }: {
   device: PhoneDevice;
   connected: boolean;
   state: CompanionState;
   c: PhoneSetupController;
   onRemoved: (name: string) => void;
+  onPairAgain?: () => void;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -44,7 +45,12 @@ export function PhoneRow({ device, connected, state, c, onRemoved, defaultOpen =
           <div className="truncate text-[14px] font-medium text-ink">{device.name}</div>
           <div className="truncate text-[12px] text-ink-secondary">{phoneSubtitle(device, connected, e2eEnabled)}</div>
           {c.account?.paused && <div className="truncate text-[12px] text-ink-secondary">{t("remote.devices.paused")}</div>}
-          {c.account?.tunnelRetired && !device.e2eAt && <div className="text-[12px] leading-relaxed text-warning">{t("remote.devices.retired")}</div>}
+          {c.account?.tunnelRetired && !device.e2eAt && (
+            <div className="text-[12px] leading-relaxed text-warning" data-phone-retired="">
+              {t("remote.devices.retired")}
+              {onPairAgain && <>{" "}<button type="button" className="text-accent hover:underline" onClick={onPairAgain}>{t("remote.devices.pairAgain")}</button></>}
+            </div>
+          )}
         </div>
         <button
           onClick={() => setOpen((value) => !value)}
@@ -115,7 +121,7 @@ export function PhoneRow({ device, connected, state, c, onRemoved, defaultOpen =
 }
 
 /** One grouped card: a dot, the name and one line per phone. Remove acts at once. */
-export function PairedPhones({ c, state }: { c: PhoneSetupController; state: CompanionState }) {
+export function PairedPhones({ c, state, onPairAgain }: { c: PhoneSetupController; state: CompanionState; onPairAgain?: () => void }) {
   const [removed, setRemoved] = useState<string | null>(null);
   const connected = new Set(state.connectedDeviceIds ?? []);
   if (state.devices.length === 0 && !removed) return null;
@@ -124,7 +130,7 @@ export function PairedPhones({ c, state }: { c: PhoneSetupController; state: Com
       {state.devices.length > 0 && (
         <ul className="rounded-xl border border-hairline/40 bg-card">
           {sortPhones(state.devices, connected).map((device) => (
-            <PhoneRow key={device.id} device={device} connected={connected.has(device.id)} state={state} c={c} onRemoved={setRemoved} />
+            <PhoneRow key={device.id} device={device} connected={connected.has(device.id)} state={state} c={c} onRemoved={setRemoved} onPairAgain={onPairAgain} />
           ))}
         </ul>
       )}
