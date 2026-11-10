@@ -12,7 +12,7 @@ import { accountFullName } from "./system-name.mjs";
 
 export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 /** The only notices a page may record, so no page can write anything else into the file. */
-export const DESKTOP_NOTICES = Object.freeze(["whats-new-2026-11", "boat-credit-2026-11", "grok-move-2026-11"]);
+export const DESKTOP_NOTICES = Object.freeze(["whats-new-2026-11", "boat-credit-2026-11", "grok-move-2026-11", "modelgo-offer-2026-11"]);
 const WHATS_NEW = DESKTOP_NOTICES[0];
 /** A locale code such as "de" or "pt-br", or "" for following the system. */
 const LANGUAGE = /^(?:[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,2})?$/i;

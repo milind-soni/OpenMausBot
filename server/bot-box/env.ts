@@ -38,7 +38,7 @@ export const BOX_ENV_OMB_PREFIXES: readonly string[] = ["OMB_MCP_TOKEN_", "OMB_G
 export const BOX_ENV_PREFIXES: readonly string[] = [
   "LC_", "OPENMAUSBOT_", "NPM_CONFIG_", "npm_config_",
   "ANTHROPIC_", "CLAUDE_", "CODEX_", "OPENAI_", "OPENCODE_", "OPENROUTER_", "GEMINI_", "GOOGLE_", "GROK_", "XAI_",
-  "MISTRAL_", "CEREBRAS_", "GROQ_", "GREENFERENCE_", "META_", "MINIMAX_", "KIMI_", "MOONSHOT_", "CURSOR_", "FACTORY_", "CLINE_", "HERMES_",
+  "MISTRAL_", "CEREBRAS_", "GROQ_", "GREENFERENCE_", "MODELGO_", "META_", "MINIMAX_", "KIMI_", "MOONSHOT_", "CURSOR_", "FACTORY_", "CLINE_", "HERMES_",
   "MUSE_", "PI_", "DWEB_", "UNSLOTH_", "FAKE_CLAUDE_", "MCP_", "ANTIGRAVITY_", "AGY_",
 ];
 

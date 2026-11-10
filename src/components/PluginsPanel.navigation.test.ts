@@ -588,7 +588,7 @@ describe("Apps pop-up", () => {
     expect(html).toContain(`Show all ${APPS_PREVIEW_COUNT + 5} apps`);
   });
 
-  it("keeps the per-bot banner, stale notice and self-host key link reachable", () => {
+  it("keeps the stale notice reachable and no longer sends people to a settings page for per-bot access", () => {
     fixture.instances = [claude];
     fixture.bots = [bot("scout", { composio: false })];
     fixture.overrides.set(7, true);
@@ -596,8 +596,7 @@ describe("Apps pop-up", () => {
     expect(html).toContain("Showing what was connected last time");
     fixture.overrides.set(7, false);
     ({ html } = render());
-    expect(html).toContain("Not every bot can use these apps.");
-    expect(html).toContain("Allow scout");
+    expect(html).not.toContain("Settings → Access");
   });
 
   it("names the bots that use a connected app", () => {

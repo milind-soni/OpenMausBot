@@ -1178,16 +1178,24 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   signed `POST /api/cloud/plan` `{"v":1,"tier":"starter"}` (`server/host/cloud-plan-tier.ts`), and a
   home it never told has no such limit. What a bot's own turn starts always goes through,
   and a teammate's hand-off never takes that one thread from the person.
-- **How many bots a Starter Cloud makes.** Five beside its MausBot, one number in
-  `server/host/starter-bot-limit.ts`, from the same signed plan. An archived bot or one
-  that moved away takes no room. Making one past it answers `409` with
-  `{"code":"bot_limit","error":"…"}` from `POST /api/bots`, `POST /api/teams/import`,
-  `POST /api/org-library/add` and a Chief's `create_bot` and `propose_team_setup`; a group that
-  doesn't fit is refused whole, before anything is written. The app opens its upgrade popup
-  when a create button is pressed with no room, and on that refusal. A bot is never taken away:
-  a Cloud over the limit (a downgrade, a move) keeps every one and only making a new one stops.
-  A bot arriving with its own id (a move) and a backup restored are never refused. The limit
-  lifts as soon as the Admin tells the home its new plan, with no restart.
+- **How many bots a Starter Cloud makes and keeps awake.** Any number; five of them,
+  beside its MausBot and its Chief of Staff, take turns (`STARTER_AWAKE_LIMIT` in
+  `server/host/starter-awake.ts`), from the same signed plan, and the rest are paused with
+  everything they know kept. An archived bot or one that moved away isn't counted. The awake
+  set is written down (`starter-awake.json`) while every bot still fits, so a bot made past
+  the five starts paused and never pushes out one the person was using: `POST /api/bots`
+  answers it with `"paused": true`, and the app opens **Keep these awake** with the new bot
+  chosen in place of the least recently active one that isn't working (`POST /api/starter/awake`).
+  A Chief's `create_bot` answers with a `paused` line for the person. A restore or a move into a
+  Cloud that never wrote a set down wakes the most recently active. A paused bot's turn answers
+  `409` `{"code":"bot_paused"}`, a hand-off to it is refused, a routine or webhook run for it
+  fails at once with that line (no conversation is made, and it never wakes a sleeping Cloud),
+  and its daily memory upkeep waits. Every bot wakes as soon as the Admin tells the home its new
+  plan, with no restart. An older server refuses a sixth bot with `409` `{"code":"bot_limit"}`;
+  the app still shows its upgrade popup for that. Every plan holds at most 100 bots
+  (`MAX_WORKSPACE_BOTS`), counted on `POST /api/bots`, a package import and a Chief's setup.
+- **How much a Starter Cloud runs at once.** Two turns Cloud-wide, and four hand-offs waiting
+  beyond them; past that a new hand-off is refused (`server/host/starter-caps.ts`).
 - **Who goes first.** The gate only changes the order, never how much it lets in. A
   person's own work goes first: their line, or a turn going on from what they answered.
   Bot work that has waited 5 minutes takes its place by arrival, so it is never starved
