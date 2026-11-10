@@ -11827,7 +11827,10 @@ function configStatus() {
 /** `session`: who is asking. On a Team Cloud the profile is theirs alone, never the server's. */
 function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean, session?: SessionRecord | null) {
   const profile: MemberProfile = CLOUD_TEAM ? (session ? teamHost.memberProfile(session) : NOBODY_PROFILE) : status.profile;
-  if (admin) return CLOUD_TEAM ? { ...status, profile } : status;
+  if (admin) return CLOUD_TEAM ? {
+    ...status, profile,
+    browserEngine: status.browserEngine ? { ...status.browserEngine, proxyEditable: session?.teamRole === "owner" } : undefined,
+  } : status;
   // Client sessions get configured-or-not only: no SSH alias, email, browser partition id or sign-in list.
   return {
     ...withoutKeyHints(status),
@@ -12389,7 +12392,7 @@ const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persi
   store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
   sharedComputers, sharedComputerControl, closeBrowser, browserEngineSwitched,
   hostedModels: Boolean(hostedModels),
-  cloudHome: Boolean(CLOUD_HOME), sharedMembership,
+  cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null, sharedMembership,
   lendingEnabled: () => lendingEnabled() || ownerLends(), providerConfigs, localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy,
   localVmImageBusy: { get: () => localVmImageBusy },
   localVmModeChangeBusy: { set: (busy) => { localVmModeChangeBusy = busy; } },

@@ -202,6 +202,7 @@ export class ChromeLauncher implements BrowserLaunch {
         : "Getting the browser ready. Try again in a moment.");
     }
     if (this.state.kind === "failed") throw new Error(`Chrome could not be started (${this.state.reason}). Try again: your next browser call uses the built-in browser.`);
+    this.followLanguage();
   }
 
   async started(session: string, spec: LaunchSpec): Promise<void> {

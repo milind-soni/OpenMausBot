@@ -206,6 +206,8 @@ export interface BrowserEngineSummary {
   proxyConfigured?: boolean;
   /** Whether an owner-configured SOCKS5 upstream is saved, even if the current browser engine cannot use it. */
   proxySaved?: boolean;
+  /** Team Cloud only: whether this caller may change the shared SOCKS5 upstream. */
+  proxyEditable?: boolean;
 }
 
 export interface BrowserProfile {

@@ -99,6 +99,20 @@ describe("the Chrome launcher", () => {
     expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=ko-KR'");
   });
 
+  it("refreshes the launcher language between env and a cached ready call", async () => {
+    const machine = mac({ env: { LANG: "en_US.UTF-8" } });
+    let appLanguage = "en";
+    const chrome = launcher(machine, { language: () => appLanguage });
+    await chrome.ready(headless(chrome.path));
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=en'");
+
+    expect(chrome.env()).toEqual({ AGENT_BROWSER_EXECUTABLE_PATH: chrome.path, AGENT_BROWSER_HIDE_SCROLLBARS: "0" });
+    appLanguage = "ko";
+    await chrome.ready(headless(chrome.path));
+
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=ko-KR'");
+  });
+
   it("reads the identity again after Chrome updated itself in place", async () => {
     const machine = mac();
     const calibrate = vi.fn(async () => identity("155"));

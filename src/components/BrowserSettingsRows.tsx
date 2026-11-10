@@ -91,11 +91,12 @@ export function ServerSitesRow() {
 export function BrowserProxyRow() {
   const { state } = useStore();
   const owner = useOwnerOrAdmin();
+  const canEditProxy = state.config?.team ? state.config.browserEngine?.proxyEditable === true : owner === true;
   const configured = state.config?.browserEngine?.proxyConfigured === true;
   const saved = state.config?.browserEngine?.proxySaved === true || configured;
   const [endpoint, setEndpoint] = useState("");
   const { saving, error, save } = useConfigSave();
-  if (owner !== true || (!builtInBrowserEnabled(state.config) && !saved)) return null;
+  if (!canEditProxy || (!builtInBrowserEnabled(state.config) && !saved)) return null;
 
   return (
     <SettingRow

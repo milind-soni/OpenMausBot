@@ -140,4 +140,15 @@ describe("Built-in browser proxy setting", () => {
     expect(body.browserEngine.egress.proxy).toBe("socks5://127.0.0.1:1080");
     expect(fixture.dispatch.mock.calls[0]![0].config.browserEngine.proxyConfigured).toBe(true);
   });
+
+  it("hides the shared proxy control from Team Cloud admins who are not the owner", () => {
+    owner.value = true;
+    fixture.config = { team: { id: "team", name: "Team" }, features: { browser: true }, browserEngine: { kind: "engine", proxyEditable: false } };
+    show();
+    expect(host.querySelector('input[aria-label="SOCKS5 proxy"]')).toBeNull();
+
+    fixture.config = { team: { id: "team", name: "Team" }, features: { browser: true }, browserEngine: { kind: "engine", proxyEditable: true } };
+    show();
+    expect(host.querySelector('input[aria-label="SOCKS5 proxy"]')).not.toBeNull();
+  });
 });

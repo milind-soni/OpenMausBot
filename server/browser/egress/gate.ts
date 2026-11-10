@@ -156,6 +156,7 @@ async function connectSocks5(proxy: { host: string; port: number }, target: Gate
     if (!length) throw new Error("SOCKS5 proxy returned an invalid response.");
     await readAtLeast(length + 2);
     if (head[1] !== 0) throw Object.assign(new Error("SOCKS5 proxy refused the connection."), { code: head[1] === 2 ? "EACCES" : "ECONNREFUSED" });
+    if (pending.length) socket.unshift(pending);
     socket.setTimeout(0);
     return socket;
   } catch (error) {
@@ -308,13 +309,13 @@ export function openGate(options: GateOptions): Promise<EgressGate> {
         }
         if (!addresses.length) return refuse(client, HOST_UNREACHABLE);
         const own = options.own?.();
-        const publicTarget = addresses.every(({ address }) => addressClass(address, own) === "public");
         const configuredProxy = options.upstreamProxy?.() ?? null;
-        const proxy = configuredProxy && publicTarget && !staysHere(target.host, own) ? configuredProxy : null;
+        const proxy = configuredProxy && !staysHere(target.host, own) ? configuredProxy : null;
         if (proxy) {
           let tunnel: Socket | null = null;
           let lastError: unknown;
-          for (const { address } of addresses) {
+          const publicAddresses = addresses.filter(({ address }) => addressClass(address, own) === "public");
+          for (const { address } of publicAddresses) {
             if (client.destroyed) return;
             try {
               // The proxy receives only the checked IPs above, not a hostname it could resolve differently.
@@ -327,8 +328,20 @@ export function openGate(options: GateOptions): Promise<EgressGate> {
             }
           }
           if (!tunnel) {
+            const directAddresses = addresses.filter(({ address }) => addressClass(address, own) !== "public");
+            if (directAddresses.length) {
+              try {
+                client.pause();
+                tunnel = await connectChecked(target.port, directAddresses, track, client);
+              } catch (error) {
+                if (client.destroyed) return;
+                lastError = error;
+              }
+            }
+          }
+          if (!tunnel) {
             const code = (lastError as NodeJS.ErrnoException | undefined)?.code;
-            return refuse(client, code === "ECONNREFUSED" ? CONNECTION_REFUSED : HOST_UNREACHABLE);
+            return refuse(client, code === "ECONNREFUSED" || lastError === undefined ? CONNECTION_REFUSED : HOST_UNREACHABLE);
           }
           if (client.destroyed) return void tunnel.destroy();
           client.off("data", holdEarly);

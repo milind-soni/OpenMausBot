@@ -230,6 +230,94 @@ describe("egress gate", () => {
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
   });
 
+  it("preserves destination bytes sent with a SOCKS5 CONNECT reply", async () => {
+    const first = Buffer.from("first-bytes");
+    const upstream = NodeNet.createServer((socket) => {
+      let data = Buffer.alloc(0);
+      let greeted = false;
+      socket.on("data", (chunk) => {
+        data = Buffer.concat([data, chunk]);
+        if (!greeted && data.length >= 3) {
+          data = data.subarray(3);
+          greeted = true;
+          socket.write(Buffer.from([5, 0]));
+        }
+        if (greeted && data.length >= 10 && data[0] === 5 && data[1] === 1) {
+          socket.write(Buffer.concat([Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]), first]));
+          socket.removeAllListeners("data");
+        }
+      });
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const proxyPort = (upstream.address() as NodeNet.AddressInfo).port;
+    const opened = await openGate({
+      decide: async () => null,
+      resolve: async () => [{ address: "93.184.215.14", family: 4 }],
+      upstreamProxy: () => ({ host: "127.0.0.1", port: proxyPort }),
+    });
+    gates.push(opened);
+    const socket = NodeNet.connect(opened.port, "127.0.0.1");
+    socket.on("error", () => {});
+    let received = Buffer.alloc(0);
+    const response = new Promise<Buffer>((resolve) => {
+      socket.on("data", (chunk) => {
+        received = Buffer.concat([received, chunk]);
+        if (received.includes(first)) resolve(received);
+      });
+    });
+    await new Promise<void>((resolve) => socket.once("connect", resolve));
+    socket.write(Buffer.concat([Buffer.from([5, 1, 0, 5, 1, 0]), domainTarget("example.com", 443)]));
+    const bytes = await response;
+    expect(bytes.subarray(0, 2)).toEqual(Buffer.from([5, 0]));
+    expect(bytes.subarray(2, 12)).toEqual(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
+    expect(bytes.subarray(12)).toEqual(first);
+    socket.destroy();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  });
+
+  it("proxies checked public answers in mixed DNS results and keeps permitted local answers direct", async () => {
+    const requested: string[] = [];
+    const proxy = NodeNet.createServer((socket) => {
+      let data = Buffer.alloc(0);
+      let greeted = false;
+      socket.on("data", (chunk) => {
+        data = Buffer.concat([data, chunk]);
+        if (!greeted && data.length >= 3) {
+          data = data.subarray(3);
+          greeted = true;
+          socket.write(Buffer.from([5, 0]));
+        }
+        if (greeted && data.length >= 10 && data[0] === 5 && data[1] === 1) {
+          requested.push([...data.subarray(4, 8)].join("."));
+          socket.write(Buffer.from([5, 5, 0, 1, 0, 0, 0, 0, 0, 0]));
+          socket.removeAllListeners("data");
+        }
+      });
+    });
+    const local = NodeNet.createServer((socket) => socket.pipe(socket));
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) => local.listen(0, "127.0.0.1", resolve));
+    const proxyPort = (proxy.address() as NodeNet.AddressInfo).port;
+    const localPort = (local.address() as NodeNet.AddressInfo).port;
+    const opened = await openGate({
+      decide: async () => null,
+      resolve: async () => [{ address: "93.184.215.14", family: 4 }, { address: "127.0.0.1", family: 4 }],
+      upstreamProxy: () => ({ host: "127.0.0.1", port: proxyPort }),
+    });
+    gates.push(opened);
+    const { code, socket } = await connectThrough(opened.port, domainTarget("mixed.example", localPort));
+    expect(code).toBe(0);
+    expect(requested).toEqual(["93.184.215.14"]);
+    const echoed = new Promise<Buffer>((resolve) => socket.once("data", resolve));
+    socket.write("direct-local");
+    expect((await echoed).toString()).toBe("direct-local");
+    socket.destroy();
+    await Promise.all([
+      new Promise<void>((resolve) => proxy.close(() => resolve())),
+      new Promise<void>((resolve) => local.close(() => resolve())),
+    ]);
+  });
+
   it("does not contact the configured upstream when the destination policy refuses", async () => {
     let proxyConnections = 0;
     const upstream = NodeNet.createServer(() => { proxyConnections++; });
