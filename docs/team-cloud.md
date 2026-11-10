@@ -32,8 +32,8 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   the team (or are removed), your private chats and everything only yours there are deleted, never handed to an admin
   (below). The Owner's export of the team's machine (the workspace backup, `OMB_CLOUD_EXPORT_ONLY`) leaves them out too
   (`server/workspace-backup-team-private.ts`): no private conversation, none of its work folders or files only it used, no
-  member's memory layer, no member's own MausBot, their inbox or anything under `people/`. Restoring such an export gives a
-  team back everything but those.
+  routine that lives in one nor any run that names one, no member's memory layer, no member's own MausBot, their inbox
+  or anything under `people/`. Restoring such an export gives a team back everything but those.
 - **The order of bots.** Each User's list of bots is in their own order (`bot-orders.json`): their reorder (`PUT
   /api/bots/order`, any level, Can view included) changes only their list and reaches only their streams. Whoever has
   never ordered theirs sees the team's order, which an Owner's or Admin's reorder sets: an admin's order is the team's,
@@ -305,17 +305,28 @@ the Admin (404). A session is also kept only across a clean restart.
 **When someone leaves.** The Admin tells the machine when a member is removed or leaves: `POST
 /api/cloud/team/member-left` with `{ "email": "<address>" }`, signed with its body like the sleep request (400
 `invalid_member` for a bad address; only on a Team Cloud). The machine then deletes what was that person's alone and
-answers `{ ok, chats, layers, sessions, files, browsers, bots }`: every session and phone of theirs and any open code of
-theirs end at once; their own MausBot is deleted as the app deletes a bot, with its chats and notes (`bots`, its chats
-counted in `chats`), and should they join again they get a new one; their private chats with every bot are deleted as
-the app deletes a conversation (messages, notifications, follow-ups, a running turn stopped first), with the uploaded
-files only those chats used and every file they uploaded that nothing uses (a file they took off a message before
+answers `{ ok, chats, layers, sessions, files, browsers, bots, routines, routinesHandedOver, botsHandedBack }`: every
+session and phone of theirs and any open code of theirs end at once; their own MausBot is deleted as the app deletes a
+bot, with its chats and notes (`bots`, its chats counted in `chats`), and should they join again they get a new one;
+their private chats with every bot are deleted as the app deletes a conversation (messages, notifications, follow-ups,
+a running turn stopped first), with the routines that live in them (`routines`, below "Routines"), the uploaded files
+only those chats and routines used and every file they uploaded that nothing uses (a file they took off a message before
 sending goes at once: `DELETE /api/attachments/<name>`, its uploader only, while nothing uses it); their memory
 layers (`workspaces/<bot>--member-<person>`, their journal and search index); their "About you" and profile
 (`people/<person>/`); their own connections, keys and MCP sign-ins; and their own browser of every bot and shared
 profile. Nothing of it is handed to an admin. Each conversation keeps its starter in `thread-starters.json` (a hash), so a
 record that still names it (a usage trace, an activity row) stays theirs and no admin reads it there. An export of their
 own chats before they go is not built.
+
+What they did for the team stays, without them. A routine they wrote for a shared place (a bot, a group chat) keeps
+running as the routine of whoever looks after its bot now, or nobody's when nobody does, whose asks go to the Admins
+(`routinesHandedOver`); one that reported into a chat of theirs gets a chat of its new owner's. Each is one admin
+activity row, *Handed a routine over*, naming the routine and its new owner. They come off every bot's sharing
+(`access.people` and `visibility`, an `@domain` entry kept) and "Looked after by": a bot they looked after, by
+`reportsTo` or as its creator, is nobody's and falls to the Admins (`botsHandedBack`); a Chief that would then be its
+department's second gives up its crown. So joining again restores nothing: they start as a new member. One more row,
+*Left the team*, names who left and when, with `botsHandedBack` and `routinesHandedOver` and nothing of what was
+theirs alone.
 
 **A member's own code (their phone).** `POST /api/team/phone-pairing` (any team session, Member included) makes a pairing
 code carrying the caller's `member` claim (address, role, the role's scopes) and the time the Admin last vouched for
@@ -334,7 +345,7 @@ Everything stored on a Team Cloud carries an audience (`server/audience.ts`):
 |---|---|---|
 | `team` | everyone who sees the bot | a bot's main chat, its own folder (`workspaces/<bot>`: MEMORY.md, memory/, skills), team files, routines nobody opened |
 | `room:<id>` | whoever sees the room | the room's threads, `workspaces/<bot>--room-<id>` |
-| `member:<person>` | that person only (never an Admin) | the conversations they opened (`thread-starters.json`), `workspaces/<bot>--member-<person>`, their uploads, `people/<person>/about.json` |
+| `member:<person>` | that person only (never an Admin) | the conversations they opened (`thread-starters.json`), `workspaces/<bot>--member-<person>`, their uploads, `people/<person>/about.json`, the routines that live in their private chats (below, "Routines") |
 
 **A turn reads only inputs whose audience includes everyone who will see its answer, and writes only into its own
 audience.** `mayRead(input, turn)` is true for the team's things and for the turn's own audience, nothing else.
@@ -419,6 +430,30 @@ On a My Cloud and on a desktop there is one person: every audience is the team's
 every browser keeps its old name and Chrome its old launcher, every engine keeps the server's HOME, and nothing here
 changes what those do.
 
+## Routines
+
+A routine lives where it was made or where it reports (`server/routine-home.ts`). One for a member's own MausBot, or that
+names someone's private chat (the chat a bot made it in, `sourceThreadId`, or the one it reports into,
+`resultsThreadId`), is that person's alone, as the chat is: no other member and no Admin, the Super admin included, sees
+it or learns of it, in `GET /api/routines`, the `routine` and `routine.run` frames, a bot's overview, the Today counts, a
+team export or backup, the Owner's whole-machine export, or a bot's `trigger_info` and `trigger` tools in any other
+conversation; naming it by id (to change, run or delete it) answers 404 *no such routine*, and a file only such a
+routine carries is refused as one that does not exist. Every other routine is its place's (the bot's shared chat, or a
+group chat): whoever sees that place sees it, without the id of a conversation they may not read.
+
+**Its results follow where it lives** (`server/host/team-routines.ts`). A private routine's runs open their
+conversations as its person and report into a chat of theirs. A routine of a shared place opens its runs as the team,
+whoever made it or runs it (the schedule, its writer or an Admin), and reports into the shared chat or into a results
+chat of its own that everyone who reads the place reads; its asks go to whoever looks after the bot, or the Admins. The
+routine form on a team offers two places: **Just me** (`resultsThreadId: "just-me"`, the person's own private chat with
+the bot, or a new one named for the routine) and **Shared chat** (the bot's main chat); anyone who can chat with the bot
+may choose either, and an older app's "The bot's main thread" (`null`) is the shared place's own results chat. A routine
+that reports into a chat whose audience is not its own, such as one made before this for the shared chat whose results
+chat was opened privately for its writer, gets a results chat of its own place at its next run; the old chat stays
+where it is, unchanged. The chat a routine opened for its own results does not make it anyone's until they write in it.
+The routine picker lists only the bots the person can chat with and never a teammate's own MausBot, which takes no
+routine from anyone else (404 *no such bot*).
+
 ## The shared chat's name
 
 A team bot's main chat is called *"Shared chat"* on every person's copy (`WireTask.sharedChat`), whatever its stored title,
@@ -497,7 +532,7 @@ listed.
 | No access | Nothing: the bot is not listed for them, and every route naming it, its conversations, its rooms, routines and files answers 404 as for one that does not exist |
 | Can view | See the bot, its main chat and the conversations shared with them (rooms, their own earlier chats), read only; open them and mark them read |
 | Can chat | Also write to it, start their own conversations, answer its cards, react, stop a run they asked for (or one no person asked for; below, "Whoever asked owns the run"), write in its rooms, run its routines and make routines for it (and change or delete their own) |
-| Can edit | Also change its instructions, profile and model, which of the team's connected apps and MCP servers it uses, any of its routines, its sharing, and approve a card that changes the bot itself (instructions, model, skills, team, triggers) |
+| Can edit | Also change its instructions, profile and model, which of the team's connected apps and MCP servers it uses, any of its routines but those in someone else's private chat, its sharing, and approve a card that changes the bot itself (instructions, model, skills, team, triggers) |
 
 Can edit never reaches what only an admin sets on any bot: what it may do on its computer (approval level, always
 allow, folders), where it runs, its department, whom it answers to or directs, connecting an app or making a webhook.
@@ -750,7 +785,7 @@ On a My Cloud and on a desktop there is one person: no People list, no presence,
 - **Per-member engine sign-ins.** Every audience's engine signs in as the team (its key through the broker, or the
   team's sign-in files in each engine home, above); a member cannot sign an engine in as themselves, by design.
 - **A roster read from the Admin.** Without the Admin's `member-left` request (above), removal takes effect within the
-  hour, and nothing is deleted.
+  hour, and nothing is deleted, handed over or taken off a bot.
 - **Someone invited who never opened the team.** The machine first learns of a member at their first pairing, so until
   then they are in no People list, and nothing says they joined (`team.people`): the Admin sends no roster and no
   "joined" of its own.
@@ -761,9 +796,9 @@ On a My Cloud and on a desktop there is one person: no People list, no presence,
 - **An engine that replaces its sign-in file by renaming.** Inside a box the rename is refused (the team's file is bound
   there); an engine that does not then write in place keeps a refreshed token for that process only.
 - **What a bot keeps per bot, not per audience.** Its data sheet, the skills it stages and its own profile are the bot's
-  (the team's), whichever chat wrote them; so are a routine's definition and schedule (its runs and results are the
-  conversation's). The Owner's whole-machine export leaves every member's private chats out (above), the Owner's own too: an
-  export is the team's, never anyone's alone.
+  (the team's), whichever chat wrote them; a routine is its place's (above, "Routines"). The Owner's whole-machine
+  export leaves every member's private chats out (above), the Owner's own too: an export is the team's, never anyone's
+  alone.
 - **Own apps with the team's own Composio project.** A member's own apps always use OpenMausBot's connected-apps
   service, even when the team connected a Composio project key of its own; an app that needs the project's own auth
   config can't be connected by each person.

@@ -665,21 +665,21 @@ export class RoutineManager {
     return true;
   }
 
-  /** A deleted bot's schedules go with it: each is removed, its unfinished runs stop, and its run history is dropped. */
-  removeForBot(botId: string) {
-    for (const routine of this.routines.filter((candidate) => candidate.botId === botId)) this.remove(routine.id);
+  /** A deleted bot's schedules go with it, or with `routineId` that one only (one person's alone, gone as they leave a team): each is removed, its unfinished runs stop, and its run history is dropped. */
+  removeForBot(botId: string, routineId?: string) {
+    for (const routine of this.routines.filter((candidate) => candidate.botId === botId && (routineId === undefined || candidate.id === routineId))) this.remove(routine.id);
     for (const run of this.runs) {
-      if (run.botId !== botId || !["queued", "running", "waiting"].includes(run.status)) continue;
+      if (run.botId !== botId || (routineId !== undefined && run.routineId !== routineId) || !["queued", "running", "waiting"].includes(run.status)) continue;
       run.status = "cancelled";
       if (run.target === "room-goal") run.goalStatus = "stopped";
       run.attention = undefined;
       run.finishedAt = this.now();
-      run.error = "The assigned bot was deleted";
+      run.error = routineId === undefined ? "The assigned bot was deleted" : "The routine was deleted";
       this.emitRun(run);
       if (run.threadId && run.target === "room-goal") void this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
       else if (run.threadId) void this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
     }
-    const kept = this.runs.filter((run) => run.botId !== botId);
+    const kept = this.runs.filter((run) => run.botId !== botId || (routineId !== undefined && run.routineId !== routineId));
     if (kept.length !== this.runs.length) this.commitMutation(() => { this.runs = kept; });
   }
 
