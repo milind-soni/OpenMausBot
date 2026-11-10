@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { addForkOptimistic, reduceForkPanel, removeForkOptimistic, type ForkPanelState } from "./fork-panel";
-import type { AppState, Message } from "./store";
+import { initialState, reducer, type AppState, type Message } from "./store";
 
 const source: Message = { id: "source", role: "user", kind: "text", text: "Start", at: 1, parentId: null };
 const panel = (): ForkPanelState => ({
@@ -26,6 +26,18 @@ it("reconciles a send in the fork panel and keeps an off-leaf insertion off the 
 it("restores the fork leaf after a failed optimistic send", () => {
   const sent = addForkOptimistic(state(), { type: "send", botId: "bot", threadId: "fork", text: "Continue", sendId: "send-1" });
   const removed = removeForkOptimistic(sent, { type: "optimisticMessageRemoved", threadId: "fork", sendId: "send-1" });
+  expect(removed.forkPanel?.messages).toEqual([source]);
+  expect(removed.forkPanel?.activeLeafId).toBe(source.id);
+});
+
+it("removes a failed bot fork send before buffering background thread events", () => {
+  const start = {
+    ...initialState,
+    bots: [{ id: "bot", threadId: "main", messages: [], tasks: [{ threadId: "fork" }] }],
+    forkPanel: panel(),
+  } as unknown as AppState;
+  const sent = addForkOptimistic(start, { type: "send", botId: "bot", threadId: "fork", text: "Continue", sendId: "send-1" });
+  const removed = reducer(sent, { type: "optimisticMessageRemoved", threadId: "fork", sendId: "send-1" });
   expect(removed.forkPanel?.messages).toEqual([source]);
   expect(removed.forkPanel?.activeLeafId).toBe(source.id);
 });

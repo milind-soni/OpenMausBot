@@ -896,6 +896,7 @@ function dismissOnboardingCard(state: AppState, botId: string): AppState {
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
 
 export function reducer(state: AppState, action: Action): AppState {
+  if (action.type === "optimisticMessageRemoved") state = removeForkOptimistic(state, action);
   if (action.type === "messageAdded" || action.type === "messagePatched" || action.type === "threadActive" || action.type === "optimisticMessageRemoved") {
     const owner = state.bots.find((bot) => (bot.threadId !== action.threadId || bot.awaitingThreadSnapshot) && bot.tasks?.some((task) => task.threadId === action.threadId));
     if (owner) {
@@ -1286,18 +1287,17 @@ export function reducer(state: AppState, action: Action): AppState {
       return animated;
     }
     case "optimisticMessageRemoved": {
-      const panelState = removeForkOptimistic(state, action);
       const id = optimisticMessageId(action.sendId);
       const remove = (messages: Message[], optimistic: Message) => messages
         .filter((message) => message.id !== id)
         .map((message) => message.optimisticThreadOrderAt === optimistic.at
           ? { ...message, optimisticThreadOrderAt: optimistic.optimisticThreadOrderAt }
           : message);
-      const bot = panelState.bots.find((candidate) => candidate.threadId === action.threadId);
+      const bot = state.bots.find((candidate) => candidate.threadId === action.threadId);
       if (bot) {
         const optimistic = bot.messages.find((message) => message.id === id);
-        if (!optimistic) return panelState;
-        const cleared = updateBot(panelState, bot.id, (current) => ({
+        if (!optimistic) return state;
+        const cleared = updateBot(state, bot.id, (current) => ({
           ...current,
           messages: remove(current.messages, optimistic),
           activeLeafId: current.activeLeafId === id
@@ -1308,12 +1308,12 @@ export function reducer(state: AppState, action: Action): AppState {
         const kept = cleared.bots.find((candidate) => candidate.id === bot.id)?.messages ?? [];
         return rewindThreadUpdatedAt(cleared, action.threadId, kept, task?.createdAt ?? 0, bot.hasMore ? optimistic.optimisticThreadOrderAt : undefined);
       }
-      const group = panelState.groups.find((candidate) => candidate.threadId === action.threadId);
+      const group = state.groups.find((candidate) => candidate.threadId === action.threadId);
       const optimistic = group?.messages.find((message) => message.id === id);
-      if (!group || !optimistic) return panelState;
+      if (!group || !optimistic) return state;
       const cleared = {
-        ...panelState,
-        groups: panelState.groups.map((candidate) => candidate.id === group.id
+        ...state,
+        groups: state.groups.map((candidate) => candidate.id === group.id
           ? { ...candidate, messages: remove(candidate.messages, optimistic) }
           : candidate),
       };
