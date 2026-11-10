@@ -109,6 +109,13 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       if (url.searchParams.get("fresh") === "1") registry.forgetSnapshots();
       return json(res, 200, { instances: await describeInstances() });
     }
+    // How many engines could start a bot now, never which: the check an update makes that the new version still can
+    // (deploy/update.sh), which a shared server lets a local caller without a session make (SERVICE_ALLOW).
+    if (method === "GET" && path === "/api/health/engines") {
+      const described = await describeInstances();
+      const available = Array.isArray(described) ? described.filter((instance) => Object(Object(instance).snapshot).state === "available").length : 0;
+      return json(res, 200, { app: "openmausbot", engines: available });
+    }
     const companyMutation = /^\/api\/instances\/(company\.[\w.-]+)(?:\/|$)/.exec(path);
     if (hostedModels && path.startsWith("/api/instances/") && method !== "GET") return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
     if (companyMutation && method !== "GET") return json(res, 403, { error: "Company accounts are read-only here. Manage this connection in desktop Settings." });
