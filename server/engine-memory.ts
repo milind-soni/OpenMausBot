@@ -31,6 +31,9 @@ const MINUTE_MS = 60_000, DAY_MINUTES = 24 * 60;
 export const ENGINE_PROCESS_KINDS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "opencodeGo", "grokAgent", "geminiAgent", "kimiAgent",
   "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "copilotAgent", "commandCodeAgent", "kiroAgent", "customAcp", "piAgent", "antigravityAgent"]);
 
+/** Chat-runtime engines (openai-chat.ts) have no process of their own, but each turn starts its MCP servers, each a Node process. */
+export const CHAT_RUNTIME_KINDS: ReadonlySet<string> = new Set(["openai-compat", "cerebras", "greenference", "grok", "groq", "meta", "minimax", "mistral"]);
+
 export interface HostMemory { totalBytes: number; availableBytes: number; swapFreeBytes: number; oomKills: number | null; fullStall10: number | null }
 
 const procText = (path: string) => readFileSync(path, "utf8");
@@ -521,7 +524,7 @@ export const engineMemory = new EngineMemory({ enabled: (process.env.OMB_CLOUD_R
  * for memory fails with that reason. The instance is changed in place: its `models` may be a getter a copy would freeze.
  */
 export function withEngineMemory(instance: ProviderInstance, memory: EngineMemory = engineMemory): ProviderInstance {
-  if (!memory.enabled || !ENGINE_PROCESS_KINDS.has(instance.driverKind)) return instance;
+  if (!memory.enabled || !(ENGINE_PROCESS_KINDS.has(instance.driverKind) || CHAT_RUNTIME_KINDS.has(instance.driverKind))) return instance;
   const adapter = instance.adapter;
   const listeners = new Set<RuntimeEventListener>();
   const waiting = new Map<string, AbortController>();

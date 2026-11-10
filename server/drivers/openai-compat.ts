@@ -377,6 +377,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       reasoning: true,
       billing: "metered",
       includeUsageInCompleted: true,
+      retryScale: Number(process.env.FAKE_OPENAI_COMPAT_RETRY_SCALE ?? "1"),
       nativeLog: {
         source: "openai-compat.chat.completions",
         outgoing: (_turn, messages, model, tools) => ({
