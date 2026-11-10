@@ -2587,6 +2587,8 @@
   "botLimit.paused.badge": "En pause",
   "botLimit.paused.saveFailed": "Impossible d'enregistrer. Réessayez.",
   "botLimit.paused.chooseAction": "Choisir les bots éveillés ({count} en pause)",
+  "botLimit.created.title": "{name} créé, en pause pour l'instant",
+  "botLimit.created.body": "Starter garde {count} bots éveillés, donc celui-ci est en pause. Choisissez les {count} qui restent éveillés, ou passez à un plan supérieur pour tous les réveiller.",
   "chat.compactionExcerptTitle": "Contexte antérieur réduit à des extraits récents",
   "chat.compactionExcerptHint": "Aucun résumé rédigé n'était disponible : l'agent continue donc à partir de ces extraits et des messages récents. Des détails plus anciens peuvent manquer dans son contexte. Toute votre conversation est toujours là.",
   "chat.turnStoppedByYou": "Vous l'avez arrêté.",

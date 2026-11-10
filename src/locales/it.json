@@ -6328,6 +6328,8 @@
   "botLimit.paused.badge": "In pausa",
   "botLimit.paused.saveFailed": "Impossibile salvare. Riprova.",
   "botLimit.paused.chooseAction": "Scegli i bot svegli ({count} in pausa)",
+  "botLimit.created.title": "{name} creato, in pausa per ora",
+  "botLimit.created.body": "Starter tiene svegli {count} bot, quindi questo è in pausa. Scegli quali {count} restano svegli, oppure passa a un piano superiore per svegliarli tutti.",
   "inbox.from": "Da {name}",
   "inbox.via": "tramite {name}",
   "inbox.in": "in {title}",

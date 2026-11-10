@@ -22,7 +22,7 @@ import {
   installDesktopCrashListeners,
   readSafeLogTail,
 } from "./diagnostics.mjs";
-import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
+import { migrateWorkspaceConfigFile, workspaceCredentialEnv } from "./workspace-credentials.mjs";
 import { evictStartupCacheOnce } from "./startup-cache-eviction.mjs";
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 import { bootFailureMessage, listeningSignal, pollServerIdentity, SERVER_BOOT_TIMEOUT_MS, SERVER_LISTENING_GRACE_MS } from "./server-boot-probe.mjs";
@@ -48,10 +48,10 @@ import { appPermissionHandlers, externalLinkUrl } from "./app-permissions.mjs";
 import { appFrameNavigationAllowed } from "./app-frame-guard.mjs";
 import { writeClipboardText } from "./clipboard-write.mjs";
 import {
-  ensureManagedComposioCredentials,
   managedComposioAccess,
   managedComposioBrokerUrl,
   managedComposioChildEnvironment,
+  registerManagedComposio,
 } from "./managed-composio.mjs";
 import {
   createManagedCompanionTunnel,
@@ -433,21 +433,9 @@ async function secureComposioConfig() {
 }
 
 async function secureWorkspaceConfig() {
-  const dataDir = desktopDataDir();
-  const configPath = path.join(dataDir, "config.json");
-  try {
-    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    const migrated = migrateWorkspaceCredentials(config, secureCredentials);
-    // credentials.bin first, so a failed save never loses the only copy of a secret.
-    if (migrated.credentialsChanged) await saveSecureCredentials(migrated.credentials);
-    secureCredentials = migrated.credentials;
-    if (!migrated.configChanged) return;
-    const temporary = `${configPath}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify(migrated.config, null, 2), { mode: 0o600 });
-    fs.renameSync(temporary, configPath);
-  } catch (error) {
-    if (error?.code !== "ENOENT") slog(`credential migration failed: ${error?.message ?? error}`);
-  }
+  secureCredentials = await migrateWorkspaceConfigFile({
+    configPath: path.join(desktopDataDir(), "config.json"), credentials: secureCredentials, save: saveSecureCredentials, log: slog,
+  });
 }
 
 function composioBrokerUrl() {
@@ -1218,6 +1206,11 @@ async function startServerPackaged() {
   }
   serverStartConflictOnly = everyPortForeignOwned;
   return false;
+}
+
+function checkInManagedComposio() {
+  if (desktopRemoteAccess || !app.isPackaged || credentialStoreUnavailable) return;
+  void registerManagedComposio({ brokerUrl: composioBrokerUrl(), updateCredentials: updateSecureCredentialDocument, log: slog }).finally(syncManagedComposioCredentials);
 }
 
 function syncManagedComposioCredentials() {
@@ -2738,7 +2731,7 @@ ipcMain.handle("desktop:capabilities", async (event) =>
   }),
 );
 
-async function saveWorkspaceCredential(name, value) {
+async function saveWorkspaceCredential(name, value, options) {
   const patchFor = CREDENTIAL_PATCH[name];
   if (!patchFor || typeof value !== "string") {
     throw new Error("Unsupported credential");
@@ -2756,7 +2749,7 @@ async function saveWorkspaceCredential(name, value) {
         { "content-type": "application/json" },
         { packaged: app.isPackaged, token: desktopMutationToken },
       ),
-      body: JSON.stringify(patchFor(secret)),
+      body: JSON.stringify(patchFor(secret, options)),
     });
     const body = await response.json().catch(() => null);
     if (!response.ok) throw credentialSaveError(response.status, body, nativeT);
@@ -2765,7 +2758,7 @@ async function saveWorkspaceCredential(name, value) {
   if (!app.isPackaged) return applyToHarness();
 
   // Commit the encrypted value before the server makes it live; a failed reload rolls credentials.bin back.
-  return updateSecureCredentialDocument(
+  const saved = await updateSecureCredentialDocument(
     (credentials) => {
       if (secret) credentials[name] = secret;
       else delete credentials[name];
@@ -2773,10 +2766,12 @@ async function saveWorkspaceCredential(name, value) {
     },
     applyToHarness,
   );
+  if (name === "composioApiKey" && !secret) checkInManagedComposio();
+  return saved;
 }
 
 installCredentialStoreIpc({ ipcMain, localOnly, dialog, windowFor: (sender) => BrowserWindow.fromWebContents(sender), t: nativeT, appName: () => app.name, unreadable: () => credentialStoreUnavailable, quitting: () => desktopShutdownStarted, moveAside: () => fs.renameSync(CREDENTIALS_FILE, `${CREDENTIALS_FILE}.unreadable-${Date.now()}`), log: slog, relaunch: relaunchAfterDesktopRemoteChange });
-ipcMain.handle("credential:set", localOnly("credential:set", (_event, name, value) => saveWorkspaceCredential(name, value)));
+ipcMain.handle("credential:set", localOnly("credential:set", (_event, name, value, options) => saveWorkspaceCredential(name, value, options)));
 
 ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mode", (_event, botId, mode, options) => {
   // A separately launched dev server is outside this trust path: never degrade this grant to loopback HTTP.
@@ -3074,17 +3069,7 @@ app.whenReady().then(async () => {
   if (credentialStoreUnavailable) {
     slog("skipping connected-apps registration: the credential store was unreadable this launch");
   }
-  if (!desktopRemoteAccess && app.isPackaged && composioBrokerUrl() && !credentialStoreUnavailable) {
-    void updateSecureCredentialDocument(async (credentials) => {
-      await ensureManagedComposioCredentials({
-        brokerUrl: composioBrokerUrl(),
-        credentials,
-        saveCredentials: async () => {},
-        log: slog,
-      });
-      return credentials;
-    }).finally(syncManagedComposioCredentials);
-  }
+  checkInManagedComposio();
   startUpdater(quietSignals({ powerMonitor, window: () => mainWindow, lastInput: oneHome.lastInput, local: localServerRequest, place: () => homeWindow.placeOrigin(), cloudFetch: (...args) => session.defaultSession.fetch(...args), asleep: origin => homeWindow.asleepAt(origin), busy: () => ((oneHome.oneHome.busy() || ownHome?.busy()) && "move") || (computerSharing?.busy() && "lending") || (talk.busy() && "talk") || (companyBackupController || companyRestoreCommitting ? "backup" : null) }));
   refreshApplicationMenu();
   openWindowForLink = () => {

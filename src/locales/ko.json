@@ -7028,6 +7028,8 @@
   "botLimit.paused.badge": "일시 중지됨",
   "botLimit.paused.saveFailed": "저장하지 못했어요. 다시 시도하세요.",
   "botLimit.paused.chooseAction": "깨어 있을 봇 고르기 ({count}개 일시 중지됨)",
+  "botLimit.created.title": "{name} 봇을 만들었어요. 지금은 일시 중지 상태예요",
+  "botLimit.created.body": "Starter는 봇 {count}개만 깨어 있게 해서 이 봇은 일시 중지되었어요. 깨어 있을 봇 {count}개를 고르거나, 업그레이드해서 모두 깨우세요.",
   "chat.setupCard.title": "무엇부터 도와드릴까요?",
   "chat.setupCard.other": "다른 것",
   "chat.setupCard.answer": "내 답변",

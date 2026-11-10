@@ -220,6 +220,24 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   });
 
+  it("keeps the desktop store's workspace key away from an instance with its own URL", async () => {
+    vi.stubEnv("OMB_DESKTOP_PARENT", "1");
+    process.env.OPENAI_COMPAT_API_KEY = "sk-or-STORE";
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      seen.push(JSON.stringify(init?.headers ?? {}));
+      return new Response('{"data":[]}', { headers: { "content-type": "application/json" } });
+    }));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "router", displayName: "Router", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://third-party.example.test/v1" }), environment: {},
+    });
+    await inst.refreshModels?.();
+    await inst.snapshot();
+    expect(JSON.stringify(seen)).not.toContain("STORE");
+    await inst.dispose();
+  });
+
   it("rejects remote HTTP computer use before starting tools or a completion request", async () => {
     const request = vi.fn(async (_url: string | URL | Request) => new Response('{"data":[]}', { headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", request);

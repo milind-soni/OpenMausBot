@@ -5048,6 +5048,8 @@
   "botLimit.paused.badge": "Tạm dừng",
   "botLimit.paused.saveFailed": "Không lưu được. Hãy thử lại.",
   "botLimit.paused.chooseAction": "Chọn bot hoạt động ({count} đang tạm dừng)",
+  "botLimit.created.title": "Đã tạo {name}, tạm dừng lúc này",
+  "botLimit.created.body": "Starter giữ {count} bot hoạt động, nên bot này đang tạm dừng. Chọn {count} bot tiếp tục hoạt động, hoặc nâng cấp để đánh thức tất cả.",
   "voice.search": "Tìm giọng nói hoặc dán liên kết",
   "voice.noMatches": "Không có giọng nói nào khớp",
   "voice.noMatchesHint": "Hãy thử tên khác hoặc dán liên kết tới giọng nói.",

@@ -6456,6 +6456,8 @@
   "botLimit.paused.badge": "Wstrzymany",
   "botLimit.paused.saveFailed": "Nie udało się zapisać. Spróbuj ponownie.",
   "botLimit.paused.chooseAction": "Wybierz aktywne boty (wstrzymane: {count})",
+  "botLimit.created.title": "Utworzono {name}, na razie wstrzymany",
+  "botLimit.created.body": "Starter utrzymuje aktywne {count} boty, więc ten jest wstrzymany. Wybierz, które {count} mają pozostać aktywne, albo zmień plan, aby obudzić wszystkie.",
   "voice.search": "Szukaj głosów lub wklej link",
   "voice.noMatches": "Brak pasujących głosów",
   "voice.noMatchesHint": "Spróbuj innej nazwy lub wklej link do głosu.",
