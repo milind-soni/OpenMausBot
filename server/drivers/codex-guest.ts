@@ -16,7 +16,8 @@ export function codexShellDisabled(config: unknown): boolean {
   return features?.shell_tool === false && features?.unified_exec === false && features?.view_image === false;
 }
 
-/** `-c skills.config=[…]` so Codex skips native skills this bot switched off, without touching ~/.codex/skills. */
+/** `-c skills.config=[…]` so Codex skips native skills this bot switched off, without touching ~/.codex/skills.
+ * It replaces any skills.config in ~/.codex/config.toml for that turn; the Skills page hint says so. */
 export function codexDisabledNativeSkillArgs(botId: string | undefined): string[] {
   const names = disabledNativeSkillNames(botId ?? "");
   if (!names.length) return [];
