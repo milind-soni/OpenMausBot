@@ -6,6 +6,7 @@ import type { EffortLevel } from "../shared/wire.ts";
 import type {
   DriverKind, InstanceId, ModelVariantOption, RuntimeEventListener, ThreadId, TurnId,
 } from "../shared/runtime-events.ts";
+import type { LocalModelFacts } from "../shared/local-model.ts";
 import type { ProviderIcon } from "../shared/provider-icon.ts";
 
 export type { CloudBackend, EffortLevel, ModelSelection } from "../shared/wire.ts";
@@ -484,6 +485,7 @@ export interface ModelCatalog {
     orgBlocked?: true;
     /** The installed CLI is too old for this model: the version it needs. */
     needsCliUpdate?: string;
+    local?: LocalModelFacts;
   }>;
 }
 

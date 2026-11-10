@@ -4,6 +4,7 @@ import { t } from "./i18n";
 import { modelOptionLabel } from "./model-label";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "./custom-models";
 import { engineDisplayName, isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail } from "./engine-rail";
+import { localModelDetail } from "./local-model";
 import { displayModelLabel, shortModelLabel } from "./model-friendly";
 import { choiceIsSelected, modelChoices, takesTypedModels, type ModelChoice } from "./model-choices";
 
@@ -19,6 +20,8 @@ export interface MenuModelRow {
   variant?: string;
   label: string;
   route?: string;
+  /** What a local server says about the model: parameters, quantization, size. */
+  detail?: string;
   current: boolean;
   blocked: boolean;
 }
@@ -128,6 +131,7 @@ function localFrom(rows: readonly MenuModelRow[], mixed: boolean): number | null
 function heading(instance: InstanceInfo, listed: readonly InstanceInfo[]): Pick<MenuGroup, "label" | "provider" | "account"> {
   const provider = providerName(instance);
   const family = signInFamily(instance);
+  if (instance.serverKind === "ollama") return { label: provider, provider };
   if (instance.access === "api") return { label: `${provider} · ${t("model.simple.apiKey")}`, provider };
   const several = family !== undefined && listed.filter((other) => signInFamily(other) === family).length > 1;
   const account = several && engineDisplayName(instance) !== provider ? engineDisplayName(instance) : undefined;
@@ -139,7 +143,8 @@ function currentRow(input: SimpleMenuInput): MenuCurrent {
   const active = instances.find((instance) => instance.instanceId === selection.instanceId);
   const option = active?.models.options.find((candidate) => candidate.id === selection.model);
   const name = option ? modelOptionLabel(option) : selection.model;
-  const row = { instance: active, label: modelName(active, selection.model, selection.variant), title: active ? `${engineDisplayName(active)} · ${name}${variantSuffix(active, selection.model, selection.variant)}` : name, warning: false, pending: false };
+  const detail = localModelDetail(option?.local);
+  const row = { instance: active, label: modelName(active, selection.model, selection.variant), title: `${active ? `${engineDisplayName(active)} · ${name}${variantSuffix(active, selection.model, selection.variant)}` : name}${detail ? ` · ${detail}` : ""}`, warning: false, pending: false };
   if (!active) return loading ? { ...row, pending: true } : { ...row, meta: t("model.simple.unavailable"), warning: true };
   if (!option && input.refreshing === active.instanceId) return { ...row, pending: true };
   if (option?.orgBlocked) return { ...row, meta: t("model.orgBlocked"), warning: true, blocked: true };
@@ -151,7 +156,7 @@ function currentRow(input: SimpleMenuInput): MenuCurrent {
   const family = signInFamily(active);
   const accounts = family ? instances.filter((instance) => signInFamily(instance) === family).length : 0;
   if (accounts > 1 || active.snapshot.chatgptPlan) return { ...row, meta: engineDisplayName(active) };
-  return option?.provider ? { ...row, meta: option.provider } : row;
+  return option?.provider || detail ? { ...row, meta: option?.provider ?? detail } : row;
 }
 
 export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
@@ -173,15 +178,19 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
     const currentSelection = instance.instanceId === selection.instanceId ? selection : undefined;
     const repeated = repeatedModelLabels(all);
     const botSelection = bot.follows === false && bot.selection.instanceId === instance.instanceId ? bot.selection : undefined;
-    const row = (option: ModelChoice): MenuModelRow => ({
-      option,
-      ...(option.nativeModel ? { model: option.nativeModel } : {}),
-      ...(option.variant ? { variant: option.variant } : {}),
-      label: shortModelLabel(modelOptionLabel(option), provider),
-      ...(repeated.has(option.label) && option.provider ? { route: option.provider } : {}),
-      current: currentSelection ? choiceIsSelected(option, currentSelection) : false,
-      blocked: option.orgBlocked === true || option.needsCliUpdate !== undefined,
-    });
+    const row = (option: ModelChoice): MenuModelRow => {
+      const detail = localModelDetail(option.local);
+      return {
+        option,
+        ...(option.nativeModel ? { model: option.nativeModel } : {}),
+        ...(option.variant ? { variant: option.variant } : {}),
+        label: shortModelLabel(modelOptionLabel(option), provider),
+        ...(repeated.has(option.label) && option.provider ? { route: option.provider } : {}),
+        ...(detail ? { detail } : {}),
+        current: currentSelection ? choiceIsSelected(option, currentSelection) : false,
+        blocked: option.orgBlocked === true || option.needsCliUpdate !== undefined,
+      };
+    };
     const mixed = own.length > 0 && own.length < all.length;
     if (query) {
       const rows = filterCustomModels(all, query).map(row);
