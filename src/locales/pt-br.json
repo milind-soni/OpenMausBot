@@ -5786,7 +5786,7 @@
   "skills.origin.imported": "este computador",
   "skills.origin.importedHint": "Trazida deste computador. Cada bot lista as que combinam com a função dele e encontra as outras quando uma tarefa precisa. Ative para listá-la neste bot, ou desative para mantê-la longe deste bot.",
   "skills.origin.native": "IA",
-  "skills.origin.nativeHint": "A IA do bot carrega isto da pasta indicada em Origem. Edite ou remova lá.",
+  "skills.origin.nativeHint": "A IA do bot carrega esta habilidade da pasta indicada em Origem. Desative aqui apenas para este bot; os arquivos ficam onde estão. No Codex, enquanto alguma estiver desativada aqui, as respostas deste bot ignoram a lista skills.config de ~/.codex/config.toml.",
   "skills.write.title": "Escrever um comando",
   "skills.write.hint": "Dê ao bot um comando curto para algo que você pede com frequência. Digite /nome em uma conversa para executá-lo. O que vier depois do nome preenche {input}.",
   "skills.write.name": "Nome do comando",

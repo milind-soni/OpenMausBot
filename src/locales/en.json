@@ -6062,7 +6062,7 @@
   "skills.origin.imported": "this computer",
   "skills.origin.importedHint": "Brought in from this computer. Each bot lists the ones that fit its role and finds the rest when a task needs them. Switch it on to list it for this bot, or off to keep it from this bot.",
   "skills.origin.native": "AI",
-  "skills.origin.nativeHint": "The bot's AI loads this from the folder under Source. Edit or remove it there.",
+  "skills.origin.nativeHint": "The bot's AI loads this from the folder under Source. Turn it off here for this bot only; the files stay where they are. On Codex, while any is off here, this bot's replies skip the skills.config list in ~/.codex/config.toml.",
   "skills.write.title": "Write a command",
   "skills.write.hint": "Give the bot a short command for something you ask often. Type /name in a chat to run it. Anything after the name fills in {input}.",
   "skills.write.name": "Command name",
