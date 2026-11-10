@@ -102,6 +102,11 @@ jobs:
         run: pnpm i18n:check
       - run: pnpm check:contrast
       - run: pnpm lint
+      - name: Validate the announcements file
+        # Installs download it from main within the hour (docs/announcements.md), so a bad edit must not land.
+        env:
+          ANNOUNCEMENTS_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: node scripts/check-announcements.mjs --against "$ANNOUNCEMENTS_BASE"
       - name: Source guards
         # The tests that only read the source: seconds here, and they stay in the shards. On Nov 3-4 2026 one of them was
         # red on main for 11 hours, and each PR heard about it after about 70 minutes, once its shards had found a runner.

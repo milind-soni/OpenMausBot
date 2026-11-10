@@ -45,6 +45,7 @@ import { ADVANCED_MODE_KEY, setAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_MODE_PROMPT_KEY } from "@/lib/simple-mode-prompt";
 import { ADVANCED_BACK_KEY } from "@/lib/new-look";
 import { api } from "@/state/store";
+import { forgetAnnouncementCards, seenKey } from "@/lib/announcements";
 
 const DAY = 86_400_000, NOW = new Date(2026, 9, 9, 12).getTime();
 const plans = [
@@ -1530,4 +1531,113 @@ describe("ModelGo's sponsor card", () => {
     expect(launchNotice()).toBe(WHATS_NEW_NOTICE);
   });
 
+});
+
+describe("cards from the announcements file", () => {
+  const card = (id: string, extra: Record<string, unknown> = {}) => ({ id, kind: "product", label: "New", title: `Title of ${id}`, body: `Body of ${id}.`,
+    primary: { label: `Open ${id}`, action: { open_url: `https://example.com/${id}` } }, ends: new Date(NOW + 30 * DAY).toISOString(), ...extra });
+  let feed: unknown[];
+  const events = () => vi.mocked(track).mock.calls.filter(([name]) => name === "announcement").map(([, props]) => props);
+  beforeEach(() => {
+    forgetAnnouncementCards(); feed = [card("phone-app")];
+    const config = vi.mocked(api).getMockImplementation()!;
+    vi.mocked(api).mockImplementation(async (path, init) => path === "/api/announcements" ? { cards: feed } : config(path, init));
+  });
+
+  it("shows the first card for this person as a corner card: its label, title, body and button, and Not now", async () => {
+    const shown = await launch();
+    for (const text of ["New", "Title of phone-app", "Body of phone-app.", "Open phone-app", "Not now"]) expect(shown).toContain(text);
+    expect(shown).toContain('data-notice="announcement"'); expect(shown).not.toContain('aria-modal="true"');
+    expect(events()).toEqual([{ id: "phone-app", kind: "product", action: "shown" }]);
+    expect(await settle()).toContain("Title of phone-app");
+    expect(events(), "one shown event, however often it draws").toHaveLength(1);
+  });
+
+  it("its button opens the file's address outside the app, as it is, and the card is gone for good on every record", async () => {
+    await launch(); press("Open phone-app"); await flush();
+    expect(window.ogb!.openExternal).toHaveBeenCalledWith("https://example.com/phone-app");
+    expect(events().at(-1)).toEqual({ id: "phone-app", kind: "product", action: "primary" });
+    expect(render()).toBe("");
+    expect(storage.get(seenKey("phone-app"))).toBe("1"); expect(hints()).toContain(seenKey("phone-app")); expect(desk.saved?.seen).toContain(seenKey("phone-app"));
+    expect(await relaunch()).not.toContain("Title of phone-app");
+  });
+
+  it("a button for one of the app's places opens it in the app, and only that", async () => {
+    feed = [card("keys-tip", { kind: "tip", primary: { label: "Open API keys", action: { open: "api_keys" } }, secondary: { label: "Connect apps", action: { open: "connected_apps" } } })];
+    expect(await launch()).not.toContain("Not now");
+    press("Connect apps");
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "togglePlugins", open: true, surface: "apps" });
+    expect(events().at(-1)).toEqual({ id: "keys-tip", kind: "tip", action: "secondary" });
+    expect(window.ogb!.openExternal).not.toHaveBeenCalled();
+  });
+
+  it("one card a launch: the next waits for the next launch", async () => {
+    feed = [card("first-card"), card("second-card")];
+    await launch(); press("Not now"); await flush();
+    expect(events().at(-1)).toEqual({ id: "first-card", kind: "product", action: "close" });
+    expect(await launch(), "the same launch").toBe("");
+    expect(await relaunch()).toContain("Title of second-card");
+  });
+
+  it("waits behind the notices someone must act on and the built-in offers", async () => {
+    storage.delete(MODELGO_OFFER_NOTICE);
+    const first = await launch();
+    expect(first).toContain("ModelGo"); expect(first).not.toContain("Title of phone-app");
+    press("Not now"); await flush();
+    expect(await relaunch()).toContain("Title of phone-app");
+  });
+
+  it("never in the launch the welcome took, nor over a live call", async () => {
+    f.state.liveCall = { status: "active" };
+    expect(await launch()).not.toContain("Title of phone-app");
+    f.state.liveCall = undefined; session.clear(); markWelcomeFinished();
+    expect(await launch()).not.toContain("Title of phone-app");
+  });
+
+  it("its words are text: markup in the file shows as written and runs nothing", async () => {
+    feed = [card("markup", { body: "<img src=x onerror=alert(1)><b>bold</b>" })];
+    const shown = await launch();
+    expect(shown).toContain("&lt;img src=x onerror=alert(1)&gt;&lt;b&gt;bold&lt;/b&gt;");
+    expect(shown).not.toContain("<b>");
+  });
+
+  it("follows the person's language, falling back to English", async () => {
+    feed = [card("translated", { title: { en: "English title", de: "Deutscher Titel" } })];
+    setLocale("de");
+    expect(await launch()).toContain("Deutscher Titel");
+  });
+
+  it("skips a card for someone else and a card it cannot read, and shows nothing on a branded build", async () => {
+    feed = [card("cloud-only", { audience: { surfaces: ["cloud"] } }), card("future-key", { audience: { country: ["de"] } }), card("broken", { primary: { label: "Go", action: { eval: "x" } } }), card("for-desktop")];
+    expect(await launch()).toContain("Title of for-desktop");
+    f.brand = "file"; forgetAnnouncementCards(); storage.set(seenKey("for-desktop"), "1"); feed = [card("branded")];
+    expect(await relaunch()).not.toContain("Title of branded");
+  });
+
+  describe("a sponsor's card", () => {
+    const sponsor = (id: string) => card(id, { kind: "sponsor", label: "Sponsor" });
+
+    it("one a week: a second sponsor waits while a product card may show", async () => {
+      feed = [sponsor("sponsor-one"), sponsor("sponsor-two"), card("product-news")];
+      expect(await launch()).toContain("Title of sponsor-one");
+      press("Not now"); await flush();
+      expect(await relaunch()).toContain("Title of product-news");
+      press("Not now"); await flush();
+      expect(await relaunch()).toBe("");
+      now += 7 * DAY;
+      expect(await relaunch()).toContain("Title of sponsor-two");
+    });
+
+    it("never where an organization restricts providers, nor to a Team Cloud's members who are not its owner or an admin", async () => {
+      feed = [sponsor("sponsor-one"), card("product-news")];
+      f.state.config.managedPolicy = { organizationName: "Acme", companyModelsOnly: false, allowedEngines: ["claudeAgent"] };
+      expect(await launch()).toContain("Title of product-news");
+      f.state.config.managedPolicy = undefined; storage.set(seenKey("product-news"), "1");
+      viewer = { hosted: true, canSave: false, cloudHome: true }; f.state.config.cloudHome = true; f.state.config.team = { id: "t", name: "Team" };
+      f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"]; showWindow(VPS);
+      expect(await relaunch(), "a member").toBe("");
+      viewer = { hosted: true, canSave: true, cloudHome: true };
+      expect(await relaunch(), "the team's owner or an admin").toContain("Title of sponsor-one");
+    });
+  });
 });

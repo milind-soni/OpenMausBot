@@ -133,6 +133,12 @@ describe("CI path scope", () => {
     expect(selectCiScope([file])).toEqual({ areas: ["desktop"], checks: checks("server") });
   });
 
+  it("runs nothing beyond static, which validates them, for the announcements file, its schema and pictures", () => {
+    expect(selectCiScope(["announcements/announcements.json", "announcements/announcements.schema.json", "announcements/images/phone.png"]))
+      .toEqual({ areas: ["announcements"], checks: [] });
+    expect(selectCiScope(["announcements/announcements.json", "docs/announcements.md"])).toEqual({ areas: ["announcements", "docs"], checks: ["docs-tests"] });
+  });
+
   it("runs only the control-plane job for the control plane", () => {
     expect(selectCiScope(["cloudflare/control-plane/src/index.ts"])).toEqual({ areas: ["control-plane"], checks: ["control-plane"] });
   });

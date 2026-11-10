@@ -20,6 +20,9 @@ export const GROK_MOVE_NOTICE = "grok-move-2026-11";
 /** The sponsor's card for ModelGo: each person sees it once, on every page but a branded build or a desktop whose organization
  * refuses it, and on the first launch it may show in: first when nothing else is due, else right after the launch's notice. */
 export const MODELGO_OFFER_NOTICE = "modelgo-offer-2026-11";
+/** A card from the project's announcements file (src/lib/announcements.ts keeps which ones each person saw): after every
+ * notice someone must act on and every built-in offer, at most one in a launch. */
+export const ANNOUNCEMENT_NOTICE = "announcement";
 
 /**
  * Every notice, in the order a launch asks them: one launch shows one notice first, the first one due, and only FOLLOWERS may
@@ -37,6 +40,7 @@ export const NOTICES = [
   CLOUD_NOTICE,
   MODELGO_OFFER_NOTICE,
   BOAT_OFFER_NOTICE,
+  ANNOUNCEMENT_NOTICE,
   STAR_NOTICE,
 ] as const;
 
