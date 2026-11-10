@@ -11,7 +11,8 @@ export interface PresenceRouteDeps {
   /** The language the app of a ping that counts shows (the owner's, or a member's), for the lines the server writes for
    * that person (host/person-languages.ts). */
   heard?(auth: RequestAuth, language: string): void;
-  /** The conversation open in the app while the person was active: it is the one in front of them. */
+  /** The conversation open in the app while a person who counts was active (the owner, or on a Team Cloud any
+   * member): it is the one in front of them. */
   sawChat?(auth: RequestAuth, threadId: string): void;
 }
 
@@ -29,8 +30,9 @@ export function createPresenceRoutes(deps: PresenceRouteDeps): RouteHandler {
     const source = given.source === "phone" ? "phone" : "desktop";
     const timeZone = typeof given.timeZone === "string" && given.timeZone.length <= 128 && IANA_ZONE.test(given.timeZone) ? validZone(given.timeZone) : undefined;
     const language = typeof given.language === "string" && LANGUAGE_TAG.test(given.language) ? given.language.toLowerCase() : undefined;
-    if (language && (deps.member || deps.isOwner(auth))) deps.heard?.(auth, language);
-    if (typeof given.threadId === "string" && THREAD_ID.test(given.threadId)) deps.sawChat?.(auth, given.threadId);
+    const counts = Boolean(deps.member) || deps.isOwner(auth);
+    if (language && counts) deps.heard?.(auth, language);
+    if (counts && typeof given.threadId === "string" && THREAD_ID.test(given.threadId)) deps.sawChat?.(auth, given.threadId);
     if (deps.member) return json(res, 200, { ok: true, ...deps.member(auth, language) });
     // A guest's activation is not the person's: answered, never recorded.
     if (!deps.isOwner(auth)) return json(res, 200, { ok: true, returned: false });
