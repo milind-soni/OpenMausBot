@@ -1,0 +1,161 @@
+name: Promote to stable
+
+# Makes one released version the `stable` channel that self-hosted servers follow. Run by hand, after our own Clouds
+# have run the version for 48 hours. Nothing is built: the `stable` tags of the server image (linux/amd64 and
+# linux/arm64) and of the Cloud home image move to the digests the release already published, and stable.json on the
+# `channels` branch records them. A server reads that file over plain HTTPS (server/update-check.ts,
+# deploy/update.sh). `latest` keeps following main and is not touched.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Released version to make stable (X.Y.Z)"
+        required: true
+        type: string
+      soaked:
+        description: "Our own Clouds have run this version for 48 hours"
+        required: true
+        type: boolean
+        default: false
+      urgent:
+        description: "A fix that cannot wait: skip the 48 hours since the release"
+        required: false
+        type: boolean
+        default: false
+      allow_older:
+        description: "Allow moving stable back to an older version"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-stable
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Point stable at the release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION_INPUT: ${{ inputs.version }}
+      SOAKED: ${{ inputs.soaked }}
+      URGENT: ${{ inputs.urgent }}
+      ALLOW_OLDER: ${{ inputs.allow_older }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Refuse anything but a published, soaked release
+        id: release
+        run: |
+          set -euo pipefail
+          if [ "$SOAKED" != "true" ] && [ "$URGENT" != "true" ]; then
+            echo "::error::Tick the box that says our own Clouds have run this version for 48 hours."
+            exit 1
+          fi
+          version=$(node scripts/stable-channel.mjs version "$VERSION_INPUT")
+          if ! gh release view "v$version" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,publishedAt,url > "$RUNNER_TEMP/release.json"; then
+            echo "::error::v$version is not a release of $GITHUB_REPOSITORY. Stable only takes a version that was released."
+            exit 1
+          fi
+          node scripts/stable-channel.mjs check-release --version "$version" --release "$RUNNER_TEMP/release.json" $([ "$URGENT" = "true" ] && echo --urgent)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # Image references must be lowercase; the repository name is not.
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find the images the release published
+        id: images
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          IMAGE: ${{ steps.release.outputs.image }}
+        run: |
+          set -euo pipefail
+          digest_of() { docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -er .digest; }
+          docker buildx imagetools inspect --raw "$IMAGE:v$VERSION" > "$RUNNER_TEMP/server-index.json"
+          docker buildx imagetools inspect --raw "$IMAGE-cloud-home:v$VERSION" > "$RUNNER_TEMP/home-index.json"
+          node scripts/stable-channel.mjs check-image --index "$RUNNER_TEMP/server-index.json" --platforms linux/amd64,linux/arm64 --name "$IMAGE:v$VERSION"
+          node scripts/stable-channel.mjs check-image --index "$RUNNER_TEMP/home-index.json" --platforms linux/amd64 --name "$IMAGE-cloud-home:v$VERSION"
+          echo "server=$IMAGE@$(digest_of "$IMAGE:v$VERSION")" >> "$GITHUB_OUTPUT"
+          echo "home=$IMAGE-cloud-home@$(digest_of "$IMAGE-cloud-home:v$VERSION")" >> "$GITHUB_OUTPUT"
+
+      - name: Write the record, refusing to move stable back
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          SERVER: ${{ steps.images.outputs.server }}
+          HOME_IMAGE: ${{ steps.images.outputs.home }}
+        run: |
+          set -euo pipefail
+          current=()
+          if git fetch --depth 1 origin channels 2>/dev/null && git show FETCH_HEAD:stable.json > "$RUNNER_TEMP/current.json" 2>/dev/null; then
+            current=(--current "$RUNNER_TEMP/current.json")
+          fi
+          node scripts/stable-channel.mjs record --version "$VERSION" --image "$SERVER" --cloud-home "$HOME_IMAGE" \
+            --release "$RUNNER_TEMP/release.json" "${current[@]}" $([ "$ALLOW_OLDER" = "true" ] && echo --allow-older) > "$RUNNER_TEMP/stable.json"
+          cat "$RUNNER_TEMP/stable.json"
+
+      # The tags move before the record does: a server follows the record, and the record never names a digest the
+      # `stable` tag did not reach. Running this again with the same version repairs a run that stopped in between.
+      - name: Move the stable tags, without building
+        env:
+          IMAGE: ${{ steps.release.outputs.image }}
+          SERVER: ${{ steps.images.outputs.server }}
+          HOME_IMAGE: ${{ steps.images.outputs.home }}
+        run: |
+          set -euo pipefail
+          digest_of() { docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' | jq -er .digest; }
+          docker buildx imagetools create --tag "$IMAGE:stable" "$SERVER"
+          docker buildx imagetools create --tag "$IMAGE-cloud-home:stable" "$HOME_IMAGE"
+          test "$IMAGE@$(digest_of "$IMAGE:stable")" = "$SERVER"
+          test "$IMAGE-cloud-home@$(digest_of "$IMAGE-cloud-home:stable")" = "$HOME_IMAGE"
+
+      - name: Publish the record on the channels branch
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/channels"
+          if git fetch --depth 1 origin channels 2>/dev/null; then
+            git worktree add --detach "$work" FETCH_HEAD
+          else
+            git worktree add --detach "$work"
+            git -C "$work" checkout --orphan channels
+            git -C "$work" rm -rfq .
+            printf '%s\n' "# Channels" "" "\`stable.json\` names the released version self-hosted servers follow. \`.github/workflows/promote-stable.yml\` on main writes it; do not edit it by hand." > "$work/README.md"
+          fi
+          cp "$RUNNER_TEMP/stable.json" "$work/stable.json"
+          git -C "$work" add -A
+          if git -C "$work" diff --cached --quiet; then
+            echo "stable.json already says $VERSION."
+          else
+            git -C "$work" -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "stable: $VERSION"
+            git -C "$work" push origin HEAD:refs/heads/channels
+          fi
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          SERVER: ${{ steps.images.outputs.server }}
+          HOME_IMAGE: ${{ steps.images.outputs.home }}
+        run: |
+          {
+            echo "### Stable is now $VERSION"
+            echo "- Server image: \`$SERVER\`"
+            echo "- Cloud home image: \`$HOME_IMAGE\`"
+            echo "- Record: https://raw.githubusercontent.com/$GITHUB_REPOSITORY/channels/stable.json"
+          } >> "$GITHUB_STEP_SUMMARY"

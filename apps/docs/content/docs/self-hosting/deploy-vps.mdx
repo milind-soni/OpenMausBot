@@ -117,6 +117,7 @@ One container for the server plus Caddy for HTTPS at `https://maus.example.com`.
 
    ```sh
    docker compose pull omb && docker compose up -d
+   ./update.sh              # move to the stable version (see "Update")
    docker compose ps        # omb "healthy", caddy "running"
    ```
 
@@ -278,19 +279,120 @@ same release without an npm install prompt or an implicit upgrade.
 
 ## Update
 
-- **Paths A and C with the service above:** choose the new published version,
-  then run these commands from the administrator shell, replacing `X.Y.Z`:
+A self-hosted server follows the **stable** channel: a released version that
+MausBot's own Clouds have run for 48 hours first. The image tag `stable` and
+[`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json)
+name it. The tag `latest` follows every change on `main`; it is for trying
+things out, not for a server you rely on. **Check for updates** in the app
+compares your server with the stable version. To hear of every release as soon
+as it is published instead, set `OMB_UPDATE_CHANNEL=newest` in the server's
+environment.
 
-  ```sh
-  sudo systemctl stop openmausbot
-  sudo -iu maus npm install --global --prefix /home/maus/.local openmausbot@X.Y.Z
-  sudo systemctl start openmausbot
-  ```
+### Path B (Docker): one command, with a way back
 
-  Check that installation succeeded before starting. A service restart by itself
-  does not update the installed package. For foreground `npx` usage, specify the
-  desired release as `npx --yes openmausbot@X.Y.Z serve --tunnel`.
-- **Path B:** `cd OpenMausBot/deploy && docker compose pull omb && docker compose up -d`.
+From `OpenMausBot/deploy`:
+
+```sh
+git pull && ./update.sh
+```
+
+`git pull` brings the current `update.sh` and `docker-compose.yml`; the server
+image comes from the stable channel, not from your checkout. An install that
+has no checkout, with its `compose.yaml`, `.env` and `data/` in one folder such
+as `/opt/openmausbot`, runs the same script on that folder:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/update.sh -o update.sh
+sudo bash update.sh --dir /opt/openmausbot
+```
+
+The data may be a Docker volume or a folder on the server; the copy keeps
+every file's owner and mode either way. The script then:
+
+1. Downloads the stable image, by its digest. If that fails it stops, and
+   nothing has changed.
+2. Checks there is room for a copy of your data, stops the server, and copies
+   everything under `/data` into a Docker volume
+   (`deploy_data-before-update`; `openmausbot_data-before-update` for
+   `/opt/openmausbot`). The server is down from here until step 4;
+   how long depends on how much data there is.
+3. Writes the image into `.env` (`OMB_IMAGE=ghcr.io/milind-soni/openmausbot@sha256:…`)
+   and starts it.
+4. Waits, up to five minutes, until the new server answers `/api/health`
+   steadily, says it is the new version, can still start a bot if it could
+   before (`openmausbot doctor`: an engine is ready), and Caddy runs again.
+5. If any of that fails: puts back `.env`, the data from the copy and the old
+   image, starts the old version, and tells you what went wrong. Your server
+   is as it was before step 1.
+
+It is safe to interrupt and to run twice. Each step is written to
+`deploy/.update/journal` before it starts, so after Ctrl-C, a closed terminal or
+a reboot, the next `./update.sh` first finishes what was cut short: it keeps
+the new version if that is up and healthy, and otherwise puts the old one
+back. Run again after a finished update, it says there is nothing to do. Two
+runs at once are refused.
+
+```sh
+./update.sh --check            # what would change; changes nothing
+./update.sh --version 0.1.151  # one released version instead of the stable one
+./update.sh --rollback         # the version and the data from before the last update
+```
+
+`--rollback` is for an update that passed its checks and still turned out
+wrong. It asks first, because everything made since the update (chats, files,
+settings) is replaced by the copy. The copy is kept until the next update
+replaces it. The script's own log is `deploy/.update/update.log`.
+
+| The script ends with | Meaning |
+| --- | --- |
+| `0` | Updated, or already on that version |
+| `1` | The update failed; the old version and its data are back |
+| `2` | The update failed and the old version did not come back healthy; read the last lines it printed |
+| `3` | Another update is running |
+| `4` | Nothing was changed (could not download, not enough disk, refused) |
+
+If you built the image yourself (`docker compose up -d --build`, with
+`ENGINES` baked in), `update.sh` refuses to replace it without being told to:
+keep updating with `git pull && docker compose up -d --build`, or move to the
+published image with `./update.sh --replace-local-build`. Engines you install
+from **Settings → Engines** live on the data volume and survive either way.
+
+### Paths A and C (npm with the service above): the same steps by hand
+
+There is no one-command updater for an npm install yet. Do what the script
+does: copy the data first, install one named version, check it, and keep the
+way back. Take the stable version number from
+[`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json)
+(`"version"`), and note the one you run now (`openmausbot --version`). From
+the administrator shell, replacing `X.Y.Z`:
+
+```sh
+sudo systemctl stop openmausbot
+sudo -iu maus sh -c 'umask 077; tar czf ~/openmausbot-before-update.tgz -C ~ .openmausbot'
+sudo -iu maus npm install --global --prefix /home/maus/.local openmausbot@X.Y.Z
+sudo systemctl start openmausbot
+curl -sf http://127.0.0.1:8799/api/health && sudo -iu maus openmausbot doctor
+```
+
+If the install fails, or the last line does not end with the server answering
+and an engine ready, go back (replace `OLD` with the version you noted):
+
+```sh
+sudo systemctl stop openmausbot
+sudo -iu maus npm install --global --prefix /home/maus/.local openmausbot@OLD
+sudo -iu maus sh -c 'mv ~/.openmausbot ~/.openmausbot-failed-update && tar xzf ~/openmausbot-before-update.tgz -C ~'
+sudo systemctl start openmausbot
+```
+
+A service restart by itself does not update the installed package. For
+foreground `npx` usage, name the release: `npx --yes openmausbot@X.Y.Z serve --tunnel`.
+
+### How far behind a server may fall
+
+The desktop and phone apps are built to work with any server version that was
+the stable one within the last 90 days. An older server keeps running, but the
+app tells you it is behind, and newer features may not work until you update
+it. Update at least every 90 days.
 
 Routines and queued work survive a restart; a turn running at that moment does not, so update between runs.
 

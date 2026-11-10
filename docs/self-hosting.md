@@ -340,9 +340,11 @@ cp .env.example .env            # set DOMAIN
 docker compose pull omb && docker compose up -d
 ```
 
-That uses the image CI publishes on every `main` push
-(`ghcr.io/milind-soni/openmausbot`, tagged `latest`, `sha-…` and `v…`).
-To build from your checkout instead: `docker compose up -d --build`.
+That starts the image CI publishes on every `main` push
+(`ghcr.io/milind-soni/openmausbot:latest`; each release is also tagged `v…`,
+and the one our own Clouds have run for 48 hours is `stable`). Move to the
+stable version right away with `./update.sh`, which pins it by digest in
+`.env`. To build from your checkout instead: `docker compose up -d --build`.
 
 Then sign the engine CLIs in **inside the container** (their logins live on
 the `data` volume, so they survive restarts and image upgrades) and mint a
@@ -373,9 +375,12 @@ What the stack does, so you can adapt it:
   own pairing is the login. A shared-password `basic_auth` block is there,
   commented out, if you want a second wall in front of pairing.
 
-Upgrade with `docker compose pull omb && docker compose up -d` (or
-`git pull && docker compose up -d --build`). State (chats, routines,
-engine logins, paired sessions) is on the `data` volume; back that up.
+Update with `git pull && ./update.sh`: it copies the data aside, starts the
+stable version, and puts the old version and the data back if the new one
+does not come up healthy ([what it does, step by step](deploy-vps.md#update)).
+A build from source updates with `git pull && docker compose up -d --build`.
+State (chats, routines, engine logins, paired sessions) is on the `data`
+volume; back that up.
 
 The published image installs the current Chrome for Testing whenever a new
 Stable ships. A build from source keeps the Chrome (and any `ENGINES`) it
@@ -1436,15 +1441,34 @@ settings do not change it.
 
 ## Updating
 
-For the npm service, [install the chosen new version](deploy-vps.md#update)
-as the service user while the server is stopped, then start it again.
-For a foreground invocation, `npx --yes openmausbot@X.Y.Z serve --tunnel`
-selects a particular published release; replace `X.Y.Z` with that version.
+Self-hosted servers follow the **stable** channel: a released version that our
+own Clouds have run for 48 hours, named by the image tag `stable` and by
+[`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json).
+`latest` follows `main` and is not for a server you rely on. The update check
+(`GET /api/updates/check`, **Check for updates** in the app) compares the
+server with the stable version; `OMB_UPDATE_CHANNEL=newest` makes it follow
+every release instead.
 
 ```sh
-docker compose -f deploy/docker-compose.yml pull omb && docker compose -f deploy/docker-compose.yml up -d   # Docker
+cd deploy && git pull && ./update.sh                                    # Docker: copy the data, update, roll back on failure
 git pull && pnpm install && sudo systemctl restart openmausbot          # from source
 ```
+
+`deploy/update.sh` is the whole routine for a Docker Compose install: the
+stable image by digest, a copy of `/data` first, a health check that includes
+"an engine can still start a bot", and the old image and the copy put back
+when the check fails. It is safe to interrupt and to run twice.
+[Every step, the rollback and the exit codes](deploy-vps.md#update).
+
+For the npm service there is no one-command updater yet:
+[do the same steps by hand](deploy-vps.md#paths-a-and-c-npm-with-the-service-above-the-same-steps-by-hand),
+as the service user while the server is stopped. For a foreground invocation,
+`npx --yes openmausbot@X.Y.Z serve --tunnel` selects a particular published
+release; replace `X.Y.Z` with that version.
+
+The desktop and phone apps work with any server version that was the stable
+one within the last 90 days. An older server keeps running, but the app says
+it is behind, and newer features may not work until it is updated.
 
 Routines and queued work survive restarts. A teammate turn in flight runs
 again once at the next start, told to check what it already did, and the bot
