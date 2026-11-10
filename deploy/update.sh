@@ -37,7 +37,9 @@ PINNED="^ghcr\.io/milind-soni/openmausbot@sha256:[0-9a-f]{64}$"
 STABLE_URL=${OMB_STABLE_URL:-https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json}
 NEWEST_URL=${OMB_NEWEST_URL:-https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest}
 SERVICE=${OMB_UPDATE_SERVICE:-omb}
-WAIT_S=${OMB_UPDATE_WAIT_S:-300}
+# A healthy server answers within seconds of starting; two minutes leaves room for a slow first start after an update,
+# and is how long the server is down before a version that never answers is rolled back. OMB_UPDATE_WAIT_S for more.
+WAIT_S=${OMB_UPDATE_WAIT_S:-120}
 ENGINE_WAIT_S=${OMB_UPDATE_ENGINE_WAIT_S:-120}
 POLL_S=${OMB_UPDATE_POLL_S:-5}
 KEEP_TAG="openmausbot-before-update:local"
@@ -352,9 +354,11 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    # Started with the server, not after it is healthy: Caddy reaches it over the socket
+    # whenever it answers, so `up` never waits on the server's health.
     depends_on:
       omb:
-        condition: service_healthy
+        condition: service_started
     environment:
       DOMAIN: ${DOMAIN}
     volumes:
@@ -802,8 +806,9 @@ if old_installer_layout; then
   else roll_back "The installer's compose.yaml and Caddyfile could not be rewritten (see $LOG)." 1; fi
 fi
 pin_image "$J_target"
-# Where Caddy waits for a healthy server, `up` itself fails when the new version never gets there; the wait below
-# then says why.
+# Where Caddy waits for a healthy server (a Compose file from before Caddy had its own container), `up` itself waits,
+# and fails when the new version never gets there; the wait below then says why. The current files start Caddy with
+# the server, so `up` returns at once and the wait below is the only one.
 if ! compose up -d --no-build >>"$LOG" 2>&1 && [ "$(inspect '{{.Image}}' "$(container)")" != "$J_target_id" ]; then
   roll_back "Docker could not start $(new_name) (see $LOG)." 1
 fi

@@ -327,13 +327,22 @@ every file's owner and mode either way. The script then:
    has matched. The server is down from here until step 4; how long depends
    on how much data there is.
 3. Writes the image into `.env` (`OMB_IMAGE=ghcr.io/milind-soni/openmausbot@sha256:…`)
-   and starts it.
-4. Waits, up to five minutes, until the new server answers `/api/health`
+   and starts it. An install the installer made while Caddy still shared the
+   server's network gets the installer's current `compose.yaml` and
+   `Caddyfile` here, as a run of the installer would write them (the rollback
+   puts the old ones back). For this repository's `docker-compose.yml`,
+   `git pull` brings the current one; `--check` says when it is needed.
+4. Waits, up to two minutes (`OMB_UPDATE_WAIT_S` for longer), until the new server answers `/api/health`
    steadily, says it is the new version, can still start a bot if it could
-   before (`openmausbot doctor`: an engine is ready), and Caddy runs again.
+   before (the server's own count of ready engines, `GET /api/health/engines`,
+   which a hardened server answers too; `openmausbot doctor` on a version
+   without it), and Caddy runs again.
 5. If any of that fails: puts back the data from the copy, `.env` and the old
    image, starts the old version, and tells you what went wrong. Your server
-   is as it was before step 1. The copy is put into a new folder inside the
+   is as it was before step 1, except that `.env` now names the old version by
+   its digest: a tag such as the installer's `stable` may have moved since,
+   and a later run of the installer would otherwise follow it. `--rollback`
+   does the same. The copy is put into a new folder inside the
    data and checked there before it takes the data's place, so a restore that
    fails (a full disk, say) leaves both the data and the copy as they were:
    the server stays stopped, the update's journal is kept, and
