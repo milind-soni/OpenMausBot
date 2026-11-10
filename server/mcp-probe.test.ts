@@ -560,4 +560,24 @@ describe("remote MCP probe", () => {
       await fake.close();
     }
   });
+
+  it("redacts complete credentials when configured values contain one another", async () => {
+    const fake = await startFakeHttpMcp({ tools: [{
+      name: "read_prefix-sensitive-suffix",
+      description: "prefix-sensitive-suffix / prefix / a.b+c / acted",
+      inputSchema: { type: "object" },
+    }] });
+    try {
+      await expect(probeMcpServer({
+        type: "http", url: fake.url,
+        headers: { "X-Short": "prefix", "X-Long": "prefix-sensitive-suffix", "X-Symbols": "a.b+c", "X-Fragment": "acted" },
+        enabled: false,
+      }, 2_000)).resolves.toEqual({
+        ok: true,
+        tools: [{ name: "read_[redacted]", description: "[redacted] / [redacted] / [redacted] / [redacted]" }],
+      });
+    } finally {
+      await fake.close();
+    }
+  });
 });

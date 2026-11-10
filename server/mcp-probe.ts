@@ -75,11 +75,10 @@ function publicProbeError(kind: "spawn" | "timeout" | "protocol" | "closed" | "c
 }
 
 function redactConfiguredValues(value: string, secrets: Record<string, string>): string {
-  let redacted = value;
-  for (const secret of Object.values(secrets)) {
-    if (secret) redacted = redacted.split(secret).join("[redacted]");
-  }
-  return redacted;
+  const alternatives = [...new Set(Object.values(secrets))].filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return alternatives.length ? value.replace(new RegExp(alternatives.join("|"), "g"), "[redacted]") : value;
 }
 
 /** Bounded and redacted: `secrets` are configured values a careless server might echo. */
