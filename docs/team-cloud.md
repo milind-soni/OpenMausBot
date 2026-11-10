@@ -355,7 +355,7 @@ else's. A bot sent to anyone carries only the conversations they may read; when 
 else's, the main chat is named instead, without the other's messages, and its unread mark counts only what they see.
 Search, SSE (live and replayed), attachments, notifications, usage traces, routine runs, the activity and decision rows
 (kept as when, bot, tool and outcome, without their words), a bot's activity, synced folders and a team backup go
-through the same check, a deleted private chat included. Incidents and escalations from a private chat go to its person,
+through the same check, a deleted private chat included. Incidents from a private chat go to its person,
 never into a Chief's thread; work handed on from a private chat runs in a thread of that same person's, and nothing
 from a private chat is handed into a room or posted in one; a conversation a bot opens from a shared chat is the
 team's, never the last speaker's; `retry_thread`, `close_thread` and `session_search` reading a message reach only what the turn may read;
@@ -453,8 +453,8 @@ whose inbox a bot's own asks reach; who may chat with the bot is its sharing's (
 
 **One Chief of Staff per person.** A crowned bot that someone owns is that person's Chief; a team has at most one per
 person (crowning a second hands the role over, and moving a Chief to someone who has one is refused). Its authority is
-exactly the bots that person owns, in every department: they are its team in its roster, their incidents and
-escalations come to it (into a notices chat of the person's own, "Problems to look at"; a notice from someone else's
+exactly the bots that person owns, in every department: they are its team in its roster, their incidents come
+to it (into a notices chat of the person's own, "Problems to look at"; a notice from someone else's
 private chat goes to that person instead), and it retries their threads and changes their setup. The person's private
 chat with it is their inbox (below). A crowned bot nobody owns stays its department's Chief, as on any other server.
 The app offers no crown on a team, so this is reached only through the API (`PATCH /api/bots/<id>` with `chiefOfStaff`).
@@ -465,10 +465,9 @@ from reaching a bot everyone sees (`sameAudience`), so today it cannot hand work
 **Every bot reaches every bot.** Departments are folders, not walls. Any bot can ask, hand work to or @mention any
 other bot on the team, in any department, someone's Chief included, with nothing to set up (`canReach` in
 `server/peer-roster.ts`). Each bot's roster lists them all, its own department first; a Chief's lists its own team
-first and everyone else as reachable. Reaching a bot gives no authority over it: supervision, incidents, escalations,
-the inbox, setup changes and automations follow ownership and departments as above (`hasAuthority`, `canManage`).
-Only three things narrow reach: a bot's own peers list (a person can open it again in the bot's settings, under
-Permissions), archived bots, and the audience rule below (a bot shared with different people). A turn in someone's
+first and everyone else as reachable. Reaching a bot gives no authority over it: supervision, incidents, the inbox,
+setup changes and automations follow ownership and departments as above (`hasAuthority`, `canManage`). Only two
+things narrow reach: archived bots, and the audience rule below (a bot shared with different people). A turn in someone's
 private chat may ask any bot, and the work it hands on stays in that person's audience; it never hands work into a room
 or posts in one.
 

@@ -68,7 +68,7 @@ function world(options: { inboxThread?: string; live?: string[] } = {}) {
   const cards = createAskCards(deps);
   const node = (over: Partial<HandoffView> = {}): HandoffView => {
     const made = { id: "as_1", rootId: "root", parentId: "root", threadId: "work", botId: "ledger", key: "ledger", text: "Fix it", createdAt: 1_000,
-      startedAt: 1_000, status: "waiting", result: "", reported: false, executions: 1, lastProgressAt: 1_000, approvalGranted: false, kind: "work",
+      startedAt: 1_000, status: "waiting", result: "", reported: false, executions: 1, lastProgressAt: 1_000, kind: "work",
       restarts: 0, mode: "work", reply: "resume", ...over } as HandoffView;
     nodes.set(made.id, made);
     return made;
