@@ -47,6 +47,61 @@ Configure the optional Vercel hook below to rebuild the docs immediately after
 publication; otherwise the live cache or the next normal docs deployment
 refreshes it.
 
+## Promote a release to stable
+
+Self-hosted servers do not follow the newest release: they follow `stable`.
+A release becomes stable only after our own Clouds have run it for 48 hours.
+Then run **Actions → Promote to stable → Run workflow** with the version
+(`X.Y.Z`) and tick that the 48 hours are done.
+
+The workflow builds nothing. It:
+
+1. refuses a version that is not a published, full release, or that was
+   published less than 48 hours ago (`urgent` skips the wait, for a fix that
+   cannot wait);
+2. checks that the release's server image has `linux/amd64` and `linux/arm64`,
+   and reads its digest and the Cloud home image's;
+3. refuses to move stable back to an older version unless `allow_older` is
+   ticked;
+4. moves the `stable` tag of `ghcr.io/milind-soni/openmausbot` and of
+   `ghcr.io/milind-soni/openmausbot-cloud-home` to those digests;
+5. commits `stable.json` (version, both images by digest, and every version
+   that was stable in the last 90 days) to the `channels` branch.
+
+Servers read
+`https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json`:
+the update check (`server/update-check.ts`) for the version, and
+`deploy/update.sh` for the image to pull. `latest` still follows `main` and is
+never moved by this workflow. Running it again with the same version changes
+nothing, and repairs a run that stopped between the tag and the record. The
+`channels` branch is written only by this workflow; do not edit it by hand.
+The checks live in `scripts/stable-channel.mjs`.
+
+### How a server takes an update
+
+One routine, in the two places that can run it. A server cannot replace its
+own container, so neither is the server process: a connected server's update
+is the connector's `update` job, and a standalone Docker Compose install's is
+`deploy/update.sh`, run on the host by its owner. They are two programs (the
+connector drives a container it made itself through the Docker API and has no
+shell; a Compose install has to be swapped by `docker compose` on the host),
+held to the same steps and the same promises:
+
+| Step | Connector (`connector/src/home.ts`) | Standalone (`deploy/update.sh`) |
+| --- | --- | --- |
+| Image by digest, before anything stops | `ensureImage`, `checkImage` | `docker pull` of the record's `…@sha256:…` |
+| Room for the copy | `ensureRoomForCopy` | `room_for_copy` |
+| Stop, copy `/data` aside | `stopAndCopy` → volume `mausbot-snapshot` | `copy_aside` → volume `<project>_data-before-update` |
+| Start the new image | `createContainer`, `startHome` | `OMB_IMAGE` in `.env`, `docker compose up -d` |
+| Healthy, and bots can start | signed health report names the image; the bot box still passes every check it passed before | `/api/health` three times running, the version it reports, `openmausbot doctor` if it passed before, Caddy |
+| On failure | `rollBack`: old image and the copy, reply `update_rolled_back` | `roll_back`: `.env`, the copy and the old image, exit 1 with the reason |
+| Interrupted | the operation in `home.json`; `recover` at the next start | `.update/journal`; the next run, or the signal handler |
+| Run twice | a job id is answered again, never run again | "already runs …, nothing to do" |
+
+`connector/test/home.test.ts` and `connector/e2e/run.sh` hold the connector to
+this; `scripts/testing/deploy-update.test.ts` holds the script to it. A change
+to one side's steps belongs in the other too.
+
 ## Updater migration invariant
 
 `app-update.yml` is baked into every packaged desktop app. Builds through

@@ -7,14 +7,16 @@
 #   cp .env.example .env   # set DOMAIN
 #   docker compose pull omb && docker compose up -d     # prebuilt image
 #   docker compose up -d --build                        # or build from source
+#   ./update.sh                                         # later: the stable version, with a way back
 services:
   omb:
     build:
       context: ..
       args:
         ENGINES: ${ENGINES:-}
-    # prebuilt on every main push; `docker compose up --build` builds from source instead
-    image: ghcr.io/milind-soni/openmausbot:latest
+    # update.sh pins OMB_IMAGE in .env to the stable version's digest. Without it: `latest`, prebuilt on every main
+    # push; `docker compose up --build` builds from source instead.
+    image: ${OMB_IMAGE:-ghcr.io/milind-soni/openmausbot:latest}
     restart: unless-stopped
     # The bots' browsers (docs/browser-packaging.md, "Process hygiene"): an
     # init collects the browser processes whose parents exit, and Chrome
