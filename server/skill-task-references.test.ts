@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import * as promises from "node:fs/promises";
 import { afterAll, expect, it, vi } from "vitest";
 
@@ -80,9 +80,19 @@ it("keeps all revisions when task metadata changes during inspection", async () 
   const bot = "metadata-race", task = join(TASK_WORKSPACES_DIR, bot, "thread-one");
   mkdirSync(task, { recursive: true });
   const original = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).lstat;
+  const key = (value: string) => {
+    const normal = resolve(value).replace(/^\\\\\?\\/, "");
+    return process.platform === "win32" ? normal.toLowerCase() : normal;
+  };
   const changed = vi.mocked(promises.lstat).mockImplementation(async (...args) => {
     const stat = await original(...args);
-    if (args[0] === task && !existsSync(join(task, "changed"))) mkdirSync(join(task, "changed"));
+    const path = typeof args[0] === "string" ? args[0] : "";
+    if (path !== "" && key(path) === key(task) && !existsSync(join(task, "changed"))) {
+      mkdirSync(join(task, "changed"));
+      // NTFS stamps move in about 16 ms ticks, so a directory created in the tick just read keeps that stamp.
+      const moved = new Date(stat.mtime.getTime() + 2_000);
+      utimesSync(task, moved, moved);
+    }
     return stat;
   });
   try { expect(await taskSkillsMayReferTo(bot, "runbook", [join(data, "old"), join(data, "next")])).toEqual([true, true]); }
