@@ -10,6 +10,8 @@ import { connect } from "node:net";
 import { hostname } from "node:os";
 import { join } from "node:path";
 
+import { seccompTable } from "./seccomp.ts";
+
 export const PROBE_SPEC_ENV = "OMB_BOX_PROBE";
 
 export interface ProbeSpec {
@@ -49,8 +51,8 @@ export interface ProbeSpec {
 
 export interface ProbeResult { id: string; ok: boolean; detail: string }
 
-/** x86-64's add_key(2), the only numbers the box's filter is written for (seccomp.ts). */
-const ADD_KEY = 248;
+/** add_key(2) by this machine's number, from the box's own filter table (seccomp.ts). */
+const ADD_KEY = seccompTable()?.denied.find(([name]) => name === "add_key")?.[1] ?? 248;
 /** Each makes add_key(2) into the process keyring, which any user may, and prints `ok` or the errno it got. python3 is in
  * the Cloud home's image; perl-base is an essential package of Debian and Ubuntu, so the self-hosted server's image, which
  * has no python3, has it. Perl 5.36 refuses a string literal as a syscall argument ("Modification of a read-only value

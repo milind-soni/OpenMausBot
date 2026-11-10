@@ -236,7 +236,7 @@ function probeStdioMcpServer(
         ...(options.asBot ? (options.asBot.cwd ? { cwd: options.asBot.cwd } : {}) : { cwd: process.cwd() }),
         env: probeEnvironment(server),
         stdio: ["pipe", "pipe", "pipe"],
-        ...(options.asBot ? { box: { ...(options.asBot.id ? { botId: options.asBot.id } : {}), allowEnv: Object.keys(server.env) } } : {}),
+        ...(options.asBot ? { box: { ...(options.asBot.id ? { botId: options.asBot.id } : {}), allowEnv: Object.keys(server.env), configured: true } } : {}),
       });
     } catch {
       resolve({ ok: false, error: publicProbeError("spawn") });

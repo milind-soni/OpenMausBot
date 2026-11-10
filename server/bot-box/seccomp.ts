@@ -1,13 +1,14 @@
 // A seccomp filter for the box, as the BPF program bubblewrap loads from a descriptor (`--seccomp FD`): the second
 // layer under the mount namespace. It refuses the system calls that only reach the kernel's attack surface (mounting,
 // modules, bpf, perf, userfaultfd, the kernel keyring, open_by_handle_at, setns, kexec, reboot, swap, clock setting, I/O
-// ports) with EPERM; everything an engine, a shell, git, npm, python or Chrome uses stays allowed. Linux x86-64 only: on
-// another architecture the filter is not loaded, and the report says so.
+// ports) with EPERM; everything an engine, a shell, git, npm, python or Chrome uses stays allowed. Linux on x86-64 and
+// on arm64, each with its own numbers: on another architecture the filter is not loaded, and the report says so.
 //
 // Classic BPF, built here so the server needs no native module. Each instruction is { code, jt, jf, k } packed as
 // u16 code, u8 jt, u8 jf, u32 k (little-endian, as the kernel reads struct sock_filter on x86-64).
 
 export const SECCOMP_ARCH_X86_64 = 0xc000003e;
+export const SECCOMP_ARCH_AARCH64 = 0xc00000b7;
 const SECCOMP_RET_ALLOW = 0x7fff0000, SECCOMP_RET_ERRNO = 0x00050000, SECCOMP_RET_KILL_PROCESS = 0x80000000;
 const EPERM = 1;
 // BPF opcodes
@@ -25,14 +26,31 @@ export const DENIED_SYSCALLS: ReadonlyArray<[name: string, nr: number]> = [
   ["mount_setattr", 442], ["fsmount", 432], ["fsopen", 430], ["fsconfig", 431], ["move_mount", 429], ["open_tree", 428],
 ];
 
+/** The same calls by arm64's numbers (asm-generic/unistd.h). arm64 has no iopl or ioperm. */
+export const DENIED_SYSCALLS_ARM64: ReadonlyArray<[name: string, nr: number]> = [
+  ["mount", 40], ["umount2", 39], ["pivot_root", 41], ["swapon", 224], ["swapoff", 225], ["reboot", 142],
+  ["kexec_load", 104], ["kexec_file_load", 294], ["init_module", 105], ["finit_module", 273], ["delete_module", 106],
+  ["bpf", 280], ["perf_event_open", 241], ["userfaultfd", 282], ["add_key", 217], ["request_key", 218], ["keyctl", 219],
+  ["open_by_handle_at", 265], ["setns", 268], ["acct", 89], ["settimeofday", 170], ["clock_settime", 112],
+  ["adjtimex", 171], ["clock_adjtime", 266], ["quotactl", 60], ["lookup_dcookie", 18],
+  ["mount_setattr", 442], ["fsmount", 432], ["fsopen", 430], ["fsconfig", 431], ["move_mount", 429], ["open_tree", 428],
+];
+
+/** The filter's table for a machine: its audit architecture and the numbers it refuses; null where there is none. */
+export function seccompTable(arch: string = process.arch): { arch: number; denied: ReadonlyArray<[name: string, nr: number]> } | null {
+  if (arch === "x64") return { arch: SECCOMP_ARCH_X86_64, denied: DENIED_SYSCALLS };
+  if (arch === "arm64") return { arch: SECCOMP_ARCH_AARCH64, denied: DENIED_SYSCALLS_ARM64 };
+  return null;
+}
+
 export interface BpfInstruction { code: number; jt: number; jf: number; k: number }
 
 /** The filter as instructions: check the architecture, then each denied number, then allow. */
-export function seccompProgram(denied: ReadonlyArray<[string, number]> = DENIED_SYSCALLS): BpfInstruction[] {
+export function seccompProgram(denied: ReadonlyArray<[string, number]> = DENIED_SYSCALLS, arch: number = SECCOMP_ARCH_X86_64): BpfInstruction[] {
   const program: BpfInstruction[] = [
     { code: BPF_LD_W_ABS, jt: 0, jf: 0, k: OFFSET_ARCH },
     // Another architecture's numbers mean something else: never run a foreign-ABI process under this filter.
-    { code: BPF_JMP_JEQ_K, jt: 1, jf: 0, k: SECCOMP_ARCH_X86_64 },
+    { code: BPF_JMP_JEQ_K, jt: 1, jf: 0, k: arch },
     { code: BPF_RET_K, jt: 0, jf: 0, k: SECCOMP_RET_KILL_PROCESS },
     { code: BPF_LD_W_ABS, jt: 0, jf: 0, k: OFFSET_NR },
   ];
@@ -55,9 +73,15 @@ export function seccompBytes(program: BpfInstruction[] = seccompProgram()): Buff
   return bytes;
 }
 
-/** Whether this machine can take the filter: the program hard-codes x86-64 numbers. */
+/** This machine's filter, as the bytes bubblewrap reads; null where there is none. */
+export function machineSeccompBytes(arch: string = process.arch): Buffer | null {
+  const table = seccompTable(arch);
+  return table ? seccompBytes(seccompProgram(table.denied, table.arch)) : null;
+}
+
+/** Whether this machine can take the filter: the program is written per architecture. */
 export function seccompSupported(arch: string = process.arch, platform: NodeJS.Platform = process.platform): boolean {
-  return platform === "linux" && arch === "x64";
+  return platform === "linux" && seccompTable(arch) !== null;
 }
 
 /** Runs the program by hand, as the kernel would, for a call: the verdict. */

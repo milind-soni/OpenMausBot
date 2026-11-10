@@ -212,7 +212,9 @@ describe("the box a bot's Chrome runs in", () => {
     expect(browser.bwrap).toBe("/usr/bin/bwrap");
     const bind = (target: string) => browser.options.some((arg, i) => arg === "--bind" && browser.options[i + 2] === target);
     expect(bind(home), "HOME is not the browser's").toBe(false);
-    expect(browser.options.join(" ")).not.toContain(`--tmpfs ${dataDir}`);
+    // The cover stays, and what the browser is given of the data folder comes after it.
+    expect(browser.options.indexOf(dataDir), "the data folder is covered").toBe(browser.options.indexOf("--tmpfs", browser.options.indexOf(dataDir) - 1) + 1);
+    expect(browser.options.indexOf(uploads)).toBeGreaterThan(browser.options.indexOf(dataDir));
     expect(browser.options.join(" "), "the engines are the turns' only").not.toContain(join(dataDir, "tools"));
     expect(browser.options).not.toContain("--unshare-net");
     expect(browser.options).toEqual(expect.arrayContaining(["--unshare-user", "--unshare-pid", "--die-with-parent"]));

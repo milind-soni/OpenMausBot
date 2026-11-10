@@ -4,7 +4,10 @@
 //   - the image's code read-only: /usr (with /bin, /lib, /lib64 and /sbin as the links a merged-/usr Debian has), /etc,
 //     /opt (the bots' browser) and the server's own code folder, so the engine CLIs and the proxies they start run;
 //   - its HOME read-write (the engine's own login and settings live there), with the server's data folder replaced by an
-//     empty private folder, so messages.db, config.json, logins, other bots' folders and the server's sockets are not there;
+//     empty private folder, so messages.db, config.json, logins, other bots' folders and the server's sockets are not there.
+//     The empty folder goes over the data folder wherever it is (inside HOME, under /var/lib or /opt, on a disk of its
+//     own) and after every line outside it, so no line can put the folder back; and a path on the command line that is
+//     in the data folder, or holds it, is never shown;
 //     on a Team Cloud that HOME is the audience's engine home instead (server/engine-homes), with only the team's engine
 //     sign-ins bound into it, so no other audience's transcripts are there;
 //   - put back inside that empty folder: this turn's working folder, the bot's own folder (workspaces/<bot>) and what the
@@ -43,6 +46,14 @@ export interface BoxSetup {
   bridges: readonly BoxBridge[];
   /** The descriptor number the box reads its seccomp filter from (`--seccomp FD`), or none. */
   seccompFd?: number;
+  /** Stops a boxed process from making user namespaces of its own (`--disable-userns`, bubblewrap 0.8): a new one would
+   * give it namespaces to configure (network, mounts) and the kernel code behind them. Not for a browser's box:
+   * Chrome's own sandbox is a user namespace. */
+  noNestedUserns?: boolean;
+  /** HOME is a person's own (a server run outside a container, or one others sign in to), not a folder that holds only
+   * the engines' sign-ins: what is in it to sign in elsewhere is hidden, and what runs at a later sign-in is read-only
+   * (homeGuards). */
+  guardHome?: boolean;
   /** Test knobs; production passes none. */
   mutate?: ReadonlySet<BoxMutation>;
 }
@@ -75,6 +86,10 @@ export interface BoxRequest {
   home?: string;
   /** Files bound read-write over their names in `home`: the team's engine sign-ins. */
   shared?: ReadonlyArray<{ source: string; target: string }>;
+  /** The command, its arguments and its environment are a server someone configured (an MCP server a bot may have
+   * added), not ones OpenMausBot built. Security: none of them puts anything of the data folder in the box but the
+   * bot's own folders, so an environment value naming a folder there is not made writable. */
+  configured?: boolean;
   /** A host unix socket the box dials out to, so the server can reach a port the engine listens on inside the box's own
    * network, such as a sign-in's callback. Only an isolated box has one. */
   relay?: string;
@@ -145,6 +160,38 @@ function assertReadOnlySource(source: string): void {
   }
 }
 
+/** Folders in a person's HOME that hold what signs them in elsewhere. */
+export const HOME_SECRET_FOLDERS = [".ssh", ".aws", ".azure", ".kube", ".docker", ".gnupg", ".password-store", ".config/gcloud", ".config/gh", ".config/op", ".local/share/keyrings"] as const;
+/** Files that do the same, and the shells' and tools' histories. */
+export const HOME_SECRET_FILES = [".netrc", ".git-credentials", ".pypirc", ".bash_history", ".zsh_history", ".python_history", ".node_repl_history", ".psql_history", ".mysql_history", ".lesshst"] as const;
+/** Files a shell, git or npm runs or obeys the next time the person uses them: a bot may read them, never write them. */
+export const HOME_STARTUP_FILES = [".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".gitconfig", ".config/git/config", ".npmrc"] as const;
+
+function entryKind(path: string): "file" | "folder" | null {
+  try {
+    const stat = statSync(path);
+    return stat.isDirectory() ? "folder" : stat.isFile() ? "file" : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The lines that keep a person's HOME from being the bot's: an empty folder over each folder of sign-ins, an empty file
+ * over each file of them, and the start-up files read-only. Only what exists is named: bubblewrap would otherwise make
+ * the missing ones in the real HOME.
+ *
+ * Open risk: this is a list of well-known names, so a secret kept under another name in HOME is still the bot's to
+ * read. The whole fix is a home of the engines' own (BoxRequest.home), as a Team Cloud has.
+ */
+export function homeGuards(home: string, kind: (path: string) => "file" | "folder" | null = entryKind): Mount[] {
+  const guards: Mount[] = [];
+  for (const name of HOME_SECRET_FOLDERS) if (kind(join(home, name)) === "folder") guards.push({ kind: "tmpfs", target: join(home, name) });
+  for (const name of HOME_SECRET_FILES) if (kind(join(home, name)) === "file") guards.push({ kind: "ro", source: "/dev/null", target: join(home, name) });
+  for (const name of HOME_STARTUP_FILES) if (kind(join(home, name)) === "file") guards.push({ kind: "ro", source: join(home, name), target: join(home, name) });
+  return guards;
+}
+
 export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   const mutate = setup.mutate ?? new Set<BoxMutation>();
   const dataDir = resolve(setup.dataDir), home = resolve(setup.home);
@@ -175,16 +222,11 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     mounts.push({ kind: "bind", source: path, target: path });
     if (!writable.includes(path)) writable.push(path);
   };
-  // HOME first; the data folder is replaced by an empty one right after, so the lines below put back only what is named.
-  // An engine home lives in the data folder, so it goes back after that.
+  // HOME first. The data folder is replaced by an empty one once every line is known (coverDataFolder), so the lines
+  // below put back only what is named. An engine home lives in the data folder, so it is one of them.
   const ownHome = request.home ? resolve(request.home) : null;
   if (!ownHome) rw(home);
-  const dataInsideHome = under(dataDir, home);
-  if (!mutate.has("bind-data")) {
-    if (dataInsideHome) mounts.push({ kind: "tmpfs", target: dataDir });
-  } else {
-    rw(dataDir);
-  }
+  if (!ownHome && setup.guardHome) mounts.push(...homeGuards(home));
   if (ownHome) rw(ownHome);
   const dataHidden = !mutate.has("bind-data");
   /** A path is already readable and writable through an earlier line (and not hidden by the data folder's tmpfs). */
@@ -200,6 +242,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     const own = join(dataDir, "workspaces", botId);
     if (!covered(own)) rw(own);
   }
+  const ownFolders = botId && ID.test(botId) ? [join(dataDir, "workspaces", botId), join(dataDir, "task-workspaces", botId)] : [];
   if (mutate.has("bind-otherws")) {
     rw(join(dataDir, "workspaces"));
     rw(join(dataDir, "task-workspaces"));
@@ -207,7 +250,9 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   for (const name of PATH_ENV_NAMES) {
     const value = request.env[name];
     // A temp folder stays the box's own private one; anything else the engine writes is put back.
-    if (value && isAbsolute(value) && !covered(resolve(value)) && !PRIVATE_INSIDE.some((base) => under(resolve(value), base))) rw(resolve(value));
+    if (!value || !isAbsolute(value) || covered(resolve(value)) || PRIVATE_INSIDE.some((base) => under(resolve(value), base))) continue;
+    if (request.configured && (under(resolve(value), dataDir) || under(dataDir, resolve(value))) && !ownFolders.some((folder) => under(resolve(value), folder))) continue;
+    rw(resolve(value));
   }
   for (const path of request.rw ?? []) if (!covered(resolve(path))) rw(resolve(path));
   if (ownHome) {
@@ -226,18 +271,26 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     mounts.push({ kind: "ro", source: shown, target: shown, optional: true });
   }
   const readOnly = new Set<string>();
+  const named = new Set((request.ro ?? []).map((path) => resolve(path)));
+  if (botId && ID.test(botId)) named.add(join(dataDir, "bots", botId, "SOUL.md"));
   for (const path of [...(request.ro ?? []), ...argvPaths(request.args), ...(botId && ID.test(botId) ? [join(dataDir, "bots", botId, "SOUL.md")] : [])]) {
     const full = resolve(path);
     if (request.ro?.includes(path)) assertReadOnlySource(full);
+    // Security: a command line is not a grant. A bot can put a path on one (an MCP server's arguments, a model's name),
+    // so a path there that is in the data folder, or holds it, is shown only when the caller named it in `ro`.
+    if (!named.has(full) && (under(full, dataDir) || under(dataDir, full)) && !covered(full)) continue;
     // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
     if (covered(full) || readOnly.has(full)) continue;
-    if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
+    // Not what the data folder holds: the cover hides it even under a system folder, so a named path there is put back.
+    if (!under(full, dataDir) && ["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots].some((base) => under(full, resolve(base)))) continue;
+    if (setup.engineRoots.some((base) => under(full, resolve(base)))) continue;
     readOnly.add(full);
     mounts.push({ kind: "ro", source: full, target: full, optional: true });
   }
 
   const options = ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--die-with-parent", "--hostname", BOX_HOSTNAME];
   if (!mutate.has("share-pid")) options.push("--unshare-pid");
+  if (setup.noNestedUserns) options.push("--disable-userns");
   if (setup.seccompFd !== undefined && !mutate.has("no-seccomp")) options.push("--seccomp", String(setup.seccompFd));
   if (net === "isolated") {
     options.push("--unshare-net");
@@ -246,7 +299,22 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     if (request.relay) mounts.push({ kind: "bind", source: resolve(request.relay), target: inBoxSocket(RELAY_SOCKET_NAME) });
   }
   if (cwd) options.push("--chdir", cwd);
-  return { mounts, options, net, writable, botId };
+  if (mutate.has("bind-data") && !writable.includes(dataDir)) writable.push(dataDir);
+  return { mounts: coverDataFolder(mounts, dataDir, mutate.has("bind-data")), options, net, writable, botId };
+}
+
+/**
+ * The plan's lines with the data folder covered: every line outside the folder first, then an empty folder over it,
+ * then the lines inside it, each group in its own order.
+ *
+ * Security: bubblewrap applies lines in order, so a line that binds a folder holding the data folder (`/var/lib`, HOME,
+ * a path a caller named) would show all of it if it came after the cover. Nothing does: the cover follows every line
+ * that is not inside the data folder, wherever the folder is.
+ */
+export function coverDataFolder(mounts: readonly Mount[], dataDir: string, bound = false): Mount[] {
+  const inside = (mount: Mount) => mount.kind !== "symlink" && mount.target !== dataDir && under(mount.target, dataDir);
+  const cover: Mount = bound ? { kind: "bind", source: dataDir, target: dataDir } : { kind: "tmpfs", target: dataDir };
+  return [...mounts.filter((mount) => !inside(mount)), cover, ...mounts.filter(inside)];
 }
 
 /** bubblewrap's argv for the plan (the command follows `--`). */

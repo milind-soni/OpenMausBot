@@ -62,7 +62,8 @@ export function readOperatorToken(dataDir: string | undefined): string | undefin
   }
 }
 
-const UNSANDBOXED_RISK = "anyone who can chat with a bot can make it read this server's settings, AI keys, saved logins and other people's chats";
+/** Unboxed, a bot's shell is the server's own user: it reads the data folder and writes it too. */
+const UNSANDBOXED_RISK = "anyone who can chat with a bot can make it read this server's AI keys, saved logins and other people's chats, and change its settings, including who may sign in";
 
 /** The sign-in lists as the server reads them (server/config.ts loadConfig): the environment's win when set. */
 export function signInListsFor(dataDir: string, env: Record<string, string | undefined> = process.env): SignInLists {

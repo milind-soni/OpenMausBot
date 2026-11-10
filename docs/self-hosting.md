@@ -396,9 +396,14 @@ git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot
 pnpm install
 
 # choose where data lives and start the server
-OMB_DATA_DIR="$HOME/.openmausbot" OMB_PORT=8799 \
+OMB_PROFILE=auto OMB_DATA_DIR="$HOME/.openmausbot" OMB_PORT=8799 \
   node --experimental-strip-types server/index.ts
 ```
+
+`OMB_PROFILE=auto` gives a server run from source the same
+[hardened profile](#the-hardened-profile) rules as a released one. Without
+it a checkout is a development server and never turns the profile on by
+itself: do not let other people sign in to one started that way.
 
 For something durable, let the CLI write the service for you:
 
@@ -812,10 +817,11 @@ A server only its one owner signs in to, started with `npx openmausbot` or
 were. `OMB_PROFILE=standard` declines the profile anywhere; on a shared server
 the log then warns at every start.
 
-A server run [from source](#from-source) (`node server/index.ts`) is a
-development checkout and never turns the profile on by itself; when more than
-one person can sign in to it, the log says so at every start. Set
-`OMB_PROFILE=hardened` there, or `OMB_PROFILE=auto` for the rules above.
+A server run [from source](#from-source) with a bare `node server/index.ts`
+is a development checkout and never turns the profile on by itself; when
+more than one person can sign in to it, the log says so at every start. The
+command that section gives, and the service `openmausbot service install`
+writes, set `OMB_PROFILE=auto`, which applies the rules above there too.
 
 The start-up log says which it is:
 

@@ -29,7 +29,7 @@ describe("server profile banner", () => {
     const notice = serverProfileNotice(config({ kind: "unboxed", fault: "no-bwrap", shared: true, dismissible: false }));
     expect(notice).toEqual({
       tone: "danger", dismissible: false,
-      text: "Bots on this server are not running in a sandbox: anyone who can chat with a bot can make it read the server's settings, AI keys, saved logins and other people's chats. Install bubblewrap on the server (on Debian or Ubuntu: sudo apt-get install -y bubblewrap) and start it again.",
+      text: "Bots on this server are not running in a sandbox: anyone who can chat with a bot can make it read the server's AI keys, saved logins and other people's chats, and change its settings, including who may sign in. Install bubblewrap on the server (on Debian or Ubuntu: sudo apt-get install -y bubblewrap) and start it again.",
     });
     expect(renderToStaticMarkup(createElement(ServerProfileBanner, { config: config({ kind: "unboxed", fault: "no-bwrap", shared: true, dismissible: false }) }))).not.toContain("<button");
   });
@@ -38,12 +38,12 @@ describe("server profile banner", () => {
     const text = (fault: "switched-off" | "not-linux" | "no-bwrap" | "userns-refused") =>
       serverProfileNotice(config({ kind: "unboxed", fault, shared: false, dismissible: true }))!;
     expect(text("userns-refused")).toMatchObject({ tone: "warning", dismissible: true });
-    expect(text("userns-refused").text).toMatch(/a bot that follows a harmful web page could read the server's settings and AI keys\. .*"The hardened profile"/);
+    expect(text("userns-refused").text).toMatch(/a bot that follows a harmful web page could read the server's AI keys and change its settings\. .*"The hardened profile"/);
     expect(text("switched-off").text).toContain("Remove OMB_BOT_BOX=0");
     expect(text("not-linux").text).toContain("The sandbox needs Linux");
   });
 
   it("asks for a restart after a second person was added", () => {
-    expect(serverProfileNotice(config({ kind: "restart" }))).toMatchObject({ tone: "warning", dismissible: false, text: expect.stringMatching(/^More than one person can now sign in\. Start this server again/) });
+    expect(serverProfileNotice(config({ kind: "restart" }))).toMatchObject({ tone: "warning", dismissible: false, text: expect.stringMatching(/^The people you added can sign in once this server has started again\./) });
   });
 });

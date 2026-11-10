@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { engineInstallRoots } from "../engine-roots.ts";
-import { BOX_MUTATIONS, CPU_LIST_FILES, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
+import { BOX_MUTATIONS, CPU_LIST_FILES, argvPaths, bwrapArgs, homeGuards, planBox, taskWorkspaceIds, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
 
 const home = "/data";
 const dataDir = "/data/.openmausbot";
@@ -193,12 +193,86 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(turn(), "/data/.claude/projects/p/s.jsonl")).toBe("rw");
   });
 
-  it("a data folder outside HOME is simply not there", () => {
+  it("covers a data folder outside HOME like one inside it", () => {
     const plan = planBox({ ...setup(), dataDir: "/srv/omb", home: "/home/maus" }, { command: "/usr/bin/x", args: [], cwd: "/srv/omb/task-workspaces/b/t", env: {} });
     expect(visibleInBox(plan, "/srv/omb/messages.db")).toBe("none");
     expect(visibleInBox(plan, "/srv/omb/task-workspaces/b/t")).toBe("rw");
     expect(visibleInBox(plan, "/srv/omb/workspaces/b")).toBe("rw");
-    expect(bwrapArgs(plan).join(" ")).not.toContain("--tmpfs /srv/omb");
+    expect(bwrapArgs(plan).join(" ")).toContain("--tmpfs /srv/omb");
+  });
+
+  it("makes nothing of the data folder writable for a configured server's environment, but the bot's own folders", () => {
+    const dataDir = "/data/.openmausbot";
+    const ask = (env: Record<string, string>, configured: boolean) => planBox({ ...setup(), dataDir, home: "/data" }, { command: "sh", args: [], cwd: join(dataDir, "task-workspaces", "b", "t"), env, botId: "b", configured });
+    for (const value of [join(dataDir, "config.json"), join(dataDir, "box"), dataDir, join(dataDir, "workspaces", "other")]) {
+      for (const name of ["XDG_CACHE_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "TMPDIR"]) {
+        const plan = ask({ [name]: value }, true);
+        for (const file of ["config.json", "box/harness.sock", "operator-token", "workspaces/other/MEMORY.md"]) expect(visibleInBox(plan, join(dataDir, file)), `${name}=${value}`).toBe("none");
+      }
+    }
+    expect(visibleInBox(ask({ XDG_CACHE_HOME: join(dataDir, "workspaces", "b", "cache") }, true), join(dataDir, "workspaces", "b", "cache", "x"))).toBe("rw");
+    // An engine OpenMausBot starts keeps the home it was given there.
+    expect(visibleInBox(ask({ CODEX_HOME: join(dataDir, "providers", "codex-1") }, false), join(dataDir, "providers", "codex-1", "auth.json"))).toBe("rw");
+  });
+
+  it("guards a person's HOME: sign-ins hidden, start-up files read-only, and only what exists is named", () => {
+    const home = "/home/maus";
+    const there = new Map<string, "file" | "folder">([[".ssh", "folder"], [".aws", "folder"], [".config/gcloud", "folder"], [".netrc", "file"], [".bash_history", "file"], [".bashrc", "file"], [".gitconfig", "file"]].map(([name, kind]) => [join(home, name!), kind as "file" | "folder"]));
+    const guards = homeGuards(home, (path) => there.get(path) ?? null);
+    expect(guards).toEqual([
+      { kind: "tmpfs", target: "/home/maus/.ssh" }, { kind: "tmpfs", target: "/home/maus/.aws" }, { kind: "tmpfs", target: "/home/maus/.config/gcloud" },
+      { kind: "ro", source: "/dev/null", target: "/home/maus/.netrc" }, { kind: "ro", source: "/dev/null", target: "/home/maus/.bash_history" },
+      { kind: "ro", source: "/home/maus/.bashrc", target: "/home/maus/.bashrc" }, { kind: "ro", source: "/home/maus/.gitconfig", target: "/home/maus/.gitconfig" },
+    ]);
+    expect(homeGuards(home, () => null)).toEqual([]);
+    // The plan asks only when told to, and never for an engine home of the box's own.
+    const ask = (guardHome: boolean, own?: string) => planBox({ ...setup(), dataDir: "/srv/omb", home: "/usr", guardHome }, { command: "x", args: [], env: {}, ...(own ? { home: own } : {}) });
+    expect(ask(true).mounts.length).toBeGreaterThanOrEqual(ask(false).mounts.length);
+    expect(ask(true, "/srv/omb/engine-homes/a").mounts).toEqual(ask(false, "/srv/omb/engine-homes/a").mounts);
+  });
+
+  it("covers a data folder that a system folder the box shows holds", () => {
+    for (const dataDir of ["/var/lib/openmausbot", "/opt/openmausbot/data", "/etc/openmausbot", "/usr/local/share/openmausbot"]) {
+      const plan = planBox({ ...setup(), dataDir, home: "/home/maus" }, { command: "/usr/bin/x", args: [], cwd: join(dataDir, "task-workspaces", "b", "t"), env: {} });
+      for (const file of ["config.json", "operator-token", "sessions.json", "logins.json", "workspaces/other/MEMORY.md"]) expect(visibleInBox(plan, join(dataDir, file)), `${dataDir}/${file}`).toBe("none");
+      expect(visibleInBox(plan, join(dataDir, "task-workspaces", "b", "t", "notes.md")), dataDir).toBe("rw");
+      expect(visibleInBox(plan, join(dataDir, "workspaces", "b", "MEMORY.md")), dataDir).toBe("rw");
+      expect(visibleInBox(plan, "/usr/bin/git")).toBe("ro");
+    }
+  });
+
+  it("puts the cover after every line outside the data folder, and every line inside it after the cover", () => {
+    const layouts = [{ dataDir: "/data/.openmausbot", home: "/data" }, { dataDir: "/var/lib/openmausbot", home: "/home/maus" }, { dataDir: "/srv/omb", home: "/srv/omb/home" }];
+    for (const { dataDir, home } of layouts) {
+      const plan = planBox({ ...setup(), dataDir, home, engineRoots: [join(dataDir, "tools")] }, {
+        command: "/usr/bin/x", args: ["--config", "/tmp/turn/mcp.json"], cwd: join(dataDir, "task-workspaces", "b", "t"), env: { XDG_CACHE_HOME: "/var/cache/x" },
+        rw: ["/srv", join(dataDir, "perm.sock")], ro: ["/var/lib", join(dataDir, "hook-tokens", "t")],
+      });
+      const targets = plan.mounts.map((mount) => (mount.kind === "symlink" ? mount.link : mount.target));
+      const cover = plan.mounts.findIndex((mount) => mount.kind === "tmpfs" && mount.target === dataDir);
+      expect(plan.mounts.filter((mount) => mount.kind !== "symlink" && mount.target === dataDir), dataDir).toEqual([{ kind: "tmpfs", target: dataDir }]);
+      targets.forEach((target, index) => {
+        const inside = target !== dataDir && target.startsWith(`${dataDir}/`);
+        expect(inside ? index > cover : index <= cover, `${dataDir}: ${target}`).toBe(true);
+      });
+      expect(visibleInBox(plan, join(dataDir, "config.json")), dataDir).toBe("none");
+      expect(visibleInBox(plan, join(dataDir, "perm.sock")), dataDir).toBe("rw");
+      expect(visibleInBox(plan, join(dataDir, "hook-tokens", "t")), dataDir).toBe("ro");
+    }
+  });
+
+  it("never shows a path on the command line that is in the data folder or holds it, unless the caller named it", () => {
+    for (const { dataDir, home } of [{ dataDir: "/data/.openmausbot", home: "/data" }, { dataDir: "/var/lib/openmausbot", home: "/home/maus" }, { dataDir: "/srv/omb", home: "/home/maus" }]) {
+      const secrets = ["config.json", "operator-token", "sessions.json", "workspaces/other/MEMORY.md"].map((file) => join(dataDir, file));
+      const ask = (args: string[], ro: string[] = []) => planBox({ ...setup(), dataDir, home }, { command: "/bin/sh", args, cwd: join(dataDir, "task-workspaces", "b", "t"), env: {}, botId: "b", ro });
+      for (const args of [["-c", "cat \"$1\"", "sh", ...secrets], [dataDir], [`--model=${secrets[0]}`], [`@${secrets[0]}`], ["/srv", "/var", "/data", "/"].filter((path) => dataDir.startsWith(path))]) {
+        const plan = ask(args);
+        for (const file of secrets) expect(visibleInBox(plan, file), `${dataDir}: ${args.join(" ")}`).toBe("none");
+      }
+      expect(visibleInBox(ask([join(dataDir, "workspaces", "b", "server.js")]), join(dataDir, "workspaces", "b", "server.js"))).toBe("rw");
+      expect(visibleInBox(ask(["--token", join(dataDir, "hook-tokens", "t", "token")], [join(dataDir, "hook-tokens", "t")]), join(dataDir, "hook-tokens", "t", "token"))).toBe("ro");
+      expect(visibleInBox(ask(["--mcp-config", "/tmp/omb-mcp-1/mcp.json"]), "/tmp/omb-mcp-1/mcp.json")).toBe("ro");
+    }
   });
 
   it("each mutation opens exactly the hole it names", () => {

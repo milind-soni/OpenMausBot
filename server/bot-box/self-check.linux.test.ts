@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { BOX_BRIDGE_SCRIPT, writeSeccompFile } from "./box.ts";
 import { detectBox } from "./detect.ts";
+import { seccompSupported } from "./seccomp.ts";
 import { runBoxSelfCheck } from "./self-check.ts";
 
 const detection = detectBox({ env: { ...process.env, OMB_BOT_BOX: "1" } });
@@ -27,7 +28,7 @@ describe.skipIf(!available)(`the real box (${detection.box === "bwrap" ? "bubble
     const result = await runBoxSelfCheck(options());
     expect(result.error).toBeUndefined();
     expect(result.failed).toEqual([]);
-    expect(result.total).toBe((process.arch === "x64" ? 31 : 30) + (cpuList ? 1 : 0));
+    expect(result.total).toBe((seccompSupported() ? 31 : 30) + (cpuList ? 1 : 0));
     expect(result.results.map((check) => check.id)).toEqual(expect.arrayContaining([...(cpuList ? ["cpu-list-readable"] : []), "engine-runs", "engine-read-only", "no-provider-key-in-env", "broker-call-works", "broker-wrong-token-refused", "broker-other-grant-refused", "broker-key-not-on-disk", "base-url-is-broker"]));
   }, 120_000);
 
@@ -39,7 +40,7 @@ describe.skipIf(!available)(`the real box (${detection.box === "bwrap" ? "bubble
       "env-all": ["secret-not-in-env"],
       "tmp-shared": ["tmp-private"],
       "engines-rw": ["engine-read-only"],
-      ...(process.arch === "x64" ? { "no-seccomp": ["keyring-denied"] } : {}),
+      ...(seccompSupported() ? { "no-seccomp": ["keyring-denied"] } : {}),
     };
     for (const [mutation, checks] of Object.entries(expected)) {
       const result = await runBoxSelfCheck({ ...options(), mutate: new Set([mutation as never]) });
