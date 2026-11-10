@@ -132,3 +132,15 @@ export function createRunOwners(deps: RunOwnersDeps) {
 }
 
 export type RunOwners = ReturnType<typeof createRunOwners>;
+
+/** The rule as a route asks it, by the request's sign-in. A route built without it (a server one person uses, or a
+ * route's own test) refuses nothing and sees no admin, so nothing changes there. */
+export function routeRunOwners(owners: Pick<RunOwners, "stopRefusal" | "removeRefusal" | "joinRefusal"> | undefined, actorOf: ((auth: RequestAuth) => Actor) | undefined) {
+  const by = (auth: RequestAuth): Actor => actorOf?.(auth) ?? { admin: false };
+  return {
+    admin: (auth: RequestAuth) => by(auth).admin,
+    stopRefusal: (auth: RequestAuth, threadId: string) => owners?.stopRefusal(threadId, by(auth)) ?? null,
+    removeRefusal: (auth: RequestAuth, threadId: string, sender: ResolvedSender | undefined) => owners?.removeRefusal(threadId, sender, by(auth)) ?? null,
+    joinRefusal: (auth: RequestAuth, threadId: string, senders: ReadonlyArray<ResolvedSender | undefined>) => owners?.joinRefusal(threadId, senders, by(auth)) ?? null,
+  };
+}

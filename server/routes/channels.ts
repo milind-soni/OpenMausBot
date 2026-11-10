@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Actor, RunOwners } from "../host/run-owner.ts";
+import { routeRunOwners, type Actor, type RunOwners } from "../host/run-owner.ts";
 import type { ResolvedSender, WireGroup } from "../../shared/wire.ts";
 import { admit } from "../admission.ts";
 import {
@@ -42,8 +42,8 @@ export type MessagePage = { messages: Array<Message | Record<string, unknown>>; 
 
 export interface ChannelRouteDeps {
   /** Whoever asked owns the run, where several people write. */
-  runOwners: Pick<RunOwners, "stopRefusal" | "removeRefusal" | "joinRefusal">;
-  runActor(auth: RequestAuth): Actor;
+  runOwners?: Pick<RunOwners, "stopRefusal" | "removeRefusal" | "joinRefusal">;
+  runActor?(auth: RequestAuth): Actor;
   store: Pick<Store,
     | "group" | "groupTaskByThread" | "bot" | "switchGroupTask" | "patchGroupTask" | "patchGroup" | "messagesFor" | "groupTasks" | "deleteGroupTasks" | "deleteGroup"
     | "createGroupTask" | "appendMessage">;
@@ -114,7 +114,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
     resolveReplyTarget, runningTurnInstance, startGroupTurn, engineSteersImages, applyRoomHoldsFromMessage, cancelGroupTurnOperations,
     drainQueuedChannelSends, clearTurnDigestState, closeOpenApprovals, revokeInternalCapabilitiesForThread,
     stagedSkillCleanupsForThread, rejectDeletedThreadSkillStages,
-  } = deps;
+  } = deps; const owners = routeRunOwners(deps.runOwners, deps.runActor);
   const DESKTOP_MANAGED = deps.desktopManaged;
   const deleteRefusal = (auth: RequestAuth, groupId: string, threadId: string): { status: 403 | 404 | 409; error: string } | null => {
     if (phoneSecretSubmissions.hasThread(threadId)) {
@@ -405,7 +405,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
             ? sameNameRefusalForBots(text, members, mentions, current.name, "sent")
             : sameNameRefusal(text, members, mentions, conversationLanguage(threadId));
           if (sameName) throw Object.assign(new Error(sameName), { status: 409 });
-          if (channelMode === "chat" && !deps.runOwners.stopRefusal(threadId, deps.runActor(auth))) applyRoomHoldsFromMessage(current.id, text, mentions);
+          if (channelMode === "chat" && !owners.stopRefusal(auth, threadId)) applyRoomHoldsFromMessage(current.id, text, mentions);
           const threadWorking = groupThreadIsWorking(current.id, threadId);
           const decision = admit("room", {}, { roomWorking: threadWorking, threadWorking });
           if (decision.action === "queue") {
@@ -431,7 +431,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const group = store.group(m[1]);
       if (!group) return json(res, 404, { error: "no such group" });
       const waiting = channelQueueItem(group.id, m[2]);
-      const notYours = waiting && deps.runOwners.removeRefusal(waiting.threadId, waiting.item.sender, deps.runActor(auth));
+      const notYours = waiting && owners.removeRefusal(auth, waiting.threadId, waiting.item.sender);
       if (notYours) return json(res, 403, { error: notYours, code: "queued_not_yours" });
       if (!cancelChannelMessage(group.id, m[2])) {
         return json(res, 404, { error: "no such queued message" });
@@ -471,7 +471,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!held) return json(res, 404, { error: "no such queued message" });
       const headGroup = headChannelGroup(held.items);
       const [head] = headGroup;
-      const waitsItsTurn = deps.runOwners.joinRefusal(targetThreadId, headGroup.map((item) => item.sender), deps.runActor(auth));
+      const waitsItsTurn = owners.joinRefusal(auth, targetThreadId, headGroup.map((item) => item.sender));
       if (waitsItsTurn) {
         restoreHeldChannelQueue(held);
         return json(res, 403, { error: waitsItsTurn, code: "waits_its_turn" });
@@ -616,7 +616,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
           instance: busy ? runningTurnInstance(busy, threadId) : undefined,
         };
       });
-      const refusal = targetThreadIds.map((threadId) => deps.runOwners.stopRefusal(threadId, deps.runActor(auth))).find(Boolean);
+      const refusal = targetThreadIds.map((threadId) => owners.stopRefusal(auth, threadId)).find(Boolean);
       if (refusal) return json(res, 403, { error: refusal, code: "stop_not_yours" });
       // Abort every queued operation before the first provider round trip, so none begins while Stop awaits.
       for (const { threadId } of interruptTargets) cancelGroupTurnOperations(group.id, threadId);

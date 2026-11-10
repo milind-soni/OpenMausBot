@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { arrivalDecision, createRunOwners, mayJoinRun, mayRemoveQueued, mayStop, type RunOwnersDeps } from "./run-owner.ts";
+import type { RequestAuth } from "../request-auth.ts";
+import { arrivalDecision, createRunOwners, mayJoinRun, mayRemoveQueued, mayStop, routeRunOwners, type RunOwnersDeps } from "./run-owner.ts";
 
 const PRIYA = "p_priyapriyapriyapriyapr";
 const TOM = "p_tomtomtomtomtomtomtomt";
@@ -84,5 +85,16 @@ describe("who asked", () => {
   it("names the asker in the refusal", () => {
     expect(owners({ messageId: "m1" }).stopRefusal("t", { person: TOM, admin: false })).toBe("Only Priya or an admin can stop this.");
     expect(owners({ messageId: "m1" }).stopRefusal("t", { person: PRIYA, admin: false })).toBeNull();
+  });
+});
+
+describe("a route built without the rule", () => {
+  it("refuses nothing and sees no admin, as on a server one person uses", () => {
+    const owners = routeRunOwners(undefined, undefined);
+    const auth = { kind: "loopback" } as RequestAuth;
+    expect(owners.admin(auth)).toBe(false);
+    expect(owners.stopRefusal(auth, "t")).toBeNull();
+    expect(owners.removeRefusal(auth, "t", { name: "Tom", id: TOM })).toBeNull();
+    expect(owners.joinRefusal(auth, "t", [{ name: "Tom", id: TOM }])).toBeNull();
   });
 });
