@@ -16,7 +16,7 @@ import { claudeAuthStatus } from "./claude-auth-status.ts";
 import { projectMcpServers } from "./claude-project-mcp.ts";
 import { botSettingsFor, withBotSettings } from "./claude-bot-settings.ts";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
-import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.ts";
+import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.ts"; import { AWS_CREDENTIAL_ENV_KEYS, bedrockResultError, withBedrockCredentialError } from "./claude-bedrock-aws.ts";
 import { CLAUDE_MODEL_ID, STATIC_CLAUDE_MODELS, claudeModelExtras, endpointModelCatalog } from "./claude-model-extras.ts";
 import { claudeToolSearchSetting } from "./claude-tool-search.ts"; import { unusableBuiltIns } from "./claude-unusable-tools.ts"; import { EMAIL_READ_TOOL_NAMES } from "../../shared/email.ts";
 import { claudeElicitations } from "./claude-elicitation.ts";
@@ -84,7 +84,7 @@ export const CLAUDE_ACCOUNT_ENV_KEYS = [
   "ANTHROPIC_CUSTOM_HEADERS",
   "CLAUDE_CODE_USE_BEDROCK",
   "CLAUDE_CODE_USE_VERTEX",
-  "CLAUDE_CODE_USE_FOUNDRY",
+  "CLAUDE_CODE_USE_FOUNDRY", ...AWS_CREDENTIAL_ENV_KEYS,
 ] as const;
 
 export function resolveClaudeConfigDir(configDir?: string, env: NodeJS.ProcessEnv = process.env): string {
@@ -272,7 +272,7 @@ export interface ClaudeConfig {
   permissionMode: "acceptEdits" | "auto" | "bypassPermissions";
   tools?: string[];
   disallowedTools?: string[];
-  requireApiKey?: boolean;
+  requireApiKey?: boolean; bedrock?: boolean; // bedrock: Amazon Bedrock through an AWS profile, no secret of its own
 }
 
 export { STATIC_CLAUDE_MODELS };
@@ -643,7 +643,7 @@ function decodeConfig(raw: unknown): ClaudeConfig {
     permissionMode: (mode as ClaudeConfig["permissionMode"]) ?? "acceptEdits",
     ...(tools !== undefined ? { tools } : {}),
     ...(disallowedTools !== undefined ? { disallowedTools } : {}),
-    ...(o.requireApiKey === true ? { requireApiKey: true } : {}),
+    ...(o.requireApiKey === true ? { requireApiKey: true } : {}), ...(o.bedrock === true ? { bedrock: true } : {}),
   };
 }
 
@@ -1522,7 +1522,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
             if ((o.is_api_error_message === true || typeof o.error === "string") && text.trim()) {
               if (session.turn) session.turn.explained = true;
-              if (!session.turn?.stopRequested) emit({ ...base(threadId, currentTurnId()), type: "runtime.error", ...claudeApiError(o, text) });
+              if (!session.turn?.stopRequested) emit({ ...base(threadId, currentTurnId()), type: "runtime.error", ...withBedrockCredentialError(config.bedrock, input.environment, text, claudeApiError(o, text)) });
               break;
             }
             if (session.turn) session.turn.answered = true;
@@ -1596,7 +1596,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 o.api_error === "usage_limit_reached" || USAGE_LIMIT.test(String(o.result ?? "")))) reachLimit(o, o.result);
             if (o.is_error === true && session.turn && !session.turn.settled && !session.turn.explained && !session.turn.stopRequested) {
               session.turn.explained = true;
-              emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: claudeResultError(o) });
+              emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: bedrockResultError(config.bedrock, input.environment, claudeResultError(o)) });
             }
             if (!config.managed) void orgBlocks.refresh();
             // result.usage is per turn "in streaming-input sessions" (2.1.282) even on a retained

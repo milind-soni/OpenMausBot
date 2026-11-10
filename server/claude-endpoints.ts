@@ -57,9 +57,9 @@ function rawConfig(entry: InstanceConfig): Record<string, unknown> {
     ? entry.config as Record<string, unknown> : {};
 }
 
-/** A Claude instance the person pointed at another host, rather than a named Claude account. */
+/** A Claude instance the person pointed at another host, rather than a named Claude account or Bedrock. */
 export function isClaudeEndpoint(entry: InstanceConfig | undefined): boolean {
-  return entry?.driver === "claudeAgent" && Array.isArray(rawConfig(entry).endpointModels);
+  return entry?.driver === "claudeAgent" && Array.isArray(rawConfig(entry).endpointModels) && rawConfig(entry).bedrock !== true;
 }
 
 export type { ClaudeEndpointInfo };
