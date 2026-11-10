@@ -2213,7 +2213,6 @@
   "relay.reply": "{name} 回覆了",
   "relay.assistant": "{name} 的助理回答了",
   "sidebar.people.title": "成員",
-  "sidebar.people.you": "{name}（你）",
   "sidebar.people.yourInbox": "你的收件匣：寄給你的一切都在這裡",
   "sidebar.people.yourInboxWaiting": "你的收件匣：待你處理，{count}",
   "sidebar.people.invite": "邀請他人",

@@ -2073,7 +2073,6 @@
   "relay.reply": "{name}さんが返信しました",
   "relay.assistant": "{name}さんのアシスタントが答えました",
   "sidebar.people.title": "メンバー",
-  "sidebar.people.you": "{name}（あなた）",
   "sidebar.people.yourInbox": "あなたの受信トレイ：あなた宛てのものがすべて届きます",
   "sidebar.people.yourInboxWaiting": "あなたの受信トレイ：あなたの対応待ち、{count} 件",
   "sidebar.people.invite": "メンバーを招待",

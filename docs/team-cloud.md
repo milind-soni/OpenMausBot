@@ -495,8 +495,37 @@ routine from anyone else (404 *no such bot*).
 ## The shared chat's name
 
 A team bot's main chat is called *"Shared chat"* on every person's copy (`WireTask.sharedChat`), whatever its stored title,
-so nobody takes it for one of their own, and it can't be renamed. A member's own MausBot has none. Clicking a bot still
-opens the person's own private chat.
+so nobody takes it for one of their own, and it can't be renamed. A member's own MausBot has none.
+
+## Just me and Team
+
+At the top of a team's sidebar sits one switch, **Just me / Team** (`src/state/team-side.ts`, `TeamSideSwitch`). It is in
+the sidebar in each of its shapes: full width, the rail of icons (two icon buttons) and the phone's bot list. It is not
+in the window's rail of Clouds, which is the desktop window's own chrome: a browser and a phone have none, one place has
+none, and the person can hide it.
+
+- **Just me** lists the bots the person can chat with privately (their own MausBot among them), each with their own
+  conversations with it, and no group chat. A bot opens the person's own chat with it, made through `POST
+  /api/bots/<id>/tasks` the first time.
+- **Team** lists the bots that have a shared chat, each with its shared conversations only, and the group chats. A bot
+  opens its shared chat. A bot with no shared chat (a person's own MausBot) is not listed there. No new conversation is
+  offered beside a shared chat: a conversation a person opens is always private, so New conversation is under Just me.
+- **Which side a conversation is on is the server's answer**, never the switch: `private: true` on the task (or a
+  conversation this page just made through that route, or the person's own MausBot) is Just me; everything else, a
+  conversation the page knows nothing of included, is Team. Neither side's list shows a conversation, an unread mark or a
+  preview line of the other's.
+- **By the message box**, every conversation on a team says who can read it, from that same answer: *"Private · only
+  you"*, *"Shared · everyone in Acme can see"*, *"Shared · only people added and admins can see"* or, in a group chat,
+  *"Shared · everyone in this group chat can see"* (`TeamAudienceLabel`).
+- **The switch follows the conversation on screen.** A conversation opened from a notification, a link or search on the
+  other side moves the switch to its side. Choosing a side opens the bot on screen there, or that side's first bot.
+- **Remembered** per person and team on the device (`localStorage`, `omb.team-side.<team>.<address>`), Just me until
+  they choose Team. The page's first conversation moves to the remembered side when its bot has a conversation there
+  and nothing asked for that conversation by name.
+- **Unread.** The side not shown carries a dot when the person has something unread there (their own marks: a private
+  chat's, or their own read line of a shared chat or a group chat).
+- With one side empty (nobody shared a bot with them yet, say) there is no switch and the sidebar lists everything.
+  The first time the switch shows on a device, one line under it says what the two sides are.
 
 ## Who looks after a bot
 
@@ -773,8 +802,8 @@ listed), two of that name, the person the bot is already talking with, a person 
 inbox here, and more than 10 passes an hour from one conversation (answers from an inbox included).
 
 **People.** The composer's @ list offers the teammates after the bots, with their picture and a "Person" tag; the
-sidebar lists the team's people with their pictures: your own row opens your inbox, a teammate's puts their @name in
-the composer on screen. Each person is tagged by their whole name, and by their first name when no other teammate shares
+sidebar shows the team's people as a row of faces above the bots, never as rows of their own: your own face opens your
+inbox, a teammate's puts their @name in the composer on screen. Each person is tagged by their whole name, and by their first name when no other teammate shares
 it (`shared/person-mention.ts`). A tag a bot shares is the person's: "@Ben" reaches Ben even with a bot called Ben, and
 that bot is not told it was named; only a longer bot name ("@Ben Bot") reaches a bot. A bot made or renamed with a
 person's name says so once in its own chat, and the Chief's `create_bot` result warns (`server/host/bot-name-clash.ts`).

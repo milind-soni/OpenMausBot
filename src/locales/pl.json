@@ -6475,7 +6475,6 @@
   "relay.reply": "Odpowiedź od: {name}",
   "relay.assistant": "Asystent odpowiedział za: {name}",
   "sidebar.people.title": "Osoby",
-  "sidebar.people.you": "{name} (ty)",
   "sidebar.people.yourInbox": "Twoja skrzynka: wszystko, co do ciebie trafia",
   "sidebar.people.yourInboxWaiting": "Twoja skrzynka: czeka na ciebie, {count}",
   "sidebar.people.invite": "Zaproś kogoś",
