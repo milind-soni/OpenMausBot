@@ -41,12 +41,14 @@ services:
       OMB_PUBLIC_URL: https://${DOMAIN}
       OMB_SERVER_NAME: ${OMB_SERVER_NAME:-${DOMAIN}}
       # Who may sign in with an emailed code at /pair (docs/self-hosting.md,
-      # "Sign in with your email"). Empty means pairing codes only.
-      OMB_SIGNIN_EMAILS: ${OMB_SIGNIN_EMAILS:-}
-      OMB_SIGNIN_MEMBER_EMAILS: ${OMB_SIGNIN_MEMBER_EMAILS:-}
-      # Send the codes through your own mail server (same section of the docs).
-      OMB_SIGNIN_SMTP_URL: ${OMB_SIGNIN_SMTP_URL:-}
-      OMB_SIGNIN_SMTP_FROM: ${OMB_SIGNIN_SMTP_FROM:-}
+      # "Sign in with your email"), and your own mail server for the codes.
+      # With no value here, each is passed only when .env sets it. A list
+      # .env leaves empty is Settings → Remote access's to manage; one that
+      # names someone decides that list, and Settings refuses to change it.
+      OMB_SIGNIN_EMAILS:
+      OMB_SIGNIN_MEMBER_EMAILS:
+      OMB_SIGNIN_SMTP_URL:
+      OMB_SIGNIN_SMTP_FROM:
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]
       interval: 30s
