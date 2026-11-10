@@ -1,8 +1,13 @@
 # One OpenMausBot tenant: the harness server plus Caddy for TLS + login.
 #
-# Caddy runs in the server's network namespace, so it reaches the server on
-# 127.0.0.1 — the server never binds a public interface. Ports are therefore
-# declared on the `omb` service (the namespace owner).
+# The server only listens on loopback inside its container, and on two Unix
+# sockets in the `edge` volume; Caddy, in its own container, reaches it through
+# those. A request on a socket is never a local one: it needs a session, and
+# X-Forwarded-For names the client, exactly as when Caddy shared the server's
+# network. Caddy no longer shares that network because a server restarted on
+# its own (a crash, `docker compose restart`, `stop omb`) came back in a new
+# one, leaving Caddy in the old one with HTTPS refused while both looked
+# healthy; a socket path is the same file again as soon as the server is back.
 #
 #   cp .env.example .env   # set DOMAIN
 #   docker compose pull omb && docker compose up -d     # prebuilt image
@@ -25,12 +30,13 @@ services:
     shm_size: 512m
     volumes:
       - data:/data
-    ports:
-      - "80:80"
-      - "443:443"
+      - edge:/run/openmausbot
     environment:
       OMB_PORT: "8799"
       OMB_WEBHOOK_PORT: "8800"
+      # What Caddy connects to (deploy/Caddyfile).
+      OMB_TUNNEL_SOCKET: /run/openmausbot/http.sock
+      OMB_WEBHOOK_SOCKET: /run/openmausbot/hooks.sock
       # what the app prints as hook URLs — Caddy passes /hooks/* straight through
       OMB_WEBHOOK_PUBLIC_URL: https://${DOMAIN}
       # pairing links for remote clients point here (docs/self-hosting.md)
@@ -52,18 +58,31 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
-    network_mode: "service:omb"
+    ports:
+      - "80:80"
+      - "443:443"
+    # Started with the server, not after it is healthy: Caddy reaches it over the socket
+    # whenever it answers, so `up` never waits on the server's health, and HTTPS is back
+    # as soon as a restarted server is.
     depends_on:
       omb:
-        condition: service_healthy
+        condition: service_started
     environment:
       DOMAIN: ${DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - edge:/run/openmausbot
       - caddy_data:/data
       - caddy_config:/config
 
 volumes:
   data:
+  # The two sockets: in memory, made afresh by the server at each start. Not
+  # under /data, which every bot's sandbox sees; the sandbox has its own /run.
+  edge:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: mode=1777,size=1m
   caddy_data:
   caddy_config:
