@@ -81,6 +81,8 @@ checks it guards.
   stay in the environment until the credential broker (T0b) replaces them with per-turn tokens.
 - The box runs as the server's own user inside a user namespace; a separate Linux user per bot needs a privileged
   spawn service (T0c notes).
+- A Cloud home's boxes are not started with `--disable-userns`: Chrome or Playwright run from a bot's shell there
+  needs a user namespace for its own sandbox. The self-hosted profile's engine boxes have it.
 - On a Team Cloud each Chrome of the bots' browsers runs in a box of its own (`BotBox.browserBox`, written into the
   launcher agent-browser runs, see [team-cloud.md](team-cloud.md)); the agent-browser daemon is not boxed, and on a My
   Cloud no browser is.

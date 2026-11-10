@@ -396,9 +396,14 @@ git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot
 pnpm install
 
 # choose where data lives and start the server
-OMB_DATA_DIR="$HOME/.openmausbot" OMB_PORT=8799 \
+OMB_PROFILE=auto OMB_DATA_DIR="$HOME/.openmausbot" OMB_PORT=8799 \
   node --experimental-strip-types server/index.ts
 ```
+
+`OMB_PROFILE=auto` gives a server run from source the same
+[hardened profile](#the-hardened-profile) rules as a released one. Without
+it a checkout is a development server and never turns the profile on by
+itself: do not let other people sign in to one started that way.
 
 For something durable, let the CLI write the service for you:
 
@@ -798,6 +803,24 @@ the server turns on by itself:
   card, or sends into a Full-access conversation.
 - **Memory is read from regular files only**, so a link a bot leaves in its
   folder cannot make the server read its own settings back to that bot.
+- **The server's files stay hidden wherever its data folder is** (inside the
+  server user's home, under `/var/lib` or `/opt`, on a disk of its own), and
+  whatever a command line or an MCP server's settings name. At every start
+  the server runs one sandboxed command in its real layout and asks it for a
+  file it just wrote there; if the command finds it, the server does not
+  start.
+- **A bot cannot make a sandbox inside its sandbox** (a user namespace of
+  its own), which would hand it network and mount settings to configure and
+  the kernel code behind them. This needs bubblewrap 0.8 (Debian 12, Ubuntu
+  24.04, the Docker image); with an older one the log says the gap is open.
+- **Outside a container, the server user's own home is guarded.** A bot sees
+  the home folder, but not `~/.ssh`, `~/.aws`, `~/.config/gcloud`,
+  `~/.docker`, `~/.gnupg`, `~/.kube`, `~/.netrc`, `~/.git-credentials` or the
+  shells' histories, and cannot write `~/.bashrc`, `~/.profile`, `~/.zshrc`,
+  `~/.gitconfig` or `~/.npmrc`. This is a list of well-known names, not a
+  wall: keep a server other people use under a user of its own, with nothing
+  else in its home. In the Docker image the home holds only what you put on
+  the data volume, and is guarded the same way once others sign in.
 
 It is on when any of these is true:
 
@@ -812,10 +835,11 @@ A server only its one owner signs in to, started with `npx openmausbot` or
 were. `OMB_PROFILE=standard` declines the profile anywhere; on a shared server
 the log then warns at every start.
 
-A server run [from source](#from-source) (`node server/index.ts`) is a
-development checkout and never turns the profile on by itself; when more than
-one person can sign in to it, the log says so at every start. Set
-`OMB_PROFILE=hardened` there, or `OMB_PROFILE=auto` for the rules above.
+A server run [from source](#from-source) with a bare `node server/index.ts`
+is a development checkout and never turns the profile on by itself; when
+more than one person can sign in to it, the log says so at every start. The
+command that section gives, and the service `openmausbot service install`
+writes, set `OMB_PROFILE=auto`, which applies the rules above there too.
 
 The start-up log says which it is:
 
@@ -850,13 +874,20 @@ sandbox (unprivileged user namespaces). The Docker image ships `bubblewrap`.
   23.10 and later also restrict user namespaces until you run
   `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` (add it to
   `/etc/sysctl.d/` to keep it). The sandbox shows a bot the system folders
-  (`/usr`, `/etc`, `/opt`), the server user's home without the data folder,
-  and its own working folder: an engine or tool installed somewhere else
-  (`/snap`, `/home/linuxbrew`) is not there for it.
+  (`/usr`, `/etc`, `/opt`, `/var/lib`), the server user's home without the
+  data folder and without the sign-ins listed above, and its own working
+  folder: an engine or tool installed somewhere else (`/snap`,
+  `/home/linuxbrew`) is not there for it. Ubuntu 22.04 ships bubblewrap
+  0.6, which cannot stop a bot making a user namespace of its own: the
+  sandbox still runs, and the log says so at every start.
 - **macOS and Windows** have no bot box. A shared server there still stops
   trusting local requests, and says at every start and in Settings that its
-  bots are not sandboxed: anyone who can chat with a bot can make it read the
-  server's settings and keys. Run a server other people use on Linux.
+  bots are not sandboxed. Unsandboxed, a bot's commands run as the server's
+  own user: anyone who can chat with a bot can make it read the server's AI
+  keys, saved logins and other people's chats, and change its settings,
+  including who may sign in. Run a server other people use on Linux.
+- **arm64** gets the sandbox's system-call filter too, by arm64's own
+  numbers.
 
 ### When the sandbox cannot run
 
@@ -865,8 +896,9 @@ The server never runs unsandboxed without saying so.
 | The server | What happens |
 |---|---|
 | New, and more than one person can sign in (or `OMB_PROFILE=hardened`) | It does not start. It prints one sentence saying what to fix, exits with code 78, and changes nothing. |
-| Already in use (someone has signed in before), and more than one person can sign in | It starts, so nobody's work stops, as a `service` to local requests. The log warns at every start and Settings shows an admin a notice that stays until it is fixed. It takes no new people: adding one to the sign-in list is refused with the fix. |
-| The Docker image, one owner | It starts exactly as before (owner trust, no sandbox). The log warns at every start and Settings tells the owner once. Adding a second person is refused with the fix. |
+| Already in use (someone has signed in before), and more than one person can sign in | It starts, so nobody's work stops, as a `service` to local requests. The log warns at every start and Settings shows an admin a notice that stays until it is fixed. It takes no new people: adding one in Settings is refused with the fix, and one added to the list on disk (`openmausbot access add`) is not let in. |
+| The Docker image, one owner | It starts exactly as before (owner trust, no sandbox). The log warns at every start and Settings tells the owner once. Adding a second person in Settings is refused with the fix; one added on disk is not let in until the next start, which then follows the row above or the first one. |
+| The sandbox is on but a sandboxed command can still see the server's files | It does not start, and says which file. This is a fault to report, not a setting. |
 | Any server that has run the profile before | It does not start: a sandbox that stops working is never replaced by none. |
 
 `OMB_PROFILE=standard` starts any of them without the sandbox, with the
@@ -891,13 +923,37 @@ Nothing is moved or rewritten: the data folder gains one small file,
 - **A shared server where the sandbox cannot run:** see the table above. It
   keeps running, as a `service`, and tells its admin what to fix.
 - **Adding a second person to a running one-owner server:** the change is
-  saved and Settings asks for a restart, which turns the profile on; where
-  the sandbox could not run the change is refused instead.
+  saved, and Settings asks for a restart. Until that restart the new person
+  cannot sign in: the server started as one person's, so it still trusts
+  local requests as its owner, and it holds the list as it was rather than
+  let a second person's bot be that owner. The same holds for a list edited
+  on disk with `openmausbot access add`. The restart turns the profile on;
+  where the sandbox could not run, the change is refused in Settings
+  instead.
+- **What does not turn the profile on:** a bot's API key and a webhook. They
+  let someone outside send a bot text, as a web page the bot reads does, but
+  nobody signs in through them. On a one-owner server outside Docker a bot
+  driven that way is unsandboxed, as it is when it browses; put such a
+  server in Docker on a prepared host, or set `OMB_PROFILE=hardened`.
 
 What the profile does not cover yet is listed in
 [the bot box's notes](bot-box.md#what-it-does-not-do-yet): the engines' own
 subscription sign-ins stay inside the sandbox because the engine needs them,
 and a key whose CLI takes no base URL stays in that engine's environment.
+Also not yet:
+
+- **A home of the engines' own.** Outside a container a bot works in the
+  server user's home, guarded by the list of names above. Moving the
+  engines' sign-ins to a folder of their own, as a Team Cloud's audiences
+  have, would move every existing owner's engine logins, so it comes as a
+  change of its own. Until then, run a shared server under a user that has
+  nothing else in its home.
+- **A bare `node server/index.ts`.** Every released form of the server is a
+  build; a checkout started that way is someone's development or test
+  server, often on a laptop with no bubblewrap, so it keeps its behaviour
+  rather than refuse to start, and warns at every start when others can
+  sign in. Use the command in [from source](#from-source) or
+  `openmausbot service install` for a server people use.
 
 ## Sign in with your email
 
