@@ -807,8 +807,11 @@ An entry is an address or `@domain` (everyone at that domain). Admins get
 the same access as a pairing code from `openmausbot serve`; users get the
 chat-only scope, the same as `openmausbot pair --phone`. The same lists live
 in `config.json` under `signIn.admins` and `signIn.members` and can be changed
-through the settings API without a restart; the environment variables win
-when set, which is how a container or a service unit is bootstrapped.
+through the settings API without a restart. An environment variable that
+names someone wins over its list, which is how a container or a service unit
+is bootstrapped; while it does, Settings refuses to change that list and says
+which variable to change instead. One that is empty, as `.env.example` and the
+Compose files leave them, leaves the list to Settings.
 
 The code itself comes from `accounts.openmausbot.com`, the OpenMausBot
 account service, so your server needs no email credentials. Your server asks
