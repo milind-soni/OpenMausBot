@@ -15,6 +15,7 @@ import { activityPage, createActivityWindow } from "./lending-activity-window.mj
 import { createLendingIndicator, indicatorText } from "./lending-indicator.mjs";
 import { createLendingTarget } from "./lending-target.mjs";
 import { WORDS } from "./lending-words.mjs";
+import nativeText from "./native-text.cjs";
 
 const HOME = "https://omb-u-fixture.fly.dev", OTHER = "https://omb-c-client-a.fly.dev", TEAM = "https://omb-t-acme.fly.dev";
 const myCloud = { id: "my-cloud", name: "My Cloud", origin: HOME, home: true };
@@ -563,10 +564,11 @@ test("the PC's tray item ends with Quit, paused or not, when the app gives it on
   const indicator = createLendingIndicator({ Tray, Menu: { buildFromTemplate: items => items }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, iconPath: "icon.png",
     onPause() {}, onResume() {}, onActivity() {}, onTerminal() {}, onQuit: () => quits++, device: "PC" });
   const labels = () => trays[0].menu.map(item => item.type === "separator" ? "-" : item.label);
-  indicator.update({ clouds: ["Rocky"], using: [], paused: true });
-  assert.deepEqual(labels(), ["Paused: Rocky can't use this PC", "-", "Resume", "See activity", "-", "Quit OpenMaus Bot"]);
-  indicator.update({ clouds: ["Rocky"], using: [], paused: false });
-  assert.deepEqual(labels().slice(-2), ["-", "Quit OpenMaus Bot"]);
+  const quit = nativeText.englishText.t("native.tray.quit");
+  indicator.update({ clouds: ["My Cloud"], using: [], paused: true });
+  assert.deepEqual(labels(), ["Paused: My Cloud can't use this PC", "-", "Resume", "See activity", "-", quit]);
+  indicator.update({ clouds: ["My Cloud"], using: [], paused: false });
+  assert.deepEqual(labels().slice(-2), ["-", quit]);
   trays[0].menu.at(-1).click();
   assert.equal(quits, 1);
 });
