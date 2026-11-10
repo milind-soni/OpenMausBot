@@ -92,15 +92,16 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
    * that question, or when it goes to the thread (`threadId`) where work the sender handed on in an earlier turn waits on
    * a question (not on a sign-in only the person can do). Otherwise, to the thread where such work is running, it is
    * handed to that running turn. Work handed out in this very turn (`sentThisTurn`) stays apart: a second assignment is its
-   * own. Undefined when it goes into no work; a failed receipt when `answers` names work that no longer asks. */
+   * own. When the sender chose `threadId` itself (`selected`: a report-back thread it steers), a question it carries from another
+   * thread does not take the message. Undefined when it goes into no work; a failed receipt when `answers` names work that no longer asks. */
   async function relay(input: { sender: BotRecord; senderThreadId: string; senderNode?: HandoffView; target: BotRecord; message: string; answers?: string;
-    threadId?: string; sentThisTurn?: ReadonlySet<string> }): Promise<PeerDeliveryReceipt | undefined> {
+    threadId?: string; selected?: boolean; sentThisTurn?: ReadonlySet<string> }): Promise<PeerDeliveryReceipt | undefined> {
     const { sender, target, message } = input;
     const waiting = waitingOn(target).filter((one) => deps.mayReach(input.senderThreadId, one.threadId));
     const ownWork = (node: HandoffView | undefined): node is HandoffView => node !== undefined && node.threadId === input.threadId
       && !input.sentThisTurn?.has(node.id) && handedOnBy(node, sender.id) && deps.mayReach(input.senderThreadId, node.threadId);
     const pick = input.answers !== undefined ? waiting.find((one) => one.node?.id === input.answers)
-      : waiting.find((one) => one.node !== undefined && input.senderNode?.carrying?.includes(one.node.id) === true)
+      : waiting.find((one) => one.node !== undefined && input.senderNode?.carrying?.includes(one.node.id) === true && (!input.selected || one.threadId === input.threadId))
         ?? waiting.find((one) => ownWork(one.node) && (one.card !== undefined || !one.node.cards?.length));
     const refused = () => input.answers === undefined ? undefined : peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "failed",
       detail: `nothing of ${target.name}'s waits on an answer as ${input.answers}: it was answered or its work ended. Send it without answers if it still needs doing` });

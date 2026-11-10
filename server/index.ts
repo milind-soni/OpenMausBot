@@ -13800,7 +13800,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             const continued = room || fresh ? undefined : workThreadFor(store, { botId: target.botId, botName: recipient.name, fromBotId: internalSender.id, fromThreadId: address.threadId, thread: call.thread, notice: mode === "notify",
               answering: coordinator.answersTo(internalCapability.roomHandoffId ?? generation), also: (task) => !CLOUD_TEAM || threadStarters.get(task.threadId) === opener, reach: (task) => outsideLineage.mayReach(address.threadId, task.threadId) });
             const relayed = EXTERNAL || (!call.answers && (room || fresh || mode === "consult")) ? undefined : await questionRouting.relay({ sender: internalSender, senderThreadId: address.threadId,
-              senderNode: coordinator.node(internalCapability.roomHandoffId ?? generation), target: recipient, message: call.message, ...(call.answers ? { answers: call.answers } : {}), ...(continued ? { threadId: continued.threadId } : {}),
+              senderNode: coordinator.node(internalCapability.roomHandoffId ?? generation), target: recipient, message: call.message, ...(call.answers ? { answers: call.answers } : {}), ...(continued ? { threadId: continued.threadId, ...(steersOwn ? { selected: true } : {}) } : {}),
               ...(internalCapability.delegatedThisTurn ? { sentThisTurn: internalCapability.delegatedThisTurn } : {}) });
             if (relayed) { if (relayed.outcome === "failed") refused.push(relayed.detail); receipts.push(relayed); continue; }
             const lane = room && lanes ? roomJobs.openLane(room, target.threadId, target.botId, internalSender, call.message) : undefined;
