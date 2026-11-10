@@ -1,8 +1,9 @@
-// The engines' usage limits and the automations that wait for them to reset. All three need admin scope
+// The engines' usage limits and the automations that wait for them to reset. All four need admin scope
 // (request-auth's default):
 //   GET  /api/limit-resets              each engine's limit: how full, when it resets, whether it refuses work
 //   POST /api/limit-resets/continue     {botId, threadId}: the stopped turn's "Continue when your limit resets"
 //   POST /api/limit-resets/after-reset  {routineId, engine}: move only that automation's next run past the reset
+//   POST /api/limit-resets/release      {engine}: "Try again now", end the engine's limit hold at once
 import { AFTER_RESET_MS, type LimitResetSchedule } from "../../shared/limit-reset.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { LimitResetClock } from "../limit-resets.ts";
@@ -49,6 +50,13 @@ export function createLimitResetRoutes(deps: LimitResetRouteDeps): RouteHandler 
       res.setHeader("cache-control", "no-store");
       const fresh = deps.clock.ensureFresh();
       if (url.searchParams.get("refresh") === "1" || deps.clock.report().checkedAt === 0) await fresh;
+      return json(res, 200, deps.clock.report());
+    }
+    if (path === "/api/limit-resets/release" && method === "POST") {
+      const body = await readBody(req, 4096) as Record<string, unknown> | null;
+      const engine = exactId(body?.engine);
+      if (!engine) return json(res, 400, { error: "engine is required" });
+      deps.clock.release(engine);
       return json(res, 200, deps.clock.report());
     }
     if (path === "/api/limit-resets/continue" && method === "POST") {
