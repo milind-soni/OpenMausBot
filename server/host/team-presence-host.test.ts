@@ -43,18 +43,15 @@ function setup(team = true) {
   const threadBots: Record<string, string> = { shared: "scout", "ada-private": "scout", "ada-own": "mausbot", hidden: "scout" };
   const groups: Record<string, { memberIds: string[] }> = { room: { memberIds: ["scout"] }, "room-own": { memberIds: ["scout", "mausbot"] } };
   const sent: Array<{ to: string; frame: Record<string, unknown> }> = [];
-  const streams: Array<PresenceStream & { name: string }> = [
-    { name: ADA, person: session(ADA) },
-    { name: BEN, person: session(BEN, { teamRole: "admin", scopes: ["admin", "client"] }) },
-    { name: "move-in", person: session("mover@acme.test", { moveIn: "b1" }) },
-    { name: "server" },
-  ];
+  /** An open event stream whose writes land in `sent`. */
+  const stream = (name: string, person?: SessionRecord): PresenceStream & { name: string } => ({ name, person, backpressured: false, close: () => {},
+    res: { writableLength: 0, once: () => {}, write: (frame: string) => { sent.push({ to: name, frame: JSON.parse(frame.replace(/^data: /, "")) as Record<string, unknown> }); return true; } } });
+  const streams = [stream(ADA, session(ADA)), stream(BEN, session(BEN, { teamRole: "admin", scopes: ["admin", "client"] })),
+    stream("move-in", session("mover@acme.test", { moveIn: "b1" })), stream("server")];
   const broadcasts: Array<Record<string, unknown>> = [];
   const { clock, advance } = manualClock();
-  const host = createTeamPresenceHost({
+  const host = createTeamPresenceHost<PresenceStream & { name: string }>({
     people,
-    streams: () => streams,
-    send: (stream, frame) => sent.push({ to: stream.name, frame: JSON.parse(frame.replace(/^data: /, "")) as Record<string, unknown> }),
     broadcast: (payload) => broadcasts.push(payload),
     audienceOf: (threadId) => audiences[threadId] ?? "team",
     store: () => ({ botByThread: (threadId: string) => (threadBots[threadId] ? bots[threadBots[threadId]!] : null), groupByThread: (threadId: string) => groups[threadId], bot: (id: string) => bots[id] ?? null }) as never,
@@ -75,17 +72,31 @@ function setup(team = true) {
 describe("the presence host", () => {
   it("counts team sessions' streams only, and tells every team stream", () => {
     const { host, streams, sent } = setup();
-    for (const stream of streams) host.opened(stream);
+    for (const one of streams) host.streams.add(one);
     const arrivals = sent.filter((one) => one.frame.kind === "team.presence");
-    expect(arrivals.map((one) => one.frame.email)).toEqual([ADA, ADA, BEN, BEN]);
-    expect(arrivals.map((one) => one.to)).toEqual([ADA, BEN, ADA, BEN]);
+    // Each arrival reaches the team streams open by then: Ada's only her own, Ben's both.
+    expect(arrivals.map((one) => [one.frame.email, one.to])).toEqual([[ADA, ADA], [BEN, ADA], [BEN, BEN]]);
     expect(host.of!(ADA)).toEqual({ here: true });
     expect(host.of!("mover@acme.test")).toMatchObject({ here: false });
+    expect([...host.streams].map((one) => one.name)).toEqual([ADA, BEN, "move-in", "server"]);
+  });
+
+  it("starts a person's grace when their stream leaves the set, once", () => {
+    const { host, streams, advance } = setup();
+    host.streams.add(streams[0]!);
+    expect(host.streams.delete(streams[0]!)).toBe(true);
+    expect(host.streams.delete(streams[0]!)).toBe(false);
+    host.streams.add(streams[0]!);
+    advance(60_000);
+    expect(host.of!(ADA).here, "the second delete did not count").toBe(true);
+    host.streams.delete(streams[0]!);
+    advance(60_000);
+    expect(host.of!(ADA).here).toBe(false);
   });
 
   it("shows a person only in a conversation more than one person reads, and only to those who read it", async () => {
     const { host, streams, sent, post, advance } = setup();
-    for (const stream of streams) host.opened(stream);
+    for (const one of streams) host.streams.add(one);
     sent.length = 0;
     for (const threadId of ["ada-private", "ada-own", "room-own", "hidden"]) {
       expect(await post(ADA, { tab: "t1", threadId })).toEqual([200, { ok: true }]);
@@ -117,7 +128,7 @@ describe("the presence host", () => {
 
   it("does nothing off a team", async () => {
     const { host, streams, sent, post } = setup(false);
-    for (const stream of streams) host.opened(stream);
+    for (const one of streams) host.streams.add(one);
     expect(sent).toEqual([]);
     expect(host.of).toBeUndefined();
     expect((await post(ADA, { tab: "t1", threadId: "shared" }))?.[0]).toBe(404);
@@ -125,7 +136,7 @@ describe("the presence host", () => {
 
   it("tells every app when someone joins, changes role or leaves, once, and forgets who left", () => {
     const { host, people, broadcasts, streams, advance } = setup();
-    host.opened(streams[0]!);
+    host.streams.add(streams[0]!);
     expect(host.of!(ADA).here).toBe(true);
     people!.seen("cy@acme.test", "member");
     people!.seen(ADA, "admin");

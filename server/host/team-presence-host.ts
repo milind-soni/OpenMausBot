@@ -1,6 +1,7 @@
-// Who is here on a Team Cloud, wired for the server (docs/team-cloud.md "Who is here"): each team session's event stream
-// counts its person here (team-presence.ts), POST /api/presence/here says which conversation a window shows, and the
-// frames go out on the streams themselves, outside the replay buffer: presence is now or never.
+// Who is here on a Team Cloud, wired for the server (docs/team-cloud.md "Who is here"): the server's set of open event
+// streams lives here, and each team session's stream in it counts its person here (team-presence.ts). POST
+// /api/presence/here says which conversation a window shows, and the frames go out on the streams themselves, outside
+// the replay buffer: presence is now or never.
 // Security: the one rule is `reads`. A conversation counts only when more than one person can read it (a bot's shared
 // chat, a group chat) and the person can; anything else, a private chat above all, is taken as "no conversation", so
 // nobody, an admin included, learns that it is open, which bot it is with or that it exists.
@@ -10,25 +11,25 @@ import { audienceMember, type Audience } from "../audience.ts";
 import type { VisibleSet, Viewer } from "../bot-visibility.ts";
 import { PASS, type RouteHandler } from "../routes/table.ts";
 import type { SessionRecord } from "../sessions.ts";
+import { deliverSseFrame, type SseFanoutClient } from "../sse-fanout.ts";
 import type { Store } from "../store.ts";
 import type { TeamPeople } from "../team-people.ts";
 import { createTeamPresence, realClock, type PresenceClock, type PresenceEvent } from "../team-presence.ts";
 
-export interface PresenceStream {
+export interface PresenceStream extends SseFanoutClient {
   person?: Pick<SessionRecord, "email" | "membershipAuthority" | "moveIn">;
 }
 
-export interface TeamPresenceHostDeps<Stream extends PresenceStream> {
+export interface TeamPresenceHostDeps {
   /** Null off a team: then nothing here does anything. */
   people: TeamPeople | null;
-  streams(): Iterable<Stream>;
-  send(stream: Stream, frame: string): void;
   /** A frame every team stream gets, replayed to one that reconnects (`team.people`). */
   broadcast(payload: Record<string, unknown>): void;
   audienceOf(threadId: string): Audience;
   store(): Pick<Store, "botByThread" | "groupByThread" | "bot">;
   visibleTo(viewer: Viewer): Pick<VisibleSet, "thread">;
   clock?: PresenceClock;
+  /** OMB_TEAM_PRESENCE_GRACE_MS when not given (tests shorten it). */
   graceMs?: number;
 }
 
@@ -43,7 +44,14 @@ function teamPerson(session: PresenceStream["person"] | undefined): string | nul
 
 const frameOf = (frame: PresenceFrame) => `data: ${JSON.stringify(frame)}\n\n`;
 
-export function createTeamPresenceHost<Stream extends PresenceStream>(deps: TeamPresenceHostDeps<Stream>) {
+/** Sends a presence frame, cutting loose a stream that cannot take it, as every other frame does. */
+function send(stream: SseFanoutClient, frame: string): void {
+  if (deliverSseFrame(stream, "presence", frame) === "disconnected") stream.close();
+}
+
+/** `streams` is the server's set of open event streams: adding one counts its person here, deleting it starts their
+ * grace. */
+export function createTeamPresenceHost<Stream extends PresenceStream>(deps: TeamPresenceHostDeps) {
   const { people } = deps;
 
   /** More than one person can read it: never a conversation that is someone's own, nor one with someone's own bot. */
@@ -62,9 +70,9 @@ export function createTeamPresenceHost<Stream extends PresenceStream>(deps: Team
 
   function sendTo(emails: ReadonlySet<string> | null, frame: PresenceFrame): void {
     const text = frameOf(frame);
-    for (const stream of deps.streams()) {
+    for (const stream of streams) {
       const email = teamPerson(stream.person);
-      if (email !== null && (emails === null || emails.has(email))) deps.send(stream, text);
+      if (email !== null && (emails === null || emails.has(email))) send(stream, text);
     }
   }
   function emit(event: PresenceEvent): void {
@@ -77,7 +85,7 @@ export function createTeamPresenceHost<Stream extends PresenceStream>(deps: Team
   }
 
   const clock = deps.clock ?? realClock;
-  const presence = people ? createTeamPresence({ reads, emit, clock, graceMs: deps.graceMs }) : null;
+  const presence = people ? createTeamPresence({ reads, emit, clock, graceMs: deps.graceMs ?? (Number(process.env.OMB_TEAM_PRESENCE_GRACE_MS) || undefined) }) : null;
   let peopleTimer: { cancel(): void } | undefined;
   people?.onChange((email, change) => {
     if (change === "left") presence?.forget(email);
@@ -97,17 +105,24 @@ export function createTeamPresenceHost<Stream extends PresenceStream>(deps: Team
     return json(res, 200, { ok: true });
   };
 
-  return {
-    routes,
-    /** A stream opened: its person is here. */
-    opened(stream: Stream): void {
+  const streams = new (class extends Set<Stream> {
+    override add(stream: Stream): this {
+      super.add(stream);
       const email = teamPerson(stream.person);
       if (email !== null) presence?.streamOpened(email);
-    },
-    closed(stream: Stream): void {
+      return this;
+    }
+    override delete(stream: Stream): boolean {
+      if (!super.delete(stream)) return false;
       const email = teamPerson(stream.person);
       if (email !== null) presence?.streamClosed(email);
-    },
+      return true;
+    }
+  })();
+
+  return {
+    routes,
+    streams,
     /** What the people list says of someone: whether they are here now. Undefined off a team. */
     of: presence ? (email: string): PersonPresence => ({ here: presence.here(email) }) : undefined,
     close(): void {
