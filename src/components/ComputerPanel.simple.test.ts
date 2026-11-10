@@ -106,6 +106,7 @@ const { WorksOnGrid } = await import("./WorksOnGrid");
 const { FullScreenButton } = await import("./FullScreenButton");
 const { ComputerFilesPane } = await import("./ComputerFilesPane");
 const { CloudBackendPicker } = await import("./CloudBackendPicker");
+const { SimpleVpsChoices } = await import("./SimpleVpsChoices");
 const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
 const { KeyRow } = await import("./keys/KeyRow");
 
@@ -220,9 +221,10 @@ describe("Computer panel tabs", () => {
     }
   });
 
-  it("shows Screen, Browser, Data and Files in Simple mode", () => {
-    fixture.android = true;
+  it("shows Screen, Browser, Data and Files in Simple mode, and Android after Screen while a phone is connected", () => {
     expect(tabs(render(makeBot()))).toEqual(["Screen", "Browser", "Data", "Files"]);
+    fixture.android = true;
+    expect(tabs(render(makeBot()))).toEqual(["Screen", "Android", "Browser", "Data", "Files"]);
   });
 
   it("keeps the Advanced tabs unchanged", () => {
@@ -651,14 +653,18 @@ describe("Technical controls", () => {
     expect(advanced.buttons.some((node) => node.props.title === "Delete Scout's VM" || /Delete/.test(text(node.props.children)))).toBe(true);
   });
 
-  it("turns VPS setup into one friendly line and an Advanced switch", () => {
+  it("turns VPS setup into one friendly line, its start button and the cloud computer choice", () => {
     fixture.seed = { phase: "vps-stopped", resolved: { botId: "scout", threadId: "thread-scout", computer: "cloud", cloudBackend: "vps" } };
     const vps = () => makeBot({ computer: "cloud", cloudBackend: "vps" });
     const simple = render(vps());
     expect(simple.html).toContain("Scout&#x27;s desktop needs a setup step first.");
-    expect(simple.buttons.some((node) => /VPS/.test(text(node.props.children)))).toBe(false);
-    (simple.button("Show advanced controls")!.props.onClick as () => void)();
-    expect(fixture.setAdvancedMode).toHaveBeenCalledWith(true);
+    expect(simple.button("Start the desktop on your VPS")).toBeDefined();
+    expect(simple.button("Show advanced controls")).toBeUndefined();
+    expect(simple.button("Open VPS settings")).toBeUndefined();
+    const choices = simple.nodes.find((node) => node.type === SimpleVpsChoices)!;
+    expect(simple.html).not.toContain("Start VPS automatically");
+    (choices.props.onBackend as (backend: string) => void)("box");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateBot", botId: "scout", patch: { cloudBackend: "box" } });
 
     fixture.advanced = true;
     fixture.values = [];
@@ -666,5 +672,17 @@ describe("Technical controls", () => {
     const advanced = render(vps());
     expect(advanced.buttons.some((node) => /VPS/.test(text(node.props.children)))).toBe(true);
     expect(advanced.button("Show advanced controls")).toBeUndefined();
+    expect(advanced.nodes.some((node) => node.type === SimpleVpsChoices)).toBe(false);
+  });
+
+  it("offers a bot that picks its own place auto-start beside a stopped VPS, and Advanced's switch where Simple has no fix", () => {
+    fixture.seed = { phase: "vps-unconfigured", resolved: { botId: "scout", threadId: "thread-scout", computer: undefined, cloudBackend: "vps" } };
+    const simple = render(makeBot({ cloudBackend: "vps" }));
+    expect(simple.html).toContain("Start VPS automatically");
+    expect(simple.button("Start the desktop on your VPS")).toBeUndefined();
+    (simple.nodes.find((node) => node.type === SimpleVpsChoices)!.props.onAutoStart as () => void)();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateBot", botId: "scout", patch: { autoStartVps: true } });
+    (simple.button("Show advanced controls")!.props.onClick as () => void)();
+    expect(fixture.setAdvancedMode).toHaveBeenCalledWith(true);
   });
 });

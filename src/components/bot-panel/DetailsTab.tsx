@@ -14,7 +14,7 @@ import { Card, CardLabel, LabelAction, panelActionCls, NavRow, RowIcon, rowCls, 
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
-export const CONVERSATION_ITEMS = ["find", "usage", "activity"];
+export const CONVERSATION_ITEMS = ["find", "usage", "activity", "inspector"];
 
 /** A ⋯ menu item drawn as a panel row: the same label, icon, value and handler. */
 export function ItemRow({ item }: { item: SidebarMenuItem }) {

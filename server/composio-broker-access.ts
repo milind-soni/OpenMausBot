@@ -3,6 +3,10 @@
 // them from the environment). `composio.ts` re-exports these.
 import { z } from "zod";
 
+import { managedComposioBrokerOff } from "../electron/managed-composio.mjs";
+
+export { managedComposioBrokerOff };
+
 let managedBrokerAccess: { url: string; token: string } | null | undefined;
 
 const managedBrokerMessageSchema = z.record(z.string(), z.unknown());
@@ -44,6 +48,7 @@ export function setManagedBrokerAccess(access: unknown): void {
 
 export type BrokerAccess = { url: string; token: string }; // `as` below: a Team Cloud member's own installation, never a project key
 export function brokerAccess(): BrokerAccess | null {
+  if (managedComposioBrokerOff()) return null;
   if (managedBrokerAccess !== undefined) return managedBrokerAccess;
   const url = process.env.OMB_COMPOSIO_BROKER_URL?.trim();
   const token = process.env.OMB_COMPOSIO_BROKER_TOKEN?.trim();

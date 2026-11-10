@@ -135,6 +135,7 @@ it("saves every kind of credential, reads it back and shows it masked to its las
 
       const config = (await call("GET", "/api/config")).body;
       expect(savedState(entry, config as never), `${entry.id}${storage}`).toEqual({ configured: true, last4 });
+      if (storage) expect(readFileSync(join(fixture.info.dataDir, "config.json"), "utf8"), `${entry.id} config.json`).not.toContain(key);
       expect(JSON.stringify(config), entry.id).not.toContain(key);
       view.config = config;
       const html = renderToStaticMarkup(createElement(KeyCatalogRow, { entry }));

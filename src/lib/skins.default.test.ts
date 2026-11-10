@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const values = new Map<string, string>();
 const os = { dark: false, listeners: new Set<() => void>() };
 
-// Each case loads fresh modules over the same storage, as a launch would; interface-mode keeps a per-session choice.
+// Each case loads fresh modules over the same storage, as a launch would (main.tsx's order); interface-mode keeps a
+// per-session choice.
 async function boot() {
   vi.resetModules();
-  const [{ settleAdvancedModeDefault, readAdvancedMode }, skins] = await Promise.all([import("./interface-mode"), import("./skins")]);
-  settleAdvancedModeDefault();
+  const [{ readAdvancedMode }, { settleInterfaceMode }, skins] = await Promise.all([import("./interface-mode"), import("./new-look"), import("./skins")]);
+  settleInterfaceMode();
   skins.applySkinChoice(skins.readSkinChoice());
   return { skin: document.documentElement.dataset.skin, advanced: readAdvancedMode(), stored: values.get("omb-skin") };
 }

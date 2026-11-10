@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { CONTROL_PLANE_ENV, WORKSPACE_CREDENTIAL_ENV } from "../config.ts";
 import { BOX_BRIDGE_SCRIPT, botBox, type BotBox } from "./box.ts";
+import { serverPath } from "./program-trust.ts";
 import { runBoxSelfCheck } from "./self-check.ts";
 
 export { botBox };
@@ -28,6 +29,8 @@ export async function startBotBoxAtBoot(options: {
   const box = options.box ?? botBox;
   const log = options.log ?? ((line: string) => console.log(line));
   const detection = await box.start({ dataDir: options.dataDir, home: options.home ?? homedir(), port: options.port, denyEnv: BOX_DENY_ENV, log });
+  // What the server starts with no PATH of its own (a plain spawn) finds nothing in HOME either.
+  if (box === botBox && box.enabled()) process.env.PATH = serverPath(process.env.PATH);
   if (detection.box !== "bwrap" || !detection.tools || options.selfCheck === false) return;
   const tools = detection.tools;
   const timer = setTimeout(() => {

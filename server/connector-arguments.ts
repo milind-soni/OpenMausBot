@@ -88,8 +88,11 @@ function coerce(value: unknown, node: Json | null, root: Json, path: string, cha
       [key, key in properties ? coerce(item, resolved(properties[key], root), root, `${path}.${key}`, changed) : item]));
   }
   if ((type === "number" || type === "integer") && typeof value === "string" && /^-?\d+(?:\.\d+)?$/.test(value.trim())) {
+    const number = Number(value.trim());
+    if (!Number.isFinite(number) || (Number.isInteger(number) && !Number.isSafeInteger(number)) ||
+      (type === "integer" && !Number.isInteger(number))) return value;
     changed.push(`${path} as a number`);
-    return Number(value.trim());
+    return number;
   }
   if (type === "boolean" && (value === "true" || value === "false")) {
     changed.push(`${path} as ${value}`);

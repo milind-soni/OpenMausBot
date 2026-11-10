@@ -21,7 +21,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function home(probes: Partial<CloudPowerProbes> = {}) {
+function home(probes: Partial<CloudPowerProbes> = {}, onWoke?: () => void, bootedFromSleep = false, onBootWakeRequest?: (at: number) => void) {
   let clock = START;
   const dataDir = mkdtempSync(join(tmpdir(), "omb-cloud-power-"));
   dirs.push(dataDir);
@@ -30,12 +30,46 @@ function home(probes: Partial<CloudPowerProbes> = {}) {
   const power = createCloudPower({ dataDir, now: () => clock, broadcast: (payload) => sent.push(payload), probes: {
     turn: () => state.turn, run: () => state.run, handoff: () => state.handoff, liveCall: () => state.liveCall, computer: () => state.computer,
     maintenance: () => state.maintenance, nextDueAt: () => state.nextDueAt, ...probes,
-  } });
+  }, onWoke, bootedFromSleep, onBootWakeRequest });
   powers.push(power);
   /** Moves the clock in ticks, as the 5-second timer would (a single big step is a resume). */
   const pass = (ms: number) => { for (let left = ms; left > 0; left -= 5_000) { clock += Math.min(5_000, left); power.tick(); } };
   return { power, state, sent, dataDir, pass, jump: (ms: number) => { clock += ms; }, now: () => clock };
 }
+
+describe("telling the Admin it woke", () => {
+  it("a plain restart isn't a wake; a boot from a sleep it was stopped for, and each resume the tick or a request notices, are", () => {
+    let woke = 0;
+    const plain = home({}, () => { woke++; });
+    expect(woke).toBe(0);
+    expect(plain.power.sleptUntil()).toBeNull();
+    const fromSleep = home({}, () => { woke++; }, true);
+    expect(woke).toBe(1);
+    expect(fromSleep.power.sleptUntil()).toBe(START);
+    plain.jump(10 * 60_000);
+    plain.power.tick();
+    expect(woke).toBe(2);
+    expect(plain.power.sleptUntil()).toBe(plain.now());
+    plain.pass(10_000);
+    expect(woke).toBe(2);
+  });
+
+  it("times only the request that a boot from a stopped sleep was waiting for: never a plain boot's, a resume's or a second one", () => {
+    const requests: number[] = [];
+    const plain = home({}, undefined, false, (at) => requests.push(at));
+    plain.power.arrived("/api/events", {});
+    expect(requests).toEqual([]);
+    const fromSleep = home({}, undefined, true, (at) => requests.push(at));
+    fromSleep.jump(1_200);
+    fromSleep.power.arrived("/api/events", {});
+    fromSleep.power.arrived("/api/sync/changes", {});
+    expect(requests).toEqual([START + 1_200]);
+    fromSleep.pass(5 * 60_000);
+    fromSleep.jump(10 * 60_000);
+    fromSleep.power.arrived("/api/events", {});
+    expect(requests).toEqual([START + 1_200]);
+  });
+});
 
 describe("the home's idle verdict", () => {
   it("is busy just after it wakes, then idle with nothing going on", () => {

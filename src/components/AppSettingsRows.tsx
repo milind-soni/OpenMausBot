@@ -16,6 +16,7 @@ import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
 import { setColorUserBubbles, useColorUserBubbles } from "@/lib/user-bubble-preference";
 import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
+import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { setPinnedCircles, setUniversalPins, usePinnedCircles, useUniversalPins } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
@@ -81,7 +82,7 @@ export function UpdatesRow({ title = t("settings.updates.title") }: { title?: st
   );
 }
 
-export function NewBotEffortRow() {
+function useNewBotEffort() {
   const { state, dispatch } = useStore();
   const current = state.config?.newBots?.effort ?? "";
   const [saving, setSaving] = useState(false);
@@ -103,26 +104,53 @@ export function NewBotEffortRow() {
       setSaving(false);
     }
   };
+  return { current, saving, error, save };
+}
 
+function NewBotEffortSelect({ effort, className }: { effort: ReturnType<typeof useNewBotEffort>; className: string }) {
+  return (
+    <Select size="sm" className={className}
+      value={effort.current}
+      disabled={effort.saving}
+      aria-label={t("settings.newBotEffort.aria")}
+      onChange={(event) => void effort.save(event.target.value)}
+    >
+      <option value="">{t("settings.newBotEffort.default")}</option>
+      {EFFORT_LEVELS.map((level) => (
+        <option key={level} value={level}>
+          {effortLabel(level)}
+        </option>
+      ))}
+    </Select>
+  );
+}
+
+export function NewBotEffortRow() {
+  const effort = useNewBotEffort();
   return (
     <SettingRow
       title={t("settings.newBotEffort.title")}
       subtitle={t("settings.newBotEffort.subtitle")}
-      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
+      message={effort.error ? <p role="alert" className="text-danger">{effort.error}</p> : null}
     >
-      <Select size="sm" className="w-full max-w-[240px]"
-        value={current}
-        disabled={saving}
-        aria-label={t("settings.newBotEffort.aria")}
-        onChange={(event) => void save(event.target.value)}
-      >
-        <option value="">{t("settings.newBotEffort.default")}</option>
-        {EFFORT_LEVELS.map((level) => (
-          <option key={level} value={level}>
-            {effortLabel(level)}
-          </option>
-        ))}
-      </Select>
+      <NewBotEffortSelect effort={effort} className="w-full max-w-[240px]" />
+    </SettingRow>
+  );
+}
+
+export function NewBotDefaultsRow({ onEdit, onShare }: { onEdit: () => void; onShare: () => void }) {
+  const effort = useNewBotEffort();
+  return (
+    <SettingRow
+      title={t("newBot.defaults")}
+      subtitle={t("settings.newBotEffort.title")}
+      message={effort.error ? <p role="alert" className="text-danger">{effort.error}</p> : null}
+    >
+      <div className="flex items-center gap-2">
+        <NewBotEffortSelect effort={effort} className="w-auto" />
+        <button type="button" className="ui-button" data-new-bot-share onClick={onShare}>{t("newBot.sharePreset")}</button>
+        <button type="button" className="ui-button" data-new-bot-defaults onClick={onEdit}>{t("newBot.edit")}</button>
+      </div>
     </SettingRow>
   );
 }
@@ -254,6 +282,7 @@ export function ColorUserBubblesRow({ simple = false }: { simple?: boolean }) {
 
 export function AdvancedModeRow({ simple = false }: { simple?: boolean }) {
   const enabled = useAdvancedMode();
+  if (SIMPLE_ONLY) return null;
   return (
     <SettingRow className={simple ? undefined : "rounded-2xl border border-accent-border/40 bg-raised-hover/40 py-4"} title={t("settings.advancedMode.title")}
       subtitle={t(simple ? "settings.simple.advancedMode" : "settings.advancedMode.subtitle")}>

@@ -1,16 +1,18 @@
-// Which of a Starter Cloud's bots stay awake. A restore or a move brings every bot whatever the plan, so past its limit the
-// bots are all kept but only that many take turns; the rest are paused until the person swaps them in or upgrades. The set
-// is written down the first time it is needed, so a paused bot that receives a message never pushes an awake one out.
+// Which of a Starter Cloud's bots stay awake. Starter makes as many bots as the person likes, but only this many take turns;
+// the rest are paused until the person swaps them in or upgrades. The awake set is written down while every bot still fits,
+// so a bot made past the limit starts paused and never pushes out one the person was using, and a paused bot that receives
+// a message never does either. A restore or a move into a Cloud that never wrote one down wakes the most recently active.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
 import { botsTowardLimit } from "../../shared/bot-limit.ts";
 import { writeFileAtomic } from "../atomic.ts";
-import { STARTER_BOT_LIMIT } from "./starter-bot-limit.ts";
 
+/** How many bots a Starter Cloud keeps awake, not counting its MausBot or chief of staff. The one number to change. */
+export const STARTER_AWAKE_LIMIT = 5;
 export const STARTER_AWAKE_FILE = "starter-awake.json";
-const fileSchema = z.object({ v: z.literal(1), awake: z.array(z.string().min(1).max(200)).max(STARTER_BOT_LIMIT) });
+const fileSchema = z.object({ v: z.literal(1), awake: z.array(z.string().min(1).max(200)).max(STARTER_AWAKE_LIMIT) });
 
 type CountedBot = Parameters<typeof botsTowardLimit>[0][number];
 export type AwakeBot = CountedBot & { id: string; chiefOfStaff?: boolean; createdAt?: number; tasks?: ReadonlyArray<{ updatedAt?: number }> };
@@ -47,11 +49,15 @@ export function createStarterAwake(deps: { dataDir: string; starter(): boolean; 
   };
   /** The bots the limit counts, the chief of staff aside: it hands out the work, so it never sleeps. */
   const candidates = () => deps.bots().filter((bot) => botsTowardLimit([bot]) === 1 && !bot.chiefOfStaff);
-  const limit = () => (deps.starter() ? STARTER_BOT_LIMIT : undefined);
+  const limit = () => (deps.starter() ? STARTER_AWAKE_LIMIT : undefined);
   const awake = (): Set<string> | null => {
     const most = limit(), bots = candidates();
-    if (most === undefined || bots.length <= most) return null;
+    if (most === undefined) return null;
     const ids = new Set(bots.map((bot) => bot.id));
+    if (bots.length <= most) {
+      if (chosen?.length !== ids.size || chosen.some((id) => !ids.has(id))) save([...ids]);
+      return null;
+    }
     const kept = (chosen ?? []).filter((id) => ids.has(id));
     if (kept.length < most) {
       const rest = bots.filter((bot) => !kept.includes(bot.id)).sort((a, b) => lastActive(b) - lastActive(a));

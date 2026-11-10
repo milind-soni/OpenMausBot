@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { addHeldSecretScrubber, HELD_SECRET_MASK } from "../../shared/redact.ts";
 
 import { checkInvariants } from "./invariants.ts";
 import { Runtime, type BeginRequest } from "./runtime.ts";
@@ -284,6 +285,27 @@ describe("Runtime: one tree, one lane", () => {
     expect(w.store.get(lead.id)).toMatchObject({ status: "completed", executions: 2 });
     expect(w.store.get(lead.id)?.answer).toBeUndefined();
     invariants(w);
+  });
+
+  it("masks a held secret, even one with spaces, before an over-long answer is clipped", async () => {
+    const secret = "alpha bravo charlie";
+    const removeScrubber = addHeldSecretScrubber((text) => text.replaceAll(secret, HELD_SECRET_MASK));
+    try {
+      const w = world();
+      w.runner.script = a => a.assignee.botId === "lead" && a.executions === 1 ? { kind: "needs_input", question: "Done?" } : undefined;
+      const root = w.runtime.begin(beginReq());
+      const lead = ok(w.runtime.enqueue(toBot("lead", root.id)));
+      w.runtime.tick(); await flush();
+      const leadIn = "x".repeat(11_990);
+      expect(w.runtime.answer(lead.id, `${leadIn}${secret} and more`)).toBe(true);
+      const stored = w.store.get(lead.id)?.answer ?? "";
+      expect(stored.length).toBeLessThanOrEqual(12_000);
+      expect(stored).not.toContain("alpha");
+      expect(stored).toContain(HELD_SECRET_MASK);
+      expect(w.runtime.answer(lead.id, "short")).toBe(false);
+    } finally {
+      removeScrubber();
+    }
   });
 
   it("stalls a turn with no activity on the monotonic clock, and a tree with no progress, but never a parked tree", async () => {

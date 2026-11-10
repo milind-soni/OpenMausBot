@@ -79,9 +79,10 @@ export function BotSwitch({ color, checked, ...props }: Parameters<typeof Switch
   return <Switch {...props} checked={checked} style={checked ? { backgroundColor: MAUS_COLORS[color] } : undefined} />;
 }
 
-export function SwitchRow({ title, hint, checked, onChange, disabled, color, label, tooltip, extra, ...rest }: {
+export function SwitchRow({ title, hint, icon, checked, onChange, disabled, color, label, tooltip, extra, ...rest }: {
   title: ReactNode;
   hint?: ReactNode;
+  icon?: LucideIcon;
   checked: boolean;
   onChange: () => void;
   disabled?: boolean;
@@ -93,6 +94,7 @@ export function SwitchRow({ title, hint, checked, onChange, disabled, color, lab
 }) {
   return (
     <div {...rest} className={rowCls}>
+      {icon && <RowIcon icon={icon} />}
       <RowText title={title} hint={hint} />
       {extra}
       <BotSwitch

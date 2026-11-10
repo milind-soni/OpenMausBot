@@ -41,6 +41,7 @@ import { BOAT_OFFER, boatClaimMailto } from "@/lib/boat-offer";
 import { track } from "@/lib/analytics";
 import { ADVANCED_MODE_KEY, setAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_MODE_PROMPT_KEY } from "@/lib/simple-mode-prompt";
+import { ADVANCED_BACK_KEY } from "@/lib/new-look";
 import { api } from "@/state/store";
 
 const DAY = 86_400_000, NOW = new Date(2026, 9, 9, 12).getTime();
@@ -1179,6 +1180,53 @@ describe("the Simple mode popup after the update", () => {
     session.clear();
     const later = await launch();
     expect(later).toContain(POPUP); expect(later).not.toContain(TITLE);
+  });
+});
+
+describe("the word that Advanced mode is back, in the Simple mode popup's place", () => {
+  const TITLE = "Advanced mode is back", BODY = "Turn it off any time in Settings → General.";
+  const events = () => vi.mocked(track).mock.calls.filter(([event]) => event === "advanced_back_notice").map(([, props]) => props);
+
+  beforeEach(() => {
+    vi.stubGlobal("document", { activeElement: null, body: null, documentElement: { dataset: {} }, getElementById: () => null, querySelector: () => null,
+      querySelectorAll: () => [] });
+    // main.tsx's settleInterfaceMode put this browser back on Advanced mode.
+    setAdvancedMode(true);
+    storage.set(ADVANCED_BACK_KEY, "due");
+  });
+
+  it("shows once, with no switch, even where the Simple mode popup was never closed, and neither comes back", async () => {
+    storage.delete(SIMPLE_MODE_PROMPT_KEY);
+    const html = await launch();
+    expect(html).toContain(TITLE); expect(html).toContain(BODY);
+    for (const gone of ['role="switch"', "data-simple-mode-prompt", "Try the new Simple mode"]) expect(html).not.toContain(gone);
+    expect(events()).toEqual([{ action: "shown" }]);
+    press("Done"); await flush();
+    expect(render(), "nothing else in this launch after it").toBe("");
+    expect(storage.get(ADVANCED_BACK_KEY)).toBe("seen");
+    expect(storage.get(SIMPLE_MODE_PROMPT_KEY)).toBe("1");
+    expect(events()).toEqual([{ action: "shown" }, { action: "closed" }]);
+    session.clear();
+    const later = await launch();
+    expect(later).not.toContain(TITLE); expect(later).not.toContain("data-simple-mode-prompt");
+  });
+
+  it("never says so once the person has switched to Simple before it showed", async () => {
+    storage.set(SIMPLE_MODE_PROMPT_KEY, "1");
+    setAdvancedMode(false);
+    expect(await launch()).not.toContain(TITLE);
+    expect(events()).toEqual([]);
+    expect(storage.get(ADVANCED_BACK_KEY)).toBe("due");
+  });
+
+  it("never shows where nothing was put back", async () => {
+    storage.set(SIMPLE_MODE_PROMPT_KEY, "1");
+    for (const back of ["seen", undefined]) {
+      if (back) storage.set(ADVANCED_BACK_KEY, back); else storage.delete(ADVANCED_BACK_KEY);
+      session.clear();
+      expect(await launch(), String(back)).not.toContain(TITLE);
+    }
+    expect(events()).toEqual([]);
   });
 });
 

@@ -106,7 +106,7 @@ export class ChatMcpClient {
       // The desktop shell inherits Finder's bare PATH, where `npx`-style servers cannot find `node`.
       this.child = spawnCli(server.command, server.args, {
         stdio: ["pipe", "pipe", "pipe"], env: chatMcpEnvironment(server.env),
-        ...(configured ? { box: { allowEnv: Object.keys(server.env) } } : {}),
+        ...(configured ? { box: { allowEnv: Object.keys(server.env), configured: true } } : {}),
       }, "bot");
     } catch { throw new Error("MCP server could not start; check its command and installation"); }
     this.child.stdout.setEncoding("utf8");

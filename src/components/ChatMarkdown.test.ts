@@ -30,6 +30,7 @@ import { BotEditorStore, initialState, StoreProvider } from "@/state/store";
 import { setLocale } from "@/lib/i18n";
 import { ThreadRefsContext } from "./ThreadRefs";
 import * as AttachmentPreview from "./AttachmentPreview";
+import { messageReferencesFile } from "../../server/message-file";
 
 // Most of this file pins Advanced mode's chrome; the Simple code block has its own tests below.
 const mode = vi.hoisted(() => ({ advanced: true }));
@@ -768,7 +769,7 @@ describe("ChatMarkdown attachments", () => {
       text: "[macOS](file:///Users/milind/report.md) [Windows](C:/Users/Maus/report.md)",
       message: { threadId: "thread-1", messageId: "message-1" },
     }));
-    expect(html).toContain('title="Save a copy"');
+    expect(html).toContain('title="Preview: report.md"');
     expect(html).not.toContain("/Users/milind/report.md");
     expect(html).not.toContain("C:/Users/Maus/report.md");
   });
@@ -810,7 +811,7 @@ describe("ChatMarkdown attachments", () => {
         text: "[Report](C:\\Users\\Maus\\.openmausbot\\report.md)\n\n![Chart](C:\\Users\\Maus\\.openmausbot\\chart.png)",
         message: { threadId: "thread-1", messageId: "message-1" },
       }));
-      expect(html).toContain('title="Save a copy"');
+      expect(html).toContain('title="Preview: report.md"');
       expect(html).not.toContain('href=""');
       expect(html).not.toContain("Image unavailable");
       expect(save.mock.calls[0]?.[0]).toBe("C:\\Users\\Maus\\.openmausbot\\report.md");
@@ -832,6 +833,34 @@ describe("ChatMarkdown attachments", () => {
     } finally {
       save.mockRestore();
     }
+  });
+
+  it("links a path written as plain text, and the server authorizes the very path the link asks for", () => {
+    const cases: Array<[string, string]> = [
+      ["I saved the report to /Users/maus/reports/q3.md, have a look.", "/Users/maus/reports/q3.md"],
+      ["It's in `/Users/maus/My Reports/q3 final.md`.", "/Users/maus/My Reports/q3 final.md"],
+      [String.raw`Written to C:\Users\Maus\.openmausbot\report.md.`, String.raw`C:\Users\Maus\.openmausbot\report.md`],
+      [String.raw`It's on \\fileserver\team\plans\roadmap.docx now.`, String.raw`\\fileserver\team\plans\roadmap.docx`],
+      [String.raw`Saved /tmp/out/my\_notes.md`, "/tmp/out/my_notes.md"],
+    ];
+    for (const [text, expected] of cases) {
+      const save = vi.spyOn(AttachmentPreview, "useLocalFileSave");
+      try {
+        renderToStaticMarkup(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } }));
+        const requested = save.mock.calls[0]?.[0];
+        // Spaces travel percent-encoded, as in any Markdown link, and the server decodes them once.
+        expect(requested!.replace(/%20/g, " ")).toBe(expected);
+        expect(messageReferencesFile(text, requested!)).toBe(true);
+      } finally {
+        save.mockRestore();
+      }
+    }
+  });
+
+  it("does not authorize a path the message never rendered as a link", () => {
+    expect(messageReferencesFile("Use and/or here, or /etc alone.", "/etc")).toBe(false);
+    expect(messageReferencesFile("```\ncat /Users/maus/notes.md\n```", "/Users/maus/notes.md")).toBe(false);
+    expect(messageReferencesFile(String.raw`On \\fileserver\team\a.md`, String.raw`\fileserver\team\a.md`.slice(1))).toBe(false);
   });
 
   it("keeps an unscoped legacy file link inert", () => {
@@ -1392,6 +1421,9 @@ describe("Simple mode's code block", () => {
     expect(plate.split(" ")).toEqual(expect.arrayContaining(["opacity-0", "group-hover/code:opacity-100", "focus-within:opacity-100", "touch:opacity-100"]));
     expect(html).toContain('aria-label="Copy code"');
     expect(html).toContain('aria-label="More"');
+    // A finger-sized target on touch screens, and a ring on the menu's button for the keyboard.
+    expect(html.match(/<button[^>]*aria-label="Copy code"[^>]*>/)?.[0]).toContain("touch:size-11");
+    expect(html.match(/<button[^>]*aria-label="More"[^>]*>/)?.[0]).toContain("focus-visible:ring-2");
     expect(html).toMatch(/<pre class="[^"]*leading-5 px-3 py-2 text-ink-secondary/);
   });
 

@@ -3,10 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initialState, StoreContext, type AppState, type Bot, type Message } from "@/state/store";
-import { needsYouVersion, setTeamPeople, type TeamPeople } from "@/state/team-people";
+import { needsYouVersion, retryTeamPeople, setTeamPeople, type TeamPeople } from "@/state/team-people";
 
 import { InboxAnswers, InboxCaption, RelayLabel } from "./InboxLine";
-import { inboxBotOf, SidebarPeople } from "./SidebarPeople";
+import { inboxBotOf, peopleInOrder, SidebarPeople } from "./SidebarPeople";
 import { pendingApprovals, PendingApprovalPanel } from "./PendingApproval";
 
 const CLEO = { email: "cleo@acme.test", name: "Cleo", role: "owner" };
@@ -94,6 +94,44 @@ describe("the team's people in the sidebar", () => {
     expect(inboxBotOf([mausbot, cleos, chief], BEN.email)?.id).toBe("mc");
     expect(inboxBotOf([mausbot, cleos], BEN.email)?.id).toBe("mm");
     expect(inboxBotOf([cleos], BEN.email)).toBeUndefined();
+  });
+});
+
+describe("who is here, in the people list", () => {
+  const ADA = { email: "ada@acme.test", name: "Ada", role: "member" };
+  const config = { team: { id: "team-acme", name: "Acme" } } as AppState["config"];
+
+  it("puts a dot on whoever is here now and lists them after you and before the rest, with no time for the others", () => {
+    setTeamPeople({ ...asBen, presence: true, people: [{ ...ADA, here: false }, { ...CLEO, here: true }, { ...BEN, here: true }] });
+    const markup = render(createElement(SidebarPeople, { compact: false }), { config });
+    expect(markup.indexOf("ben@acme.test")).toBeLessThan(markup.indexOf("cleo@acme.test"));
+    expect(markup.indexOf("cleo@acme.test")).toBeLessThan(markup.indexOf("ada@acme.test"));
+    expect(markup).toMatch(/aria-label="Write to Cleo. Here now"[^>]*data-person="cleo@acme.test"/);
+    expect(markup).toMatch(/aria-label="Write to Ada"[^>]*data-person="ada@acme.test"/);
+    expect(markup.match(/data-here-dot/g)).toHaveLength(1);
+    expect(peopleInOrder([ADA, CLEO, BEN].map((person) => ({ ...person, here: person === ADA }))).map((person) => person.name)).toEqual(["Ben", "Ada", "Cleo"]);
+  });
+
+  it("shows no dot and no time against a server that says nothing about presence", () => {
+    setTeamPeople(asBen);
+    const markup = render(createElement(SidebarPeople, { compact: false }), { config });
+    expect(markup).not.toContain("data-here-dot");
+    expect(markup).toContain('aria-label="Write to Cleo"');
+  });
+
+  it("says the people are loading, and when they could not be read offers to try again", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+    try {
+      retryTeamPeople();
+      expect(render(createElement(SidebarPeople, { compact: false }), { config })).toContain("Loading people…");
+      await vi.waitFor(() => expect(render(createElement(SidebarPeople, { compact: false }), { config })).toContain("data-people-retry"));
+      const failed = render(createElement(SidebarPeople, { compact: false }), { config });
+      expect(failed).toContain("Couldn&#x27;t load people");
+      expect(render(createElement(SidebarPeople, { compact: true }), { config }), "nothing on the rail").toBe("");
+      expect(render(createElement(SidebarPeople, { compact: false })), "nothing off a team").toBe("");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

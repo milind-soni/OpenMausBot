@@ -13,7 +13,7 @@ export function readTeamRolesWith(resolver: TeamRoleOf): void {
 /** A Chief of Staff's powers: creating, configuring and deleting bots, rooms and routines through its tools, retrying a
  * teammate's thread, and its approval level passing down to the work it hands out. The Chief holds them, and so does the
  * person's MausBot (on a Team Cloud only when its member is an Owner or Admin). Being the Chief (the brief, incidents,
- * escalations, who answers a room) stays with `chiefOfStaff`. */
+ * who answers a room) stays with `chiefOfStaff`. */
 export function chiefLevel(bot: ({ chiefOfStaff?: boolean } & DefaultBotFields) | null | undefined): boolean {
   if (!bot) return false;
   if (bot.chiefOfStaff === true) return true;

@@ -6,6 +6,10 @@ export const APPROVAL_MODES = ["ask", "edits", "auto", "full", "custom"] as cons
 
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
+/** Whether work at `level` lets nothing through that `limit` would stop; "custom" is comparable only to itself. */
+export const levelWithin = (level: ApprovalMode, limit: ApprovalMode): boolean =>
+  level === limit || (level !== "custom" && limit !== "custom" && APPROVAL_MODES.indexOf(level) < APPROVAL_MODES.indexOf(limit));
+
 /** Only providers with an implemented permission mapping may expose a level.
  * `edits` (auto-accept edits) exists where the engine has such a mode:
  * Claude and Grok `acceptEdits`, Antigravity `auto_edit`, Qwen `auto-edit`,
