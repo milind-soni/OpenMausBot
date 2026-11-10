@@ -1,9 +1,12 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { TurnNotStartedError, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener, type SendTurnInput } from "./contracts.ts";
 import {
-  BOT_TURN_GIVES_WAY_MS, BROWSER_BYTES, EngineMemory, memoryStallText, memoryStillWaitingText, memoryStopped, memoryStopText, memoryWaitText, PressureLedger, processGroupBytes, readHostMemory,
+  BOT_TURN_GIVES_WAY_MS, BROWSER_BYTES, CHAT_RUNTIME_KINDS, EngineMemory, memoryStallText, memoryStillWaitingText, memoryStopped, memoryStopText, memoryWaitText, PressureLedger, processGroupBytes, readHostMemory,
   withEngineMemory, type HostMemory,
 } from "./engine-memory.ts";
 import { OOM_SCORE, protectSupervisor, spawnBotWork, spawnWithOomScore } from "./oom-score.ts";
@@ -611,9 +614,36 @@ describe("an engine's adapter on a Cloud home", () => {
     expect(seen.slice(2).map((event) => event.type === "runtime.error" ? event.message : event.type)).toEqual([memoryStopText(false), "turn.completed"]);
   });
 
+  it("makes a chat-runtime turn wait for memory, as its MCP servers need it", async () => {
+    const h = host({ available: 300 * MB });
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const { instance, sent } = fakeInstance("openai-compat");
+    const decorated = withEngineMemory(instance, h.memory);
+    const seen: RuntimeEvent[] = [];
+    decorated.adapter.onEvent((event) => seen.push(event));
+    const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    await settle();
+    expect(seen).toEqual([expect.objectContaining({ type: "runtime.notice", threadId: "t1", provider: "openai-compat", message: memoryWaitText(1) })]);
+    expect(sent).toEqual([]);
+    await decorated.adapter.interruptTurn("t1");
+    await expect(turn).rejects.toBeInstanceOf(TurnNotStartedError);
+  });
+
+  it("gates every engine built on the chat runtime", () => {
+    const drivers = join(dirname(fileURLToPath(import.meta.url)), "drivers");
+    const kinds = readdirSync(drivers).filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts")).flatMap((file) => {
+      const source = readFileSync(join(drivers, file), "utf8");
+      if (!source.includes("createOpenAIChatRuntime(")) return [];
+      const kind = /driverKind: "([^"]+)"/.exec(source)?.[1] ?? /DRIVER_KIND = "([^"]+)"/.exec(source)?.[1];
+      return kind ? [kind] : [`no kind found in ${file}`];
+    });
+    expect(kinds.length).toBeGreaterThanOrEqual(8);
+    expect(kinds.filter((kind) => !CHAT_RUNTIME_KINDS.has(kind))).toEqual([]);
+  });
+
   it("leaves engines that start no process of their own, and every engine where the gate is off, as they are", () => {
     const h = host();
-    const api = fakeInstance("openai-compat");
+    const api = fakeInstance("some-remote-engine");
     const adapter = api.instance.adapter;
     expect(withEngineMemory(api.instance, h.memory).adapter).toBe(adapter);
     const local = fakeInstance();

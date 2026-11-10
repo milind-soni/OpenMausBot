@@ -87,7 +87,7 @@ import {
 } from "./companion-account-service.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
-import { pairingPageUrl } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs";
+import { pairingPageUrl } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { createTailnetShare, remotePolicyAllows } from "./tailnet-share.mjs"; import { checkTailscale } from "./tailscale-check.mjs"; import { onTailnet } from "./tailnet.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
 import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs"; import { installServerLending } from "./server-lending.mjs"; import { ownEnvironmentIds } from "./lent-mcp.mjs";
@@ -449,7 +449,7 @@ const DESKTOP_CRASH_LOG_MAX_BYTES = 512 * 1024;
 let logStream = null;
 let desktopShutdownStarted = false;
 import { companionAdvertisedHostedUrl, companionEnabledAtRest, companionOriginTarget, companionPairing, companionPairingRenew, companionDeviceRoutes, companionStartsAtLaunch, companionCloudDesktopAccess, companionRouteOn, dismissCompanionNotice, rememberCompanionRoute, setCompanionMigrationFacts,
-  companionBrowserControlAccess, companionRevoke, companionRunning, companionState, rememberCompanionKeepAwake, setCompanionHostedUrl, setCompanionLifecycleListener, startCompanion, stopCompanion } from "./companion.mjs";
+  companionBrowserControlAccess, companionRevoke, companionRunning, companionSettings, companionState, rememberCompanionKeepAwake, setCompanionHostedUrl, setCompanionLifecycleListener, startCompanion, stopCompanion } from "./companion.mjs";
 import { createDesktopCompanionE2E, deviceCounts } from "./companion-e2e-desktop.mjs";
 import { autoStartCompanion } from "./companion-autostart.mjs";
 import { createPhoneLinkRoutes } from "./phone-link-routes.mjs";
@@ -569,7 +569,7 @@ function publicManagedCompanionState() {
 
 function decorateDesktopCompanionState(state) {
   syncCompanionKeepAwake(state.enabled && !state.error, state.keepAwake === true);
-  return { ...state, managedConnection: publicManagedCompanionState() };
+  return { ...state, managedConnection: publicManagedCompanionState(), tailnetShare: tailnetShare.state() };
 }
 
 async function desktopCompanionState() {
@@ -670,14 +670,14 @@ async function startDesktopCompanion({ waitForHosted = true, remember = true, ro
 async function stopDesktopCompanion({ remember = true } = {}) {
   companionDesiredThisLaunch = false;
   companionLaunchGeneration += 1;
-  if (remember) for (const route of ["wifi", "relay", "tailscale", "https"]) await rememberCompanionRoute(route, false);
+  if (remember) { for (const route of ["wifi", "relay", "tailscale", "https"]) await rememberCompanionRoute(route, false); await tailnetShare.apply(companionSettings().routes.tailscale); }
   syncCompanionKeepAwake(false, false);
   await managedCompanionConnector?.stop();
   await stopCompanion();
   return desktopCompanionState();
 }
 
-const phoneLinkRoutes = createPhoneLinkRoutes({ rememberRoute: rememberCompanionRoute, routeOn: companionRouteOn, dismissNotice: dismissCompanionNotice, state: () => desktopCompanionState(), running: companionRunning, log: slog, changed: (route, on) => (route !== "https" ? companionE2E?.reconcile() : on ? startManagedCompanionConnection({ waitForVerification: false }) : stopManagedCompanionEndpointLocally()),
+const tailnetShare = createTailnetShare({ check: checkTailscale, allowed: () => remotePolicyAllows({ managed: app.isPackaged && !desktopRemoteAccess, client: managedDesktop }), markerFile: () => path.join(app.getPath("userData"), "tailnet-serve.marker"), log: slog }); const phoneLinkRoutes = createPhoneLinkRoutes({ shareChanged: () => tailnetShare.apply(companionSettings().routes.tailscale), rememberRoute: rememberCompanionRoute, routeOn: companionRouteOn, dismissNotice: dismissCompanionNotice, state: () => desktopCompanionState(), running: companionRunning, log: slog, changed: (route, on) => (route !== "https" ? companionE2E?.reconcile() : on ? startManagedCompanionConnection({ waitForVerification: false }) : stopManagedCompanionEndpointLocally()),
   wake: () => (!companionRunning() && companionStartsAtLaunch({ remoteClient: Boolean(desktopRemoteAccess), serverReady }) ? startDesktopCompanion({ waitForHosted: false, remember: false }) : null), sleep: () => stopDesktopCompanion({ remember: false }) });
 setCompanionMigrationFacts(() => ({ managedAddress: Boolean(managedCompanionTunnelAccess(secureCredentials)) }));
 
@@ -902,7 +902,7 @@ function ensureManagedDesktop() {
     appVersion: app.getVersion(),
     openBrowser: url => shell.openExternal(url),
     onState: state => {
-      if (state.status === "license-expired") companyBackupController?.abort();
+      if (state.status === "license-expired") companyBackupController?.abort(); void tailnetShare.recheck();
       const lost = ["signed-out", "reauth-required"].includes(state.status), withoutStorage = state.status === "connected" && !state.cloudBackups;
       if (lost || withoutStorage) {
         companyBackupConfigurationRevision++;
@@ -1152,7 +1152,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
       if (trustedApprovalMode.receive(proc, message)) return;
       if (managedDesktopRelay.receive(proc, message)) return;
       if (orgLibrary?.receive(message)) return;
-      if (receivePhoneSecretSave(proc, message) || oneHome.receive(proc, message)) return;
+      if (receivePhoneSecretSave(proc, message) || oneHome.receive(proc, message) || tailnetShare.receive(message)) return;
     } catch (error) {
       slog(`desktop private sync rejected: ${error?.message ?? error}`);
     }
@@ -1160,7 +1160,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
   proc.once("spawn", () => {
     slog(`spawned pid=${proc.pid}`);
     if (!serverSupervisor.isCurrent(proc)) return;
-    syncDesktopMutationToken(proc);
+    syncDesktopMutationToken(proc); void tailnetShare.attach(proc, port, companionSettings().routes.tailscale);
     syncPhoneSecretKey(proc); grantLocalComputer(proc, (child) => serverSupervisor.isCurrent(child));
   });
   let exited = false;
@@ -1787,7 +1787,7 @@ async function addServerFromClipboard() {
   }
 }
 
-const serverConnect = createServerConnect({ fetch: (...args) => session.defaultSession.fetch(...args), t: nativeT,
+const serverConnect = createServerConnect({ fetch: (...args) => session.defaultSession.fetch(...args), t: nativeT, tailnet: () => onTailnet(os.networkInterfaces()),
   ownEnvironmentId: async () => (await (await localServerRequest("/.well-known/openmausbot/environment")).json())?.environmentId ?? null,
   ask: async (found) => (await dialog.showMessageBox({ type: "question", buttons: [nativeT("native.dialog.connect.button"), nativeT("native.common.cancel")], defaultId: 0, cancelId: 1,
     message: nativeT("native.dialog.connect.title", { host: found.label }), detail: nativeT(found.code || found.credential ? "native.dialog.connect.withCode" : "native.dialog.connect.noCode") })).response === 0,
@@ -2604,7 +2604,7 @@ const cloudLook = createCloudLook({ store: lookFile(() => path.join(app.getPath(
 const cloudBuy = installCloudBuy({ ipcMain, guard: localWorkspaceOnly, client: ensureCloudAccount, offersReady: cloudOffersReady, clipboard, look: cloudLook });
 const localServerRequest = (route, init = {}) => (serverProc && serverReady ? fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { ...init, redirect: "error", credentials: "omit", headers: { ...init.headers, [DESKTOP_MUTATION_HEADER]: desktopMutationToken } }) : Promise.reject(new Error("not running")));
 const teamProfileSeeds = createTeamProfileSeeds({ teamFetch: (...args) => session.defaultSession.fetch(...args), localRequest: localServerRequest, log: slog });
-const oneHome = installOneHome({ ipcMain, clean: cleanWorkspace, cloudPage: cloudPageAsking, pageOrigin: activePageOrigin, confirmMove: confirmTeamMove, server: () => serverProc, cookieFetch: (...args) => session.defaultSession.fetch(...args), home: () => (myCloud() && cloudAccount ? { origin: myCloud(), grant: () => cloudAccount.pairHome() } : null), power: cloudPower, file: () => path.join(app.getPath("userData"), "cloud-send.json"), localRequest: localServerRequest, space: { disk: () => cloudPlanDisk(ensureCloudAccount().state()), grow: sizeGb => ensureCloudAccount().growDisk(sizeGb) }, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }), window: () => (desktopRemoteAccess ? null : mainWindow), localOrigin: rendererOrigin, account: () => cloudAccount, journalFile: () => path.join(app.getPath("userData"), "one-home.json"), tempRoot: () => path.join(app.getPath("temp"), "openmaus-one-home"), lend: projects => sharingController().lendProjects(projects), phone: { paired: () => companionStartsAtLaunch({ remoteClient: Boolean(desktopRemoteAccess), serverReady }), start: () => startDesktopCompanion({ waitForHosted: false, remember: false }).then(() => {}) }, openHome: () => void showHome({ place: "cloud" }), openTeam: team => void showHome({ place: { team: team.id, name: team.name } }), openLocal: () => void showHome(), restart: () => relaunchAfterDesktopRemoteChange(), version: app.getVersion(), log: slog, other: () => ownHome, accountsHere: () => accountRing()?.count() ?? 1, t: nativeT }); ownHome = installOwnHome({ t: nativeT, localRequest: localServerRequest, fetch: (...args) => session.defaultSession.fetch(...args), environments: () => environmentsState.environments, handoff: what => oneHome.handoff(what), cloudJournal: () => oneHome.journal(), journal: jsonFile(path.join(app.getPath("userData"), "own-home.json")), choice: jsonFile(path.join(app.getPath("userData"), "own-home-choice.json")), sendState: jsonFile(path.join(app.getPath("userData"), "own-home-send.json")), lend: (projects, place) => sharingController().lendProjects(projects, place), phone: { paired: () => companionStartsAtLaunch({ remoteClient: Boolean(desktopRemoteAccess), serverReady }), start: () => startDesktopCompanion({ waitForHosted: false, remember: false }).then(() => {}) }, openHome: place => void workspaceMenuAction(() => switchEnvironment(place.id)), lastInput: oneHome.lastInput, version: app.getVersion(), log: slog, onChange: () => { oneHome.publish(); computerSharing?.cloudChanged(); railChanged(); } }); twoPlaces = installTwoPlacesMain({ t: nativeT, ipcMain, guard: localWorkspaceOnly, localRequest: localServerRequest, fetch: (...args) => session.defaultSession.fetch(...args), environments: () => environmentsState.environments, cloud: () => ({ origin: myCloud(), asleep: cloudPower.asleep() }), oneHome, ownHome, dismissed: jsonFile(path.join(app.getPath("userData"), "two-places.json")), account: () => cloudAccount, teamsRemembered: jsonFile(path.join(app.getPath("userData"), "team-places.json")), log: slog, tell: () => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("two-places:changed"); } });
+const oneHome = installOneHome({ ipcMain, clean: cleanWorkspace, cloudPage: cloudPageAsking, pageOrigin: activePageOrigin, confirmMove: confirmTeamMove, server: () => serverProc, cookieFetch: (...args) => session.defaultSession.fetch(...args), home: () => (myCloud() && cloudAccount ? { origin: myCloud(), grant: () => cloudAccount.pairHome() } : null), power: cloudPower, file: () => path.join(app.getPath("userData"), "cloud-send.json"), localRequest: localServerRequest, space: { disk: () => cloudPlanDisk(ensureCloudAccount().state()), grow: sizeGb => ensureCloudAccount().growDisk(sizeGb) }, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }), window: () => (desktopRemoteAccess ? null : mainWindow), localOrigin: rendererOrigin, account: () => cloudAccount, journalFile: () => path.join(app.getPath("userData"), "one-home.json"), tempRoot: () => path.join(app.getPath("temp"), "openmaus-one-home"), lend: projects => sharingController().lendProjects(projects), phone: { paired: () => companionStartsAtLaunch({ remoteClient: Boolean(desktopRemoteAccess), serverReady }), start: () => startDesktopCompanion({ waitForHosted: false, remember: false }).then(() => {}) }, openHome: () => void showHome({ place: "cloud" }), openTeam: team => void showHome({ place: { team: team.id, name: team.name } }), openLocal: () => void showHome(), restart: () => relaunchAfterDesktopRemoteChange(), version: app.getVersion(), log: slog, other: () => ownHome, accountsHere: () => accountRing()?.count() ?? 1, chooses: true, t: nativeT }); ownHome = installOwnHome({ t: nativeT, localRequest: localServerRequest, fetch: (...args) => session.defaultSession.fetch(...args), environments: () => environmentsState.environments, handoff: what => oneHome.handoff(what), cloudJournal: () => oneHome.journal(), journal: jsonFile(path.join(app.getPath("userData"), "own-home.json")), choice: jsonFile(path.join(app.getPath("userData"), "own-home-choice.json")), sendState: jsonFile(path.join(app.getPath("userData"), "own-home-send.json")), lend: (projects, place) => sharingController().lendProjects(projects, place), phone: { paired: () => companionStartsAtLaunch({ remoteClient: Boolean(desktopRemoteAccess), serverReady }), start: () => startDesktopCompanion({ waitForHosted: false, remember: false }).then(() => {}) }, openHome: place => void workspaceMenuAction(() => switchEnvironment(place.id)), lastInput: oneHome.lastInput, version: app.getVersion(), log: slog, onChange: () => { oneHome.publish(); computerSharing?.cloudChanged(); railChanged(); } }); twoPlaces = installTwoPlacesMain({ t: nativeT, ipcMain, guard: localWorkspaceOnly, localRequest: localServerRequest, fetch: (...args) => session.defaultSession.fetch(...args), environments: () => environmentsState.environments, cloud: () => ({ origin: myCloud(), asleep: cloudPower.asleep() }), oneHome, ownHome, dismissed: jsonFile(path.join(app.getPath("userData"), "two-places.json")), account: () => cloudAccount, teamsRemembered: jsonFile(path.join(app.getPath("userData"), "team-places.json")), log: slog, tell: () => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("two-places:changed"); } });
 // Teams from the verified session as places this window shows (home-places.mjs): the one to open next time, and its lines.
 const homePlaces = createHomePlaces({ store: jsonFile(path.join(app.getPath("userData"), "home-place.json")), environments: () => environmentsState, persist: persistEnvironments, makeId: randomUUID, homeOrigin: myCloud, synced: state => teamLinks.changed(state), log: slog });
 const homeWindow = createHomeWindow({ clean: cleanWorkspace, journal: oneHome.journal, frozen: oneHome.marker, account: () => (app.isPackaged && !desktopRemoteAccess ? cloudAccount : null), restored: cloudAccountRestored,
@@ -3023,7 +3023,7 @@ app.whenReady().then(async () => {
     }
   }
   if (desktopShutdownStarted) return;
-  if (app.isPackaged && !desktopRemoteAccess) void ensureManagedDesktop().start().then(() => companyBackupSchedule.start()).catch(() => {});
+  if (app.isPackaged && !desktopRemoteAccess) { void ensureManagedDesktop().start().then(() => companyBackupSchedule.start()).catch(() => {}); void managedDesktop.whenRestored().then(() => tailnetShare.recheck()); }
   // Fresh local use never makes a Cloud request; start only restores an existing grant.
   if (app.isPackaged && !desktopRemoteAccess) {
     cloudAccountRestoring = true;
@@ -3156,5 +3156,5 @@ function releaseDesktopDataDirLease() {
 
 // before-quit is too early (this app defers it); will-quit is Electron's last boundary, and the process hook covers app.exit().
 app.on("will-quit", releaseDesktopDataDirLease);
-app.on("will-quit", () => desktopTray?.destroy());
+app.on("will-quit", () => { desktopTray?.destroy(); void tailnetShare.stop(); });
 process.once("exit", releaseDesktopDataDirLease);

@@ -48,7 +48,8 @@ async function fileSha256(full: string, size: number, mtimeMs: number): Promise<
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(full)) hash.update(chunk as Buffer);
   const digest = hash.digest("hex");
-  if (hashes.size > 50_000) hashes.clear();
+  // As many as one listing holds, oldest out first: a listing never pushes out what it hashed itself.
+  if (hashes.size >= MAX_FILES) hashes.delete(hashes.keys().next().value!);
   hashes.set(key, digest);
   return digest;
 }

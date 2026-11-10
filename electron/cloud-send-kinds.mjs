@@ -13,6 +13,12 @@ const FILE_PATH = /^(?:workspaces\/[\w-]{1,128}|task-workspaces\/[\w-]{1,128}\/[
 /** A part of a file, as My Cloud takes one (server/cloud-send-files.ts). */
 const FILE_PART_BYTES = 8 * 1024 * 1024;
 const SETTINGS_BATCH = 500;
+/** How long My Cloud may take to list a bot's files: longer the more bytes it may have to hash. */
+const LISTING_MS = 2 * 60_000;
+const LISTING_MAX_MS = 30 * 60_000;
+/** How long this computer's own server may take to list what it holds. */
+const LOCAL_LISTING_MS = 10 * 60_000;
+const ownerOf = (path) => /^(?:workspaces|task-workspaces)\/([\w-]{1,128})\//u.exec(path)?.[1];
 const AUTOMATIONS = new Set(AUTOMATION_KINDS);
 const ATTACHMENT_NAMES = 2000;
 
@@ -167,7 +173,7 @@ export function createMoveKinds({ localJson, localBytes, localSend, entry, persi
 
   /** The attachments My Cloud lacks of those this computer's chats name, in bytes. */
   async function missingAttachmentBytes(session) {
-    const listed = list((await localJson(scoped("/api/cloud-send/chats?attachments=1")))?.attachments).filter((item) => record(item) && typeof item.name === "string" && Number.isSafeInteger(item.size));
+    const listed = list((await localJson(scoped("/api/cloud-send/chats?attachments=1"), { timeoutMs: LOCAL_LISTING_MS }))?.attachments).filter((item) => record(item) && typeof item.name === "string" && Number.isSafeInteger(item.size));
     let bytes = 0;
     for (let i = 0; i < listed.length; i += ATTACHMENT_NAMES) {
       const asked = listed.slice(i, i + ATTACHMENT_NAMES);
@@ -209,19 +215,35 @@ export function createMoveKinds({ localJson, localBytes, localSend, entry, persi
     throw new Error("My Cloud could not take this file.");
   }
 
+  /** My Cloud's files of these bots, a bot at a time (one answer for every bot of a big workspace is more than a slow
+   * Cloud hashes in time), each given as long as hashing that bot's files here could take there; and its free space. */
+  async function cloudFiles(ctx, here, carried) {
+    const bytes = new Map();
+    for (const file of here) bytes.set(ownerOf(file.path), (bytes.get(ownerOf(file.path)) ?? 0) + file.size);
+    const scopedRoute = scoped("/api/cloud-send/files");
+    const asks = scopedRoute.includes("bot=") ? [[scopedRoute, here.reduce((sum, file) => sum + file.size, 0)]]
+      : [...bytes].map(([bot, size]) => [`/api/cloud-send/files?bot=${bot}`, size]);
+    if (!asks.length) asks.push([carried.size && !scopedRoute.includes("bot=") ? `/api/cloud-send/files?bot=${[...carried][0]}` : scopedRoute, 0]);
+    const files = [];
+    let space = null;
+    for (const [route, size] of asks) {
+      const listed = await ctx.session.call("GET", route, undefined, { timeoutMs: Math.min(LISTING_MAX_MS, LISTING_MS + Math.round(size / 20_000)) });
+      if (!listed.ok) throw new Error(refusal(listed, "My Cloud did not list its files."));
+      files.push(...parseFiles(listed.body));
+      if (record(listed.body?.space)) space = listed.body.space;
+    }
+    return { there: new Map(files.map((file) => [file.path, file])), space };
+  }
+
   /** The bots' files My Cloud lacks, once it has room for them and for the attachments still to go. */
   async function moveFiles(ctx, bots, label) {
     const carried = new Set(bots.map((bot) => bot.id));
-    const owner = (path) => /^(?:workspaces|task-workspaces)\/([\w-]{1,128})\//u.exec(path)?.[1];
-    const here = parseFiles(await localJson(scoped("/api/cloud-send/files"))).filter((file) => carried.has(owner(file.path)));
-    const listed = await ctx.session.call("GET", scoped("/api/cloud-send/files"));
-    if (!listed.ok) throw new Error(refusal(listed, "My Cloud did not list its files."));
-    const there = new Map(parseFiles(listed.body).map((file) => [file.path, file]));
+    const here = parseFiles(await localJson(scoped("/api/cloud-send/files"), { timeoutMs: LOCAL_LISTING_MS })).filter((file) => carried.has(ownerOf(file.path)));
+    const { there, space: measured } = await cloudFiles(ctx, here, carried);
     const kept = entry(ctx.origin);
     const plan = planFiles(here, there, kept.files, label);
     ctx.result.files = { sent: 0, kept: 0 };
     const bytes = plan.reduce((sum, file) => sum + file.size, 0) + await missingAttachmentBytes(ctx.session);
-    const measured = record(listed.body?.space) ? listed.body.space : null;
     if (measured && bytes) {
       const short = await makeRoom(ctx.session, bytes, measured);
       if (short) return void failed(ctx, "files", "files", "Files", short);

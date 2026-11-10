@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { ValidateFunction } from "ajv";
 import { stripControlPlaneEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
+import { cloudRole } from "../bot-box/detect.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { MESSAGE_FILE_MAX_BYTES } from "../message-file.ts";
 import { augmentedPath } from "../env-path.ts";
@@ -57,11 +58,26 @@ export interface ChatToolSession {
 }
 
 type Server = { command: string; args: string[]; env: Record<string, string> };
-type RegisteredTool = { client: ChatMcpClient; server: string; launch: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; name: string; schema: ValidateFunction; searched: boolean };
+/** `required`: a server the turn must not run without (see `mustHave` in mountChatTools). */
+type RegisteredTool = { client: ChatMcpClient; server: string; launch: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; required: boolean; name: string; schema: ValidateFunction; searched: boolean };
 function chatToolName(server: string, tool: string): string {
   return `${server}_${tool}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "mcp_tool";
 }
 const STARTUP_MS = 8_000;
+/** A small Cloud home that is busy can take this long to load Node and a server's own imports. */
+const CLOUD_STARTUP_MS = 30_000;
+const STARTUP_TIMED_OUT = "MCP startup timed out";
+const REQUEST_TIMED_OUT = "MCP request timed out; execution outcome may be uncertain";
+/** How much of a server's stderr is kept, and how much of its last line is ever shown. */
+const STDERR_TAIL_CHARS = 4_000, STDERR_LINE_CHARS = 300;
+/** Built-ins a turn can go on without, saying so. A turn can't run without the agents server, nor without a Local VM it
+ * was given (mountChatTools `mustHave`). */
+const OPTIONAL_BUILT_INS: ReadonlySet<string> = new Set(["computer", "browser", "composio", OWN_APPS_SERVER, "data", "email", "device"]);
+
+/** How long a server that runs a command gets to start here. */
+export function mcpStartupMs(env: Record<string, string | undefined> = process.env): number {
+  return cloudRole(env) ? CLOUD_STARTUP_MS : STARTUP_MS;
+}
 const DEFAULT_CALL_MS = 10 * 60_000;
 const FRAME_BYTES = 2 * 1024 * 1024;
 const OUTPUT_BYTES = 50 * 1024;
@@ -97,11 +113,15 @@ export class ChatMcpClient {
   private frames = 0;
   private closed = false;
   private closing?: Promise<void>;
+  private failure?: string;
+  private stderrTail = "";
+  private readonly configured: string[];
   private pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
 
   /** `configured`: a server the person set up, whose own environment passes the bot box as theirs. */
   constructor(server: Server, computerUse = false, configured = false) {
     this.frameBytes = computerUse ? 32 * 1024 * 1024 : FRAME_BYTES;
+    this.configured = Object.values(server.env).filter((value) => value.length >= 6);
     try {
       // The desktop shell inherits Finder's bare PATH, where `npx`-style servers cannot find `node`.
       this.child = spawnCli(server.command, server.args, {
@@ -111,16 +131,30 @@ export class ChatMcpClient {
     } catch { throw new Error("MCP server could not start; check its command and installation"); }
     this.child.stdout.setEncoding("utf8");
     this.child.stdout.on("data", (chunk: string) => this.onData(chunk));
-    // Stderr may contain credentials; drain without recording or returning it.
-    this.child.stderr.on("data", () => {});
+    this.child.stderr.on("data", (chunk: Buffer | string) => { this.stderrTail = `${this.stderrTail}${chunk}`.slice(-STDERR_TAIL_CHARS); });
     this.child.on("error", () => this.fail(new Error("MCP server could not start; check its command and installation")));
-    this.child.on("exit", () => this.fail(new Error("MCP server exited before the session closed")));
+    // "close" follows the last of its output, so what it said on the way out is read first; a helper still holding stderr doesn't hold this up.
+    this.child.on("exit", () => {
+      const stop = () => this.fail(new Error(`MCP server exited before the session closed.${this.lastWords()}`));
+      this.child.once("close", stop);
+      setTimeout(stop, 200).unref();
+    });
     this.child.stdin.on("error", () => this.fail(new Error("MCP server input closed")));
+  }
+
+  /** The last line the server wrote to stderr, for saying why it stopped. Stderr can hold credentials, so its configured
+   * values and anything shaped like a secret are masked first, and a line cut off by the tail is never shown. */
+  private lastWords(): string {
+    const whole = this.stderrTail.length >= STDERR_TAIL_CHARS ? this.stderrTail.slice(this.stderrTail.indexOf("\n") + 1 || this.stderrTail.length) : this.stderrTail;
+    const masked = this.configured.reduce((text, value) => text.split(value).join("[redacted]"), whole);
+    const line = redactSecretsInText(masked).split("\n").map((entry) => entry.trim()).filter(Boolean).at(-1);
+    return line ? ` It last said: ${line.slice(0, STDERR_LINE_CHARS)}` : "";
   }
 
   private fail(error: Error): void {
     if (this.closed) return;
     this.closed = true;
+    this.failure = error.message;
     for (const entry of this.pending.values()) entry.reject(error);
     this.pending.clear();
     void this.close().catch(() => {});
@@ -186,9 +220,9 @@ export class ChatMcpClient {
     if (Buffer.byteLength(this.buffer) > this.frameBytes) this.fail(new Error("MCP response exceeds the frame limit"));
   }
 
-  async call(method: string, params: unknown, signal: AbortSignal, timeout: number, keepOnRefusal = false): Promise<unknown> {
+  async call(method: string, params: unknown, signal: AbortSignal, timeout: number, keepOnRefusal = false, timedOut = REQUEST_TIMED_OUT): Promise<unknown> {
     if (signal.aborted) { await this.close(); throw aborted(); }
-    if (this.closed) throw new Error("MCP session closed");
+    if (this.closed) throw new Error(this.failure ?? "MCP session closed");
     const id = this.nextId++;
     try {
       return await new Promise((resolve, reject) => {
@@ -203,7 +237,7 @@ export class ChatMcpClient {
           catch {}
           finish(aborted());
         };
-        const timer = setTimeout(() => finish(new Error("MCP request timed out; execution outcome may be uncertain")), timeout);
+        const timer = setTimeout(() => finish(new Error(timedOut)), timeout);
         timer.unref();
         signal.addEventListener("abort", cancel, { once: true });
         this.pending.set(id, { resolve: (value) => finish(undefined, value), reject: (error) => finish(error) });
@@ -219,19 +253,19 @@ export class ChatMcpClient {
   async tools(signal: AbortSignal, include: (tool: unknown) => boolean = () => true, startupMs = STARTUP_MS, observer?: AppObserver): Promise<unknown[]> {
     const deadline = Date.now() + startupMs;
     const remaining = () => {
-      if (Date.now() >= deadline) throw new Error("MCP startup timed out");
+      if (Date.now() >= deadline) throw new Error(STARTUP_TIMED_OUT);
       return deadline - Date.now();
     };
     const handshake = { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "openmausbot-chat", version: "1" } };
     let initialized: unknown;
     if (observer?.mount.extension) {
-      try { initialized = await this.call("initialize", withUiExtension(handshake), signal, remaining(), true); }
+      try { initialized = await this.call("initialize", withUiExtension(handshake), signal, remaining(), true, STARTUP_TIMED_OUT); }
       catch (error) {
         if (!(error instanceof McpRequestRefused)) throw error;
-        initialized = await this.call("initialize", handshake, signal, remaining());
+        initialized = await this.call("initialize", handshake, signal, remaining(), false, STARTUP_TIMED_OUT);
       }
     } else {
-      initialized = await this.call("initialize", handshake, signal, remaining());
+      initialized = await this.call("initialize", handshake, signal, remaining(), false, STARTUP_TIMED_OUT);
     }
     if (!object(initialized)) throw new Error("MCP initialization returned an invalid result");
     observer?.initialized(initialized);
@@ -241,7 +275,7 @@ export class ChatMcpClient {
     const cursors = new Set<string>();
     let cursor: string | undefined;
     for (let page = 0; page < MAX_PAGES; page += 1) {
-      const result = await this.call("tools/list", cursor ? { cursor } : {}, signal, remaining());
+      const result = await this.call("tools/list", cursor ? { cursor } : {}, signal, remaining(), false, STARTUP_TIMED_OUT);
       if (!object(result) || !Array.isArray(result.tools)) throw new Error("MCP tools/list returned an invalid result");
       observer?.listed(result);
       tools.push(...result.tools.filter((tool) => modelVisible(tool) && include(tool)));
@@ -434,12 +468,13 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   if (integrations?.data && eligible("data")) servers.push(["data", integrations.data]);
   if (integrations?.email && eligible("email")) servers.push(["email", integrations.email]);
   if (integrations?.device && eligible("device")) servers.push(["device", integrations.device]);
-  // Connected apps are optional: their tool catalog is fetched from the connected-apps service while
-  // mounting, so an unreachable service must not fail the whole turn. A failed mount is skipped like a
-  // configured server's, which the model is told about. (CLI engines already drop them and go on.)
-  const optionalBuiltIns = new Set<string>();
-  if (integrations?.composio) optionalBuiltIns.add("composio");
-  if (integrations?.composioOwn) optionalBuiltIns.add(OWN_APPS_SERVER);
+  // A failed mount of an optional built-in is skipped like a configured server's, which the model is told about, so one
+  // dead helper can't fail every later turn. (CLI engines already drop them and go on.)
+  // Safety: a turn never runs without the agents server, or without a Local VM it was given (any computer but this
+  // desktop's own): without the VM's tools the model would do the work some other way, outside the VM. Such a server that
+  // can't start, lists no tools, or fails during the turn ends the turn, as every server did before.
+  const mustHave = (descriptor: Server) => descriptor === agentsServer || (descriptor === integrations?.localComputer && integrations?.localComputer?.scope !== "local-computer");
+  const startupMs = mcpStartupMs();
   const builtIns = servers.length;
   const besideBrowser = servers.some(([, descriptor]) => descriptor === integrations?.browser);
   const merged: MergedChatMcpServers[] = [];
@@ -595,21 +630,21 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       const keeps = (tool: unknown) => !computer || !object(tool) || typeof tool.name !== "string" || listsComputerTool(tool.name, besideBrowser);
       const include = (tool: unknown) => keeps(tool) && (scope === undefined || (object(tool) && typeof tool.name === "string"
         && ((searchable.has(name) && isDirectoryTool(tool.name)) || allowsTool(scope, { kind: "mcp", server: name, name: tool.name }))));
-      const tools = await client.tools(signal, include, searchable.has(name) ? REMOTE_MCP_STARTUP_MS : STARTUP_MS, observers.get(name));
+      const tools = await client.tools(signal, include, searchable.has(name) ? REMOTE_MCP_STARTUP_MS : startupMs, observers.get(name));
       if (!tools.length && scope === undefined && descriptor === integrations?.localComputer) throw new Error("The Local VM listed no tools");
       // Harness mounts are known by descriptor, never by a name a configured server could claim. A grant
       // hashes the descriptor (no credential kept); machine bridges mint a bearer per turn, so theirs last a turn.
       const launch = createHash("sha256").update(JSON.stringify(descriptor)).digest("hex");
       const origin: ToolOrigin = { client, server: name, launch, builtInBrowser: descriptor === integrations?.browser, agents: descriptor === agentsServer,
-        hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer", searched: searchable.has(name) };
+        hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer", required: index < builtIns && mustHave(descriptor), searched: searchable.has(name) };
       return { origin, tools };
     }));
     for (const [index, mount] of mounts.entries()) {
       if (signal.aborted || closed) throw aborted();
       const name = servers[index]![0];
       if (mount.status === "rejected") {
-        if (index >= builtIns || optionalBuiltIns.has(name)) { await skip(name, mount.reason, startedAt[index]); continue; }
-        throw mount.reason;
+        if (index >= builtIns || (OPTIONAL_BUILT_INS.has(name) && !mustHave(servers[index]![1]))) { await skip(name, mount.reason, startedAt[index]); continue; }
+        throw new Error(`MCP server "${name}" didn't start: ${mount.reason instanceof Error ? mount.reason.message : "no reason given"}`);
       }
       if (index < builtIns) {
         offeredTools.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) });
@@ -668,7 +703,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   };
   const run = async (tool: RegisteredTool, args: Record<string, unknown>, callSignal: AbortSignal): Promise<ChatToolResult> => {
     try {
-      const result = await tool.client.call("tools/call", { name: tool.name, arguments: args }, AbortSignal.any([signal, callSignal]), callTimeoutMs);
+      const result = await tool.client.call("tools/call", { name: tool.name, arguments: args }, AbortSignal.any([signal, callSignal]), callTimeoutMs, true);
       if (signal.aborted || callSignal.aborted) throw aborted();
       if (!object(result) || !Array.isArray(result.content) || (result.isError !== undefined && typeof result.isError !== "boolean")) throw new Error("MCP tool returned an invalid result; execution outcome may be uncertain");
       observers.get(tool.server)?.returned({ name: tool.name, arguments: args }, result);
@@ -686,8 +721,17 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       return { text: await savedOrBounded(parts.join("\n") || (images.length ? "Screenshot captured." : "(empty result)"), chatToolName(tool.server, tool.name), resultFolder, scrub), ok: result.isError !== true && unsupported === 0,
         ...(images.length ? { images } : {}) };
     } catch (error) {
-      await close();
-      throw new ChatToolSessionError(error instanceof Error ? error.message : "MCP transport failed; execution outcome may be uncertain");
+      const reason = error instanceof Error ? error.message : "MCP transport failed; execution outcome may be uncertain";
+      if (signal.aborted || callSignal.aborted || tool.required) {
+        await close();
+        throw new ChatToolSessionError(reason);
+      }
+      // The server answered and said no, so it stays. Any other failure ends that server for this turn, so a call whose
+      // outcome is uncertain can't run twice on it, and every other server carries on.
+      if (error instanceof McpRequestRefused) return { ok: false, text: `${reason} That was the MCP server "${tool.server}".` };
+      console.warn(`chat-mcp: MCP server "${tool.server}" stopped for this turn: ${reason}`);
+      await tool.client.close().catch(() => {});
+      return { ok: false, text: `${reason} That was the MCP server "${tool.server}". It is stopped for the rest of this turn; your other tools still work.` };
     }
   };
   const answer = (result: DirectoryResult): ChatToolResult => ({ text: boundedText(result.content.map((part) => part.text).join("\n")), ok: result.isError !== true });

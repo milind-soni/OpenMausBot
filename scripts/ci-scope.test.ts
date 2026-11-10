@@ -189,6 +189,7 @@ describe("CI outputs", () => {
     expect(VITEST_SUBSETS["locale-tests"].files).toEqual([
       "src/",
       "electron/cua-launch.test.mjs",
+      "electron/cua-watch-restart.test.mjs",
       "electron/cua-windows-isolation.test.mjs",
       "electron/menu.test.mjs",
       "electron/updater.test.mjs",
@@ -239,6 +240,7 @@ describe("CI outputs", () => {
       "server/host/brief-words.test.ts",
       "server/host/lending-lifts.test.ts",
       "server/lent-folders.e2e.test.ts",
+      "server/move-chosen-bots.e2e.test.ts",
       "server/one-home-keep.e2e.test.ts",
       "server/one-home-outdated.e2e.test.ts",
       "server/one-home-retry.e2e.test.ts",

@@ -140,6 +140,7 @@ export function RoutinesPage({ bot, derived }: PageContext) {
       <RoutineList
         routines={derived.botRoutines}
         runs={state.routineRuns}
+        pausedBots={state.config?.pausedBots}
         loading={state.routinesLoadState === "loading" && derived.botRoutines.length === 0}
         error={state.routinesLoadState === "error"}
         onOpen={setEditing}

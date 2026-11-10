@@ -10,6 +10,8 @@ import { removeTempDir } from "./cleanup.ts";
 const home = mkdtempSync(join(tmpdir(), "omb-test-home-"));
 process.env.HOME = home;
 process.env.USERPROFILE = home;
+// A provider that answers 5xx retries with backoff: no test should wait out real seconds.
+process.env.FAKE_OPENAI_COMPAT_RETRY_SCALE ??= "0.001";
 // OMB_DATA_DIR must never escape the throwaway home the suite deletes.
 delete process.env.OMB_DATA_DIR;
 // The model manifest comes from the bundled copy in tests; refreshing it would be a network call in every server boot.
