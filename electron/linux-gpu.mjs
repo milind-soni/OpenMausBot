@@ -7,3 +7,6 @@ export function linuxDisablesGpu({ env = process.env, exists = fs.existsSync } =
   if (env.OMB_LINUX_GPU === "on") return false;
   return exists("/proc/driver/nvidia/version") || exists("/sys/module/nvidia");
 }
+
+// The main window's page is told so its glass pop-ups drop the backdrop blur, which is redrawn on the CPU here.
+export const SOFTWARE_RENDERING_ARG = "--omb-software-rendering=1";

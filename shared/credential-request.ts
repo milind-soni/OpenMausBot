@@ -124,11 +124,11 @@ export type CredentialTargetId = keyof typeof CREDENTIAL_TARGETS;
 /** Saved in the sealed login store, not the settings file. */
 export type LoginCredentialTargetId = "onePasswordToken";
 export type ConfigCredentialTargetId = Exclude<CredentialTargetId, LoginCredentialTargetId>;
-/** AI provider keys: the server's config only, like Settings → Keys, and refused where Admin manages the models. */
+/** AI provider keys: refused where Admin manages the models, and typed only in the computer's own app or a desktop paired to it, never on a phone. */
 export const PROVIDER_CREDENTIAL_TARGETS = [
   "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "greenferenceApiKey", "metaApiKey", "deepseekApiKey",
 ] as const satisfies readonly ConfigCredentialTargetId[];
-export type DesktopCredentialSlot = Exclude<ConfigCredentialTargetId, (typeof PROVIDER_CREDENTIAL_TARGETS)[number]>;
+export type DesktopCredentialSlot = ConfigCredentialTargetId;
 export type CredentialConfig = {
   xai?: { key?: string };
   box?: { token?: string };
@@ -169,10 +169,9 @@ export function isProviderCredentialTarget(id: CredentialTargetId): boolean {
   return (PROVIDER_CREDENTIAL_TARGETS as readonly string[]).includes(id);
 }
 
-/** The desktop's encrypted-store slot that holds this key, where Settings saves it; null for a key Settings keeps in the
- * server's config. A paired phone can save only a key with a slot. */
+/** The desktop's encrypted-store slot that holds this key, where Settings saves it; null for the 1Password token, which Logins keeps. */
 export function desktopCredentialSlot(id: CredentialTargetId): DesktopCredentialSlot | null {
-  return isConfigCredentialTarget(id) && !isProviderCredentialTarget(id) ? id as DesktopCredentialSlot : null;
+  return isConfigCredentialTarget(id) ? id : null;
 }
 
 /** Where a card saves what the person typed: the 1Password token goes to Logins, which checks it reaches 1Password. */

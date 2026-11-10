@@ -18,7 +18,7 @@ import { LocalComputerSection } from "./LocalComputerSection";
 import { PeopleSection } from "./PeopleSection";
 import { ActivitySection } from "./ActivitySection";
 import { BuiltInBrowserRow, ServerSitesRow } from "./BrowserSettingsRows";
-import { LoginsSettings } from "./LoginsSettings";
+import { VaultSettings } from "./VaultSettings";
 import { OrganizationSettings } from "./OrganizationSettings";
 import { CloudPlanRow, CloudPlanFootnote, useCloudPlan } from "./ProIntroduction";
 import { CloudUsageDetails, CloudUsageSummaryView, useCloudUsageSettings } from "./CloudUsageMeter";
@@ -32,6 +32,7 @@ import { PlaceLookRows } from "./PlaceLookCard";
 import { ChromeRailRow } from "./ChromeRailToggle";
 import { WindowFrameRow } from "./WindowFrameRow";
 import { ProfileSummaryRow } from "./ProfileSettings";
+import { AwayEmailsSetting } from "./AwayEmailsSetting";
 import { ImportSettings } from "./ImportSettings";
 import { NotificationRows } from "./NotificationSettingsRows";
 import { useServerUpdateItem } from "./SidebarProfileMenu";
@@ -69,6 +70,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks, onMore }: { has: H
         <SettingsGroup label={t("settings.group.account")} block="general">
           <SettingsRows>
             {has("general") && <ProfileSummaryRow />}
+            {has("general") && <AwayEmailsSetting row />}
             {has("general") && <CloudPlanRow place="account" />}
             {has("people") && <div data-settings-block="people" className="scroll-mt-4"><PeopleSection simple startOpen={peopleOpen} /></div>}
           </SettingsRows>
@@ -225,7 +227,7 @@ export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { h
           <BrowserProfilesRow />
         </SettingsGroup>
       )}
-      {has("logins") && <div data-settings-block="logins" className="scroll-mt-4"><LoginsSettings /></div>}
+      {has("logins") && <div data-settings-block="logins" className="scroll-mt-4"><VaultSettings /></div>}
       {(has("companion") || has("desktopWorkspaces")) && (
         <SettingsDisclosureRow title={t("settings.simple.computer.elsewhere")} block="elsewhere" {...disclose("computer-elsewhere")}>
           {has("desktopWorkspaces") && <div data-settings-block="desktopWorkspaces" className="flex scroll-mt-4 flex-col gap-4">{servers}</div>}

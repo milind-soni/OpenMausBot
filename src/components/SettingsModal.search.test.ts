@@ -25,7 +25,7 @@ for (const [path, name] of [
   ["./EnginesSettings", "EnginesSettings"], ["./RemoteComputerSection", "RemoteComputerSection"], ["./PhoneDevicesSection", "PhoneDevicesSection"],
   ["./ServerPairingCard", "ServerPairingCard"], ["./LocalComputerSection", "LocalComputerSection"], ["./CloudAccountSettings", "CloudAccountSettings"],
   ["./PeopleSection", "PeopleSection"], ["./ActivitySection", "ActivitySection"], ["./UsageSection", "UsageSection"], ["./ImportSettings", "ImportSettings"],
-  ["./CustomDomainSettings", "CustomDomainSettings"], ["./LoginsSettings", "LoginsSettings"], ["./PlanUsage", "PlanUsageSummary"],
+  ["./CustomDomainSettings", "CustomDomainSettings"], ["./VaultSettings", "VaultSettings"], ["./PlanUsage", "PlanUsageSummary"],
 ] as const) vi.doMock(path, async (importOriginal) => ({ ...await importOriginal<Record<string, unknown>>(), [name]: () => null }));
 
 const { SettingsModal } = await import("./SettingsModal");
@@ -70,13 +70,24 @@ describe("Settings search in Simple mode", () => {
     expect(search().value).toBe("f");
   });
 
-  it("points nowhere Advanced, Simple being the only mode, and finds Automatic recovery under More settings", () => {
-    for (const words of ["font", "chat width", "circles", "universal", "this run"]) {
+  it("lists a builder control as Advanced and, when chosen, opens General at the Advanced mode row", () => {
+    type("font");
+    const result = host.querySelector<HTMLButtonElement>('[data-settings-advanced-only="settings.font.title"]')!;
+    expect(result.textContent).toBe("Interface font · Advanced");
+    flushSync(() => result.click());
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "general" });
+    expect(scrolled.map((element) => element.getAttribute("data-settings-block"))).toContain("advanced-mode");
+    expect(search().value).toBe("");
+  });
+
+  it("finds every other builder control as Advanced, and Automatic recovery under More settings", () => {
+    for (const [words, key] of [["chat width", "settings.chatWidth.title"], ["circles", "settings.pinnedCircles.title"],
+      ["universal", "settings.universalPins.title"], ["this run", "settings.runCard.title"]]) {
       type(words);
-      expect(host.querySelector("[data-settings-advanced-only]"), words).toBeNull();
-      expect(dialog().textContent, words).not.toContain("· Advanced");
+      expect(host.querySelector(`[data-settings-advanced-only="${key}"]`)?.textContent, words).toMatch(/ · Advanced$/);
     }
     type("recovery");
+    expect(host.querySelector("[data-settings-advanced-only]")).toBeNull();
     const result = host.querySelector<HTMLButtonElement>('[data-settings-more-result="settings.recovery.title"]')!;
     expect(result.textContent).toBe("Automatic recovery · More settings");
     flushSync(() => result.click());

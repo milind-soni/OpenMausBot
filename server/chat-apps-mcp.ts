@@ -44,6 +44,8 @@ export interface ChatAppsMcpDeps {
   storedServers(): Record<string, unknown>;
   mountedServers(bot: BotRecord): Record<string, McpServerSpec>;
   personMcp?(): readonly string[];
+  /** How a command server is started outside a turn: as the turns of its bot, or of any bot (server/mcp-probe.ts `asBot`). */
+  probeAs?(server: { bot?: string }): NonNullable<McpProbeOptions["asBot"]>;
   oauth: ChatAppsMcpOAuth;
   dataDir?: string;
   catalog?: McpAppCatalog;
@@ -117,7 +119,14 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((line: string) => console.info(`chat apps: ${line}`));
   const catalog = deps.catalog ?? new McpAppCatalog(deps.dataDir ? `${deps.dataDir}/mcp-app-catalog.json` : null);
+  // A command server OpenMausBot starts by itself (the background probe, an app's own connection) runs where the bots'
+  // turns run it: in the bot box where that is on, never beside the server.
+  const asBot = (name: string) => {
+    const stored = storedServer(name, deps.storedServers()[name]);
+    return deps.probeAs?.(stored && !isRemoteMcpServer(stored) ? stored : {}) ?? {};
+  };
   const connections = deps.connections ?? new AppConnections({
+    asBot,
     onTools: (name, server, tools, extensions) => {
       if (storedServer(name, deps.storedServers()[name])?.apps === false) return;
       catalog.recordList(name, server, tools, extensions);
@@ -396,7 +405,7 @@ export function createChatAppsMcp(deps: ChatAppsMcpDeps): ChatAppsMcp {
       const target = isRemoteMcpServer(stored) ? await signedIn(name, stored) : stored;
       if (!target) return;
       const probed = { ...target, enabled: true } as StoredMcpServer;
-      const result = await probe(probed, BACKGROUND_PROBE_MS, undefined, probeOptions(name, stored));
+      const result = await probe(probed, BACKGROUND_PROBE_MS, undefined, { ...probeOptions(name, stored), ...(isRemoteMcpServer(probed) ? {} : { asBot: asBot(name) }) });
       if (!result.ok && result.auth === "required" && isRemoteMcpServer(probed) && !sendsCredentials(probed)) deps.oauth.requireSignIn(name, probed.url);
       log(`probed ${name}: ${result.ok ? `apps=${catalog.get(name, stored)?.apps === true}` : result.auth === "required" ? "needs sign-in" : "failed"}`);
     }).catch((error: unknown) => log(`probe of ${name} failed: ${String(error)}`));

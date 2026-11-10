@@ -1,4 +1,16 @@
+import fs from "node:fs";
+
 export const WORKSPACE_CREDENTIALS = [
+  { section: "openai", field: "key", name: "openaiApiKey", env: "OMB_OPENAI_API_KEY" },
+  { section: "anthropic", field: "key", name: "anthropicApiKey", env: "OMB_ANTHROPIC_API_KEY" },
+  { section: "openrouter", field: "key", name: "openrouterApiKey", env: "OMB_OPENROUTER_API_KEY" },
+  { section: "mistral", field: "key", name: "mistralApiKey", env: "MISTRAL_API_KEY" },
+  { section: "cerebras", field: "key", name: "cerebrasApiKey", env: "CEREBRAS_API_KEY" },
+  { section: "groq", field: "key", name: "groqApiKey", env: "OMB_GROQ_API_KEY" },
+  { section: "greenference", field: "key", name: "greenferenceApiKey", env: "OMB_GREENFERENCE_API_KEY" },
+  { section: "meta", field: "key", name: "metaApiKey", env: "OMB_META_API_KEY" },
+  { section: "deepseek", field: "key", name: "deepseekApiKey", env: "OMB_DEEPSEEK_API_KEY" },
+  { section: "openaiCompat", field: "key", name: "openaiCompatApiKey", env: "OPENAI_COMPAT_API_KEY" },
   { section: "xai", field: "key", name: "xaiApiKey", env: "XAI_API_KEY" },
   { section: "box", field: "token", name: "boxToken", env: "BOX_TOKEN" },
   { section: "tts", field: "key", name: "ttsKey", env: "OMB_TTS_KEY" },
@@ -39,6 +51,24 @@ export function migrateWorkspaceCredentials(config, credentials) {
     configChanged = true;
   }
   return { config: nextConfig, credentials: nextCredentials, configChanged, credentialsChanged };
+}
+
+/** Security: the encrypted write comes first, so a store that cannot save leaves every plaintext key in config.json and the app working. */
+export async function migrateWorkspaceConfigFile({ configPath, credentials, save, log }) {
+  let current = credentials;
+  try {
+    const migrated = migrateWorkspaceCredentials(JSON.parse(fs.readFileSync(configPath, "utf8")), current);
+    if (migrated.credentialsChanged) await save(migrated.credentials);
+    current = migrated.credentials;
+    if (migrated.configChanged) {
+      const temporary = `${configPath}.${process.pid}.tmp`;
+      fs.writeFileSync(temporary, JSON.stringify(migrated.config, null, 2), { mode: 0o600 });
+      fs.renameSync(temporary, configPath);
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") log(`credential migration failed: ${error?.message ?? error}`);
+  }
+  return current;
 }
 
 export function workspaceCredentialEnv(credentials) {

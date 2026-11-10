@@ -21,6 +21,7 @@ import { RoutineEditor } from "./RoutineCalendarPage";
 import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
 import { WebhookEditor } from "./WebhookTrigger";
+import { schedulableBots, useTeamPeople } from "@/state/team-people";
 
 /** The bot filter earns its place only on a long list shared by several bots. */
 const FILTER_FROM = 9;
@@ -41,6 +42,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const [editing, setEditing] = useState<{ kind: SetUpKind; id?: string; botId?: string } | null>(null);
   const routinesOnly = window.ogb?.remoteClient?.active === true;
   const visibleBots = state.bots.filter((bot) => !bot.hidden);
+  const team = useTeamPeople();
   const botName = (botId: string) => state.bots.find((bot) => bot.id === botId)?.name ?? t("routines.unavailableBot");
 
   useEffect(() => {
@@ -161,7 +163,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
       {newText !== null && (
         <NewAutomation initialText={newText} onClose={() => setNewText(null)} onSetUpYourself={(kind, botId) => { setNewText(null); setEditing({ kind, botId }); }} />
       )}
-      {editing?.kind === "schedule" && (editRoutine || !editing.id) && <RoutineEditor routine={editRoutine} bots={visibleBots} initialBotId={editing.botId} plain onClose={() => setEditing(null)} />}
+      {editing?.kind === "schedule" && (editRoutine || !editing.id) && <RoutineEditor routine={editRoutine} bots={schedulableBots(visibleBots, team, editRoutine?.botId)} initialBotId={editing.botId} plain onClose={() => setEditing(null)} />}
       {editing?.kind === "webhook" && (editWebhook || !editing.id) && (
         <WebhookEditor webhook={editWebhook} bots={visibleBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onCredential={(credential, id) => { saveWebhookCredential(webhookCredentialStore(), id, credential); setOpenId(id); }} />
       )}

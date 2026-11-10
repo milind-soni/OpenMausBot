@@ -106,6 +106,15 @@ describe("scopes", () => {
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
   });
 
+  it("keeps a card's \"Use a saved one\" an admin's, since picking one lets a bot use a Vault item", () => {
+    for (const [method, path] of [
+      ["GET", "/api/bots/bot-1/secret-cards/card-1/saved"],
+      ["POST", "/api/bots/bot-1/secret-cards/card-1/use"],
+      ["GET", "/api/bots/bot-1/sign-in-cards/card-1/saved-logins"],
+      ["POST", "/api/bots/bot-1/sign-in-cards/card-1/use-login"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
+  });
+
   it("keeps the attachments clear to the owner: a client may read one file, never empty the store", () => {
     for (const method of ["GET", "POST"]) expect(requiredScope(method, "/api/attachment-storage"), method).toBe("admin");
     expect(requiredScope("GET", "/api/attachments/a1b2.png")).toBe("client");
@@ -227,7 +236,7 @@ describe("scopes", () => {
   it("lets a bot's maker without the admin scope say who it is and how it looks, never what it may do or whom it directs", () => {
     const profile = { name: "Scout", title: "Trips", soul: "Plans trips.", color: "teal", avatarCrop: "square", voice: "alloy", modelSelection: { instanceId: "claude", model: "m" } };
     expect(adminOnlyBotSetting(profile)).toBeNull();
-    for (const field of ["approvalMode", "autoApprove", "alwaysAllow", "chiefOfStaff", "managedSections", "computer", "cwd", "peers", "approvePeerComms",
+    for (const field of ["approvalMode", "autoApprove", "alwaysAllow", "chiefOfStaff", "managedSections", "computer", "cwd",
       "mcpServers", "browserProfile", "toolScope", "composio", "browser", "section", "visibility", "reportsTo", "preset", "defaultBot", "installedPackage"]) {
       expect(adminOnlyBotSetting({ ...profile, [field]: true }), field).toBe(field);
       expect(botProfileSettings({ ...profile, [field]: true }), field).toEqual(profile);

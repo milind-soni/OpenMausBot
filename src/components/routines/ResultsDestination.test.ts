@@ -36,4 +36,15 @@ describe("routine result destination", () => {
     expect(html).toContain("Thread unavailable");
     expect(html).toContain('value="deleted-or-foreign" disabled="" selected=""');
   });
+
+  it("on a team offers only Just me and the shared chat, and picks the shared chat by its id", () => {
+    const team = { ...bot, mainThreadId: "main", tasks: [...bot.tasks!, { threadId: "mine", title: "Bob's plans", private: true }] } as Bot;
+    const html = renderToStaticMarkup(createElement(ResultsDestination, { bot: team, value: null, team: true, onChange: vi.fn() }));
+    expect(html).toContain('value="shared" selected=""');
+    expect(html).toContain(">Just me<");
+    expect(html).toContain(">Shared chat<");
+    expect(html).not.toContain("Fleet health");
+    expect(renderToStaticMarkup(createElement(ResultsDestination, { bot: team, value: "mine", team: true, onChange: vi.fn() }))).toContain('value="me" selected=""');
+    expect(renderToStaticMarkup(createElement(ResultsDestination, { bot: team, value: "just-me", team: true, onChange: vi.fn() }))).toContain('value="me" selected=""');
+  });
 });

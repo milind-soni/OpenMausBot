@@ -17,6 +17,8 @@ import { turnWaitedOnPerson } from "../waiting-on-person.ts";
 import { workspaceDir } from "../workspace.ts";
 
 const TOOL = "lending_lift";
+/** The request of a card for a whole bot's memory, which no line of a conversation asked for. */
+const WHOLE_BOT = "whole-bot-memory";
 /** A card shows what it allows; past this it says where the rest is. */
 const SHOWN_CHARS = 2_000;
 const CARRY_ON_EVERY_MS = 5_000;
@@ -132,10 +134,11 @@ export function createLendingLifts(deps: LendingLiftDeps) {
         }
         return "open";
       }
-      if (last?.card?.answered === "deny") return "declined";
+      // A line's Not now holds for that line; a bot's holds until its memory changes again.
+      if (last?.card?.answered === "deny" && (requestMessageId !== WHOLE_BOT || last.card.lendingLift?.memoryToken === lift.memoryToken)) return "declined";
       const language = deps.language(threadId);
       const room = store.groupByThread(threadId);
-      const title = serverLine(language, "server.lendingLift.title", { bot: bot?.name ?? "", device: deps.device() });
+      const title = serverLine(language, requestMessageId === WHOLE_BOT ? "server.lendingLift.wholeBotTitle" : "server.lendingLift.title", { bot: bot?.name ?? "", device: deps.device() });
       const requestId = `lending-lift-${randomUUID()}`;
       store.appendMessage(threadId, {
         role: "bot", kind: "options",
@@ -146,6 +149,14 @@ export function createLendingLifts(deps: LendingLiftDeps) {
       if (store.projectBotForTask(botId, threadId)?.busy) store.setTaskActivity(botId, threadId, "waiting-on-you");
       if (bot) deps.notify(buildNotification("approval", bot, threadId, title));
       return "open";
+    },
+
+    /** Security invariant: a bot's memory just became locked. The card goes to its own main chat, for the owner alone to
+     * answer from one of their devices, and shows exactly what it would allow, like any other. */
+    memoryLocked(botId: string): void {
+      const bot = store.bot(botId);
+      if (!bot?.threadId) return;
+      this.raise({ botId, threadId: bot.threadId, requestMessageId: WHOLE_BOT, memoryChanged: true, outside: false });
     },
 
     /** They said Not now to this line of theirs. */

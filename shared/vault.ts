@@ -45,3 +45,11 @@ export interface LinkedSecret {
   readOnly: true;
   lastUsedAt?: number;
 }
+
+/** A saved item a secure card offers under "Use a saved one": its name only. Picking it lets the asking bot use it. */
+export interface VaultChoice {
+  id: string;
+  name: string;
+  /** Who it is linked from, such as 1password; absent for one saved in the Vault. */
+  provider?: string;
+}

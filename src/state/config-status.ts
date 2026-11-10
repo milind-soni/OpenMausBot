@@ -60,7 +60,7 @@ export interface ConfigStatus {
   newBots?: { effort?: EffortLevel };
   /** This Cloud is on the Starter plan, as the Admin last said; absent or false otherwise. */
   cloudStarter?: boolean;
-  /** The most bots this Cloud's plan makes, its MausBot aside; absent when its plan has no such limit. */
+  /** The most bots this Cloud's plan makes, its MausBot aside. Sent only by servers that capped Starter's bots; absent otherwise. */
   botLimit?: number;
   /** A task on this Cloud is waiting for memory right now. */
   waitingForRoom?: boolean;
