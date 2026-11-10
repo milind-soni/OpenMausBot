@@ -650,9 +650,10 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === "fill_login") {
     const username = typeof args.username === "string" ? args.username.trim().slice(0, 512) : "";
+    const email = typeof args.email === "string" ? args.email.trim().slice(0, 320) : "";
     const r = await api("/api/internal/fill-login", {
       method: "POST",
-      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, ...(username ? { username } : {}), ...(args.submit === false ? { submit: false } : {}) }),
+      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, ...(username ? { username } : {}), ...(email ? { email } : {}), ...(args.submit === false ? { submit: false } : {}) }),
     });
     return { text: typeof r.text === "string" && r.text ? r.text : "fill_login did not answer. Call request_sign_in instead.", ...(r.ok === true ? {} : { isError: true }) };
   }
