@@ -24,8 +24,12 @@ import {
 import { errorResponse, HTTPError, json, readOptionalBoundedJSON } from "./http";
 import {
   printableVersion,
+  installationKindSchema,
+  type InstallationKind,
+  recordInstallationKind,
   recordReportedAppVersion,
   requireInstallation,
+  storedInstallationKind,
   requireInstallationAndRead,
 } from "./installations";
 import { idleTunnelReason } from "./tunnel-activity";
@@ -245,15 +249,26 @@ const provisionRequestSchema = z.strictObject({
   appVersion: printableVersion.optional(),
   /** Paired phones that can't use the encrypted connection yet; only they still need a tunnel. */
   legacyDevices: z.number().int().min(0).max(100).optional(),
+  kind: installationKindSchema.optional(),
 });
 
-/** POST may carry `{ "appVersion": "0.1.103", "legacyDevices": 1 }`, or no body. */
-async function provisionRequest(request: Request): Promise<{ appVersion: string | null; legacyDevices: number | null }> {
+interface ProvisionRequest {
+  appVersion: string | null;
+  kind: InstallationKind | null;
+  legacyDevices: number | null;
+}
+
+/** POST may carry `{ "appVersion": "0.1.103", "legacyDevices": 1, "kind": "desktop" }`, or no body. */
+async function provisionRequest(request: Request): Promise<ProvisionRequest> {
   const body = await readOptionalBoundedJSON(request);
-  if (body === undefined) return { appVersion: null, legacyDevices: null };
+  if (body === undefined) return { appVersion: null, kind: null, legacyDevices: null };
   const parsed = provisionRequestSchema.safeParse(body);
   if (!parsed.success) throw new HTTPError(400, "invalid_request");
-  return { appVersion: parsed.data.appVersion ?? null, legacyDevices: parsed.data.legacyDevices ?? null };
+  return {
+    appVersion: parsed.data.appVersion ?? null,
+    kind: parsed.data.kind ?? null,
+    legacyDevices: parsed.data.legacyDevices ?? null,
+  };
 }
 
 /** Why a relay-capable desktop goes without a tunnel. The code stays `relay_capable`, which every such desktop
@@ -1210,10 +1225,11 @@ export async function provisionManagedEndpoint(
 ): Promise<Response> {
   const installation = await requireInstallation(request, env);
   await enforceEndpointRateLimit(env, installation.installation_id, "reconcile_endpoint");
-  const { appVersion: reportedVersion, legacyDevices } = await provisionRequest(request);
+  const { appVersion: reportedVersion, kind: reportedKind, legacyDevices } = await provisionRequest(request);
   if (reportedVersion !== null && reportedVersion !== installation.app_version) {
     await recordReportedAppVersion(env, installation.installation_id, reportedVersion);
   }
+  if (reportedKind !== null) await recordInstallationKind(env, installation.installation_id, reportedKind);
   const allocation = allocationFor(env, config, reportedVersion ?? installation.app_version);
   const existing = await endpointRow(env, installation.installation_id);
   const policy = readTunnelPolicy(env);
@@ -1221,12 +1237,18 @@ export async function provisionManagedEndpoint(
   if (belowMinimum(policy, reportedVersion ?? installation.app_version)) throw new HTTPError(426, "update_required");
   // The relay first: a desktop it can carry gets a tunnel only for an old phone, and only while old phones may
   // still hold one. A desktop the relay cannot carry (an older release, the relay off, outside the rollout,
-  // blocked) falls through to a tunnel, as before the relay existed.
+  // blocked) falls through to a tunnel, as before the relay existed. So does a self-hosted server: its tunnel is
+  // its public address, so it is never answered relay_capable. One that does not say what it is is known by what
+  // every released server does: it reports no phones and has never asked for a relay token.
   let standing: RelayStanding | null = null;
+  let kind: InstallationKind | null | undefined = reportedKind ?? undefined;
   const onRelay = async () => {
     if (!relayCapableVersion(policy, reportedVersion)) return null;
+    if (kind === undefined) kind = await storedInstallationKind(env, installation.installation_id);
+    if (kind === "server") return null;
     standing ??= await relayStanding(env, installation.installation_id);
-    return standing.serves ? standing : null;
+    if (!standing.serves) return null;
+    return kind === null && legacyDevices === null && !standing.asked ? null : standing;
   };
   if (policy.legacyCutoffPercent > 0) {
     const relay = await onRelay();
