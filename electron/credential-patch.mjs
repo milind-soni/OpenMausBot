@@ -1,5 +1,16 @@
 import nativeText from "./native-text.cjs";
 export const CREDENTIAL_PATCH = {
+  openaiApiKey: (value) => ({ openai: { key: value } }),
+  // everyClaudeBot travels with the key, so no moment exists where a first key moves every signed-in Claude bot onto API billing.
+  anthropicApiKey: (value, options) => ({ anthropic: { key: value, ...(options?.everyClaudeBot === false ? { everyClaudeBot: false } : {}) } }),
+  openrouterApiKey: (value) => ({ openrouter: { key: value } }),
+  mistralApiKey: (value) => ({ mistral: { key: value } }),
+  cerebrasApiKey: (value) => ({ cerebras: { key: value } }),
+  groqApiKey: (value) => ({ groq: { key: value } }),
+  greenferenceApiKey: (value) => ({ greenference: { key: value } }),
+  metaApiKey: (value) => ({ meta: { key: value } }),
+  deepseekApiKey: (value) => ({ deepseek: { key: value } }),
+  openaiCompatApiKey: (value) => ({ openaiCompat: { key: value } }),
   composioApiKey: (value) => ({ composio: { apiKey: value } }),
   xaiApiKey: (value) => ({ xai: { key: value } }),
   boxToken: (value) => ({ box: { token: value } }),

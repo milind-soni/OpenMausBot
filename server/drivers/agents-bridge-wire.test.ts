@@ -60,10 +60,9 @@ function profiles(): Record<string, Record<string, string>> {
   for (const name of ["skills+shared+voice", "skills+shared+voice+non-chief"]) {
     all[`${name}+cloud-home`] = { ...all[name]!, OMB_CLOUD_HOME: "1" };
   }
-  all["skills+shared+voice+escalations"] = { ...all["skills+shared+voice"]!, OMB_ESCALATIONS: "1" };
-  all["skills+shared+voice+escalations+x"] = { ...all["skills+shared+voice+escalations"]!, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" };
-  all["skills+shared+voice+escalations+x+team"] = { ...all["skills+shared+voice+escalations+x"]!, OMB_TEAM_PEOPLE: "1" };
-  all["skills+shared+voice+escalations+x+team+images"] = { ...all["skills+shared+voice+escalations+x+team"]!, OMB_IMAGE_GENERATION: "1" };
+  all["skills+shared+voice+x"] = { ...all["skills+shared+voice"]!, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" };
+  all["skills+shared+voice+x+team"] = { ...all["skills+shared+voice+x"]!, OMB_TEAM_PEOPLE: "1" };
+  all["skills+shared+voice+x+team+images"] = { ...all["skills+shared+voice+x+team"]!, OMB_IMAGE_GENERATION: "1" };
   all["default+legacy-switches"] = { ...all.default!, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1", OMB_ACTIVE_WAITS: "0" };
   for (const name of ["default", "skills+shared+voice"]) all[`${name}+mausbot`] = { ...all[name]!, OMB_MAUSBOT: "1" };
   all["default+no-computer-pick"] = { ...all.default!, OMB_COMPUTER_SELECTION: "0" };
@@ -76,7 +75,7 @@ const PROFILES = profiles();
 /** Refused by the server to every bot that is not a Chief of Staff. */
 const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
 /** The profile that mounts the most: its bridged list is checked in whole. */
-const FULL = "skills+shared+voice+escalations+x+team+images";
+const FULL = "skills+shared+voice+x+team+images";
 
 /** Bytes of each bridged list when its budget was last set. A list may not
  * exceed this by more than 2%, and may not undercut it by more than 2%
@@ -101,16 +100,15 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+non-chief": 18217,
   "skills+shared+voice+cloud-home": 18444,
   "skills+shared+voice+non-chief+cloud-home": 18233,
-  "skills+shared+voice+escalations": 18446,
-  "skills+shared+voice+escalations+x": 18507,
-  "skills+shared+voice+escalations+x+team": 18507,
+  "skills+shared+voice+x": 18507,
+  "skills+shared+voice+x+team": 18507,
   "default+legacy-switches": 17486,
   "default+mausbot": 17538,
   "skills+shared+voice+mausbot": 18480,
   "default+no-computer-pick": 16274,
   "default+room": 16213,
   "non-chief+room": 16096,
-  "skills+shared+voice+escalations+x+team+images": 18429,
+  "skills+shared+voice+x+team+images": 18429,
   "default+images": 17502,
 };
 

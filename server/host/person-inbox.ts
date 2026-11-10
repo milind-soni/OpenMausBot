@@ -117,6 +117,8 @@ export interface PersonInboxDeps {
   ensureOwnBot?(email: string): void;
   /** What waits on this inbox's person may have changed: its bot goes out to them again. */
   changed?(threadId: string): void;
+  /** A line reached a person's inbox. */
+  delivered?(item: Item, delivery: Delivery): void;
   now?: () => number;
 }
 
@@ -165,9 +167,8 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     let threadId = standing?.threadId;
     if (standing?.brief) store.patchTask(bot.id, standing.threadId, { title: INBOX_TITLE });
     else if (!standing) {
-      const created = store.createTask(bot.id, INBOX_TITLE, false);
+      const created = store.createTask(bot.id, INBOX_TITLE, false, undefined, undefined, undefined, undefined, undefined, (task) => deps.starters.set(task.threadId, person));
       if (!created) return null;
-      deps.starters.set(created.threadId, person);
       threadId = created.threadId;
     }
     homes[person] = { botId: bot.id, threadId: threadId! };
@@ -302,6 +303,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     };
     items.push(item);
     save();
+    deps.delivered?.(item, delivery);
     mark(at.threadId);
     store.patchTask(at.bot.id, at.threadId, { unread: true });
     if (delivery.representable && deps.representative) void represent(item, delivery, at.bot);

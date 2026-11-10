@@ -28,6 +28,17 @@ describe("Mistral provider", () => {
     await instance.dispose();
   });
 
+  it("keeps the desktop store's workspace key away from an instance with its own URL", async () => {
+    vi.stubEnv("OMB_DESKTOP_PARENT", "1");
+    vi.stubEnv("MISTRAL_API_KEY", "fixture-workspace-key");
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    const instance = await MistralDriver.create({ instanceId: "own-url", displayName: "Mine", enabled: true,
+      config: MistralDriver.decodeConfig({ url: "https://mine.example.test/v1" }), environment: {} });
+    expect(await instance.snapshot()).toMatchObject({ state: "unavailable" });
+    expect(fetcher).not.toHaveBeenCalled();
+    await instance.dispose();
+  });
+
   it("discovers versioned chat models and aliases while excluding archived and non-chat entries", async () => {
     let data: unknown = { data: [
       { id: "mistral-large-2512", name: "Mistral Large 3", aliases: ["mistral-large-latest", "mistral-large-2512"], max_context_length: 262144, capabilities: { completion_chat: true } },

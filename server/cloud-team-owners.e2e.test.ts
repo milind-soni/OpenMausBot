@@ -124,7 +124,8 @@ it("records who created each team bot, offers everyone who opened the team, and 
   expect(fox.reportsTo).toBeUndefined();
   expect(lead).toMatchObject({ createdBy: OLIVE.email, reportsTo: ADA.email });
 
-  const people = (await team.as(bob, "GET", "/api/team/people")).body.people;
+  const people = ((await team.as(bob, "GET", "/api/team/people")).body.people as Array<Record<string, unknown>>)
+    .map(({ here, ...person }) => { expect(typeof here).toBe("boolean"); return person; });
   expect(people).toEqual(expect.arrayContaining([
     { email: OLIVE.email, name: "Olive", role: "owner" }, { email: ADA.email, name: "Ada", role: "admin" }, { email: BOB.email, name: "Bob", role: "member", you: true },
   ]));

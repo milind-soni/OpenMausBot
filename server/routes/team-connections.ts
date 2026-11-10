@@ -114,7 +114,9 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
         const access = await deps.host.people.ensureAppsAccess(person, email);
         if (!access) return json(res, 503, { error: "Connected apps aren't available on this Cloud right now. Try again in a minute." });
         try {
-          return json(res, 200, await deps.composio.authorizeService(cfg, slug, null, access));
+          const started = await deps.composio.authorizeService(cfg, slug, null, access);
+          deps.host.people.appConnecting(person, slug);
+          return json(res, 200, started);
         } catch (error) {
           const status = (error as { status?: number }).status;
           return json(res, typeof status === "number" && status >= 400 && status < 500 ? status : 502, { error: error instanceof Error ? error.message : "The app's sign-in couldn't start." });

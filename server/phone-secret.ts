@@ -1,6 +1,6 @@
 import { createECDH, createHash, type webcrypto } from "node:crypto";
 
-import { desktopCredentialSlot, isCredentialTargetId } from "../shared/credential-request.ts";
+import { isCredentialTargetId, isProviderCredentialTarget } from "../shared/credential-request.ts";
 import type { CipherSuite } from "@hpke/core";
 
 export const PHONE_SECRET_PROTOCOL_VERSION = 1 as const;
@@ -139,7 +139,7 @@ export function assertPhoneSecretRequestMatches(
     throw new PhoneSecretError("Paste the 1Password token in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
   }
   // An AI provider key lives in the server's settings, which only the computer's own app writes.
-  if (isCredentialTargetId(expected.target) && !desktopCredentialSlot(expected.target)) {
+  if (isCredentialTargetId(expected.target) && isProviderCredentialTarget(expected.target)) {
     throw new PhoneSecretError("Paste this key in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
   }
   if (

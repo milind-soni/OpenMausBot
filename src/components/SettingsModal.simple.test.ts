@@ -163,15 +163,14 @@ describe("Settings in Simple mode", () => {
     for (const id of hidden) expect(SIMPLE_HIDDEN_SECTIONS).toContain(id);
   });
 
-  it("opens General on Account, then Appearance, Language and typing, Notifications, System and Import, with More settings last as a plain row and no Advanced mode", () => {
+  it("opens General on Account, then Appearance, Language and typing, Notifications, System and Import, with More settings and Advanced mode last as plain rows", () => {
     const html = render();
     expect(currentPage(html)).toBe("general");
     expect(groupLabels(html)).toEqual(["Account", "Appearance", "Language and typing", "Notifications", "System", "Import", "Organization"]);
-    expect(blocks(html).at(-1)).toBe("more");
-    expect(blocks(html)).not.toContain("advanced-mode");
+    expect(blocks(html).slice(-2)).toEqual(["more", "advanced-mode"]);
     expect(html).toContain(">More settings<");
-    expect(html).not.toContain('aria-label="Advanced mode"');
-    expect(html).not.toContain("Nothing is deleted either way");
+    expect([...html.matchAll(/<button[^>]*role="switch"[^>]*>/g)].at(-1)?.[0]).toContain('aria-label="Advanced mode"');
+    expect(html).toContain("Show every control, including tools for builders. Nothing is deleted either way.");
     expect(html).not.toContain("border-accent-border/40");
     expect(html).toContain(">Your name</div>");
     expect(html).toContain(">Not set yet</div>");
@@ -208,7 +207,7 @@ describe("Settings in Simple mode", () => {
     expect(fixture.switches.find((props) => props["aria-label"] === "Show your computers")?.checked).toBe(false);
   });
 
-  it("keeps the everyday rows, puts limits and Automatic recovery behind More settings, and leaves out the rest of Advanced's controls", () => {
+  it("keeps the everyday rows, puts limits and Automatic recovery behind More settings, and leaves the five other builder controls to Advanced, where search still points", () => {
     const general = open("general");
     for (const shown of ['aria-label="Send usage analytics"', 'aria-label="Color my messages with the bot&#x27;s color"', 'aria-label="Send messages with"',
       'aria-label="Notification sounds"', 'aria-label="Show the notification feed"', 'aria-label="App language"', 'role="radiogroup" aria-label="Light or dark"']) {
@@ -319,7 +318,7 @@ describe("Settings in Simple mode", () => {
     expect(currentPage(general)).toBe("general");
     expect(general).not.toContain(">Your name</div>");
     expect(general).toContain('aria-label="App language"');
-    expect(general).not.toContain('aria-label="Advanced mode"');
+    expect(general).toContain('aria-label="Advanced mode"');
   });
 
   it.each<[AppSettingsSection, string]>([
@@ -374,14 +373,14 @@ describe("Settings in Simple mode", () => {
 describe("Settings in Advanced mode", () => {
   beforeEach(() => { fixture.advancedMode = true; });
 
-  it("keeps the grouped rail and General, with no Advanced mode switch, on the same Settings look as Simple", () => {
+  it("keeps the grouped rail and General, Advanced mode switch first, on the same Settings look as Simple", () => {
     const html = render();
     expect(html).toContain("glass-surface");
     expect(html).toContain('data-settings-look="advanced"');
     expect(html).not.toContain("data-settings-page=");
     expect([...html.matchAll(/data-settings-group="([^"]+)"/g)].map((match) => match[1])).toEqual(["you", "ai", "computers", "account"]);
-    expect(html).not.toContain('aria-label="Advanced mode"');
-    expect(html).not.toContain("Show every technical control on this device");
+    expect(html.indexOf('aria-label="Advanced mode"')).toBeLessThan(html.indexOf("Language"));
+    expect(html).toContain("Show every technical control on this device");
     expect(html).not.toContain("More settings");
     for (const kept of ["Group turns", 'aria-label="Effort for new bots"', 'aria-label="Send usage analytics"', "Diagnostics"]) {
       expect(placement(html, kept), kept).toBe("shown");

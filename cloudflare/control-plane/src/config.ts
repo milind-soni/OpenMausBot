@@ -15,8 +15,11 @@ export interface CapacityConfig {
   /** Zone DNS record quota used for the usage alert. */
   dnsRecordLimit: number;
   /** A tunnel offline for at least this long (and an installation that has
-   * been quiet as long) may be reclaimed. Never below three days. */
+   * been quiet as long) may be reclaimed. Never below one day. */
   offlineReclaimMs: number;
+  /** A second offline period that is only counted, never acted on: how many
+   * tunnels a pass would reclaim at it. Null: no preview. */
+  reclaimPreviewMs: number | null;
   /** `observe` evaluates and logs reclaim candidates without marking any. */
   reclaimMode: TunnelReclaimMode;
   /** Account tunnel quota used for the usage alert. */
@@ -67,7 +70,10 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 export const DEFAULT_TUNNEL_LIMIT = 1_000;
 export const DEFAULT_DNS_RECORD_LIMIT = 1_000;
 export const DEFAULT_OFFLINE_RECLAIM_DAYS = 21;
-export const MIN_OFFLINE_RECLAIM_DAYS = 3;
+// One day is the floor: a computer shut down overnight must never lose its
+// tunnel. Below three days a weekend away does; it gets the same address back
+// when it returns, if its account still has room.
+export const MIN_OFFLINE_RECLAIM_DAYS = 1;
 // Each cleanup makes at most ten Cloudflare API calls: twenty rows plus the two
 // capacity reads stay near 200 calls per five-minute run, under the token's
 // 1,200-per-five-minutes limit and Workers Paid's 10,000 subrequests. Use 4 on
@@ -132,6 +138,16 @@ export function readCapacityConfig(env: Partial<Record<string, unknown>>): Capac
       365,
     ) * DAY_MS,
     reclaimMode: reclaimMode(env.OMB_TUNNEL_RECLAIM),
+    reclaimPreviewMs: env.OMB_TUNNEL_RECLAIM_PREVIEW_DAYS === undefined || env.OMB_TUNNEL_RECLAIM_PREVIEW_DAYS === null
+      || env.OMB_TUNNEL_RECLAIM_PREVIEW_DAYS === ""
+      ? null
+      : boundedIntegerVar(
+        env.OMB_TUNNEL_RECLAIM_PREVIEW_DAYS,
+        "OMB_TUNNEL_RECLAIM_PREVIEW_DAYS",
+        0,
+        MIN_OFFLINE_RECLAIM_DAYS,
+        365,
+      ) * DAY_MS || null,
     tunnelLimit: boundedIntegerVar(
       env.OMB_TUNNEL_LIMIT,
       "OMB_TUNNEL_LIMIT",

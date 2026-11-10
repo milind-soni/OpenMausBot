@@ -9,6 +9,7 @@ import {
   pairWithCode,
   readSessionState,
   reasonWorthShowing,
+  rememberedTeamSignIn,
   startEmailSignIn,
   verifyEmailSignIn,
   type EnvironmentDescriptor,
@@ -57,10 +58,28 @@ export function unencryptedPublic(where: { protocol: string; hostname: string })
   return where.protocol === "http:" && !isPrivateHost(where.hostname);
 }
 
+/** A team's Cloud: the person's team page on MausBot Cloud, as their signed-in session told this browser (never before
+ * sign-in), where they open it again. Only an https page (or a loopback fixture's). */
+export function teamPage(environment: EnvironmentDescriptor | null, remembered: string | null = rememberedTeamSignIn()): string | null {
+  if (!environment?.capabilities.cloudTeam || typeof remembered !== "string") return null;
+  try {
+    const url = new URL(remembered);
+    const loopback = url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+    return (url.protocol === "https:" || loopback) && !url.username && !url.password && !url.hash ? url.href : null;
+  } catch { return null; }
+}
+
 export function pairTitle(environment: EnvironmentDescriptor | null, mode: "email" | "code" | null): string {
   if (environment?.capabilities.cloudTeam) return environment.label;
   if (environment?.capabilities.cloudHome) return t("pair.myCloud");
   return t(mode === "email" ? "pair.signInTo" : "pair.connectTo", { name: environment?.label ?? t("pair.thisOpenMausBot", { app: productName() }) });
+}
+
+/** A team's page whose session ended because its person is no longer in the team: one sentence, nothing that can't work. */
+export function TeamLeftPage({ team }: { team: string | null }) {
+  return <main data-team-left className="flex min-h-screen items-center justify-center bg-app px-6 text-ink">
+    <p role="status" className="max-w-[420px] text-[16px]">{t("homeLine.left", { name: team ?? t("pair.thisOpenMausBot", { app: productName() }) })}</p>
+  </main>;
 }
 
 export function PairPage({ initialCode, initialEmail = null, reason }: { initialCode: string | null; initialEmail?: string | null; reason?: string }) {
@@ -159,6 +178,10 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
         </p>
         {reasonWorthShowing(reason) && !connected ? <p className="mt-3 text-[13px] text-ink-secondary">{reasonWorthShowing(reason)}</p> : null}
         {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">{t("pair.expired", { app: productName(), open: t("cloudHome.connect"), section: t("settings.section.cloudAccount") })}</p> : null}
+        {!connected && teamPage(environment) ? <div data-team-sign-in className="mt-4 flex flex-col items-start gap-1.5">
+          <a href={teamPage(environment)!} className="rounded-md bg-accent px-4 py-2 text-[14px] font-medium text-accent-ink">{t("pair.team.open", { team: environment!.label })}</a>
+          <p className="text-[13px] text-ink-secondary">{t("pair.team.openHint")}</p>
+        </div> : null}
         </>}
         {opening ? null : connected ? (
           <p className="mt-4 text-[14px]">

@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
-// The real mode, with Simple the only one: a paired remote client keeps the controls its "advanced || remoteClient"
-// branches gave it.
+// The real mode with the switch to Simple as the only mode turned on, as it can be again: a paired remote client keeps
+// the controls its "advanced || remoteClient" branches gave it.
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AppState, Bot, InstanceInfo, Message } from "@/state/store";
 
+vi.mock("@/lib/simple-only", () => ({ SIMPLE_ONLY: true }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: "other" }, localComputer: { available: false } }, ready: true }),
