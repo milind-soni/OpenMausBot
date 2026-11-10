@@ -83,6 +83,7 @@ it("Pair again opens the Connect sheet with the address locked and the code fiel
   await click(buttonIn(row("mac").querySelector("[data-server-state]")!, "Pair again"));
   const form = document.querySelector('[data-place-add="own-server"]')!;
   expect(form.textContent).toContain("Pair again with Mac at home");
+  expect(host.contains(form), "the sheet sits on body, outside Settings' blurred pane that would clip it").toBe(false);
   const address = form.querySelector("[data-own-server-link]") as HTMLInputElement;
   expect([address.value, address.readOnly]).toEqual(["https://mac.tail1234.ts.net", true]);
   expect(document.activeElement).toBe(form.querySelector("[data-own-server-code]"));
