@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { createAgentsIntegration } from "./agents-integration.ts";
 
 const host = {
-  skillAuthoring: true, sharedComputers: false, cloudHome: false, team: false, escalations: false,
+  skillAuthoring: true, sharedComputers: false, cloudHome: false, team: false,
   voiceNotes: false, x: false, research: false, imageGeneration: false,
 };
 

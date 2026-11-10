@@ -244,6 +244,12 @@ describe("configuration boundaries", () => {
     expect(parseConfigPatch(stored)).toEqual({ language: "en", features: { browser: true } });
   });
 
+  it("loads a config that still switches on chief escalations, and drops the switch", () => {
+    const stored = { language: "en", features: { browser: true, chiefEscalations: true } };
+    expect(parseStoredConfig(stored)).toEqual({ language: "en", features: { browser: true } });
+    expect(parseConfigPatch(stored)).toEqual({ language: "en", features: { browser: true } });
+  });
+
   it("rejects malformed stored instances and API patches", () => {
     expect(() => parseStoredConfig({ instances: { claude: { driver: 42 } } })).toThrow("instances.claude.driver");
     expect(() => parseStoredConfig({ browserProfiles: [{ id: "../evil", name: "Unsafe" }] })).toThrow(

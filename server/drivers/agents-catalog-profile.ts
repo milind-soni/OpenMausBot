@@ -20,8 +20,6 @@ export interface CatalogProfile {
   operator?: boolean;
   /** Only for Watcher's own tool. Never written into a schema: a list that names its bot can't share a prompt cache with other bots. */
   botId: string;
-  /** features.chiefEscalations: raise_escalation is mounted. */
-  escalations?: boolean;
   /** A Team Cloud: message_person is mounted. */
   team?: boolean;
   /** The person's MausBot with a Chief's powers: its notification tools are mounted. */
@@ -49,7 +47,6 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     chief: env.OMB_CHIEF_OF_STAFF === "1",
     operator: env.OMB_CHIEF_OPERATOR === "1",
     botId: env.OMB_BOT_ID ?? "",
-    escalations: env.OMB_ESCALATIONS === "1",
     team: env.OMB_TEAM_PEOPLE === "1",
     mausbot: env.OMB_MAUSBOT === "1",
     computerSelection: env.OMB_COMPUTER_SELECTION === "1",

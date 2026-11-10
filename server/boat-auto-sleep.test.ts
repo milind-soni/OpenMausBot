@@ -75,6 +75,9 @@ describe("a cloud computer goes to sleep after its idle window", () => {
 
   async function powerFor(cfg: import("./config.ts").AppConfig) {
     vi.resetModules();
+    // A stop is recorded before its log line, so the next test can replace `logs` while this call still has a line to write.
+    const lines: string[] = [];
+    logs = lines;
     const { createCloudComputerPower } = await import("./host/cloud-computer-power.ts");
     power = createCloudComputerPower({
       cfg,
@@ -84,7 +87,7 @@ describe("a cloud computer goes to sleep after its idle window", () => {
       routines: () => [],
       routineComputer: () => null,
       broadcast: () => {},
-      log: line => logs.push(line),
+      log: line => lines.push(line),
     });
     return power;
   }
@@ -173,11 +176,10 @@ describe("a cloud computer goes to sleep after its idle window", () => {
     stopStatus = 503;
     await powerFor({});
     power.used(botId);
-    await waitFor(() => stops().length === 3 && logs.length === 3, hostTimeout(10_000));
-    for (const line of logs) {
-      expect(line).toBe("cloud computer auto-sleep-test: could not go to sleep, retrying in 1 min: boat sleep failed: Cloud computers are not available right now.");
-    }
-    const [first, second, third] = stops().map(stop => stop.at);
+    await waitFor(() => stops().length >= 3 && logs.length >= 3, hostTimeout(10_000));
+    const retry = "cloud computer auto-sleep-test: could not go to sleep, retrying in 1 min: boat sleep failed: Cloud computers are not available right now.";
+    expect(logs.slice(0, 3)).toEqual([retry, retry, retry]);
+    const [first, second, third] = stops().slice(0, 3).map(stop => stop.at);
     // A Node timer may fire up to a millisecond before its delay by Date.now().
     expect(second! - first!).toBeGreaterThanOrEqual(1_000 - 5);
     expect(third! - second!).toBeGreaterThanOrEqual(2_000 - 5);

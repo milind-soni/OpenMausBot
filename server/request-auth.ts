@@ -430,6 +430,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["DELETE"], path: /^\/api\/team\/my-connections\/(?:apps\/[\w-]{1,64}|mcp\/[a-z][a-z0-9_-]{0,31})$/ },
   // the person opened the app: their own brief on a Team Cloud, nothing recorded for anyone else
   { methods: ["POST"], path: /^\/api\/presence\/active$/ },
+  // which shared conversation a team member's window shows: the handler keeps only one they and others may read
+  { methods: ["POST"], path: /^\/api\/presence\/here$/ },
   // what a bot asks of this person: their own questions and approvals only
   { methods: ["GET"], path: /^\/api\/needs-you$/ },
   // a person's own inbox: its lines, how many wait, and one of them read or done; the handler serves the session's own alone

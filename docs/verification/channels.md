@@ -53,5 +53,4 @@ requests, current Chief status, peer allow-lists, hidden bots, creation limits,
 busy rooms, pending approvals, goal leads and in-flight credential saves.
 Public channel creation and edits use the same validation as the Chief tools.
 Chiefs cannot move rooms/bots between sections, remove themselves, or change
-working folders. Chiefs configured to require peer approval must ask the user
-to make room changes; these tools do not add a separate approval workflow.
+working folders. These tools add no separate approval workflow.

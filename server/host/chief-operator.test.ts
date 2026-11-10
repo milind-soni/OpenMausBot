@@ -50,7 +50,7 @@ it("keeps the appointment across conversation creation, task selection and reloa
 
 it.each<Partial<BotRecord>>([
   { createdBy: "another@example.test" }, { reportsTo: "another@example.test" }, { section: "Engineering" },
-  { visibility: "admins" }, { peers: ["another-bot"] }, { hidden: true }, { createdAt: 2 },
+  { visibility: "admins" }, { hidden: true }, { createdAt: 2 },
   { movedTo: { team: { id: "team", name: "Other team" }, state: "moved", at: 2 } },
 ])("revokes an appointment when stable ownership or audience changes: %j", patch => {
   const store = new Store(() => ({ instanceId: "claude", model: "fixture" }));

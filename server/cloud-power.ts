@@ -113,6 +113,8 @@ export function createCloudPower(options: {
   bootedFromSleep?: boolean;
   /** It just woke: the Admin hears at once, not at its next read (`createWokeNotifier`). */
   onWoke?: () => void;
+  /** The first request after a boot from a stopped sleep reached the server, at this time: when that wake ended. */
+  onBootWakeRequest?: (at: number) => void;
 }) {
   const now = options.now ?? Date.now;
   const bootedAt = now();
@@ -121,7 +123,7 @@ export function createCloudPower(options: {
   let sleptUntil: number | null = options.bootedFromSleep ? bootedAt : null;
   if (options.bootedFromSleep) options.onWoke?.();
   /** The first request since `wokeAt` (`arrived`), and whether one came. */
-  let wokeBy: CloudPowerReport["wokeBy"] = null, wokeSeen = false;
+  let wokeBy: CloudPowerReport["wokeBy"] = null, wokeSeen = false, bootWake = Boolean(options.bootedFromSleep);
   let sleepingSince: number | null = null, inFlight = 0;
   let sleepAbort = new AbortController();
   let lastTick = now();
@@ -155,6 +157,7 @@ export function createCloudPower(options: {
     wokeAt = at;
     wokeBy = null;
     wokeSeen = false;
+    bootWake = false;
     sleptUntil = at;
     endSleep();
     options.onWoke?.();
@@ -205,6 +208,7 @@ export function createCloudPower(options: {
       if (wokeSeen || at - wokeAt > WOKE_BY_MS) return;
       wokeSeen = true;
       wokeBy = { by: wakeCode(path), background: !countsAsActivity(path, headers) };
+      if (bootWake) options.onBootWakeRequest?.(at);
     },
     /** An authenticated request: someone using the home (`countsAsActivity`), and work in progress until it ends. */
     request(path: string, headers: IncomingHttpHeaders, res: Pick<ServerResponse, "once">) {
