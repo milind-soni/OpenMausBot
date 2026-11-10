@@ -115,7 +115,7 @@ function endpointModels(fields: EndpointFields): string[] {
 /** The installed binary, not another account's environment: an endpoint has no login of its own. */
 function inheritedCli(instances: InstanceConfigMap): string | undefined {
   for (const entry of Object.values(instances)) {
-    if (entry.driver !== "claudeAgent" || isClaudeEndpoint(entry)) continue;
+    if (entry.driver !== "claudeAgent" || isClaudeEndpoint(entry) || rawConfig(entry).bedrock === true) continue;
     const cli = rawConfig(entry).cli;
     if (typeof cli === "string" && cli) return cli;
   }

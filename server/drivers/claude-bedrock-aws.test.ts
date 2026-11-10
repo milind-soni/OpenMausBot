@@ -13,7 +13,7 @@ describe("bedrockCredentialError", () => {
       "API Error: Could not load AWS credentials · Could not load credentials from any providers. Check or refresh your AWS credentials and try again.",
     ]) {
       expect(bedrockCredentialError(text, "bedrock-prod")).toBe(
-        "AWS sign-in for profile bedrock-prod expired. Run `aws sso login --profile bedrock-prod` and try again."
+        "AWS credentials for profile bedrock-prod are missing or expired. If it uses SSO, run `aws sso login --profile bedrock-prod`; otherwise check ~/.aws, then try again."
       );
     }
   });
@@ -35,7 +35,7 @@ describe("withBedrockCredentialError", () => {
 
   it("replaces a credential failure on a Bedrock instance with the sign-in step", () => {
     expect(withBedrockCredentialError(true, env, expired, { message: expired, text: { key: "x" } })).toEqual({
-      message: "AWS sign-in for profile bedrock-prod expired. Run `aws sso login --profile bedrock-prod` and try again.",
+      message: "AWS credentials for profile bedrock-prod are missing or expired. If it uses SSO, run `aws sso login --profile bedrock-prod`; otherwise check ~/.aws, then try again.",
     });
     expect(bedrockResultError(true, env, expired)).toContain("aws sso login --profile bedrock-prod");
   });

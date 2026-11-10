@@ -1,6 +1,4 @@
-// Claude Code on Amazon Bedrock: the person names an AWS profile and region from this computer's own
-// ~/.aws config, and the instance runs with CLAUDE_CODE_USE_BEDROCK=1. The AWS SDK inside Claude Code
-// resolves that profile's SSO or credential_process itself; OpenMausBot stores no AWS secret.
+// The AWS SDK inside Claude Code resolves a profile's SSO or credential_process itself; OpenMausBot stores no AWS secret.
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
@@ -42,7 +40,6 @@ export const claudeBedrockUpdateSchema = z.object({
 }).strict().refine((value) => Object.keys(value).length > 0, "No settings supplied");
 
 type BedrockFields = z.infer<typeof claudeBedrockUpdateSchema>;
-/** Environment/model generation always runs once the profile and region are resolved. */
 type ResolvedBedrockFields = BedrockFields & { awsProfile: string; awsRegion: string };
 
 const TIERS = [
@@ -112,7 +109,6 @@ function defaultBedrockModels(): string[] {
   return officialModels(false).map((id) => `global.anthropic.${id}`);
 }
 
-/** The installed binary, not another account's environment: Bedrock routes through AWS, never a Claude login. */
 function inheritedCli(instances: InstanceConfigMap): string | undefined {
   for (const entry of Object.values(instances)) {
     if (entry.driver !== "claudeAgent" || isClaudeBedrock(entry)) continue;
@@ -129,7 +125,6 @@ export function newClaudeBedrock(cfg: AppConfig, body: z.infer<typeof claudeBedr
   const entry: InstanceConfig = {
     driver: "claudeAgent",
     displayName: body.displayName,
-    // Its own credential: an AWS profile, never another Claude instance's sign-in state.
     access: "custom",
     config: {
       ...(cli ? { cli } : {}),
@@ -144,7 +139,6 @@ export function newClaudeBedrock(cfg: AppConfig, body: z.infer<typeof claudeBedr
   return { instanceId, instances };
 }
 
-/** Changes the Bedrock engine in place; an omitted field keeps its saved value. */
 export function updateClaudeBedrock(cfg: AppConfig, instanceId: string, body: BedrockFields) {
   const instances = persistableInstanceConfigs(cfg);
   const entry = instances[instanceId];

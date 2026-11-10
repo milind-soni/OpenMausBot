@@ -15,7 +15,7 @@ const BEDROCK_CREDENTIAL_ERROR =
 /** A plain next step for an AWS profile that can no longer authenticate; null when the text is some other failure. */
 export function bedrockCredentialError(text: string, awsProfile: string): string | null {
   if (!BEDROCK_CREDENTIAL_ERROR.test(text)) return null;
-  return `AWS sign-in for profile ${awsProfile} expired. Run \`aws sso login --profile ${awsProfile}\` and try again.`;
+  return `AWS credentials for profile ${awsProfile} are missing or expired. If it uses SSO, run \`aws sso login --profile ${awsProfile}\`; otherwise check ~/.aws, then try again.`;
 }
 
 /** The turn error to show: the AWS sign-in step when a Bedrock instance's profile failed, else `error` unchanged. */
