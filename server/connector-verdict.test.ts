@@ -181,6 +181,15 @@ describe("refusal text", () => {
     expect(text).not.toContain("GMAIL");
   });
 
+  it("points a refused sandbox call at the bot's sandbox switch", () => {
+    const text = connectorRefusalText(evaluateConnectorTools(["COMPOSIO_REMOTE_WORKBENCH"], { gmail: { tools: "*" } }).denials);
+    expect(text).toContain("Run code in the apps' sandbox");
+    expect(connectorRefusalText([
+      { tool: "COMPOSIO_REMOTE_WORKBENCH", service: "composio", onGrantedService: false },
+      { tool: "NOTION_CREATE_PAGE", service: "notion", onGrantedService: false },
+    ])).not.toContain("sandbox");
+  });
+
   it("names every refused tool in a batch", () => {
     const text = connectorRefusalText([
       { tool: "SLACK_CREATE_CHANNEL", service: "slack", onGrantedService: true },
