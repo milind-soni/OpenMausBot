@@ -40,8 +40,10 @@ Electron main process
 
 Windows supports **This computer** through the app-owned embedded
 CUA host. It uses a private named pipe and does not adopt a separately running
-Cua driver. The Windows packager verifies a pinned upstream executable's SHA-256
-and version, then stages it with the matching SDK. See
+Cua driver. The Windows packager checks the SHA-256 of newly downloaded upstream
+ZIPs and checks executable versions against the SDK before staging. Cached,
+native-package and `CUA_DRIVER_PATH` executables receive the version check,
+without that ZIP checksum check. See
 [`scripts/prepare-cua-win.mjs`](../scripts/prepare-cua-win.mjs) and the Windows
 `extraResources` in [`electron-builder.yml`](../electron-builder.yml). The
 Windows CUA host smoke job in [CI](../.github/workflows/ci.yml) exercises the
