@@ -15,6 +15,7 @@ import { FixButton, StatusMark } from "./parts";
 const RECENT = 5;
 const BUTTON = "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium disabled:opacity-50";
 
+/** One automation, simply: its sentence, its status, the last five runs plus any failure not yet seen, and what can be done to it. */
 export function AutomationPanel({ automation, sentence, onClose, onEdit, onDeleted }: {
   automation: Automation;
   sentence: string;
