@@ -171,6 +171,31 @@ this server shares with every bot. It exists only on a Team Cloud.
   engines: [{ id, name, authenticated, account: { email, organization, method } | null }] } }` (`cloud-team-admin.ts`).
   Names, states and the identities the providers report: never a key, a token, a header or environment value (`secrets`
   are their names), nor any part of an MCP address but its host.
+- **How each connection is doing** (`server/host/connection-health-host.ts`, kept in `connection-health.json`). Each
+  `mcp` entry and each `apps.services` entry may also carry, every field absent when unknown (times ISO 8601):
+  `health` (`working` | `needs-sign-in` | `refused` | `unreachable`), `checkedAt` (when that was established),
+  `lastError` (a fixed class while it isn't working: `sign-in`, `expired`, `refresh-rejected`, `account-inactive`,
+  `refused`, `account-failed`, `cant-connect`, `timeout`, `not-found`, `bad-answer`; never what a server said),
+  `lastUsedAt` (the last real tool call on it), `addedBy` (`{ email, name }`, `name` null when they set none) with
+  `addedAt` (recorded from when this was built, so older connections have none), and `bots` (the names of the team bots
+  that use it; each member's own MausBot is left out). An `mcp` entry adds `expiresAt` for a sign-in that expires and
+  that nothing can refresh, and each app account adds `health`, its status word as one of the four (`ACTIVE` working,
+  `FAILED` refused, `EXPIRED`, `INACTIVE` and an unfinished connection needs-sign-in).
+  - **Real use decides it.** A tool call that works marks it working. One a server refuses with HTTP 401 on a sign-in
+    gets the sign-in refreshed at once: refused for good, or nothing can refresh it, and the sign-in ends (the app shows
+    it signed out, here and on a personal install or My Cloud, which take the same path); a key refused, or a 403, is
+    `refused`. A refresh refused as a turn starts is `needs-sign-in`. Not reaching a server (refused connection, timeout,
+    not found) is `unreachable` only once it happens twice in a row. An app call is read from its own error words only.
+    An app whose accounts all say they are not active shows that, whatever the last call did.
+  - **The background check.** A team server nothing used or checked for a day is tested once, as Test does it, at most
+    one about every hour (jittered, the first a quarter hour after start). It never runs while the machine has agreed
+    to sleep, starts no request to it, and a check the machine slept through is dropped. Apps aren't checked in the
+    background: the read itself asks the connected-apps service for each account's status.
+  - **Each person's own.** A connection each person connects has no `health` or `lastUsedAt` of its own; instead
+    `people.states` is `{ apps: { <slug>: { <address>: state } }, mcp: { <name>: { <address>: state } } }`, with
+    `state` `connected` | `needs-sign-in` | `not-connected`, for every member the Admin paired here and only for those
+    connections: whether they connected what an admin asked everyone to connect, never when or how they used it, nor
+    any other connection of theirs. A member who left is not listed.
 - Changes are never signed calls of their own. The Admin pairs as the admin making the change (the usual signed pairing
   with their `member` claim: an `owner` or `admin` gets the admin scope) and uses that session with the routes the app
   uses: `PATCH /api/config` for a key, `/api/mcp/servers` to add, test, sign in to and remove a server,
