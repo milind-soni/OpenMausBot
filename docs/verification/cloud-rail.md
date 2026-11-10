@@ -47,6 +47,12 @@ Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
   computer's or a Cloud's; a page learns only that the rail stands beside it. A
   circle opens only a place main listed, by its id, through main's own switch,
   and only from the person's click.
+- A click on a circle is taken at once: the place clicked is marked from that
+  click, pending, with its name on a shell over the page while main opens it
+  (Waking My Cloud… while it wakes), and any other click replaces it on the
+  spot, even one back to the place on screen. Main ends what the earlier click
+  had under way; a server restart that can't stop leaves the window on the place
+  the person chose last, and the rail stays up through it.
 - Buying another Cloud sends the plan, a name and a swatch to the Admin, which
   answers with a checkout this app opens in the browser; the sheet then follows
   the payment and the setup. An Admin that sells one Cloud per account (no

@@ -15,7 +15,9 @@ export interface McpRunsOn {
   label: string;
 }
 
-/** One config.json `mcpServers` entry: the block Claude Code, Cursor and Claude Desktop write. */
+/** One config.json `mcpServers` entry: the block Claude Code, Cursor and Claude Desktop write. An env or header value (or
+ * an OAuth client secret) may be a `vault:<id>` pointer that a bot's secretRef left there: the secret stays in the Vault
+ * and the pointer is resolved when the server starts or is called. */
 export interface StoredStdioMcpServer extends StdioMcpSpec {
   enabled: boolean;
   /** Characters of one tool result allowed into context; 0 = never trim, absent = OMB_MCP_RESULT_BUDGET, else 8,000. */

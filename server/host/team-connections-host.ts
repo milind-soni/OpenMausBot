@@ -16,11 +16,11 @@ import type { AppConfig } from "../config.ts";
 import type { McpServerSpec } from "../contracts.ts";
 import { serviceSlugFor } from "../connector-verdict.ts";
 import { type McpOAuthManager, type McpRefreshOutcome, type McpSignInPhase, withMcpSignIn, withoutPendingSignIn } from "../mcp-oauth.ts";
-import { isRemoteMcpServer, parseStoredMcpServer } from "../mcp-registry.ts";
+import { isRemoteMcpServer, parseStoredMcpServer, type McpOAuthClientConfig } from "../mcp-registry.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { managedComposioBrokerOff } from "../composio-broker-access.ts";
 import { projectApiKey } from "../composio-session.ts";
-import { appLabel, ConnectionScopes, isProjectAccess, PeopleConnections, personAppOf, SCOPES_FILE, type BrokerAccess, type PersonAppsAccess } from "../team-connections.ts";
+import { appLabel, asPerson, ConnectionScopes, isProjectAccess, PeopleConnections, personAppOf, SCOPES_FILE, type PersonAppsAccess } from "../team-connections.ts";
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolsFor } from "../connector-app-tools.ts";
 import type { ConnectorScopes } from "../../shared/connector-scopes.ts";
 
@@ -47,6 +47,8 @@ export interface TeamConnectionsHostDeps {
   mcpOAuth: McpOAuthManager;
   /** The bot's enabled MCP servers, as policy allows them, before any sign-in is attached. */
   botMcp(bot: McpBot): Record<string, McpServerSpec>;
+  /** An admin's OAuth app as a member's sign-in uses it: its client secret read from the Vault when it is kept there. */
+  oauthClient?(name: string, oauth: McpOAuthClientConfig): McpOAuthClientConfig;
   /** Whether whoever started a member's sign-in (a session, or a chat's Sign in card) is still there to finish it. */
   isOwnerLive(owner: string): boolean;
   onSettled?(name: string, phase: McpSignInPhase, owner: string): void;
@@ -80,17 +82,14 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     dataDir: deps.dataDir,
     brokerUrl: deps.brokerUrl,
     ...(team ? { teamId: team.id, projectKey: () => projectApiKey(deps.cfg()) } : {}),
-    clients: (name, url) => { const server = teamServer(name); return server && isRemoteMcpServer(server) && server.url === url ? server.oauth : undefined; },
+    clients: (name, url) => { const server = teamServer(name); return server && isRemoteMcpServer(server) && server.url === url ? (server.oauth && deps.oauthClient ? deps.oauthClient(name, server.oauth) : server.oauth) : undefined; },
     isOwnerLive: deps.isOwnerLive,
     ...(deps.onSettled ? { onSettled: deps.onSettled } : {}),
     ...(deps.onRefresh ? { onRefresh: deps.onRefresh } : {}),
     ...(deps.onPersonChanged ? { onChanged: deps.onPersonChanged } : {}),
   });
   const personApps = () => (team ? scopes.person("app") : []);
-  /** How a call is made as a member: with the team's own key, the team's config with their Composio user in place of the
-   * team's; else the team's config and their installation. */
-  const via = (access?: PersonAppsAccess | null): [AppConfig, BrokerAccess | undefined] =>
-    isProjectAccess(access) ? [{ ...deps.cfg(), composio: access.composio }, undefined] : [deps.cfg(), access ?? undefined];
+  const via = (access?: PersonAppsAccess | null) => asPerson(deps.cfg(), access);
   /** With the connected-apps service switched off and no key of the team's, nobody can connect an app of their own. */
   const ownAppsNeedKey = () => Boolean(team) && managedComposioBrokerOff() && !projectApiKey(deps.cfg());
   /** The apps connected for an installation, the team's or a member's own. A turn never waits on a refresh: what is known

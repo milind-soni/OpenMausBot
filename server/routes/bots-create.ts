@@ -48,6 +48,8 @@ export interface BotCreateRouteDeps {
   team?: { name: string; people: Pick<TeamPeople, "has"> } | null;
   /** Starts writing personal answers for a new bot's setup card; never awaited. */
   personaliseSetupCard?(bot: BotRecord): void;
+  /** The Chief of Staff of a scope changed: these bots' flags did. */
+  chiefChanged?(changed: readonly BotRecord[]): void;
 }
 
 const OWN_ID = /^[\w-]{8,128}$/;
@@ -250,7 +252,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (settings.chiefOfStaff) {
         try {
           store.patchBot(bot.id, { managedSections: settings.managedSections ?? [] });
-          store.setChiefOfStaff(bot.id);
+          deps.chiefChanged?.(store.setChiefOfStaff(bot.id) ?? []);
         } catch {
           warnings.push("Bot created; review its Chief of Staff setting before delegating work.");
         }

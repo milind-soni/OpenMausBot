@@ -67,6 +67,17 @@ describe("the private login handoff to the desktop's main process", () => {
     expect(JSON.stringify(posted.slice(0, 2))).not.toContain(TOKEN);
   });
 
+  it("hands one saved secret with its bots under its own id, only over this port, and never a linked item", () => {
+    const { store, posted, ask } = setup();
+    const secret = store.saveSecret({ name: "Stripe secret key", value: "sk_fake-handoff-value", source: "card", bots: ["pepper"], refOnly: true });
+    ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0301", what: { kind: "secret", id: secret.id } });
+    ask({ type: LOGIN_HANDOFF_REQUEST, requestId: "request-0302", what: { kind: "secret", id: "linked-".concat("0".repeat(32)) } });
+    expect(posted).toEqual([
+      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0301", ok: true, secret: { id: secret.id, name: "Stripe secret key", value: "sk_fake-handoff-value", bots: ["pepper"], source: "card", refOnly: true } },
+      { type: LOGIN_HANDOFF_RESULT, requestId: "request-0302", ok: false, error: "This secret is no longer saved on this computer." },
+    ]);
+  });
+
   it("answers nothing to a malformed ask, and leaves every other private message to its own handler", () => {
     const { store, posted, ask } = setup();
     store.setOnePasswordToken(TOKEN);

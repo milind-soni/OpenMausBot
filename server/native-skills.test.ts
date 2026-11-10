@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -14,10 +15,14 @@ import { TASK_WORKSPACES_DIR } from "./workspace.ts";
 // HOME and the data folder are this test file's own temporary ones (server/testing/setup.ts).
 const HOME = join(DATA_DIR, "..");
 const USER_SKILLS = join(HOME, ".claude", "skills");
+const CODEX_SKILLS = join(HOME, ".codex", "skills");
 const SHARED = join(TASK_WORKSPACES_DIR, ".claude", "skills");
 const PROJECTS = join(HOME, "projects");
 afterEach(() => {
-  for (const dir of [TASK_WORKSPACES_DIR, USER_SKILLS, PROJECTS]) rmSync(dir, { recursive: true, force: true });
+  if (!DATA_DIR.startsWith(join(tmpdir(), "omb-test-home-"))) throw new Error(`refusing to clean ${DATA_DIR}: not this test's home`);
+  for (const dir of [TASK_WORKSPACES_DIR, USER_SKILLS, CODEX_SKILLS, PROJECTS, join(DATA_DIR, "skill-state")]) {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 const skillMd = (name: string) => `---\nname: ${name}\ndescription: Works with ${name}.\n---\n\nFollow the steps.\n`;
@@ -154,3 +159,16 @@ describe("skills the engine loads by itself", () => {
     expect(other.host.expandSkillCommand(other.bot, "main", "/shared-one", undefined, [], true)).toBe("/shared-one");
   });
 });
+
+describe("switching a native skill off for one bot", () => {
+  it("shows enabled false on the Skills page and keeps /name from expanding it", async () => {
+    const { setNativeSkillEnabled } = await import("./native-skill-choices.ts");
+    const { host, bot } = hostFor("codex");
+    plant(join(HOME, ".codex", "skills"), "pdf");
+    expect(host.listBotSkills(bot).find((skill) => skill.name === "pdf")).toMatchObject({ origin: "native", enabled: true });
+    setNativeSkillEnabled(bot.id, "pdf", false);
+    expect(host.listBotSkills(bot).find((skill) => skill.name === "pdf")).toMatchObject({ origin: "native", enabled: false });
+    expect(host.expandSkillCommand(bot, "main", "/pdf summarise", undefined, [], true)).toBe("/pdf summarise");
+  });
+});
+

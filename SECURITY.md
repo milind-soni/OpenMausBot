@@ -28,7 +28,9 @@ You'll get a response as soon as possible, normally within a few days.
 - API keys live in `~/.openmausbot/config.json` and are write-only through the API (`configured`
   booleans out, never values). The packaged desktop app keeps AI provider and service keys in an
   OS-encrypted store (`credentials.bin`) instead; OpenCode provider keys, per-engine `environment`
-  or `key` values, MCP header values and `mcp-oauth.json` stay plaintext on every install. Any path
+  or `key` values, MCP env and header values and `mcp-oauth.json` stay plaintext on every install,
+  except a key a bot set from a secret card, which `config.json` holds only as a `vault:<id>` pointer
+  into the sealed Vault. Any path
   that echoes a stored secret back — API response, SSE event,
   log line, argv visible in `ps` — is a vulnerability.
 - Agents run real CLIs (`claude`, `codex`) with the user's own privileges, and the permission broker

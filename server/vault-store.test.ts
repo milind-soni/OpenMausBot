@@ -217,6 +217,53 @@ describe("the Vault's saved secrets", () => {
   });
 });
 
+describe("what saved secrets go with", () => {
+  it("a deleted bot leaves every secret kept to it, and a secret kept only to it goes with it", () => {
+    const changed: string[] = [];
+    const store = new VaultStore({ dataDir: dir, secretChanged: (id) => changed.push(id) });
+    const shared = store.saveSecret({ name: "Shared", value: "fake-shared-value", source: "card", bots: ["ada", "kit"] });
+    const only = store.saveSecret({ name: "Only Ada", value: "fake-only-value", source: "card", bots: ["ada"] });
+    const everyone = store.saveSecret({ name: "Everyone", value: "fake-all-value", source: "settings", bots: "all" });
+    store.forgetBot("ada");
+    expect(store.secret(shared.id)?.bots).toEqual(["kit"]);
+    expect(store.secret(only.id)).toBeNull();
+    expect(store.secret(everyone.id)?.bots).toBe("all");
+    expect(changed.sort()).toEqual([shared.id, only.id].sort());
+  });
+
+  it("a secret from the person's other computer keeps its id and bots, and sent again replaces what it first made", () => {
+    const store = new VaultStore({ dataDir: dir });
+    const id = "22222222-2222-4222-8222-222222222222";
+    expect(store.receiveSecret({ id, name: "Stripe", value: "fake-first", source: "card", bots: ["ada"], refOnly: true })).toMatchObject({ id, refOnly: true, source: "card", bots: ["ada"] });
+    expect(store.secret(id)?.value).toBe("fake-first");
+    store.receiveSecret({ id, name: "Stripe key", value: "fake-second", source: "settings", bots: "all" });
+    expect(store.listSecrets()).toHaveLength(1);
+    expect(store.secret(id)).toMatchObject({ name: "Stripe key", value: "fake-second", bots: "all" });
+    expect(store.secret(id)?.refOnly).toBeUndefined();
+  });
+
+  it("which MCP servers may read each item is sealed in the same file and forgotten with its server", () => {
+    const item = "33333333-3333-4333-8333-333333333333";
+    const store = new VaultStore({ dataDir: dir });
+    store.grantMcpKeys("stripe", [item]);
+    store.grantMcpKeys("stripe", [item, "44444444-4444-4444-8444-444444444444"]);
+    const reopened = new VaultStore({ dataDir: dir });
+    expect(reopened.mcpServerKeys("stripe")).toEqual([item, "44444444-4444-4444-8444-444444444444"]);
+    expect(reopened.serversUsingKey(item)).toEqual(["stripe"]);
+    expect(readFileSync(join(dir, LOGINS_FILE)).includes("stripe")).toBe(false);
+    reopened.forgetMcpServer("stripe");
+    expect(new VaultStore({ dataDir: dir }).mcpServerKeys("stripe")).toEqual([]);
+  });
+
+  it("a file holding MCP keys still opens on the previous release, which skips what it does not know", () => {
+    const store = new VaultStore({ dataDir: dir });
+    store.create({ ...at("example.com"), username: "alice", password: PASSWORD, source: "settings", bots: "all" });
+    store.grantMcpKeys("stripe", ["33333333-3333-4333-8333-333333333333"]);
+    const plain = JSON.parse(decryptBrowserState(readFileSync(join(dir, LOGINS_FILE)), readFileSync(join(dir, LOGINS_KEY_FILE), "utf8").trim()));
+    expect(previousRelease.safeParse(plain).success).toBe(true);
+  });
+});
+
 describe("the held-secret scrubber", () => {
   it("masks a saved password in every form a page or a log can show it", () => {
     const store = new VaultStore({ dataDir: dir });

@@ -15,6 +15,7 @@ import { z } from "zod";
 
 import { ensureManagedComposioCredentials, managedComposioAccess } from "../electron/managed-composio.mjs";
 import { writeFileAtomic } from "./atomic.ts";
+import type { AppConfig } from "./config.ts";
 import { removeUserConnections } from "./composio-project.ts";
 import { keepSessionWith } from "./composio-session.ts";
 import { McpOAuthManager, type McpRefreshOutcome, type McpSignInPhase } from "./mcp-oauth.ts";
@@ -107,6 +108,11 @@ export interface ProjectAccess { composio: { apiKey: string; userId: string; ses
 /** A member's own apps: their installation on the connected-apps service, or with the team's own key their Composio user. */
 export type PersonAppsAccess = BrokerAccess | ProjectAccess;
 export const isProjectAccess = (access: PersonAppsAccess | null | undefined): access is ProjectAccess => Boolean(access && "composio" in access);
+
+/** How a connected-apps call is made as a member: with the team's own key, the team's config with their Composio user
+ * in place of the team's; else the team's config and their installation. */
+export const asPerson = (cfg: AppConfig, access?: PersonAppsAccess | null): [AppConfig, BrokerAccess | undefined] =>
+  isProjectAccess(access) ? [{ ...cfg, composio: access.composio }, undefined] : [cfg, access ?? undefined];
 
 const keyMarkOf = (apiKey: string) => createHash("sha256").update("omb-project-apps\0").update(apiKey).digest("hex").slice(0, 16);
 

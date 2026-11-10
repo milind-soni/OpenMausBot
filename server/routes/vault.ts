@@ -1,14 +1,17 @@
 // No answer ever carries a saved value: a saved secret is only ever replaced.
 import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, type LinkedSecret } from "../../shared/vault.ts";
+import type { McpKeys } from "../vault/mcp-keys.ts";
 import type { VaultStore } from "../vault-store.ts";
 import { isJson, parseBots, type LoginRouteDeps } from "./logins.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface VaultRouteDeps {
   logins: Pick<LoginRouteDeps, "list" | "botExists" | "onePassword">;
-  secrets: Pick<VaultStore, "listSecrets" | "saveSecret" | "updateSecret" | "removeSecret">;
+  secrets: Pick<VaultStore, "listSecrets" | "saveSecret" | "receiveSecret" | "updateSecret" | "removeSecret">;
   /** A linked password manager's secrets, listed beside the saved ones and changed only in the manager. */
   linked?: () => LinkedSecret[];
+  /** Which MCP servers lose their key when a secret is deleted. */
+  keys?: Pick<McpKeys, "usedBy">;
 }
 
 const SECRETS = "/api/vault/secrets";
@@ -55,11 +58,19 @@ export function createVaultRoutes(deps: VaultRouteDeps): RouteHandler {
       if (!value.ok || value.value === undefined) return json(res, 400, { error: VAULT_ERRORS.value });
       const bots = parseBots(body.bots ?? "all", deps.logins.botExists);
       if (!bots.ok) return json(res, 400, { error: bots.error });
-      return json(res, 201, { secret: deps.secrets.saveSecret({ name: name.value, value: value.value, source: "settings", bots: bots.value ?? "all" }) });
+      const fields = { name: name.value, value: value.value, bots: bots.value ?? "all" };
+      if (body.id === undefined) return json(res, 201, { secret: deps.secrets.saveSecret({ ...fields, source: "settings" }) });
+      // A secret arriving from this person's computer keeps that computer's id, so an MCP server's `vault:<id>` still names it.
+      if (typeof body.id !== "string" || !ID.test(body.id)) return json(res, 400, { error: "send the secret's id" });
+      return json(res, 201, { secret: deps.secrets.receiveSecret({ ...fields, id: body.id, source: body.source === "card" ? "card" : "settings", ...(body.refOnly === true ? { refOnly: true } : {}) }) });
     }
     const id = path.slice(`${SECRETS}/`.length);
     if (!ID.test(id)) return json(res, 404, { error: "no such secret" });
-    if (method === "DELETE") return deps.secrets.removeSecret(id) ? json(res, 200, { ok: true }) : json(res, 404, { error: "no such secret" });
+    if (method === "DELETE") {
+      if (!deps.secrets.removeSecret(id)) return json(res, 404, { error: "no such secret" });
+      const keysOff = deps.keys?.usedBy(id) ?? [];
+      return json(res, 200, { ok: true, ...(keysOff.length ? { keysOff } : {}) });
+    }
     if (method !== "PATCH") return json(res, 405, { error: "method not allowed" });
     const body = await readBody(req, SECRET_VALUE_MAX_BYTES * 4);
     if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "send the change as a JSON object" });
