@@ -23,12 +23,12 @@ function world(options: { answer?: Answer; here?: Set<string>; members?: string[
   let clock = Date.UTC(2026, 10, 10, 9, 0, 0);
   const here = options.here ?? new Set<string>();
   const members = new Map((options.members ?? [MAYA, BEN]).map((email) => [personKey({ id: "", email }), { email }]));
-  const timers: { run: () => void; at: number }[] = [];
+  const timers: { run: () => void; at: number; unref(): void }[] = [];
   const requests: { body: AwayRequest; headers: Record<string, string>; url: string; raw: string }[] = [];
   const away = createTeamAway({
     here: (person) => here.has(person), member: (person) => members.get(person), language: (person) => (person === maya ? "de" : undefined),
     dataDir, adminOrigin: "https://cloud.example.test", machineId: MACHINE, secret: SECRET, now: () => clock,
-    setTimer: (run, ms) => { const timer = { run, at: clock + ms }; timers.push(timer); return timer; },
+    setTimer: (run, ms) => { const timer = { run, at: clock + ms, unref() {} }; timers.push(timer); return timer; },
     clearTimer: (timer) => { const index = timers.indexOf(timer as never); if (index >= 0) timers.splice(index, 1); },
     fetchImpl: (async (url: string, init: RequestInit) => {
       const raw = String(init.body), body = JSON.parse(raw) as AwayRequest;

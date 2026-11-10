@@ -80,7 +80,7 @@ describe("what of a Team Cloud is worth an away email", () => {
   const note = (over: Partial<Notification>): Notification => ({ kind: "question", botId: "scout", botName: "Scout", threadId: "mayas", title: "Scout asks", body: "Which plan, the blue one?", ...over });
 
   it("a question in the person's own private chat: a bot waits, nothing more, while its card is open", () => {
-    const card = { id: "c", role: "bot", kind: "options", card: { requestId: "r9", question: "Which plan?" } } as Partial<Message>;
+    const card = { id: "c", role: "bot", kind: "options", card: { requestId: "r9", title: "Which plan?", options: [] } } as unknown as Partial<Message>;
     const { events, notified } = world({ mayas: [card] });
     notified(note({}), note({}));
     expect(events.map(plain)).toEqual([{ person: MAYA, about: "ask:mayas:r9", thread: "mayas", still: undefined, item: { kind: "waiting", private: true } }]);
