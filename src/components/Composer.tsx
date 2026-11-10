@@ -87,6 +87,7 @@ import { serializeThreadRefs, threadTokenFromPaste, threadTokenSpacing } from "@
 import {
   composerSlashTrigger,
   goalTextFromComposer,
+  builtInCommandText,
   replaceComposerSlashTrigger,
   skillSlashCommands,
   slashCommandMatches,
@@ -318,7 +319,7 @@ export function Composer({
       id: "setup",
       label: "/setup",
       description: t("composer.command.setupDesc"),
-    });
+    }, { kind: "command", id: "burst", label: "/burst", description: t("composer.command.burstDesc") });
     available.push(...skillSlashCommands(slashSkills));
     return available.filter((command) => slashCommandMatches(command, slash.query));
   }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills]);
@@ -384,7 +385,7 @@ export function Composer({
     if (!slash || !command) return;
     const spaceAfter = /^\s/.test(text.slice(slash.end)) ? "" : " ";
     const replacement = command.kind === "skill" ? `${command.label}${spaceAfter}`
-      : command.id === "learn" ? "/learn " : command.id === "setup" ? "/setup " : "";
+      : builtInCommandText(command.id);
     const next = replaceComposerSlashTrigger(text, slash, replacement);
     editText(next.text);
     setCaret(next.caret);

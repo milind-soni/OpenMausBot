@@ -1,6 +1,6 @@
 import { blankCode, offersSkillCommand } from "../../shared/skill-command";
 
-export type ComposerSlashCommandId = "goal" | "learn" | "setup";
+export type ComposerSlashCommandId = "goal" | "learn" | "setup" | "burst";
 
 export type ComposerSlashCommand =
   | { kind: "command"; id: ComposerSlashCommandId; label: `/${ComposerSlashCommandId}`; description: string }
@@ -42,6 +42,11 @@ export function composerSlashTrigger(text: string, caretInput: number): Composer
 export function goalTextFromComposer(text: string): string | null {
   const match = /^\/goal(?:\s+([\s\S]*))?$/i.exec(text);
   return match ? (match[1] ?? "").trimStart() : null;
+}
+
+/** The text a picked built-in leaves in the composer; /goal only flips the composer's mode. */
+export function builtInCommandText(id: ComposerSlashCommandId): string {
+  return id === "goal" ? "" : `/${id} `;
 }
 
 export function replaceComposerSlashTrigger(
