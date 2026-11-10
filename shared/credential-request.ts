@@ -1,3 +1,4 @@
+import { MODELGO_URL } from "./modelgo.ts";
 /**
  * Credentials an agent may ask the person to provide through an inline
  * card. The id is the entire authority surface: agents never choose a
@@ -100,6 +101,12 @@ export const CREDENTIAL_TARGETS = {
     placeholder: "Paste your Greenference API key",
     helpUrl: "https://greenference.com/dashboard/tokens",
   },
+  modelgoApiKey: {
+    label: "ModelGo API key",
+    description: "Runs ModelGo models with your own key.",
+    placeholder: "Paste your ModelGo API key",
+    helpUrl: MODELGO_URL,
+  },
   metaApiKey: {
     label: "Meta API key",
     description: "Runs Meta's models with your own key.",
@@ -120,7 +127,7 @@ export type LoginCredentialTargetId = "onePasswordToken";
 export type ConfigCredentialTargetId = Exclude<CredentialTargetId, LoginCredentialTargetId>;
 /** AI provider keys: refused where Admin manages the models, and typed only in the computer's own app or a desktop paired to it, never on a phone. */
 export const PROVIDER_CREDENTIAL_TARGETS = [
-  "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "greenferenceApiKey", "metaApiKey", "deepseekApiKey",
+  "openaiApiKey", "anthropicApiKey", "openrouterApiKey", "mistralApiKey", "cerebrasApiKey", "groqApiKey", "greenferenceApiKey", "modelgoApiKey", "metaApiKey", "deepseekApiKey",
 ] as const satisfies readonly ConfigCredentialTargetId[];
 export type DesktopCredentialSlot = ConfigCredentialTargetId;
 export type CredentialConfig = {
@@ -137,6 +144,7 @@ export type CredentialConfig = {
   cerebras?: { key?: string };
   groq?: { key?: string };
   greenference?: { key?: string };
+  modelgo?: { key?: string };
   meta?: { key?: string };
   deepseek?: { key?: string };
   /** Not in the settings file: the server fills it from its login store. */
@@ -207,6 +215,8 @@ export function credentialConfigPatch(id: ConfigCredentialTargetId, value: strin
       return { groq: { key: value } };
     case "greenferenceApiKey":
       return { greenference: { key: value } };
+    case "modelgoApiKey":
+      return { modelgo: { key: value } };
     case "metaApiKey":
       return { meta: { key: value } };
     case "deepseekApiKey":
@@ -248,6 +258,8 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.groq?.key);
     case "greenferenceApiKey":
       return Boolean(config.greenference?.key);
+    case "modelgoApiKey":
+      return Boolean(config.modelgo?.key);
     case "metaApiKey":
       return Boolean(config.meta?.key);
     case "deepseekApiKey":

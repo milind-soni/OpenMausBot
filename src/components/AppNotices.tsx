@@ -6,12 +6,13 @@ import { api, useStore } from "@/state/store";
 import { APP_REPOSITORY } from "@/lib/app-links";
 import { track } from "@/lib/analytics";
 import { boatOfferRuns } from "@/lib/boat-offer";
+import { modelgoOfferable, reportModelgoOffer } from "@/lib/modelgo-offer";
 import { brandStatus } from "@/lib/brand";
 import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays } from "@/lib/cloud-plan";
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits, firstChatQuiet, firstReplyPending } from "@/lib/corner-popup";
-import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { useTwoPlaces } from "@/lib/two-places";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { useAdvancedBackDue, useNewLookDue } from "@/lib/new-look";
@@ -24,6 +25,7 @@ import { useUpdaterState } from "@/lib/updater";
 import { t } from "@/lib/i18n";
 import { BoatOfferCard, reportBoatOffer, type BoatOfferAction } from "./BoatOffer";
 import { engineReady } from "./EngineLibrary";
+import { ModelgoOfferCard, type ModelgoCardAction } from "./ModelgoOffer";
 import { CLOUD_NOTICE_CARD, cloudNoticeStep, CloudNoticeCard } from "./CloudNotice";
 import { CloudTrialIntroCard } from "./CloudTrialIntro";
 import { useMoveQuiet } from "./CloudSendStrip";
@@ -86,6 +88,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const [busy, setBusy] = useState(false);
   const [simpleShown, setSimpleShown] = useState(false);
   const [boatShown, setBoatShown] = useState(false);
+  const [modelgoShown, setModelgoShown] = useState(false);
   const [grokShown, setGrokShown] = useState(false);
   const [grokOpen, setGrokOpen] = useState(false);
   const [grokLanded, setGrokLanded] = useState(false);
@@ -154,6 +157,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const simpleDue = SIMPLE_ONLY ? newLookDue : advancedBack || !promptSeen;
   const simpleBlocked = useOtherDialogOpen(simpleDue) || Boolean(state.liveCall && state.liveCall.status !== "ended");
   const boatHere = boatOfferRuns(now()) && brandStatus().source !== "file";
+  const modelgoHere = modelgoOfferable(state.config?.managedPolicy);
 
   const trial = plan?.trial;
   const key = trial ? trialKey(trial) : null;
@@ -195,11 +199,15 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   }, [grokDue, grokLanding, waits]);
   const grokNow = !grokDue ? false
     : !viewer || (desktop && !desktopState) || organization === null || firstChat === null || mausBotFirst || moving === null || grokLanding || grokBlocked ? null : true;
+  // Everyone, whether or not a bot has answered yet (so not `afterWelcome`, which holds until one has), but never in the launch
+  // the welcome or MausBot's card took, or during a live call.
+  const modelgoNow = !modelgoHere || moving || welcomeFinishedThisLaunch() || launchDialogShown() === "mausbot" || desktopState?.seen.includes(MODELGO_OFFER_NOTICE) ? false
+    : organization === null || moving === null || firstChat === null || mausBotFirst || (state.liveCall && state.liveCall.status !== "ended") || (desktop && !desktopState) ? null : true;
   const launch = launchNotice();
   // After a closed popup only the product-updates question may follow in this launch; nothing else does.
   const notice = waits ? null : closed ? (consentNow === true ? UPDATES_CONSENT_NOTICE : null)
     : firstChatQuiet(state) ? (grokNow === true && (launch === null || launch === GROK_MOVE_NOTICE) ? GROK_MOVE_NOTICE : null)
-    : cards || whatsNewHere || consentHere || simpleDue || boatHere || twoFact !== false || grokNow !== false ? nextNotice({
+    : cards || whatsNewHere || consentHere || simpleDue || boatHere || modelgoHere || twoFact !== false || grokNow !== false ? nextNotice({
     [GROK_MOVE_NOTICE]: grokNow,
     // As the What's new popup: never in the launch whose welcome just finished, nor over MausBot's first-launch card.
     [SIMPLE_MODE_NOTICE]: !simpleDue || afterWelcome === true ? false : afterWelcome === null || mausBotFirst || simpleBlocked ? null : true,
@@ -213,11 +221,12 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     [CLOUD_TRIAL_NOTICE]: planBridge && plan === null ? null : Boolean(key && (trialDue || trialOpen === key)),
     [CLOUD_NOTICE]: !view ? false : view.kind === "unknown" ? null
       : Boolean(kind && !noticeSeen(record, CLOUD_NOTICE_CARD[kind].dismissed)),
+    [MODELGO_OFFER_NOTICE]: modelgoNow,
     [BOAT_OFFER_NOTICE]: !boatHere || moving || afterWelcome === true || !usedBefore(state.bots) || desktopState?.seen.includes(BOAT_OFFER_NOTICE) ? false
       : organization === null || moving === null || afterWelcome === null || mausBotFirst || (desktop && !desktopState) ? null : !organization,
     [STAR_NOTICE]: !bridge || moving || brandStatus().source === "file" || !usedBefore(state.bots) ? false : moving === null ? null : true,
   }, id => id === CLOUD_INTRO ? stage === "done" && !introOpen
-    : id === STAR_NOTICE || id === PRODUCT_HUNT_NOTICE || id === BOAT_OFFER_NOTICE ? noticeSeen(record, id) : false, launch) : null;
+    : id === STAR_NOTICE || id === PRODUCT_HUNT_NOTICE || id === BOAT_OFFER_NOTICE || id === MODELGO_OFFER_NOTICE ? noticeSeen(record, id) : false, launch) : null;
 
   const shownKey = notice === CLOUD_TRIAL_NOTICE ? key : notice;
   useEffect(() => {
@@ -240,6 +249,9 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     } else if (shownKey === BOAT_OFFER_NOTICE && !boatShown) {
       setBoatShown(true);
       reportBoatOffer("shown", "card");
+    } else if (shownKey === MODELGO_OFFER_NOTICE && !modelgoShown) {
+      setModelgoShown(true);
+      reportModelgoOffer("shown", "popup");
     } else if (shownKey === GROK_MOVE_NOTICE && !grokShown) {
       setGrokShown(true);
       reportGrokMovePopup("shown");
@@ -318,6 +330,13 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       void desktop?.seen(BOAT_OFFER_NOTICE).catch(() => {});
     };
     return <BoatOfferCard onDone={done} />;
+  }
+  if (notice === MODELGO_OFFER_NOTICE) {
+    const done = (action: ModelgoCardAction) => {
+      reportModelgoOffer(action, "popup"); close(); save(MODELGO_OFFER_NOTICE);
+      void desktop?.seen(MODELGO_OFFER_NOTICE).catch(() => {});
+    };
+    return <ModelgoOfferCard onDone={done} />;
   }
   if (notice === STAR_NOTICE) return <StarCard onDismiss={() => { close(); save(STAR_NOTICE); }} />;
   return null;
