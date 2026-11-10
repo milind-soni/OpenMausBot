@@ -44,6 +44,7 @@ import { ThreadCache, type ThreadState } from "./thread-cache.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 import { buildTask, threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
+import { activeGroupTask, groupTaskByThread, groupTasks, migrateGroupTaskRead, mirrorActiveGroupTask, refreshGroupUnread, setGroupTaskRead, syncGroupReadPatch } from "./group-task-state.ts";
 export { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 export { threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
 export type {
@@ -115,9 +116,6 @@ export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number
 
 export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null; activity?: "waiting-on-you" | null };
 
-function mirrorActiveGroupTask(group: GroupRecord, task: GroupTaskRecord): void {
-  Object.assign(group, { threadId: task.threadId, pinnedCwd: task.pinnedCwd, pinnedMessageId: task.pinnedMessageId, lastReadMessageId: task.lastReadMessageId });
-}
 
 function persistedPin<T extends { pinned?: boolean }>(task: T): T {
   if (task.pinned === true) return task;
@@ -502,15 +500,7 @@ export class Store {
       }
       g.pinnedCwd = active.pinnedCwd;
       g.pinnedMessageId = active.pinnedMessageId;
-      if (g.lastReadMessageId && !active.lastReadMessageId) {
-        active.lastReadMessageId = g.lastReadMessageId;
-        groupsMigrated = true;
-      }
-      // Older registries kept one unread mark for the active room conversation.
-      if (g.unread && !g.tasks.some((task) => task.unread)) {
-        active.unread = true;
-        groupsMigrated = true;
-      }
+      if (migrateGroupTaskRead(g, active)) groupsMigrated = true;
     }
     if (groupsMigrated) this.saveGroups();
     const clearModelCopies = !existsSync(THREAD_MODEL_COPIES_CLEARED) && (botsLoaded || !existsSync(BOTS_FILE));
@@ -898,15 +888,7 @@ export class Store {
     }
     this.commitGroupChange(group, group.dm ? "the chat's settings" : "the room's settings", () => {
       Object.assign(group, stored);
-      if (!group.dm && stored.unread !== undefined) {
-        const active = this.activeGroupTask(group.id);
-        if (active) active.unread = stored.unread;
-        group.unread = Boolean(group.tasks?.some((task) => task.unread));
-      }
-      if (!group.dm && stored.lastReadMessageId) {
-        const active = this.activeGroupTask(group.id);
-        if (active) active.lastReadMessageId = stored.lastReadMessageId;
-      }
+      syncGroupReadPatch(group, stored);
       if (Object.prototype.hasOwnProperty.call(stored, "turnTimeoutMinutes") && stored.turnTimeoutMinutes == null) {
         delete group.turnTimeoutMinutes;
       }
@@ -994,20 +976,12 @@ export class Store {
     return recovered;
   }
 
-  groupTasks(groupId: string): GroupTaskRecord[] {
-    const group = this.group(groupId);
-    return group?.dm ? [] : (group?.tasks ?? []);
-  }
+  groupTasks(groupId: string): GroupTaskRecord[] { return groupTasks(this.group(groupId)); }
 
-  activeGroupTask(groupId: string): GroupTaskRecord | undefined {
-    const group = this.group(groupId);
-    return group?.tasks?.find((task) => task.threadId === group.threadId);
-  }
+  activeGroupTask(groupId: string): GroupTaskRecord | undefined { return activeGroupTask(this.group(groupId)); }
 
   groupTaskByThread(groupId: string, threadId: string): GroupTaskRecord | undefined {
-    const group = this.group(groupId);
-    if (!group || group.dm) return undefined;
-    return group.tasks?.find((task) => task.threadId === threadId);
+    return groupTaskByThread(this.group(groupId), threadId);
   }
 
   /** A room's unread mark summarizes its conversations, while each task retains its own mark. */
@@ -1016,14 +990,7 @@ export class Store {
     if (group?.dm && group.threadId === threadId) return this.patchGroup(groupId, { unread, ...(!unread && lastReadMessageId ? { lastReadMessageId } : {}) });
     const task = this.groupTaskByThread(groupId, threadId);
     if (!group || !task) return null;
-    this.commitGroupChange(group, "the thread's read state", () => {
-      task.unread = unread;
-      group.unread = group.tasks!.some((candidate) => candidate.unread);
-      if (!unread && lastReadMessageId) {
-        task.lastReadMessageId = lastReadMessageId;
-        if (threadId === group.threadId) group.lastReadMessageId = lastReadMessageId;
-      }
-    });
+    this.commitGroupChange(group, "the thread's read state", () => setGroupTaskRead(group, task, unread, lastReadMessageId));
     this.emit({ type: "group", groupId });
     return group;
   }
@@ -1116,7 +1083,7 @@ export class Store {
     mdb.deleteThreads(deleted, () => this.commitGroupChange(group, "the thread deletion", () => {
       group.tasks = group.tasks!.filter((task) => !doomed.has(task.threadId));
       if (doomed.has(group.threadId)) mirrorActiveGroupTask(group, group.tasks[0]!);
-      group.unread = group.tasks.some((task) => task.unread);
+      refreshGroupUnread(group);
     }));
     for (const id of deleted) this.deleteThreadRecord(id, true);
     this.emit({ type: "group", groupId });

@@ -298,6 +298,7 @@ import { createRoomAccess, PRIVATE_CHAT_ROOM_WRITE } from "./host/room-access.ts
 import { outsideRoomNote, sentRow, teammateResultRow, WAIT_CARD_CLOSED_REASON } from "./host/handoff-sent.ts";
 import { createWebhookRoomPost } from "./host/webhook-room-deps.ts";
 import { createRoomJobs, parallelRoomJobsEnabled, type RoomRoundLine } from "./host/room-jobs.ts";
+import { markGroupThreadUnreadAfterTurn } from "./group-task-state.ts";
 import { createDelegatedLevel } from "./host/delegated-level.ts";
 import { createLiveApprovalMode } from "./host/live-approval.ts";
 import { CONSENT_RULE, continuedOrigin, escapeNotes, labelledLine, OUTSIDE, peerLineText, peerProvenanceNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts"; import { lineNote, PROVENANCE_PROMPT } from "./provenance-label.ts"; import { openRoomThread } from "./host/room-new-thread.ts"; import { createLineLabels } from "./host/line-labels.ts";
@@ -5043,8 +5044,7 @@ const watchdog = new TurnWatchdog({
       if (stalledRoomSpeaker) {
         groupSpeakers.delete(turn.threadId);
         const remaining = group ? activeGroupSpeaker(group.id) : undefined;
-        store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null });
-        store.markGroupThreadUnread(group.id, turn.threadId, true);
+        markGroupThreadUnreadAfterTurn(store, group.id, turn.threadId, remaining?.botId ?? null);
       }
       // A cleared UI busy flag must not strand this finished generation's computer claim.
       releaseTurnResources(stalledResourceOwner);
@@ -6886,10 +6886,7 @@ bus.subscribe((event: RuntimeEvent) => {
         releaseTurnResources(turnResourceOwners.get(event.threadId));
         groupSpeakers.delete(event.threadId);
         const remaining = group ? activeGroupSpeaker(group.id) : undefined;
-        if (group) {
-          store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null });
-          store.markGroupThreadUnread(group.id, event.threadId, true);
-        }
+        if (group) markGroupThreadUnreadAfterTurn(store, group.id, event.threadId, remaining?.botId ?? null);
         const speakingBot = store.bot(speaker.botId);
         if (speakingBot?.busy) store.setActivity(speakingBot.id, "idle");
       }
@@ -10235,8 +10232,7 @@ async function runClaimedGroupMemberTurn(
   ) {
     groupSpeakers.delete(threadId);
     const remaining = activeGroupSpeaker(group.id);
-    store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null });
-    store.markGroupThreadUnread(group.id, threadId, true);
+    markGroupThreadUnreadAfterTurn(store, group.id, threadId, remaining?.botId ?? null);
     if (store.bot(bot.id)?.busy) {
       store.setActivity(bot.id, "idle");
     }
@@ -10427,8 +10423,7 @@ async function runClaimedGroupMemberTurn(
     const currentGroup = store.group(group.id);
     groupSpeakers.delete(threadId);
     const remaining = activeGroupSpeaker(group.id);
-    store.patchGroup(currentGroup?.id ?? group.id, { busyBotId: remaining?.botId ?? null });
-    store.markGroupThreadUnread(currentGroup?.id ?? group.id, threadId, true);
+    markGroupThreadUnreadAfterTurn(store, currentGroup?.id ?? group.id, threadId, remaining?.botId ?? null);
     const currentBot = store.bot(bot.id);
     if (currentBot?.busy) {
       store.setActivity(currentBot.id, "idle");
@@ -10451,8 +10446,7 @@ async function runClaimedGroupMemberTurn(
       if (speaker?.botId === bot.id) {
         groupSpeakers.delete(threadId);
         const remaining = activeGroupSpeaker(group.id);
-        store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null });
-        store.markGroupThreadUnread(group.id, threadId, true);
+        markGroupThreadUnreadAfterTurn(store, group.id, threadId, remaining?.botId ?? null);
       }
       const currentBot = store.bot(bot.id);
       if (currentBot?.busy) {
@@ -10468,8 +10462,7 @@ async function runClaimedGroupMemberTurn(
   // Fallback only while this invocation still owns the room, or it would clear a newer speaker's state.
   groupSpeakers.delete(threadId);
   const remaining = activeGroupSpeaker(group.id);
-  store.patchGroup(group.id, { busyBotId: remaining?.botId ?? null });
-  store.markGroupThreadUnread(group.id, threadId, true);
+  markGroupThreadUnreadAfterTurn(store, group.id, threadId, remaining?.botId ?? null);
   if (store.bot(bot.id)?.busy) {
     store.setActivity(bot.id, "idle");
   }
