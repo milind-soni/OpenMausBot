@@ -219,7 +219,7 @@ export async function setRemoteEnabled(env: Env, triggerId: string, enabled: boo
   return { error: await upstreamError(response, `Composio could not ${enabled ? "enable" : "disable"} the trigger (${response.status})`) };
 }
 
-async function deleteRemote(env: Env, triggerId: string): Promise<RemoteResult> {
+export async function deleteRemote(env: Env, triggerId: string): Promise<RemoteResult> {
   const response = await composioRequest(env, `/trigger_instances/manage/${encodeURIComponent(triggerId)}`, { method: "DELETE" });
   if (response.ok || response.status === 404) {
     await response.body?.cancel();
@@ -228,7 +228,7 @@ async function deleteRemote(env: Env, triggerId: string): Promise<RemoteResult> 
   return { error: await upstreamError(response, `Composio could not delete the trigger (${response.status})`) };
 }
 
-async function listRemoteInstances(env: Env, userId: string): Promise<RemoteInstance[]> {
+export async function listRemoteInstances(env: Env, userId: string): Promise<RemoteInstance[]> {
   const instances: RemoteInstance[] = [];
   const seen = new Set<string>();
   let cursor: string | undefined;
@@ -258,7 +258,7 @@ async function binding(env: Env, installationId: string, triggerId: string) {
 
 /** Bindings other installations hold on the same instance: a desktop and its Cloud that act as one Composio user may
  *  both listen to it. The remote instance is changed only for the last one. */
-async function otherBindings(env: Env, installationId: string, triggerId: string, enabledOnly: boolean) {
+export async function otherBindings(env: Env, installationId: string, triggerId: string, enabledOnly: boolean) {
   const row = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM trigger_bindings WHERE composio_trigger_id = ? AND installation_id != ?${enabledOnly ? " AND disabled_at IS NULL" : ""}`,
   ).bind(triggerId, installationId).first<{ n: number }>();
