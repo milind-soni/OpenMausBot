@@ -248,6 +248,32 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(done.status, done.stdout + done.stderr).toBe(0);
   });
 
+  // As the real-server check's step 6 runs it: killed while it waits for a version that never answers, then a `yes`
+  // piped in. Its health checks run `docker compose exec`, which forwards standard input to the container: the answer
+  // must still reach the question, and the old image, the data and .env (on a version tag) come back exactly.
+  it("after an update killed while it waits, a piped yes puts the old image, the data and .env back", () => {
+    const box = install({ behaviour: "silent" }, {
+      images: [{ ...OLD, refs: [...OLD.refs, `${REPO}:v0.1.150`] }, { ...NEW, behaviour: "silent" }],
+      signalOn: { match: "/api/health\"", signal: "SIGKILL" },
+    });
+    writeFileSync(join(box.deploy, ".env"), `${ENV}OMB_IMAGE=${REPO}:v0.1.150\n`, { mode: 0o600 });
+    const envBefore = box.env();
+    const before = tree(box.data);
+    expect(box.run().signal).toBe("SIGKILL");
+    expect(box.journal()).toBe(true);
+    expect(box.state().containers.omb.image).toBe(NEW.id);
+    const unanswered = box.run([], { input: "" });
+    expect(unanswered.status, unanswered.stdout).toBe(4);
+    expect(box.state().containers.omb.image).toBe(NEW.id);
+    const yes = box.run([], { input: "yes\n" });
+    expect(yes.said.at(-1), yes.stdout).toBe("Your server runs 0.1.150 again, with its data as it was before the update.");
+    expect(yes.status).toBe(1);
+    expect(box.state().containers.omb.image).toBe(OLD.id);
+    expect(box.env()).toBe(envBefore);
+    expect(tree(box.data)).toEqual({ ...before, "started-by.txt": "0.1.150\n0.1.150\n" });
+    expect(box.journal()).toBe(false);
+  });
+
   it("asks before it undoes an update an earlier run left unhealthy, says what that loses, and changes nothing without a yes", () => {
     const box = install({ behaviour: "silent" }, { signalOn: { step: "compose up", signal: "SIGKILL" } });
     const before = tree(box.data);
@@ -262,7 +288,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     // The new version has been running on the data since: nothing may take that away unasked.
     const since = tree(box.data);
     for (const unanswered of [box.run(), box.run([], { input: "no\n" }), box.run(["--rollback"])]) {
-      expect(unanswered.status).toBe(4);
+      expect(unanswered.status, unanswered.stdout).toBe(4);
       expect(unanswered.stdout).toMatch(/An earlier update to 0\.1\.151, started \S+Z, did not finish/);
       expect(unanswered.stdout).toContain("Everything made on this server since then (chats, files, settings) is lost.");
       expect(unanswered.said.at(-1)).toContain("Nothing was changed.");

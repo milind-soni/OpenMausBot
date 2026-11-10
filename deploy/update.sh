@@ -67,6 +67,9 @@ unset OMB_IMAGE
 
 # A step interrupted while its output goes to the log still speaks to the terminal.
 exec 3>&1
+# The answers to its questions are read from fd 4, and nothing else this script starts sees them: `docker compose exec`
+# forwards its standard input to the container and would swallow a `yes` typed or piped ahead of the question.
+exec 4<&0 </dev/null
 say() {
   printf '%s\n' "$*" >&3 2>/dev/null
   if [ -d "$STATE" ]; then printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$LOG" 2>/dev/null; fi
@@ -80,9 +83,9 @@ refuse() {
 ask() {
   local answer=""
   printf '%s' "$1" >&3 2>/dev/null
-  read -r answer || answer=""
+  read -r answer <&4 || answer=""
   # A terminal echoes the Enter that ends the answer; anything else does not.
-  [ -t 0 ] || printf '\n' >&3 2>/dev/null
+  [ -t 4 ] || printf '\n' >&3 2>/dev/null
   printf '%s' "$answer"
 }
 compose() { docker compose "$@"; }

@@ -62,6 +62,9 @@ function compose(rest) {
   if (verb === "up") return composeUp();
   if (verb === "logs") return out(image(omb?.image)?.lastWords ?? "");
   if (verb === "exec") {
+    // As the real one does: `docker compose exec` forwards its standard input to the container, so it takes whatever is
+    // waiting there, an answer meant for update.sh's question included.
+    try { readFileSync(0); } catch { /* no standard input */ }
     const serving = image(omb?.image);
     if (omb?.status !== "running" || !serving) fail("service omb is not running");
     // `doctor: false`: a hardened version, where doctor without a session is refused whatever its engines.
