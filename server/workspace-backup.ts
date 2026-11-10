@@ -14,6 +14,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { userErrorFields, userErrorThrown } from "./user-errors.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.ts";
+import { cjkSearchText } from "./cjk-search.ts";
 import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
 import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
@@ -804,12 +805,14 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
     try {
       db.exec("BEGIN");
       if (manifest.sourceDataDir !== resolve(dataDir)) {
-        const update = db.prepare("UPDATE messages SET json = ?, text = ? WHERE thread_id = ? AND id = ?");
+        const searchText = (db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>).some((column) => column.name === "search_text");
+        const update = db.prepare(`UPDATE messages SET json = ?, text = ?${searchText ? ", search_text = ?" : ""} WHERE thread_id = ? AND id = ?`);
         for (const row of db.prepare("SELECT thread_id, id, json FROM messages").iterate()) {
           const message: unknown = JSON.parse(String(row.json));
           paths.message(message);
           const json = JSON.stringify(message);
-          if (json !== row.json) update.run(json, record(message) && typeof message.text === "string" ? message.text : null, row.thread_id, row.id);
+          const text = record(message) && typeof message.text === "string" ? message.text : null;
+          if (json !== row.json) update.run(json, text, ...(searchText ? [cjkSearchText(text)] : []), row.thread_id, row.id);
         }
       }
       // Import is not a restart: the source may still be running, so never execute a copy of its pending work.
