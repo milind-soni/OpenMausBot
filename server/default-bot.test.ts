@@ -319,7 +319,13 @@ describe("MausBot, every person's helper", () => {
       expect(await arrive(cloud, chief.id, { chiefOfStaff: true, managedSections: ["General"] }, "Amit's MacBook", { sourceDefault: true })).toBe(200);
       expect(cloud.bots.filter((bot) => bot.chiefOfStaff).map((bot) => bot.id)).toEqual([theirs.id]);
       expect(placeMausBots(cloud).map((bot) => bot.id)).toEqual([theirs.id]);
-      // A Chief that is not a MausBot still takes the crown, as before.
+      // Nor from a Chief here that is not the MausBot.
+      const lee = cloud.createBot({ name: "Lee" }, { id: "cloud-lee-000008", seedMessages: false });
+      cloud.setChiefOfStaff(lee.id);
+      const third = cloud.createBot({ name: "MausBot" }, { id: "desk-maus-000009", seedMessages: false });
+      expect(await arrive(cloud, third.id, fields({ defaultBot: {}, chiefOfStaff: true, managedSections: ["General"] }), "Amit's MacBook")).toBe(200);
+      expect(cloud.bots.filter((bot) => bot.chiefOfStaff).map((bot) => bot.id)).toEqual([lee.id]);
+      // A Chief that is not a MausBot takes the crown.
       const ada = cloud.createBot({ name: "Ada" }, { id: "desk-ada-000007", seedMessages: false });
       expect(await arrive(cloud, ada.id, { chiefOfStaff: true }, "Amit's MacBook")).toBe(200);
       expect(cloud.bots.filter((bot) => bot.chiefOfStaff).map((bot) => bot.id)).toEqual([ada.id]);

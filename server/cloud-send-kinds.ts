@@ -293,9 +293,11 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown, source: A
   if (Object.hasOwn(fields, "chiefOfStaff") && fields.chiefOfStaff !== true) patch.chiefOfStaff = fields.chiefOfStaff ?? undefined;
   if (fields.chiefOfStaff === true) delete patch.hidden;
   deps.store.patchBot(id, patch);
-  // A MausBot arriving where the person's own MausBot stays (takeArrivingDefaultBot) doesn't take that one's crown, also
-  // when a later pass sends its Chief fields without its MausBot mark (`source.defaultBot`).
-  if (fields.chiefOfStaff === true && !((fields.defaultBot || source.defaultBot) && keptDefaultBot(deps.store, id)?.chiefOfStaff)) {
+  // A MausBot arriving where the person's own MausBot stays (takeArrivingDefaultBot) doesn't take the crown from this
+  // place's Chief, whichever bot that is, also when a later pass sends its Chief fields without its MausBot mark.
+  const keepsCrown = (fields.defaultBot || source.defaultBot) && keptDefaultBot(deps.store, id)
+    && deps.store.bots.some((other) => other.id !== id && other.chiefOfStaff);
+  if (fields.chiefOfStaff === true && !keepsCrown) {
     deps.store.setChiefOfStaff(id);
     if (patch.managedSections) deps.store.patchBot(id, { managedSections: patch.managedSections });
   }
@@ -382,7 +384,6 @@ async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, 
 const putSchema = z.object({ v: z.literal(1), key: z.string().max(200), dataDir: z.string().min(1).max(4096), record: z.unknown(), runs: z.array(z.unknown()).max(2_000).optional(),
   computer: z.string().max(120).optional(), sourceDefault: z.boolean().optional() });
 
-/** What the computer a bot comes from says of it: its name, and whether the bot is the MausBot there. */
 type ArrivingSource = { computer?: string; defaultBot?: boolean };
 
 /** This computer's name as a person knows it, which a MausBot that moves away is named for when the place it goes keeps its own. */
