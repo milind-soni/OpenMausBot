@@ -95,6 +95,8 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
     /** How Test starts a command server: as the turns of its bot, or of any bot. */
     probeAs: (server: { bot?: string }) => (server.bot ? asBot(server.bot) : {}),
     mounted: (bot: Bot): Record<string, McpServerSpec> => withRestarts(health.usable(bot.id, configured(bot)), restarts),
+    /** The servers set for this bot, started or not: who a change to one reaches. */
+    given: (bot: Bot): string[] => Object.keys(configured(bot)),
     prepare: (bot: Bot): Promise<void> => health.prepare(bot.id, started(bot)),
     off: (bot: Bot) => health.off(bot.id, started(bot)),
     listing: <T extends { name: string }>(server: T): T & { offFor?: string[] } => {

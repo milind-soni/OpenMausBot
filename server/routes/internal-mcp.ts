@@ -70,7 +70,7 @@ export interface InternalMcpDeps {
   decide(summary: string, applied: Applied): void;
   activity(label: string, call: McpCall): void;
   language(): string | undefined;
-  /** The other bots that use this server now, by name. */
+  /** The other bots this server is set for, by name, even before it has started for them. */
   usedBy(name: string): string[];
   /** Shows the person a card for a change below Full access; the bot ends its turn and their answer resumes it. */
   requestApproval(proposal: { action: McpCardAction; name: string; subtitle: string; targetHash: string; fields?: McpUpdateFields }): { text: string };

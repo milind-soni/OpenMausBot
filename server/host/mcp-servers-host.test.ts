@@ -67,6 +67,7 @@ it("moves servers in one bot's folders to that bot once, says so once, and keeps
   expect(host.mounted(ROSA), "a bot given no servers gets none").toEqual({});
   expect(started.sort(), "Iris's own servers are started for Iris only, every bot's once for all").toEqual(["blender-own:iris", "blender:iris", "broken:iris", "notes:iris", "sketch-suite:iris"]);
   expect(host.off(PAUL)).toEqual([{ name: "broken", error: "The server stopped before the MCP handshake finished." }]);
+  expect(host.given(PAUL).sort(), "a server that did not start is still set for Paul, so a change to it reaches him").toEqual(["broken", "notes"]);
   expect(host.off(NOTES_ONLY), "a bot whose tool selection never reaches it is not told about it").toEqual([]);
   expect(host.health.offFor("broken"), "nor a bot whose AI starts no servers").toEqual(["iris", "paul"]);
 
