@@ -33,6 +33,7 @@ export const DOWNLOAD_LIMITS: DownloadLimits = { maxBytes: 1024 ** 3, perOwner: 
 const UNSAFE_NAME = /[\p{Cc}<>:"/\\|?*]/gu;
 const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|conin\$|conout\$|clock\$|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3]) *(?:\..*)?$/iu;
 
+/** Return a basename within the 255-byte UTF-8 limit, with Windows device names escaped and whole code points retained. */
 export function safeFileName(suggested: string): string {
   const base = suggested.split(/[\\/]/).pop() ?? "";
   const cleaned = base.replace(UNSAFE_NAME, "_").replace(/^[.\s]+|[.\s]+$/g, "");
