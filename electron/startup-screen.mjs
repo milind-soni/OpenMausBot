@@ -6,7 +6,7 @@ const attribute = (value) => String(value).replaceAll("&", "&amp;").replaceAll('
 
 export function startupScreenHtml(iconPath, { t = nativeText.englishText.t, lang = "en" } = {}) {
   const icon = fs.readFileSync(iconPath).toString('base64');
-  return `<!doctype html><html lang="${attribute(lang)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><title>OpenMaus Bot</title><style>
+  return `<!doctype html><html lang="${attribute(lang)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><title>OpenMausBot</title><style>
   *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:Segoe UI,system-ui,sans-serif;color:#f5f5f5;background:transparent}
   main{height:100%;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #ffffff16;border-radius:20px;background:radial-gradient(ellipse at 50% 22%,#242529 0,#161719 54%,#111214 100%);-webkit-app-region:drag}
   img{width:74px;height:74px;object-fit:contain;margin-bottom:18px;user-select:none;-webkit-user-drag:none}
@@ -16,7 +16,7 @@ export function startupScreenHtml(iconPath, { t = nativeText.englishText.t, lang
   button{position:absolute;right:13px;top:13px;width:30px;height:30px;display:grid;place-items:center;padding:0;color:#999da5;border:0;border-radius:7px;background:transparent;cursor:pointer;-webkit-app-region:no-drag}
   button:hover{color:#fff;background:#ffffff10}button:focus-visible{outline:2px solid #1686ff;outline-offset:2px}button svg{pointer-events:none}
   @keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.spinner{animation:none;border-color:#a6c9ff}}
-  </style></head><body><main><button aria-label="${attribute(t("native.common.close"))}" onclick="window.startupScreen.close()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button><img src="data:image/png;base64,${icon}" alt=""><h1>OpenMaus Bot</h1><div class="status" role="status"><span class="spinner" aria-hidden="true"></span>Opening your workspace…</div></main></body></html>`;
+  </style></head><body><main><button aria-label="${attribute(t("native.common.close"))}" onclick="window.startupScreen.close()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button><img src="data:image/png;base64,${icon}" alt=""><h1>OpenMausBot</h1><div class="status" role="status"><span class="spinner" aria-hidden="true"></span>Opening your workspace…</div></main></body></html>`;
 }
 
 export function createStartupScreen({
@@ -29,7 +29,7 @@ export function createStartupScreen({
     width: 440, height: 300, resizable: false, maximizable: false,
     fullscreenable: false, frame: false, transparent: true,
     backgroundColor: "#00000000", show: false, icon: iconPath,
-    title: "OpenMaus Bot", autoHideMenuBar: true,
+    title: "OpenMausBot", autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true, sandbox: true, nodeIntegration: false,
       preload: fileURLToPath(new URL("./startup-screen-preload.cjs", import.meta.url)),
