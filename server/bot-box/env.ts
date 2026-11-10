@@ -42,10 +42,13 @@ export const BOX_ENV_PREFIXES: readonly string[] = [
   "MUSE_", "PI_", "DWEB_", "UNSLOTH_", "FAKE_CLAUDE_", "MCP_", "ANTIGRAVITY_", "AGY_",
 ];
 
-/** Never, whatever the allow-list says: the control plane's settings and secrets, and the server's own placement. */
+/** Never, whatever the allow-list says: the control plane's settings and secrets, and the server's own placement. The
+ * CLI's session token and server address (server/headless/client.ts) too: nothing in a box reads them, and one an
+ * operator set on the server would otherwise pass under the engines' OPENMAUSBOT_ prefix. */
 export const BOX_ENV_NEVER: ReadonlySet<string> = new Set([
   "OMB_LICENSE_KEY", "OMB_INSTALLATION_CREDENTIAL", "OMB_LOOPBACK_TRUST", "OMB_CLOUD_SECRETS_FD",
   "OMB_DATA_DIR", "OMB_STATIC_DIR", "OMB_DUCKDB_DIR", "OMB_PORT", "OMB_WEBHOOK_PORT",
+  "OPENMAUSBOT_TOKEN", "OPENMAUSBOT_URL",
 ]);
 export const BOX_ENV_NEVER_PREFIXES: readonly string[] = ["OMB_CLOUD_"];
 

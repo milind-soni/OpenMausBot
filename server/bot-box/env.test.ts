@@ -41,7 +41,7 @@ const SERVER_ONLY_OMB: ReadonlySet<string> = new Set([
   "OMB_GREENFERENCE_API_KEY", "OMB_GROQ_API_KEY", "OMB_HELPER_INSTANCE", "OMB_HELPER_MODEL", "OMB_HOOKS", "OMB_HOOK_",
   "OMB_HOSTED_", "OMB_HOSTED_MODELS", "OMB_HOSTED_MODEL_TOKEN", "OMB_HOSTED_MODEL_URL", "OMB_INSTALLATION_CREDENTIAL",
   "OMB_JEV_API_KEY", "OMB_LAN", "OMB_LICENSE_KEY", "OMB_LINUX_GPU", "OMB_LIVE_PROVIDER", "OMB_LOCAL_VM_UPDATE_WAIT_MS",
-  "OMB_LOOPBACK_TRUST", "OMB_LOOP_GUARD", "OMB_LOOP_GUARD_STOP_AT", "OMB_META_API_KEY", "OMB_OPENAI_API_KEY",
+  "OMB_LOOPBACK_TRUST", "OMB_LOOP_GUARD", "OMB_LOOP_GUARD_STOP_AT", "OMB_META_API_KEY", "OMB_MODELGO_API_KEY", "OMB_OPENAI_API_KEY",
   "OMB_OPENAI_IMAGE_KEY", "OMB_OPENAI_LIVE_KEY", "OMB_OPENAI_LIVE_URL", "OMB_OPENROUTER_API_KEY",
   "OMB_OPENROUTER_DECIDER_KEY", "OMB_PERSON_FIRST_MS", "OMB_PHONE_SECRET_PUBLIC_KEY", "OMB_PORT", "OMB_POSTIZ_API_KEY",
   "OMB_POSTIZ_CLOUD_URL", "OMB_PROCESS_ID", "OMB_PUBLIC_IPV4", "OMB_PUBLIC_URL", "OMB_QUOTA_SWITCH",
@@ -94,6 +94,17 @@ describe("the box's environment allow-list", () => {
     expect(boxEnvironmentAllows("OMB_CLOUD_ANYTHING")).toBe(false);
     expect(boxEnvironmentAllows("OMB_CLOUDFLARED_PATH")).toBe(false);
     expect(BOX_ENV_NAMES.has("PATH")).toBe(true);
+  });
+
+  // The CLI's session token and server address (server/headless/client.ts, scripts/mcp-server.ts): an operator may put
+  // them in the server's environment, and nothing that runs in a box reads them. The engines' own OPENMAUSBOT_ keys
+  // (OPENMAUSBOT_CODEX_API_KEY, OPENMAUSBOT_CHATGPT_TOKEN) still pass, and a spawn's allowEnv never lifts these two.
+  it("keeps the CLI's session token and server address on the server, and the engines' OPENMAUSBOT_ keys in the box", () => {
+    const kept = boxEnvironment(
+      { OPENMAUSBOT_TOKEN: "omb_sess_x", OPENMAUSBOT_URL: "http://127.0.0.1:8799", OPENMAUSBOT_CODEX_API_KEY: "k", OPENMAUSBOT_CHATGPT_TOKEN: "t" },
+      new Set(), new Set(["OPENMAUSBOT_TOKEN", "OPENMAUSBOT_URL"]),
+    );
+    expect(Object.keys(kept).sort()).toEqual(["OPENMAUSBOT_CHATGPT_TOKEN", "OPENMAUSBOT_CODEX_API_KEY"]);
   });
 
   it("keeps what Antigravity's runtime is started with: its harness, its file storage switch and the browser hook", () => {
