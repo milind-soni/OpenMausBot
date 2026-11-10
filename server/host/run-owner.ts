@@ -46,6 +46,12 @@ export function mayRemoveQueued(input: { shared: boolean; sender?: ResolvedSende
   return writer ? writer === by.person : by.admin;
 }
 
+/** A request is its writer's to run again; an Owner or Admin runs anyone's again, and anyone one no person wrote. */
+export function mayRetry(input: { shared: boolean; sender?: ResolvedSender; by: Actor }): boolean {
+  const { shared, sender, by } = input;
+  return !shared || !sender?.id || by.admin || sender.id === by.person;
+}
+
 /** Waiting lines join the running turn only when every one is the asker's own and the asker adds them. */
 export function mayJoinRun(input: { shared: boolean; asker: RunAsker; senders: ReadonlyArray<ResolvedSender | undefined>; by: Actor }): boolean {
   const { shared, asker, senders, by } = input;
@@ -128,19 +134,27 @@ export function createRunOwners(deps: RunOwnersDeps) {
       const shared = deps.shared(threadId);
       return mayJoinRun({ shared, asker: shared ? asker(threadId) : null, senders, by }) ? null : serverLine(deps.language(threadId), "server.runOwner.waitsItsTurn");
     },
+    /** The sentence someone who may not run this request again reads, or null when they may. */
+    retryRefusal(threadId: string, sender: ResolvedSender | undefined, by: Actor): string | null {
+      if (mayRetry({ shared: deps.shared(threadId), sender, by })) return null;
+      return serverLine(deps.language(threadId), "server.runOwner.onlyAskerRetries", { name: shownPersonName(deps.personName(sender!.id!) ?? sender!.name) });
+    },
   };
 }
 
 export type RunOwners = ReturnType<typeof createRunOwners>;
 
+export type RouteRunOwners = Pick<RunOwners, "stopRefusal" | "removeRefusal" | "joinRefusal" | "retryRefusal">;
+
 /** The rule as a route asks it, by the request's sign-in. A route built without it (a server one person uses, or a
  * route's own test) refuses nothing and sees no admin, so nothing changes there. */
-export function routeRunOwners(owners: Pick<RunOwners, "stopRefusal" | "removeRefusal" | "joinRefusal"> | undefined, actorOf: ((auth: RequestAuth) => Actor) | undefined) {
+export function routeRunOwners(owners: RouteRunOwners | undefined, actorOf: ((auth: RequestAuth) => Actor) | undefined) {
   const by = (auth: RequestAuth): Actor => actorOf?.(auth) ?? { admin: false };
   return {
     admin: (auth: RequestAuth) => by(auth).admin,
     stopRefusal: (auth: RequestAuth, threadId: string) => owners?.stopRefusal(threadId, by(auth)) ?? null,
     removeRefusal: (auth: RequestAuth, threadId: string, sender: ResolvedSender | undefined) => owners?.removeRefusal(threadId, sender, by(auth)) ?? null,
     joinRefusal: (auth: RequestAuth, threadId: string, senders: ReadonlyArray<ResolvedSender | undefined>) => owners?.joinRefusal(threadId, senders, by(auth)) ?? null,
+    retryRefusal: (auth: RequestAuth, threadId: string, sender: ResolvedSender | undefined) => owners?.retryRefusal(threadId, sender, by(auth)) ?? null,
   };
 }

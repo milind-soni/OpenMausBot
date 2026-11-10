@@ -3016,6 +3016,7 @@
   "server.runOwner.onlyAskerStops": "Nur {name} oder ein Admin kann das stoppen.",
   "server.runOwner.notYourQueued": "Nur die Person, die diese Nachricht geschickt hat, kann sie entfernen.",
   "server.runOwner.waitsItsTurn": "Diese Nachricht wartet, bis sie dran ist, und läuft nach der Anfrage, die gerade läuft.",
+  "server.runOwner.onlyAskerRetries": "Nur {name} oder ein Admin kann diese Anfrage noch einmal ausführen.",
   "server.routines.held.planCancelled": "Deine Routinen sind pausiert, weil der Tarif gekündigt wurde. Damit eine bis zum Ende des Tarifs weiterläuft, schalte sie unter Routines wieder ein.",
   "server.routines.held.noEngine": "Deine Routinen sind pausiert: Keines deiner KI-Konten ist hier noch angemeldet. Sie schalten sich von selbst wieder ein, wenn du dich erneut anmeldest.",
   "server.routines.held.noConnections": "Deine Routinen sind pausiert: Alle verbundenen Apps und MCP-Server wurden entfernt. Sie schalten sich wieder ein, wenn du eine App oder einen MCP-Server verbindest oder eine Routine unter Routines wieder einschaltest.",

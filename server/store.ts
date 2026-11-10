@@ -281,7 +281,7 @@ function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string }
 
 export class Store {
   bots: BotRecord[] = [];
-  groups: GroupRecord[] = [];
+  groups: GroupRecord[] = []; /** Told before a delete of these conversations is tried; "thread.deleted" follows only for those that went. Must not throw. */ threadsGoing: (threadIds: readonly string[]) => void = () => {};
   private threads = new ThreadCache(() => this.busyThreadIds());
   private defaultSelection: () => ModelSelection;
   private completeNewBotSelection: (selection: ModelSelection) => ModelSelection;
@@ -915,7 +915,7 @@ export class Store {
   deleteGroup(id: string): boolean {
     const group = this.group(id);
     if (!group) return false;
-    const remaining = this.groups.filter((g) => g.id !== id);
+    const remaining = this.groups.filter((g) => g.id !== id); this.threadsGoing([group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)]);
     saveRegistryFor("groups.json", group.dm ? "the chat deletion" : "the room deletion", () => this.saveGroups(remaining));
     this.groups = remaining;
     for (const threadId of new Set([group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)])) {
@@ -1059,7 +1059,7 @@ export class Store {
     const missing = unique.filter((id) => !present.has(id));
     if (deleted.length >= group.tasks.length) return null;
     if (!deleted.length) return { group, deleted, missing };
-    const doomed = new Set(deleted);
+    const doomed = new Set(deleted); this.threadsGoing(deleted);
     mdb.deleteThreads(deleted, () => this.commitGroupChange(group, "the thread deletion", () => {
       group.tasks = group.tasks!.filter((task) => !doomed.has(task.threadId));
       if (doomed.has(group.threadId)) mirrorActiveGroupTask(group, group.tasks[0]!);
@@ -1450,7 +1450,7 @@ export class Store {
     const bot = this.bot(id);
     if (!bot) return false;
     if (bot.defaultBot) throw Object.assign(new Error(defaultBotRefusal(bot.name)), { status: 409 });
-    let nextBots = this.bots.filter((b) => b.id !== id);
+    let nextBots = this.bots.filter((b) => b.id !== id); this.threadsGoing([bot.threadId, ...(bot.tasks ?? []).map((t) => t.threadId)]);
     if (setupRequest) {
       const chief = this.bot(setupRequest.botId);
       if (!chief || chief.id === id || setupRequest.deletion?.botId !== id) throw new Error("The reviewed deletion no longer has a valid owner");
@@ -2267,7 +2267,7 @@ export class Store {
     const deleted = unique.filter((id) => present.has(id));
     const missing = unique.filter((id) => !present.has(id));
     if (!deleted.length) return { bot, deleted, missing };
-    const doomed = new Set(deleted);
+    const doomed = new Set(deleted); this.threadsGoing(deleted);
     mdb.deleteThreads(deleted, () => this.commitBotChange(bot, "the thread deletion", () => {
       const kept = bot.tasks!.filter((t) => !doomed.has(t.threadId));
       const visible = nextOpenThread(kept) ?? this.buildTask(bot);

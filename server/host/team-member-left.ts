@@ -22,11 +22,20 @@ import { audienceHome } from "../engine-homes/layout.ts";
 import { forgetBotMemoryJournal, journalFile } from "../memory-journal.ts";
 import { deleteBotMemoryFiles } from "../message-db.ts";
 import { personKey } from "../person-key.ts";
+import { removeMemoryLayer, type MemoryLayerRecords } from "./delete-leftovers.ts";
 import { memberUploads } from "./member-uploads.ts";
 
 /** A file in attachments/, by its URL or by its path (as JSON escapes it) a sent document's tag carries. */
 const ATTACHMENT = /attachments(?:\/|\\)+([A-Za-z0-9][\w.-]{0,200})/g;
 const PERSON = /^p_[\w-]{22}$/;
+
+export const memoryLayerRecords: MemoryLayerRecords = {
+  journalFile,
+  forget(layer) {
+    deleteBotMemoryFiles(layer);
+    forgetBotMemoryJournal(layer);
+  },
+};
 
 export interface TeamMemberLeftDeps {
   dataDir: string;
@@ -135,10 +144,7 @@ export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) 
     let entries: string[] = [];
     try { entries = readdirSync(workspaces); } catch {}
     for (const layer of entries.filter((entry) => entry.endsWith(`--member-${person}`))) {
-      rmSync(join(workspaces, layer), { recursive: true, force: true });
-      rmSync(journalFile(layer), { force: true });
-      deleteBotMemoryFiles(layer);
-      forgetBotMemoryJournal(layer);
+      removeMemoryLayer(deps.dataDir, layer, memoryLayerRecords);
       layers++;
     }
     rmSync(join(deps.dataDir, "people", person), { recursive: true, force: true });

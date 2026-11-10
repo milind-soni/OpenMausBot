@@ -3459,7 +3459,8 @@
       "native.connect.desktopApp": "8a430f237e81cf9cca9ea0bb61a612ee0c408247919acbfeb9b76963b0c94ee2",
       "server.runOwner.onlyAskerStops": "832c893848422bf9040e17b415756f5466d3988354b4e661cb73511be36ff56e",
       "server.runOwner.notYourQueued": "18216333edfdf5e36266b29f5fb8f41152345ab4700f69fe64a0f609743fe25d",
-      "server.runOwner.waitsItsTurn": "e8cd9fac4417e654d67bd9b2bb8a0ebf3ffc70b328de47fd1039da6995b84462"
+      "server.runOwner.waitsItsTurn": "e8cd9fac4417e654d67bd9b2bb8a0ebf3ffc70b328de47fd1039da6995b84462",
+      "server.runOwner.onlyAskerRetries": "d484d96fcb6a67c571cccb47ec50b631f17253f7ab1261c929bb7e91571f6c82"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -33849,6 +33850,7 @@
       "server.runOwner.onlyAskerStops": "832c893848422bf9040e17b415756f5466d3988354b4e661cb73511be36ff56e",
       "server.runOwner.notYourQueued": "18216333edfdf5e36266b29f5fb8f41152345ab4700f69fe64a0f609743fe25d",
       "server.runOwner.waitsItsTurn": "e8cd9fac4417e654d67bd9b2bb8a0ebf3ffc70b328de47fd1039da6995b84462",
+      "server.runOwner.onlyAskerRetries": "d484d96fcb6a67c571cccb47ec50b631f17253f7ab1261c929bb7e91571f6c82",
       "secretCard.modelgo.description": "b09e97c010524be77e50e4429d199218a3a3199a187f3edbacd81c9c661b1439",
       "native.teamLink.otherTitle": "d160e3032fd4f4fedabfad5fc84852563d0cf85dcdbf92e82f9a06359a8d8522",
       "native.teamLink.otherDetail": "11b8a9828b4afd5d0e6aef778751b00fe688893eee2e81e9865e834f21f8391d",
