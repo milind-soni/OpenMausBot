@@ -5,7 +5,7 @@ import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 import { codexShellDisabled, GUEST_CONFINED_CODEX_ARGS } from "./codex-guest.ts";
 import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.ts";
 import { enabledMcpMounts, mcpStartupTracker, supportsMcpStartup } from "./codex-mcp-startup.ts";
-import { boxProxyEnvNames, type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
+import { boxProxyEnvNames, customServerEnvBox, type McpApprovalMode, mountMcpServer } from "./codex-mcp-mount.ts";
 import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
 // `turn/completed`, approvals arrive as server→client requests, resumeCursor is the codex thread id.
@@ -659,7 +659,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const child = spawnHoldingSlot(releaseSlot, () => spawnCli(...codexLaunch(config.cli, appServerArgs), {
           cwd: turn.cwd ?? homedir(),
           env,
-          stdio: ["pipe", "pipe", "pipe"],
+          stdio: ["pipe", "pipe", "pipe"], ...customServerEnvBox(turn.integrations?.custom, selectedMcp),
         }, "bot"));
 
       let abandoned = false;

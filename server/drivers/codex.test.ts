@@ -27,6 +27,7 @@ import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import * as procs from "../procs.ts";
 import { botBox } from "../bot-box/box.ts";
+import { boxEnvironment } from "../bot-box/env.ts";
 import { autoVerdict } from "../auto-approve.ts";
 import { formatQuestionAnswers } from "../../shared/ask-question.ts";
 
@@ -1312,6 +1313,36 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(await envVars("t-unboxed-proxy")).toEqual(["LIST"]);
     vi.spyOn(botBox, "enabled").mockReturnValue(true);
     expect(await envVars("t-boxed-proxy")).toEqual(["LIST", "HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy"]);
+  }, 20_000);
+
+  it("lets a person's own stdio server's env through the bot box to Codex, which hands it on by name", async () => {
+    await create();
+    const realSpawnCli = procs.spawnCli;
+    const spawns: Parameters<typeof procs.spawnCli>[] = [];
+    const spawnSpy = vi.spyOn(procs, "spawnCli").mockImplementation((...args: Parameters<typeof procs.spawnCli>) => {
+      spawns.push(args);
+      return realSpawnCli(...args);
+    });
+    const appServer = () => spawns.find(([, args]) => args.some((arg) => arg.startsWith("mcp_servers.")))?.[2];
+    try {
+      const woo = { command: "python3", args: ["woo.py"], env: { WOO_KEY: "ck_fixture", TRC_ONLY: "1" } };
+      await instance.adapter.sendTurn({ threadId: "t-box-env", text: "go", integrations: { custom: { woo } } });
+      await recorder.until((event) => event.type === "turn.completed" && event.threadId === "t-box-env");
+      const options = appServer()!;
+      const allow = new Set(typeof options.box === "object" ? options.box.allowEnv : []);
+      expect([...allow].sort()).toEqual(["TRC_ONLY", "WOO_KEY"]);
+      // The box keeps only its allow-list: without these names the server would start with neither.
+      expect(boxEnvironment(options.env!, new Set(), new Set())).not.toHaveProperty("WOO_KEY");
+      expect(boxEnvironment(options.env!, new Set(), allow)).toMatchObject({ WOO_KEY: "ck_fixture", TRC_ONLY: "1" });
+
+      spawns.length = 0;
+      const plain = { command: "python3", args: ["todo.py"], env: {} };
+      await instance.adapter.sendTurn({ threadId: "t-box-no-env", text: "go", integrations: { custom: { plain } } });
+      await recorder.until((event) => event.type === "turn.completed" && event.threadId === "t-box-no-env");
+      expect(appServer()).not.toHaveProperty("box");
+    } finally {
+      spawnSpy.mockRestore();
+    }
   }, 20_000);
 
   it("reaches a url server through OpenMausBot's connector on Codex's own login, header values off argv", async () => {
