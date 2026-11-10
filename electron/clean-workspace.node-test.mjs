@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import test from "node:test";
 
 import { cleanWorkspaceConfig, cleanWorkspaceDir, createCleanWorkspace, DEFAULT_PROFILE, profileDir, profilesDir } from "./clean-workspace.mjs";
@@ -340,4 +340,63 @@ test("lending goes on from a profile: the sign-in alone decides, and only the wo
   assert.deepEqual(cloudLendingVerdict(grant, target.cloud(env), env), { allow: true });
   state = { status: "signed-out", account: null, machine: null };
   assert.notDeepEqual(cloudLendingVerdict(grant, target.cloud(env), env), { allow: true }, "signed out: nothing is lent, profile or not");
+});
+
+/** A named local environment's folder: anywhere the person chose, neither the clean workspace nor under the profiles' folder. */
+const workFolder = (w) => join(dirname(w.dataDir), "work-environment");
+const onWork = (w) => w.requests.filter(([folder]) => folder === workFolder(w));
+
+test("a named local environment is not this computer's own copy: the move gets the copy's own marker and identity, nothing else", async (t) => {
+  const w = computer(t);
+  const request = w.clean.realCopy(w.request);
+  w.running = workFolder(w);
+  assert.deepEqual([w.clean.active(), w.clean.profile(), w.clean.ownCopy()], [false, null, false]);
+  assert.deepEqual(await (await request("/api/move/freeze")).json(), { frozen: true, cloud: CLOUD });
+  assert.deepEqual(await (await request("/.well-known/openmausbot/environment")).json(), { environmentId: "own-copy-id" }, "the Admin never hears the environment's identity as this computer's");
+  for (const [route, init] of [["/api/bots?messages=0"], ["/api/cloud-send?move=1"], ["/api/move/freeze", { method: "POST" }], ["/api/move/freeze", { method: "DELETE" }], ["/api/move/forget", { method: "POST" }]]) {
+    await assert.rejects(request(route, init), { code: "clean-workspace" }, `${init?.method ?? "GET"} ${route}`);
+  }
+  await assert.rejects(w.clean.holding(() => request("/api/move/forget", { method: "POST" })), { code: "clean-workspace" });
+  assert.deepEqual(w.swaps, [], "the environment the person chose stays open");
+  assert.deepEqual(w.requests, [], "nothing reached its server");
+});
+
+test("only the data folder itself is this computer's own copy: however it is spelled, and never with no server at all", (t) => {
+  const w = computer(t);
+  w.running = `${w.dataDir}${sep}`;
+  assert.equal(w.clean.ownCopy(), true, "a trailing separator is the same folder");
+  w.running = join(w.dataDir, "..", ".openmausbot");
+  assert.equal(w.clean.ownCopy(), true);
+  w.running = null;
+  assert.equal(w.clean.ownCopy(), false);
+  w.running = `${w.dataDir}-work`;
+  assert.equal(w.clean.ownCopy(), false, "a folder beside it is another folder");
+});
+
+test("no first move from a named local environment: nothing is carried or frozen, the Admin hears why, and it starts from the data folder", async (t) => {
+  const w = moved(t, { state: ready(), journal: null, marker: null });
+  w.running = workFolder(w);
+  await w.main.kick();
+  assert.equal(w.journal, null, "no move started");
+  assert.deepEqual(onWork(w), []);
+  assert.equal(w.main.oneHome.facts().noted, "local_unavailable");
+  assert.deepEqual([w.main.moveStatus.read().phase, w.main.moveStatus.read().reason], ["none", "local_unavailable"]);
+  assert.equal(w.main.view(), null, "no line says the bots are moving");
+  w.running = w.dataDir;
+  await w.main.kick();
+  assert.equal(w.journal?.v, 1, "this computer's own copy running, the move starts");
+  assert.deepEqual(w.requests.find(([, , route]) => route.startsWith("/api/cloud-send")), [w.dataDir, "GET", "/api/cloud-send?move=1"]);
+  assert.deepEqual(onWork(w), []);
+});
+
+test("a named local environment is never forgotten in place of this computer's copy, nor topped up from", async (t) => {
+  const w = moved(t, { state: ready(), journal: done({ doneAt: 2 }) });
+  w.running = workFolder(w);
+  await w.main.kick();
+  assert.deepEqual(onWork(w), []);
+  assert.equal(w.journal.forgot, undefined, "deleted later, from the copy itself");
+  assert.equal(w.journal.version, "0.1.140", "the top-up waits too");
+  w.running = w.dataDir;
+  await w.main.kick();
+  assert.deepEqual(w.requests.filter(([, , route]) => route === "/api/move/forget"), [[w.dataDir, "POST", "/api/move/forget"]]);
 });

@@ -4,6 +4,7 @@ import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
 import { isLoopback } from "../provider-key-check.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
 import { isContextName, isOllama, serveWithWindow } from "./ollama-context.ts";
+import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, ollamaOrigin, ollamaUnavailable, onOllamaPort, probeOllama, type OllamaModel, type OllamaStatus } from "./ollama.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 import {
   freeDefault, freeFallbackCatalog, freeLabel, freeToolModels, freeToolsFirst, isOpenRouterOrigin, openRouterFreeTier,
@@ -36,6 +37,14 @@ const DEFAULT_MODELS: ModelCatalog = {
     { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (Groq)", custom: true },
   ],
 };
+
+const NO_MODELS: ModelCatalog = { default: "", options: [] };
+const OLLAMA_STATUS_MS = 5_000;
+
+const localFacts = ({ bytes, parameters, quantization, tools, vision }: OllamaModel) => ({
+  ...(bytes ? { bytes } : {}), ...(parameters ? { parameters } : {}), ...(quantization ? { quantization } : {}),
+  ...(tools !== undefined ? { tools } : {}), ...(vision !== undefined ? { vision } : {}),
+});
 
 const DEFAULT_KEY_ENV = "OPENAI_COMPAT_API_KEY";
 /** A provider's own key: such an instance never falls back to the workspace OpenAI-compatible key, URL,
@@ -75,8 +84,9 @@ export interface OpenAICompatConfig {
   tools?: boolean;
   url: string;
   apiKeyEnv: string;
-  /** Which model list the server serves besides /models: OpenAI's own, or LM Studio's native /api/v1/models. */
-  catalog?: "openai" | "lmstudio";
+  /** Which model list the server serves besides /models: OpenAI's own, LM Studio's native /api/v1/models, or
+   * Ollama's /api/tags. */
+  catalog?: "openai" | "lmstudio" | "ollama";
   key?: string;
   model?: string;
   provider?: string;
@@ -85,6 +95,7 @@ export interface OpenAICompatConfig {
   replyWaitMinutes?: number;
 }
 
+const CATALOGS = ["openai", "lmstudio", "ollama"] as const;
 export const MAX_REPLY_WAIT_MINUTES = 60;
 const isReplyWait = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= MAX_REPLY_WAIT_MINUTES;
 
@@ -128,7 +139,7 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
   if (config.tools !== undefined && typeof config.tools !== "boolean") throw new Error("tools must be a boolean");
   if (config.managedModels !== undefined && (!Array.isArray(config.managedModels) || !config.managedModels.length || config.managedModels.some(model => typeof model !== "string" || !model.trim()))) throw new Error("Invalid managed models.");
   const ownKey = typeof config.apiKeyEnv === "string" && OWN_KEY_ENVS.has(config.apiKeyEnv);
-  if (config.catalog !== undefined && config.catalog !== "openai" && config.catalog !== "lmstudio") throw new Error("catalog must be \"openai\" or \"lmstudio\"");
+  if (config.catalog !== undefined && !CATALOGS.includes(config.catalog as never)) throw new Error("catalog must be \"openai\", \"lmstudio\" or \"ollama\"");
   if (config.replyWaitMinutes !== undefined && !isReplyWait(config.replyWaitMinutes)) throw new Error(`replyWaitMinutes must be a whole number from 1 to ${MAX_REPLY_WAIT_MINUTES}`);
   const envUrl = ownKey ? undefined : process.env.OPENAI_COMPAT_URL;
   return {
@@ -140,7 +151,7 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
     apiKeyEnv: typeof config.apiKeyEnv === "string" && config.apiKeyEnv
       ? config.apiKeyEnv
       : DEFAULT_KEY_ENV,
-    ...(config.catalog === "openai" || config.catalog === "lmstudio" ? { catalog: config.catalog } : {}),
+    ...(CATALOGS.includes(config.catalog as never) ? { catalog: config.catalog as OpenAICompatConfig["catalog"] } : {}),
     key: typeof config.key === "string" && config.key ? config.key : undefined,
     model: typeof config.model === "string" && config.model
       ? config.model
@@ -172,17 +183,23 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     const { config } = input;
     // An instance naming its own key variable reads only that one: the workspace key must not reach its host.
     const ownKeyVariable = config.apiKeyEnv !== DEFAULT_KEY_ENV;
-    const apiKey =
+    const savedKey =
       config.key ??
       input.environment[config.apiKeyEnv] ??
       (ownKeyVariable ? undefined : input.environment[DEFAULT_KEY_ENV]) ??
       process.env[config.apiKeyEnv] ??
       (ownKeyVariable ? undefined : process.env[DEFAULT_KEY_ENV]) ??
       "";
+    // A server someone gave a fixed model list to is not asked what else it might be, unless it is on Ollama's own port.
+    const ollamaCandidate = config.catalog === "ollama" || (config.catalog === undefined && (onOllamaPort(config.url) || (onThisNetwork(config.url) && !config.managedModels)));
+    // Another server on this network is only asked for Ollama's model list once it has answered Ollama's version route.
+    const answersAsOllama = () => isOllamaServer(config) || isOllama(ollamaOrigin(config.url));
+    if (!savedKey && ollamaCandidate && !isOllamaServer(config) && await answersAsOllama()) await probeOllama(config.url, { timeoutMs: 1_500 });
+    const apiKey = savedKey || (ollamaCandidate && isOllamaServer(config) ? OLLAMA_PLACEHOLDER_KEY : "");
     const missingKey = !ownKeyVariable || OWN_KEY_ENVS.has(config.apiKeyEnv)
       ? "No API key — open Settings → API keys."
       : `no API key — set ${config.apiKeyEnv} or add it to the instance config`;
-    const seeded = config.catalog === "openai" ? OPENAI_MODELS : DEFAULT_MODELS;
+    const seeded = config.catalog === "openai" ? OPENAI_MODELS : isOllamaServer(config) ? NO_MODELS : DEFAULT_MODELS;
     let catalog: ModelCatalog = config.managedModels
       ? { default: config.managedModels[0], options: config.managedModels.map(id => ({ id, label: id })) }
       : config.model
@@ -197,9 +214,31 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     const gemini = isGeminiOrigin(config.url);
     const freeTier = () => openRouter ? openRouterFreeTier(apiKey, config.url) : Promise.resolve(null);
 
+    const facts = new Map<string, OllamaModel>();
+    const fact = (model: string) => facts.get(model) ?? facts.get(`${model}:latest`);
+    let ollama: { at: number; status: Promise<OllamaStatus> } | null = null;
+    const checkOllama = () => {
+      if (!ollama || Date.now() - ollama.at > OLLAMA_STATUS_MS) ollama = { at: Date.now(), status: probeOllama(config.url, { key: apiKey, timeoutMs: 3_000 }) };
+      return ollama.status;
+    };
+    const listOllama = async (): Promise<boolean> => {
+      if (!await answersAsOllama()) return false;
+      const status = await probeOllama(config.url, { key: apiKey, timeoutMs: 8_000, capabilities: true });
+      ollama = { at: Date.now(), status: Promise.resolve(status) };
+      if (!isOllamaServer(config) || (status.state !== "ready" && status.state !== "no-models")) return false;
+      facts.clear();
+      for (const model of status.models) facts.set(model.name, model);
+      if (config.managedModels) return true;
+      const options: ModelCatalog["options"] = status.models.map((model) => ({ id: model.name, label: model.name, custom: true, local: localFacts(model) }));
+      if (config.model && !options.some((model) => model.id === config.model)) options.unshift({ id: config.model, label: config.model, custom: true });
+      catalog = { default: config.model ?? options[0]?.id ?? "", options };
+      return true;
+    };
+
     const fetchModels = async () => {
-      if (config.managedModels) return;
       if (!apiKey) return;
+      if (ollamaCandidate && await listOllama()) return;
+      if (config.managedModels) return;
       try {
         // Only a server added as LM Studio: any other local server would get a request it never serves.
         const nativeUrl = config.catalog === "lmstudio" ? loopbackLmStudioV1Url(config.url) : null;
@@ -313,6 +352,13 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       nudgeAnnouncedAction: true,
       models: () => catalog,
       refreshModels: fetchModels,
+      imageInput: (model) => fact(model)?.vision ?? true,
+      toolUse: (model) => fact(model)?.tools ?? true,
+      ...(ollamaCandidate ? {
+        serverUnavailable: async () => {
+          return isOllamaServer(config) ? ollamaUnavailable(await checkOllama()) : null;
+        },
+      } : {}),
       requestBody: (model, messages, stream) => ({
         model,
         messages,

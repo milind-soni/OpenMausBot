@@ -60,8 +60,8 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
       data-org-blocked={row.blocked || undefined}
       disabled={row.blocked}
       aria-pressed={row.current}
-      aria-label={[modelOptionLabel(option), option.provider, reason].filter(Boolean).join(" · ")}
-      title={[modelOptionLabel(option), option.provider, reason].filter(Boolean).join(" · ")}
+      aria-label={[modelOptionLabel(option), option.provider, row.detail, reason].filter(Boolean).join(" · ")}
+      title={[modelOptionLabel(option), option.provider, row.detail, reason].filter(Boolean).join(" · ")}
       tabIndex={-1}
       onClick={() => onPick(instance, row.model ?? option.id, row.variant)}
       className={SIMPLE_MENU_ROW}
@@ -69,6 +69,7 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
       <Gutter />
       <RowLines label={row.label}>
         {row.route && <span data-simple-route className={SIMPLE_MENU_META}>{row.route}</span>}
+        {row.detail && <span data-simple-model-detail className={SIMPLE_MENU_META}>{row.detail}</span>}
         {reason && <span data-simple-org-blocked className={SIMPLE_MENU_META}>{reason}</span>}
       </RowLines>
       {row.current && <Check size={14} className="shrink-0 text-ink" aria-hidden="true" />}

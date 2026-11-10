@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { DesktopNoticesBridge, DesktopNoticesState } from "../../electron/desktop-prefs.mjs";
 import { GROK_MOVE_POPUP } from "./GrokMovePopup";
+import { NEW_LOOK_NOTICE } from "./NewLookNotice";
 import { SIMPLE_MODE_PROMPT } from "./SimpleModePrompt";
 import { UPDATES_CONSENT_POPUP } from "./UpdatesConsent";
 import { WHATS_NEW_POPUP } from "./whats-new/WhatsNewPopup";
@@ -18,7 +19,7 @@ export function useDesktopNotices(desktop: DesktopNoticesBridge | undefined): De
 }
 
 const OTHER_DIALOGS = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], [data-tour-card], [data-cloud-setup-ready]';
-const QUEUE_POPUPS = [GROK_MOVE_POPUP, WHATS_NEW_POPUP, UPDATES_CONSENT_POPUP, SIMPLE_MODE_PROMPT].join(", ");
+const QUEUE_POPUPS = [GROK_MOVE_POPUP, WHATS_NEW_POPUP, UPDATES_CONSENT_POPUP, SIMPLE_MODE_PROMPT, NEW_LOOK_NOTICE].join(", ");
 
 /** Any dialog on screen counts, modal or not, and the card that says a new Cloud is set up; never the queue's own popups. */
 export function otherDialogOpen(): boolean {

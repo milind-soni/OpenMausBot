@@ -566,6 +566,60 @@ it("R8 runs a chained @mention as a root of its own, with the hop recorded", () 
   expect((await f.roomView(room.id))).toMatchObject({ working: false, busyBotId: null });
 }), hostTimeout(60_000));
 
+it("R8 answers a direct bot @mention again for a bot that already spoke, up to three hops", () => scenario(async (f) => {
+  const mira = await f.bot("Mira", "Engineering");
+  const room = await f.room("Engineering", [f.clive.id, mira.id], { kind: "member", botId: f.clive.id });
+  f.script(f.clive.id,
+    { key: "C0", match: ["R8B-JOB"], reply: "R8B-C0: @Mira please check the total." },
+    { key: "C2", match: ["R8B-M1"], reply: "R8B-C2: @Mira and the tax line?" },
+    { key: "C-EXTRA", repeat: true, match: ["R8B"], reply: "R8B-EXTRA" });
+  f.script(mira.id,
+    { key: "M1", match: ["R8B-C0"], reply: "R8B-M1: 42. @Clive anything else?" },
+    { key: "M3", match: ["R8B-C2"], reply: "R8B-M3: tax is 4. @Clive done." },
+    { key: "M-EXTRA", repeat: true, match: ["R8B"], reply: "R8B-EXTRA" });
+  await f.post(room, "R8B-JOB: what is the week's total?");
+  await f.final(room.threadId, "R8B-M3");
+  await expect.poll(() => f.roomRoots(room.threadId).map((row: any) => row.status), { timeout: 15_000 }).toEqual(["completed", "completed", "completed", "completed"]);
+  expect(f.roomRoots(room.threadId).map((row: any) => row.brief.split(":")[0])).toEqual(["R8B-JOB", "Mentioned by Clive (hop 1)", "Mentioned by Mira (hop 2)", "Mentioned by Clive (hop 3)"]);
+  expect(f.turns().map((record: any) => record.planKey)).toEqual(["C0", "M1", "C2", "M3"]);
+  expect(nothingLive(f)).toEqual([]);
+}), hostTimeout(90_000));
+
+it("R8 does not run a bot twice for one reply when a nested mention already woke it", () => scenario(async (f) => {
+  const mira = await f.bot("Mira", "Engineering");
+  const bee = await f.bot("Bee", "Engineering");
+  const room = await f.room("Engineering", [f.clive.id, mira.id, bee.id], { kind: "mentions" });
+  f.script(bee.id,
+    { key: "B0", match: ["R8C-JOB"], reply: "R8C-B0: noted." },
+    { key: "B1", match: ["R8C-M1"], reply: "R8C-B1: agreed." },
+    { key: "B-EXTRA", repeat: true, match: ["R8C"], reply: "R8C-EXTRA" });
+  f.script(f.clive.id,
+    { key: "C0", match: ["R8C-JOB"], reply: "R8C-C0: @Mira please check, @Bee please confirm." },
+    { key: "C-EXTRA", repeat: true, match: ["R8C"], reply: "R8C-EXTRA" });
+  f.script(mira.id,
+    { key: "M1", match: ["R8C-C0"], reply: "R8C-M1: 42. @Bee agree?" },
+    { key: "M-EXTRA", repeat: true, match: ["R8C"], reply: "R8C-EXTRA" });
+  await f.post(room, "R8C-JOB: @Bee note this, then @Clive ask around.");
+  await f.final(room.threadId, "R8C-B1");
+  await expect.poll(() => nothingLive(f), { timeout: 15_000 }).toEqual([]);
+  expect(f.turns().map((record: any) => record.planKey)).toEqual(["B0", "C0", "M1", "B1"]);
+}), hostTimeout(90_000));
+
+it("R8 does not wake a bot that already spoke for an @everyone from another bot", () => scenario(async (f) => {
+  const mira = await f.bot("Mira", "Engineering");
+  const room = await f.room("Engineering", [f.clive.id, mira.id], { kind: "member", botId: f.clive.id });
+  f.script(f.clive.id,
+    { key: "C0", match: ["R8D-JOB"], reply: "R8D-C0: @Mira please check the total." },
+    { key: "C-EXTRA", repeat: true, match: ["R8D"], reply: "R8D-EXTRA" });
+  f.script(mira.id,
+    { key: "M1", match: ["R8D-C0"], reply: "R8D-M1: 42. Thanks @everyone." },
+    { key: "M-EXTRA", repeat: true, match: ["R8D"], reply: "R8D-EXTRA" });
+  await f.post(room, "R8D-JOB: what is the week's total?");
+  await f.final(room.threadId, "R8D-M1");
+  await expect.poll(() => nothingLive(f), { timeout: 15_000 }).toEqual([]);
+  expect(f.turns().map((record: any) => record.planKey)).toEqual(["C0", "M1"]);
+}), hostTimeout(90_000));
+
 const goalDone = (detail: string) => `<openmaus-goal>${JSON.stringify({ status: "completed", detail })}</openmaus-goal>`;
 const sendGoal = (f: any, bot: { id: string; threadId: string }, text: string) =>
   f.api("POST", `/api/bots/${bot.id}/messages`, { text, mode: "goal", threadId: bot.threadId });

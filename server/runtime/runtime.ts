@@ -1,5 +1,6 @@
 // The store is the only state: tick() is the only place work is admitted or dispatched, and no timer lives here.
 import { randomUUID } from "node:crypto";
+import { redactSecretsInText } from "../../shared/redact.ts";
 
 import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
@@ -577,7 +578,8 @@ export class Runtime {
     const n = this.store.get(id);
     if (!n || n.status !== "needs_input") return false;
     const now = this.clock.now();
-    n.answer = clip(text, BRIEF_MAX); delete n.question; delete n.decide; n.status = "queued"; n.lastActivityAt = now;
+    // Mask secrets before an over-long answer is clipped, so the cut can never leave part of one that redaction no longer matches.
+    n.answer = clip(text.length > BRIEF_MAX ? redactSecretsInText(text) : text, BRIEF_MAX); delete n.question; delete n.decide; n.status = "queued"; n.lastActivityAt = now;
     if (by) n.answeredBy = by; else delete n.answeredBy;
     const root = n.parentId ? this.store.get(n.rootId) : undefined;
     this.store.transaction(() => {

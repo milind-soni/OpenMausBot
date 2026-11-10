@@ -33,6 +33,12 @@ export function serverTerminal(cloudHome: boolean): boolean {
   return Boolean(window.ogb?.openInstallTerminal) && window.ogb?.remoteClient?.active !== true && !cloudHome;
 }
 
+/** Google's redirect goes to 127.0.0.1 on the server, which the person's browser can't reach when the server is a Cloud or
+ * another computer: there the paste-the-redirect step is the only way to finish, so it starts open. */
+export function redirectPasteOpen(cloudHome: boolean): boolean {
+  return cloudHome || window.ogb?.remoteClient?.active === true;
+}
+
 export function grokKeyInstead(instance: InstanceInfo, cloudHome: boolean): boolean {
   return instance.driverKind === "grokAgent" && needsCli(instance) && !serverTerminal(cloudHome);
 }
@@ -270,7 +276,7 @@ export function EngineWarningNotice({
 }
 
 function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; signInOnly: boolean }) {
-  const { refreshInstances, refreshModels } = useStore();
+  const { state, refreshInstances, refreshModels } = useStore();
   const [busy, setBusy] = useState<"install" | "signin" | "complete" | "check" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flow, setFlow] = useState<{ flowId: string; authorizationUrl: string } | null>(null);
@@ -369,7 +375,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
           <button type="button" onClick={() => void check()} className="w-full rounded-lg bg-control px-3 py-2 text-[12px] font-semibold text-ink hover:bg-raised-hover">
             {busy === "check" ? t("common.checking") : t("engineSetup.finishedSignIn")}
           </button>
-          <details className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
+          <details open={redirectPasteOpen(state.config?.cloudHome === true)} className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
             <summary className="cursor-pointer select-none">{t("engineSetup.otherComputer")}</summary>
             <p className="mt-2 leading-relaxed">{t("engineSetup.otherComputerHint")}</p>
             <input
@@ -405,7 +411,7 @@ export function hasSavedApiKey(instance: InstanceInfo): boolean {
 }
 
 function apiKeySetup(instance: InstanceInfo): boolean {
-  if (!(isApiKeyEngine(instance) || instance.install?.settings === "connections") || instance.snapshot.authenticationUnavailableReason) return false;
+  if (!(isApiKeyEngine(instance) || instance.install?.settings === "connections") || instance.snapshot.authenticationUnavailableReason || instance.serverKind === "ollama") return false;
   // A key engine with its own CLI (DeepSeek Harness) is installed first, then given the key.
   if (instance.snapshot.state !== "available") return !installCommandFor(instance.install);
   return instance.snapshot.authenticated === false;
@@ -576,7 +582,7 @@ export function EngineSetup({
     return <GrokKeyInstead className={className} unframed={unframed} />;
   }
 
-  if (!install || instance.snapshot.authenticationUnavailableReason) {
+  if (!install || instance.snapshot.authenticationUnavailableReason || instance.serverKind === "ollama") {
     return (
       <div className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
         <div className="text-[13px] font-semibold text-ink">{t("engineSetup.notReady", { name: engineDisplayName(instance) })}</div>

@@ -89,7 +89,7 @@ UI and harness, then removes its temporary data; the server log remains.
    account (fake values) for the test page's site. Pepper resumes and calls
    `fill_login`; the page's username and password boxes fill, the form is
    submitted, the tool result names only what was filled and where the page
-   went, and **Settings → Logins** lists the login by site without its
+   went, and **Settings → Vault** lists the login by site without its
    password. Open the same page under a subdomain: `fill_login` fills it
    too. Under another site, or plain http on a non-local address, it refuses
    and types nothing. Call `fill_login` with `submit: false`, then ask Pepper
@@ -100,7 +100,7 @@ UI and harness, then removes its temporary data; the server log remains.
    connect a service account limited to one vault holding a test Login item
    for the test page's site. Its row appears read-only, marked From
    1Password; `fill_login` fills it like a saved login. Pick another bot for
-   the vault under 1Password in Settings → Logins: Pepper no longer lists or
+   the vault under 1Password in Settings → Vault: Pepper no longer lists or
    fills it. Unit tests use a fake SDK and reach no network.
 
 11. Page dialogs: give the test page a button that calls `confirm()`, take control and press it. The question shows over
@@ -140,7 +140,7 @@ pnpm exec vitest run server/browser-engine.test.ts server/browser-runtime.test.t
   src/components/browser/StreamSurface.test.ts server/routes/browser-viewers.test.ts \
   src/components/BrowserPanel.test.ts src/components/SignInRequestCard.test.ts \
   server/sign-in-request.e2e.test.ts server/login-fill.test.ts server/vault-store.test.ts \
-  server/totp.test.ts server/routes/logins.test.ts src/components/LoginsSettings.test.ts \
+  server/totp.test.ts server/routes/logins.test.ts src/components/VaultSettings.test.ts \
   server/saved-login.e2e.test.ts server/onepassword.test.ts scripts/prepare-duckdb.test.mjs
 ```
 

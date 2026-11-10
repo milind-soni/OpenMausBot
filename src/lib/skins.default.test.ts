@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const values = new Map<string, string>();
 const os = { dark: false, listeners: new Set<() => void>() };
 
-// Each case loads fresh modules over the same storage, as a launch would; interface-mode keeps a per-session choice.
+// Each case loads fresh modules over the same storage, as a launch would (main.tsx's order); interface-mode keeps a
+// per-session choice.
 async function boot() {
   vi.resetModules();
-  const [{ settleAdvancedModeDefault, readAdvancedMode }, skins] = await Promise.all([import("./interface-mode"), import("./skins")]);
-  settleAdvancedModeDefault();
+  const [{ readAdvancedMode }, { settleInterfaceMode }, skins] = await Promise.all([import("./interface-mode"), import("./new-look"), import("./skins")]);
+  settleInterfaceMode();
   skins.applySkinChoice(skins.readSkinChoice());
   return { skin: document.documentElement.dataset.skin, advanced: readAdvancedMode(), stored: values.get("omb-skin") };
 }
@@ -70,7 +71,7 @@ describe("default skin", () => {
 
   it("keeps Midnight for an earlier install whose saved skin is missing or no longer exists", async () => {
     values.set("omb-installed", "2026-01-01T00:00:00.000Z");
-    expect(await boot()).toEqual({ skin: "midnight", advanced: true, stored: "midnight" });
+    expect(await boot()).toEqual({ skin: "midnight", advanced: false, stored: "midnight" });
     values.set("omb-skin", "retired-skin");
     expect(await boot()).toMatchObject({ skin: "midnight", stored: "midnight" });
   });

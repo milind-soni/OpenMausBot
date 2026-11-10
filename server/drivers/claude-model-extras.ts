@@ -56,6 +56,7 @@ export function claudeModelExtras(settings: Record<string, unknown>, env: Record
 export const STATIC_CLAUDE_MODELS: ModelCatalog = {
   default: "claude-sonnet-5",
   options: [
+    { id: "claude-fable-5-2", label: "Claude Fable 5.2", contextWindow: 1_000_000 },
     { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
     { id: "claude-fable-5", label: "Claude Fable 5" },
     { id: "claude-opus-5-5", label: "Claude Opus 5.5", contextWindow: 1_000_000 },
