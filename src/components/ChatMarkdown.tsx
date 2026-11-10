@@ -347,18 +347,18 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
   return (
     <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]" {...revealMenu.targetProps(source)}>
       {revealMenu.menu}
-      {preview.html
+      {preview.opens
         ? <SaveIconButton name={name ?? fileName(filePath)} save={save} retryable={save.retryable} />
         : <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />}
       <button
         type="button"
-        onClick={preview.html ? preview.show : () => void save.save()}
-        disabled={!preview.html && save.state === "saving"}
-        title={preview.html ? t("html.preview", { name: name ?? fileName(filePath) }) : t("chat.file.saveCopy")}
+        onClick={preview.opens ? preview.show : () => void save.save()}
+        disabled={!preview.opens && save.state === "saving"}
+        title={preview.opens ? preview.label : t("chat.file.saveCopy")}
         className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
       >
         {children}
-        {preview.html ? (
+        {preview.opens ? (
           <Eye size={12} className="shrink-0" aria-hidden="true" />
         ) : save.state === "saving" ? (
           <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />

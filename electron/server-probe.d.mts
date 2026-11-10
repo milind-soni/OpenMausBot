@@ -1,6 +1,6 @@
 import type { ServerInputProblem, ServerTransport } from "./server-address.mjs";
 
-export type ServerProbeProblem = ServerInputProblem | "unreachable" | "dns" | "certificate" | "notMausBot" | "loopback" | "localNetwork";
+export type ServerProbeProblem = ServerInputProblem | "unreachable" | "dns" | "certificate" | "notMausBot" | "desktopApp" | "loopback" | "localNetwork";
 export type ServerProbe =
   | { outcome: "found"; origin: string; label: string; version: string | null; transport: ServerTransport; code: string | null; credential: string | null }
   | { outcome: "problem"; problem: ServerProbeProblem; host?: string; code?: string; reason?: "refused" | "timeout" };

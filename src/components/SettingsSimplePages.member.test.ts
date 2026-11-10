@@ -15,7 +15,7 @@ vi.mock("./CloudUsageMeter", () => ({ useCloudUsageSettings: () => ({ usage: nul
 vi.mock("./ProIntroduction", () => ({ useCloudPlan: () => null, CloudPlanRow: () => null, CloudPlanFootnote: () => null }));
 vi.mock("./BrowserSettingsRows", () => ({ BuiltInBrowserRow: () => null, ServerSitesRow: () => null }));
 vi.mock("./AppSettingsRows", async (original) => ({ ...await original<object>(), BrowserProfilesRow: () => null }));
-vi.mock("./LoginsSettings", () => ({ LoginsSettings: () => null }));
+vi.mock("./VaultSettings", () => ({ VaultSettings: () => null }));
 
 const { SimpleAiPage, SimpleBillingPage, SimpleComputerPage } = await import("./SettingsSimplePages");
 

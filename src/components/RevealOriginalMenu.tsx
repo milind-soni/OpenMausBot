@@ -18,6 +18,23 @@ function revealBridge(): Reveal | undefined {
   return ogb?.remoteClient?.active ? undefined : ogb?.revealInFolder;
 }
 
+type OpenFolder = NonNullable<NonNullable<Window["ogb"]>["openFolder"]>;
+
+/** Opens a linked folder in Finder or Explorer on the desktop app that holds it; false lets the caller fall back. */
+export async function openLinkedFolder(folderPath: string, open: OpenFolder | undefined = openFolderBridge()): Promise<boolean> {
+  if (!open || !REVEALABLE_PATH.test(folderPath)) return false;
+  try {
+    return await open(folderPath) === "opened";
+  } catch {
+    return false;
+  }
+}
+
+function openFolderBridge(): OpenFolder | undefined {
+  const ogb = typeof window === "undefined" ? undefined : window.ogb;
+  return ogb?.remoteClient?.active ? undefined : ogb?.openFolder;
+}
+
 export function canRevealOriginal(source: string | undefined, reveal: Reveal | undefined = revealBridge()): source is string {
   return Boolean(reveal) && typeof source === "string" && REVEALABLE_PATH.test(source);
 }

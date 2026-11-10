@@ -13,7 +13,7 @@ import type { AdminActionRow } from "../admin-activity.ts";
 import type { AppConfig } from "../config.ts";
 import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
 import { McpOAuthError, McpSignInError, mcpCallbackOrigin } from "../mcp-oauth.ts";
-import { isRemoteMcpServer, parseStoredMcpServer } from "../mcp-registry.ts";
+import { isRemoteMcpServer, mcpServerNotFound, parseStoredMcpServer } from "../mcp-registry.ts";
 import { personKey } from "../person-key.ts";
 import { provesSameOrigin, requestOrigin, type RequestAuth } from "../request-auth.ts";
 import { APP_SLUG, appLabel, MCP_NAME, personKeyHeader } from "../team-connections.ts";
@@ -58,7 +58,7 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
       }
       if (kind === "mcp") {
         const found = server(id);
-        if (!found) return json(res, 404, { error: "MCP server not found." });
+        if (!found) return json(res, 404, { error: mcpServerNotFound(id) });
         if (scope === "person" && !isRemoteMcpServer(found)) return json(res, 409, { error: "Only a server reached by its address can be connected by each person." });
       }
       const before = deps.host.scopes.scope(kind, id);
@@ -114,7 +114,9 @@ export function createTeamConnectionRoutes(deps: TeamConnectionRouteDeps): Route
         const access = await deps.host.people.ensureAppsAccess(person, email);
         if (!access) return json(res, 503, { error: "Connected apps aren't available on this Cloud right now. Try again in a minute." });
         try {
-          return json(res, 200, await deps.composio.authorizeService(cfg, slug, null, access));
+          const started = await deps.composio.authorizeService(cfg, slug, null, access);
+          deps.host.people.appConnecting(person, slug);
+          return json(res, 200, started);
         } catch (error) {
           const status = (error as { status?: number }).status;
           return json(res, typeof status === "number" && status >= 400 && status < 500 ? status : 502, { error: error instanceof Error ? error.message : "The app's sign-in couldn't start." });

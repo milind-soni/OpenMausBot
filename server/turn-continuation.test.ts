@@ -1,6 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { classifyContinuable, writeTurnHandoff } from "./turn-continuation.ts";
@@ -45,6 +45,16 @@ describe("writeTurnHandoff", () => {
     expect(text).toContain("Almost done");
     expect(text).toContain("Stop reason: Stopped after 64 steps");
     expect(text).toContain("Tokens this turn: 10 in / 20 out");
+  });
+
+  it("returns an absolute handoff when OMB_DATA_DIR is relative", () => {
+    const dir = withTempDataDir();
+    process.env.OMB_DATA_DIR = relative(process.cwd(), dir);
+    const path = writeTurnHandoff({ threadId: "relative", turnId: "turn", toolCalls: 0, messages: [] });
+    expect(path).not.toBeNull();
+    expect(isAbsolute(path!)).toBe(true);
+    expect(dirname(path!)).toBe(join(dir, "handoffs"));
+    expect(readFileSync(path!, "utf8")).toContain("# Handoff");
   });
 
   it("returns null when the handoff cannot be written", () => {
