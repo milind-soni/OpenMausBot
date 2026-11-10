@@ -142,6 +142,53 @@ it("does not restore old status prices after a refresh invalidates them", async 
   } finally { pending.resolve(prices("free")); await status; }
 });
 
+it.each([
+  { outcome: "paid", statusFirst: false },
+  { outcome: "paid", statusFirst: true },
+  { outcome: "failed", statusFirst: false },
+  { outcome: "failed", statusFirst: true },
+])("keeps the final $outcome refresh facts with an overlapping status read (status first: $statusFirst)", async ({ outcome, statusFirst }) => {
+  const dir = mkdtempSync(join(tmpdir(), "omb-price-refresh-status-"));
+  dirs.push(dir);
+  const id = `refresh-status-${outcome}-${statusFirst}`;
+  savedListing(id);
+  const refreshStarted = deferred<void>();
+  const refreshGate = deferred<void>();
+  const statusStarted = deferred<void>();
+  const statusGate = deferred<ModelCatalog>();
+  let first = true;
+  const driver = createOpenCodeDriver(async () => {
+    if (first) {
+      first = false;
+      refreshStarted.resolve();
+      await refreshGate.promise;
+      if (outcome === "failed") throw new Error("fixture refresh unavailable");
+      return prices("paid");
+    }
+    statusStarted.resolve();
+    return statusGate.promise;
+  }, { everyMs: Infinity, liveLists: [] });
+  const instance = await driver.create(lifecycleInput(id, dir, "current", ""));
+  instances.push(instance);
+  const refresh = instance.refreshModels!();
+  let status: Promise<unknown> = Promise.resolve();
+  try {
+    await refreshStarted.promise;
+    status = instance.snapshot();
+    await statusStarted.promise;
+    if (statusFirst) { statusGate.resolve(prices("free")); await status; }
+    refreshGate.resolve();
+    await refresh;
+    if (!statusFirst) statusGate.resolve(prices("free"));
+    await status;
+    expect(await otherHeld(instance, dir)).toBeNull();
+  } finally {
+    refreshGate.resolve();
+    statusGate.resolve(prices("free"));
+    await Promise.all([refresh, status]);
+  }
+});
+
 it("uses retained prices when the catalog default is absent from the live session", async () => {
   const dir = mkdtempSync(join(tmpdir(), "omb-price-fallback-"));
   dirs.push(dir);

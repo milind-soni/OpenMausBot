@@ -726,11 +726,17 @@ const support = (
     resolveModels: async (environment, config, instanceId, fresh) => {
       priceCatalog = undefined;
       generation++;
-      if (fresh) markOpenCodeCatalogRefreshed(instanceId, (sources.now ?? Date.now)());
-      await refreshLiveModelLists(environment, { lists: sources.liveLists, fetch: sources.fetch, now: sources.now });
-      declareLiveOpenCodeModels(environment, sources.liveLists);
-      const catalog = await discover(environment, config.cli, { refresh: fresh === true });
-      return mergeLocalInject(catalog, environment);
+      let catalog: ModelCatalog | undefined;
+      try {
+        if (fresh) markOpenCodeCatalogRefreshed(instanceId, (sources.now ?? Date.now)());
+        await refreshLiveModelLists(environment, { lists: sources.liveLists, fetch: sources.fetch, now: sources.now });
+        declareLiveOpenCodeModels(environment, sources.liveLists);
+        catalog = await loadCatalog(environment, config.cli, { refresh: fresh === true });
+        return mergeLocalInject(catalog, environment);
+      } finally {
+        generation++;
+        priceCatalog = catalog;
+      }
     },
     buildPromptText: (turn) => turn.system ? `${turn.system}\n\n${turn.text}` : turn.text,
   };
