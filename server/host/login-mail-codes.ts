@@ -18,7 +18,7 @@ import type { EmailBot } from "../email/host.ts";
 import type { EmailAccount } from "../email/store.ts";
 import { waitForEmailCode, type CodeMailbox } from "../email-code.ts";
 import type { EmailCodeAnswer, EmailCodeAsk } from "../login-fill.ts";
-import type { BrokerAccess } from "../team-connections.ts";
+import { asPerson, type BrokerAccess, type PersonAppsAccess } from "../team-connections.ts";
 import type { ConnectorCardAnswer } from "./connector-cards.ts";
 
 export const MAIL_CARD_FILE = "email-code-card.json";
@@ -41,7 +41,7 @@ export interface LoginMailCodesDeps {
   personApps(): readonly string[];
   /** The member this turn may use the own connections of, or null. */
   turnPerson(threadId: string, generation: string): string | null;
-  appsAccess(person: string): BrokerAccess | null;
+  appsAccess(person: string): PersonAppsAccess | null;
   appAllowed(slug: string): boolean;
   /** The IMAP mailboxes this bot may read. */
   imapAccounts(bot: Bot): readonly EmailAccount[];
@@ -88,13 +88,14 @@ export function createLoginMailCodes(deps: LoginMailCodesDeps) {
   }
 
   async function appBoxes(turn: Turn, app: MailApp): Promise<CodeMailbox[]> {
-    const cfg = deps.cfg();
+    let cfg = deps.cfg();
     let access: BrokerAccess | undefined;
     if (deps.personApps().includes(app)) {
       const person = deps.turnPerson(turn.threadId, turn.generation);
       if (!person) return [];
-      access = deps.appsAccess(person) ?? undefined;
-      if (!access) return [];
+      const own = deps.appsAccess(person);
+      if (!own) return [];
+      [cfg, access] = asPerson(cfg, own);
     }
     const state = (await deps.composio.connectedServices(cfg, access))[app];
     if (!state?.connected) return [];
