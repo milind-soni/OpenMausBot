@@ -2433,6 +2433,29 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(JSON.parse(readFileSync(inherited, "utf8")).argv).not.toContain("--disallowedTools");
   });
 
+  it("denies the native skills this bot switched off, and only for that bot", async () => {
+    const { setNativeSkillEnabled } = await import("../native-skill-choices.ts");
+    setNativeSkillEnabled("bot-skills-off", "pdf", false);
+    setNativeSkillEnabled("bot-skills-off", "hatch-pet", false);
+    try {
+      const dump = join(scratch, "skills-off.json");
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump, OMB_CLAUDE_INHERIT_USER_CONFIG: "1" });
+      await instance.adapter.sendTurn({ threadId: "t-skills-off", botId: "bot-skills-off", text: "hi" });
+      await recorder.until((event) => event.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv[seen.argv.indexOf("--disallowedTools") + 1].split(",")).toEqual(["Skill(hatch-pet)", "Skill(pdf)"]);
+
+      const other = join(scratch, "skills-other.json");
+      await create(undefined, { FAKE_CLAUDE_DUMP: other, OMB_CLAUDE_INHERIT_USER_CONFIG: "1" });
+      await instance.adapter.sendTurn({ threadId: "t-skills-other", botId: "bot-skills-on", text: "hi" });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(JSON.parse(readFileSync(other, "utf8")).argv).not.toContain("--disallowedTools");
+    } finally {
+      setNativeSkillEnabled("bot-skills-off", "pdf", true);
+      setNativeSkillEnabled("bot-skills-off", "hatch-pet", true);
+    }
+  });
+
   it("passes an explicit empty available set to disable every Claude built-in", async () => {
     await create(undefined, {}, { tools: [], disallowedTools: [] });
     const dump = join(scratch, "no-builtins.json");

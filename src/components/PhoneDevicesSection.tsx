@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { t } from "@/lib/i18n";
 import { Loader2, ShieldCheck } from "lucide-react";
 import type { CompanionAccountState } from "../types/ogb";
@@ -22,6 +21,7 @@ import { PhonesList } from "./PhonesList";
 import { PairedPhones } from "./PairedPhones";
 import { TailnetComputers } from "./TailnetComputers";
 import { Card, Switch } from "./SettingsPrimitives";
+import { Layer } from "./Layer";
 import { productName } from "../lib/brand";
 import { useStore } from "@/state/store";
 
@@ -257,7 +257,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [close]);
-  // An ancestor with backdrop-filter becomes the containing block for `fixed`, so render into the body.
+  // An ancestor with backdrop-filter becomes the containing block for `fixed`, so it renders through Layer, on the body.
   const dialog = (
     <div ref={root} role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step}>
@@ -297,7 +297,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
       </div>
     </div>
   );
-  return typeof document === "undefined" ? dialog : createPortal(dialog, document.body);
+  return <Layer modal>{dialog}</Layer>;
 }
 
 /** A pairing code still open: anyone holding it can pair until it runs out, so it can be revoked here. */

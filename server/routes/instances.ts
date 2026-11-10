@@ -19,6 +19,13 @@ import {
   updateClaudeEndpoint,
   withClaudeEndpointInfo,
 } from "../claude-endpoints.ts";
+import {
+  claudeBedrockSchema,
+  claudeBedrockUpdateSchema,
+  newClaudeBedrock,
+  updateClaudeBedrock,
+  withClaudeBedrockInfo,
+} from "../claude-bedrock.ts";
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
 import { addEndpoint, addEndpointSchema, endpointBaseUrl, isAddedEndpoint, withEndpointUrls } from "../openai-compat-endpoints.ts";
@@ -67,7 +74,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
     botForThread, activeGroupTurnForBot,
   } = deps;
   const describeInstances = async () => hostedModels ? deps.describeInstances()
-    : withEndpointUrls(withCodexEndpointInfo(withClaudeEndpointInfo(await deps.describeInstances(), cfg.instances ?? {}), cfg.instances ?? {}), cfg.instances ?? {});
+    : withEndpointUrls(withCodexEndpointInfo(withClaudeBedrockInfo(withClaudeEndpointInfo(await deps.describeInstances(), cfg.instances ?? {}), cfg.instances ?? {}), cfg.instances ?? {}), cfg.instances ?? {});
   /** Bots, their backups and threads, the new-bot default, or a turn running on it: a provider in use can't go away. */
   const providerInUse = (instanceId: string): boolean => cfg.defaultModelSelection?.instanceId === instanceId || store.bots.some((bot) =>
     bot.modelSelection.instanceId === instanceId || bot.fallback?.some(candidate => candidate.instanceId === instanceId) || store.tasks(bot.id).some((task) => task.modelSelection?.instanceId === instanceId)) ||
@@ -224,6 +231,51 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         const previous = persistableInstanceConfigs(cfg)[instanceId];
         const addressChanged = agentEndpointAddress(previous) !== agentEndpointAddress(instances[instanceId]);
         if (!parsed.data.model && !hasExplicitModel(previous) && (parsed.data.token !== undefined || addressChanged)) await discoverAgentEndpointModels(instances[instanceId]);
+        await persistProviderInstance(instanceId, instances);
+        return json(res, 200, { instances: await describeInstances() });
+      } catch (error) {
+        const status = (error as { status?: unknown }).status;
+        return json(res, typeof status === "number" ? status : 400, { error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        providerInstancesChanging.delete(instanceId);
+        providerConfigBusy.set(false);
+      }
+    }
+
+    if (method === "POST" && path === "/api/instances/claude-bedrock") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const parsed = claudeBedrockSchema.safeParse(await readBody(req, 16384));
+      if (!parsed.success) return json(res, 400, { error: parsed.error.issues[0]?.message ?? "Enter a name, an AWS profile and a region." });
+      if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      providerConfigBusy.set(true);
+      try {
+        const { instanceId, instances } = newClaudeBedrock(cfg, parsed.data);
+        await persistProviderInstance(instanceId, instances);
+        return json(res, 201, { instanceId, instances: await describeInstances() });
+      } catch (error) {
+        const status = (error as { status?: unknown }).status;
+        return json(res, typeof status === "number" ? status : 400, { error: error instanceof Error ? error.message : String(error) });
+      } finally { providerConfigBusy.set(false); }
+    }
+
+    const bedrockPatch = /^\/api\/instances\/([\w.-]+)\/claude-bedrock$/.exec(path);
+    if (method === "PATCH" && bedrockPatch) {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const instanceId = bedrockPatch[1];
+      const parsed = claudeBedrockUpdateSchema.safeParse(await readBody(req, 16384));
+      if (!parsed.success) return json(res, 400, { error: parsed.error.issues[0]?.message ?? "Check the AWS profile, region and models." });
+      if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      if (busyProviderSelections().some((selection) => selection.instanceId === instanceId)) {
+        return json(res, 409, { error: "Wait for bots using this engine to finish before changing its settings." });
+      }
+      providerConfigBusy.set(true);
+      providerInstancesChanging.add(instanceId);
+      try {
+        const { instances } = updateClaudeBedrock(cfg, instanceId, parsed.data);
         await persistProviderInstance(instanceId, instances);
         return json(res, 200, { instances: await describeInstances() });
       } catch (error) {

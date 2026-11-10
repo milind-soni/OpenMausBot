@@ -116,6 +116,15 @@ export function useManagedSkills(bot: Bot) {
     setWorking(skill.name);
     setError("");
     try {
+      // Native skills live in the engine's own folders; the switch only affects this bot.
+      if (skill.origin === "native") {
+        await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ enabled: !skill.enabled }),
+        });
+        await refresh();
+        return;
+      }
       if (skill.origin === "library" && skill.enabled) {
         await api(`/api/skills-library/${encodeURIComponent(skill.name)}`, {
           method: "PATCH",
@@ -486,14 +495,12 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{skill.description}</div>
                     <div className="mt-0.5 text-[11px] text-ink-secondary">{t(skill.enabled && !skillSwitchOn(skill) ? "skills.foundWhenNeeded" : "skills.usedWhenRelevant")}</div>
                   </button>
-                  {skill.origin !== "native" && (
-                    <Switch
-                      checked={skillSwitchOn(skill)}
-                      aria-label={t(skillSwitchOn(skill) ? "skills.disableName" : "skills.enableName", { name: skill.name })}
-                      disabled={Boolean(working)}
-                      onClick={() => void toggle(skill)}
-                    />
-                  )}
+                  <Switch
+                    checked={skillSwitchOn(skill)}
+                    aria-label={t(skillSwitchOn(skill) ? "skills.disableName" : "skills.enableName", { name: skill.name })}
+                    disabled={Boolean(working)}
+                    onClick={() => void toggle(skill)}
+                  />
                   {skill.origin !== "imported" && skill.origin !== "native" && (
                     <button
                       aria-label={t("skills.removeName", { name: skill.name })}
