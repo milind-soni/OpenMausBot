@@ -224,6 +224,7 @@ describe("CI outputs", () => {
       "server/cloud-team-mausbot-reach.e2e.test.ts",
       "server/cloud-team-new-chat-private.e2e.test.ts",
       "server/cloud-team-open-reach.e2e.test.ts",
+      "server/cloud-team-own-key-apps.e2e.test.ts",
       "server/cloud-team-owners.e2e.test.ts",
       "server/cloud-team-people.e2e.test.ts",
       "server/cloud-team-per-person.e2e.test.ts",
@@ -531,7 +532,8 @@ describe("the repository's import graph", () => {
       .filter((file) => !/[/\\]ci-scope\.(?:mjs|test\.ts)$/.test(file));
     const mentionsTranslations = (file: string) => {
       const text = readFileSync(file, "utf8");
-      return [...text.matchAll(/locales/g)].some((match) => !/^locales\W{1,6}en\.json/.test(text.slice(match.index, match.index + 24)));
+      // A browser extension's own _locales folder is not one of ours.
+      return [...text.matchAll(/(?<!_)locales/g)].some((match) => !/^locales\W{1,6}en\.json/.test(text.slice(match.index, match.index + 24)));
     };
     const readers = new Set(files.filter(mentionsTranslations));
     const affected = files

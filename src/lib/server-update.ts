@@ -5,6 +5,7 @@ import { t } from "./i18n";
 export interface ServerUpdateCheck {
   current: string;
   install: "desktop" | "managed" | "docker" | "podman" | "npm" | "git" | "unknown";
+  channel?: "stable" | "newest";
   latest?: string;
   available: boolean;
   releaseUrl?: string;

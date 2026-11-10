@@ -210,6 +210,13 @@ class FakeCloudflare {
   rateLimitRetryAfter: string | null = null;
   readonly afterHooks = new Map<string, () => void>();
   readonly tunnels = new Map<string, FakeTunnel>();
+  /** Tunnel IDs with a connector up: a plain delete answers error 1022. */
+  readonly connectedTunnels = new Set<string>();
+  /** Connection cleanups after which cloudflared is back before the next request. */
+  reconnectsAfterCleanup = 0;
+  /** Whether `?cascade=true` deletes a connected tunnel. The API reference
+   * does not list it, so by default it is ignored. */
+  cascadeHonoured = false;
   dnsTotalCount: number | null = null;
   tunnelTotalCount: number | null = null;
   /** Answer the account-wide tunnel listing without `result_info`. */
@@ -431,10 +438,31 @@ class FakeCloudflare {
       this.after("delete_dns");
       return Response.json({ result: { id } });
     }
+    if (method === "DELETE" && url.pathname.endsWith("/connections")) {
+      const failed = await this.before("cleanup_connections");
+      if (failed) return failed;
+      const id = url.pathname.split("/").at(-2) ?? "";
+      this.connectedTunnels.delete(id);
+      if (this.reconnectsAfterCleanup > 0) {
+        this.reconnectsAfterCleanup -= 1;
+        this.connectedTunnels.add(id);
+      }
+      return jsonResult({});
+    }
     if (method === "DELETE" && url.pathname.includes("/cfd_tunnel/")) {
       const failed = await this.before("delete_tunnel");
       if (failed) return failed;
       const id = url.pathname.split("/").at(-1);
+      const cascade = this.cascadeHonoured && url.searchParams.get("cascade") === "true";
+      if (id && this.connectedTunnels.has(id) && !cascade) {
+        return Response.json({
+          errors: [{ code: 1_022, message: "Cannot delete a tunnel with active connections" }],
+          messages: [],
+          result: null,
+          success: false,
+        }, { status: 400 });
+      }
+      if (id) this.connectedTunnels.delete(id);
       for (const [name, tunnel] of this.tunnels) {
         if (tunnel.id === id) this.tunnels.delete(name);
       }
@@ -4056,5 +4084,216 @@ describe("the idle reclaim dry run", () => {
     await runScheduledCleanup(worker, { OMB_TUNNEL_OFFLINE_RECLAIM_DAYS: "1" });
     expect((await endpointState(twoDays.id)).status).toBe("deleted");
     expect((await endpointState(online.id)).status).toBe("ready");
+  });
+});
+
+describe("removing a tunnel whose computer is online", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    forgetTunnelRelease();
+  });
+
+  const minimum = (extra: Record<string, string> = {}) => relayVars({ TUNNEL_MIN_APP_VERSION: "0.1.145", ...extra });
+  const tunnelOf = (cloudflare: FakeCloudflare, computer: Computer) => {
+    const tunnel = cloudflare.tunnels.get(computer.state.tunnel_name);
+    if (!tunnel) throw new Error("fake tunnel missing");
+    return tunnel;
+  };
+  const tunnelDeletes = (cloudflare: FakeCloudflare, tunnelId: string) => deleteURLs(cloudflare)
+    .filter((url) => new URL(url).pathname.endsWith(`/cfd_tunnel/${tunnelId}`));
+  const connectionCleanups = (cloudflare: FakeCloudflare, tunnelId: string) => deleteURLs(cloudflare)
+    .filter((url) => new URL(url).pathname.endsWith(`/cfd_tunnel/${tunnelId}/connections`));
+  const retryNow = () => env.DB.prepare(
+    "UPDATE installation_endpoints SET last_cleanup_attempt_at = 0 WHERE status = 'deleting'",
+  ).run();
+
+  it("names Cloudflare's still-connected refusal and cleans up connections", async () => {
+    const tunnelId = "10000000-0000-4000-8000-000000000001";
+    const refused = new CloudflareAPI(readConfig(env).cloudflare, async () => Response.json({
+      errors: [{ code: 1_022, message: "Cannot delete a tunnel with active connections" }],
+      result: null,
+      success: false,
+    }, { status: 400 }));
+    await expect(refused.deleteTunnel(tunnelId)).rejects.toMatchObject({ code: "cf_tunnel_connected", status: 400 });
+
+    const seen: string[] = [];
+    const cleaned = new CloudflareAPI(readConfig(env).cloudflare, async (input, init) => {
+      seen.push(`${init?.method} ${new URL(input.toString()).pathname}`);
+      return jsonResult({});
+    });
+    await expect(cleaned.cleanupTunnelConnections(tunnelId)).resolves.toBeUndefined();
+    expect(seen).toEqual([`DELETE /client/v4/accounts/${PRIMARY_ACCOUNT}/cfd_tunnel/${tunnelId}/connections`]);
+    // A tunnel that is already gone has nothing to clean up.
+    const gone = new CloudflareAPI(readConfig(env).cloudflare, async () => jsonNotFound());
+    await expect(gone.cleanupTunnelConnections(tunnelId)).resolves.toBeUndefined();
+  });
+
+  it("drops the connections of a released tunnel and deletes it in the same attempt, and nothing hands it back", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "online-release@example.com");
+    const old = await computerWithTunnel(worker, cloudflare, owner.token, "online-release", "0.1.140");
+    const tunnel = tunnelOf(cloudflare, old);
+    connected(tunnel);
+    cloudflare.connectedTunnels.add(tunnel.id);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    cloudflare.calls.length = 0;
+
+    await runScheduledCleanup(worker, minimum());
+
+    expect(await endpointState(old.id)).toMatchObject({ status: "deleted", tunnel_id: null, dns_record_id: null, last_error_code: null });
+    expect(cloudflare.tunnels.has(old.state.tunnel_name)).toBe(false);
+    // Refused, connections dropped, deleted: back to back, as documented.
+    expect(deleteURLs(cloudflare).filter((url) => !url.includes("/dns_records/")).map((url) => new URL(url).pathname.split("/").slice(-2).join("/")))
+      .toEqual([`cfd_tunnel/${tunnel.id}`, `${tunnel.id}/connections`, `cfd_tunnel/${tunnel.id}`]);
+    expect(tunnelDeletes(cloudflare, tunnel.id).every((url) => !url.includes("cascade"))).toBe(true);
+
+    // The same old desktop asking again is refused before any provider call.
+    const creates = () => cloudflare.calls.filter((entry) => entry.method === "POST" && entry.url.endsWith("/cfd_tunnel")).length;
+    const before = creates();
+    const again = await askForTunnel(worker, old, 1, minimum());
+    expect(again.status).toBe(426);
+    await expect(again.json()).resolves.toEqual({ error: "update_required" });
+    expect(creates()).toBe(before);
+  });
+
+  it("deletes with cascade on the last round when cloudflared is back at once", async () => {
+    const cloudflare = new FakeCloudflare();
+    cloudflare.cascadeHonoured = true;
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "online-reconnect@example.com");
+    const old = await computerWithTunnel(worker, cloudflare, owner.token, "online-reconnect", "0.1.140");
+    const tunnel = tunnelOf(cloudflare, old);
+    cloudflare.connectedTunnels.add(tunnel.id);
+    cloudflare.reconnectsAfterCleanup = 2;
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    cloudflare.calls.length = 0;
+
+    await runScheduledCleanup(worker, minimum());
+
+    expect(await endpointState(old.id)).toMatchObject({ status: "deleted", tunnel_id: null });
+    expect(connectionCleanups(cloudflare, tunnel.id)).toHaveLength(2);
+    const deletes = tunnelDeletes(cloudflare, tunnel.id);
+    expect(deletes).toHaveLength(3);
+    expect(deletes.map((url) => new URL(url).searchParams.get("cascade"))).toEqual([null, null, "true"]);
+  });
+
+  it("stays inside its call budget, backs off, and keeps the release marking while a tunnel stays connected", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "online-stuck@example.com");
+    const first = await computerWithTunnel(worker, cloudflare, owner.token, "online-stuck-a", "0.1.140");
+    const second = await computerWithTunnel(worker, cloudflare, owner.token, "online-stuck-b", "0.1.140");
+    for (const each of [first, second]) cloudflare.connectedTunnels.add(tunnelOf(cloudflare, each).id);
+    cloudflare.reconnectsAfterCleanup = 1_000;
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const vars = minimum({ OMB_CLEANUP_SWEEP_LIMIT: "1" });
+    const firstTunnel = tunnelOf(cloudflare, first).id;
+    cloudflare.calls.length = 0;
+
+    await runScheduledCleanup(worker, vars);
+
+    expect(await endpointState(first.id)).toMatchObject({ status: "deleting", last_error_code: "cf_tunnel_connected", tunnel_id: firstTunnel });
+    expect(await endpointState(second.id)).toMatchObject({ status: "ready" });
+    // Bounded: the usual verified cleanup plus two rounds of cleanup and delete.
+    expect(connectionCleanups(cloudflare, firstTunnel)).toHaveLength(2);
+    expect(tunnelDeletes(cloudflare, firstTunnel)).toHaveLength(3);
+    expect(cleanupCalls(cloudflare).length).toBeLessThanOrEqual(14);
+
+    // Backing off, it neither takes the sweep's slot nor holds the release.
+    cloudflare.calls.length = 0;
+    await runScheduledCleanup(worker, vars);
+    expect(tunnelDeletes(cloudflare, firstTunnel)).toHaveLength(0);
+    expect(await endpointState(second.id)).toMatchObject({ status: "deleting", last_error_code: "cf_tunnel_connected" });
+
+    // Once the connector stays down both go.
+    cloudflare.reconnectsAfterCleanup = 0;
+    await retryNow();
+    await runScheduledCleanup(worker, vars);
+    await retryNow();
+    await runScheduledCleanup(worker, vars);
+    for (const each of [first, second]) expect(await endpointState(each.id)).toMatchObject({ status: "deleted", tunnel_id: null });
+    expect(cloudflare.tunnels.size).toBe(0);
+  });
+
+  it("records a failed connection cleanup, holds the release, and retries later", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "online-cleanup-fails@example.com");
+    const first = await computerWithTunnel(worker, cloudflare, owner.token, "online-cleanup-fails-a", "0.1.140");
+    const second = await computerWithTunnel(worker, cloudflare, owner.token, "online-cleanup-fails-b", "0.1.140");
+    const tunnel = tunnelOf(cloudflare, first);
+    cloudflare.connectedTunnels.add(tunnel.id);
+    cloudflare.failures.add("cleanup_connections");
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const vars = minimum({ OMB_CLEANUP_SWEEP_LIMIT: "1" });
+
+    await runScheduledCleanup(worker, vars);
+    expect(await endpointState(first.id)).toMatchObject({ status: "deleting", last_error_code: "cf_api_10000", tunnel_id: tunnel.id });
+    expect(tunnelDeletes(cloudflare, tunnel.id)).toHaveLength(1);
+    // A sweep that is failing for another reason still stops the marking.
+    await runScheduledCleanup(worker, vars);
+    expect(await endpointState(second.id)).toMatchObject({ status: "ready" });
+
+    cloudflare.failures.delete("cleanup_connections");
+    await retryNow();
+    await runScheduledCleanup(worker, vars);
+    expect(await endpointState(first.id)).toMatchObject({ status: "deleted", tunnel_id: null });
+    expect(cloudflare.tunnels.has(first.state.tunnel_name)).toBe(false);
+  });
+
+  it("never forces an idle reclaim: a tunnel still connected is left, then the reclaim is cancelled", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "online-idle@example.com");
+    const idle = await provisioned(worker, cloudflare, owner.token, "online-idle");
+    await quiet(idle.id, 30 * DAY_MS);
+    neverRan(idle.tunnel, 30);
+    // Its connector came up after the last check: Cloudflare refuses the delete.
+    cloudflare.connectedTunnels.add(idle.tunnel.id);
+    cloudflare.cascadeHonoured = true;
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    cloudflare.calls.length = 0;
+
+    await runScheduledCleanup(worker);
+
+    const marked = await endpointState(idle.id);
+    expect(marked).toMatchObject({ status: "deleting", last_error_code: "cf_tunnel_connected", tunnel_id: idle.tunnel.id });
+    expect(marked.reclaim_requested_at).not.toBeNull();
+    expect(connectionCleanups(cloudflare, idle.tunnel.id)).toHaveLength(0);
+    expect(tunnelDeletes(cloudflare, idle.tunnel.id)).toHaveLength(1);
+    expect(tunnelDeletes(cloudflare, idle.tunnel.id).some((url) => url.includes("cascade"))).toBe(false);
+
+    connected(idle.tunnel);
+    await retryNow();
+    await runScheduledCleanup(worker);
+
+    expect(await endpointState(idle.id)).toMatchObject({
+      last_error_code: "reclaim_cancelled",
+      reclaim_requested_at: null,
+      status: "error",
+      tunnel_id: idle.tunnel.id,
+    });
+    expect(cloudflare.tunnels.get(idle.state.tunnel_name)?.id).toBe(idle.tunnel.id);
+    expect(connectionCleanups(cloudflare, idle.tunnel.id)).toHaveLength(0);
+    expect(tunnelDeletes(cloudflare, idle.tunnel.id)).toHaveLength(1);
+  });
+
+  it("lets an owner delete an endpoint whose connector is still up", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "online-owner@example.com");
+    const endpoint = await provisioned(worker, cloudflare, owner.token, "online-owner");
+    connected(endpoint.tunnel);
+    cloudflare.connectedTunnels.add(endpoint.tunnel.id);
+
+    const deleted = await call(worker, "/v1/installations/self/endpoint", { method: "DELETE", token: endpoint.credential });
+
+    expect(deleted.status).toBe(204);
+    expect(await endpointState(endpoint.id)).toMatchObject({ status: "deleted", tunnel_id: null });
+    expect(connectionCleanups(cloudflare, endpoint.tunnel.id)).toHaveLength(1);
   });
 });

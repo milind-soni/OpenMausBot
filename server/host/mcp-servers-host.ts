@@ -122,6 +122,8 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
     /** How Test starts a command server: as the turns of its bot, or of any bot. */
     probeAs: (server: { bot?: string }) => (server.bot ? asBot(server.bot) : {}),
     mounted: (bot: Bot): Record<string, McpServerSpec> => withRestarts(health.usable(bot.id, keyed(bot).servers), restarts),
+    /** The servers set for this bot, started or not: who a change to one reaches. */
+    given: (bot: Bot): string[] => Object.keys(configured(bot)),
     /** Before a turn: any Vault key its servers read from a linked password manager, and the first start checks. */
     prepare: async (bot: Bot): Promise<void> => {
       if (deps.keys) {

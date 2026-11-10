@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { parseCloudList } from "./cloud-list.mjs";
 import environments from "./environments.cjs";
 import { createHomePlaces } from "./home-places.mjs";
 
@@ -92,4 +93,25 @@ test("a workspace of this computer's own or a server saved by hand is remembered
   assert.equal(w.places.remembered(), null);
   assert.deepEqual(world({ saved: { profile: "work", team: "team-acme" } }).places.remembered(), { team: "team-acme" }, "a file naming two: the first kind wins");
   assert.equal(world({ saved: { profile: 7 } }).places.remembered(), null, "an id that isn't one: nothing");
+});
+
+const listedHome = (name) => parseCloudList([{ id: "c-home", name, color: null, role: "owner", tier: "pro", runsOn: "cloud", status: "ready", origin: HOME, teamId: null, primary: true }]);
+const withHome = (name, clouds = listedHome(name)) => ({ ...connected([]), machine: { status: "ready", origin: HOME }, ...(clouds ? { clouds } : {}) });
+
+test("My Cloud renamed in the Admin (Settings → Name and colour) is renamed here on the next session check; nothing else is", () => {
+  const w = world({ state: { environments: [{ id: "c", kind: "remote", name: "My Cloud", origin: HOME, home: true }, { id: "s", kind: "remote", name: "Lab", origin: "https://lab.example.com" }], activeId: "c" } });
+  w.places.sync(withHome("My Cloud"));
+  assert.deepEqual(w.persisted, [], "the same name: nothing written");
+  w.places.sync(withHome("Freedom Fox"));
+  assert.deepEqual(w.state.environments.map((entry) => [entry.name, entry.home ?? false]), [["Freedom Fox", true], ["Lab", false]]);
+  w.places.sync(withHome("Freedom Fox"));
+  assert.equal(w.persisted.length, 1, "and once only");
+  w.places.sync(withHome("Other", null));
+  assert.equal(w.state.environments[0].name, "Freedom Fox", "an Admin without the list leaves the name as it was");
+});
+
+test("a listed name never renames a place that isn't home at the machine's address", () => {
+  const w = world({ state: { environments: [{ id: "s", kind: "remote", name: "Saved by hand", origin: HOME }], activeId: "s" } });
+  w.places.sync(withHome("Freedom Fox"));
+  assert.equal(w.state.environments[0].name, "Saved by hand");
 });

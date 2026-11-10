@@ -5,11 +5,12 @@
 	}
 	encode zstd gzip
 	handle /hooks/* {
-		reverse_proxy 127.0.0.1:8800
+		reverse_proxy unix//run/openmausbot/hooks.sock
 	}
 	handle {
-		reverse_proxy 127.0.0.1:8799 {
+		reverse_proxy unix//run/openmausbot/http.sock {
 			header_up X-Forwarded-Proto {upstream_scheme}
+			header_up -Accept-Encoding
 			flush_interval -1
 		}
 	}

@@ -281,7 +281,9 @@ their team page in MausBot Cloud (the Admin's Cloud page calls the routes below 
   asked in is only where the result is ("Done. The result is in Clerk's chat with Ada."), never the result: a private chat
   never reaches a room or the team (server/host/room-access.ts).
 - **Apps.** A member's own apps are their own installation on the connected-apps service (their own Composio user),
-  registered the first time they press Connect. Their turn gets a second bridge, `own_apps`, beside the team's
+  registered the first time they press Connect. While the team has its own Composio project key they are instead the
+  member's own Composio user in the team's project, and nothing of theirs goes to the service
+  ([composio.md](composio.md), "Keeping traffic off the managed service"); who gets them is the same. Their turn gets a second bridge, `own_apps`, beside the team's
   `composio`; the relay checks every frame again: the team's bridge refuses a `person` app (and code that calls apps
   while the team's own installation still holds one), a member's bridge refuses a team app and anything outside their
   own turn. A connection card for a `person` app is never shown: the bot gets one plain line to say, *"Connect your
@@ -296,14 +298,15 @@ their team page in MausBot Cloud (the Admin's Cloud page calls the routes below 
   used, else `Authorization: Bearer`) or their own sign-in; one not mounted is named to the bot with why and the fix. Both are pinned to the server's address: re-pointed, they aren't sent.
   Removing the server forgets every member's key and sign-in for it.
 - **Storage.** `team-connection-scopes.json` (no secret, carried by backups) and `people-connections/` (0700; each
-  member's installation token, keys and sign-ins, 0600), which no backup carries and no bot box binds. Nothing a route
+  member's installation token, keys and sign-ins, 0600; with the team's own key, `project-apps.json`: each member's
+  Composio user and Session ids and a short hash of the key, never the key), which no backup carries and no bot box binds. Nothing a route
   answers carries a key, a token or more of an address than its host.
 
 | Route | Who | |
 |---|---|---|
 | `PUT /api/team/connection-scopes { kind: "app" \| "mcp", id, scope: "team" \| "person" }` | admin | `{ scopes: { apps, mcp } }`; recorded in admin activity |
-| `GET /api/team/my-connections` | the member | `{ team, link, email, apps: [{ slug, name, connected, accounts }], mcp: [{ name, host, connected, how, offers }] }` |
-| `POST /api/team/my-connections/apps/:slug/connect` | the member | `{ url }`, the app's own sign-in (a new tab) |
+| `GET /api/team/my-connections` | the member | `{ team, link, email, apps: [{ slug, name, connected, accounts, reconnect? }], mcp: [{ name, host, connected, how, offers }], ownApps? }`; `reconnect: true` on an app they connected before the team changed its Composio key, to connect again; `ownApps: "needs-key"` when the connected-apps service is off and the team has no key |
+| `POST /api/team/my-connections/apps/:slug/connect` | the member | `{ url }`, the app's own sign-in (a new tab); 409 `own_apps_need_key` when an admin must add the team's key first |
 | `DELETE /api/team/my-connections/apps/:slug` | the member | |
 | `POST /api/team/my-connections/mcp/:name/sign-in` | the member | `{ auth }`; it comes back to this server's `/mcp-oauth/callback` |
 | `PUT /api/team/my-connections/mcp/:name/key { value, url? }` | the member | write-only; with `url`, returns 409 if the server URL changed |
@@ -884,9 +887,12 @@ opens the team's page on the Cloud site (`/cloud/team/<id>`), not a chat. Nothin
   (the team's), whichever chat wrote them; a routine is its place's (above, "Routines"). The Owner's whole-machine
   export leaves every member's private chats out (above), the Owner's own too: an export is the team's, never anyone's
   alone.
-- **Own apps with the team's own Composio project.** A member's own apps always use OpenMausBot's connected-apps
-  service, even when the team connected a Composio project key of its own; an app that needs the project's own auth
-  config can't be connected by each person.
+- **Own apps after the team changes its Composio key.** Saving, removing or replacing the team's key leaves every
+  member's own apps to be connected again. What they connected before stays where it was made (the connected-apps
+  service, or the earlier project) and is not erased from here.
+- **A member who leaves a team on the connected-apps service.** Their installation's token is forgotten here, but the
+  installation and its connections are not erased at the service. With the team's own key their connections are
+  removed from the project.
 
 ## The desktop app and a team it was invited to
 
