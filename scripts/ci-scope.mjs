@@ -52,6 +52,7 @@ export const VITEST_SUBSETS = {
     files: [
       "src/",
       "electron/cua-launch.test.mjs",
+      "electron/cua-watch-restart.test.mjs",
       "electron/cua-windows-isolation.test.mjs",
       "electron/menu.test.mjs",
       "electron/updater.test.mjs",
