@@ -532,6 +532,8 @@ describe("start_thread on another model, reporting back", () => {
       release(threadId);
       release("own-steer");
       await expect.poll(() => handoffs().filter((node) => node.threadId === threadId).every((node) => node.status === "completed"), { timeout: 15_000 }).toBe(true);
+      // The running turn itself read the correction mid-turn (the fake CLI echoes steers into its reply), not just the stored thread.
+      expect((await messages(threadId)).some((message) => message.role === "bot" && message.text?.includes("steered:") && message.text.includes("Also check the tests."))).toBe(true);
 
       const followUp = await api("POST", "/api/internal/coordinate-bots", { botIds: [pm.id], message: "One more: check the docs.", thread: threadId }, later);
       expect(followUp.status, JSON.stringify(followUp.body)).toBe(200);
