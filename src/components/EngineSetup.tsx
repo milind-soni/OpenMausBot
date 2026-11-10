@@ -15,6 +15,7 @@ export { installCommandFor };
 import { keyEntry, keyForInstance, type KeyId } from "./keys/key-catalog";
 import { openKeySettings } from "./keys/key-focus";
 import { KeyRow, SavedKeyLine } from "./keys/KeyRow";
+import { OllamaStatusLine } from "./OllamaStatusLine";
 
 export function needsSignIn(instance: InstanceInfo | undefined): boolean {
   return instance?.snapshot.state === "available" && instance.snapshot.authenticated === false;
@@ -407,7 +408,7 @@ export function isApiKeyEngine(instance: InstanceInfo | undefined): boolean {
 }
 
 export function hasSavedApiKey(instance: InstanceInfo): boolean {
-  return isApiKeyEngine(instance) && instance.snapshot.authenticated === true;
+  return isApiKeyEngine(instance) && instance.serverKind !== "ollama" && instance.snapshot.authenticated === true;
 }
 
 function apiKeySetup(instance: InstanceInfo): boolean {
@@ -503,6 +504,17 @@ function ApiKeyEngineSetup({ instance, className, unframed, configured = false }
   );
 }
 
+function CheckEnginesAgain() {
+  const { refreshInstances } = useStore();
+  const [busy, setBusy] = useState(false);
+  return (
+    <button type="button" disabled={busy} className="ui-button" onClick={() => { setBusy(true); void refreshInstances().finally(() => setBusy(false)); }}>
+      {busy && <Loader2 size={12} className="animate-spin" aria-hidden="true" />}
+      {t("common.checkAgain")}
+    </button>
+  );
+}
+
 export function ApiKeyEngineManage({ instance, className }: { instance: InstanceInfo; className?: string }) {
   if (!hasSavedApiKey(instance)) return null;
   return <ApiKeyEngineSetup instance={instance} className={className} unframed={false} configured />;
@@ -586,9 +598,11 @@ export function EngineSetup({
     return (
       <div className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
         <div className="text-[13px] font-semibold text-ink">{t("engineSetup.notReady", { name: engineDisplayName(instance) })}</div>
-        <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
-          {instance.snapshot.authenticationUnavailableReason ?? instance.snapshot.reason ?? t("engineSetup.noReason")}
-        </p>
+        {instance.snapshot.ollama
+          ? <div className="mt-1 flex flex-col items-start gap-2"><OllamaStatusLine status={instance.snapshot.ollama} /><CheckEnginesAgain /></div>
+          : <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
+              {instance.snapshot.authenticationUnavailableReason ?? instance.snapshot.reason ?? t("engineSetup.noReason")}
+            </p>}
       </div>
     );
   }

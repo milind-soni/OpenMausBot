@@ -238,7 +238,6 @@ describe("the chat engine on Ollama", () => {
     const { url } = await fakeOllama({ models: [LLAMA, GEMMA] });
     const instance = await create({ url: `${url}/v1`, catalog: "ollama" });
     try {
-      await instance.refreshModels?.();
       expect(instance.models).toEqual({
         default: "llama3.2:latest",
         options: [
@@ -253,15 +252,48 @@ describe("the chat engine on Ollama", () => {
   it("is unavailable, saying why, while Ollama is not running or has nothing to run", async () => {
     const closed = await create({ url: `${await closedPort()}/v1`, catalog: "ollama" });
     try {
-      expect(await closed.snapshot()).toMatchObject({ state: "unavailable", reason: expect.stringMatching(/^Ollama isn't running at /) });
+      expect(await closed.snapshot()).toMatchObject({ state: "unavailable", reason: expect.stringMatching(/^Ollama isn't running at /), ollama: { state: "not-running" } });
       expect(closed.models).toEqual({ default: "", options: [] });
     } finally { await closed.dispose(); }
     const { url } = await fakeOllama({ models: [] });
     const empty = await create({ url: `${url}/v1`, catalog: "ollama" });
     try {
       await empty.refreshModels?.();
-      expect(await empty.snapshot()).toMatchObject({ state: "unavailable", reason: expect.stringContaining("ollama pull llama3.2") });
+      expect(await empty.snapshot()).toMatchObject({ state: "unavailable", reason: expect.stringContaining("ollama pull llama3.2"), ollama: { state: "no-models", url } });
     } finally { await empty.dispose(); }
+  });
+
+  it("says so when a server added as Ollama answers as something else", async () => {
+    const { url } = await fakeOllama({ models: [LLAMA], tags: false });
+    const instance = await create({ url: `${url}/v1`, catalog: "ollama" });
+    try {
+      expect(await instance.snapshot()).toMatchObject({ state: "unavailable", reason: expect.stringContaining("it isn't Ollama"), ollama: { state: "unreachable", problem: "not-ollama" } });
+    } finally { await instance.dispose(); }
+  });
+
+  it("holds a first turn until the list says what its model can do", async () => {
+    const { url, chats } = await fakeOllama({ models: [GEMMA] });
+    const real = globalThis.fetch;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    vi.stubGlobal("fetch", (async (input, init) => {
+      if (String(input).endsWith("/api/show")) await held;
+      return real(input, init);
+    }) as typeof fetch);
+    const instance = await create({ url: `${url}/v1`, catalog: "ollama" });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      const threadId = randomUUID();
+      const started = instance.adapter.sendTurn({ threadId, text: "hi", model: "gemma2:2b" });
+      release();
+      await started;
+      await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId);
+      expect(chats[0]!.tools).toBeUndefined();
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("recognises a server someone added as OpenAI-compatible, and keeps its saved key and model", async () => {

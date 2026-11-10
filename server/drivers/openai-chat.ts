@@ -4,6 +4,7 @@ import type {
   DriverCreateInput,
   ModelCatalog,
   ProviderInstance,
+  ProviderSnapshot,
   RuntimeEvent,
   RuntimeEventListener,
   SendTurnInput,
@@ -120,7 +121,7 @@ interface RuntimeOptions<Config> {
   /** False for a model its server says cannot call tools: its turns go without them instead of being refused. */
   toolUse?: (model: string) => boolean;
   /** Why the server cannot answer now (not running, nothing to run), asked before the key is. */
-  serverUnavailable?: () => Promise<string | null>;
+  serverUnavailable?: () => Promise<Pick<ProviderSnapshot, "reason" | "ollama"> | null>;
   /** The name to send for a model, when its server knows it by another. */
   servedModel?: (model: string) => Promise<string>;
   /** Smaller models announce a step and end the turn without calling a tool; such a reply gets a nudge, at most three
@@ -941,7 +942,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     ...(options.refreshModels ? { refreshModels: options.refreshModels } : {}),
     snapshot: async () => {
       const down = await options.serverUnavailable?.();
-      if (down) return { state: "unavailable", reason: down };
+      if (down) return { state: "unavailable", ...down };
       if (!options.apiKey) return { state: "unavailable", reason: options.unavailableReason };
       if (keyRejected(options.apiUrl, options.apiKey)) return { state: "available", authenticated: false, reason: KEY_REJECTED_REASON, version: null };
       return { state: "available", authenticated: true, version: null, ...(options.billing ? { billing: options.billing } : {}) };

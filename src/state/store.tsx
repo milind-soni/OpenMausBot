@@ -473,7 +473,7 @@ export interface InstanceInfo extends InstanceEndpointInfo {
     version?: string | null;
     update?: { title: string; message: string; command: string };
     billing?: "metered" | "subscription";
-    warning?: { title: string; message: string };
+    warning?: { title: string; message: string }; ollama?: import("../../shared/local-model").OllamaProblem;
   };
   /** What one tiny test message through this AI showed, for its current sign-in; absent until one is sent. */
   aiTest?: import("../../shared/ai-ranking").AiTestState;
