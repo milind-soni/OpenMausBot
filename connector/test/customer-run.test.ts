@@ -71,7 +71,7 @@ async function server(options: { image?: string; seats?: number | null } = {}) {
     return {
       code: 0,
       output: [
-        JSON.stringify({ app: "openmausbot", pid: 41, owner: EMAIL }),
+        JSON.stringify({ app: "openmausbot", pid: 41, owner: EMAIL, box: "on" }),
         JSON.stringify({ environmentId: "env-1", label: SERVER_NAME, version: "0.1.151", admin: EMAIL }),
         home.seats === null ? JSON.stringify({ error: "Not found" }) : JSON.stringify({ seats: home.seats, people: [EMAIL] }),
       ].map((answer) => `${answer}\n\u001e\n`).join(""),
@@ -238,13 +238,16 @@ describe("a customer-run server: what leaves it", () => {
     return out;
   };
 
-  it("reads three fields from the home and drops everything else it answered", async () => {
+  it("reads four fields from the home and drops everything else it answered", async () => {
     const fixture = await server();
     expect(HOME_READS).toEqual(["/api/health", "/.well-known/openmausbot/environment", "/api/seats"]);
     const facts = parseHomeReads(fixture.docker.onExec!({} as never, []).output);
-    expect(facts).toEqual({ answers: true, version: "0.1.151", seats: 7 });
-    expect(parseHomeReads("not json\n\u001e\n{\"version\":\"<script>\"}\n\u001e\n{\"seats\":\"seven\"}\n\u001e\n")).toEqual({ answers: false, version: null, seats: null });
-    expect(parseHomeReads("")).toEqual({ answers: false, version: null, seats: null });
+    expect(facts).toEqual({ answers: true, version: "0.1.151", seats: 7, box: "on" });
+    expect(parseHomeReads("not json\n\u001e\n{\"version\":\"<script>\"}\n\u001e\n{\"seats\":\"seven\"}\n\u001e\n")).toEqual({ answers: false, version: null, seats: null, box: null });
+    expect(parseHomeReads("")).toEqual({ answers: false, version: null, seats: null, box: null });
+    // On or off, nothing else: a server without the field, or with anything else in it, says nothing about its box.
+    expect(parseHomeReads(`${JSON.stringify({ app: "openmausbot", box: "off" })}\n\u001e\n`).box).toBe("off");
+    expect(parseHomeReads(`${JSON.stringify({ app: "openmausbot", box: { checks: "33/33" } })}\n\u001e\n`).box).toBeNull();
   });
 
   it("sends a heartbeat of versions, states, counts and the seat count, with no address, name or sentence in it", async () => {
@@ -257,7 +260,7 @@ describe("a customer-run server: what leaves it", () => {
     for (const secret of [EMAIL, "@customer", "lovelace", SERVER_NAME, "Lovelace", WRITTEN, "said so", "env-1"]) expect(sent, secret).not.toContain(secret);
     expect(beat.heartbeat).toEqual({
       host: { ...host, diskTotalGb: 200, memAvailableMb: 9000, load1: 0.1, uptimeS: 50, clockSkewS: 0, checks: [{ id: "disk", ok: true, warning: true }, { id: "clock", ok: true }] },
-      home: { state: "running", image: RUNNING, health: { ok: true, version: "0.1.151", image: RUNNING, box: null, at: 1_800_000_000_000 } },
+      home: { state: "running", image: RUNNING, health: { ok: true, version: "0.1.151", image: RUNNING, box: { box: "on", checks: null, failed: [] }, at: 1_800_000_000_000 } },
       connector: identity, mode: "customer-run", paused: false, seats: 7,
     });
     for (const text of strings(beat)) expect(text, text).toMatch(TOLD);

@@ -146,7 +146,7 @@ Backward compatible: a field is only ever added, and only by a customer-run serv
 | Where | Field | Meaning |
 |---|---|---|
 | `EnrollRequest` (`POST /api/cloud/box/v1/enroll`) | `mode: "customer-run"` | Present only for a customer-run server; absent means `operated`, exactly the request sent before. Store it with the box |
-| `Heartbeat.heartbeat` | `mode: "customer-run"`, `paused: boolean`, `seats: number \| null` | Present only for a customer-run server. `host`, `home` and `connector` keep their shape; `host.checks[]` carries `id`, `ok` and `warning` without `fix`; `home.health.box` is always null |
+| `Heartbeat.heartbeat` | `mode: "customer-run"`, `paused: boolean`, `seats: number \| null` | Present only for a customer-run server. `host`, `home` and `connector` keep their shape; `host.checks[]` carries `id`, `ok` and `warning` without `fix`; `home.health.box` is `{ box: "on" \| "off", checks: null, failed: [] }` (whether the bots' sandbox is on, never its checks), or null when the server does not say |
 | `JobErrorCode` | `refused_by_mode`, `paused`, `update_unavailable`, `update_not_started`, `older_version` | Only from a customer-run server. Its error `message` is a fixed sentence per code |
 
 For a customer-run box the Admin should: send `start` with no arguments; send `update` with

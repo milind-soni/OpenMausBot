@@ -114,12 +114,12 @@ People sign in to your server with your server's own sign-in: a pairing code you
 | When | What |
 |---|---|
 | Once, at enrolment | The one-time code, the connector's public key, the mode, and the server's facts: operating system, kernel, architecture, CPU count, memory, free disk, Docker version, whether AppArmor and user namespaces are on |
-| Every 30 seconds | Those facts, plus total disk, available memory, load, uptime, clock difference and each server check as an id and a pass or fail; the server's state, image and version; the connector's version and image; the mode; whether you paused; the seat count |
+| Every 30 seconds | Those facts, plus total disk, available memory, load, uptime, clock difference and each server check as an id and a pass or fail; the server's state, image and version, and whether its bots' sandbox is on or off; the connector's version and image; the mode; whether you paused; the seat count |
 | After each job | The result: the server's state, image and version, or the id and time of a backup. A failure is a fixed code and a fixed sentence |
 
-The seat count is the number of people who can sign in: the addresses on your sign-in list, plus any other address that has signed in. It is a number. No address, name or role is sent.
+The seat count is the number of people who can sign in: the addresses on your sign-in list, plus any other address that has signed in, plus you when you signed in with a pairing code and no admin address is on the list. It is a number. No address, name or role is sent.
 
-To build this the connector reads three things from your server, on the server's own loopback: that it answers, its version, and its seat count. It keeps one field from each answer and drops the rest. It reads no chat, file, key, name or address, and it sends no line of any log.
+To build this the connector reads four things from your server, on the server's own loopback: that it answers, whether its bots' sandbox is on or off (not its checks), its version, and its seat count. It keeps those fields and drops the rest of each answer. It reads no chat, file, key, name or address, and it sends no line of any log.
 
 ## What your server itself still sends
 

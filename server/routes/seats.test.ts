@@ -21,6 +21,14 @@ describe("seat count", () => {
     expect(seatCount(list, [{ email: "bot@example.test", token: true }])).toBe(2);
   });
 
+  // Found on a real server: the owner paired by code and one member on the list counted 1.
+  it("counts the owner paired by code besides the people with an address, unless the owner has one too", () => {
+    const owner = { scopes: ["admin", "client"] };
+    expect(seatCount({ admins: [], members: ["grace@example.test"] }, [owner, { email: "grace@example.test", scopes: ["client"] }])).toBe(2);
+    expect(seatCount({ admins: ["ada@example.test"], members: ["grace@example.test"] }, [owner])).toBe(2);
+    expect(seatCount({ admins: [], members: ["grace@example.test"] }, [owner, { email: "ada@example.test", scopes: ["admin", "client"] }])).toBe(2);
+  });
+
   it("counts a server with paired devices and no address as one person, and an empty one as none", () => {
     expect(seatCount({ admins: [], members: [] }, [{}, {}, {}])).toBe(1);
     expect(seatCount({ admins: [], members: [] }, [])).toBe(0);

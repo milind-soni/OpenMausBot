@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { CUSTOMER_HOME_IMAGE, HOME_READS_COMMAND, VERSION_LABEL, olderVersionRefusal, parseHomeReads, type HomeFacts, type JobSource } from "./customer-run.ts";
+import { CUSTOMER_HOME_IMAGE, HOME_READS_COMMAND, VERSION_LABEL, boxReport, olderVersionRefusal, parseHomeReads, type HomeFacts, type JobSource } from "./customer-run.ts";
 import type { ContainerInfo, Docker, Mount } from "./docker.ts";
 import { JobFailure } from "./failure.ts";
 import { backupId, helperSpec } from "./home.ts";
@@ -162,7 +162,7 @@ export class AdoptedHome {
     }
     const facts = await this.read(container);
     this.lastSeats = facts.seats;
-    this.lastHealth = { ok: facts.answers, version: facts.version, image: await this.imageOf(container), box: null, at: this.now() };
+    this.lastHealth = { ok: facts.answers, version: facts.version, image: await this.imageOf(container), box: boxReport(facts.box), at: this.now() };
     return this.lastHealth;
   }
 
@@ -408,7 +408,7 @@ export class AdoptedHome {
     try {
       return parseHomeReads((await this.docker.exec(container.Id, [...HOME_READS_COMMAND], 30_000)).output);
     } catch {
-      return { answers: false, version: null, seats: null };
+      return { answers: false, version: null, seats: null, box: null };
     }
   }
 

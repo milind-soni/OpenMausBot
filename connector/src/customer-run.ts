@@ -5,7 +5,7 @@
 // Security invariant: nothing in this file passes through text a person wrote. Every string that leaves is either a
 // constant below, an enumerated code, or matches one of the patterns below (a version, an image reference, an id).
 import {
-  checkJob, type CheckId, type ConnectorIdentity, type CopyInfo, type Heartbeat, type HomeReport, type HostFacts, type HomeState, type HostHealth,
+  checkJob, type CheckId, type ConnectorIdentity, type CopyInfo, type Heartbeat, type HomeHealth, type HomeReport, type HostFacts, type HomeState, type HostHealth,
   type Job, type JobError, type JobErrorCode, type JobReply, type JobType,
 } from "./protocol.ts";
 
@@ -143,8 +143,8 @@ export function answerCustomerRunRequest(request: CustomerRunRequest, facts: Ser
   }
 }
 
-// 3. WHAT THE CONNECTOR READS FROM THE HOME. Three GETs on the home's own loopback, with no body, and from each answer
-// one field: that it answers as MausBot, its version, and its seat count. Every other field of those answers (the
+// 3. WHAT THE CONNECTOR READS FROM THE HOME. Three GETs on the home's own loopback, with no body, and from them four
+// fields: that it answers as MausBot and whether its bot box is on or off, its version, and its seat count. Every other field of those answers (the
 // server's name among them) is dropped here and never kept.
 
 export const HOME_READS = ["/api/health", "/.well-known/openmausbot/environment", "/api/seats"] as const;
@@ -159,6 +159,8 @@ export interface HomeFacts {
   answers: boolean;
   version: string | null;
   seats: number | null;
+  /** Whether its bots run in the bot box, from the health answer: on, off, or null when it does not say. */
+  box: "on" | "off" | null;
 }
 
 const parsed = (text: string | undefined): Record<string, unknown> => {
@@ -172,7 +174,8 @@ const parsed = (text: string | undefined): Record<string, unknown> => {
 
 export function parseHomeReads(output: string): HomeFacts {
   const [health, environment, seats] = output.split(RECORD_END);
-  return { answers: parsed(health).app === "openmausbot", version: versionOrNull(parsed(environment).version), seats: seatsOrNull(parsed(seats).seats) };
+  const said = parsed(health);
+  return { answers: said.app === "openmausbot", version: versionOrNull(parsed(environment).version), seats: seatsOrNull(parsed(seats).seats), box: boxOnOff(said.box) };
 }
 
 // 4. WHAT LEAVES THE SERVER. The heartbeat (every 30 seconds) and each job's reply, rebuilt here field by field. A
@@ -190,6 +193,12 @@ const versionOrNull = (value: unknown) => (typeof value === "string" && VERSION.
 const imageOrNull = (value: unknown) => (typeof value === "string" && IMAGE.test(value) ? value : null);
 const machine = (value: unknown) => (typeof value === "string" && MACHINE.test(value) ? value : "unknown");
 const count = (value: unknown, max = 1e15) => (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= max ? value : 0);
+const boxOnOff = (value: unknown) => (value === "on" || value === "off" ? value : null);
+/** The bot box as a customer-run server reports it: on or off, never its checks. */
+export const boxReport = (value: unknown): HomeHealth["box"] => {
+  const said = boxOnOff(value);
+  return said ? { box: said, checks: null, failed: [] } : null;
+};
 const seatsOrNull = (value: unknown) => (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 1_000_000 ? value : null);
 
 /** The server's facts as they leave it, at enrolment and in every heartbeat. */
@@ -215,7 +224,7 @@ function reducedHome(home: HomeReport): HomeReport {
   return {
     state: HOME_STATES.includes(home.state) ? home.state : "absent",
     image: imageOrNull(home.image),
-    health: health ? { ok: health.ok === true, version: versionOrNull(health.version), image: imageOrNull(health.image), box: null, at: count(health.at) } : null,
+    health: health ? { ok: health.ok === true, version: versionOrNull(health.version), image: imageOrNull(health.image), box: boxReport(health.box?.box), at: count(health.at) } : null,
   };
 }
 

@@ -314,10 +314,18 @@ async function probeCommand(): Promise<void> {
   if (!ok) process.exitCode = 1;
 }
 
+const JOB_USAGE = [
+  "usage: mausbot-connector job <type> [args as JSON], for example:",
+  "  job status                                   the server's state, and its backups with their ids",
+  "  job backup",
+  "  job restore '{\"backupId\":\"<id>\"}'           put a backup back (root only on a server its owner runs); the id is one of job status's backups[].id",
+  "  job update '{\"image\":\"ghcr.io/…@sha256:…\"}'",
+].join("\n");
+
 /** `job <type> [args as JSON]`: one job, run by the running connector; prints its reply, exits 1 when it failed. */
 async function jobCommand(): Promise<void> {
   const [type, args] = process.argv.slice(3);
-  if (!type) throw new Error("usage: mausbot-connector job <type> [args as JSON], e.g. job update '{\"image\":\"ghcr.io/…@sha256:…\"}'");
+  if (!type) throw new Error(JOB_USAGE);
   let parsed: unknown = {};
   if (args) {
     try { parsed = JSON.parse(args); } catch { throw new Error("the job's arguments are not JSON"); }
@@ -371,7 +379,7 @@ const commands: Record<string, () => Promise<void> | void> = {
 
 const command = commands[process.argv[2] ?? "run"];
 if (!command) {
-  console.error("usage: mausbot-connector run | enroll | status | probe [--json] | job <type> [args] | audit [--tail N | --verify] | pause | resume | version");
+  console.error(`usage: mausbot-connector run | enroll | status | probe [--json] | job <type> [args] | audit [--tail N | --verify] | pause | resume | version\n${JOB_USAGE}`);
   process.exitCode = 2;
 } else {
   Promise.resolve().then(command).catch((error) => {

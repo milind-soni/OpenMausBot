@@ -378,7 +378,7 @@ function noArgs(args: Record<string, unknown>): Checked<Record<string, never>> {
 
 function only(args: Record<string, unknown>, keys: string[]): string | null {
   const extra = Object.keys(args).filter((key) => !keys.includes(key));
-  return extra.length ? `unknown argument ${JSON.stringify(extra[0])}` : null;
+  return extra.length ? `unknown argument ${JSON.stringify(extra[0])}; this job takes ${keys.length ? keys.join(", ") : "none"}` : null;
 }
 
 function httpsOrigin(value: string): boolean {
