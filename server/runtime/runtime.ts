@@ -7,7 +7,7 @@ import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
 import { answersSender, asking, awaited, childrenSince, settledSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, ownThread, path, restartNote, wakeOwner } from "./tree.ts";
 import { DEFAULT_LIMITS, type Answerer, type Assignment, type Assignee, type Clock, type EndResult, type EnqueueRequest, type EnqueueResult, type EnvelopeNames,
-  type EventKind, type InboxItem, type InboxKind, type Level, type Limits, type LiveEdge, type Origin, type Outcome, type Owner,
+  type BackgroundCommand, type EventKind, type InboxItem, type InboxKind, type Level, type Limits, type LiveEdge, type Origin, type Outcome, type Owner,
   type Reply, type Requester, type RunInput, type RunResult, type StatusView, type TurnRunner } from "./types.ts";
 
 export interface RuntimeOptions {
@@ -97,7 +97,7 @@ export class Runtime {
         const carried = n.carrying ?? [];
         const handedOut = childrenSince(this.store, n).length > 0;
         const outward = handedOut ? [] : this.outwardOf(n);
-        if (handedOut) {
+        if (handedOut || n.backgroundCommands?.some(c => !c.delivered)) {
           n.status = "waiting"; n.restart = "cut"; n.lastActivityAt = now;
           this.store.update(n, { kind: "restart_reconciled", at: now, detail: "waiting: cut after handing out work" });
           this.touch(n);
@@ -170,6 +170,34 @@ export class Runtime {
   /** Remove terminal trees that finished before `before`. Returns rows removed. */
   prune(before: number): number {
     return this.store.prune(before);
+  }
+
+  trackBackground(id: string, command: Pick<BackgroundCommand, "boxId" | "processId" | "expiresAt">): boolean {
+    const n = this.store.get(id);
+    if (!n || n.status !== "running" || n.origin.kind !== "person" || n.mode !== "work" || this.store.get(n.rootId)?.goalRunId ||
+        (command.boxId === "local-agent" && n.level !== "full")) return false;
+    const commands = n.backgroundCommands ?? [];
+    if (commands.some(c => c.boxId === command.boxId && c.processId === command.processId)) return true;
+    if (commands.length >= 20) return false;
+    n.backgroundCommands = [...commands, command];
+    this.store.update(n);
+    this.touch(n);
+    return true;
+  }
+
+  backgroundResult(id: string, boxId: string, processId: string, result: string, observed = false): boolean {
+    const n = this.store.get(id);
+    if (!n || isTerminal(n) || n.origin.kind !== "person") return false;
+    const command = n.backgroundCommands?.find(c => c.boxId === boxId && c.processId === processId);
+    if (!command || command.delivered || (command.result !== undefined && !observed)) return false;
+    const parent = n.parentId ? this.store.get(n.parentId) : undefined;
+    const problem = this.safe("validate", () => this.runner.validate(n, parent));
+    if (this.lastThrew || problem) return false;
+    command.result = clip(result, RESULT_MAX);
+    if (observed && n.status === "running") command.delivered = true;
+    this.store.update(n);
+    this.touch(n);
+    return true;
   }
 
   /** Hand work to a teammate from a running node. Never throws. */
@@ -306,7 +334,7 @@ export class Runtime {
         this.settle(n, "completed", "done");
       } else {
         n.status = "resume";
-        this.store.update(n, { kind: "resume_due", at: now, detail: due === "settled" ? "resume" : "resume: a teammate asks" });
+        this.store.update(n, { kind: "resume_due", at: now, detail: due === "settled" ? "resume" : due === "command" ? "resume: background command ended" : "resume: a teammate asks" });
         this.touch(n);
       }
     }
@@ -383,6 +411,8 @@ export class Runtime {
         ...(n.continuation ? { continuation: { note: n.continuation.note, ...(n.continuation.handoffPath ? { handoffPath: n.continuation.handoffPath } : {}) } } : {}),
         ...(settled.length ? { settled } : {}),
         ...(asked.length ? { asked } : {}),
+        ...(n.backgroundCommands?.some(c => c.result !== undefined && !c.delivered)
+          ? { backgroundResults: n.backgroundCommands.filter(c => c.result !== undefined && !c.delivered).map(c => c.result!) } : {}),
         level: n.level, mode: n.mode,
       };
       delivered = inbox.map(i => i.id);
@@ -394,6 +424,7 @@ export class Runtime {
     }
     n.status = "running"; n.startedAt = now; n.executions += 1; n.lastActivityAt = now;
     delete n.continuation; delete n.cards;
+    for (const command of n.backgroundCommands ?? []) if (command.result !== undefined) command.delivered = true;
     if (carrying.length) n.carrying = carrying; else delete n.carrying;
     if (root.id !== n.id) root.lastActivityAt = now;
     if (root.budgets) root.budgets.executions += 1;
@@ -500,7 +531,7 @@ export class Runtime {
     if (result.kind === "completed" && result.statusOnly) n.statusOnly = true;
     const kids = awaited(this.store.children(n.id));
     const unseen = live !== undefined && kids.some(c => isTerminal(c) && !live.carried.has(c.id));
-    const outstanding = unseen || kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
+    const outstanding = n.backgroundCommands?.some(c => !c.delivered) || unseen || kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
     if (outstanding) {
       n.status = "waiting"; n.lastActivityAt = now;
       if (root) this.renew(root, now);
@@ -735,10 +766,11 @@ export class Runtime {
     return news.length > 0 && news.every(c => c.status === "completed" && c.statusOnly === true);
   }
 
-  private resumeReason(n: Assignment): "settled" | "asked" | undefined {
+  private resumeReason(n: Assignment): "settled" | "asked" | "command" | undefined {
+    if (n.backgroundCommands?.some(c => c.result !== undefined && !c.delivered)) return "command";
     const kids = awaited(this.store.children(n.id));
     if (kids.length === 0) return undefined;
-    if (kids.every(c => isTerminal(c) && c.reportedAt !== undefined)) return "settled";
+    if (!n.backgroundCommands?.some(c => !c.delivered) && kids.every(c => isTerminal(c) && c.reportedAt !== undefined)) return "settled";
     if (!n.parentId && n.reply === "poll") return undefined;
     const parked = new Set(kids.filter(asking).map(c => c.id));
     if (parked.size === 0) return undefined;

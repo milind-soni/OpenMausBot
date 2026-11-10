@@ -6914,5 +6914,6 @@
   "settings.simple.more.title": "Другие настройки",
   "settings.simple.more.subtitle": "Резервные копии, ограничения и настройки, которые вы меняете редко.",
   "settings.simple.more.limits": "Ограничения",
-  "settings.simple.more.open": "Открыть"
+  "settings.simple.more.open": "Открыть",
+  "activity.tool.team.startExternalAgent": "Запустить внешнего агента"
 }

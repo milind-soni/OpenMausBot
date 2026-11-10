@@ -237,6 +237,10 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   const member = agentsCallMember(name, args);
   const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH } = context;
   const { api, apiResponse } = context.client;
+  if (name === "start_external_agent") {
+    const { ok, body } = await apiResponse("/api/internal/external-agent", { method: "POST", body: JSON.stringify(args) });
+    return { text: ok ? JSON.stringify(body) : String(body.error ?? "Could not start the agent."), ...(!ok ? { isError: true } : {}) };
+  }
   if (name === "vm_exec") {
     const { ok, body } = await apiResponse("/api/internal/vm-exec", {
       method: "POST",

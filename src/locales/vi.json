@@ -5593,5 +5593,6 @@
   "settings.simple.more.title": "Cài đặt khác",
   "settings.simple.more.subtitle": "Sao lưu, giới hạn và các cài đặt bạn ít khi thay đổi.",
   "settings.simple.more.limits": "Giới hạn",
-  "settings.simple.more.open": "Mở"
+  "settings.simple.more.open": "Mở",
+  "activity.tool.team.startExternalAgent": "Khởi chạy tác nhân bên ngoài"
 }

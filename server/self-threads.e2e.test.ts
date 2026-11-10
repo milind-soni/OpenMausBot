@@ -41,8 +41,9 @@ it("opens threads on a bot only for a person's own request, never from a hand-of
     expect(result("J1-ASK").isError).toBe(true);
     expect(JSON.stringify(result("J1-ASK"))).toContain("Only a person's own request can open separate threads on yourself");
 
-    // The person's own request opens a job; that job opens no more.
-    await cli("send", "--bot", books.id, "--task", books.activeTaskId, "--text", "J2-JOB: open one thread per ledger");
+    // The person's own request opens a job; that job opens no more. A self-opened thread quotes this thread's title,
+    // which is the first line, so the script token stays on the next line.
+    await cli("send", "--bot", books.id, "--task", books.activeTaskId, "--text", "Open one thread per ledger.\nJ2-JOB");
     await expect.poll(() => evidence().some((turn) => turn.planKey === "J2-SELF"), { timeout: 20_000 }).toBe(true);
     expect(result("J2").isError).toBeFalsy();
     expect(result("J2-SELF").isError).toBe(true);

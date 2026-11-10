@@ -3162,5 +3162,6 @@
   "settings.simple.more.title": "और सेटिंग्स",
   "settings.simple.more.subtitle": "बैकअप, सीमाएँ और वे सेटिंग्स जिन्हें आप कभी-कभार ही बदलते हैं।",
   "settings.simple.more.limits": "सीमाएँ",
-  "settings.simple.more.open": "खोलें"
+  "settings.simple.more.open": "खोलें",
+  "activity.tool.team.startExternalAgent": "बाहरी एजेंट शुरू करें"
 }

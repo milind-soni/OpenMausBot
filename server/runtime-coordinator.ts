@@ -2,14 +2,14 @@ import { join } from "node:path";
 
 import type { BeginTurnRequest, Coordinator, CoordinatorHost, CoordinatorOptions, HandoffLimit, HandoffOptions, HandoffView, HostTurnResult, LiveHandoffEdge, RoomAddress } from "./coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
-import { composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, continuationLine, envelopeNote } from "./runtime/envelope.ts";
+import { composeBackgroundResults, composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, continuationLine, envelopeNote } from "./runtime/envelope.ts";
 import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
 import { personOnly, requesterDecides, withDefault } from "./runtime/questions.ts";
 import { isStatusOnly, mayBeStatusOnly, statusReplyPrompt } from "./runtime/status-reply.ts";
 import { answersSender, childrenSince, clip, isTerminal, ownThread, path } from "./runtime/tree.ts";
-import type { Answerer, Assignee, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
+import type { Answerer, Assignee, Assignment, BackgroundCommand, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
 import { sameRequest } from "./same-request.ts";
 
 const NOT_RUNNING = "The originating room task is no longer running";
@@ -101,6 +101,7 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   if (a.cards !== undefined) node.cards = a.cards;
   if (a.continuation !== undefined) node.continuation = { ...a.continuation };
   if (a.goalRunId !== undefined) node.goalRunId = a.goalRunId;
+  if (a.backgroundCommands?.some(c => c.boxId === "local-agent")) node.localAgent = true;
   if (a.parentId !== undefined) node.parentId = a.parentId;
   if (groupId !== undefined) node.groupId = groupId;
   if (a.batchKey !== undefined) node.requestBatchKey = a.batchKey;
@@ -147,6 +148,8 @@ export class RuntimeCoordinator implements Coordinator {
   private readonly stops: Array<{ at: number; request: string; bots: Set<string> }> = [];
   private opened = false;
   private prunedAt: number | undefined;
+  private readonly commandReads = new Map<string, { controller: AbortController; nextAt: number }>();
+  private closed = false;
 
   constructor(options: CoordinatorOptions) {
     this.host = options.host;
@@ -193,6 +196,36 @@ export class RuntimeCoordinator implements Coordinator {
     this.ready();
     const a = this.store.get(id);
     return a && this.project(a);
+  }
+
+  trackBackground(source: RoomAddress, id: string, command: Pick<BackgroundCommand, "boxId" | "processId" | "expiresAt">): boolean {
+    this.ready();
+    const n = this.store.get(id);
+    return Boolean(n && sameSpeaker(n, source) && this.runtime.trackBackground(id, command));
+  }
+
+  observeBackground(source: RoomAddress, id: string, boxId: string, processId: string, result: string): boolean {
+    this.ready();
+    const n = this.store.get(id);
+    return Boolean(n && sameSpeaker(n, source) && n.status === "running" && this.runtime.backgroundResult(id, boxId, processId, result, true));
+  }
+
+  completeBackground(id: string, boxId: string, processId: string, result: string): boolean {
+    if (this.closed) return false;
+    this.ready();
+    return this.recordBackground(id, boxId, processId, result);
+  }
+
+  private recordBackground(id: string, boxId: string, processId: string, result: string): boolean {
+    if (!this.runtime.backgroundResult(id, boxId, processId, result)) return false;
+    if (boxId === "local-agent") {
+      let unknown = false;
+      try { unknown = JSON.parse(result)?.status === "unknown"; } catch {}
+      const node = this.store.get(id);
+      if (unknown && node) try { this.host.backgroundUnknown?.(this.project(node)); }
+      catch (error) { this.log(`background unknown notice failed: ${String(error)}`); }
+    }
+    return true;
   }
 
   answersTo(id: string): { botId: string; threadId: string } | undefined {
@@ -478,11 +511,17 @@ export class RuntimeCoordinator implements Coordinator {
       const parent = n.parentId && n.reply !== "none" ? this.store.get(n.parentId) : undefined;
       if (parent && !isTerminal(parent) && parent.assignee.destination.groupId === undefined) threads.add(parent.assignee.destination.threadId);
       const root = view(n);
-      if (!root.parentId && !root.groupId && (root.status === "resume" || (root.status === "waiting" && root.question === undefined && !root.cards?.length))) {
+      if (!root.parentId && !root.groupId && !n.backgroundCommands?.some(c => c.boxId === "local-agent" && !c.delivered) && (root.status === "resume" || (root.status === "waiting" && root.question === undefined && !root.cards?.length))) {
         threads.add(root.threadId);
       }
     }
     return threads;
+  }
+
+  awaitingLocalAgentThreads(): Set<string> {
+    this.ready();
+    return new Set(this.live().filter(n => n.status !== "running" && n.backgroundCommands?.some(c => c.boxId === "local-agent" && !c.delivered))
+      .map(n => n.assignee.destination.threadId));
   }
 
   liveEdges(): LiveHandoffEdge[] {
@@ -512,6 +551,39 @@ export class RuntimeCoordinator implements Coordinator {
     this.ready();
     this.pruneDaily();
     this.runtime.tick();
+    this.pollBackground();
+  }
+
+  private pollBackground(): void {
+    if (this.closed || !this.host.backgroundStatus) return;
+    const now = this.now();
+    const live = new Set<string>();
+    for (const n of this.live()) for (const command of n.backgroundCommands ?? []) {
+      if (command.delivered || command.result !== undefined) continue;
+      const key = `${n.id}:${command.boxId}:${command.processId}`;
+      live.add(key);
+      const read = this.commandReads.get(key);
+      if (now >= command.expiresAt) {
+        read?.controller.abort();
+        this.host.stopBackground?.(command);
+        this.recordBackground(n.id, command.boxId, command.processId,
+          JSON.stringify({ processId: command.processId, status: "unknown", exitCode: null, error: "Completion tracking expired after two hours. Check the command and its artifacts before continuing; do not start another copy blindly." }));
+        continue;
+      }
+      if (read && now < read.nextAt) continue;
+      const controller = new AbortController();
+      const reading = { controller, nextAt: Number.POSITIVE_INFINITY };
+      this.commandReads.set(key, reading);
+      void Promise.resolve().then(() => this.host.backgroundStatus!(command, controller.signal)).then(result => {
+        if (!this.closed && !controller.signal.aborted && result !== undefined) this.recordBackground(n.id, command.boxId, command.processId, result);
+      }).catch(error => {
+        if (!controller.signal.aborted) this.log(`background status failed: ${String(error)}`);
+      }).finally(() => { reading.nextAt = this.now() + 10_000; });
+    }
+    for (const [key, read] of this.commandReads) if (!live.has(key)) {
+      read.controller.abort();
+      this.commandReads.delete(key);
+    }
   }
 
   pace(): "busy" | "parked" | "idle" {
@@ -532,6 +604,9 @@ export class RuntimeCoordinator implements Coordinator {
   }
 
   close(): void {
+    this.closed = true;
+    for (const read of this.commandReads.values()) read.controller.abort();
+    this.commandReads.clear();
     this.runtime.close();
   }
 
@@ -572,6 +647,7 @@ export class RuntimeCoordinator implements Coordinator {
         const groups = new Set<string>();
         const threads = new Set<string>();
         for (const row of rows) {
+          if (isTerminal(row)) for (const command of row.backgroundCommands ?? []) this.host.stopBackground?.(command);
           const groupId = row.assignee.destination.groupId;
           if (groupId) groups.add(groupId); else threads.add(row.assignee.destination.threadId);
         }
@@ -603,10 +679,10 @@ export class RuntimeCoordinator implements Coordinator {
     const settled = input.settled ?? [];
     const asked = input.asked ?? [];
     const root = a.parentId === undefined;
-    const body = resumed
-      ? composeResume(a, this.host.names(node, parent && this.project(parent)),
-        settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node))),
-        asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node))))
+    const reports = settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node)));
+    const questions = asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node)));
+    const body = input.backgroundResults?.length ? [composeBackgroundResults(input.backgroundResults), input.envelope, ...reports, ...questions].join("\n\n") : resumed
+      ? composeResume(a, this.host.names(node, parent && this.project(parent)), reports, questions)
       : root
         ? composeRootTurn(a, { turn: input.turn === "resume" ? "first" : input.turn, restartNote: "", ...(input.answer !== undefined ? { answer: input.answer } : {}),
           ...(input.continuation ? { continuation: input.continuation } : {}) })

@@ -1022,7 +1022,7 @@ export function GroupView({ group }: { group: Group }) {
 
       {findOpen && <ChatFindBar threadId={group.threadId} onClose={() => setFindOpen(false)} />}
       <ChatErrorBanner message={state.error} onDismiss={() => dispatch({ type: "error", message: null })} />
-      <ChatNotice notice={state.notice} />
+      <ChatNotice notice={state.notice} />{!threadWorking && (group.tasks?.find(task => task.threadId === group.threadId)?.waitingForExternalAgent ?? group.waitingForExternalAgent) && <p role="status" className="px-5 text-[12px] text-ink-secondary">{t("task.waitingOnExternalAgent")}</p>}
       {!setupPending && <RoomContextWarnings group={group} members={members} />}
 
       {!setupPending && !group.dm && !remoteClient && state.config && group.defaultResponder.kind === "auto" && !jevRoomRoutingOn(state.config) && (
