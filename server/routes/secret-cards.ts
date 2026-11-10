@@ -1,6 +1,7 @@
 import { userError } from "../user-errors.ts";
 // POST /api/bots/<bot>/secret-cards/<message>/provide with a phone's sealed envelope, .../save with {threadId, value}
-// for a custom secret typed in the app, and .../(provided|resume|dismiss) with {threadId}; and the agents tool's
+// for a custom secret typed in the app, .../use with {threadId, itemId} for one picked from the Vault (GET .../saved
+// lists those by name), and .../(provided|resume|dismiss) with {threadId}; and the agents tool's
 // /api/internal/request-credential. A value is never echoed back, logged or added to the card.
 import { CUSTOM_SECRET_TARGET, credentialResumeOutcome, isCredentialTargetId } from "../../shared/credential-request.ts";
 import { phoneSecretEnvelopeSchema, type SecretCards } from "../host/secret-cards.ts";
@@ -46,8 +47,24 @@ export interface SecretCardRouteDeps {
 export function createSecretCardRoutes(deps: SecretCardRouteDeps): RouteHandler {
   const { phoneSecretSubmissions } = deps;
   const { secretMessage, currentSecretState, resumeSecretCard, provideSecretFromPhone, phoneSecretSubmissionKey, secretSaved } = deps.cards;
-  return async ({ req, res, path, method, auth, json, readBody }) => {
+  return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null;
+    // Picking a saved secret lets the bot use it, so these are an admin's (not in CLIENT_ALLOW) like the Vault itself.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/secret-cards\/([\w-]+)\/(saved|use)$/);
+    if (m && method === (m[3] === "saved" ? "GET" : "POST")) {
+      const mediaType = String(req.headers["content-type"] ?? "").split(";", 1)[0]!.trim().toLowerCase();
+      if (m[3] === "use" && mediaType !== "application/json") return json(res, 415, { error: "content-type must be application/json" });
+      const raw = m[3] === "use" ? await readBody(req, 16_384) : null;
+      const fields = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+      const threadId = m[3] === "saved" ? url.searchParams.get("threadId") ?? "" : String(fields.threadId ?? "");
+      if (!deps.threadVisible(auth, threadId) || !secretMessage(m[1]!, threadId, m[2]!)) return json(res, 404, { ...userError("serverError.secret.missing") });
+      const refusal = codedSecretAnswerRefusal(auth, deps.answerContext(auth, m[1]!, threadId));
+      if (refusal) return json(res, 403, refusal);
+      res.setHeader("cache-control", "no-store");
+      if (m[3] === "saved") return json(res, 200, { choices: deps.cards.savedChoices(m[1]!, threadId, m[2]!) });
+      const result = await deps.cards.useSavedSecret(m[1]!, threadId, m[2]!, fields.itemId);
+      return json(res, result.status, result.body);
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/secret-cards\/([\w-]+)\/save$/);
     if (m && method === "POST") {
       // JSON only, so a form posted from another local page cannot save one.

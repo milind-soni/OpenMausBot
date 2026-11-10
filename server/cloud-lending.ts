@@ -7,13 +7,14 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import { CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts";
+import type { WorkOrigin } from "./peer-provenance.ts";
 import type { RoutineRunTrigger } from "./routines.ts";
 
 type Card = { requestId?: string; answered?: string; answeredText?: string; dismissed?: boolean; autoApplied?: boolean; answeredBy?: { kind: string; person?: string } };
 type Line = { id: string; role: string; peerAsk?: unknown; sender?: { id?: string }; card?: Card };
 
 export interface CloudLendingTurn {
-  request: { messageId?: string; generations: ReadonlySet<string>; stopped?: boolean; automation?: RoutineRunTrigger } | undefined;
+  request: { messageId?: string; generations: ReadonlySet<string>; stopped?: boolean; automation?: RoutineRunTrigger; origin?: WorkOrigin } | undefined;
   generation: string;
   thread: readonly Line[];
   /** Whoever opened the conversation chose its title, so they must be the owner too. */
@@ -23,12 +24,24 @@ export interface CloudLendingTurn {
   /** A bot opened the conversation: with work another bot handed in, or with its own words from wherever it was. Those
    * words start the conversation's session, but they are no line in it. */
   botOpened?: boolean;
+  /** A hand-off from a turn that could itself use the lent computer opened it, and nothing else has been handed in since
+   * (`TaskOpenedBy.forOwner`): counts for the lent computer alone. */
+  openedForOwner?: boolean;
   ownerPerson: (person: string | undefined) => boolean;
   cardAnswerer: (card: Card) => string | undefined;
   routineRun: () => { triggerSource: RoutineRunTrigger; ownerStarted: boolean; ownerAuthored: boolean } | null;
 }
 
 const personOf = (line: Line | undefined) => line?.role === "user" && !line.peerAsk ? line.sender?.id : undefined;
+
+/** Security invariant: work handed on inherits the lent computer only from a turn that could itself use it when it handed
+ * it on, recorded by the harness at that moment (HandedPeople, the origin's `lends`). So it never reaches further than
+ * that turn already did, and only the owner's own line ever starts such a chain: a routine, a webhook or an unproven
+ * hand-off has no such record. */
+export function handedOnForOwner(turn: CloudLendingTurn): boolean {
+  const origin = turn.request?.automation === undefined ? turn.request?.origin : undefined;
+  return origin?.kind === "user" && origin.lends === true && turn.ownerPerson(origin.person);
+}
 
 /** This turn answers a line the owner wrote: no run of a routine or a webhook, and no line a bot handed in. */
 export function answersOwnersLine(turn: CloudLendingTurn): boolean {
@@ -73,23 +86,39 @@ export function teamLendingRefusal(team: string): string {
   return `${team}'s bots never use anyone's own computer; they use ${team}'s cloud computer.`;
 }
 
+/** Who may use the lent computer. */
 export function cloudHomeLendingRefusal(turn: CloudLendingTurn): CloudLendingRefusal | null {
+  return judgeCloudTurn(turn, true);
+}
+
+/** Security invariant: everything else a turn gets for being the owner's (writing the bot's memory, the owner's phones, not
+ * being watched for what it writes) takes the owner's own conversation: work handed on for them never counts. */
+export function cloudHomeOwnTurnRefusal(turn: CloudLendingTurn): CloudLendingRefusal | null {
+  return judgeCloudTurn(turn, false);
+}
+
+function judgeCloudTurn(turn: CloudLendingTurn, handOffsCount: boolean): CloudLendingRefusal | null {
   const { request } = turn;
-  if (!request?.messageId || request.stopped || !request.generations.has(turn.generation)) return "unproven";
-  const index = turn.thread.findIndex(line => line.id === request.messageId);
-  if (index < 0) return "unproven";
-  let owner: boolean;
-  if (request.automation === undefined) {
-    owner = turn.ownerPerson(personOf(turn.thread[index]));
-  } else {
-    const run = turn.routineRun();
-    owner = request.automation !== "webhook" && request.automation !== "api" && Boolean(run) && run!.triggerSource !== "webhook" &&
-      run!.ownerAuthored && (run!.triggerSource !== "manual" || run!.ownerStarted);
+  if (!request || request.stopped || !request.generations.has(turn.generation)) return "unproven";
+  // A hand-off carries its request with no line of the owner's, only the harness's record that it was handed on for them.
+  const handed = handOffsCount && handedOnForOwner(turn);
+  let owner = handed;
+  if (!handed) {
+    if (!request.messageId) return "unproven";
+    const index = turn.thread.findIndex(line => line.id === request.messageId);
+    if (index < 0) return "unproven";
+    if (request.automation === undefined) {
+      owner = turn.ownerPerson(personOf(turn.thread[index]));
+    } else {
+      const run = turn.routineRun();
+      owner = request.automation !== "webhook" && request.automation !== "api" && Boolean(run) && run!.triggerSource !== "webhook" &&
+        run!.ownerAuthored && (run!.triggerSource !== "manual" || run!.ownerStarted);
+    }
   }
   if (!owner) return "not-owner";
   // A conversation someone else opened (and named) is theirs, whoever writes in it.
   if (turn.starters?.some((person) => person !== undefined && !turn.ownerPerson(person))) return "someone-else";
-  if (turn.botOpened || turn.reportsFromOthers) return "someone-else";
+  if ((turn.botOpened && !(handOffsCount && turn.openedForOwner)) || turn.reportsFromOthers) return "someone-else";
   // No line (sent, queued, steered or handed in) and no card answer by anyone else, ever; a routine's own prompt names nobody.
   const clean = ownerOnlyConversation(turn.thread, turn.ownerPerson, turn.cardAnswerer,
     request.automation !== undefined ? request.messageId : undefined);

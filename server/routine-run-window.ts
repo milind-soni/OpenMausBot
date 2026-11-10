@@ -17,7 +17,7 @@ export function appRunWindow(newestFirst: readonly RoutineRun[], since: number):
     reach.set(run.routineId, own);
     const reached = own.count < NEWEST_RUNS_PER_AUTOMATION || !own.settled;
     own.count += 1;
-    if (run.status !== "cancelled" && run.status !== "queued" && !isRoutineProblemRun(run)) own.settled = true;
+    if (run.status !== "cancelled" && !ACTIVE.has(run.status) && !isRoutineProblemRun(run)) own.settled = true;
     return reached || run.scheduledFor >= since || ACTIVE.has(run.status) || (isRoutineProblemRun(run) && !run.seenAt);
   });
 }

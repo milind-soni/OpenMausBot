@@ -29,6 +29,9 @@ describe("built-in list prices", () => {
   it("looks models up case-insensitively, through catalog aliases, and follows announced price changes", () => {
     expect(listPriceFor("MiniMax-M3")).toEqual({ inputPerMillion: 0.3, cachedInputPerMillion: 0.06, outputPerMillion: 1.2 });
     expect(listPriceFor("gpt-5.5")).toEqual({ inputPerMillion: 5, cachedInputPerMillion: 0.5, outputPerMillion: 30 });
+    for (const fable of ["claude-fable-5-2", "anthropic/claude-fable-5.2"]) {
+      expect(listPriceFor(fable), fable).toEqual({ inputPerMillion: 8, cachedInputPerMillion: 0.2, outputPerMillion: 40 });
+    }
     expect(listPriceFor("gemini-3.8-flash-high", new Date("2026-12-31T23:00:00Z"))?.inputPerMillion).toBe(0.75);
     expect(listPriceFor("gemini-3.8-flash", new Date("2027-01-01T00:00:00Z"))).toEqual({ inputPerMillion: 1.5, cachedInputPerMillion: 0.15, outputPerMillion: 7.5 });
   });

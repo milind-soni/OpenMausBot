@@ -263,6 +263,69 @@ describe("remote MCP probe", () => {
       }
     });
 
+    describe("a server that answers an unknown tool before it asks who is calling, as Gmail's MCP server does", () => {
+      const read = { name: "get_thread", annotations: { readOnlyHint: true, destructiveHint: false }, inputSchema: { type: "object", required: ["threadId"] } };
+      const asked = { tryReadOnlyTool: true };
+
+      it("needs a sign-in, found with one read-only tool that has nothing to work on, and nothing runs", async () => {
+        const oauth = await startFakeOAuth();
+        const fake = await startFakeHttpMcp({ guard: "listed-tools", acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge, tools: [buy, read] });
+        try {
+          await expect(probeMcpServer(anonymous(fake.url), 8_000, undefined, asked))
+            .resolves.toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
+          expect(fake.refusedCalls).toEqual([{ name: "get_thread", arguments: {} }]);
+          expect(fake.calls).toEqual([]);
+        } finally {
+          await fake.close();
+          await oauth.close();
+        }
+      });
+
+      it("calls no real tool in a check nobody asked for", async () => {
+        const oauth = await startFakeOAuth();
+        const fake = await startFakeHttpMcp({ guard: "listed-tools", acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge, tools: [read] });
+        try {
+          await expect(probeMcpServer(anonymous(fake.url), 8_000)).resolves.toMatchObject({ ok: true });
+          expect(fake.refusedCalls).toEqual([]);
+        } finally {
+          await fake.close();
+          await oauth.close();
+        }
+      });
+
+      it.each([
+        ["not marked read-only", { name: "trash", inputSchema: { type: "object", required: ["id"] } }],
+        ["marked read-only and destructive", { name: "purge", annotations: { readOnlyHint: true, destructiveHint: true }, inputSchema: { type: "object", required: ["id"] } }],
+        ["read-only but able to run with no arguments", { name: "list_labels", annotations: { readOnlyHint: true }, inputSchema: { type: "object" } }],
+      ])("never calls a tool %s", async (_label, tool) => {
+        const oauth = await startFakeOAuth();
+        const fake = await startFakeHttpMcp({ guard: "listed-tools", acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge, tools: [tool] });
+        try {
+          await expect(probeMcpServer(anonymous(fake.url), 8_000, undefined, asked)).resolves.toMatchObject({ ok: true });
+          expect(fake.refusedCalls).toEqual([]);
+          expect(fake.calls).toEqual([]);
+        } finally {
+          await fake.close();
+          await oauth.close();
+        }
+      });
+
+      it("stays connected when sign-in is optional and the read-only tool only complains about its arguments", async () => {
+        const oauth = await startFakeOAuth();
+        const fake = await startFakeHttpMcp({
+          tools: [read],
+          wellKnown: { "/.well-known/oauth-protected-resource/mcp": protectedResource(oauth.issuer) },
+          callError: (params) => ({ code: -32602, message: `Bad arguments for ${(params as { name: string }).name}` }),
+        });
+        try {
+          await expect(probeMcpServer(anonymous(fake.url), 8_000, undefined, asked)).resolves.toMatchObject({ ok: true });
+        } finally {
+          await fake.close();
+          await oauth.close();
+        }
+      });
+    });
+
     it("finds the protected-resource document without a www-authenticate hint", async () => {
       const oauth = await startFakeOAuth();
       const fake = await startFakeHttpMcp({

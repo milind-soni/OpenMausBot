@@ -109,10 +109,17 @@ export function createCloudPower(options: {
   broadcast(payload: Record<string, unknown>): void;
   now?: () => number;
   log?: (line: string) => void;
+  /** It woke from a sleep it was stopped for: this boot, like a resume, is a wake. */
+  bootedFromSleep?: boolean;
+  /** It just woke: the Admin hears at once, not at its next read (`createWokeNotifier`). */
+  onWoke?: () => void;
 }) {
   const now = options.now ?? Date.now;
   const bootedAt = now();
   let wokeAt = bootedAt, lastActivityAt: number | null = null, lastWorkAt: number | null = null;
+  /** The last wake from sleep; null while this process has only ever booted normally. */
+  let sleptUntil: number | null = options.bootedFromSleep ? bootedAt : null;
+  if (options.bootedFromSleep) options.onWoke?.();
   /** The first request since `wokeAt` (`arrived`), and whether one came. */
   let wokeBy: CloudPowerReport["wokeBy"] = null, wokeSeen = false;
   let sleepingSince: number | null = null, inFlight = 0;
@@ -148,7 +155,9 @@ export function createCloudPower(options: {
     wokeAt = at;
     wokeBy = null;
     wokeSeen = false;
+    sleptUntil = at;
     endSleep();
+    options.onWoke?.();
   };
   /** Samples work (so "finished two minutes ago" needs no hook in every kind of work) and notices a resume. */
   const tick = () => {
@@ -219,6 +228,8 @@ export function createCloudPower(options: {
       return { ok: true, nextDueAt: options.probes.nextDueAt() };
     },
     sleeping,
+    /** The last wake from sleep (a resume, or a boot from one), kept current by the tick and each request; null otherwise. */
+    sleptUntil: () => sleptUntil,
     /** Aborted the moment the home agrees to sleep: held long-polls end with it and answer "asleep". */
     sleepSignal: () => sleepAbort.signal,
     /** Tests: the clock tick, without waiting for the timer. */
@@ -230,6 +241,6 @@ export function createCloudPower(options: {
 export type CloudPower = ReturnType<typeof createCloudPower>;
 
 /** The running home's power, for route modules built before it (Files sync); null on any server that is not a Cloud home. */
-let registered: Pick<CloudPower, "sleeping" | "sleepSignal"> | null = null;
-export function registerCloudPower(power: Pick<CloudPower, "sleeping" | "sleepSignal"> | null) { registered = power; }
+let registered: Pick<CloudPower, "sleeping" | "sleepSignal" | "sleptUntil"> | null = null;
+export function registerCloudPower(power: Pick<CloudPower, "sleeping" | "sleepSignal" | "sleptUntil"> | null) { registered = power; }
 export const cloudPowerNow = () => registered;
