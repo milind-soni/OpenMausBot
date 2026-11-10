@@ -709,7 +709,7 @@ function planUsageCacheKey(accounts: PlanAccount[]): string {
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([name, value]) => `${name}=${value}`)
       .join("\n");
-    return [account.id, account.driver, account.name, account.configDir ?? "", environment].join("\u0000");
+    return [account.id, account.driver, account.name, account.configDir ?? "", environment, account.noUsage ? "no-usage" : "usage"].join("\u0000");
   }).join("\n");
 }
 

@@ -630,4 +630,16 @@ describe("plan usage fetcher", () => {
     expect(read.mock.calls.map(([account]) => account.id)).toEqual(["metered"]);
     expect(report.providers.map((row) => row.id)).toEqual(["metered"]);
   });
+
+  it("never serves a cached report across a usage-meter switch", async () => {
+    const read = vi.fn((_account: PlanAccount) => ({ token: SECRET, accountId: null, expired: false }));
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({}));
+    const load = (usageMeter: boolean) => loadPlanUsage({
+      accounts: planAccountsFromInstances({ claude: { driver: "claudeAgent", config: { usageMeter } } }),
+      fetch: fetchImpl, now: NOW, credentials: { read },
+    });
+    expect((await load(true)).providers.map((row) => row.id)).toEqual(["claude"]);
+    expect((await load(false)).providers).toEqual([]);
+    expect((await load(true)).providers.map((row) => row.id)).toEqual(["claude"]);
+  });
 });
