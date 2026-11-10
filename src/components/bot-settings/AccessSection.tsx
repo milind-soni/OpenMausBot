@@ -785,8 +785,8 @@ export function AccessSection({
           </>
         )}
         {/* Only an owner or admin may change it (the server refuses an editor). An enabled switch stays shown while the
-            app list is unknown, so it can always be turned off. */}
-        {connectedAppsEnabled && ownerOrAdmin === true && bot.connectorTools !== undefined && (inventoryReady || bot.appSandbox === true) && (
+            app list is unknown or connected apps are off, so it can always be turned off. */}
+        {ownerOrAdmin === true && bot.connectorTools !== undefined && (bot.appSandbox === true || (connectedAppsEnabled && inventoryReady)) && (
           <AppSandboxRow on={bot.appSandbox === true} onChange={(appSandbox) => patch({ appSandbox })} />
         )}
         {connectedAppsEnabled && connectedAppsConfigured && (

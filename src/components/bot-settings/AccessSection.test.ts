@@ -437,12 +437,15 @@ describe("AccessSection per-app scopes", () => {
     expect(render(makeBot())).not.toContain("data-app-sandbox");
   });
 
-  it("keeps an enabled sandbox switch while the app list is unknown, and hides it from editors", () => {
+  it("keeps an enabled sandbox switch while the app list is unknown or apps are off, and hides it from editors", () => {
     const grants = { connectorTools: { gmail: { tools: "*" as const } } };
     fixture.apps = { phase: "unknown", apps: [], connectedSlugs: [] };
     expect(render(makeBot({ ...grants, appSandbox: true }))).toContain("data-app-sandbox");
     expect(render(makeBot(grants))).not.toContain("data-app-sandbox");
     fixture.apps = { phase: "ready", connectedSlugs: ["gmail"], apps: [app("gmail", "Gmail")] };
+    const appsOff = { ...makeDerived(), connectedAppsEnabled: false };
+    expect(render(makeBot({ ...grants, appSandbox: true, composio: false }), appsOff)).toContain("data-app-sandbox");
+    expect(render(makeBot({ ...grants, composio: false }), appsOff)).not.toContain("data-app-sandbox");
     fixture.ownerOrAdmin = false;
     expect(render(makeBot({ ...grants, appSandbox: true }))).not.toContain("data-app-sandbox");
   });
