@@ -22,6 +22,15 @@ describe("model context window fallback", () => {
     expect(modelContextWindow("claude-opus-5-5garbage")).toBe(200_000);
     expect(modelContextWindow("omlx::claude-opus-5-5")).toBe(200_000);
     expect(modelContextWindow("claude-opus-5[1m]")).toBe(1_000_000);
+    expect(modelContextWindow("claude-fable-5-2")).toBe(1_000_000);
+    expect(modelContextWindow("claude-fable-5.2")).toBe(1_000_000);
+    expect(modelContextWindow("openrouter/anthropic/claude-fable-5.2")).toBe(1_000_000);
+    expect(modelContextWindow("anthropic.claude-fable-5-2")).toBe(1_000_000);
+    expect(modelContextWindow("claude-fable-5-20")).toBe(200_000);
+    expect(modelContextWindow("claude-fable-5-2-local")).toBe(200_000);
+    expect(modelContextWindow("omlx::claude-fable-5-2")).toBe(200_000);
+    expect(modelContextWindow("claude-fable-5-1")).toBe(200_000);
+    expect(modelContextWindow("claude-fable-5")).toBe(200_000);
     expect(modelContextWindow("gpt-5.6-sol")).toBe(272_000);
     expect(modelContextWindow("gpt-4.1-mini")).toBe(1_000_000);
     expect(modelContextWindow("gemini-2.5-pro")).toBe(1_000_000);

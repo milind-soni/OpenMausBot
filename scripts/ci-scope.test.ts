@@ -188,6 +188,8 @@ describe("CI outputs", () => {
     expect(out.jobs).toEqual(["build", "vitest"]);
     expect(VITEST_SUBSETS["locale-tests"].files).toEqual([
       "src/",
+      "electron/cua-launch.test.mjs",
+      "electron/cua-windows-isolation.test.mjs",
       "electron/menu.test.mjs",
       "electron/updater.test.mjs",
       "scripts/generate-locale.test.mjs",
@@ -220,6 +222,7 @@ describe("CI outputs", () => {
       "server/cloud-team-open-reach.e2e.test.ts",
       "server/cloud-team-owners.e2e.test.ts",
       "server/cloud-team-people.e2e.test.ts",
+      "server/cloud-team-per-person.e2e.test.ts",
       "server/cloud-team-phones.e2e.test.ts",
       "server/cloud-team-pictures.e2e.test.ts",
       "server/cloud-team-private.e2e.test.ts",

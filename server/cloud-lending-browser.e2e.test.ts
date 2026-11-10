@@ -291,7 +291,7 @@ it("a locked screen says to unlock it, and works once unlocked", async () => {
 it("a quarantined driver says how to restore it; restored, the next action works without a restart", async () => {
   screen.set("exit");
   const stopped = await screenCall("get_desktop_state");
-  expect(said(stopped)).toMatch(/^Computer control stopped on this computer: its helper, cua-driver, exited\. Try the action once more/);
+  expect(said(stopped)).toMatch(/^Computer control stopped on this computer because its helper exited and OpenMausBot is restarting it by itself, so try the action once more\b.*Protection history/);
   const working = driver;
   driver = { mcpCommand: join(home, "Program Files", "OpenMausBot", "resources", "cua-driver.exe"), mcpArgs: ["mcp"], mcpEnv: {} };
   const missing = await screenCall("get_desktop_state");

@@ -51,6 +51,32 @@ const rows = (built: Menu, index = 0) => {
 };
 const body = (built: Menu, index = 0) => built.groups[index]!.body;
 
+describe("Ollama in the Simple model menu", () => {
+  const ollama = engine("openaiCompat", "openai-compat", "Ollama", "api", [
+    { id: "llama3.2:latest", label: "llama3.2:latest", custom: true, local: { bytes: 2_019_393_189, parameters: "3.2B", quantization: "Q4_K_M", tools: true } },
+    { id: "gemma2:2b", label: "gemma2:2b", custom: true, local: { bytes: 912_000_000, parameters: "2.6B", tools: false } },
+  ], { serverKind: "ollama" });
+
+  it("is headed Ollama, with no API key, and says what each pulled model is", () => {
+    const built = menu([ollama], { selection: { instanceId: "openaiCompat", model: "" } });
+    expect(built.groups.map((group) => group.label)).toEqual(["Ollama"]);
+    const body = built.groups[0]!.body;
+    expect(body.kind === "models" && body.rows.map((row) => [row.label, row.detail])).toEqual([
+      ["llama3.2:latest", "3.2B · Q4_K_M · 2 GB"],
+      ["gemma2:2b", "2.6B · 912 MB · No tools"],
+    ]);
+  });
+
+  it("says what the selected model is too", () => {
+    const built = menu([ollama], { selection: { instanceId: "openaiCompat", model: "gemma2:2b" } });
+    expect(built.current).toMatchObject({ label: "gemma2:2b", meta: "2.6B · 912 MB · No tools", title: "Ollama · gemma2:2b · 2.6B · 912 MB · No tools" });
+  });
+
+  it("keeps the API key heading for another OpenAI-compatible server", () => {
+    expect(menu([openaiKey]).groups.map((group) => group.label)).toEqual(["OpenAI · API key"]);
+  });
+});
+
 describe("the Simple model menu", () => {
   it("puts the current model on top, then the rest of its provider under a heading, in short names", () => {
     const built = menu([claude()]);

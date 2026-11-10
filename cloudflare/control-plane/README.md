@@ -280,7 +280,7 @@ A failure in one account is logged and never stops the others:
    - `inactive` (never ran), with no activation time, created at least two
      days ago; or
    - `down` with its last connection ended at least
-     `OMB_TUNNEL_OFFLINE_RECLAIM_DAYS` (default 21, minimum 3) days ago and no
+     `OMB_TUNNEL_OFFLINE_RECLAIM_DAYS` (default 21, minimum 1) days ago and no
      later activation.
 
    `healthy` and `degraded` tunnels, any reported connection, an unknown
@@ -623,8 +623,74 @@ old one; no identifiers) answers:
   the day, the kind and a count; `relay_adoption.first_seen_at`, `token_at` and `e2e_at` tell a request whether its
   installation was already counted today. The stats dashboard (stats.openmausbot.com) charts it. A Worker without the
   migration keeps minting tokens and writing `relay_adoption`, and logs `relay_daily_schema` once per isolate.
-- **Tunnels.** From `RELAY_CAPABLE_MIN_VERSION`, a desktop at that version or later that reports `legacyDevices: 0` gets
-  `409 relay_capable` instead of a new tunnel. An endpoint it already holds keeps working.
+- **Tunnels.** From `RELAY_CAPABLE_MIN_VERSION`, a desktop at that version or later that the relay can carry (it is
+  on, the computer is inside the rollout and not blocked) and that reports `legacyDevices: 0` gets `409 relay_capable`
+  instead of a tunnel, whether it never had one or is coming back after a release or reclaim. An endpoint it already
+  holds keeps working. A desktop the relay cannot carry gets a tunnel as before. See **Releasing tunnels**.
+
+### Releasing tunnels
+
+A running desktop keeps its connector up, so idle reclaim never sees its tunnel as idle. These rules give tunnels back
+once the relay has replaced them. Each switch is off in `wrangler.jsonc`; all need migration `0015`. The cron only
+marks rows `deleting` (at most 20 a run, every reason together) and the cleanup sweep removes them; the row and its
+hostname stay, so a later provisioning call returns the same address.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `RELAY_TUNNEL_RELEASE_PERCENT` | `0` | Share of computers (the relay rollout's stable hash) whose tunnel is released once it is proven on the relay |
+| `RELAY_TUNNEL_RELEASE_DAYS` | `3` | The wait: no old phone reported for this long. Three days outlasts a weekend away, so a phone that still dials the tunnel has had working days to be counted and stop the wait |
+| `TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT` | `0` | Share of relay-served computers that give up their tunnel whatever phones are paired. Old phone apps stop connecting from outside the home network |
+| `TUNNEL_MIN_APP_VERSION` | empty | A desktop below it gets `426 update_required` and its tunnel is removed. A missing version counts as below |
+| `TUNNEL_REASON_MIN_VERSION` | empty | First desktop release that reads `tunnel` on `409 relay_capable` and keeps asking afterwards. Only from it is a full account answered with `relay_capable` |
+| `OMB_TUNNEL_RECLAIM_PREVIEW_DAYS` | empty | Dry run of idle reclaim at another offline period; counted, never acted on |
+
+- **Proven on the relay** means: a relay token in the last two days, a phone report in the last two days with at
+  least one phone on the encrypted connection and no old phone, and no old phone reported for the whole wait
+  (`relay_adoption.legacy_clear_at`, cleared by any report that counts an old phone). A phone that has used the
+  encrypted connection never dials the tunnel again, so such a tunnel carries nothing. The checks are repeated inside
+  the marking SQL, so a report that lands during the run wins.
+- **One rule for "on the relay".** The cron and provisioning both ask `relayAdmits` (`src/relay.ts`): the relay is
+  on, the computer is not blocked, and it is inside `RELAY_ROLLOUT_PERCENT` or named in `RELAY_ALLOW_INSTALLATIONS`.
+  So the cron never marks a tunnel that provisioning would hand straight back. To give up a tunnel that works, a
+  computer must also hold a relay token from the last two days: the cron always requires it, and under the cutoff
+  provisioning requires it whenever the row still holds a tunnel.
+- **The stored release.** `installations.app_version` is refreshed by every relay-token request (hourly on a
+  relay-capable desktop), as well as at registration and on `POST .../endpoint`. The cron applies
+  `TUNNEL_MIN_APP_VERSION` only to a computer that called in the last two days: had it updated to a relay-capable
+  release it would have said so. A computer that has been off is left to idle reclaim. One case is still judged by
+  a stale release: a desktop that updated with the relay route turned off. Its tunnel is removed, its next request
+  reports the real release and the same address comes back.
+- **Backpressure.** A run marks at most what one cleanup sweep removes (`OMB_CLEANUP_SWEEP_LIMIT`, at most 20) minus
+  the rows already waiting for cleanup. While the sweep is failing or rate-limited nothing more is marked. A marked
+  row is a final delete: its owner is answered `409 endpoint_busy` until the sweep has removed it.
+- **Coming back.** `POST /v1/installations/self/endpoint` creates a tunnel again, with the same hostname, when the
+  desktop reports an old phone (outside the cutoff), or the relay cannot carry it: `RELAY_DISABLED: "1"`, a lower
+  `RELAY_ROLLOUT_PERCENT`, or `relay_blocked_at`. With the relay switched off the cron releases nothing on the
+  relay's account either, so a relay outage is answered by that one switch.
+- **At the tunnel limit** a desktop the relay carries, at `TUNNEL_REASON_MIN_VERSION` or later, is answered
+  `409 {"error":"relay_capable","tunnel":"full"}` instead of `503 endpoint_capacity`: it pairs new phones over the
+  relay and keeps asking for its old phones. An earlier release takes any `relay_capable` as "nothing more to do"
+  and would stop retrying, so it keeps the 503. Under the old-phone cutoff the answer is `"tunnel":"retired"` for
+  every relay-capable release; the earlier ones carry on without a tunnel and say nothing.
+- **Reading before switching.** `/healthz` reports counts only:
+
+```json
+"tunnelRelease": {
+  "relayProven": { "percent": 0, "days": 3, "eligible": 41 },
+  "legacyPhoneCutoff": { "percent": 0, "eligible": 1630 },
+  "minAppVersion": { "on": false, "eligible": 212 }
+}
+```
+
+  `relayProven.eligible` is what the release clears at 100%; `legacyPhoneCutoff.eligible` what the cutoff clears
+  beyond that (both assume the relay rollout is at 100%); `minAppVersion.eligible` the tunnels of desktops seen in
+  the last two days below `TUNNEL_MIN_APP_VERSION`, or below `RELAY_CAPABLE_MIN_VERSION` while no minimum is set. `capacity.reclaim.preview` is
+  `{ "offlineDays": 1, "eligible": 37 }` once every account has finished a full pass at the preview period (about 50
+  minutes per 1,000 tunnels), and `eligible: null` until then.
+- **Order.** Apply migration `0015` and deploy with everything off. Read `tunnelRelease`. Raise
+  `RELAY_TUNNEL_RELEASE_PERCENT` 10, 50, 100. After the desktop release that explains the cutoff is out, set
+  `TUNNEL_REASON_MIN_VERSION` to that release, then raise `TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT` 10, then 100, and last
+  set `TUNNEL_MIN_APP_VERSION`.
 
 Setup, once:
 

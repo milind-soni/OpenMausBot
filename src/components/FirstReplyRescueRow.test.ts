@@ -13,6 +13,9 @@ import { PERSON_STOPPED_TURN_NAME, STOPPED_TURN_NAME } from "../../shared/client
 import { CancelledTurnRow } from "./CancelledTurnRow";
 import { StatusActivityRow } from "./StatusActivityRow";
 
+// Its cases switch between Simple and Advanced mode, whose code stays until it goes: they run with the switch put back.
+vi.mock("@/lib/simple-only", () => ({ SIMPLE_ONLY: false }));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const rescue: FirstReplyRescue = { botId: "bot-1", threadId: "thread-1", turnId: "turn-1", requestMessageId: "ask-1", instanceId: "opencodeGo", ai: "OpenCode" };

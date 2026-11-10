@@ -89,6 +89,9 @@ const resultBudgetSchema = z.number({ message: "The result size limit must be a 
   .min(0, "The result size limit cannot be negative.")
   .max(MAX_RESULT_BUDGET, `The result size limit can be at most ${MAX_RESULT_BUDGET.toLocaleString("en-US")} characters; use 0 for no limit.`);
 const MCP_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+
+/** A server the request named is not saved here: its name, in the words every route answers with. */
+export const mcpServerNotFound = (name: string): string => `MCP server "${name}" not found. It may have been removed: check Apps → MCP servers.`;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** An HTTP header field name: RFC 9110 token characters. */
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/;

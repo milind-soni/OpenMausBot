@@ -9,10 +9,10 @@
 // shown place's verified origin, nothing else. A team is only ever one the Admin's session lists, paired through the
 // Admin's team pairing (its claims are the Admin's), never an address a page supplied.
 import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableCause, cloudUnreachableText, machineSetup, readyCloudOrigin } from "./cloud-home.mjs";
-import { cloudMachine, cloudState, otherOwnClouds, ownCloud } from "./cloud-list.mjs";
+import { cloudMachine, cloudState, myCloudOf, otherOwnClouds, ownCloud } from "./cloud-list.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
 import nativeText from "./native-text.cjs";
-import { awayIn, parseJournal } from "./one-home.mjs";
+import { awayIn, parseJournal, sameCloud } from "./one-home.mjs";
 
 export const HOME_SCREEN_PATH = "/home";
 /** The look at an awake My Cloud before the window moves there: under 3 s, so the offline screen shows within 3 s. */
@@ -65,6 +65,14 @@ const DEFAULT_TIMERS = {
 
 const originOf = (url) => { try { return new URL(url).origin; } catch { return null; } };
 
+/** The Cloud this computer moved to, at the address the verified session gives My Cloud now when My Cloud is that Cloud by
+ * its id or by an address it had before it moved to another provider, for the journal's own account; as kept otherwise. */
+function followedCloud(kept, state) {
+  const mine = myCloudOf(state);
+  if (!mine?.origin || !kept.origin || mine.origin === kept.origin || (kept.account && kept.account !== state.account?.id)) return kept;
+  return sameCloud(mine, kept) ? { ...kept, origin: mine.origin } : kept;
+}
+
 /**
  * Who the window opens. `journal`: one-home.json read back; `frozenCloud`: this computer's freeze marker when there is no
  * journal (its Cloud's origin, or true when it names none); `state`: the MausBot Cloud sign-in's state. An ended My Cloud
@@ -73,9 +81,10 @@ const originOf = (url) => { try { return new URL(url).origin; } catch { return n
  * @returns {{ kind: "computer" } | { kind: "cloud", origin: string } | { kind: "signin", other?: true }}
  */
 export function homeOf({ journal = null, frozenCloud = null, state = null }) {
-  const moved = journal ? (awayIn(journal) ? journal.cloud : null)
+  const kept = journal ? (awayIn(journal) ? journal.cloud : null)
     : frozenCloud ? { origin: typeof frozenCloud === "string" ? frozenCloud : null, account: null } : null;
-  if (!moved) return { kind: "computer" };
+  if (!kept) return { kind: "computer" };
+  const moved = followedCloud(kept, state);
   const connected = state?.status === "connected";
   const signedInNow = state?.account?.id ?? null;
   // This computer moved to another account's Cloud: its frozen copy stays frozen, and this account's own Cloud is what opens.

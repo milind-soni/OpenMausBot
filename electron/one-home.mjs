@@ -93,9 +93,15 @@ const tagged = (message, code, extra = {}) => Object.assign(new Error(message), 
 const errorText = (error) => (typeof error?.errorKey === "string" && error.errorKey.startsWith("serverError.")
   ? { errorKey: error.errorKey, errorParams: record(error.errorParams) ? error.errorParams : {} } : { errorKey: undefined, errorParams: undefined });
 
-/** The session's My Cloud is known to be another Cloud than the one at `origin`. A held Cloud that names no address gives no
- * sign of being another, so it is taken for that one. */
-const anotherCloud = (cloud, origin) => cloud.origin !== origin && !(cloud.ended && !cloud.origin);
+/** The session's Cloud (`cloud`: its address, id and `formerOrigins`) is the one kept as `kept` (a journal's Cloud: its
+ * address, and its id once known): the same address, the same id, or an address the Cloud had before it moved to another
+ * provider, unless both ids are known and differ. A journal from before ids were kept is known again by that last one. */
+export const sameCloud = (cloud, kept) => cloud.origin === kept.origin || (Boolean(cloud.id) && cloud.id === kept.id)
+  || (Array.isArray(cloud.formerOrigins) && cloud.formerOrigins.includes(kept.origin) && !(cloud.id && kept.id && cloud.id !== kept.id));
+
+/** The session's My Cloud is known to be another Cloud than `kept`. A held Cloud that names no address gives no sign of being
+ * another, so it is taken for that one. */
+const anotherCloud = (cloud, kept) => !sameCloud(cloud, kept) && !(cloud.ended && !cloud.origin);
 
 /** A journal read back, kept to its known shape; null when there is none. */
 export function parseJournal(value) {
@@ -157,7 +163,7 @@ export function arrivedCounts(here, there) {
  * @param {{
  *   journal: { read(): unknown, write(value: unknown): void },
  *   cloud(): null | { origin: string | null, account: string, machine: string | null, ready: boolean, moves: boolean, ended: boolean, paid: boolean,
- *     homecoming?: { installationId: string, name: string }, signIn?: string, verified?: boolean },
+ *     homecoming?: { installationId: string, name: string }, signIn?: string, verified?: boolean, id?: string, formerOrigins?: string[] },
  *   send: { move(options?: { final?: boolean }): Promise<unknown>, check(): Promise<{ ok: boolean }>, switches(): Record<string, boolean>, snapshot(): any },
  *   local: { freeze(origin: string): Promise<{ frozen: true } | { busy: string, what?: string }>, unfreeze(options?: { automations?: "off" }): Promise<void>, frozen(): Promise<boolean>, json(route: string): Promise<any>,
  *     call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, forget?(): Promise<void>,
@@ -481,10 +487,10 @@ export function createOneHome(deps) {
    * this app kept no journal of it. Never a server of the person's own (`place`), nor one another account moved to. */
   async function frozenFor(journal, cloud) {
     if (!cloud?.verified || !deps.gone) return null;
-    if (journal && (awayIn(journal) || journal.phase === "home-again")) return anotherCloud(cloud, journal.cloud.origin) ? journal : null;
+    if (journal && (awayIn(journal) || journal.phase === "home-again")) return anotherCloud(cloud, journal.cloud) ? journal : null;
     if (journal && journal.phase !== "back") return null;
     const marker = await deps.local.marker?.().catch(() => null);
-    if (!marker?.frozen || marker.place || typeof marker.cloud !== "string" || marker.cloud === cloud.origin) return null;
+    if (!marker?.frozen || marker.place || typeof marker.cloud !== "string" || sameCloud(cloud, { origin: marker.cloud })) return null;
     return { v: 1, cloud: { origin: marker.cloud, account: cloud.account, machine: marker.cloud }, startedAt: now() };
   }
 
@@ -503,9 +509,20 @@ export function createOneHome(deps) {
    * nor takes a top-up by that word, and a move not yet switched over stops as it does when My Cloud ends (nothing runs
    * there yet). Only a verified session's word, for the journal's own account. */
   function judged(cloud, journal) {
-    if (!cloud?.verified || !journal || journal.phase === "back" || cloud.account !== journal.cloud.account || !anotherCloud(cloud, journal.cloud.origin)) return cloud;
+    if (!cloud?.verified || !journal || journal.phase === "back" || cloud.account !== journal.cloud.account || !anotherCloud(cloud, journal.cloud)) return cloud;
     const { homecoming: _, ...rest } = cloud;
     return awayIn(journal) || journal.phase === "home-again" ? { ...rest, ready: false, ended: false } : { ...rest, ended: true };
+  }
+
+  /** The Cloud this journal moved to, by a verified session's word for its own account, answers at a new address now (it
+   * moved to another provider), or its id is known now: the journal follows it there and keeps its id, so the move goes
+   * on, or stays done, at that address, and the old one is never read as My Cloud having ended. */
+  function followed(journal, cloud) {
+    if (!journal || journal.phase === "back" || !cloud?.verified || !cloud.origin || cloud.account !== journal.cloud.account || !sameCloud(cloud, journal.cloud)) return journal;
+    const id = cloud.id || journal.cloud.id;
+    if (cloud.origin === journal.cloud.origin && id === journal.cloud.id) return journal;
+    if (cloud.origin !== journal.cloud.origin) log("one home: the Cloud this computer moved to answers at a new address; the move follows it there");
+    return write({ ...journal, cloud: { ...journal.cloud, origin: cloud.origin, machine: cloud.machine ?? cloud.origin, ...(id ? { id } : {}) } });
   }
 
   /** My Cloud ended: this computer is home again at once, as it was at the move, then brings back what was done there. */
@@ -635,8 +652,9 @@ export function createOneHome(deps) {
 
   async function run() {
     noted = null;
-    let journal = read();
-    const said = deps.cloud(), cloud = judged(said, journal);
+    const said = deps.cloud();
+    let journal = followed(read(), said);
+    const cloud = judged(said, journal);
     // A move left off while My Cloud was away goes on as soon as it is back, unless it failed frozen: that waits its hour.
     const cameBack = cloud?.ready === true && wasReady === false;
     wasReady = cloud ? cloud.ready : null;
@@ -663,7 +681,8 @@ export function createOneHome(deps) {
       // local environment) nothing starts or counts as failing, and it looks again in a minute.
       if (deps.ownCopy?.() === false) { noted = "local_unavailable"; if (!heldOff) log("one home: the move waits until this computer's own copy runs"); heldOff = true; later(MINUTE); return; }
       heldOff = false;
-      journal = write({ v: 1, phase: "copy", cloud: { origin: cloud.origin, account: cloud.account, machine: cloud.machine, ...(cloud.name ? { name: cloud.name } : {}) }, startedAt: now() });
+      journal = write({ v: 1, phase: "copy", cloud: { origin: cloud.origin, account: cloud.account, machine: cloud.machine, ...(cloud.id ? { id: cloud.id } : {}), ...(cloud.name ? { name: cloud.name } : {}) },
+        startedAt: now() });
     }
     if (journal.thaw && !(await thaw(journal))) return;
     journal = read() ?? journal;

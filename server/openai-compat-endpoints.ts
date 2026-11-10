@@ -30,7 +30,7 @@ export const addEndpointSchema = z.object({
   url: z.string().max(512),
   key: z.string().trim().min(1).max(4096),
   models: z.array(z.string().trim().min(1).max(200)).max(64).optional(),
-  catalog: z.literal("lmstudio").optional(),
+  catalog: z.enum(["lmstudio", "ollama"]).optional(),
 }).strict();
 
 export type AddEndpoint = z.infer<typeof addEndpointSchema>;

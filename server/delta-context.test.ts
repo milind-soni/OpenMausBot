@@ -477,6 +477,8 @@ describe("isContextMessage", () => {
     expect(isContextMessage({ kind: "text", text: "", attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg" }] })).toBe(false);
     expect(isContextMessage({ kind: "text", text: "", webhookPost: true, attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg", text: "Spoken words" }] })).toBe(false);
     expect(isContextMessage({ kind: "compaction" })).toBe(true);
+    // The engine condensed its own session: a marker for people, with nothing for a provider to read.
+    expect(isContextMessage({ kind: "compaction", engineCompaction: true })).toBe(false);
     expect(isContextMessage({ kind: "text", roomRequest: { id: "r1", phase: "result" } })).toBe(true);
     expect(isContextMessage({ kind: "activity", text: "Bash" })).toBe(false);
     expect(isContextMessage({ kind: "call", text: "Call with Ada · 0:42" })).toBe(false);
