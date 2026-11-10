@@ -539,6 +539,10 @@ it("runs sandbox code for a bot with app grants only at Full access, only by a d
   expect(batched.body.result.isError).toBe(true);
   expect(JSON.stringify(batched.body.result)).toContain("only at Full access");
   expect(relayed).toHaveLength(before + 1);
+  // Per-app scopes hold at Full access too: the code could reach Slack, which these scopes turn off.
+  expect((await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "write" } } })).status).toBe(200);
+  expect((await relay(token, "COMPOSIO_REMOTE_WORKBENCH", code)).body.result.isError).toBe(true);
+  expect(relayed).toHaveLength(before + 1);
   const low = await bot("Sandbox below Full access");
   expect((await api("PATCH", `/api/bots/${low.id}`, { connectorTools: { gmail: { tools: "*" } } })).status).toBe(200);
   const lowToken = await mint(low.id, low.threadId);

@@ -5,7 +5,8 @@ import { CONNECTOR_TOOL_NAME_PATTERN, type ConnectorToolGrant } from "../shared/
 import { EMAIL_SLUG } from "../shared/email.ts";
 
 /** The connected apps' sandbox: Composio's code tools. Code run there can reach any connected app, past a bot's per-app
- * grants and scopes, so a bot that has either runs it only at Full access, and only by a direct call. */
+ * grants, so a bot with grants runs it only at Full access, and only by a direct call. A bot with per-app scopes (an app
+ * off, or read-only) never runs it: nothing here can check that code against them. */
 export const APP_SANDBOX_TOOLS: readonly string[] = ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL"];
 
 /** The service Composio's own tools are named for (COMPOSIO_REMOTE_WORKBENCH → composio). */
@@ -26,8 +27,8 @@ function appSandboxCall(frame: unknown): boolean {
   return method === "tools/call" && typeof name === "string" && APP_SANDBOX_TOOLS.includes(name);
 }
 
-/** The relay's rule for the apps' sandbox: a direct call to it passes a bot's per-app grants and scopes only while the turn
- * runs at Full access, judged again each time it is asked (at dispatch too). `refusal` is what a bot with grants is told
+/** The relay's rule for the apps' sandbox: a direct call to it passes a bot's per-app grants (never its scopes) only while
+ * the turn runs at Full access, judged again each time it is asked (at dispatch too). `refusal` is what a bot with grants is told
  * when code it sent cannot be checked against them. */
 export function appSandboxRule(frame: unknown, fullAccess: () => boolean): { open(): boolean; refusal: string } {
   const direct = appSandboxCall(frame);

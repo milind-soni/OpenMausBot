@@ -259,7 +259,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     async appsIntegrations(bot: Bot, threadId: string, generation: string, names: "dotted" | "plain" = "plain"): Promise<{ composio?: Integration; composioOwn?: Integration }> {
       const cfg = deps.cfg();
       const out: { composio?: Integration; composioOwn?: Integration } = {};
-      const base = { harnessUrl: deps.harnessUrl, botId: bot.id, threadId, connectorTools: advertisedGrants(bot.connectorTools, deps.fullAccess?.(bot.id, threadId) === true) };
+      const base = { harnessUrl: deps.harnessUrl, botId: bot.id, threadId, connectorTools: advertisedGrants(bot.connectorTools, bot.connectorScopes === undefined && deps.fullAccess?.(bot.id, threadId) === true) };
       const shared = await deps.composio.mcpIntegration(cfg, { ...base, commsToken: deps.mint({ botId: bot.id, threadId, generation }) });
       if (shared) out.composio = await withAppTools(shared, bot, names);
       const person = personApps().length ? turnPerson(threadId, generation) : null;
