@@ -156,9 +156,9 @@ test("a bot a move made on My Cloud has all its fields sent again when the move 
 test("each item is recorded from My Cloud's own answer as soon as it went, so a send cut short later never takes it for My Cloud's own change", async () => {
   const store = stored({ v: 1, clouds: { [CLOUD]: { sent: { [itemKey.bot("juno")]: { team: ["p1", "p1"] } } } } });
   let cutAtEnd = true;
-  const move = sides({ here: [bot("juno", { team: "p2" })], bots: { juno: { peers: ["ember"] } }, there: [bot("juno", { team: "p1" })],
+  const move = sides({ here: [bot("juno", { team: "p2" })], bots: { juno: { section: "Ops" } }, there: [bot("juno", { team: "p1" })],
     onCall: (method, route, _body, cloud) => {
-      // My Cloud keeps the team without the bot it lacks: its own hash for what it took.
+      // My Cloud files the bot its own way: its own hash for what it took.
       if (method === "PATCH" && route === "/api/bots/juno") { cloud.get(itemKey.bot("juno")).parts.team = "p3"; return reply(200, {}); }
       if (cutAtEnd && method === "GET" && route === "/api/cloud-send?move=1" && cloud.get(itemKey.bot("juno")).parts.team === "p3") throw new TypeError("fetch failed");
     } });
