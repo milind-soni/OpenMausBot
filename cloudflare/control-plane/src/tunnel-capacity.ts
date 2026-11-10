@@ -41,6 +41,7 @@ const MANAGED_TUNNEL_NAME = /^omb-c-[0-9a-f]{32}$/;
 const CAPACITY_HEALTH_CACHE_SECONDS = 120;
 const CAPACITY_HEALTH_CACHE = "healthz-capacity";
 // Never routed. Bump the version when AccountSnapshot changes: copies outlive deploys.
+const DAY_MS = 24 * 60 * 60 * 1_000;
 const CAPACITY_HEALTH_CACHE_PATH = "/__internal/healthz-capacity-row/v2";
 
 interface ScanEndpointRow {
@@ -295,6 +296,72 @@ function capacityAlert(
   }));
 }
 
+/** Adds this page to the account's dry-run pass; the last page closes the
+ * pass and publishes its total. A changed threshold starts over, so a total
+ * never mixes two thresholds. Without migration 0015 nothing is kept. */
+async function recordReclaimPreview(
+  env: Env,
+  config: ControlPlaneConfig,
+  account: EndpointAccount,
+  page: number,
+  lastPage: boolean,
+  eligible: number,
+  now: number,
+): Promise<void> {
+  const previewMs = config.capacity.reclaimPreviewMs;
+  if (previewMs === null) {
+    await env.DB.prepare("DELETE FROM managed_endpoint_reclaim_preview WHERE provider_account = ?")
+      .bind(account.accountId).run().catch(() => undefined);
+    return;
+  }
+  const days = previewMs / DAY_MS;
+  try {
+    const row = await env.DB.prepare(
+      "SELECT days, running, eligible, completed_at FROM managed_endpoint_reclaim_preview WHERE provider_account = ?",
+    ).bind(account.accountId).first<{ completed_at: number | null; days: number; eligible: number | null; running: number | null }>();
+    // A pass counts only from its first page, at one threshold throughout.
+    const inPass = page === 1 || (row !== null && row.days === days && row.running !== null);
+    const sameDays = row !== null && row.days === days;
+    const running = inPass ? (page === 1 ? 0 : row?.running ?? 0) + eligible : null;
+    const finished = lastPage && running !== null;
+    await env.DB.prepare(
+      `INSERT INTO managed_endpoint_reclaim_preview (provider_account, days, running, eligible, completed_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(provider_account) DO UPDATE SET
+         days = excluded.days, running = excluded.running, eligible = excluded.eligible,
+         completed_at = excluded.completed_at, updated_at = excluded.updated_at`,
+    ).bind(
+      account.accountId,
+      days,
+      lastPage ? null : running,
+      finished ? running : sameDays ? row.eligible : null,
+      finished ? now : sameDays ? row.completed_at : null,
+      now,
+    ).run();
+  } catch {
+    // The table is missing: no dry run until the migration is applied.
+  }
+}
+
+/** What a full pass would reclaim at the preview threshold, summed over the
+ * accounts: null until every account has finished a pass at it. */
+async function reclaimPreview(env: Env, config: ControlPlaneConfig): Promise<JSONValue | null> {
+  const previewMs = config.capacity.reclaimPreviewMs;
+  if (previewMs === null) return null;
+  const days = previewMs / DAY_MS;
+  const found = await env.DB.prepare(
+    `SELECT provider_account, eligible FROM managed_endpoint_reclaim_preview
+      WHERE days = ? AND provider_account IN (SELECT value FROM json_each(?))`,
+  ).bind(days, JSON.stringify(accountIds(config))).all<{ eligible: number | null; provider_account: string }>()
+    .then((result) => result.results, () => null);
+  if (found === null) return null;
+  const complete = found.length === config.endpointAccounts.length && found.every((row) => row.eligible !== null);
+  return {
+    offlineDays: days,
+    eligible: complete ? found.reduce((total, row) => total + (row.eligible ?? 0), 0) : null,
+  };
+}
+
 /**
  * One bounded step of one account's tunnel scan: a single provider page, the
  * shared reclaim-mark budget, one zone record count, and one snapshot.
@@ -362,6 +429,12 @@ async function scanAccount(
 
   const policy = idlePolicy(config);
   const idle: Record<IdleReason, number> = { never_connected: 0, offline: 0 };
+  // The dry run: the same rules at OMB_TUNNEL_RECLAIM_PREVIEW_DAYS, counted
+  // before anything is marked and never acted on.
+  const previewPolicy = config.capacity.reclaimPreviewMs === null
+    ? null
+    : { ...policy, offlineMs: config.capacity.reclaimPreviewMs };
+  let previewEligible = 0;
   let unmatched = 0;
   let eligible = 0;
   let marked = 0;
@@ -372,6 +445,13 @@ async function scanAccount(
       // be verified. Leave it for an operator rather than guessing.
       unmatched += 1;
       continue;
+    }
+    const previewReason = previewPolicy ? idleTunnelReason(tunnel.activity, now, previewPolicy) : null;
+    if (
+      previewPolicy && previewReason
+      && await reclaimEligible(env, account, row, tunnel.id, previewReason, previewPolicy, now)
+    ) {
+      previewEligible += 1;
     }
     const reason = idleTunnelReason(tunnel.activity, now, policy);
     if (!reason) continue;
@@ -426,6 +506,8 @@ async function scanAccount(
        checked_at = excluded.checked_at,
        updated_at = excluded.updated_at`,
   ).bind(account.accountId, nextPage, tunnelCount, dnsRecordCount, reclaimPending, dormantEndpoints, now, now).run();
+
+  await recordReclaimPreview(env, config, account, page, lastPage, previewEligible, now);
 
   capacityAlert(requestId, account, "tunnels", tunnelCount, account.tunnelLimit);
   capacityAlert(requestId, account, "dns_records", dnsRecordCount, account.dnsRecordLimit);
@@ -650,6 +732,8 @@ export async function capacityHealth(
 ): Promise<JSONValue> {
   const pool = poolHealth(config, await cachedSnapshots(env, config, ctx), now);
   const only = pool.accounts.length === 1 ? pool.accounts[0] : undefined;
+  const dryRun = await reclaimPreview(env, config);
+  const preview: Record<string, JSONValue> = dryRun === null ? {} : { preview: dryRun };
   if (only) {
     return {
       status: only.status,
@@ -657,7 +741,7 @@ export async function capacityHealth(
       tunnels: { used: only.snapshot.tunnel_count, limit: only.account.tunnelLimit },
       dnsRecords: { used: only.snapshot.dns_record_count, limit: only.account.dnsRecordLimit },
       providerRejectedAt: only.rejected ? only.snapshot.capacity_rejected_at : null,
-      reclaim: { mode: config.capacity.reclaimMode, pending: only.snapshot.reclaim_pending },
+      reclaim: { mode: config.capacity.reclaimMode, pending: only.snapshot.reclaim_pending, ...preview },
     };
   }
   const { open } = pool;
@@ -683,6 +767,7 @@ export async function capacityHealth(
     reclaim: {
       mode: config.capacity.reclaimMode,
       pending: open.reduce((total, each) => total + each.snapshot.reclaim_pending, 0),
+      ...preview,
     },
     accounts: pool.accounts.map((each) => ({
       hostSuffix: each.account.companionHostSuffix,

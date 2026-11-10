@@ -237,6 +237,38 @@ async function recordUse(env: Env, use: RelayUse): Promise<boolean> {
   ).bind(use.installationId, use.appVersion, use.e2e, use.legacy, use.continent, use.now).run().then(() => true, () => false);
 }
 
+/** Since when this installation has reported no old phone: kept while the count stays 0, cleared by any old phone.
+ * The tunnel release waits on it (`tunnel-release.ts`). Skipped without migration 0015, and the release stays off. */
+async function recordLegacyClear(env: Env, use: Pick<RelayUse, "installationId" | "legacy" | "now">): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE relay_adoption
+        SET legacy_clear_at = CASE WHEN ?2 > 0 THEN NULL ELSE COALESCE(legacy_clear_at, ?3) END
+      WHERE installation_id = ?1`,
+  ).bind(use.installationId, use.legacy, use.now).run().catch(() => undefined);
+}
+
+/**
+ * Whether the relay can carry this computer right now: it is on, the computer is not blocked, and it is inside the
+ * rollout (or admitted by name). Only then may it go without a tunnel. `bucket` is its place (0-99) in every
+ * percentage rollout, null when unknown. A database that cannot answer (a Worker ahead of migration 0012) reads as
+ * served, which is what a relay-capable desktop got before this check existed.
+ */
+export async function relayStanding(env: Env, installationId: string): Promise<{ serves: boolean; bucket: number | null }> {
+  const settings = await readRelaySettings(env);
+  if (!settings) return { serves: false, bucket: null };
+  let host: { hostId: string; blocked: boolean };
+  try {
+    host = await hostIdFor(env, installationId);
+  } catch {
+    return { serves: true, bucket: null };
+  }
+  const bytes = fromB64u(host.hostId);
+  const bucket = bytes === null ? null : await rolloutBucket(bytes);
+  if (host.blocked) return { serves: false, bucket };
+  const serves = settings.allowInstallations.has(installationId) || (bucket !== null && bucket < settings.rolloutPercent);
+  return { serves, bucket };
+}
+
 export async function issueRelayToken(request: Request, env: Env): Promise<Response> {
   const installation = await requireInstallation(request, env);
   const parsed = requestSchema.safeParse(await readBoundedJSON(request).catch(() => null));
@@ -274,6 +306,7 @@ export async function issueRelayToken(request: Request, env: Env): Promise<Respo
     now,
   });
   if (!counted) return relaySchemaMissing();
+  await recordLegacyClear(env, { installationId: installation.installation_id, legacy: parsed.data.devices.legacy, now });
   if (!included) return unavailable();
   const iat = Math.floor(now / 1000);
   const token = await mintRelayToken({ kid: settings.kid, hid: hostId, iid: installation.installation_id, iat, exp: iat + RELAY_TOKEN_TTL_S }, settings.signingKey);

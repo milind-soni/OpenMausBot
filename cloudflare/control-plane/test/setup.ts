@@ -4,6 +4,7 @@ import { afterEach, beforeAll } from "vitest";
 
 import { readConfig } from "../src/config";
 import { forgetCachedCapacity } from "../src/tunnel-capacity";
+import { forgetTunnelRelease } from "../src/tunnel-release";
 
 declare global {
   namespace Cloudflare {
@@ -22,6 +23,7 @@ beforeAll(async () => {
 
 afterEach(async () => {
   await forgetCachedCapacity(readConfig(env));
+  forgetTunnelRelease();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM otp_recipient_rate_limits"),
     env.DB.prepare("DELETE FROM control_action_rate_limits"),
@@ -30,6 +32,7 @@ afterEach(async () => {
     env.DB.prepare("DELETE FROM installation_push_devices"),
     // A missing row reads as an empty snapshot (never scanned, never refused).
     env.DB.prepare("DELETE FROM managed_endpoint_account_capacity"),
+    env.DB.prepare("DELETE FROM managed_endpoint_reclaim_preview"),
     env.DB.prepare("DELETE FROM installation_credentials"),
     env.DB.prepare("DELETE FROM installations"),
     env.DB.prepare('DELETE FROM "session"'),
