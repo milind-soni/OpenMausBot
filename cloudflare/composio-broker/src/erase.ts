@@ -1,35 +1,18 @@
 // Erases one installation: what it holds in D1, and what it created at Composio. Composio goes first and the
 // installation row last, so a failed Composio call leaves the token working for a retry.
-import { z } from "zod";
-
-import { base64Bytes, hmacKey, SIGNATURE_TOLERANCE_S } from "./app-events";
 import {
   ACCOUNT_ID,
   actingUser,
   composioRequest,
   json,
   listConnectedAccounts,
-  readBoundedBody,
   upstreamError,
-  utf8,
   type InstallationRow,
 } from "./common";
 import { deleteRemote, listRemoteInstances, otherBindings } from "./triggers";
 
 /** Workers on the free plan get 50 subrequests and 50 D1 queries per request: a larger erase is finished by further calls. */
 const DELETES_PER_CALL = 30;
-const INSTALLATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const MACHINE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/;
-const STAFF_ERASE_SIGNATURE = /^v1=([A-Za-z0-9_-]{43})$/;
-const staffEraseSchema = z.union([
-  z.object({ installationId: z.string().regex(INSTALLATION_ID) }).strict(),
-  z.object({ machineId: z.string().regex(MACHINE_ID) }).strict(),
-]);
-
-export function staffEraseMessage(timestamp: string, body: string) {
-  return `omb-broker-erase:v1\n${timestamp}\n${body}`;
-}
-
 /** The users among `users` no other live installation acts as. Only their connected accounts may be deleted: a desktop
  *  and its Cloud that share a Composio user lose each other's apps otherwise. */
 async function usersNoOneElseActsAs(env: Env, installationId: string, users: string[]) {
@@ -73,6 +56,7 @@ async function eraseAtComposio(env: Env, installationId: string, users: string[]
   let deletes = bound.deletes;
   for (const user of users) {
     for (const instance of await listRemoteInstances(env, user)) {
+      if (instance.user_id !== user) continue;
       if (deletes >= DELETES_PER_CALL) return "more";
       if (await otherBindings(env, installationId, instance.id, false) > 0) continue;
       const result = await deleteRemote(env, instance.id);
@@ -80,7 +64,7 @@ async function eraseAtComposio(env: Env, installationId: string, users: string[]
       deletes += 1;
     }
     for (const account of await listConnectedAccounts(env, user, [])) {
-      if (!account.id || !ACCOUNT_ID.test(account.id) || (account.user_id && account.user_id !== user)) continue;
+      if (!account.id || !ACCOUNT_ID.test(account.id) || account.user_id !== user) continue;
       if (deletes >= DELETES_PER_CALL) return "more";
       const response = await composioRequest(env, `/connected_accounts/${encodeURIComponent(account.id)}?revoke_on_delete=true`, { method: "DELETE" });
       if (!response.ok && response.status !== 404) {
@@ -94,7 +78,7 @@ async function eraseAtComposio(env: Env, installationId: string, users: string[]
 }
 
 /** 200 once nothing is left and the token is dead; 202 to call again; an error leaves the token working. */
-export async function eraseInstallation(installation: InstallationRow, env: Env, by: "owner" | "staff") {
+export async function eraseInstallation(installation: InstallationRow, env: Env) {
   const { id } = installation;
   // Before the check below: a code still out could hand a user being erased to another installation.
   await env.DB.prepare("DELETE FROM user_shares WHERE from_installation = ?1 OR for_installation = ?1").bind(id).run();
@@ -114,38 +98,6 @@ export async function eraseInstallation(installation: InstallationRow, env: Env,
     env.DB.prepare("DELETE FROM user_shares WHERE from_installation = ?1 OR for_installation = ?1").bind(id),
     env.DB.prepare("DELETE FROM installations WHERE id = ?").bind(id),
   ]);
-  console.log(JSON.stringify({ message: "installation erased", installationId: id, by }));
+  console.log(JSON.stringify({ message: "installation erased", installationId: id }));
   return json({ erased: true, sharedUserKept: erasable.length < users.length });
-}
-
-/** POST /v1/admin/erase {installationId} or {machineId}, for a customer who asks us to: signed with CLOUD_GRANT_SECRET
- *  over staffEraseMessage(timestamp, body), which the secret's other uses never sign. */
-export async function staffErase(request: Request, env: Env, now = Date.now()) {
-  const secret = env.CLOUD_GRANT_SECRET;
-  if (!secret) return json({ error: "not found" }, 404);
-  const timestamp = request.headers.get("x-omb-admin-timestamp") ?? "";
-  const signature = base64Bytes(request.headers.get("x-omb-admin-signature")?.match(STAFF_ERASE_SIGNATURE)?.[1] ?? "", true);
-  if (!signature || !/^\d{1,12}$/.test(timestamp) || Math.abs(now / 1000 - Number(timestamp)) > SIGNATURE_TOLERANCE_S) {
-    return json({ error: "unauthorized" }, 401);
-  }
-  const bytes = await readBoundedBody(request, 1024);
-  if (!bytes) return json({ error: "request body is too large" }, 413);
-  const raw = new TextDecoder().decode(bytes);
-  if (!await crypto.subtle.verify("HMAC", await hmacKey(secret), signature, utf8(staffEraseMessage(timestamp, raw)))) {
-    return json({ error: "unauthorized" }, 401);
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    return json({ error: "invalid JSON body" }, 400);
-  }
-  const parsed = staffEraseSchema.safeParse(value);
-  if (!parsed.success) return json({ error: "send {installationId} or {machineId}" }, 400);
-  const target = parsed.data;
-  const installation = "installationId" in target
-    ? await env.DB.prepare("SELECT * FROM installations WHERE id = ?").bind(target.installationId).first<InstallationRow>()
-    : await env.DB.prepare("SELECT * FROM installations WHERE cloud_machine_id = ?").bind(target.machineId).first<InstallationRow>();
-  if (!installation) return json({ error: "no such installation" }, 404);
-  return eraseInstallation(installation, env, "staff");
 }

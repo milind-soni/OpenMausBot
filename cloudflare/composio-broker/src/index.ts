@@ -17,7 +17,7 @@ import {
   eventInstallation,
   type InstallationRow,
 } from "./common";
-import { eraseInstallation, staffErase } from "./erase";
+import { eraseInstallation } from "./erase";
 import { adoptSharedUser, me, shareUser } from "./sharing";
 import { createTrigger, deleteTrigger, getTriggerType, listTriggers, listTriggerTypes, updateTrigger } from "./triggers";
 
@@ -716,7 +716,6 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
   if (request.method === "POST" && url.pathname === "/v1/installations") return register(request, env);
   if (request.method === "POST" && url.pathname === "/v1/composio/webhook") return composioWebhook(request, env, ctx);
   if (request.method === "GET" && url.pathname === "/v1/stats/app-events") return appEventStats(request, url, env);
-  if (request.method === "POST" && url.pathname === "/v1/admin/erase") return staffErase(request, env);
   if (!url.pathname.startsWith("/v1/")) return json({ error: "not found" }, 404);
   const installation = await authenticate(request, env);
   if (!installation) return json({ error: "unauthorized" }, 401);
@@ -725,7 +724,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
   if (request.method === "GET" && url.pathname === "/v1/me") return me(installation);
   if (request.method === "DELETE" && url.pathname === "/v1/installation") {
     await limitSessionRequests(installation, env);
-    return eraseInstallation(installation, env, "owner");
+    return eraseInstallation(installation, env);
   }
   if (request.method === "POST" && url.pathname === "/v1/installation/share") return shareUser(request, installation, env);
   if (request.method === "POST" && url.pathname === "/v1/installation/adopt") {

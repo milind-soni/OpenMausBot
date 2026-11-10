@@ -1,9 +1,6 @@
-import { createHmac } from "node:crypto";
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { staffEraseMessage } from "./erase";
-import { brokerHarness, CLOUD_GRANT_SECRET, message, type Installation } from "./test-harness";
+import { brokerHarness, message, type Installation } from "./test-harness";
 
 let h: ReturnType<typeof brokerHarness>;
 
@@ -59,17 +56,6 @@ async function shared() {
   const { code } = await (await post(desktop, "/v1/installation/share", { for: cloud.id })).json() as { code: string };
   expect((await post(cloud, "/v1/installation/adopt", { code })).status).toBe(200);
   return { desktop, cloud, gmail };
-}
-
-function staffCall(body: unknown, options: { secret?: string; timestamp?: number; signature?: string } = {}) {
-  const raw = JSON.stringify(body);
-  const timestamp = String(options.timestamp ?? Math.floor(Date.now() / 1000));
-  const signature = options.signature ?? `v1=${createHmac("sha256", options.secret ?? CLOUD_GRANT_SECRET).update(staffEraseMessage(timestamp, raw)).digest("base64url")}`;
-  return h.fetch("/v1/admin/erase", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-omb-admin-timestamp": timestamp, "x-omb-admin-signature": signature },
-    body: raw,
-  });
 }
 
 describe("DELETE /v1/installation", () => {
@@ -238,6 +224,27 @@ describe("a Composio user another installation also uses", () => {
     expect((await erase(owner)).status).toBe(200);
     expect(h.composio.accounts.map((account) => account.id)).toEqual([theirs]);
   });
+
+  it("does not delete an account or trigger Composio lists without saying whose it is", async () => {
+    harness();
+    const owner = await h.install(), stranger = await h.install();
+    const theirs = h.account(stranger, "gmail");
+    const trigger = "ti_unattributed";
+    const listing = h.composio.fetchImpl;
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if ((init?.method ?? "GET") === "GET" && url.pathname.endsWith("/connected_accounts")) {
+        return Response.json({ items: [{ id: theirs, status: "ACTIVE", toolkit: { slug: "gmail" } }], next_cursor: null });
+      }
+      if ((init?.method ?? "GET") === "GET" && url.pathname.endsWith("/trigger_instances/active")) {
+        return Response.json({ items: [{ id: trigger, trigger_name: "GMAIL_NEW_GMAIL_MESSAGE" }], next_cursor: null });
+      }
+      return listing(input, init);
+    });
+    expect((await erase(owner)).status).toBe(200);
+    expect(h.composio.accounts.map((account) => account.id)).toEqual([theirs]);
+    expect(h.composio.calls.filter((call) => call.method === "DELETE")).toEqual([]);
+  });
 });
 
 describe("a Composio failure can be retried", () => {
@@ -328,72 +335,5 @@ describe("a Composio failure can be retried", () => {
     expect(await alive(owner)).toBe(true);
     expect(h.composio.accounts.map((candidate) => candidate.id)).toEqual([account]);
     expect(h.composio.calls.filter((call) => call.method === "DELETE")).toEqual([]);
-  });
-});
-
-describe("POST /v1/admin/erase", () => {
-  it("erases by installation id with a signed request", async () => {
-    harness();
-    const owner = await h.install();
-    h.account(owner);
-    const response = await staffCall({ installationId: owner.id });
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ erased: true, sharedUserKept: false });
-    expect(h.composio.accounts).toEqual([]);
-    expect(await alive(owner)).toBe(false);
-  });
-
-  it("erases a Cloud by its machine id, and answers 404 once it is gone", async () => {
-    harness();
-    const owner = await h.install();
-    h.d1.db.prepare("UPDATE installations SET cloud_machine_id = 'machine-1' WHERE id = ?").run(owner.id);
-    expect((await staffCall({ machineId: "machine-1" })).status).toBe(200);
-    expect(rowCounts(owner.id)).toEqual(NOTHING);
-    expect((await staffCall({ machineId: "machine-1" })).status).toBe(404);
-  });
-
-  it("keeps a shared user's accounts, as the owner's route does", async () => {
-    harness();
-    const { desktop, gmail } = await shared();
-    await expect((await staffCall({ installationId: desktop.id })).json()).resolves.toEqual({ erased: true, sharedUserKept: true });
-    expect(h.composio.accounts.map((account) => account.id)).toEqual([gmail]);
-  });
-
-  it("refuses a wrong secret, a stale timestamp, a body the signature is not over, and an installation token", async () => {
-    harness();
-    const owner = await h.install();
-    h.account(owner);
-    expect((await staffCall({ installationId: owner.id }, { secret: "wrong-secret" })).status).toBe(401);
-    expect((await staffCall({ installationId: owner.id }, { timestamp: Math.floor(Date.now() / 1000) - 301 })).status).toBe(401);
-    expect((await staffCall({ installationId: owner.id }, { signature: "v1=short" })).status).toBe(401);
-    const timestamp = String(Math.floor(Date.now() / 1000));
-    const signedForOther = `v1=${createHmac("sha256", CLOUD_GRANT_SECRET).update(staffEraseMessage(timestamp, JSON.stringify({ installationId: "00000000-0000-4000-8000-000000000000" }))).digest("base64url")}`;
-    const tampered = await h.fetch("/v1/admin/erase", {
-      method: "POST",
-      headers: { "x-omb-admin-timestamp": timestamp, "x-omb-admin-signature": signedForOther },
-      body: JSON.stringify({ installationId: owner.id }),
-    });
-    expect(tampered.status).toBe(401);
-    expect((await h.call(owner, "/v1/admin/erase", { method: "POST", body: JSON.stringify({ installationId: owner.id }) })).status).toBe(401);
-    expect(await alive(owner)).toBe(true);
-    expect(h.composio.accounts).toHaveLength(1);
-  });
-
-  it("refuses a signature made for a Cloud grant or a wake, which use the same secret", async () => {
-    harness();
-    const owner = await h.install();
-    const timestamp = String(Math.floor(Date.now() / 1000));
-    const raw = JSON.stringify({ installationId: owner.id });
-    const grantStyle = `v1=${createHmac("sha256", CLOUD_GRANT_SECRET).update(`omb-connected-apps-cloud:v1\n${raw}`).digest("base64url")}`;
-    expect((await staffCall({ installationId: owner.id }, { timestamp: Number(timestamp), signature: grantStyle })).status).toBe(401);
-    expect(await alive(owner)).toBe(true);
-  });
-
-  it("answers 400 for a target it cannot read, and 404 without the secret", async () => {
-    harness();
-    expect((await staffCall({ installationId: "not-an-id" })).status).toBe(400);
-    expect((await staffCall({ installationId: "00000000-0000-4000-8000-000000000000" })).status).toBe(404);
-    h.env.CLOUD_GRANT_SECRET = undefined;
-    expect((await staffCall({ machineId: "machine-1" })).status).toBe(404);
   });
 });
