@@ -135,8 +135,21 @@ Read at commit `542f8e55f`. "Built" means the code is in this repository; it doe
 - **The update window.** The connector receives and keeps the window the Admin signs, and runs an update when the
   Admin sends the job. Choosing the window is the Admin's.
 
+### In review
+
+Written and under review, not merged:
+
+- **The installer** (`deploy/install.sh`, #5158): the preflight, the install under `/opt/openmausbot`, and for a
+  version with the hardened profile the host's preparation for the bots' sandbox and the server's own self-check of
+  it. It places `update.sh` and keeps the version that pins.
+- **The `stable` channel and the one-command update with rollback** for standalone servers (`deploy/update.sh`,
+  #5171). No `stable` image tag is published yet.
+- **The hardened default** for shared servers and the server image (#5180).
+
+They can merge in any order. The installer turns the sandbox on and places `update.sh` only once the other two are on
+`main` and a release carries the hardened profile; before that it says what is not there yet.
+
 ### Planned
 
-The installer for the server itself, the `stable` channel (no `stable` image tag is published yet), the hardened default for shared servers, entitlements
-from the Admin with seats, Add your own server in the dashboard, the one-command update for standalone servers, the
-schema marker in the data directory, the 90-day skew banner, and everything in phases 2 and 3.
+Entitlements from the Admin with seats, Add your own server in the dashboard, the schema marker in the data
+directory, the 90-day skew banner, and everything in phases 2 and 3.
