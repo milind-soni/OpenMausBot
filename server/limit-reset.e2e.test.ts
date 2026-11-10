@@ -403,7 +403,7 @@ it.each([
     const { bot } = await control("new-bot", "--name", "Kai");
     const threadId = bot.activeTaskId;
     if (recovering) await api("PUT", "/api/config", { automaticRecovery: { enabled: true, backup: bot.modelSelection } });
-    // The fixture's starter bot is on the same Claude with no backup too, so the one notice names both (#5136).
+    // The fixture's starter bot is on the same Claude with no backup too, so the one notice names both as bots that can't run.
     const told = "Verification fixture is signed out on this computer. Sign in again in Settings → AI to keep using it. Until then Kai and Fixture Starter can't run: they have no backup.";
     await control("send", "--bot", bot.id, "--task", threadId, "--text", "Draft the launch plan");
     expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("failed");
