@@ -51,6 +51,9 @@ export interface BotSettingsRouteDeps {
   cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null;
   /** A person opened this conversation (a Team Cloud's Needs you lines for them there are done). */
   threadRead?(auth: RequestAuth, threadId: string): void;
+  /** A Team Cloud: marks a bot's shared conversation read or unread for this person alone (host/room-reads.ts); false
+   * for a private chat, which keeps its one mark. */
+  personMarkThread?(auth: RequestAuth, threadId: string, unread: boolean): boolean;
 }
 
 export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandler {
@@ -167,6 +170,10 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       const current = requestedTaskBot(m[1], body?.threadId);
       sawThread(current.threadId);
       deps.threadRead?.(auth, current.threadId);
+      if (deps.personMarkThread?.(auth, current.threadId, false)) {
+        readThreadNotifications(current.threadId, broadcast, notificationListed(auth));
+        return json(res, 200, { bot: wireBot(store.bot(current.id)!) });
+      }
       const task = store.taskByThread(current.id, current.threadId), cursor = readCursor(current.threadId);
       const changed = Boolean(task?.unread) || (cursor.lastReadMessageId !== undefined && task?.lastReadMessageId !== cursor.lastReadMessageId);
       if (changed) store.patchTask(current.id, current.threadId, { unread: false, ...cursor });
