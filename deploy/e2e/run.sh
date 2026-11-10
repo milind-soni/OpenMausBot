@@ -2,7 +2,9 @@
 # The server installer (deploy/install.sh) on a stock Ubuntu 24.04 host with Docker, run as a person runs it: the checks
 # alone, then a real install of the published image, a second run, an uninstall that keeps the data, and an install on
 # top of that data. The host has no domain of its own, so the DNS check is shown to fail and is then skipped, and no
-# certificate can be issued: the installer must say exactly that, with the server healthy behind Caddy.
+# public certificate can be issued: the installer must say exactly that, with the server healthy behind Caddy. The name
+# ends in .internal, for which Caddy issues a certificate of its own CA at once, so HTTPS through Caddy is checked too:
+# after every way the server restarts without Caddy, and after the documented backup and restore.
 # The files the installer places (update.sh, the sandbox's host preparation) come from this checkout. Where the image
 # runs the hardened profile the bots' sandbox must be on and hold: a bot cannot read config.json. With
 # OMB_INSTALL_IMAGE set (the workflow builds this checkout's image and serves it from a registry on the runner), that
@@ -12,7 +14,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 OUT=${OUT:-$(mktemp -d)}
 mkdir -p "$OUT"
-DOMAIN=installer-e2e.invalid
+DOMAIN=installer-e2e.internal
 DIR=/opt/openmausbot
 SETTINGS=(OMB_INSTALL_SKIP_DNS=1 OMB_INSTALL_HTTPS_WAIT_S=20 "OMB_INSTALL_SOURCE=file://$ROOT")
 # Without a version asked for: what a person's later run is, which must keep the version update.sh pinned.
@@ -33,6 +35,29 @@ fail() {
   fi
   exit 1
 }
+# HTTPS through Caddy, with its own CA's certificate: the server's health answers, and a request through Caddy is a
+# remote one (it must pair), never a local one.
+through_caddy() { # what happened
+  local _
+  for _ in $(seq 1 60); do
+    if curl -sk --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/health" 2>/dev/null | grep -qx '{"app":"openmausbot"}' &&
+      [ "$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/bots")" = 403 ]; then
+      echo "HTTPS through Caddy answers after: $1"
+      return 0
+    fi
+    sleep 2
+  done
+  (cd "$DIR" && sudo docker compose ps) || true
+  fail "HTTPS through Caddy did not come back after: $1"
+}
+healthy_again() {
+  local _
+  for _ in $(seq 1 60); do
+    [ "$(sudo docker inspect --format '{{.State.Health.Status}}' "$(cd "$DIR" && sudo docker compose ps -q omb)" 2>/dev/null)" = healthy ] && return 0
+    sleep 3
+  done
+  fail "the server did not become healthy again"
+}
 contains() { # file words what
   grep -qF -- "$2" "$1" || fail "$3: $(tail -n 20 "$1")"
 }
@@ -50,6 +75,7 @@ install_until_https() { # evidence-file [the install command, when not the usual
   [ "$(sudo docker inspect --format '{{.State.Health.Status}}' "$(cd "$DIR" && sudo docker compose ps -q omb)")" = healthy ] || fail "the server is not healthy"
   (cd "$DIR" && sudo docker compose exec -T omb curl -sf http://127.0.0.1:8799/api/health) | grep -q openmausbot || fail "the server does not answer inside its container"
   curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: $DOMAIN" http://127.0.0.1/ | grep -qx 308 || fail "Caddy does not redirect port 80 to HTTPS"
+  through_caddy "the install"
 }
 
 step "the checks alone, with a name that points nowhere: one thing to fix, nothing changed"
@@ -114,6 +140,34 @@ else
   echo "this checkout has no deploy/update.sh; nothing to place"
 fi
 
+step "HTTPS comes back by itself whenever the server restarts without Caddy"
+# Caddy used to share the server's network, and stayed in the old, dead one after each of these, with 443 refused.
+(cd "$DIR" && sudo docker compose restart >/dev/null 2>&1) && healthy_again && through_caddy "docker compose restart"
+before=$(sudo docker inspect -f '{{.RestartCount}}' "$(cd "$DIR" && sudo docker compose ps -q omb)")
+launcher=$(sudo docker top "$(cd "$DIR" && sudo docker compose ps -q omb)" -eo pid,args | awk '/server-launcher/ { print $1; exit }')
+[ -n "$launcher" ] || fail "no server process to kill"
+sudo kill -9 "$launcher"
+sleep 5
+healthy_again && through_caddy "kill -9 of the server process"
+[ "$(sudo docker inspect -f '{{.RestartCount}}' "$(cd "$DIR" && sudo docker compose ps -q omb)")" -gt "$before" ] || fail "Docker did not restart the killed server"
+(cd "$DIR" && sudo docker compose stop omb >/dev/null 2>&1 && sudo docker compose start omb >/dev/null 2>&1) && healthy_again && through_caddy "stop omb, then start omb"
+
+step "the documented backup and restore, each with the whole project stopped and started"
+echo before-backup | sudo tee "$DIR/data/e2e-backup" >/dev/null
+# docs/deploy-vps.md, "Back up", with the installer: exactly as written there.
+(cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'umask 077; tar --warning=no-file-ignored -czf "backup-$(date -u +%Y%m%dT%H%M%SZ).tgz" data .env'; sudo docker compose start) >"$OUT/backup.txt" 2>&1
+archive=$(cd "$DIR" && sudo sh -c 'ls backup-*.tgz' | head -n 1)
+[ -n "$archive" ] || fail "the backup made no archive: $(cat "$OUT/backup.txt")"
+grep -q "socket ignored" "$OUT/backup.txt" && fail "tar listed sockets: $(cat "$OUT/backup.txt")"
+[ "$(sudo stat -c %a "$DIR/$archive")" = 600 ] || fail "the archive is readable by others"
+healthy_again && through_caddy "the backup"
+echo after-backup | sudo tee "$DIR/data/e2e-backup" >/dev/null
+(cd /opt/openmausbot && sudo docker compose stop && sudo sh -c "set -e; tar -tzf $archive data/ >/dev/null; rm -rf data.before-restore; mv data data.before-restore; tar -xzpf $archive data"; sudo docker compose start) >"$OUT/restore.txt" 2>&1
+[ "$(sudo cat "$DIR/data/e2e-backup")" = before-backup ] || fail "the restore did not put the data back: $(cat "$OUT/restore.txt")"
+[ "$(sudo stat -c '%u:%a' "$DIR/data")" = "$(sudo stat -c '%u:%a' "$DIR/data.before-restore")" ] || fail "the restore changed the data folder's owner or mode"
+sudo rm -rf "$DIR/data.before-restore" "$DIR/$archive"
+healthy_again && through_caddy "the restore"
+
 step "the first admin's sign-in link, made the way the installer says"
 (cd "$DIR" && sudo docker compose exec -T omb openmausbot pair --label "First admin") >"$OUT/pair.txt" 2>&1 || fail "pair failed: $(cat "$OUT/pair.txt")"
 grep -q "https://$DOMAIN/pair#code=" "$OUT/pair.txt" || fail "pair printed no link for $DOMAIN"
@@ -135,6 +189,57 @@ sudo sed -i "s|^OMB_IMAGE=.*|OMB_IMAGE=$pin|" "$DIR/.env"
 install_until_https "$OUT/pinned.txt" "${PLAIN_INSTALL[@]}"
 contains "$OUT/pinned.txt" "version: the one update.sh pinned here" "the installer did not keep the pin"
 sudo grep -qx "OMB_IMAGE=$pin" "$DIR/.env" || fail "the installer overwrote the pinned version"
+
+step "an install from before, with Caddy in the server's network, moves to the new layout when the installer runs"
+sudo tee "$DIR/compose.yaml" >/dev/null <<'OLD'
+name: openmausbot
+services:
+  omb:
+    image: ${OMB_IMAGE:?run the installer again}
+    restart: unless-stopped
+    init: true
+    shm_size: 512m
+    volumes:
+      - ./data:/data
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      OMB_PORT: "8799"
+      OMB_WEBHOOK_PORT: "8800"
+      OMB_WEBHOOK_PUBLIC_URL: https://${DOMAIN}
+      OMB_PUBLIC_URL: https://${DOMAIN}
+      OMB_SERVER_NAME: ${OMB_SERVER_NAME:-${DOMAIN}}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    network_mode: "service:omb"
+    depends_on:
+      omb:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/data:/data
+      - ./caddy/config:/config
+OLD
+sudo sed -i 's#unix//run/openmausbot/hooks.sock#127.0.0.1:8800#; s#unix//run/openmausbot/http.sock#127.0.0.1:8799#' "$DIR/Caddyfile"
+(cd "$DIR" && sudo docker compose up -d --remove-orphans >/dev/null 2>&1) && healthy_again
+(cd "$DIR" && sudo docker compose restart >/dev/null 2>&1) && healthy_again
+if curl -sk --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/health" >/dev/null 2>&1; then
+  echo "(the layout from before happened to come back after this restart)"
+else
+  echo "the layout from before: HTTPS refused after docker compose restart, as found on a real server"
+fi
+install_until_https "$OUT/migrated.txt" "${PLAIN_INSTALL[@]}"
+sudo grep -q network_mode "$DIR/compose.yaml" && fail "the run left Caddy in the server's network"
+(cd "$DIR" && sudo docker compose restart >/dev/null 2>&1) && healthy_again && through_caddy "docker compose restart, once moved"
 
 step "uninstall: the server stops, the data stays"
 sudo sh "$ROOT/deploy/install.sh" --uninstall | tee "$OUT/uninstall.txt"

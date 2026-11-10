@@ -153,6 +153,18 @@ compose() {
   (cd "$INSTALL_DIR" && docker compose "$@")
 }
 
+# Compose's own progress lines (Pulling, Creating, Started) go to a file, and reach the terminal only when it fails.
+compose_quietly() {
+  compose_log=$(mktemp)
+  if compose "$@" >"$compose_log" 2>&1; then
+    rm -f "$compose_log"
+    return 0
+  fi
+  cat "$compose_log" >&2
+  rm -f "$compose_log"
+  return 1
+}
+
 env_value() { # name: its value in the install's .env, or nothing
   [ -r "$INSTALL_DIR/.env" ] || return 0
   sed -n "s/^$1=//p" "$INSTALL_DIR/.env" | tail -n 1
@@ -461,6 +473,43 @@ registry_ask() { # tag
   done
 }
 
+registry_get() { # path-under-the-repository media-types: the registry's answer, the pull token on curl's standard input
+  printf 'header = "Authorization: Bearer %s"\n' "$REGISTRY_TOKEN" | curl -K - -fsSL --max-time 20 -H "Accept: $2" "https://ghcr.io/v2/$IMAGE_REPO/$1" 2>/dev/null
+}
+
+# Whether the image a tag or digest names runs the bots' sandbox (OMB_IMAGE=server in its settings), read from the
+# registry without downloading it: yes, no, or nothing when the registry did not say.
+registry_sandbox() { # tag or sha256:digest
+  [ -n "$REGISTRY_TOKEN" ] || REGISTRY_TOKEN=$(registry_token || true)
+  [ -n "$REGISTRY_TOKEN" ] || return 0
+  case "$(uname -m)" in aarch64 | arm64) platform=arm64 ;; *) platform=amd64 ;; esac
+  answer=$(registry_get "manifests/$1" "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" | tr -d ' \n\r\t') || return 0
+  case "$answer" in
+    *'"manifests":['*)
+      # An index: one manifest per platform. Each entry ends with its platform, so the entries split at "},{".
+      digest=$(printf '%s' "$answer" | sed 's/},{/}\
+{/g' | grep "\"architecture\":\"$platform\"" | grep '"os":"linux"' | sed -n 's/.*"digest":"\(sha256:[0-9a-f]\{64\}\)".*/\1/p' | head -n 1)
+      [ -n "$digest" ] || return 0
+      answer=$(registry_get "manifests/$digest" "application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" | tr -d ' \n\r\t') || return 0
+      ;;
+  esac
+  config=$(printf '%s' "$answer" | sed -n 's/.*"config":{[^}]*"digest":"\(sha256:[0-9a-f]\{64\}\)".*/\1/p')
+  [ -n "$config" ] || return 0
+  case "$(registry_get "blobs/$config" "application/vnd.oci.image.config.v1+json, application/vnd.docker.container.image.v1+json")" in
+    '') ;;
+    *'"OMB_IMAGE=server"'*) echo yes ;;
+    *) echo no ;;
+  esac
+}
+
+# Says, before anything is downloaded, when the version chosen would run without the bots' sandbox.
+note_sandbox() { # tag or sha256:digest
+  [ "$SANDBOX" = yes ] || return 0
+  if [ "$(registry_sandbox "$1" || true)" = no ]; then
+    note "This version has no bots' sandbox, so bots would run beside the server, able to read its settings, keys and each other's files. That is only for a server you alone sign in to; run this again once a version with the sandbox is out."
+  fi
+}
+
 newest_release() {
   curl -fsS --max-time 15 "$RELEASES_URL" 2>/dev/null | sed -n 's/.*"tag_name": *"\(v[0-9][0-9.]*\)".*/\1/p' | head -n 1
 }
@@ -497,6 +546,7 @@ check_version() {
   if [ "$REGISTRY_STATUS" = 200 ]; then
     IMAGE="ghcr.io/$IMAGE_REPO:stable"
     ok "version: the stable channel"
+    note_sandbox stable
     return
   fi
   if [ "$REGISTRY_STATUS" != 404 ]; then
@@ -519,6 +569,7 @@ check_version() {
   fi
   IMAGE="ghcr.io/$IMAGE_REPO:$release"
   ok "version: $release, the newest release"
+  note_sandbox "$release"
 }
 
 preflight() {
@@ -582,8 +633,10 @@ write_file() { # path, with the content on standard input: replaced in one step
 write_compose() {
   write_file "$INSTALL_DIR/compose.yaml" <<'COMPOSE'
 # Written by MausBot's installer (deploy/install.sh), and written again each time it runs: put your own settings in
-# .env beside this file, which the installer keeps. Caddy shares the server's network, so the server itself only
-# listens on loopback.
+# .env beside this file, which the installer keeps. The server only listens on loopback inside its container, and on
+# two Unix sockets in the `edge` volume, which Caddy, in its own container, reaches it through. A request on a socket is
+# always a remote one to the server. Caddy does not share the server's network: a server that restarted on its own came
+# back in a new one, and left Caddy refusing HTTPS in the old one.
 name: openmausbot
 services:
   omb:
@@ -593,19 +646,20 @@ services:
     shm_size: 512m
     volumes:
       - ./data:/data
-    ports:
-      - "80:80"
-      - "443:443"
+      - edge:/run/openmausbot
     environment:
       OMB_PORT: "8799"
       OMB_WEBHOOK_PORT: "8800"
+      OMB_TUNNEL_SOCKET: /run/openmausbot/http.sock
+      OMB_WEBHOOK_SOCKET: /run/openmausbot/hooks.sock
       OMB_WEBHOOK_PUBLIC_URL: https://${DOMAIN}
       OMB_PUBLIC_URL: https://${DOMAIN}
       OMB_SERVER_NAME: ${OMB_SERVER_NAME:-${DOMAIN}}
-      OMB_SIGNIN_EMAILS: ${OMB_SIGNIN_EMAILS:-}
-      OMB_SIGNIN_MEMBER_EMAILS: ${OMB_SIGNIN_MEMBER_EMAILS:-}
-      OMB_SIGNIN_SMTP_URL: ${OMB_SIGNIN_SMTP_URL:-}
-      OMB_SIGNIN_SMTP_FROM: ${OMB_SIGNIN_SMTP_FROM:-}
+      # Passed only when .env sets them: an empty one would still be set, and Settings' own lists are used when not.
+      OMB_SIGNIN_EMAILS:
+      OMB_SIGNIN_MEMBER_EMAILS:
+      OMB_SIGNIN_SMTP_URL:
+      OMB_SIGNIN_SMTP_FROM:
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]
       interval: 30s
@@ -615,7 +669,9 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
-    network_mode: "service:omb"
+    ports:
+      - "80:80"
+      - "443:443"
     depends_on:
       omb:
         condition: service_healthy
@@ -623,8 +679,18 @@ services:
       DOMAIN: ${DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - edge:/run/openmausbot
       - ./caddy/data:/data
       - ./caddy/config:/config
+
+volumes:
+  # The two sockets: in memory, made afresh by the server at each start. Not under /data, which every bot's sandbox
+  # sees; the sandbox has its own /run.
+  edge:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: mode=1777,size=1m
 COMPOSE
 }
 
@@ -637,7 +703,7 @@ write_caddyfile() {
 	# own per-hook secrets), so it sits outside any login. The path is passed
 	# through unchanged: the receiver routes on /hooks/<id>.
 	handle /hooks/* {
-		reverse_proxy 127.0.0.1:8800
+		reverse_proxy unix//run/openmausbot/hooks.sock
 	}
 
 	handle {
@@ -647,9 +713,12 @@ write_caddyfile() {
 		#   }
 		# and set both variables in .env (hash with `caddy hash-password`,
 		# every `$` doubled for Compose).
-		reverse_proxy 127.0.0.1:8799 {
+		reverse_proxy unix//run/openmausbot/http.sock {
 			# SSE: stream events as they arrive
 			flush_interval -1
+			# Compression is `encode`'s job above; the server would gzip its
+			# JSON on its socket otherwise, as for the phone tunnel.
+			header_up -Accept-Encoding
 		}
 	}
 }
@@ -873,12 +942,12 @@ install_server() {
   write_caddyfile
   write_settings
   say "Downloading MausBot..."
-  compose pull -q || fail "MausBot could not be downloaded (Docker's message is above). Check this server's outbound HTTPS, then run this again."
+  compose_quietly pull -q || fail "MausBot could not be downloaded (Docker's message is above). Check this server's outbound HTTPS, then run this again."
   place_update
   prepare_sandbox
   prepare_data
   say "Starting MausBot..."
-  compose up -d --remove-orphans >/dev/null || fail "MausBot could not be started (Docker's message is above). Fix that, then run this again."
+  compose_quietly up -d --remove-orphans || fail "MausBot could not be started (Docker's message is above). Fix that, then run this again."
   wait_healthy || fail "MausBot started but did not report healthy within $HEALTH_WAIT_S seconds. Its log: cd $INSTALL_DIR && sudo docker compose logs omb --tail 50"
   check_sandbox_runs
   say "Waiting for the HTTPS certificate of $DOMAIN..."
@@ -914,12 +983,29 @@ connect_server() {
   [ "$status" = 0 ] || fail "MausBot is installed and running here, but connecting it did not finish (the reason is above). Nothing needs reinstalling: fix that and run this again with a new code."
 }
 
+# The first admin's one-time sign-in link, as `openmausbot pair` prints it: its code line (until when it works) and the
+# link. Nothing when the server would not make one.
+first_admin_link() {
+  made=$(compose exec -T omb openmausbot pair --label "First admin" 2>/dev/null) || return 1
+  lines=$(printf '%s\n' "$made" | grep -E '^(Pairing code|Link) ' || true)
+  case "$lines" in *"Link "*"https://$DOMAIN/pair#code="*) printf '%s\n' "$lines" | sed 's/^/  /' ;; *) return 1 ;; esac
+}
+
 finish() {
   say ""
   say "MausBot is running at https://$DOMAIN"
   say ""
-  say "To sign in as the first admin, make a one-time link on this server and open it in your browser:"
-  say "  cd $INSTALL_DIR && sudo docker compose exec omb openmausbot pair --label \"First admin\""
+  pair_command="cd $INSTALL_DIR && sudo docker compose exec omb openmausbot pair --label \"First admin\""
+  # Only to a terminal: in a log, the link would let whoever reads it sign in as the admin until it is used or expires.
+  if [ -t 1 ] && link=$(first_admin_link); then
+    say "To sign in as the first admin, open this one-time link in your browser. Anyone who has it can use it, once:"
+    say "$link"
+    say "To make another: $pair_command"
+  else
+    say "To sign in as the first admin, make a one-time link on this server and open it in your browser:"
+    say "  $pair_command"
+    [ -t 1 ] || say "(The link is not made here because this output is not a terminal: a log must not hold a link that signs in as the admin.)"
+  fi
   admins=$(env_value OMB_SIGNIN_EMAILS)
   if [ -n "$admins" ]; then
     say "Or open https://$DOMAIN/pair and sign in with an emailed code as: $admins"
@@ -966,7 +1052,7 @@ run_uninstall() {
   [ -f "$INSTALL_DIR/compose.yaml" ] || fail "MausBot isn't installed in $INSTALL_DIR, so there is nothing to stop."
   command -v docker >/dev/null 2>&1 || fail "Docker isn't installed here, so MausBot isn't running. Your data is in $INSTALL_DIR/data."
   say "Stopping MausBot..."
-  compose down --remove-orphans >/dev/null || fail "MausBot could not be stopped (Docker's message is above)."
+  compose_quietly down --remove-orphans || fail "MausBot could not be stopped (Docker's message is above)."
   say "MausBot is stopped and its containers are removed."
   say "Your data is kept in $INSTALL_DIR/data, your settings in $INSTALL_DIR/.env and the HTTPS certificates in $INSTALL_DIR/caddy."
   say "To start it again: $(command_line "--domain $(env_value DOMAIN)")"

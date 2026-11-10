@@ -60,6 +60,12 @@ esac`,
   curl: `echo "curl $*" >> "$FAKE_LOG"
 blocked() { case " \${FAKE_BLOCKED:-} " in *" $1 "*) return 0 ;; esac; return 1; }
 case "$*" in
+  *"-K - -fsSL"*) cat >> "$FAKE_LOG.stdin"
+    case "$*" in
+      */manifests/sha256:*) printf '%s' "\${FAKE_MANIFEST:-}" ;;
+      */manifests/*) printf '%s' "\${FAKE_INDEX:-}" ;;
+      */blobs/*) printf '%s' "\${FAKE_CONFIG:-}" ;;
+    esac ;;
   *"-K -"*) cat >> "$FAKE_LOG.stdin"
     if blocked ghcr.io; then exit 7; fi
     case "$*" in */manifests/stable) printf '%s' "$FAKE_STABLE" ;; *) printf '%s' "$FAKE_RELEASE_STATUS" ;; esac ;;
@@ -314,8 +320,35 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
       "docker compose exec -T omb node dist-server/bot-box/box-check.js --public=none",
     ]);
     expect(result.stdout).toContain(`  cd ${result.install} && sudo docker compose exec omb openmausbot pair --label "First admin"`);
+    // Not a terminal, as here: the admin's sign-in link is not made, so no log holds it, and the output says why.
+    expect(result.stdout).toContain("(The link is not made here because this output is not a terminal");
+    expect(result.docker.some((call) => call.includes("openmausbot pair"))).toBe(false);
     expect(result.stdout).toContain("Or open https://maus.example.com/pair and sign in with an emailed code as: owner@example.com");
     expect(result.stdout).toContain(`Your data: ${result.install}/data`);
+  });
+
+  it("says, before anything is downloaded, when the version it would install has no bots' sandbox", () => {
+    const digest = (n: string) => `sha256:${n.repeat(64)}`;
+    const registry = (config: string) => ({ env: {
+      FAKE_INDEX: JSON.stringify({ manifests: [
+        { mediaType: "application/vnd.oci.image.manifest.v1+json", digest: digest("a"), size: 1, platform: { architecture: "arm64", os: "linux" } },
+        { mediaType: "application/vnd.oci.image.manifest.v1+json", digest: digest("b"), size: 1, platform: { architecture: "amd64", os: "linux" } },
+        { mediaType: "application/vnd.oci.image.manifest.v1+json", digest: digest("c"), size: 1, platform: { architecture: "unknown", os: "unknown" } },
+      ] }, null, 2),
+      FAKE_MANIFEST: JSON.stringify({ config: { mediaType: "application/vnd.oci.image.config.v1+json", digest: digest("d"), size: 1 }, layers: [] }),
+      FAKE_CONFIG: JSON.stringify({ config: { Env: ["PATH=/usr/bin", "HOME=/data", ...(config ? [config] : [])] } }),
+    } });
+    const without = run(["--check", "--domain", "maus.example.com"], registry(""));
+    expect(without.stdout).toContain("  ok    version: v0.1.151, the newest release\n  note  This version has no bots' sandbox");
+    expect(without.calls.filter((call) => call.includes("-fsSL")).map((call) => call.replace(/^.* (\S+)$/, "$1"))).toEqual([
+      "https://ghcr.io/v2/milind-soni/openmausbot/manifests/v0.1.151",
+      `https://ghcr.io/v2/milind-soni/openmausbot/manifests/${digest("b")}`,
+      `https://ghcr.io/v2/milind-soni/openmausbot/blobs/${digest("d")}`,
+    ]);
+    expect(run(["--check", "--domain", "maus.example.com"], registry("OMB_IMAGE=server")).stdout).not.toContain("no bots' sandbox");
+    // Asked for no sandbox, or a registry that does not say: nothing to add.
+    expect(run(["--check", "--domain", "maus.example.com", "--no-sandbox"], registry("")).stdout).not.toContain("no bots' sandbox");
+    expect(run(["--check", "--domain", "maus.example.com"]).stdout).not.toContain("no bots' sandbox");
   });
 
   it("uses the stable channel once it is published, and never the latest tag", () => {
@@ -545,12 +578,17 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(readFileSync(join(result.install, "Caddyfile"), "utf8")).toBe(caddyfile.slice(caddyfile.indexOf("{$DOMAIN} {")));
     const manual = readFileSync(join(ROOT, "deploy", "docker-compose.yml"), "utf8");
     const written = readFileSync(join(result.install, "compose.yaml"), "utf8");
-    const settings = (text: string) => [...text.matchAll(/^ {6}(OMB_[A-Z_]+: .*)$/gm)].map((match) => match[1]);
+    const settings = (text: string) => [...text.matchAll(/^ {6}(OMB_[A-Z_]+:.*)$/gm)].map((match) => match[1]);
     expect(settings(written)).toEqual(settings(manual));
-    for (const line of ['test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]', 'network_mode: "service:omb"', "init: true", "shm_size: 512m", '- "80:80"', '- "443:443"']) {
+    // The sign-in lists and mail server are passed only when .env sets them: an empty one would still be set.
+    for (const name of ["OMB_SIGNIN_EMAILS", "OMB_SIGNIN_MEMBER_EMAILS", "OMB_SIGNIN_SMTP_URL", "OMB_SIGNIN_SMTP_FROM"]) expect(settings(written)).toContain(`${name}:`);
+    for (const line of ['test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]', "init: true", "shm_size: 512m", '- "80:80"', '- "443:443"',
+      "- edge:/run/openmausbot", "type: tmpfs"]) {
       expect(written).toContain(line);
       expect(manual).toContain(line);
     }
+    // Caddy in the server's network stayed in the old one whenever the server restarted alone, with HTTPS refused.
+    for (const text of [written, manual]) expect(text).not.toContain("network_mode");
     expect(written).toContain("- ./data:/data");
     expect(written).not.toContain("build:");
   });
