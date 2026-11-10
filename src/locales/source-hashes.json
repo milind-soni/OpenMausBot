@@ -32543,6 +32543,7 @@
       "serverError.team.personalMove": "14183b232a83737432ff1bf827f42c48f2470482bae7651062f74b39b890733f",
       "serverError.team.memberLogin": "5dd9928759fc504e20d8fb96149540b933672d7bdbb053051970fe17f6846abd",
       "serverError.team.signInFirst": "57b3710b48a3cafe6fbe9187b7e7813caf7013b9c154dba8bd380135f12e3464",
+      "serverError.team.ownAppsNeedKey": "4d48b8af60bdde2c81cd631441328bd6be57a15aa5d05971d79a778d62194f76",
       "serverError.chat.ownerOrAdmin": "dc59e0b9afbf73a927e2ca509f146e450dfa5e37acba6b71ab882a120a86a51c",
       "serverError.routine.checks": "e46bf10296c403ff91f6f7591a0f313f8741f92b9a81bd5e72d3e2b3d381d23b",
       "serverError.routine.checksRepeat": "9a0cfea31637dae47c766b895467c37928a7b32e8b044b223aaa57f2ec7cce81",
