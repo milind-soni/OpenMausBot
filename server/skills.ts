@@ -1,13 +1,9 @@
 // Per-bot Agent Skills: imports keep their whole folder and land disabled; learned skills may add reviewed references/<topic>.md files.
 import { createHash, randomUUID } from "node:crypto";
 import {
-  closeSync,
-  constants,
   existsSync,
-  fstatSync,
   lstatSync,
   mkdirSync,
-  openSync,
   readdirSync,
   readFileSync,
   readlinkSync,
@@ -15,11 +11,11 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
-  unlinkSync,
 } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 
+import { nativeLinkDirectlyTargetsOwnedSkill, removeOwnedNativeLink } from "./skill-native-link-removal.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -29,11 +25,20 @@ import {
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
 import { libraryDescriptionsAt, librarySkillFilePath, listLibrarySkills, type LibrarySkillListing } from "./skill-library.ts";
 import { readManagedLinks, writeManagedLinks } from "./skill-link-registry.ts";
+import { retireUnchangedSkillRoot, SKILL_RECOVERY_ATTENTION_WARNING, SKILL_RECOVERY_CAPACITY_WARNING, type RetiredSkillRoot } from "./skill-retirement.ts";
+import { skillUpdateNeedsRecovery } from "./skill-recovery-capacity.ts";
+import { skillMayBeInUse } from "./skill-use-guard.ts";
+import { removeOrganizationSkill } from "./skill-org-removal.ts";
 import {
   directoryEntryState, entryExistsWithoutFollowing, formatKb, isSkillReferencePath, learnedSkillDirectoryMatches, publishReviewedRevision,
   readReferenceFiles, referenceLimitError, referencePathError, REFERENCES_ADVICE, skillReferencesSha256, STAGED_SKILL_FILE_MAX_BYTES,
 } from "./skill-storage.ts";
 import { workspaceDir } from "./workspace.ts";
+import { preparePackageSkill } from "./portable-skill-files.ts";
+import { readBoundedSkillFile } from "./bounded-skill-read.ts";
+import type { PackageSkill } from "../shared/package-format.ts";
+import type { SkillPackageStamp } from "./package-parts.ts";
+export type { SkillPackageStamp } from "./package-parts.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 
 export {
@@ -46,13 +51,12 @@ export {
   type ParsedSkill,
 } from "../shared/skill-md.ts";
 export { STAGED_SKILL_FILE_MAX_BYTES } from "./skill-storage.ts";
-
 export const INDEX_MAX_SKILLS = 30;
 export const INDEX_MAX_BYTES = 4_000;
 const loggedIndexOmissions = new Map<string, string>();
 export const MAX_STAGED_SKILLS = 20;
 export const STAGED_GIST_MAX = 240;
-interface SkillManifestEntry {
+export interface SkillManifestEntry {
   description: string;
   enabled: boolean;
   source: string;
@@ -66,20 +70,17 @@ interface SkillManifestEntry {
   /** An import's files beside SKILL.md, and skillFolderDigest over them. */
   files?: string[];
   filesSha256?: string;
+  executableFiles?: string[];
   github?: GitHubSkillOrigin;
   /** Replay guard for a crash between promotion and card settlement. Never exposed to agents. */
   appliedStageId?: string;
   storageRevision?: string;
+  recovery?: "capacity" | "attention";
+  retiredRoot?: RetiredSkillRoot;
+  /** A prior organization revision is retained until links have been switched safely. */
+  pendingRetirements?: Array<RetiredSkillRoot & { revision?: string }>;
+  pendingRemoval?: RetiredSkillRoot & { revision?: string };
   package?: SkillPackageStamp;
-}
-
-export interface SkillPackageStamp {
-  installId: string;
-  key: string;
-  release: string;
-  r: string;
-  w: string;
-  via?: "preset";
 }
 
 interface SkillManifest {
@@ -100,7 +101,10 @@ const skillManifestEntrySchema = z.object({
   ...skillFolderRecordSchema,
   github: githubSkillOriginSchema.optional(),
   appliedStageId: z.string().optional(),
-  storageRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  storageRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(), recovery: z.enum(["capacity", "attention"]).optional(),
+  retiredRoot: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), executableFiles: skillFolderRecordSchema.executableFiles, recovery: z.enum(["capacity", "attention"]).optional() }).strict().optional(),
+  pendingRetirements: z.array(z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), executableFiles: skillFolderRecordSchema.executableFiles, revision: z.string().regex(/^[a-f0-9]{64}$/).optional(), recovery: z.enum(["capacity", "attention"]).optional() }).strict()).max(32).optional(),
+  pendingRemoval: z.object({ identity: z.string().max(160), hash: z.string().regex(/^[a-f0-9]{64}$/), executableFiles: skillFolderRecordSchema.executableFiles, revision: z.string().regex(/^[a-f0-9]{64}$/).optional(), recovery: z.enum(["capacity", "attention"]).optional() }).strict().optional(),
   package: z.object({
     installId: z.string().regex(/^[a-f0-9]{32}$/),
     key: z.string().min(1).max(64),
@@ -111,16 +115,13 @@ const skillManifestEntrySchema = z.object({
   }).optional(),
 });
 const skillManifestSchema = z.record(z.string(), skillManifestEntrySchema);
-
 function skillsDir(botId: string): string {
   return join(workspaceDir(botId), "skills");
 }
-
 function existingSkillsRoot(botId: string): string | null {
   const root = skillsDir(botId);
   return directoryEntryState(root) === "directory" ? root : null;
 }
-
 function ensureSkillsRoot(botId: string): string | null {
   const root = skillsDir(botId);
   const state = directoryEntryState(root);
@@ -210,7 +211,10 @@ function manifestFromFile(path: string): SkillManifest | null {
     return null;
   }
 }
-
+function readProtectedManifest(botId: string): SkillManifest | null {
+  try { lstatSync(manifestPath(botId)); } catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT" ? {} : null; }
+  return manifestFromFile(manifestPath(botId));
+}
 function readManifest(botId: string): SkillManifest {
   const securePath = manifestPath(botId);
   // Corrupt protected state fails closed; never fall back to the agent-writable legacy manifest.
@@ -225,8 +229,8 @@ function readManifest(botId: string): SkillManifest {
   for (const [name, entry] of Object.entries(legacy)) {
     // No workspace-authored bit may carry enablement into secure state.
     const {
-      appliedStageId: _appliedStageId,
-      storageRevision: _storageRevision,
+      appliedStageId: _appliedStageId, executableFiles: _executableFiles,
+      storageRevision: _storageRevision, recovery: _recovery, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements, pendingRemoval: _pendingRemoval,
       ...visible
     } = entry;
     migrated[name] = { ...visible, enabled: false };
@@ -238,7 +242,6 @@ function readManifest(botId: string): SkillManifest {
   }
   return migrated;
 }
-
 function comparablePath(path: string): string {
   const normalized = resolve(path).replace(/^\\\\\?\\/, "");
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
@@ -259,82 +262,12 @@ function nativeLinkPointsToSkill(link: string, target: string): boolean {
   }
 }
 
-function nativeLinkDirectlyTargetsOwnedSkill(
-  link: string,
-  root: string,
-  name: string,
-  revisionWasManaged: boolean,
-  targetBaseDirectory = dirname(link),
-): boolean {
-  try {
-    if (!lstatSync(link).isSymbolicLink()) return false;
-    const rawTarget = readlinkSync(link);
-    const resolvedTarget = resolve(targetBaseDirectory, rawTarget.replace(/^\\\\\?\\/, ""));
-    const insideSkills = relative(join(root, "skills"), resolvedTarget).replaceAll("\\", "/");
-    return insideSkills === name || (revisionWasManaged && /^\.revisions\/[a-f0-9]{64}$/.test(insideSkills));
-  } catch {
-    return false;
-  }
-}
-
-type NativeLinkRemoval = "removed" | "preserved" | "retry";
-
-/** renameSync is the identity boundary: a workspace process can replace the name, not which entry was moved. */
-function removeOwnedNativeLink(
-  botId: string,
-  link: string,
-  root: string,
-  name: string,
-  revisionWasManaged: boolean,
-  beforeRemove?: (link: string) => void,
-): NativeLinkRemoval {
-  const quarantineDir = join(skillStateDir(botId), "link-removal");
-  try {
-    mkdirSync(quarantineDir, { recursive: true, mode: 0o700 });
-  } catch {
-    return "retry";
-  }
-  const quarantined = join(quarantineDir, randomUUID());
-  beforeRemove?.(link);
-  try {
-    renameSync(link, quarantined);
-  } catch {
-    return nativeLinkDirectlyTargetsOwnedSkill(link, root, name, revisionWasManaged)
-      ? "retry"
-      : "preserved";
-  }
-
-  if (nativeLinkDirectlyTargetsOwnedSkill(
-    quarantined,
-    root,
-    name,
-    revisionWasManaged,
-    dirname(link),
-  )) {
-    try {
-      unlinkSync(quarantined);
-      return "removed";
-    } catch {
-      try {
-        if (!entryExistsWithoutFollowing(link)) renameSync(quarantined, link);
-      } catch {}
-      return "retry";
-    }
-  }
-
-  try {
-    if (!entryExistsWithoutFollowing(link)) renameSync(quarantined, link);
-  } catch {}
-  return "preserved";
-}
-
 function writeManifest(botId: string, manifest: SkillManifest): void {
   mkdirSync(skillStateDir(botId), { recursive: true, mode: 0o700 });
   writeFileAtomic(manifestPath(botId), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
 }
 
 const NATIVE_SKILL_DIRS = [".claude/skills", ".agents/skills", ".grok/skills"];
-
 /** Compares link text, never real paths: an unsafe skills/ root is not followed, and a user-replaced link stays. */
 function removeNativeLinksForUnsafeSkillsRoot(
   botId: string,
@@ -362,7 +295,7 @@ function removeNativeLinksForUnsafeSkillsRoot(
       const link = join(linkDir, name);
       if (!nativeLinkDirectlyTargetsOwnedSkill(link, root, name, previouslyManaged.includes(name))) continue;
       const result = removeOwnedNativeLink(
-        botId,
+        skillStateDir(botId),
         link,
         root,
         name,
@@ -381,29 +314,31 @@ function removeNativeLinksForUnsafeSkillsRoot(
 /** Links, not copies; junctions on Windows, where directory symlinks need privileges. */
 export function syncSkillLinks(
   botId: string,
-  options: { beforeRemove?: (link: string) => void; task?: { threadId: string; folder: string } } = {},
-): void {
-  const root = workspaceDir(botId);
-  const linkRoot = options.task?.folder ?? root, threadId = options.task?.threadId;
-  const previouslyManaged = readManagedLinks(botId, threadId);
+  options: { beforeRemove?: (link: string) => void; task?: { threadId: string; folder: string }; onlyName?: string } = {},
+): boolean {
+  const root = workspaceDir(botId), linkRoot = options.task?.folder ?? root, threadId = options.task?.threadId;
+  const allManaged = readManagedLinks(botId, threadId);
+  const previouslyManaged = options.onlyName ? allManaged.filter((name) => name === options.onlyName) : allManaged;
   // The bot can replace its skills root: never follow it, but still revoke existing app links.
   if (directoryEntryState(skillsDir(botId)) === "unsafe") {
-    removeNativeLinksForUnsafeSkillsRoot(botId, root, linkRoot, threadId, previouslyManaged, options.beforeRemove);
-    return;
+    if (!options.onlyName) removeNativeLinksForUnsafeSkillsRoot(botId, root, linkRoot, threadId, previouslyManaged, options.beforeRemove);
+    return false;
   }
   const manifest = readManifest(botId);
   const enabled = Object.entries(manifest).filter(
-    ([name, entry]) => entry.enabled && skillContentMatches(botId, name, entry),
+    ([name, entry]) => (!options.onlyName || name === options.onlyName) && entry.enabled && skillContentMatches(botId, name, entry),
   );
   const desired = new Map(enabled.map(([name, entry]) => [name, skillTarget(root, name, entry)]));
-  const managed = new Set<string>();
+  const managed = new Set(options.onlyName ? allManaged.filter((name) => name !== options.onlyName) : []);
+  let complete = true;
   for (const dir of NATIVE_SKILL_DIRS) {
     const linkDir = nativeLinkDirectory(linkRoot, dir, enabled.length > 0);
-    if (!linkDir) continue;
+    if (!linkDir) { if (enabled.length || previouslyManaged.length) complete = false; continue; }
     let existing: string[] = [];
     try {
-      existing = readdirSync(linkDir).filter(isSkillName);
+      existing = readdirSync(linkDir).filter((name) => isSkillName(name) && (!options.onlyName || name === options.onlyName));
     } catch {
+      complete = false;
     }
     for (const name of new Set([...existing, ...previouslyManaged])) {
       const link = join(linkDir, name);
@@ -412,14 +347,14 @@ export function syncSkillLinks(
         managed.add(name);
       } else if (nativeLinkDirectlyTargetsOwnedSkill(link, root, name, previouslyManaged.includes(name))) {
         const result = removeOwnedNativeLink(
-          botId,
+          skillStateDir(botId),
           link,
           root,
           name,
           previouslyManaged.includes(name),
           options.beforeRemove,
         );
-        if (result === "retry") managed.add(name);
+        if (result === "retry") { managed.add(name); complete = false; }
       }
     }
     if (!enabled.length) continue;
@@ -438,13 +373,16 @@ export function syncSkillLinks(
         );
         managed.add(name);
       } catch {
+        complete = false;
       }
     }
   }
   try {
     writeManagedLinks(botId, [...managed], threadId);
   } catch {
+    complete = false;
   }
+  return complete;
 }
 
 /** Where syncSkillLinks links each of this bot's enabled skills. */
@@ -473,9 +411,9 @@ function skillContentMatches(botId: string, name: string, entry: SkillManifestEn
     const directory = skillDirectory(botId, name, entry);
     if (!directory) return false;
     const file = join(directory, "SKILL.md");
-    if (!lstatSync(file).isFile()) return false;
-    if (createHash("sha256").update(readFileSync(file)).digest("hex") !== entry.sha256) return false;
-    if (entry.filesSha256 && skillFolderDigest(directory, entry.files ?? []) !== entry.filesSha256) return false;
+    const bytes = readBoundedSkillFile(file, SKILL_FILE_MAX_BYTES);
+    if (!bytes || createHash("sha256").update(bytes).digest("hex") !== entry.sha256) return false;
+    if (entry.filesSha256 && skillFolderDigest(directory, entry.files ?? [], { executablePaths: entry.executableFiles }) !== entry.filesSha256) return false;
     if (!entry.referencesSha256) return true;
     const references = readReferenceFiles(directory);
     return references !== null && skillReferencesSha256(references) === entry.referencesSha256;
@@ -483,21 +421,23 @@ function skillContentMatches(botId: string, name: string, entry: SkillManifestEn
     return false;
   }
 }
-
 function skillListing(botId: string, name: string, entry: SkillManifestEntry): SkillListing {
-  const { appliedStageId, storageRevision: _storageRevision, package: _package, ...visible } = entry;
+  const { appliedStageId, storageRevision: _storageRevision, recovery: _recovery, retiredRoot: _retiredRoot, pendingRetirements: _pendingRetirements, pendingRemoval: _pendingRemoval, executableFiles: _executableFiles, package: _package, ...visible } = entry;
   const intact = skillContentMatches(botId, name, entry);
   return {
     name,
     ...visible,
     enabled: entry.enabled && intact,
     editable: entry.source.startsWith(LEARN_SOURCE_PREFIX) && Boolean(appliedStageId),
-    warnings: intact
-      ? visible.warnings
-      : [...visible.warnings, "stored skill files changed after review — enablement is blocked"],
+    warnings: [
+      ...visible.warnings,
+      ...(intact ? [] : ["stored skill files changed after review — enablement is blocked"]),
+      ...(entry.pendingRetirements?.length ? ["a previous skill revision is waiting for safe link synchronization or cleanup"] : []),
+      ...(entry.pendingRemoval ? ["skill removal is waiting for safe cleanup"] : []),
+      ...(["capacity", "attention"] as const).flatMap((reason) => entry.recovery === reason || entry.pendingRetirements?.some((item) => item.recovery === reason) || entry.pendingRemoval?.recovery === reason || (reason === "attention" && entry.source.startsWith("org:") && skillUpdateNeedsRecovery(skillStateDir(botId), name)) ? [reason === "capacity" ? SKILL_RECOVERY_CAPACITY_WARNING : SKILL_RECOVERY_ATTENTION_WARNING] : []),
+    ],
   };
 }
-
 export function listSkills(botId: string): SkillListing[] {
   const manifest = readManifest(botId);
   return Object.entries(manifest)
@@ -511,35 +451,19 @@ export function readSkillFile(botId: string, name: string): string | null {
   if (!entry) return null;
   const directory = skillDirectory(botId, name, entry);
   if (!directory) return null;
-  let descriptor: number | null = null;
   try {
-    const path = join(directory, "SKILL.md");
-    const before = lstatSync(path);
-    if (!before.isFile() || before.size > SKILL_FILE_MAX_BYTES) return null;
-    descriptor = openSync(path, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW ?? 0));
-    const opened = fstatSync(descriptor);
-    if (
-      !opened.isFile() ||
-      opened.size > SKILL_FILE_MAX_BYTES ||
-      opened.dev !== before.dev ||
-      opened.ino !== before.ino
-    ) return null;
-    const text = readFileSync(descriptor, "utf8");
+    const bytes = readBoundedSkillFile(join(directory, "SKILL.md"), SKILL_FILE_MAX_BYTES);
+    if (!bytes) return null;
+    const text = bytes.toString("utf8");
     return createHash("sha256").update(text).digest("hex") === entry.sha256 ? text : null;
   } catch {
     return null;
-  } finally {
-    if (descriptor !== null) {
-      try {
-        closeSync(descriptor);
-      } catch {}
-    }
   }
 }
 
 /** The whole folder comes in, within the limits; what is left out is reported in `skippedFiles`. */
 export function installSkill(botId: string, source: string, files: readonly SkillFolderFile[], github?: GitHubSkillOrigin): SkillListing | { error: string } {
-  const folder = prepareSkillFolder(files);
+  const folder = prepareSkillFolder(files, undefined, { recordExecutableIntent: true });
   if ("error" in folder) return folder;
   const { skillMd: content, parsed, warnings, skipped } = folder;
   const prepared = { files: [{ path: "SKILL.md", content }], parsed, warnings, skippedFiles: skipped.map((file) => file.path), folder: folder.files };
@@ -548,13 +472,10 @@ export function installSkill(botId: string, source: string, files: readonly Skil
 
 /** Arrives enabled (the Admin is the review); `source` comes from the caller, never from the package. */
 export function installOrgSkill(
-  botId: string,
-  source: string,
-  skillMd: string,
-  stamp: SkillPackageStamp,
+  botId: string, source: string, skillMd: string, stamp: SkillPackageStamp, files?: PackageSkill["files"],
 ): SkillListing | { error: string } {
   if (!source.startsWith("org:")) return { error: "organization skills need an org: source" };
-  const prepared = preparedSkillFiles(skillMd);
+  const prepared = files?.length ? preparePackageSkill(skillMd, files) : preparedSkillFiles(skillMd);
   if ("error" in prepared) return prepared;
   if (prepared.parsed.name !== stamp.key) return { error: `the skill is named "${prepared.parsed.name}", not "${stamp.key}"` };
   return installPreparedSkill(botId, source, prepared, { enabled: true, package: { ...stamp } });
@@ -571,6 +492,7 @@ export function setSkillEnabled(botId: string, name: string, enabled: boolean): 
   const manifest = readManifest(botId);
   const entry = manifest[name];
   if (!entry) return { error: `no imported skill named "${name}"` };
+  if (enabled && entry.pendingRemoval) return { error: "skill removal is waiting for safe cleanup" };
   if (enabled && !skillContentMatches(botId, name, entry)) {
     return { error: "stored skill files changed after review — remove and import or learn it again" };
   }
@@ -622,9 +544,9 @@ function removeReviewedRevisionsNamed(botId: string, name: string): void {
     if (directoryEntryState(directory) !== "directory") continue;
     try {
       const file = join(directory, "SKILL.md");
-      const stat = lstatSync(file);
-      if (!stat.isFile() || stat.size > SKILL_FILE_MAX_BYTES) continue;
-      const parsed = parseSkillMd(readFileSync(file, "utf8"));
+      const bytes = readBoundedSkillFile(file, SKILL_FILE_MAX_BYTES);
+      if (!bytes) continue;
+      const parsed = parseSkillMd(bytes.toString("utf8"));
       if ("error" in parsed || parsed.name !== name) continue;
       rmSync(directory, { recursive: true, force: true });
     } catch {
@@ -632,15 +554,18 @@ function removeReviewedRevisionsNamed(botId: string, name: string): void {
   }
 }
 
-export function removeSkill(botId: string, name: string): { removed: true } | { error: string } {
+export async function removeSkill(botId: string, name: string): Promise<{ removed: true } | { error: string }> {
   if (!isSkillName(name)) return { error: "invalid skill name" };
   const manifest = readManifest(botId);
   const entry = manifest[name];
   if (!entry) return { error: `no imported skill named "${name}"` };
+  if (entry.source.startsWith("org:") && (entry.pendingRetirements?.length || skillMayBeInUse(botId))) return { error: "wait until the bot finishes and its previous skill revision is synchronized" };
+  if (entry.source.startsWith("org:")) return removeOrganizationSkill(botId, name, orgSkillStorage);
   const root = skillsDir(botId);
   if (directoryEntryState(root) === "unsafe") {
     return { error: "the workspace skills path is a symlink or file; refusing to remove through it" };
   }
+  if (entry.storageRevision && entry.retiredRoot) { const retired = retireUnchangedSkillRoot(join(root, name), entry.retiredRoot, skillStateDir(botId)); if ("error" in retired) return retired; }
   const target = entry.storageRevision ? null : join(root, name);
   const targetState = target ? directoryEntryState(target) : "missing";
   delete manifest[name];
@@ -657,7 +582,6 @@ export function removeSkill(botId: string, name: string): { removed: true } | { 
 }
 
 export type StagedSkillAction = "create" | "update";
-
 export interface StagedSkillWrite {
   id: string;
   action: StagedSkillAction;
@@ -813,8 +737,9 @@ function commitNewSkillFiles(
   if (entryExistsWithoutFollowing(target)) throw new Error(`skill path already exists: ${name}`);
   let published = false;
   try {
-    writeSkillFolder(staged, files[0]!.content, files.slice(1));
-    const filesSha256 = skillFolderDigest(staged, files.slice(1).map((file) => file.path), { remember: false });
+    const executablePaths = files.slice(1).filter((file) => file.executable).map((file) => file.path);
+    writeSkillFolder(staged, files[0]!.content, files.slice(1), { recordExecutableIntent: true });
+    const filesSha256 = skillFolderDigest(staged, files.slice(1).map((file) => file.path), { remember: false, executablePaths });
     if (directoryEntryState(root) !== "directory" || entryExistsWithoutFollowing(target)) {
       throw new Error("the workspace skills path changed during installation");
     }
@@ -892,7 +817,7 @@ function installPreparedSkill(
   try {
     commitNewSkillFiles(botId, name, prepared.folder ? [...prepared.files, ...prepared.folder] : prepared.files, (filesSha256) => {
       if (!filesSha256) throw new Error("the stored skill could not be read back");
-      if (prepared.folder?.length) Object.assign(entry, { files: prepared.folder.map((file) => file.path), filesSha256 });
+      if (prepared.folder?.length) Object.assign(entry, { files: prepared.folder.map((file) => file.path), filesSha256, executableFiles: prepared.folder.filter((file) => file.executable).map((file) => file.path) });
       manifest[name] = entry;
       writeManifest(botId, manifest);
     });
@@ -1215,7 +1140,7 @@ export function applySkillWriteWithReceipt(
   }
 }
 
-export function undoSkillWrite(
+export async function undoSkillWrite(
   botId: string,
   write: {
     stagedId: string;
@@ -1223,13 +1148,13 @@ export function undoSkillWrite(
     action: StagedSkillAction;
     previous?: { skillMd: string; source: string; references?: Array<{ path: string; content: string }> };
   },
-): { undone: true } | { stale: true } | { error: string } {
+): Promise<{ undone: true } | { stale: true } | { error: string }> {
   const entry = readManifest(botId)[write.name];
   if (!entry || entry.appliedStageId !== write.stagedId || !installedLearnedSkillMatches(botId, write.name, entry)) {
     return { stale: true };
   }
   if (write.action === "create") {
-    const removed = removeSkill(botId, write.name);
+    const removed = await removeSkill(botId, write.name);
     return "error" in removed ? removed : { undone: true };
   }
   if (!write.previous) return { error: "This change can't be undone here." };
@@ -1342,12 +1267,16 @@ export interface MigratableSkillCopy {
   package?: SkillPackageStamp;
   files?: string[];
   filesSha256?: string;
+  executableFiles?: string[];
+  referencesSha256?: string;
+  retiredRoot?: RetiredSkillRoot;
+  pendingRetirement?: boolean;
   github?: GitHubSkillOrigin;
   intact: boolean;
 }
-
-export function listMigratableSkills(botId: string): MigratableSkillCopy[] {
+export function listMigratableSkills(botId: string, onlyName?: string, checkIntegrity = true): MigratableSkillCopy[] {
   return Object.entries(readManifest(botId))
+    .filter(([name]) => onlyName === undefined || name === onlyName)
     .map(([name, entry]) => ({
       name,
       directory: skillDirectory(botId, name, entry),
@@ -1358,13 +1287,15 @@ export function listMigratableSkills(botId: string): MigratableSkillCopy[] {
       ...(entry.license ? { license: entry.license } : {}),
       ...(entry.compatibility ? { compatibility: entry.compatibility } : {}),
       ...(entry.package ? { package: { ...entry.package } } : {}),
-      ...(entry.filesSha256 ? { files: [...entry.files ?? []], filesSha256: entry.filesSha256 } : {}),
+      ...(entry.filesSha256 ? { files: [...entry.files ?? []], filesSha256: entry.filesSha256, ...(entry.executableFiles ? { executableFiles: [...entry.executableFiles] } : {}) } : {}),
+      ...(entry.referencesSha256 ? { referencesSha256: entry.referencesSha256 } : {}),
+      ...(entry.retiredRoot ? { retiredRoot: { ...entry.retiredRoot } } : {}),
+      ...(entry.pendingRetirements?.length || entry.pendingRemoval ? { pendingRetirement: true } : {}),
       ...(entry.github ? { github: { ...entry.github } } : {}),
-      intact: skillContentMatches(botId, name, entry),
+      intact: checkIntegrity && skillContentMatches(botId, name, entry),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
-
 export function removeManifestEntry(botId: string, name: string, expectSha256: string): { removed: true } | { error: string } {
   if (!isSkillName(name)) return { error: "invalid skill name" };
   const manifest = readManifest(botId);
@@ -1378,3 +1309,4 @@ export function removeManifestEntry(botId: string, name: string, expectSha256: s
   syncSkillLinks(botId);
   return { removed: true };
 }
+export const orgSkillStorage = { readManifest, readProtectedManifest, writeManifest, ensureSkillsRoot, skillDirectory, skillContentMatches, syncSkillLinks, skillStateDir, removeSkill };

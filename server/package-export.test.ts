@@ -1,13 +1,24 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { addHeldSecretScrubber } from "../shared/redact.ts";
 import { redactSecretsInText } from "./redact.ts";
-import { createBotPackageExport, createTeamPackageExport, shareableAddress, TEAM_TOO_LARGE_MESSAGE, TeamExportError } from "./package-export.ts";
+import { createBotPackageExport, createTeamPackageExport, shareableAddress, skillSectionVersion, TEAM_TOO_LARGE_MESSAGE, TeamExportError } from "./package-export.ts";
+import { HeldSecrets, VaultStore } from "./vault-store.ts";
 import { parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import type { Routine } from "./routines.ts";
 import type { BotRecord, GroupRecord } from "./store.ts";
 import { includedSkills, requestedSkills, startingTicks } from "../src/lib/team-share-skills.ts";
 
 describe("package export", () => {
+  it("requires the new skills section when a Markdown file carries executable metadata", () => {
+    expect(skillSectionVersion([{}])).toBe(1);
+    expect(skillSectionVersion([{ files: [{ path: "run.md", content: "instructions" }] }])).toBe(2);
+    expect(skillSectionVersion([{ files: [{ path: "run.md", content: "instructions", executable: true }] }])).toBe(3);
+  });
+
   it("preserves the exact cron and timezone through export and import", () => {
     const schedule = { type: "cron" as const, expression: "0 9 L * *", timeZone: "America/New_York" };
     const exported = createBotPackageExport({
@@ -343,6 +354,24 @@ describe("whole-team export (package v2)", () => {
     const result = createTeamPackageExport(input);
     expect(result.redacted).toEqual(["agents[scout].soul"]);
     expect(JSON.stringify(result.document)).not.toContain("hunter2hunter2");
+  });
+
+  it("redacts a value saved in the Vault from a skill companion", () => {
+    const directory = mkdtempSync(join(tmpdir(), "omb-vault-export-"));
+    try {
+      const secret = "violet-ocean-fixture-value";
+      const vault = new VaultStore({ dataDir: directory });
+      vault.saveSecret({ name: "Fixture", value: secret, source: "card", bots: "all" });
+      const held = new HeldSecrets(vault);
+      const unregister = addHeldSecretScrubber((text) => held.scrub(text));
+      try {
+        const skillsByBot = new Map([["lead", [{ ...skill("pricing"), files: [{ path: "references/guide.md", content: `Use ${secret} here.\n` }] }]]]);
+        const result = createTeamPackageExport({ ...fixture(), skillsByBot });
+        expect(result.document.package.skills!.entries[0]!.files).toEqual([{ path: "references/guide.md", content: "Use •••••• here.\n" }]);
+        expect(result.redacted).toContain("skills[pricing].files[0].content");
+        expect(JSON.stringify(result.document)).not.toContain(secret);
+      } finally { unregister(); }
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 
   it("skips pictures that are too large or not what they claim", () => {

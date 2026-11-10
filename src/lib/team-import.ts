@@ -2,6 +2,7 @@ import { parse as parseYaml } from "yaml";
 import { t } from "./i18n";
 import { parseTeamBackup, TEAM_BACKUP_CONTENTS } from "../../shared/team-backup";
 import { PACKAGE_VERSION, parsePackageDocument, type PackageDocument } from "../../shared/package-format";
+import { sharedSkillFiles, type SharedSkillFile } from "./skill-files";
 
 export interface PendingTeamImport {
   manifest: unknown;
@@ -15,6 +16,7 @@ export interface PendingTeamImport {
   routines: number;
   apps: Array<{ label: string; optional: boolean }>;
   skills?: string[];
+  skillFiles?: SharedSkillFile[];
   conversations?: number;
   archivedBots?: number;
   warnings?: string[];
@@ -124,6 +126,7 @@ function sharedTeamPreview(document: PackageDocument, manifest: unknown): Pendin
     routines: pkg.routines?.length ?? 0,
     apps: pkg.requirements.apps.map((app) => ({ label: app.label, optional: app.optional === true })),
     skills: (pkg.skills?.entries ?? []).filter((skill) => referenced.has(skill.name)).map((skill) => skill.name),
+    skillFiles: sharedSkillFiles(document),
     offeredSkills: (pkg.skills?.entries ?? []).filter((skill) => !referenced.has(skill.name)).map((skill) => skill.name),
     connections: (pkg.connections ?? []).map((connection) => ({
       label: connection.label, url: connection.mcp.url, values: connection.mcp.valueNames.length,
@@ -149,6 +152,7 @@ function libraryPreview(document: PackageDocument, manifest: unknown): PendingTe
     routines: 0,
     apps: [],
     skills: [],
+    skillFiles: sharedSkillFiles(document),
     offeredSkills: (pkg.skills?.entries ?? []).filter((skill) => !pkg.presets!.some((preset) => preset.skills?.includes(skill.name))).map((skill) => skill.name),
     presets: pkg.presets.map((preset) => preset.name),
   };

@@ -2,6 +2,7 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "./config.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 
 const BOX = "bx_23456789", OTHER_BOX = "bx_3456789a";
 const OWN_KEY = "boat_own-synthetic-key", INCLUDED = "box_omb_included-synthetic-token";
@@ -269,8 +270,9 @@ describe.each([
     const processId = await start();
     holdStatusAfterFirst = true;
     const controller = new AbortController();
-    const pending = background.backgroundStatus(cfg, BOX, { process_id: processId, wait_seconds: 1 }, controller.signal);
-    await expect.poll(() => calls.filter(entry => entry.method === "GET").length).toBe(2);
+    // The next status read waits out one poll. A one-second wait is already over when that timer fires late on Windows, so the read never starts.
+    const pending = background.backgroundStatus(cfg, BOX, { process_id: processId, wait_seconds: 6 }, controller.signal);
+    await expect.poll(() => calls.filter(entry => entry.method === "GET").length, { timeout: hostTimeout(10_000), interval: 20 }).toBe(2);
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     server.closeAllConnections();

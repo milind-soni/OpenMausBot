@@ -942,6 +942,7 @@ export interface SkillsLibrarySkillWire {
   license?: string;
   compatibility?: string;
   warnings: string[];
+  files?: string[];
   assignedBots: Array<{ id: string; name: string }>;
 }
 

@@ -9,6 +9,7 @@ import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { Store } from "../store.ts";
 import { fakeGitHub } from "../testing/fake-github.ts";
+import * as skills from "../skills.ts";
 import { workspaceDir } from "../workspace.ts";
 import { createBotSkillsRoutes } from "./bot-skills.ts";
 import { dispatchRoutes } from "./table.ts";
@@ -17,8 +18,24 @@ const SKILL = "---\nname: pdf-forms\ndescription: Fills PDF forms.\n---\n\n# PDF
 
 const servers: Server[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
+});
+
+it.each([{ removed: true as const }, { error: "fixture removal failure" }])("awaits DELETE removal before replying with %j", async (result) => {
+  let finish!: (value: typeof result) => void;
+  const pending = new Promise<typeof result>((resolve) => { finish = resolve; });
+  vi.spyOn(skills, "removeSkill").mockReturnValue(pending);
+  const route = createBotSkillsRoutes({
+    store: {} as Store, cfg: {} as AppConfig, listBotSkills: () => [], readBotSkillFile: () => null, stagedSkillListing: (staged) => staged,
+  });
+  const reply = vi.fn(), path = "/api/bots/fixture/skills/runbook";
+  const response = route({ path, method: "DELETE", url: new URL(path, "http://fixture.invalid"), json: reply } as never);
+  expect(reply).not.toHaveBeenCalled();
+  finish(result);
+  await response;
+  expect(reply).toHaveBeenCalledWith(undefined, "error" in result ? 404 : 200, "error" in result ? result : { ok: true });
 });
 
 async function serve(botId: string) {

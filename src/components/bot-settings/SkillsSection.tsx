@@ -19,6 +19,7 @@ export interface ManagedSkill {
   enabled: boolean;
   source: string;
   warnings: string[];
+  files?: string[];
   /** "imported": one copy brought in from this computer for every bot, switched per bot and never removed from one.
    * "native": loaded by the bot's engine from a skills folder of its own; changed only there. */
   origin?: "private" | "library" | "imported" | "native";
@@ -246,6 +247,10 @@ export function SkillReviewDialog({
             {skill.warnings.join(" · ")}
           </div>
         )}
+        {Boolean(skill.files?.length) && <div className="mt-2 rounded-lg bg-warning/10 px-3 py-2 text-[12px] text-warning">
+          <p>{t("skills.reviewCompanions")}</p>
+          <ul className="mt-1 list-disc pl-5">{skill.files?.map((file) => <li key={file} className="break-all">{file}</li>)}</ul>
+        </div>}
         <pre
           tabIndex={0}
           aria-label={t("skills.fullSkill", { name: skill.name })}
@@ -353,7 +358,9 @@ export function SkillsSection({ bot }: { bot: Bot }) {
       await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`, { method: "DELETE" });
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("skills.error.remove"));
+      const message = cause instanceof Error ? cause.message : t("skills.error.remove");
+      await refresh();
+      setError(message);
     } finally {
       setWorking("");
     }

@@ -8,13 +8,13 @@ import { DATA_DIR, type AppConfig } from "../config.ts";
 import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE, type DirectApply } from "../direct-apply.ts";
 import {
-  importedSkillListings, importedSkillsFor, importedSkillsPrompt, listedImportedSkills, nativeSkillFolders, readImportedSkillFile,
+  exportImportedSkill, importedSkillListings, importedSkillsFor, importedSkillsPrompt, listedImportedSkills, nativeSkillFolders, readImportedSkillFile,
   readImportedSkills, type ImportedSkillView, type SkillTurnEngine,
 } from "../imported-skills.ts";
 import { nativeSkillListing, nativeSkills, readNativeSkillFile } from "../native-skills.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { readSectionContext } from "../section-context.ts";
-import { listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
+import { exportLibrarySkill, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
 import {
   conversationAssignedSkills,
   prepareShareNote,
@@ -27,6 +27,8 @@ import {
   type ShareBot,
 } from "../skill-share.ts";
 import { enabledSkillFiles, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
+import { exportPrivateSkill } from "../portable-skill-private.ts";
+import { SKILL_RECOVERY_ATTENTION_WARNING, SKILL_RECOVERY_CAPACITY_WARNING } from "../skill-recovery-capacity.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { claudeUserSkillsEnabled } from "../turn-settings.ts";
 import { typedWords } from "../typed-sends.ts";
@@ -104,6 +106,13 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     if (readImportedSkills()[name]) return readImportedSkillFile(name);
     const native = nativesFor(bot).find((skill) => skill.name === name);
     return native ? readNativeSkillFile(native) : null;
+  };
+  const exportBotSkill = (bot: BotRecord, name: string) => {
+    if (listSkills(bot.id).some((skill) => skill.name === name)) return exportPrivateSkill(bot.id, name);
+    if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (skill.everyBot || bot.assignedSkills?.includes(name)))) {
+      return exportLibrarySkill(name);
+    }
+    return readImportedSkills()[name] ? exportImportedSkill(name) : null;
   };
 
   const shareBotsNow = (): ShareBot[] =>
@@ -244,6 +253,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   return {
     listBotSkills,
     readBotSkillFile,
+    exportBotSkill,
 
     mode,
 
@@ -340,8 +350,9 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     },
 
     harnessListing(botId: string, skills: SkillListing[]): Array<SkillListing & { revision?: string }> {
-      if (mode() === "off") return skills;
-      return skills.map((skill) => !skill.editable && editable(botId, skill.name)
+      const visible = skills.map((skill) => ({ ...skill, warnings: skill.warnings.filter((warning) => warning !== SKILL_RECOVERY_CAPACITY_WARNING && warning !== SKILL_RECOVERY_ATTENTION_WARNING) }));
+      if (mode() === "off") return visible;
+      return visible.map((skill) => !skill.editable && editable(botId, skill.name)
         ? { ...skill, editable: true, revision: skill.sha256.slice(0, SHARED_REVISION_CHARS) }
         : skill);
     },

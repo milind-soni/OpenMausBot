@@ -24,6 +24,7 @@ import {
   type PackageImportResult,
 } from "../package-import.ts";
 import { readPublishedLibrary, writePublishedLibrary, type DefaultsPreset } from "../presets.ts";
+import { partHash } from "../package-parts.ts";
 import { scoutProject, suggestTeam } from "../project-scout.ts";
 import { readPublishedTeam, writePublishedTeam } from "../published-teams.ts";
 import type { Routine, RoutineManager } from "../routines.ts";
@@ -53,13 +54,18 @@ export interface TeamRouteDeps {
   starterNotes(botId: string): Array<{ path: string; text: string }>;
   checkedExportSkillNames(value: unknown, bots: readonly BotRecord[]): { ok: true; names: string[] } | { ok: false; error: string };
   collectExportSkills(bots: readonly BotRecord[], names: readonly string[]): ReadonlyMap<string, readonly ExportablePackageSkill[]>;
-  collectTeamSkills(bots: readonly BotRecord[], selection: unknown):
+  collectTeamSkills(bots: readonly BotRecord[], selection: unknown, includeBinary?: boolean):
     | { ok: true; all: boolean; skillsByBot: Map<string, ExportablePackageSkill[]>; skipped: TeamExportSkip[]; available: string[] }
     | { ok: false; error: string; available: string[] };
   /** On a Team Cloud: false for someone else's private chat, which a team backup never carries. */
   threadShown?(auth: RequestAuth): (threadId: string) => boolean;
   /** On a Team Cloud: false for a routine that lives in someone else's private chat, which no export carries. */
   routineShown?(auth: RequestAuth): (routine: Routine) => boolean;
+}
+
+function reviewHash(document: PackageDocument, skipped: readonly TeamExportSkip[]): string | undefined {
+  if (!document.package.skills || document.package.skills.version === 1) return undefined;
+  return partHash({ skills: document.package.skills, skipped: skipped.filter((item) => item.part.startsWith("skills[") || /^presets\[[^\]]+\]\.skills\[/.test(item.part)) });
 }
 
 export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
@@ -94,6 +100,10 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
             preset: built.preset,
             skipped: built.skipped,
           });
+          const skillReviewHash = reviewHash(exported.document, exported.skipped);
+          if (body.dryRun !== true && (skillReviewHash || body.reviewedSkillHash !== undefined) && body.reviewedSkillHash !== skillReviewHash) {
+            return json(res, 409, { code: "skill_preview_stale", error: "The skill files changed or have not been reviewed. Preview them again before saving." });
+          }
           if (body.dryRun !== true) writePublishedLibrary(exported.published);
           return json(res, 200, {
             document: exported.document,
@@ -101,6 +111,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
             redacted: exported.redacted,
             skipped: exported.skipped,
             summary: packageSummary(exported.document),
+            ...(skillReviewHash ? { skillReviewHash } : {}),
           });
         } catch (error) {
           if (error instanceof TeamExportError) return json(res, error.status, { error: error.message, ...userErrorFields(error) });
@@ -115,7 +126,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
         }
         const optional = (value: unknown) => (typeof value === "string" ? value : undefined);
         const teamBots = store.bots.filter((bot) => !bot.hidden && sectionKey(bot.section) === team);
-        const skills = collectTeamSkills(teamBots, body.skills);
+        const skills = collectTeamSkills(teamBots, body.skills, body.includeBinarySkillFiles === true);
         if (!skills.ok) return json(res, 400, { error: skills.error, choices: { skills: skills.available } });
         const avatars = body.avatars && typeof body.avatars === "object" && !Array.isArray(body.avatars)
           ? body.avatars as Record<string, unknown>
@@ -143,6 +154,10 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
             skipped: [...skills.skipped, ...(defaults?.skipped ?? [])],
             preset: defaults?.preset ?? null,
           });
+          const skillReviewHash = reviewHash(exported.document, exported.skipped);
+          if (body.dryRun !== true && (skillReviewHash || body.reviewedSkillHash !== undefined) && body.reviewedSkillHash !== skillReviewHash) {
+            return json(res, 409, { code: "skill_preview_stale", error: "The skill files changed or have not been reviewed. Preview them again before saving." });
+          }
           if (body.dryRun !== true) writePublishedTeam(team, exported.published);
           return json(res, 200, {
             document: exported.document,
@@ -151,6 +166,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
             skipped: exported.skipped,
             summary: packageSummary(exported.document),
             choices: { skills: skills.available },
+            ...(skillReviewHash ? { skillReviewHash } : {}),
           });
         } catch (error) {
           if (error instanceof TeamExportError) return json(res, error.status, { error: error.message, ...userErrorFields(error), choices: { skills: skills.available } });

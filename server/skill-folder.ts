@@ -1,7 +1,7 @@
 // A skill folder brought in from outside: SKILL.md and every file beside it, written once into a fresh folder and
 // checked by hash whenever it is used, never read or written through a link.
 import { createHash } from "node:crypto";
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { z } from "zod";
 
@@ -9,6 +9,7 @@ import type { SkillImportSummary, SkippedSkillFile, SkippedSkillFileReason } fro
 export type { GitHubSkillOrigin } from "../shared/skill-import.ts";
 import { parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 import { directoryEntryState } from "./skill-storage.ts";
+import { readBoundedSkillFile } from "./bounded-skill-read.ts";
 
 /** `depth` counts path segments, file name included. */
 export const SKILL_FOLDER_LIMITS = { files: 200, bytes: 16 * 1024 * 1024, fileBytes: 2 * 1024 * 1024, depth: 8 } as const;
@@ -16,7 +17,8 @@ export const SKILL_FOLDER_LIMITS = { files: 200, bytes: 16 * 1024 * 1024, fileBy
 const SKIPPED_LIST_MAX = 20;
 const MAX_WARNINGS = 20;
 const GENERATED = new Set(["__pycache__", "node_modules", "venv"]);
-const unsafeCharacter = (char: string) => char < " " || char === "\u007f" || '<>:"|?*\\'.includes(char);
+export const containsSkillPathControls = (value: string) => [...value].some((char) => char < " " || char === "\u007f");
+const unsafeCharacter = (char: string) => containsSkillPathControls(char) || '<>:"|?*\\'.includes(char);
 // Windows refuses these names in any folder, with or without an extension.
 const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\..*)?$/i;
 const SCRIPT = /\.(?:sh|bash|zsh|fish|ps1|psm1|bat|cmd|py|rb|pl|php|lua|js|mjs|cjs|ts)$/i;
@@ -133,11 +135,17 @@ export function scanSkillFolder(skillMd: string, files: ReadonlyArray<{ path: st
 }
 
 /** The storage gate: whoever supplied `files`, only what the plan admits is written. */
-export function prepareSkillFolder(files: readonly SkillFolderFile[]): PreparedSkillFolder | { error: string } {
+export const EXECUTABLE_MODE_UNSUPPORTED = "Executable skill file permissions cannot be preserved on Windows.";
+export function executableSkillModeUnsupported(files: ReadonlyArray<{ executable?: boolean }>, platform: NodeJS.Platform = process.platform): boolean {
+  return platform === "win32" && files.some((file) => file.executable);
+}
+
+export function prepareSkillFolder(files: readonly SkillFolderFile[], platform: NodeJS.Platform = process.platform, options: { recordExecutableIntent?: boolean } = {}): PreparedSkillFolder | { error: string } {
   const entries = files.map((file) => ({ ...file, kind: "file" as const, size: Buffer.byteLength(file.content) }));
   const { take, skipped } = planSkillFolder(entries);
   const skillMdFile = take.find((file) => file.path === "SKILL.md");
   if (!skillMdFile) return { error: "no SKILL.md found at that location" };
+  if (!options.recordExecutableIntent && executableSkillModeUnsupported(take.filter((file) => file !== skillMdFile), platform)) return { error: EXECUTABLE_MODE_UNSUPPORTED };
   if (skillMdFile.size > SKILL_FILE_MAX_BYTES) return { error: `SKILL.md is larger than ${SKILL_FILE_MAX_BYTES / 1024}KB` };
   const skillMd = skillFileText(skillMdFile.content);
   if (skillMd === null) return { error: "SKILL.md is not UTF-8 text" };
@@ -171,7 +179,9 @@ export function writeSkillFolder(
   folder: string,
   skillMd: string | Uint8Array,
   files: ReadonlyArray<{ path: string; content: string | Uint8Array; executable?: boolean }>,
+  options: { recordExecutableIntent?: boolean } = {},
 ): void {
+  if (!options.recordExecutableIntent && executableSkillModeUnsupported(files)) throw new Error(EXECUTABLE_MODE_UNSUPPORTED);
   mkdirSync(folder, { mode: 0o700 });
   writeFileSync(join(folder, "SKILL.md"), skillMd, { mode: 0o600, flag: "wx" });
   for (const file of files) {
@@ -187,24 +197,12 @@ export function writeSkillFolder(
       if (directoryEntryState(at) === "missing") mkdirSync(at, { mode: 0o700 });
       if (directoryEntryState(at) !== "directory") throw new Error(`${file.path} has no real folder to go in`);
     }
-    writeFileSync(target, file.content, { mode: file.executable ? 0o700 : 0o600, flag: "wx" });
+    writeFileSync(target, file.content, { mode: process.platform === "win32" ? 0o600 : file.executable ? 0o700 : 0o600, flag: "wx" });
   }
 }
 
 function readNoFollow(path: string): Buffer | null {
-  let fd: number | null = null;
-  try {
-    fd = openSync(path, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW));
-    return fstatSync(fd).isFile() ? readFileSync(fd) : null;
-  } catch {
-    return null;
-  } finally {
-    if (fd !== null) {
-      try {
-        closeSync(fd);
-      } catch {}
-    }
-  }
+  return readBoundedSkillFile(path, SKILL_FOLDER_LIMITS.fileBytes);
 }
 
 const digests = new Map<string, { key: string; sha256: string }>();
@@ -213,11 +211,15 @@ const digests = new Map<string, { key: string; sha256: string }>();
  * when one is missing, is not a plain file, or is reached through a link at any level. SKILL.md keeps a hash of its own.
  * Security: only the files that came in are checked, so what a run adds beside them (a cache, a lockfile) leaves the
  * skill usable; a bot can add a file there, which a script may then load, but cannot change one that came in. */
-export function skillFolderDigest(dir: string, paths: readonly string[], options: { remember?: boolean } = {}): string | null {
+export function skillFolderDigest(dir: string, paths: readonly string[], options: { remember?: boolean; captured?: readonly SkillFolderFile[]; executablePaths?: readonly string[] } = {}): string | null {
   if (directoryEntryState(dir) !== "directory") return null;
+  const executable = options.executablePaths && new Set(options.executablePaths);
+  if (executable && (executable.size !== options.executablePaths!.length || [...executable].some((path) => !paths.includes(path)))) return null;
+  const captured = options.captured && new Map(options.captured.map((file) => [file.path, file]));
+  if (captured && (captured.size !== options.captured!.length || [...captured.keys()].some((path) => !paths.includes(path)))) return null;
   const folders = new Set<string>();
   const files: Array<{ path: string; full: string; executable: boolean }> = [];
-  const stats: string[] = [];
+  const stats: string[] = process.platform === "win32" && executable ? [JSON.stringify([...executable].sort())] : [];
   for (const path of [...paths].sort()) {
     if (skillFilePathProblem(path)) return null;
     const parts = path.split("/");
@@ -235,20 +237,23 @@ export function skillFolderDigest(dir: string, paths: readonly string[], options
       return null;
     }
     if (!info.isFile()) return null;
+    const fileExecutable = (info.mode & 0o100) !== 0;
+    if (process.platform !== "win32" && executable && executable.has(path) !== fileExecutable) return null;
     stats.push(`${path}\0${info.ino}\0${info.size}\0${info.mtimeMs}\0${info.ctimeMs}\0${info.mode}`);
-    files.push({ path, full, executable: (info.mode & 0o100) !== 0 });
+    files.push({ path, full, executable: process.platform === "win32" && executable ? executable.has(path) : fileExecutable });
   }
   const key = createHash("sha256").update(stats.join("\n")).digest("hex");
   const known = digests.get(dir);
-  if (known?.key === key) return known.sha256;
+  if (!captured && known?.key === key) return known.sha256;
   const hash = createHash("sha256");
   for (const file of files) {
-    const bytes = readNoFollow(file.full);
+    const snapshot = captured?.get(file.path);
+    const bytes = snapshot ? Buffer.from(snapshot.content) : readNoFollow(file.full);
     if (bytes === null) return null;
-    hash.update(`${file.path}\0${file.executable ? "x" : "-"}\0${createHash("sha256").update(bytes).digest("hex")}\n`);
+    hash.update(`${file.path}\0${(snapshot ? Boolean(snapshot.executable) : file.executable) ? "x" : "-"}\0${createHash("sha256").update(bytes).digest("hex")}\n`);
   }
   const sha256 = hash.digest("hex");
-  if (options.remember !== false) digests.set(dir, { key, sha256 });
+  if (!captured && options.remember !== false) digests.set(dir, { key, sha256 });
   return sha256;
 }
 
@@ -264,4 +269,5 @@ export const githubSkillOriginSchema = z.object({
 export const skillFolderRecordSchema = {
   files: z.array(z.string()).max(SKILL_FOLDER_LIMITS.files).optional(),
   filesSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  executableFiles: z.array(z.string().max(2048)).max(SKILL_FOLDER_LIMITS.files).optional(),
 };

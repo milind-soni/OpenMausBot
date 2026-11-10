@@ -25,6 +25,7 @@ describe("Share as preset", () => {
       presetDescription: undefined, release: undefined, notes: undefined, includeMemory: true, dryRun: true,
     });
     expect(presetShareBody({ name: "Sky", includeNotes: false, picture: "data:image/png;base64,AAAA" })).toMatchObject({ includeMemory: false, presetAvatar: "data:image/png;base64,AAAA" });
+    expect(presetShareBody({ name: "Sky", includeNotes: false, includeBinarySkillFiles: true })).toMatchObject({ includeBinarySkillFiles: true });
   });
 
   it("shows what the preset file holds, what never travels, and what was removed or left out", () => {
@@ -40,6 +41,19 @@ describe("Share as preset", () => {
       "Removed what looked like a key or password from: Support agent · standing instructions",
       "Support agent · skill · follow-up — a bot in the department has a different skill with this name",
     ]) expect(words).toContain(line);
+  });
+
+  it("shows included and omitted companion paths", () => {
+    const source = fixture("library-only.v2.json");
+    source.package.skills.version = 2;
+    source.package.skills.entries[0].files = [{ path: "references/guide.md", content: "Guide" }];
+    const document = parsePackageDocument(source);
+    const name = document.package.skills!.entries[0]!.name;
+    const preview: PresetShareResponse = { document, filename: "f", summary: packageSummary(document), redacted: [],
+      skipped: [{ part: `skills[${name}].files[script.sh]`, reason: "skill_file_type" }] };
+    const words = text(renderToStaticMarkup(createElement(SharePresetContents, { preview, localSkips: [] })));
+    expect(words).toContain(`Included skill files ${name} · references/guide.md`);
+    expect(words).toContain(`${name} · script.sh — this file type cannot be shared safely`);
   });
 
   it("counts preset bots in a team file", () => {

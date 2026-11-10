@@ -5,6 +5,7 @@ import { BookOpen, CalendarClock, Check, Crown, MessageSquare, NotebookPen, Plug
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { PendingTeamImport } from "@/lib/team-import";
+import { SkillFileList } from "./SharedSkillFiles";
 
 export const TEAM_GLYPHS = [
   "bg-purple-500/15 text-purple-300",
@@ -52,6 +53,7 @@ export function TeamImportDetails({ pending, importedNames, org = false }: {
           {!org && <p className="mt-1">{pending.version === 2 ? t("teamImport.skillsReview") : t("templates.skillsReview")}</p>}
         </div>
       )}
+      {pending.skillFiles?.length ? <SkillFileList files={pending.skillFiles} /> : null}
       {pending.library && Boolean(pending.presets?.length) && (
         <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamImport.presetList")}</div>
@@ -99,11 +101,11 @@ export function TeamImportDetails({ pending, importedNames, org = false }: {
           {pending.kind === "backup"
             ? t("templates.backupSafety", { archived: pending.archivedBots ? t("templates.archivedBots", { count: pending.archivedBots }) : "" })
             : org
-            ? pending.members.length ? t("orgLibrary.teamSafety") : t("orgLibrary.librarySafety")
+            ? pending.members.length ? t("orgLibrary.teamFolderSafety") : t("orgLibrary.librarySafety")
             : pending.library
             ? t("teamImport.librarySafety")
             : pending.version === 2
-            ? t("teamImport.sharedTeamSafety")
+            ? t("teamImport.sharedTeamFolderSafety")
             : pending.kind === "package"
             ? t("templates.packageSafety")
             : t("templates.legacySafety")}

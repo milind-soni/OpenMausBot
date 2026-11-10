@@ -24,25 +24,35 @@ interface Scene {
   under?: Array<{ position?: "absolute" | "fixed"; width: number | "window"; height: number | "window"; freed?: number }>;
 }
 
-function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?: boolean; room?: boolean } = {}) {
+function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?: boolean; room?: boolean; observerDelayMs?: number } = {}) {
   const room = options.room === true;
   const page = new Window();
   pages.push(page);
   const listeners = new Set<Listener>();
   const loads = new Set<() => void>();
   const observers = new Set<() => void>();
-  let bridge: AppBridge;
-  // Every hop between the page and its host is a task of this fake frame's, counted until it has run, so a test can wait
-  // for the frame to go quiet instead of for a time: a timer's wait is about 16 ms on Windows, and a report takes three.
-  let pending = 0;
-  const task = (run: () => void) => {
-    pending += 1;
-    setTimeout(() => { try { run(); } finally { pending -= 1; } }, 0);
+  const pending = new Set<Promise<void>>();
+  const schedule = (callback: () => void, delay = 0) => {
+    let finish!: () => void;
+    const completed = new Promise<void>((resolve) => { finish = resolve; });
+    pending.add(completed);
+    setTimeout(() => {
+      try { callback(); } finally { pending.delete(completed); finish(); }
+    }, delay);
   };
+  const drain = async () => {
+    for (let round = 0; round < 100; round++) {
+      await Promise.all(pending);
+      await Promise.resolve();
+      if (pending.size === 0) return;
+    }
+    throw new Error("Fake frame callbacks did not settle");
+  };
+  let bridge: AppBridge;
   const parent = {
     postMessage(data: unknown) {
       const copy = structuredClone(data);
-      task(() => bridge.handleMessage({ source: frame, data: copy }));
+      schedule(() => bridge.handleMessage({ source: frame, data: copy }));
     },
   };
   const positions = new Map<unknown, string>();
@@ -56,7 +66,7 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
     },
     postMessage(data: unknown) {
       const copy = structuredClone(data);
-      task(() => { for (const listener of listeners) listener({ source: parent, data: copy }); });
+      schedule(() => { for (const listener of listeners) listener({ source: parent, data: copy }); });
     },
     getComputedStyle: (element: unknown) => ({ position: positions.get(element) ?? "static" }),
   };
@@ -97,7 +107,7 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
       resize: (height) => {
         seen.heights.push(height);
         frame.innerHeight = height;
-        for (const observed of observers) task(observed);
+        for (const observed of observers) schedule(observed, options.observerDelayMs);
       },
       engaged: () => engaged,
       teardownRequested: () => {},
@@ -110,18 +120,11 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
   }
   // The helper's free names, bound to this fake frame: it runs exactly as written.
   const run = new Function("window", "document", "ResizeObserver", "requestAnimationFrame", room ? APP_ROOM_HELPER_SOURCE : APP_HELPER_SOURCE);
-  run(frame, document, scene ? FakeResizeObserver : undefined, (callback: () => void) => task(callback));
+  run(frame, document, scene ? FakeResizeObserver : undefined, (callback: () => void) => schedule(callback));
   return {
-    bridge, seen, frame, root,
+    bridge, seen, frame, root, drain,
     load: () => { options.loaded = true; for (const listener of loads) listener(); },
-    reflow: () => { for (const observed of observers) task(observed); },
-    /** Resolves once no task of the frame's is waiting to run: what a reflow started has reached the host, or come to nothing. */
-    quiet: async () => {
-      for (const deadline = Date.now() + 5_000; pending > 0;) {
-        if (Date.now() > deadline) throw new Error(`the frame still had ${pending} task(s) waiting after 5 s`);
-        await new Promise((resolve) => setTimeout(resolve, 1));
-      }
-    },
+    reflow: () => { for (const observed of observers) schedule(observed, options.observerDelayMs); },
     mausbot: () => frame.mausbot as {
       send(text: string): Promise<void>; open(url: string): Promise<void>; setContext(text: string): Promise<void>; theme: string; room: boolean;
     },
@@ -130,12 +133,13 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
 
 /** The heights reported once the frame has stopped changing, or after 20 rounds of a frame that never does. */
 async function settled(page: ReturnType<typeof boot>) {
-  await expect.poll(() => page.seen.heights.length).toBeGreaterThan(0);
+  await page.drain();
+  expect(page.seen.heights.length).toBeGreaterThan(0);
   let count = -1;
   for (let round = 0; round < 20 && count !== page.seen.heights.length; round++) {
     count = page.seen.heights.length;
     page.reflow();
-    await page.quiet();
+    await page.drain();
   }
   return page.seen.heights;
 }
@@ -253,6 +257,11 @@ describe("the height a bot page reports", () => {
   it("settles when the layer covers the window only once the frame is small", async () => {
     const toolbar = { position: "absolute", width: "window", height: 44 } as const;
     expect(await settled(boot(true, { scene: { flow: flow(0), under: [toolbar] } }))).toEqual([48, 520]);
+  });
+
+  it("waits for a delayed resize observer before deciding the frame has settled", async () => {
+    const toolbar = { position: "absolute", width: "window", height: 44 } as const;
+    expect(await settled(boot(true, { observerDelayMs: 120, scene: { flow: flow(0), under: [toolbar] } }))).toEqual([48, 520]);
   });
 
   it("settles when the flow is sized from the window", async () => {

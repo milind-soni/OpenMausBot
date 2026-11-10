@@ -2,7 +2,7 @@
 // (scripts/testing/cloud-send-fixture.ts) with main's own wiring between them and the connected-apps service with a fake
 // Composio behind it. Automations, bot files, memory, the bot and conversation fields, a row over 1 MB, skill extras and
 // a model on the home network; then the check, and a move run again. Disposable homes; no network.
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -114,11 +114,14 @@ it("a move carries the automations, files, memory, fields and skills, and its ch
   const skillMd = (name: string, body: string) => `---\nname: ${name}\ndescription: ${body}\n---\n\n${body}\n`;
   const imported = join(dataDir("desktop"), "imported-skills", "invoice-check");
   mkdirSync(join(imported, "references"), { recursive: true });
-  writeFileSync(join(imported, "SKILL.md"), skillMd("invoice-check", "Check an invoice."));
-  writeFileSync(join(imported, "references", "rules.md"), "Totals must add up.\n");
+  const importedText = skillMd("invoice-check", "Check an invoice."), rules = "Totals must add up.\n";
+  const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+  writeFileSync(join(imported, "SKILL.md"), importedText);
+  writeFileSync(join(imported, "references", "rules.md"), rules);
   mkdirSync(join(dataDir("desktop"), "skill-state"), { recursive: true });
   writeFileSync(join(dataDir("desktop"), "skill-state", "imported-skills.json"), JSON.stringify({ "invoice-check": { description: "Check an invoice.", source: "codex",
-    root: "~/.codex/skills", origin: "~/.codex/skills/invoice-check", label: "Codex/invoice-check", sha256: "0".repeat(64), filesSha256: "0".repeat(64),
+    root: "~/.codex/skills", origin: "~/.codex/skills/invoice-check", label: "Codex/invoice-check", sha256: sha256(importedText),
+    filesSha256: sha256(`f - SKILL.md ${sha256(importedText)}\nd references\nf - references/rules.md ${sha256(rules)}\n`), executableFiles: [],
     importedAt: new Date().toISOString(), warnings: [] } }));
   mkdirSync(join(fx.root, "desktop", ".claude", "skills", "tidy-notes"), { recursive: true });
   writeFileSync(join(fx.root, "desktop", ".claude", "skills", "tidy-notes", "SKILL.md"), skillMd("tidy-notes", "Tidy the notes."));

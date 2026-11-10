@@ -369,11 +369,9 @@ import {
   getStagedSkillWrite,
   installOrgSkill,
   installSkill,
-  parseSkillMd,
-  scanSkillText,
   listSkills,
   listStagedSkillWrites,
-  readSkillFile, removeSkill,
+  readSkillFile,
   rejectStagedSkillWrite,
   setSkillEnabled,
   skillPackageStamps,
@@ -381,13 +379,16 @@ import {
   undoSkillWrite,
 } from "./skills.ts";
 import { fetchSkillFromSource } from "./skill-fetch.ts";
-import { ensureTaskWorkspaceWithSkills, harnessSkillLinks } from "./skill-task-links.ts"; import { changedWords, createLendingLifts, handedInSince } from "./host/lending-lifts.ts"; import { deviceWord } from "./lent-computers.ts";
+import { assertWorkspaceSkillLinksCurrent, ensureTaskWorkspaceWithSkills, harnessSkillLinks, noteSkillWorkspaceUse, skillWorkspaceMayBeInUse, SkillLinkSafetyError } from "./skill-task-links.ts"; import { changedWords, createLendingLifts, handedInSince } from "./host/lending-lifts.ts"; import { deviceWord } from "./lent-computers.ts";
 import { parseSkillManageReferences, previousSkillVersion, skillCardCopy, skillRequestReferences } from "./skill-request-card.ts";
 import { skillReferencesSha256 } from "./skill-storage.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import { skillExport } from "./skill-export.ts";
 import { pickBotName } from "./names.ts";
-import { botSkillTemplateSchema, newBotDefaultsSchema } from "./new-bot-defaults.ts";
+import { newBotDefaultsSchema } from "./new-bot-defaults.ts";
+import { defaultSkillTemplates } from "./default-skill-preview.ts";
+import { recoverOrganizationSkillLinks, replaceOrganizationSkill } from "./org-skill-update.ts";
+import { setSkillUseGuard } from "./skill-use-guard.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { setupSuggestionsFor } from "./setup-suggestions.ts"; import { createSetupRequestRoutes } from "./routes/setup-request.ts";
 import { isSkillSwitchAction, type SkillRequestCardData } from "../shared/skill-request.ts"; import { createSkillSwitchHost } from "./host/skill-switch-host.ts";
@@ -2760,6 +2761,7 @@ function defaultsPresetFor(body: Record<string, unknown>, includeNotes: boolean)
     name: typeof body.presetName === "string" ? body.presetName : undefined,
     description: typeof body.presetDescription === "string" ? body.presetDescription : undefined,
     includeNotes,
+    includeBinarySkillFiles: body.includeBinarySkillFiles === true,
     avatar,
   });
   return { preset: built.value, skipped: [...skipped, ...built.skipped] };
@@ -7930,6 +7932,8 @@ async function beginTurn(
           ? store.pinTaskCwd(bot.id, threadId, privateWorkspace, { privateOnly: cloudGuestOpened(threadId) || botApiThread(threadId) })
           : null;
       const cwd = pinnedCwd ?? undefined;
+      noteSkillWorkspaceUse(resourceOwner, cwd ?? (worksInWorkspace ? workspaceDir(bot.id) : undefined), store.bots.map((owner) => owner.id));
+      assertWorkspaceSkillLinksCurrent(bot.id, cwd ?? (worksInWorkspace ? workspaceDir(bot.id) : undefined), store.bots.map((owner) => owner.id));
       const checkpointCwd = cwd && cwd !== privateWorkspace ? cwd : undefined;
       const dwebUrl = process.env.DWEB_URL?.trim();
       if (dwebUrl) integrations.dweb = { url: dwebUrl };
@@ -8889,11 +8893,15 @@ if (CLOUD_HOME && CLOUD_OWNER_KEY && cloudRoutineAuthors) {
 }
 // Only now: an earlier owner key is the owner's once settled.
 routines.clearFrozenResultsThreads(); proactive.ensureWatch(); startFirstHour({ hooks: firstHourHooks, fresh: firstHourFresh, store, bus, cfg, dataDir: DATA_DIR, proactive, briefOn: () => proactive.briefOn(), ensureBrief: () => { proactive.ensureWatch(); }, composio, sessions, phones: () => phones.paired(), routines: () => routines, mainThread: botMainThread, threadBusy, startTurn, notify, wrote: markTaskContextExternallyUpdated, stale: shouldIgnoreProviderEvent, welcomeDone: () => { adminActorScope.exit(() => saveConfig(welcomeDonePatch(cfg.onboarding))); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } });
+setSkillUseGuard((botId) => botHasActiveTurn(botId) || Boolean(routines?.activeRunForBot(botId)) ||
+  [...directTurnBots.values()].some((bot) => bot.id === botId) ||
+  [...groupTurnOperations.values()].some((operations) => [...operations].some((operation) => operation.botIds.has(botId))) ||
+  skillWorkspaceMayBeInUse(botId, directTurnBots, groupSpeakers.keys(), store, turnResourceOwners));
 orgLibrary = new OrgLibrary({
   dataDir: DATA_DIR,
   store,
   routines: routines!,
-  skills: { list: listSkills, stamps: skillPackageStamps, setEnabled: setSkillEnabled, installOrg: installOrgSkill, read: readSkillFile, remove: removeSkill },
+  skills: { list: listSkills, stamps: skillPackageStamps, setEnabled: setSkillEnabled, installOrg: installOrgSkill, replaceOrg: replaceOrganizationSkill, recoverOrg: recoverOrganizationSkillLinks },
   presets: presetStore, sections: { read: (section) => readSectionContext(section)?.text ?? "", write: (section, text) => void writeSectionContext(section, text) },
   postState: (message) => utilityParentPort?.postMessage(message),
 });
@@ -9416,7 +9424,7 @@ type UndoResult =
   | { claimed: true; state: "already_undone" | "undone" }
   | { claimed: true; state: "invalid"; error: string; status: number; stale?: true };
 
-function undoSkillCard(botId: string, threadId: string, messageId: string): UndoResult {
+async function undoSkillCard(botId: string, threadId: string, messageId: string): Promise<UndoResult> {
   const message = store.messagesFor(threadId).find((candidate) => candidate.id === messageId);
   const card = message?.card;
   const request = card?.skillRequest;
@@ -9428,7 +9436,7 @@ function undoSkillCard(botId: string, threadId: string, messageId: string): Undo
   if (request.botId !== botId || request.threadId !== threadId) return { claimed: true, state: "invalid", error: "this skill request belongs to a different bot", status: 403 };
   const action = request.action; if (isSkillSwitchAction(action)) return skillSwitch.undo(botId, threadId, message, { ...request, action });
   if (request.shared) return skillsHost.undoReceipt(botId, threadId, message, { ...request, action, shared: request.shared });
-  const undone = undoSkillWrite(botId, { stagedId: request.stagedId, name: request.name, action,
+  const undone = await undoSkillWrite(botId, { stagedId: request.stagedId, name: request.name, action,
     ...(request.previous ? { previous: { skillMd: request.previous.preview, source: request.previous.source, references: request.previous.references ?? [] } } : {}),
   });
   if ("stale" in undone) return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
@@ -9470,7 +9478,7 @@ async function undoAppliedChange(res: ServerResponse, threadId: string, requestI
     }
     result = undone;
   } else if (card.skillRequest) {
-    result = undoSkillCard(botId, threadId, message.id);
+    result = await undoSkillCard(botId, threadId, message.id);
   } else if (card.teamMemoryRequest) {
     result = teamMemoryRequests.undo(threadId, requestId);
   } else if (card.teamSetupRequest) {
@@ -10146,6 +10154,8 @@ async function runClaimedGroupMemberTurn(
   const cwd = workspace && cloudGuestOpened(threadId)
     ? ensureTaskWorkspaceWithSkills(bot.id, threadId, skillsHost.turnImports(bot, threadId, instance))
     : groupTurnCwd(workspace, () => store.pinGroupCwd(readyGroup.id, threadId));
+  noteSkillWorkspaceUse(resourceOwner, cwd, store.bots.map((owner) => owner.id));
+  assertWorkspaceSkillLinksCurrent(bot.id, cwd, store.bots.map((owner) => owner.id));
   assertRoomFolder(cwd); if (workspace && bot.memoryEnabled !== false) beginMemoryTurn(teamHost.layer(bot.id, threadId), threadId); if (workspace) botBox.lend(bot.id, threadId, teamHost.layerDirs(bot.id, threadId));
   {
     const drift = checkSoulDrift(bot.id, bot.soul ?? "", bot.soulHash ?? "");
@@ -10585,9 +10595,9 @@ async function runClaimedGroupMemberTurn(
     reportDispatchError(message);
     if (orchestration) {
       orchestration.result.outcome = isSpendCap ? "spend_capped" : "dispatch_failed";
-      if (isSpendCap) orchestration.result.stopReason = message;
+      if (isSpendCap || error instanceof SkillLinkSafetyError) orchestration.result.stopReason = message;
     }
-    return isToolScopeError;
+    return isToolScopeError || error instanceof SkillLinkSafetyError;
   } finally {
     // Covers every early return that never produces a provider terminal event.
     unregisterSetupStall();
@@ -11300,17 +11310,17 @@ function appendSkillRequestCard(args: {
 }
 
 const skillSwitch = createSkillSwitchHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, listBotSkills, readBotSkillFile, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) });
-function resolveSkillRequest(args: {
+async function resolveSkillRequest(args: {
   botId: string;
   botName?: string;
   threadId: string;
   requestId: string;
   behavior: "allow" | "deny" | "answer";
   reviewedSha256?: string;
-}):
+}): Promise<
   | { claimed: false }
   | { claimed: true; status: number; error: string }
-  | { claimed: true; outcome: "allowed-once" | "rejected"; alreadySettled?: true } {
+  | { claimed: true; outcome: "allowed-once" | "rejected"; alreadySettled?: true }> {
   const message = store.messagesFor(args.threadId).find(
     (candidate) => candidate.card?.requestId === args.requestId && candidate.card.skillRequest,
   );
@@ -11462,7 +11472,7 @@ function resolveSkillRequest(args: {
 
 function sendSkillResolution(
   res: ServerResponse,
-  result: ReturnType<typeof resolveSkillRequest>,
+  result: Awaited<ReturnType<typeof resolveSkillRequest>>,
 ): boolean {
   if (!result.claimed) return false;
   if ("error" in result) {
@@ -13638,7 +13648,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
         const direct = appliesDirectly(from.id, fromThreadId);
-        if (isSkillSwitchAction(body.action)) { const staged = skillSwitch.stage(from, fromThreadId, body.action, body, direct); return json(res, staged.status, staged.body); }
+        if (isSkillSwitchAction(body.action)) { const staged = await skillSwitch.stage(from, fromThreadId, body.action, body, direct); return json(res, staged.status, staged.body); }
         const persistence = skillProposalPersistence(from.id, fromThreadId, !direct);
         if (!persistence.ok) return json(res, persistence.status, { error: persistence.error });
         const action = body.action === "create" || body.action === "update" ? body.action : "";
@@ -14833,19 +14843,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const input = checked.data;
       const fetched = await fetchSkillFromSource(input.source);
       if ("error" in fetched) return json(res, 422, { error: fetched.error });
-      const skills = [];
-      for (const skill of fetched.skills) {
-        const text = skill.files.find(file => file.path === "SKILL.md")?.content.toString("utf8");
-        if (text === undefined) continue;
-        const parsed = parseSkillMd(text);
-        if ("error" in parsed) return json(res, 422, { error: parsed.error });
-        const extra = skill.files.length - 1, skippedWarnings = extra > 0 ? [`${extra} supporting file${extra === 1 ? "" : "s"} left out — a skill added while making a bot keeps only SKILL.md; import it from the bot's Skills afterwards for the whole folder`] : [];
-        const template = botSkillTemplateSchema.safeParse({ name: parsed.name, description: parsed.description, source: skill.source, text,
-          enabled: false, warnings: [...scanSkillText(text), ...skippedWarnings] });
-        if (!template.success) return json(res, 422, { error: template.error.message });
-        skills.push(template.data);
-      }
-      return json(res, 200, { skills });
+      const result = defaultSkillTemplates(fetched.skills);
+      if ("error" in result) return json(res, 422, { error: result.error });
+      return json(res, 200, result);
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/soul$/);

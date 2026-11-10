@@ -266,3 +266,140 @@ describe("files for older apps", () => {
     expect(downgradeToV1(document)).toEqual({ error: expect.stringContaining("5 to 240 minutes") });
   });
 });
+
+describe("portable skill companions", () => {
+  const bundle = () => {
+    const doc = fixture("full-team.v2.json");
+    doc.package.skills.version = 2;
+    doc.package.skills.entries[0].files = [
+      { path: "references/deep/rules.md", content: "password=fixture-secret-123456\n" },
+      { path: "README.md", content: "Open the rules.\n" },
+    ];
+    return doc;
+  };
+  it("retains, sorts, redacts and scans companions, and refuses a lossy downgrade", () => {
+    const doc = parsePackageDocument(bundle());
+    expect(doc.package.skills!.entries[0]!.files!.map((file) => file.path)).toEqual(["README.md", "references/deep/rules.md"]);
+    expect(packageSecretFindings(doc)).toContain("skills[pricing-policy].files[1].content");
+    const redacted = redactPackageSecrets(doc);
+    expect(JSON.stringify(redacted.document)).not.toContain("fixture-secret-123456");
+    expect(parsePackageDocument(redacted.document).package.skills!.entries[0]!.files).toHaveLength(2);
+    expect(downgradeToV1(doc)).toEqual({ error: expect.stringContaining("skill files") });
+    const legacy = fixture("legacy-team.v1.json");
+    legacy.package.skills.version = 2;
+    legacy.package.skills.entries[0].files = [{ path: "x.md", content: "x" }];
+    expect(() => parsePackageV1(legacy)).toThrow();
+    legacy.package.skills.version = 1;
+    expect(() => parsePackageV1(legacy)).toThrow("Skill files require skills version 2");
+  });
+  it("refuses files disguised as the legacy skills section", () => {
+    const doc = bundle();
+    doc.package.skills.version = 1;
+    expect(() => parsePackageDocument(doc)).toThrow("Skill files require skills version 2");
+  });
+  it("does not allow an older skills section to discard Markdown file mode", () => {
+    const doc = bundle();
+    doc.package.skills.entries[0].files = [{ path: "run.md", content: "instructions", executable: true }];
+    expect(() => parsePackageDocument(doc)).toThrow("These skill files require skills version 3");
+    doc.package.skills.version = 3;
+    expect(parsePackageDocument(doc).package.skills!.entries[0]!.files).toEqual(doc.package.skills.entries[0].files);
+  });
+  it("uses a new section version for scripts and opaque bytes, redacting only text", () => {
+    const doc = bundle();
+    doc.package.skills.version = 3;
+    const binary = Buffer.from("password=unscannable-fixture\0", "utf8").toString("base64");
+    doc.package.skills.entries[0].files = [
+      { path: "scripts/render.sh", content: "password=fixture-secret-123456\n", executable: true },
+      { path: "assets/data.bin", binary: { base64: binary } },
+      { path: "template.html", content: "<p>Template</p>" },
+    ];
+    const parsed = parsePackageDocument(doc);
+    const redacted = redactPackageSecrets(parsed);
+    const files = redacted.document.package.skills!.entries[0]!.files!;
+    expect(files.find((file) => file.path === "assets/data.bin")).toEqual({ path: "assets/data.bin", binary: { base64: binary } });
+    expect(redacted.redacted).toContain("skills[pricing-policy].files[1].content");
+    expect(JSON.stringify(files)).not.toContain("fixture-secret-123456");
+    expect(parsePackageDocument(redacted.document)).toEqual(redacted.document);
+    doc.package.skills.version = 2;
+    expect(() => parsePackageDocument(doc)).toThrow("These skill files require skills version 3");
+  });
+  it("rejects malformed, unsafe or oversized folder files", () => {
+    const invalid = [
+      { path: "../outside.sh", content: "echo no" },
+      { path: "a\\b", content: "x" },
+      { path: "AUX", content: "x" },
+      { path: "auth.json", content: "fixture" },
+      { path: "secrets/reference.md", content: "fixture" },
+      { path: "assets/private.key", binary: { base64: "AA==" } },
+      { path: "assets/image.bin", binary: { base64: "AB==" } },
+      { path: "assets/image.bin", binary: { base64: "SGVsbG8=" } },
+      { path: "assets/image.bin", binary: { base64: "AA==" }, executable: true },
+      { path: "assets/image.bin", binary: { base64: "AA==" }, content: "x" },
+      { path: "large.txt", content: "x".repeat(512 * 1024 + 1) },
+    ];
+    for (const file of invalid) {
+      const doc = bundle(); doc.package.skills.version = 3; doc.package.skills.entries[0].files = [file];
+      expect(() => parsePackageDocument(doc), JSON.stringify(file).slice(0, 120)).toThrow();
+    }
+    for (const files of [
+      [{ path: "É.txt", content: "a" }, { path: "e\u0301.txt", content: "b" }],
+      Array.from({ length: 5 }, (_, index) => ({ path: `${index}.txt`, content: "x".repeat(500 * 1024) })),
+      Array.from({ length: 129 }, (_, index) => ({ path: `${index}.txt`, content: "x" })),
+    ]) {
+      const doc = bundle(); doc.package.skills.version = 3; doc.package.skills.entries[0].files = files;
+      expect(() => parsePackageDocument(doc)).toThrow();
+    }
+  });
+  it.each([2, 3])("rejects path collisions that the folder installer cannot represent in skills version %i", (version) => {
+    for (const files of [
+      [{ path: "SKILL.md/guide.md", content: "x" }],
+      [{ path: "a.md", content: "a" }, { path: "a.md-other.md", content: "b" }, { path: "a.md/child.md", content: "c" }],
+      [{ path: "Docs/a.md", content: "a" }, { path: "docs/b.md", content: "b" }],
+      [{ path: "É/a.md", content: "a" }, { path: "e\u0301/b.md", content: "b" }],
+    ]) {
+      const doc = bundle(); doc.package.skills.version = version; doc.package.skills.entries[0].files = files;
+      expect(() => parsePackageDocument(doc)).toThrow();
+    }
+  });
+  it.each(["../escape.md", "/absolute.md", "x/../../escape.md", "x\\escape.md", ".hidden.md", "folder/.hidden/x.md", "CON.md", "skill.md", "x/a.txt", "x/", "x/one./two.md", "secrets/guide.md"]) (
+    "refuses unsafe path %s", (path) => {
+      const doc = bundle();
+      doc.package.skills.entries[0].files = [{ path, content: "x" }];
+      expect(() => parsePackageDocument(doc)).toThrow();
+    },
+  );
+  it("refuses colliding paths, oversized content, too many files and NUL text", () => {
+    for (const files of [
+      [{ path: "Guide.md", content: "a" }, { path: "guide.md", content: "b" }],
+      [{ path: "a.md", content: "a" }, { path: "A.md/b.md", content: "b" }],
+      [{ path: "large.md", content: "a".repeat(65537) }],
+      Array.from({ length: 9 }, (_, i) => ({ path: `${i}.md`, content: "a".repeat(65536) })),
+      Array.from({ length: 33 }, (_, i) => ({ path: `${i}.md`, content: "x" })),
+      [{ path: "binary.md", content: "a\0b" }],
+    ]) {
+      const doc = bundle(); doc.package.skills.entries[0].files = files;
+      expect(() => parsePackageDocument(doc)).toThrow();
+    }
+  });
+  it("refuses text that cannot round-trip through UTF-8 while keeping valid Unicode", () => {
+    for (const file of [
+      { path: "references/\ud800.md", content: "guide" },
+      { path: "references/\udc00.md", content: "guide" },
+      { path: "references/guide.md", content: "before \ud800 after" },
+      { path: "references/guide.md", content: "before \udc00 after" },
+    ]) {
+      const doc = bundle(); doc.package.skills.entries[0].files = [file];
+      expect(() => parsePackageDocument(doc)).toThrow();
+    }
+    const doc = bundle();
+    doc.package.skills.entries[0].files = [{ path: "references/手冊-😀.md", content: "Guide 😀\n" }];
+    expect(parsePackageDocument(doc).package.skills!.entries[0]!.files).toEqual(doc.package.skills.entries[0].files);
+    doc.package.skills.entries[0].instructions += "\n\ud800";
+    expect(() => parsePackageDocument(doc)).toThrow("Bundled skill instructions must be UTF-8 text");
+    doc.package.skills.entries[0].instructions = doc.package.skills.entries[0].instructions.replace("\ud800", "\0");
+    expect(() => parsePackageDocument(doc)).toThrow("Bundled skill instructions must be UTF-8 text");
+    delete doc.package.skills.entries[0].files;
+    doc.package.skills.version = 1;
+    expect(() => parsePackageDocument(doc)).not.toThrow();
+  });
+});

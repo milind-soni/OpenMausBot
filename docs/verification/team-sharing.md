@@ -46,6 +46,8 @@ leave `step-31` out, and unticking `z-only` from them is a `200`, where
 unticking it from everything "all" put in the file is a `400`.
 
 The printed JSON line names the fixture's data directory and server log.
+The folder round trip also checks script and template text, binary opt-in,
+redaction, preview revalidation, file modes and disabled import state.
 
 ## Format, export and import units
 

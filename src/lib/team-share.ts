@@ -25,6 +25,7 @@ export interface ShareChoices {
   notes?: string;
   skills: "all" | string[];
   includeMemory: boolean;
+  includeBinarySkillFiles?: boolean;
   avatars?: Record<string, string>;
   includeDefaultsPreset?: boolean;
   presetAvatar?: string;
@@ -38,6 +39,7 @@ export interface ShareResponse {
   skipped: ShareSkip[];
   summary: PackageSummary;
   choices: { skills: string[] };
+  skillReviewHash?: string;
 }
 
 
@@ -83,6 +85,7 @@ export function shareRequestBody(choices: ShareChoices): Record<string, unknown>
     notes: text(choices.notes),
     skills: choices.skills,
     includeMemory: choices.includeMemory,
+    ...(choices.includeBinarySkillFiles ? { includeBinarySkillFiles: true } : {}),
     ...(choices.avatars && Object.keys(choices.avatars).length ? { avatars: choices.avatars } : {}),
     ...(choices.includeDefaultsPreset ? { includeDefaultsPreset: true, ...(choices.presetAvatar ? { presetAvatar: choices.presetAvatar } : {}) } : {}),
     ...(choices.dryRun ? { dryRun: true } : {}),
@@ -184,6 +187,12 @@ const FIELD_WORDS: Record<string, LocaleKey> = {
 
 export function describePart(part: string, document?: PackageDocument): string {
   const pkg = document?.package;
+  const skillFile = /^skills\[([^\]]+)\]\.files\[(.*)\](?:\.(?:content|path|binary))?$/.exec(part);
+  if (skillFile) {
+    const [, name, item] = skillFile;
+    const path = /^\d+$/.test(item!) ? pkg?.skills?.entries.find((skill) => skill.name === name)?.files?.[Number(item)]?.path ?? item : item;
+    return `${name} · ${path}`;
+  }
   part = part.replace(/^(presets\[[^\]]+\])\.bot\./, "$1.");
   const match = /^(agents|rooms|routines|skills|connections|presets|playbooks)\[([^\]]+)\](?:\.([a-zA-Z]+)(?:\[([^\]]+)\])?)?/.exec(part);
   if (match) {
@@ -207,7 +216,12 @@ export function describePart(part: string, document?: PackageDocument): string {
 
 export function describeSkip(skip: ShareSkip, document?: PackageDocument, botNames?: ReadonlyMap<string, string>): string {
   const reason = tFromServer(`teamShare.skip.${skip.reason}`, skip.reason) ?? skip.reason;
-  const who = botNames?.get(skip.part) ?? describePart(skip.part, document);
+  const presetFile = /^presets\[([^\]]+)\]\.skills\[([^\]]+)\]\.files\[(.*)\]$/.exec(skip.part);
+  const skillFile = /^skills\[([^\]]+)\]\.files\[(.*)\]$/.exec(skip.part);
+  const presetName = presetFile && (document?.package.presets?.find((preset) => preset.key === presetFile[1])?.name ??
+    (presetFile[1] === "new-bot-defaults" ? t("teamShare.defaultsPreset") : presetFile[1]));
+  const who = botNames?.get(skip.part) ?? (presetFile ? `${presetName} · ${presetFile[2]} · ${presetFile[3]}`
+    : skillFile ? `${skillFile[1]} · ${skillFile[2]}` : describePart(skip.part, document));
   return `${who} — ${reason}`;
 }
 

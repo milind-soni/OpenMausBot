@@ -1,10 +1,13 @@
 // The OpenMausBot package file ("openmaus.package"), v1 or v2; every reader
 // returns v2. The single validation gate for the server, the renderer and the
 // Admin upload, so it imports only zod, yaml, croner and pure shared modules
-// (no Buffer, no node:*). The schema has no field for chat history, secrets,
-// model choices, computers, visibility or personal settings, and unknown
-// fields are stripped.
+// (no Buffer, no node:*). The schema has no credential, chat history, model
+// choice, computer, visibility or personal setting fields. Text and binary
+// contents may still contain secrets. Unknown fields are stripped.
 import { parse as parseYaml } from "yaml";
+import { isUtf8Text, portableFolderFilesSchema, skillCompanionsSchema } from "./portable-skill-bundle.ts";
+export { isPortableSkillPath, skillCompanionsSchema, SKILL_BUNDLE_MAX_FILES, SKILL_BUNDLE_FILE_MAX_BYTES, SKILL_BUNDLE_MAX_BYTES } from "./portable-skill-bundle.ts";
+export { portableFolderFilesSchema } from "./portable-skill-bundle.ts";
 import { z } from "zod";
 
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "./bot-profile.ts";
@@ -53,7 +56,6 @@ export function utf8Bytes(value: string): number {
   return encoder.encode(value).length;
 }
 
-
 export const requiredText = (max: number) =>
   z.string({ error: "must be text" }).trim().min(1, { message: "is required" }).max(max, { message: "is too long" });
 
@@ -91,6 +93,7 @@ const portableSkillSchema = z.object({
   compatibility: optionalText(200),
   instructions: skillInstructions,
 });
+const bundledSkillSchema = portableSkillSchema.extend({ files: portableFolderFilesSchema.optional() });
 const soulSchema = z.string().refine((value) => utf8Bytes(value) <= BOT_PROFILE_LIMITS.soul, {
   error: "standing instructions must be at most 24000 bytes",
 });
@@ -253,7 +256,6 @@ const packageDocumentV1Schema = z.object({
 });
 
 export type PackageDocumentV1 = z.output<typeof packageDocumentV1Schema>;
-
 
 const semver = z.string({ error: "must be text" }).regex(/^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})$/, {
   message: "must be a version like 1.2.3",
@@ -459,8 +461,8 @@ export const packageDocumentSchema = z.object({
     routines: z.array(routineSchema).max(50).optional(),
     playbooks: z.array(playbookSchema).max(80).optional(),
     skills: z.object({
-      version: z.literal(1),
-      entries: z.array(portableSkillSchema).min(1).max(PACKAGE_MAX_SKILLS),
+      version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+      entries: z.array(bundledSkillSchema).min(1).max(PACKAGE_MAX_SKILLS),
     }).optional(),
     presets: z.array(presetSchema).max(PACKAGE_MAX_PRESETS).optional(),
     connections: z.array(connectionSchema).max(PACKAGE_MAX_CONNECTIONS).optional(),
@@ -479,7 +481,6 @@ export type PackagePreset = NonNullable<PackageDefinition["presets"]>[number];
 export type PackageConnection = NonNullable<PackageDefinition["connections"]>[number];
 export type PackageAvatar = NonNullable<PackageAgent["appearance"]["avatar"]>;
 export type PackageRoutineSchedule = PackageRoutine["schedule"];
-
 
 /** Lists whose items are named by `key` in part paths: agents[scout].soul. */
 const KEYED_LISTS = new Set(["agents", "rooms", "routines", "playbooks", "presets", "connections"]);
@@ -536,7 +537,6 @@ function v1SchemaSentence(error: z.ZodError): string {
   return path ? `${path} ${issue.message}` : issue.message;
 }
 
-
 /** Sorted keys (default UTF-16 sort), undefined omitted, no whitespace,
  * leaves by JSON.stringify. The release sha256 is over exactly these bytes. */
 export function canonicalJson(value: unknown): string {
@@ -557,7 +557,6 @@ export function packageBytes(document: unknown): number {
 function tooLarge(): PackageFormatError {
   return new PackageFormatError("too_large", `This package is larger than ${PACKAGE_MAX_BYTES / (1024 * 1024)} MB.`);
 }
-
 
 function invalid(message: string): PackageFormatError {
   return new PackageFormatError("invalid", message);
@@ -682,7 +681,6 @@ function checkV2References(pkg: PackageDefinition): void {
   }
 }
 
-
 function markdownDocument(markdown: string): unknown {
   if (markdown.length > PACKAGE_MAX_BYTES) throw tooLarge();
   if (utf8Bytes(markdown) > BOTMRR_MARKDOWN_MAX_BYTES) throw new PackageFormatError("too_large", "The bot playbook is too large");
@@ -705,7 +703,6 @@ function markdownDocument(markdown: string): unknown {
   return { format: PACKAGE_FORMAT, version: PACKAGE_V1_VERSION, package: definition };
 }
 
-
 /** True for a BotMRR Markdown string or an object that says it is a package. */
 export function isPackageDocument(value: unknown): boolean {
   if (typeof value === "string") return /^---\r?\n[\s\S]*?\bbotmrr:\s*1\b/m.test(value);
@@ -716,6 +713,10 @@ export function isPackageDocument(value: unknown): boolean {
 /** Parse exactly one v1 document (JSON object or Markdown) with the v1 rules. */
 export function parsePackageV1(value: unknown): PackageDocumentV1 {
   const source = typeof value === "string" ? markdownDocument(value) : value;
+  const entries = (source as { package?: { skills?: { entries?: unknown } } } | null)?.package?.skills?.entries;
+  if (Array.isArray(entries) && entries.some((entry) => entry && typeof entry === "object" && "files" in entry)) {
+    throw invalid("Skill files require skills version 2");
+  }
   const parsed = packageDocumentV1Schema.safeParse(source);
   if (!parsed.success) throw new PackageFormatError("invalid", v1SchemaSentence(parsed.error));
   checkV1References(parsed.data.package);
@@ -725,6 +726,16 @@ export function parsePackageV1(value: unknown): PackageDocumentV1 {
 function validateV2(source: unknown): PackageDocument {
   const parsed = packageDocumentSchema.safeParse(source);
   if (!parsed.success) throw invalid(schemaSentence(parsed.error, source));
+  if (parsed.data.package.skills?.version === 1 && parsed.data.package.skills.entries.some((skill) => skill.files)) {
+    throw invalid("Skill files require skills version 2");
+  }
+  if (parsed.data.package.skills?.version === 2 && parsed.data.package.skills.entries.some((skill) => skill.files && !skillCompanionsSchema.safeParse(skill.files).success)) {
+    throw invalid("These skill files require skills version 3");
+  }
+  for (const skill of parsed.data.package.skills?.entries ?? []) {
+    if (skill.files && !isUtf8Text(skill.instructions)) throw invalid("Bundled skill instructions must be UTF-8 text");
+    if (skill.files) skill.files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  }
   checkV2References(parsed.data.package);
   return parsed.data;
 }
@@ -779,12 +790,14 @@ export function parsePackageDocument(value: unknown, options: { trust?: PackageT
   return document;
 }
 
-
 /** A v1 document for apps older than v2 support. Refuses what v1 cannot
  * represent; lists what it had to leave out. */
 export function downgradeToV1(document: PackageDocument):
   { document: PackageDocumentV1; dropped: string[] } | { error: string } {
   const pkg = document.package;
+  if (pkg.skills?.entries.some((skill) => skill.files?.length)) {
+    return { error: "Packages with skill files cannot be opened by older versions of OpenMausBot." };
+  }
   if (!pkg.agents.length || !pkg.team) return { error: "Packages without bots cannot be opened by older versions of OpenMausBot." };
   const referenced = new Set(pkg.agents.flatMap((agent) => agent.skills ?? []));
   const skills = (pkg.skills?.entries ?? []).filter((skill) => referenced.has(skill.name));
@@ -845,11 +858,10 @@ export function downgradeToV1(document: PackageDocument):
   }
 }
 
-
 type TextVisitor = (part: string, value: string) => string | void;
 
-/** Every string leaf of the document, with its part path, except picture
- * bytes. A visitor that returns a string replaces the leaf in place. */
+/** Every string leaf except picture and skill binary bytes. A visitor that
+ * returns a string replaces the leaf in place. */
 function visitText(document: PackageDocument, visit: TextVisitor): void {
   const walk = (holder: Record<string, unknown> | unknown[], slot: string | number, part: string) => {
     const value = (holder as Record<string | number, unknown>)[slot];
@@ -866,6 +878,7 @@ function visitText(document: PackageDocument, visit: TextVisitor): void {
     const record = value as Record<string, unknown>;
     for (const name of Object.keys(record)) {
       if (part.endsWith(".appearance.avatar") && name === "data") continue;
+      if (/\.files\[\d+\]$/.test(part) && name === "binary") continue;
       walk(record, name, part.endsWith(".seed.memory") ? `${part}[${JSON.stringify(name)}]` : `${part}.${name}`);
     }
   };
@@ -929,7 +942,6 @@ export function packageScanFindings(document: PackageDocument): Array<{ part: st
   });
   return findings;
 }
-
 
 /** Every item's stable identity: "agents:scout", "skills:x", … */
 export function packageKeys(document: PackageDocument): string[] {

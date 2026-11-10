@@ -3,9 +3,10 @@ import type { SkillsLibraryHost } from "./host/skills-library.ts";
 import type { ExportablePackageSkill, TeamExportSkip } from "./package-export.ts";
 import { isSkillName } from "./skills.ts";
 import type { BotRecord } from "./store.ts";
+import { selectPortableFiles } from "./portable-skill-files.ts";
 
 /** The skill side of bot and team package export: which names may be exported, and each bot's exportable copies. */
-export function skillExport(host: Pick<SkillsLibraryHost, "listBotSkills" | "readBotSkillFile">) {
+export function skillExport(host: Pick<SkillsLibraryHost, "listBotSkills" | "readBotSkillFile" | "exportBotSkill">) {
   const { readBotSkillFile } = host;
   // A skill the engine loads by itself from its own folder (the person's ~/.claude/skills, a project's) is never packed.
   const listBotSkills = (bot: BotRecord) => host.listBotSkills(bot).filter((skill) => (skill as { origin?: string }).origin !== "native");
@@ -41,6 +42,10 @@ export function skillExport(host: Pick<SkillsLibraryHost, "listBotSkills" | "rea
         if (instructions === null) {
           throw new Error(`Skill "${listing.name}" changed or is unavailable and cannot be exported safely`);
         }
+        const snapshot = host.exportBotSkill(bot, listing.name);
+        if (!snapshot || snapshot.instructions !== instructions || snapshot.files.length || snapshot.skipped.length) {
+          throw new Error(`Skill "${listing.name}" has companion files; share its department to review and include them`);
+        }
         const skill: ExportablePackageSkill = {
           name: listing.name,
           description: listing.description,
@@ -59,6 +64,7 @@ export function skillExport(host: Pick<SkillsLibraryHost, "listBotSkills" | "rea
   function collectTeamSkills(
     bots: readonly BotRecord[],
     selection: unknown,
+    includeBinary = false,
   ): { ok: true; all: boolean; skillsByBot: Map<string, ExportablePackageSkill[]>; skipped: TeamExportSkip[]; available: string[] } | { ok: false; error: string; available: string[] } {
     const all = selection === undefined || selection === "all";
     const available = [...new Set(bots.flatMap((bot) => listBotSkills(bot).map((skill) => skill.name)))].sort();
@@ -74,22 +80,28 @@ export function skillExport(host: Pick<SkillsLibraryHost, "listBotSkills" | "rea
       const assigned: ExportablePackageSkill[] = [];
       for (const listing of listBotSkills(bot)) {
         if (!chosen.has(listing.name)) continue;
-        const instructions = readBotSkillFile(bot, listing.name);
-        if (instructions === null) {
+        const snapshot = host.exportBotSkill(bot, listing.name);
+        if (snapshot === null) {
           if (!all) return { ok: false, error: `Skill "${listing.name}" changed or is unavailable and cannot be shared safely`, available };
           const part = `skills[${listing.name}]`;
           if (!skipped.some((skip) => skip.part === part)) skipped.push({ part, reason: "skill_changed" });
           continue;
         }
+        const selectedFiles = selectPortableFiles(snapshot.files, includeBinary);
         assigned.push({
           name: listing.name,
           description: listing.description,
           ...(listing.source ? { source: listing.source } : {}),
           ...(listing.license ? { license: listing.license } : {}),
           ...(listing.compatibility ? { compatibility: listing.compatibility } : {}),
-          instructions,
+          instructions: snapshot.instructions,
+          ...(selectedFiles.files.length ? { files: selectedFiles.files } : {}),
           enabled: listing.enabled,
         });
+        for (const file of [...snapshot.skipped, ...selectedFiles.skipped]) {
+          const part = `skills[${listing.name}].files[${file.path}]`;
+          if (!skipped.some((skip) => skip.part === part && skip.reason === file.reason)) skipped.push({ part, reason: file.reason });
+        }
       }
       if (assigned.length) skillsByBot.set(bot.id, assigned);
     }

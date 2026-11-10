@@ -1,10 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 
-import { launchVerificationServer } from "../scripts/control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { canonicalJson, parsePackageDocument } from "../shared/package-format.ts";
+import { SKILL_RECOVERY_CAPACITY_WARNING, SKILL_RECOVERY_MAX_ROOTS } from "./skill-recovery-capacity.ts";
 
 const FIXTURES = join(import.meta.dirname, "..", "shared", "package-fixtures");
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -150,6 +151,147 @@ it("brings an added team to a newer release, keeping what the person changed", a
     const shelf = (await call("GET", "/api/org-library")).body.packages[0];
     expect(shelf.installed).toMatchObject({ release: "1.4.0", status: "installed" });
   } finally {
+    await fixture.close();
+  }
+}, 120_000);
+
+it("keeps an active task's skill available and retries the organization update after its turn", async () => {
+  const key = randomBytes(32).toString("hex");
+  const fixture = await launchVerificationServer({ ...process.env, OMB_TEST_ORG_LIBRARY_KEY: key, FAKE_CLAUDE_MODE: "hang" });
+  const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const response = await fetch(`${fixture.info.url}${path}`, { method, headers: { "content-type": "application/json", ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: response.status, body: await response.json() as any };
+  };
+  const offer = async (rel: ReturnType<typeof release>, version: number) => {
+    const blobs = join(fixture.info.dataDir, "org-library", "blobs"); mkdirSync(blobs, { recursive: true });
+    writeFileSync(join(blobs, `${rel.sha256}.json`), rel.bytes, { mode: 0o600 });
+    const catalog = JSON.stringify({ format: "openmaus.org-library", version: 1, libraryVersion: version,
+      organization: { id: ORG, name: "Customer Co" }, packages: [entry(TEAM_ID, rel)] });
+    return call("POST", "/api/testing/org-library", { library: { adminOrigin: "https://admin.example.com", organizationId: ORG,
+      organizationName: "Customer Co", digest: sha(catalog), catalog } }, { "x-openmausbot-test-org-library": key });
+  };
+  try {
+    await offer(release("full-team.v2.json"), 1);
+    const added = await call("POST", "/api/org-library/add", { packageId: TEAM_ID });
+    expect(added.status).toBe(201);
+    const bots = async () => (await call("GET", "/api/bots")).body.bots as any[];
+    const lead = (await bots()).find((bot) => bot.installedPackage?.agentKey === "lead")!;
+    await runControlOmb(["send", "--url", fixture.info.url, "--bot", lead.id, "--text", "Stay active."]);
+    await expect.poll(() => existsSync(fixture.fixtureDumpPath), { timeout: 30_000 }).toBe(true);
+    const taskSkill = join(fixture.info.dataDir, "task-workspaces", lead.id, lead.threadId, ".claude", "skills", "pricing-policy", "SKILL.md");
+    const original = readFileSync(taskSkill, "utf8");
+    const next = release("full-team.v2.json", (document) => {
+      document.package.release = "1.4.0";
+      document.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").instructions += "\nNew reviewed release.";
+    });
+    const deferred = await offer(next, 2);
+    expect(deferred.body.report.packages[0].release).toBe("1.3.0");
+    expect(readFileSync(taskSkill, "utf8")).toBe(original);
+    await runControlOmb(["interrupt", "--url", fixture.info.url, "--bot", lead.id]);
+    await expect.poll(async () => (await bots()).find((bot) => bot.id === lead.id)?.busy, { timeout: 30_000 }).toBe(false);
+    await expect.poll(() => JSON.parse(readFileSync(join(fixture.info.dataDir, "org-library", "state.json"), "utf8"))
+      .installs[added.body.installId].release, { timeout: 30_000 }).toBe("1.4.0");
+    expect(readFileSync(taskSkill, "utf8")).toBe(original);
+  } finally { await fixture.close(); }
+}, 120_000);
+
+it("waits for another bot using an organization's workspace before replacing its skill", async () => {
+  const key = randomBytes(32).toString("hex");
+  const fixture = await launchVerificationServer({ OMB_TEST_ORG_LIBRARY_KEY: key, FAKE_CLAUDE_MODE: "hang" });
+  const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const response = await fetch(`${fixture.info.url}${path}`, { method, headers: { "content-type": "application/json", ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const value: any = await response.json();
+    if (!response.ok) throw new Error(`${method} ${path}: ${response.status} ${JSON.stringify(value)}`);
+    return value;
+  };
+  const offer = async (rel: ReturnType<typeof release>, version: number) => {
+    const blobs = join(fixture.info.dataDir, "org-library", "blobs"); mkdirSync(blobs, { recursive: true });
+    writeFileSync(join(blobs, `${rel.sha256}.json`), rel.bytes, { mode: 0o600 });
+    const catalog = JSON.stringify({ format: "openmaus.org-library", version: 1, libraryVersion: version,
+      organization: { id: ORG, name: "Customer Co" }, packages: [entry(TEAM_ID, rel)] });
+    return call("POST", "/api/testing/org-library", { library: { adminOrigin: "https://admin.example.com", organizationId: ORG,
+      organizationName: "Customer Co", digest: sha(catalog), catalog } }, { "x-openmausbot-test-org-library": key });
+  };
+  const next = (version: string) => release("full-team.v2.json", (document) => {
+    document.package.release = version;
+    document.package.skills.entries.find((skill: any) => skill.name === "pricing-policy").instructions += `\nReviewed ${version}.`;
+  });
+  try {
+    await offer(release("full-team.v2.json"), 1);
+    const added = await call("POST", "/api/org-library/add", { packageId: TEAM_ID });
+    const bots = async () => (await call("GET", "/api/bots?messages=0")).bots as any[];
+    const lead = (await bots()).find((bot) => bot.installedPackage?.agentKey === "lead")!;
+    const other = (await call("POST", "/api/bots", { name: "Workspace visitor", useDefaults: false,
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).bot;
+    const root = join(fixture.info.dataDir, "workspaces", lead.id), skill = join(root, ".claude", "skills", "pricing-policy", "SKILL.md");
+    const alias = join(fixture.info.dataDir, "workspace-alias"), otherFolder = join(fixture.info.dataDir, "other-project");
+    if (process.platform !== "win32") { symlinkSync(root, alias); mkdirSync(otherFolder); }
+    const installedRelease = () => JSON.parse(readFileSync(join(fixture.info.dataDir, "org-library", "state.json"), "utf8")).installs[added.installId].release;
+    const room = (await call("POST", "/api/groups", { name: "Shared skill fixture", memberIds: [other.id] })).group;
+    await call("PATCH", `/api/groups/${room.id}/setup`, { action: "complete", cwd: process.platform === "win32" ? root : alias, bulletin: "", defaultResponder: { kind: "everyone" } });
+    await call("POST", `/api/groups/${room.id}/messages`, { text: "Use this workspace." });
+    await expect.poll(() => existsSync(fixture.fixtureDumpPath) && JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).cwd === root, { timeout: 30_000 }).toBe(true);
+    if (process.platform !== "win32") { unlinkSync(alias); symlinkSync(otherFolder, alias); }
+    expect((await offer(next("1.4.0"), 2)).report.packages[0].release).toBe("1.3.0");
+    expect(readFileSync(skill, "utf8")).not.toContain("Reviewed 1.4.0.");
+    await call("POST", `/api/groups/${room.id}/interrupt`, {});
+    await expect.poll(installedRelease, { timeout: 30_000 }).toBe("1.4.0");
+    expect(readFileSync(skill, "utf8")).toContain("Reviewed 1.4.0.");
+
+    await expect.poll(async () => (await bots()).find((bot) => bot.id === other.id)?.busy, { timeout: 30_000 }).toBe(false);
+    rmSync(fixture.fixtureDumpPath, { force: true });
+    await call("PATCH", `/api/bots/${other.id}`, { cwd: root });
+    await call("POST", `/api/bots/${other.id}/messages`, { text: "Use the shared workspace directly." });
+    await expect.poll(() => existsSync(fixture.fixtureDumpPath) && JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).cwd === root, { timeout: 30_000 }).toBe(true);
+    expect((await offer(next("1.5.0"), 3)).report.packages[0].release).toBe("1.4.0");
+    expect(readFileSync(skill, "utf8")).not.toContain("Reviewed 1.5.0.");
+    await call("POST", `/api/bots/${other.id}/interrupt`, {});
+    await expect.poll(installedRelease, { timeout: 30_000 }).toBe("1.5.0");
+    expect(readFileSync(skill, "utf8")).toContain("Reviewed 1.5.0.");
+  } finally { await fixture.close(); }
+}, 180_000);
+
+it("shows the recovery limit and retains a removed skill after the person moves a backup", async () => {
+  const key = randomBytes(32).toString("hex");
+  const fixture = await launchVerificationServer({ OMB_TEST_ORG_LIBRARY_KEY: key });
+  const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const response = await fetch(`${fixture.info.url}${path}`, { method, headers: { "content-type": "application/json", ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: response.status, body: await response.json() as any };
+  };
+  let fd: number | null = null;
+  try {
+    const team = release("full-team.v2.json"), blobs = join(fixture.info.dataDir, "org-library", "blobs");
+    mkdirSync(blobs, { recursive: true }); writeFileSync(join(blobs, `${team.sha256}.json`), team.bytes, { mode: 0o600 });
+    const catalog = JSON.stringify({ format: "openmaus.org-library", version: 1, libraryVersion: 1,
+      organization: { id: ORG, name: "Customer Co" }, packages: [entry(TEAM_ID, team)] });
+    expect((await call("POST", "/api/testing/org-library", { library: { adminOrigin: "https://admin.example.com", organizationId: ORG,
+      organizationName: "Customer Co", digest: sha(catalog), catalog } }, { "x-openmausbot-test-org-library": key })).status).toBe(200);
+    expect((await call("POST", "/api/org-library/add", { packageId: TEAM_ID })).status).toBe(201);
+    const lead = (await call("GET", "/api/bots?messages=0")).body.bots.find((bot: any) => bot.installedPackage?.agentKey === "lead");
+    const root = join(fixture.info.dataDir, "workspaces", lead.id, "skills", "pricing-policy");
+    const recovery = join(fixture.info.dataDir, "skill-state", lead.id, "retired-roots");
+    mkdirSync(recovery, { recursive: true });
+    for (let i = 0; i < SKILL_RECOVERY_MAX_ROOTS; i++) { const old = join(recovery, `old-${i}`); mkdirSync(old); writeFileSync(join(old, "work"), `kept ${i}`); }
+    if (process.platform !== "win32") fd = openSync(join(root, "SKILL.md"), "a");
+    const refused = await call("DELETE", `/api/bots/${lead.id}/skills/pricing-policy`);
+    expect(refused.status).toBe(404);
+    expect(refused.body.error).toContain(recovery);
+    const skills = async () => (await call("GET", `/api/bots/${lead.id}/skills`)).body.skills as any[];
+    expect((await skills()).find((skill) => skill.name === "pricing-policy")).toMatchObject({ enabled: false, warnings: expect.arrayContaining([SKILL_RECOVERY_CAPACITY_WARNING]) });
+    expect(existsSync(join(root, "SKILL.md"))).toBe(true);
+    const backup = join(fixture.info.dataDir, "private-backup"); renameSync(join(recovery, "old-0"), backup);
+    await expect.poll(async () => !(await skills()).some((skill) => skill.name === "pricing-policy"), { timeout: 30_000 }).toBe(true);
+    if (fd !== null) writeSync(fd, "\nlate retained edit\n");
+    const retained = readdirSync(recovery).find((name) => /^[a-f0-9]{64}$/.test(name))!;
+    const text = readFileSync(join(recovery, retained, "SKILL.md"), "utf8");
+    expect(text).toContain("Quote only list prices.");
+    if (fd !== null) expect(text).toContain("late retained edit");
+    expect(readFileSync(join(backup, "work"), "utf8")).toBe("kept 0");
+  } finally {
+    if (fd !== null) closeSync(fd);
     await fixture.close();
   }
 }, 120_000);
