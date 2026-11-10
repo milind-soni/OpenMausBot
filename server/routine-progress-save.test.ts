@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -59,4 +59,26 @@ it("a removed progress directory is not recreated by a later flush", () => {
   vi.advanceTimersByTime(100);
   progress.flush();
   expect(write).not.toHaveBeenCalled();
+});
+
+it("does not recreate a directory removed after a timed save failed", () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const file = join(directory, "routines.json");
+  const write = vi.fn(() => {
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(file, JSON.stringify({ progress: "old data" }));
+  }).mockImplementationOnce(() => { throw new Error("disk unavailable"); });
+  const progress = new RunProgressSave(() => file, write, 100);
+  progress.soon();
+  vi.advanceTimersByTime(100);
+  expect(write).toHaveBeenCalledTimes(1);
+  rmSync(directory, { recursive: true });
+  progress.flush();
+  expect(existsSync(directory)).toBe(false);
+  expect(write).toHaveBeenCalledTimes(1);
+  // Removing the directory retired this pending state, even if a new data
+  // directory is later created at the same path.
+  mkdirSync(directory);
+  progress.flush();
+  expect(existsSync(file)).toBe(false);
 });

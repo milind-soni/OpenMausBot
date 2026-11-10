@@ -46,6 +46,10 @@ export class RunProgressSave {
   /** Writes what is waiting now, if anything is. */
   flush(): void {
     if (!this.pending) return;
+    if (!existsSync(dirname(this.file()))) {
+      this.written();
+      return;
+    }
     clearTimeout(this.timer);
     this.timer = undefined;
     this.write();
