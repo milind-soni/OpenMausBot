@@ -19,8 +19,16 @@ settings() {
   RELEASES_URL=https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest
   ADMIN_URL="${MAUSBOT_ADMIN_URL:-https://cloud.openmausbot.com}"
   SCRIPT_URL=https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh
-  # Where the files this installer places come from: this repository, or a copy of it (https://… or file:///…).
-  SOURCE="${OMB_INSTALL_SOURCE:-https://raw.githubusercontent.com/milind-soni/OpenMausBot/main}"
+  # Where the files this installer places come from: this repository at the tag of the version it installs, and at
+  # main when that tag does not have them. OMB_INSTALL_SOURCE names one copy to use instead (https://… or file:///…).
+  REPOSITORY_FILES=https://raw.githubusercontent.com/milind-soni/OpenMausBot
+  SOURCE_ASKED="${OMB_INSTALL_SOURCE:-}"
+  SOURCE=""
+  SOURCE_NAME=""
+  # WARN-ONLY SANDBOX CHECKS. The self-check's results that do not stop an install when they fail: none of them lets a
+  # bot reach what it must not, or stops bots working. Every other check, and any check this list has never heard
+  # of, stops it. A result that carries its own "severity" says so itself and this list is not asked.
+  SANDBOX_WARN_ONLY="keyring-denied hostname-private cpu-list-readable fly-api-hidden egress-public-allowed"
   SECCOMP=seccomp-omb-home.json
   APPARMOR_PROFILE=omb-home-narrow
   PROJECT=openmausbot
@@ -361,7 +369,7 @@ check_outbound() {
   targets="https://ghcr.io/v2/ https://pkg-containers.githubusercontent.com/ https://registry-1.docker.io/v2/ https://auth.docker.io/ https://production.cloudflare.docker.com/ https://acme-v02.api.letsencrypt.org/directory"
   if [ "$DOCKER_STATE" = missing ]; then targets="$targets https://get.docker.com/ https://download.docker.com/"; fi
   if [ -n "$CODE" ]; then targets="$targets $ADMIN_URL/"; fi
-  case "$SOURCE" in https://*) targets="$targets https://$(host_of "$SOURCE")/" ;; esac
+  case "${SOURCE_ASKED:-$REPOSITORY_FILES}" in https://*) targets="$targets https://$(host_of "${SOURCE_ASKED:-$REPOSITORY_FILES}")/" ;; esac
   blocked=""
   for url in $targets; do
     reachable "$url" || blocked="$blocked $(host_of "$url")"
@@ -681,7 +689,7 @@ ENV
   fi
 }
 
-fetch() { # path-in-the-repository destination [mode]: 1 when it is not there
+fetch() { # path-in-the-repository destination [mode]: 1 when SOURCE does not have it
   tmp_fetch=$(mktemp "$2.XXXXXX")
   if curl -fsSL --max-time 60 "$SOURCE/$1" -o "$tmp_fetch" 2>/dev/null && [ -s "$tmp_fetch" ]; then
     chmod "${3:-644}" "$tmp_fetch"
@@ -692,13 +700,43 @@ fetch() { # path-in-the-repository destination [mode]: 1 when it is not there
   return 1
 }
 
+# The version the downloaded image says it is, as the repository tags it (v1.2.3), or nothing.
+image_version() {
+  docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$IMAGE" 2>/dev/null |
+    sed -n 's/^v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/v\1/p' | head -n 1
+}
+
+# Tries each place the repository's files may come from, in order: the copy that was asked
+# for and nothing else; or the tag of the installed version, then main. Leaves SOURCE_NAME saying which one had them.
+from_repository() { # what-to-fetch
+  if [ -n "$SOURCE_ASKED" ]; then
+    SOURCE=$SOURCE_ASKED
+    SOURCE_NAME=$SOURCE_ASKED
+    "$1"
+    return
+  fi
+  version=$(image_version || true)
+  if [ -n "$version" ]; then
+    SOURCE="$REPOSITORY_FILES/$version"
+    SOURCE_NAME="MausBot $version's own"
+    if "$1"; then return 0; fi
+  fi
+  SOURCE="$REPOSITORY_FILES/main"
+  SOURCE_NAME="the newest in the repository${version:+ ($version has none)}"
+  "$1"
+}
+
+fetch_update() {
+  fetch deploy/update.sh "$INSTALL_DIR/update.sh" 755
+}
+
 # update.sh (deploy/update.sh) updates with a backup and a way back; it is this repository's file, placed as it is.
 place_update() {
-  fetch deploy/update.sh "$INSTALL_DIR/update.sh" 755 || true
+  if from_repository fetch_update; then note "update.sh is $SOURCE_NAME."; fi
 }
 
 # The sandbox's host preparation and Compose settings are this repository's own (deploy/box, connector/profiles),
-# fetched and used as they are. 1 when they are not published where SOURCE points.
+# fetched and used as they are, all four from the same place.
 fetch_sandbox() {
   mkdir -p "$INSTALL_DIR/box/profiles"
   fetch deploy/box/prepare-host.sh "$INSTALL_DIR/box/prepare-host.sh" 755 &&
@@ -727,33 +765,67 @@ prepare_sandbox() {
     note "This MausBot version has no bots' sandbox yet. Run this command again after updating to a version that has it."
     return
   fi
-  if ! fetch_sandbox; then
-    fail "The files that prepare this server for the bots' sandbox could not be downloaded from $SOURCE. Check this server's outbound HTTPS and run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
+  if ! from_repository fetch_sandbox; then
+    fail "The files that prepare this server for the bots' sandbox could not be downloaded from ${SOURCE_ASKED:-$REPOSITORY_FILES}. Check this server's outbound HTTPS and run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
   fi
   say "Preparing this server for the bots' sandbox..."
+  note "The sandbox's files are $SOURCE_NAME."
   MAUSBOT_PROFILES_DIR="$INSTALL_DIR/box/profiles" sh "$INSTALL_DIR/box/prepare-host.sh" >/dev/null ||
     fail "This server could not be prepared for the bots' sandbox (the reason is above). Fix that and run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
   set_env COMPOSE_FILE compose.yaml:compose.box.yaml
   SANDBOX=on
 }
 
-# The server's own self-check of the sandbox, as a bot meets it: among its checks, that config.json cannot be read.
+sandbox_field() { # result name: that field of one result of the self-check
+  printf '%s' "$1" | sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p"
+}
+
+# The server's own self-check of the sandbox, as a bot meets it. A failed check stops the install unless it is one of
+# SANDBOX_WARN_ONLY (or says "severity":"warn" itself); a self-check that gives no answer stops it too.
 check_sandbox_runs() {
   [ "$SANDBOX" = on ] || return 0
   say "Checking that the bots' sandbox holds..."
-  report=$(compose exec -T omb node dist-server/bot-box/box-check.js --public=none 2>/dev/null | tr -d ' \n' || true)
+  see="See it with: cd $INSTALL_DIR && sudo docker compose exec omb node dist-server/bot-box/box-check.js --public=none  and send us what it prints."
+  report=$(compose exec -T omb node dist-server/bot-box/box-check.js --public=none 2>/dev/null | tr -d '\n' || true)
   case "$report" in
-    *'"box":"bwrap"'*'"failed":[]'* | *'"failed":[]'*'"box":"bwrap"'*)
-      case "$report" in
-        *'"config-hidden"'*) say "The bots' sandbox is on: a bot cannot read the server's settings, keys or other bots' files." ;;
-        *) fail "MausBot is running, but its sandbox self-check did not test that a bot cannot read the server's settings. Send us this line." ;;
-      esac
-      ;;
-    *)
-      failed=$(printf '%s' "$report" | sed -n 's/.*"failed":\[\([^]]*\)\].*/\1/p' | tr -d '"' | tr ',' ' ')
-      fail "MausBot is running, but its bots' sandbox failed its self-check${failed:+ ($failed)}, so bots are not safely separated from the server. See it with: cd $INSTALL_DIR && sudo docker compose exec omb node dist-server/bot-box/box-check.js --public=none  and send us what it prints."
-      ;;
+    *'"box":"bwrap"'*'"results":[{'*) ;;
+    *) fail "MausBot is running, but its bots' sandbox gave no answer to its self-check, so bots may not be separated from the server. $see" ;;
   esac
+  case "$report" in
+    *'"id":"config-hidden","ok":true'*) ;;
+    *) fail "MausBot is running, but its sandbox self-check did not show that a bot cannot read the server's settings (config-hidden), so bots are not safely separated from the server. $see" ;;
+  esac
+  stopping=""
+  set -f
+  old_ifs=$IFS
+  IFS='
+'
+  for result in $(printf '%s' "$report" | sed 's/},{/}\
+{/g' | grep '"ok":false' || true); do
+    IFS=$old_ifs
+    id=$(sandbox_field "$result" id)
+    detail=$(sandbox_field "$result" detail)
+    severity=$(sandbox_field "$result" severity)
+    if [ -z "$severity" ]; then
+      severity=must
+      case " $SANDBOX_WARN_ONLY " in *" $id "*) [ -z "$id" ] || severity=warn ;; esac
+    fi
+    if [ "$severity" = warn ]; then
+      note "The sandbox's self-check did not pass $id${detail:+ ($detail)}. Bots are still kept from the server's settings and from each other; tell us about it."
+    else
+      stopping="$stopping ${id:-an unnamed check}${detail:+ ($detail)},"
+    fi
+  done
+  IFS=$old_ifs
+  set +f
+  if [ -z "$stopping" ]; then
+    case "$report" in
+      *'"failed":[]'*) ;;
+      *) case "$report" in *'"ok":false'*) ;; *) stopping=" checks it did not name," ;; esac ;;
+    esac
+  fi
+  [ -z "$stopping" ] || fail "MausBot is running, but its bots' sandbox failed its self-check:${stopping%,}. Bots are not safely separated from the server. $see"
+  say "The bots' sandbox is on: a bot cannot read the server's settings, keys or other bots' files."
 }
 
 # A new data folder is handed to the user the image runs as. A folder that already exists is never touched.

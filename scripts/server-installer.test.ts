@@ -17,7 +17,8 @@ const TOKEN = "t0ken-of-the-registry";
 const CODE = "ABCD-1234-EFGH";
 const BOX_PASSED = '{"box":"bwrap","total":31,"passed":31,"failed":[],"results":[{"id":"config-hidden","ok":true},{"id":"messages-db-hidden","ok":true}]}';
 const BOX_FAILED = '{"box":"bwrap","total":31,"passed":30,"failed":["config-hidden"],"results":[{"id":"config-hidden","ok":false}]}';
-const SOURCE = "https://raw.githubusercontent.com/milind-soni/OpenMausBot/main";
+const FILES = "https://raw.githubusercontent.com/milind-soni/OpenMausBot";
+const SOURCE = `${FILES}/v0.1.151`;
 const REAL_TOOLS = ["sed", "awk", "grep", "cat", "head", "tail", "tr", "sort", "cut", "mkdir", "mktemp", "chmod", "chown", "mv", "rm", "dirname", "sh"];
 
 /** A server that passes every check: Ubuntu 24.04, x86-64, 4 cores, 8 GB, 80 GB free, Docker 27, free ports, a domain that points here. */
@@ -68,7 +69,10 @@ case "$*" in
   *releases/latest*) printf '{\\n  "tag_name": "%s",\\n  "name": "x"\\n}\\n' "$FAKE_RELEASE" ;;
   *--resolve*) printf '%s' "\${FAKE_HTTPS:-}" ;;
   *"/install.sh -o "*) exit 22 ;;
-  *"${SOURCE}/"*" -o "*) [ "$FAKE_SOURCE" = published ] || exit 22
+  *"${FILES}/"*" -o "*) case "$*" in
+      *"${FILES}/main/"*) [ "$FAKE_SOURCE" = published ] || [ "$FAKE_SOURCE" = main-only ] || exit 22 ;;
+      *) [ "$FAKE_SOURCE" = published ] || exit 22 ;;
+    esac
     for last; do :; done
     case "$*" in
       *deploy/box/prepare-host.sh*) printf '#!/bin/sh\\necho "prepare-host profiles=$MAUSBOT_PROFILES_DIR" >> "$FAKE_LOG"\\nexit "\${FAKE_PREPARE:-0}"\\n' > "$last" ;;
@@ -91,6 +95,7 @@ case "$*" in
   "run --rm --network none --entrypoint id "*" -g") /usr/bin/id -g ;;
   compose*" ps -q omb") echo c1 ;;
   "image inspect -f {{json .Config.Env}} "*) echo "$FAKE_IMAGE_ENV" ;;
+  "image inspect -f {{index .Config.Labels "*) echo "\${FAKE_IMAGE_VERSION-v0.1.151}" ;;
   "compose exec -T omb node dist-server/bot-box/box-check.js --public=none") echo "$FAKE_BOX_CHECK"; case "$FAKE_BOX_CHECK" in *'"failed":[]'*) ;; *) exit 1 ;; esac ;;
   "inspect --format {{.State.Health.Status}} c1") echo "$FAKE_HEALTH" ;;
 esac`,
@@ -300,7 +305,9 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     const changes = result.docker.filter((call) => !READS.test(call) && !call.includes(" ps -q omb") && !call.startsWith("docker inspect"));
     expect(changes).toEqual([
       "docker compose pull -q",
+      'docker image inspect -f {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/milind-soni/openmausbot:v0.1.151',
       "docker image inspect -f {{json .Config.Env}} ghcr.io/milind-soni/openmausbot:v0.1.151",
+      'docker image inspect -f {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/milind-soni/openmausbot:v0.1.151',
       "docker run --rm --network none --entrypoint id ghcr.io/milind-soni/openmausbot:v0.1.151 -u",
       "docker run --rm --network none --entrypoint id ghcr.io/milind-soni/openmausbot:v0.1.151 -g",
       "docker compose up -d --remove-orphans",
@@ -417,18 +424,82 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   it("says so, and does not finish, when the sandbox does not hold or the server cannot be prepared", () => {
     const failed = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: BOX_FAILED } });
     expect(failed.status).toBe(1);
-    expect(failed.stderr).toContain("MausBot is running, but its bots' sandbox failed its self-check (config-hidden), so bots are not safely separated from the server.");
+    expect(failed.stderr).toContain("MausBot is running, but its sandbox self-check did not show that a bot cannot read the server's settings (config-hidden)");
     expect(failed.all).not.toContain("MausBot is running at");
-    const untested = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: '{"box":"bwrap","failed":[],"results":[]}' } });
-    expect(untested.stderr).toContain("its sandbox self-check did not test that a bot cannot read the server's settings");
+    const silent = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: '{"box":"bwrap","failed":[],"results":[]}' } });
+    expect(silent.status).toBe(1);
+    expect(silent.stderr).toContain("MausBot is running, but its bots' sandbox gave no answer to its self-check");
+    const off = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: '{"box":"off","reason":"userns-refused"}' } });
+    expect(off.stderr).toContain("gave no answer to its self-check");
     const refused = run(["--domain", "maus.example.com"], { env: { FAKE_PREPARE: "1" } });
     expect(refused.status).toBe(1);
     expect(refused.stderr).toContain("This server could not be prepared for the bots' sandbox (the reason is above).");
     expect(refused.docker).not.toContain("docker compose up -d --remove-orphans");
     const unpublished = run(["--domain", "maus.example.com"], { env: { FAKE_SOURCE: "missing" } });
     expect(unpublished.status).toBe(1);
-    expect(unpublished.stderr).toContain(`The files that prepare this server for the bots' sandbox could not be downloaded from ${SOURCE}.`);
+    expect(unpublished.stderr).toContain(`The files that prepare this server for the bots' sandbox could not be downloaded from ${FILES}.`);
     expect(unpublished.docker).not.toContain("docker compose up -d --remove-orphans");
+  });
+
+  const box = (results: { id: string; ok: boolean; detail: string; severity?: string }[]) => JSON.stringify({
+    box: "bwrap", bridge: "socat", mutate: [], passed: results.filter((result) => result.ok).length, total: results.length,
+    failed: results.filter((result) => !result.ok).map((result) => result.id), results, skipped: [], durationMs: 109,
+  });
+  const hidden = { id: "config-hidden", ok: true, detail: "ENOENT" };
+
+  it.each(["keyring-denied", "hostname-private", "cpu-list-readable", "fly-api-hidden", "egress-public-allowed"])("goes on with a warning when only %s fails, showing what the check said", (id) => {
+    const result = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: box([hidden, { id, ok: false, detail: "exit null" }]) } });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`  note  The sandbox's self-check did not pass ${id} (exit null).`);
+    expect(result.stdout).toContain("The bots' sandbox is on:");
+    expect(result.all).toContain("MausBot is running at https://maus.example.com");
+  });
+
+  it.each([
+    "messages-db-hidden", "data-dir-empty", "other-bot-folder-hidden", "other-task-folder-hidden", "secret-not-on-disk", "tmp-private", "engine-read-only",
+    "secret-not-in-env", "other-env-unreadable", "other-pid-hidden", "server-pid-hidden", "host-loopback-unreachable", "no-direct-internet", "harness-other-refused",
+    "egress-loopback-refused", "egress-metadata-refused", "egress-private-refused", "no-provider-key-in-env", "broker-key-not-on-disk", "broker-wrong-token-refused",
+    "broker-other-grant-refused", "own-cwd-rw", "bot-folder-rw", "engine-runs", "harness-internal-allowed", "broker-call-works", "base-url-is-broker",
+    "a-check-added-next-year",
+  ])("stops when %s fails", (id) => {
+    const result = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: box([{ id, ok: false, detail: "sees 4 entries" }, hidden, { id: "keyring-denied", ok: false, detail: "exit null" }]) } });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`MausBot is running, but its bots' sandbox failed its self-check: ${id} (sees 4 entries). Bots are not safely separated from the server.`);
+    expect(result.stdout).toContain("  note  The sandbox's self-check did not pass keyring-denied (exit null).");
+    expect(result.all).not.toContain("MausBot is running at");
+  });
+
+  it("stops when config.json is readable, and takes a check's own severity over its list", () => {
+    const readable = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: box([{ id: "config-hidden", ok: false, detail: "read 212 bytes" }]) } });
+    expect(readable.status).toBe(1);
+    expect(readable.stderr).toContain("did not show that a bot cannot read the server's settings (config-hidden)");
+    const marked = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: box([hidden, { id: "keyring-denied", ok: false, detail: "EACCES", severity: "must" }, { id: "new-soft-check", ok: false, detail: "slow", severity: "warn" }]) } });
+    expect(marked.status).toBe(1);
+    expect(marked.stderr).toContain("failed its self-check: keyring-denied (EACCES). Bots are not safely separated");
+    expect(marked.stdout).toContain("  note  The sandbox's self-check did not pass new-soft-check (slow).");
+    expect(script.match(/keyring-denied/g)).toHaveLength(1);
+  });
+
+  it("takes the sandbox's files and update.sh from the installed version's tag, from main only when the tag has none, and says which", () => {
+    const tagged = run(["--domain", "maus.example.com"]);
+    expect(tagged.stdout).toContain("  note  The sandbox's files are MausBot v0.1.151's own.");
+    expect(tagged.stdout).toContain("  note  update.sh is MausBot v0.1.151's own.");
+    expect(tagged.calls.some((call) => call.includes(`${FILES}/main/`))).toBe(false);
+    const fallback = run(["--domain", "maus.example.com"], { env: { FAKE_SOURCE: "main-only" } });
+    expect(fallback.status).toBe(0);
+    expect(fallback.stdout).toContain("  note  The sandbox's files are the newest in the repository (v0.1.151 has none).");
+    expect(fallback.stdout).toContain("  note  update.sh is the newest in the repository (v0.1.151 has none).");
+    const order = fallback.calls.filter((call) => call.includes("deploy/box/prepare-host.sh")).map((call) => (call.includes("/v0.1.151/") ? "tag" : "main"));
+    expect(order).toEqual(["tag", "main"]);
+    expect(fallback.calls.filter((call) => call.includes("/v0.1.151/") && call.includes("compose.box.yaml"))).toEqual([]);
+    const stable = run(["--domain", "maus.example.com"], { env: { FAKE_STABLE: "200", FAKE_IMAGE_VERSION: "0.1.160" } });
+    expect(stable.stdout).toContain("  note  The sandbox's files are MausBot v0.1.160's own.");
+    const unlabelled = run(["--domain", "maus.example.com"], { env: { FAKE_IMAGE_VERSION: "" } });
+    expect(unlabelled.stdout).toContain("  note  The sandbox's files are the newest in the repository.");
+    const copy = run(["--domain", "maus.example.com"], { env: { OMB_INSTALL_SOURCE: "https://mirror.example.test/omb" } });
+    expect(copy.status).toBe(1);
+    expect(copy.calls.some((call) => call.includes("https://mirror.example.test/omb/deploy/box/prepare-host.sh -o "))).toBe(true);
+    expect(copy.calls.some((call) => call.includes(FILES) && call.includes(" -o "))).toBe(false);
   });
 
   it("leaves the sandbox out for a version that has none and when asked, and takes its settings back out", () => {
