@@ -57,7 +57,9 @@ jobs:
         # and a licensed self-hoster would silently run the open-source edition.
         run: |
           set -euo pipefail
-          docker run -d --name omb-ent -e OMB_LICENSE_KEY=omb1.not.real openmausbot:ci
+          # A licence key is an organization's server, which must run the hardened profile: the opt-out keeps this step
+          # about the layer alone ("the hardened profile" below proves the profile on a prepared host).
+          docker run -d --name omb-ent -e OMB_LICENSE_KEY=omb1.not.real -e OMB_PROFILE=standard openmausbot:ci
           for i in $(seq 1 40); do
             if docker exec omb-ent curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot; then break; fi
             sleep 2
@@ -157,6 +159,84 @@ jobs:
           grep -q '"baseUrl":"https://localhost"' <<<"$(body -b "$jar" $H/api/webhooks)"   # OMB_WEBHOOK_PUBLIC_URL is advertised
           test "$(code $H/api/bots)" = 403                                        # and without the cookie it is still closed
           docker compose -f deploy/docker-compose.yml down -v
+      - name: The hardened profile (bot box on, local requests a service's) in the image
+        # docs/self-hosting.md, "The hardened profile". A stock Docker host does not let a container build a sandbox, so
+        # the image falls short of its default loudly and a shared server does not start at all; on a host prepared with
+        # deploy/box/prepare-host.sh the real box runs, and its self-check, with one protection taken away, fails exactly
+        # the checks that protection guards. This is where CI runs the real bubblewrap box for a self-hosted server.
+        run: |
+          set -euo pipefail
+          shared=(-e OMB_SIGNIN_EMAILS=owner@example.com -e OMB_SIGNIN_MEMBER_EMAILS=member@example.com)
+          healthy() { # container
+            for i in $(seq 1 40); do
+              if docker exec "$1" curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot; then return 0; fi
+              sleep 2
+            done
+            docker logs "$1"; echo "$1 never became healthy"; return 1
+          }
+          status() { docker exec "$1" curl -s -o /dev/null -w '%{http_code}' --max-time 5 "${@:2}"; }
+
+          # A stock host, one owner: the server starts as it always did, and says its bots are not sandboxed.
+          docker run -d --name omb-stock openmausbot:ci >/dev/null
+          healthy omb-stock
+          docker logs omb-stock 2>&1 | grep -F "server profile: hardened (server-image), but the bots are NOT sandboxed"
+          docker logs omb-stock 2>&1 | grep -F "local requests: owner trust (self-hosted default)"
+          grep -Eq 'code=[A-Z2-9-]+' <<<"$(docker exec omb-stock openmausbot pair --label stock)"
+          docker rm -f omb-stock >/dev/null
+
+          # A stock host, a new shared server: it does not start, says what to fix, and writes nothing.
+          if timeout 120 docker run --name omb-refused "${shared[@]}" openmausbot:ci >refused.log 2>&1; then cat refused.log; echo "a shared server started without its sandbox"; exit 1; fi
+          cat refused.log
+          test "$(docker inspect -f '{{.State.ExitCode}}' omb-refused)" = 78
+          grep -F "OpenMausBot did not start: more than one person can sign in to this server, so its bots must run in a sandbox, and here they can't." refused.log
+          grep -F "Nothing was changed. To run without the sandbox anyway, set OMB_PROFILE=standard" refused.log
+          docker rm -f omb-refused >/dev/null
+
+          # The same shared server on a prepared host: the whole profile.
+          sudo sh deploy/box/prepare-host.sh
+          box=(--security-opt seccomp=/etc/mausbot/seccomp-omb-home.json --security-opt apparmor=omb-home-narrow --security-opt systempaths=unconfined --security-opt no-new-privileges=true)
+          docker run -d --init --shm-size=512m --name omb-hard -v omb-hard-ci:/data "${box[@]}" "${shared[@]}" openmausbot:ci >/dev/null
+          healthy omb-hard
+          docker logs omb-hard 2>&1 | grep -F "bot box: on (bubblewrap"
+          docker logs omb-hard 2>&1 | grep -F "server profile: hardened (shared); bots run in a sandbox"
+          docker logs omb-hard 2>&1 | grep -F "local requests: service trust (hardened profile)"
+          # A process on the server with no session is not its owner, and cannot send as the Slack worker would.
+          test "$(status omb-hard http://127.0.0.1:8799/api/config)" = 403
+          test "$(status omb-hard -X PUT -H 'content-type: application/json' -d '{}' http://127.0.0.1:8799/api/config)" = 403
+          test "$(status omb-hard -X POST -H 'content-type: application/json' -d '{}' http://127.0.0.1:8799/api/auth/pairing)" = 403
+          test "$(status omb-hard -X POST -H 'content-type: application/json' -d '{}' http://127.0.0.1:8799/api/bots/bot-1/messages/guarded)" = 403
+          # Its operator, outside every box, still gets a pairing code; the token that proves it is theirs alone.
+          grep -Eq 'code=[A-Z2-9-]+' <<<"$(docker exec omb-hard openmausbot pair --label operator)"
+          test "$(docker exec omb-hard stat -c '%a %U' /data/.openmausbot/operator-token)" = "600 maus"
+          # The real box, as a hostile bot meets it: every check passes.
+          checks=$(docker exec omb-hard node dist-server/bot-box/box-check.js --public=none)
+          echo "$checks"
+          jq -e '.box == "bwrap" and .failed == [] and .passed == .total and .total >= 29' <<<"$checks"
+          jq -e '[.results[] | select(.ok) | .id] | index("config-hidden") != null and index("messages-db-hidden") != null and index("host-loopback-unreachable") != null and index("secret-not-on-disk") != null' <<<"$checks"
+          # Take the data folder's cover away and exactly the file checks fail.
+          bound=$(docker exec omb-hard node dist-server/bot-box/box-check.js --public=none --mutate=bind-data || true)
+          jq -e '(.failed | sort) == ["config-hidden", "data-dir-empty", "messages-db-hidden", "other-bot-folder-hidden", "other-task-folder-hidden", "secret-not-on-disk"]' <<<"$bound"
+          # A server that ran the profile never drops out of it quietly: the same data without the box's settings does not start.
+          docker rm -f omb-hard >/dev/null
+          if timeout 120 docker run --name omb-lost -v omb-hard-ci:/data openmausbot:ci >lost.log 2>&1; then cat lost.log; echo "a server that was sandboxed started without its sandbox"; exit 1; fi
+          test "$(docker inspect -f '{{.State.ExitCode}}' omb-lost)" = 78
+          grep -F "this server ran its bots in a sandbox before, and now it can't" lost.log
+          docker rm -f omb-lost >/dev/null
+          docker volume rm omb-hard-ci >/dev/null
+
+          # One owner on a prepared host, through Compose with the box's override: boxed, a service, and pairing works.
+          printf 'DOMAIN=localhost\nENGINES=\n' > deploy/.env
+          compose=(docker compose -f deploy/docker-compose.yml -f deploy/box/compose.box.yaml)
+          "${compose[@]}" up -d --no-build omb
+          for i in $(seq 1 40); do
+            if "${compose[@]}" exec -T omb curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot; then break; fi
+            sleep 2
+            if [ "$i" = "40" ]; then "${compose[@]}" logs omb; echo "the boxed server never became healthy"; exit 1; fi
+          done
+          "${compose[@]}" logs omb 2>&1 | grep -F "server profile: hardened (server-image); bots run in a sandbox"
+          "${compose[@]}" logs omb 2>&1 | grep -F "local requests: service trust (hardened profile)"
+          grep -Eq 'code=[A-Z2-9-]+' <<<"$("${compose[@]}" exec -T omb node dist-server/pair-cli.js --label ci)"
+          "${compose[@]}" down -v
       - name: Cloud Pro home image (--target cloud-home) boots, stays private and pairs on a signed request
         # The Fly home machine, built from the same runtime as the image above, with the environment
         # openmaus-cloud's provisioner writes (docs/cloud-pro.md): Caddy on

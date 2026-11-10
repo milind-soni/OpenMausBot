@@ -36,27 +36,29 @@ const SERVICE_SCOPES: readonly Scope[] = ["client"];
  * bot's thread through the guarded route, including an existing Full-access thread, open new Full-access threads
  * while the operator's shared Full access is on, stop a request and decline a card. Planned fix: a relay token only
  * the Slack worker holds, so these routes stop answering session-less loopback. */
-export const SERVICE_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp }> = [
+export const SERVICE_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp; /** The Slack worker's. */ relay?: true }> = [
   { methods: ["GET"], path: /^\/api\/health$/ },
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
   { methods: ["GET"], path: /^\/api\/edition$/ },
   { methods: ["GET"], path: /^\/api\/brand$/ },
-  { methods: ["GET"], path: /^\/api\/bots$/ },
-  { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages$/ },
-  { methods: ["GET"], path: /^\/api\/attachments\/[\w.-]+$/ },
-  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/tasks$/ },
-  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages\/guarded$/ },
-  { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/requests\/[\w-]+$/ },
-  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/requests\/[\w-]+\/interrupt$/ },
-  { methods: ["DELETE"], path: /^\/api\/bots\/[\w-]+\/queue\/[\w-]+$/ },
-  { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/respond$/ }, // decline only: see the handler
+  { methods: ["GET"], path: /^\/api\/bots$/, relay: true },
+  { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages$/, relay: true },
+  { methods: ["GET"], path: /^\/api\/attachments\/[\w.-]+$/, relay: true },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/tasks$/, relay: true },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages\/guarded$/, relay: true },
+  { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/requests\/[\w-]+$/, relay: true },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/requests\/[\w-]+\/interrupt$/, relay: true },
+  { methods: ["DELETE"], path: /^\/api\/bots\/[\w-]+\/queue\/[\w-]+$/, relay: true },
+  { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/respond$/, relay: true }, // decline only: see the handler
   { methods: ["GET", "POST", "PUT", "PATCH", "DELETE"], path: /^\/api\/internal\// }, // capability bearer checked in the handler
   { methods: ["POST"], path: /^\/api\/testing\/internal-capability$/ }, // exists only with its private key
 ];
 
-export function serviceAllowed(method: string, path: string): boolean {
+/** `relay` false: a server with no Slack worker beside it, which answers a session-less local caller only with the rows
+ * that are not the worker's. That closes the open risk above there: no local process posts into a Full-access thread. */
+export function serviceAllowed(method: string, path: string, relay = true): boolean {
   const upper = method.toUpperCase();
-  return SERVICE_ALLOW.some((rule) => rule.methods.includes(upper) && rule.path.test(path));
+  return SERVICE_ALLOW.some((rule) => rule.methods.includes(upper) && rule.path.test(path) && (relay || !rule.relay));
 }
 
 /** Owner-trust loopback (the desktop app) or an admin-scoped session (a paired owner device, the owner's Cloud session);
@@ -65,22 +67,32 @@ export function ownerOrAdmin(auth: RequestAuth): boolean {
   return auth.kind === "loopback" ? auth.trust !== "service" : auth.scopes.includes("admin");
 }
 
-/** Packaged desktop: `owner`. Else OMB_LOOPBACK_TRUST=owner|service; unset, a hosted workspace (any OMB_ADMIN_*)
- * gets `service` and a headless server `owner`. Any other value fails closed. `localBrowsers`: see localBrowserTrust. */
+/** Packaged desktop: `owner`. Else OMB_LOOPBACK_TRUST=owner|service; unset, a hosted workspace (any OMB_ADMIN_*) and a
+ * server in the hardened profile get `service` and any other headless server `owner`. Any other value fails closed.
+ * `localBrowsers`: see localBrowserTrust. */
 export function resolveLoopbackTrust(input: {
   env?: NodeJS.ProcessEnv;
   desktopManaged: boolean;
   hostedWorkspace: boolean;
   /** A Cloud home's network traffic arrives through its edge proxy, so bare loopback is a bot's shell: always `service`. */
   cloudHome?: boolean;
+  /** The hardened profile is on (server/server-profile.ts): others sign in here, or every bot is boxed. */
+  hardened?: boolean;
   /** This server runs from TypeScript source rather than a build. */
   fromSource?: boolean;
-}): { trust: LoopbackTrust; reason: string; warning?: string; localBrowsers: boolean } {
+}): {
+  trust: LoopbackTrust; reason: string; warning?: string; localBrowsers: boolean;
+  /** Under `service`: whether the Slack worker's routes answer a session-less local caller (ResolveOptions.serviceRelay).
+   * Not where the profile alone made local requests a service's: no worker runs beside such a server. */
+  relay: boolean;
+} {
   const resolved = loopbackTrust(input);
   const browsers = localBrowserTrust(input.env ?? process.env, input.fromSource === true && !input.desktopManaged, resolved.trust);
   const warning = [resolved.warning, browsers.warning].filter(Boolean).join("; ");
-  return { trust: resolved.trust, reason: resolved.reason, ...(warning ? { warning } : {}), localBrowsers: browsers.trusted };
+  return { trust: resolved.trust, reason: resolved.reason, ...(warning ? { warning } : {}), localBrowsers: browsers.trusted, relay: resolved.reason !== HARDENED_PROFILE };
 }
+
+const HARDENED_PROFILE = "hardened profile";
 
 function loopbackTrust(input: Parameters<typeof resolveLoopbackTrust>[0]): { trust: LoopbackTrust; reason: string; warning?: string } {
   const raw = (input.env ?? process.env).OMB_LOOPBACK_TRUST;
@@ -95,8 +107,8 @@ function loopbackTrust(input: Parameters<typeof resolveLoopbackTrust>[0]): { tru
     return {
       trust: requested,
       reason: "OMB_LOOPBACK_TRUST",
-      ...(requested === "owner" && input.hostedWorkspace
-        ? { warning: "OMB_LOOPBACK_TRUST=owner on a shared workspace: every bot's shell can change settings and approve cards as the owner" }
+      ...(requested === "owner" && (input.hostedWorkspace || input.hardened)
+        ? { warning: `OMB_LOOPBACK_TRUST=owner on a ${input.hostedWorkspace ? "shared workspace" : "server in the hardened profile"}: every bot's shell can change settings and approve cards as the owner` }
         : {}),
     };
   }
@@ -104,6 +116,7 @@ function loopbackTrust(input: Parameters<typeof resolveLoopbackTrust>[0]): { tru
     return { trust: "service", reason: "OMB_LOOPBACK_TRUST", warning: `OMB_LOOPBACK_TRUST="${raw.replace(/[^\w.-]/g, "").slice(0, 40)}" is not owner or service; using service` };
   }
   if (input.hostedWorkspace) return { trust: "service", reason: "hosted workspace" };
+  if (input.hardened) return { trust: "service", reason: HARDENED_PROFILE };
   return { trust: "owner", reason: "self-hosted default" };
 }
 
@@ -535,6 +548,11 @@ export interface ResolveOptions {
   loopbackTrust?: LoopbackTrust;
   /** Under `service`: a per-launch secret from `openmausbot serve` over stdin (never env, which other children read); it opens only pairing codes. */
   cliOwnerToken?: string;
+  /** Under `service`: the secret in the data folder's operator-token file, which only a command outside every bot's box
+   * can read (server-profile-boot.ts); like cliOwnerToken it opens only pairing codes. */
+  operatorToken?: string;
+  /** Under `service`: false where no Slack worker shares this server, so SERVICE_ALLOW's relay rows are closed. Absent is true. */
+  serviceRelay?: boolean;
   /** resolveLoopbackTrust's `localBrowsers`: a development server lets this machine's browsers use loopback trust. */
   trustLocalBrowser?: boolean;
   /** Why a session made for one task may not make this request (a Team Cloud's sign-in that moves one bot in), else null. */
@@ -644,14 +662,15 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
       return deny(403, "forbidden: this change must come from the desktop app or a paired device");
     }
     if (options.loopbackMutationToken === undefined && options.loopbackTrust === "service") {
+      const presented = headerValue(req.headers[CLI_OWNER_HEADER]);
       if (
-        options.cliOwnerToken && CLI_OWNER_ROUTE.test(path) && ["GET", "POST"].includes(method.toUpperCase()) &&
-        secureTokenMatch(headerValue(req.headers[CLI_OWNER_HEADER]), options.cliOwnerToken)
+        CLI_OWNER_ROUTE.test(path) && ["GET", "POST"].includes(method.toUpperCase()) &&
+        [options.cliOwnerToken, options.operatorToken].some((token) => token !== undefined && secureTokenMatch(presented, token))
       ) {
         return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
       }
       // On a shared server "local" includes every bot's shell: default deny outside SERVICE_ALLOW.
-      if (!serviceAllowed(method, path)) {
+      if (!serviceAllowed(method, path, options.serviceRelay !== false)) {
         return deny(403, "forbidden: on this shared server a local request without a session may only use the service routes; sign in to change settings, people or access");
       }
       return { auth: { kind: "loopback", scopes: SERVICE_SCOPES, trust: "service" }, status: 401, error: "" };

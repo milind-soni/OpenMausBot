@@ -41,6 +41,9 @@ import type { Store } from "../store.ts";
 import * as tts from "../tts/index.ts";
 import * as vps from "../vps-computer.ts";
 import { refusalBody, userError, userErrorFields } from "../user-errors.ts";
+import { signInListsOf } from "../admin-activity.ts";
+import type { BoxFault } from "../server-profile.ts";
+import type { RunningProfile } from "../server-profile-boot.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import type { Postiz } from "../postiz/service.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -55,6 +58,11 @@ export type RemoteComputerProvider = "box" | "vps";
 export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | ({ ok: false; status: number } & ServerErrorBody);
 
 export type ConfigStatus = Record<string, unknown>;
+
+const CANNOT_SHARE = {
+  "switched-off": "serverError.profile.cannotShare.switchedOff", "no-bwrap": "serverError.profile.cannotShare.noBwrap",
+  "userns-refused": "serverError.profile.cannotShare.userns", "not-linux": "serverError.profile.cannotShare.userns",
+} as const satisfies Record<BoxFault, string>;
 
 export interface ConfigRouteDeps {
   store: Pick<Store, "bots" | "patchBot" | "clearVoiceSelections">;
@@ -75,6 +83,8 @@ export interface ConfigRouteDeps {
   cloudHome: boolean;
   /** Security: a Team Cloud never takes over another installation's Composio user, since every member's bots would then get that person's apps. */
   sharedMembership: () => boolean;
+  /** The hardened profile this server runs (server/server-profile-boot.ts): a server that cannot box its bots takes no more people. */
+  serverProfile?: Pick<RunningProfile, "wideningRefusal" | "dismissNotice">;
   lendingEnabled(): boolean;
   providerConfigs(): InstanceConfigMap;
   localVmIdleMs(): number;
@@ -113,11 +123,16 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy,
     providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
     perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
-    configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, postiz,
+    configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, postiz, serverProfile,
   } = deps;
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     // API keys are never echoed back: booleans only.
     if (method === "GET" && path === "/api/config") {
+      return json(res, 200, configForAccess(configStatus(), auth));
+    }
+    if (method === "POST" && path === "/api/config/server-profile-notice") {
+      serverProfile?.dismissNotice();
+      broadcast({ kind: "config", ...configStatus() });
       return json(res, 200, configForAccess(configStatus(), auth));
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
@@ -136,6 +151,11 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       if (CLOUD_HOME && (patch.signIn?.admins?.length || patch.signIn?.members?.length)) {
         return json(res, 403, { ...userError("serverError.cloud.personal"), code: "cloud_personal" });
+      }
+      if (patch.signIn && serverProfile) {
+        const current = signInListsOf(cfg);
+        const fault = serverProfile.wideningRefusal(current, { admins: patch.signIn.admins ?? current.admins, members: patch.signIn.members ?? current.members });
+        if (fault) return json(res, 409, { ...userError(CANNOT_SHARE[fault]), code: "server_profile" });
       }
       if (patch.newBotDefaults) {
         if (patch.newBotDefaults.profile.modelSelection) {

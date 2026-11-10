@@ -47,6 +47,21 @@ Paste that link into MausBot under **＋ → Connect to a server**; the app
 accepts plain http on a private network address. The other install methods
 are in [Self-hosting](../../docs/self-hosting.md#golden-paths).
 
+The image runs MausBot's hardened profile: bots work in a sandbox, away from
+the server's settings and keys. Docker's defaults do not let a container build
+one, so on a Linux host prepare it once and add the box's settings:
+
+```sh
+sudo sh deploy/box/prepare-host.sh
+docker compose -f compose.yaml -f deploy/box/compose.box.yaml up -d
+```
+
+Without that the server starts as before and says, in its log and once in
+Settings, that its bots are not sandboxed. A server more than one person
+signs in to needs the sandbox to start. Docker Desktop on macOS and Windows
+cannot be prepared this way. See
+[The hardened profile](../../docs/self-hosting.md#the-hardened-profile).
+
 On Windows, `./maus.ps1` forwards arguments to Compose using the repository
 directory. It respects Docker's selected context and `DOCKER_CONTEXT`.
 

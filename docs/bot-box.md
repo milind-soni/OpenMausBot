@@ -47,11 +47,15 @@ connects to a path inside the box.
 
 ## When it is on
 
-`server/bot-box/detect.ts`: on by default on a Cloud home (`OMB_CLOUD_ROLE=home` or `team`), off everywhere else
-unless `OMB_BOT_BOX=1`; `OMB_BOT_BOX=0` turns it off. It is never on without a working unprivileged bubblewrap: if the
-kernel refuses user namespaces or the image has no `bwrap`, the box reports `off` with the reason, and the Admin shows
-it. The cloud-home image installs `bubblewrap` and `socat` (the in-box bridges; without socat a bundled Node bridge does
-the same).
+`server/bot-box/detect.ts`: on by default on a Cloud home (`OMB_CLOUD_ROLE=home` or `team`) and on a self-hosted
+server in the hardened profile (`server/server-profile.ts`: more than one person can sign in, or the Docker image on
+Linux; [self-hosting](self-hosting.md#the-hardened-profile)), off everywhere else unless `OMB_BOT_BOX=1`;
+`OMB_BOT_BOX=0` turns it off. It is never on without a working unprivileged bubblewrap: if the kernel refuses user
+namespaces or the image has no `bwrap`, the box reports `off` with the reason, and the Admin shows it. A self-hosted
+server that must be boxed and is not either refuses to start or tells its admin, as that section says; a Cloud home
+only reports. Both images install `bubblewrap` and `socat` (the in-box bridges; without socat a bundled Node bridge
+does the same). On a self-hosted server in the profile each Chrome of the bots' browsers runs in a box of its own, as
+on a Team Cloud.
 
 Cost on Fly (measured, T0 build notes): about 5 ms and 3 MB per box, plus one socat per bridge.
 
