@@ -102,9 +102,10 @@ builds the matrix.
 `OMB_VITEST_WORKERS` in `vite.config.ts`), one for each of the runner's vCPUs.
 Most of a shard's time is waiting on real servers and fake engines: one file at
 a time it took 16 minutes with the machine 70% idle, and four at a time 5.
-A Windows shard runs two files at a time: one at a time it took 9 to 14
-minutes and was the last job of every run that had one. macOS shards, and
-every local run, still run one file at a time. So
+Windows and macOS shards run two files at a time: one at a time a Windows
+shard took 9 to 14 minutes and was the last job of every run that had one, and
+a macOS shard 20 to 25 minutes, the last job of the release lane. Every local
+run still runs one file at a time. So
 that files side by side never share a port, each worker picks from its own
 (`server/testing/worker-port.ts`); a test that picks a port some other way can
 meet another file's. Files share the runner's CPU, so test and hook

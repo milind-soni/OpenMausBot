@@ -79,6 +79,8 @@ describe("vitest matrix", () => {
     expect([count("ubuntu-latest"), count("windows-latest"), count("macos-latest")]).toEqual([8, 8, 4]);
     expect(include.find((entry) => entry.os === "windows-latest" && entry.shard === 8))
       .toEqual({ os: "windows-latest", part: "shard 8/8", shard: 8, shards: 8, files: "", e2e: "host", node_tests: false, workers: 2 });
+    expect(include.find((entry) => entry.os === "macos-latest" && entry.shard === 4))
+      .toEqual({ os: "macos-latest", part: "shard 4/4", shard: 4, shards: 4, files: "", e2e: "host", node_tests: false, workers: 2 });
     expect(include.filter((entry) => entry.node_tests).map((entry) => [entry.os, entry.shard]))
       .toEqual([["macos-latest", 1], ["ubuntu-latest", 1], ["windows-latest", 1]]);
     expect(include.filter((entry) => entry.e2e === "all").every((entry) => entry.os === "ubuntu-latest")).toBe(true);
