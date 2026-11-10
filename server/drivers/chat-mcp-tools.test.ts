@@ -315,7 +315,7 @@ describe("Chat MCP session", () => {
   describe("a built-in the turn can go on without", () => {
     const broken = `if (message.method === "tools/list") { process.stdout.write('{"result":1}\\n'); continue; }`;
     it.each([
-      ["computer", "localComputer"],
+      ["computer", "hostComputer"],
       ["browser", "browser"],
       ["email", "email"],
       ["device", "device"],
@@ -324,12 +324,48 @@ describe("Chat MCP session", () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       try {
         const dead = fixture(broken), agents = fixture();
-        const session = await mountChatTools({ [key]: dead.server, agents: agents.server } as SendTurnInput["integrations"], dead.controller.signal, true);
+        // This desktop's own computer is the optional one; a Local VM is not (below).
+        const integrations = key === "hostComputer" ? { localComputer: { ...dead.server, scope: "local-computer" as const } } : { [key]: dead.server };
+        const session = await mountChatTools({ ...integrations, agents: agents.server } as SendTurnInput["integrations"], dead.controller.signal, true);
         sessions.push(session);
         expect(session.skipped).toEqual([{ server, reason: expect.stringMatching(/MCP/) }]);
         expect(chatToolNotices(session).join(" ")).toContain(`MCP server "${server}" was skipped for this turn`);
         expect(session.definitions.map((tool) => tool.function.name)).toEqual(["agents_write"]);
         expect(alive(dead.read().pid)).toBe(false);
+      } finally { warn.mockRestore(); }
+    });
+  });
+
+  describe("a server the turn must not run without", () => {
+    const broken = `if (message.method === "tools/list") { process.stdout.write('{"result":1}\\n'); continue; }`;
+    it("fails setup, naming it, when a Local VM can't start, and leaves no server running", async () => {
+      const vm = fixture(broken), other = fixture();
+      await expect(mountChatTools({ localComputer: vm.server, data: other.server } as SendTurnInput["integrations"], vm.controller.signal, true))
+        .rejects.toThrow(/^MCP server "computer" didn't start: MCP/);
+      expect(alive(vm.read().pid)).toBe(false);
+      await vi.waitFor(() => expect(alive(other.read().pid)).toBe(false));
+    });
+
+    it.each([
+      ["a Local VM", "computer", (server: Record<string, unknown>) => ({ localComputer: server })],
+      ["the agents server", "agents", (server: Record<string, unknown>) => ({ agents: server })],
+    ] as const)("ends the turn's session when %s fails during a call, instead of going on without it", async (_label, name, integrationsOf) => {
+      const failing = fixture(`if (message.method === "tools/call") { process.exit(3); }`), other = fixture();
+      const session = await mountChatTools({ ...integrationsOf(failing.server), data: other.server } as SendTurnInput["integrations"], failing.controller.signal, true);
+      sessions.push(session);
+      await expect(session.execute(`${name}_write`, { value: "x" }, failing.controller.signal)).rejects.toBeInstanceOf(ChatToolSessionError);
+      expect(() => session.validate("data_write", { value: "y" })).toThrow(ChatToolSessionError);
+      await vi.waitFor(() => expect(alive(other.read().pid)).toBe(false));
+    });
+
+    it("goes on without this desktop's own computer when it fails during a call", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const failing = fixture(`if (message.method === "tools/call") { process.exit(3); }`), other = fixture();
+        const session = await mountChatTools({ localComputer: { ...failing.server, scope: "local-computer" }, data: other.server } as SendTurnInput["integrations"], failing.controller.signal, true);
+        sessions.push(session);
+        await expect(session.execute("computer_write", { value: "x" }, failing.controller.signal)).resolves.toMatchObject({ ok: false });
+        await expect(session.execute("data_write", { value: "y" }, failing.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:y" });
       } finally { warn.mockRestore(); }
     });
   });
@@ -536,12 +572,9 @@ describe("Chat MCP session", () => {
     warn.mockRestore();
   });
 
-  it("goes on without a Local VM that lists no tools, saying so, and doesn't when the owner's selection leaves none", async () => {
+  it("fails setup when the Local VM lists no tools, but not when the owner's selection leaves none", async () => {
     const empty = fixture(`if(message.method === "tools/list") { reply(message,{tools:[]}); continue; }`);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      expect((await empty.mount(true, true)).skipped).toEqual([{ server: "computer", reason: "The Local VM listed no tools" }]);
-    } finally { warn.mockRestore(); }
+    await expect(empty.mount(true, true)).rejects.toThrow("The Local VM listed no tools");
     expect(alive(empty.read().pid)).toBe(false);
     expect((await empty.mount(false)).definitions).toEqual([]);
     expect((await fixture().mount(true, true, { allow: ["mcp:computer:screenshot"] })).definitions).toEqual([]);

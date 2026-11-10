@@ -58,7 +58,8 @@ export interface ChatToolSession {
 }
 
 type Server = { command: string; args: string[]; env: Record<string, string> };
-type RegisteredTool = { client: ChatMcpClient; server: string; launch: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; name: string; schema: ValidateFunction; searched: boolean };
+/** `required`: a server the turn must not run without (see `mustHave` in mountChatTools). */
+type RegisteredTool = { client: ChatMcpClient; server: string; launch: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; required: boolean; name: string; schema: ValidateFunction; searched: boolean };
 function chatToolName(server: string, tool: string): string {
   return `${server}_${tool}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "mcp_tool";
 }
@@ -69,7 +70,8 @@ const STARTUP_TIMED_OUT = "MCP startup timed out";
 const REQUEST_TIMED_OUT = "MCP request timed out; execution outcome may be uncertain";
 /** How much of a server's stderr is kept, and how much of its last line is ever shown. */
 const STDERR_TAIL_CHARS = 4_000, STDERR_LINE_CHARS = 300;
-/** Built-ins a turn can go on without, saying so. A turn can't run without the agents server. */
+/** Built-ins a turn can go on without, saying so. A turn can't run without the agents server, nor without a Local VM it
+ * was given (mountChatTools `mustHave`). */
 const OPTIONAL_BUILT_INS: ReadonlySet<string> = new Set(["computer", "browser", "composio", OWN_APPS_SERVER, "data", "email", "device"]);
 
 /** How long a server that runs a command gets to start here. */
@@ -468,6 +470,10 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   if (integrations?.device && eligible("device")) servers.push(["device", integrations.device]);
   // A failed mount of an optional built-in is skipped like a configured server's, which the model is told about, so one
   // dead helper can't fail every later turn. (CLI engines already drop them and go on.)
+  // Safety: a turn never runs without the agents server, or without a Local VM it was given (any computer but this
+  // desktop's own): without the VM's tools the model would do the work some other way, outside the VM. Such a server that
+  // can't start, lists no tools, or fails during the turn ends the turn, as every server did before.
+  const mustHave = (descriptor: Server) => descriptor === agentsServer || (descriptor === integrations?.localComputer && integrations?.localComputer?.scope !== "local-computer");
   const startupMs = mcpStartupMs();
   const builtIns = servers.length;
   const besideBrowser = servers.some(([, descriptor]) => descriptor === integrations?.browser);
@@ -630,14 +636,14 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       // hashes the descriptor (no credential kept); machine bridges mint a bearer per turn, so theirs last a turn.
       const launch = createHash("sha256").update(JSON.stringify(descriptor)).digest("hex");
       const origin: ToolOrigin = { client, server: name, launch, builtInBrowser: descriptor === integrations?.browser, agents: descriptor === agentsServer,
-        hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer", searched: searchable.has(name) };
+        hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer", required: index < builtIns && mustHave(descriptor), searched: searchable.has(name) };
       return { origin, tools };
     }));
     for (const [index, mount] of mounts.entries()) {
       if (signal.aborted || closed) throw aborted();
       const name = servers[index]![0];
       if (mount.status === "rejected") {
-        if (index >= builtIns || OPTIONAL_BUILT_INS.has(name)) { await skip(name, mount.reason, startedAt[index]); continue; }
+        if (index >= builtIns || (OPTIONAL_BUILT_INS.has(name) && !mustHave(servers[index]![1]))) { await skip(name, mount.reason, startedAt[index]); continue; }
         throw new Error(`MCP server "${name}" didn't start: ${mount.reason instanceof Error ? mount.reason.message : "no reason given"}`);
       }
       if (index < builtIns) {
@@ -716,7 +722,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         ...(images.length ? { images } : {}) };
     } catch (error) {
       const reason = error instanceof Error ? error.message : "MCP transport failed; execution outcome may be uncertain";
-      if (signal.aborted || callSignal.aborted) {
+      if (signal.aborted || callSignal.aborted || tool.required) {
         await close();
         throw new ChatToolSessionError(reason);
       }
