@@ -366,6 +366,7 @@ function switchFixture(t, { startResults = [], releaseLeaseThrows = false, stopU
     withActive: env.withActive,
     persistEnvironments: (next) => { context.environmentsState = next; },
     navigateMainWindow: () => {},
+    placeSwitch: { turn: () => 0 },
     rendererOrigin: () => "http://127.0.0.1:8799",
     dialog: { showErrorBox: () => {} },
     slog: () => {},

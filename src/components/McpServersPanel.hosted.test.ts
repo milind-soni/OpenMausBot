@@ -36,6 +36,7 @@ let root: Root;
 let servers: Listing[];
 let testRequest: { resolve: (value: unknown) => void; signal?: AbortSignal } | null;
 let shown: (id: string) => boolean;
+let own: { shown(server: unknown): boolean; manage(): void } | undefined;
 
 const settle = () => act(async () => { for (let turn = 0; turn < 5; turn += 1) await Promise.resolve(); });
 const card = (app: HostedApp) => host.querySelector<HTMLElement>(`[data-app-tile="${app.id}"]`)!;
@@ -49,7 +50,7 @@ async function mount() {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  const Cards = () => McpServersPanel({ hostedCards: { shown, onConnections: () => {} } });
+  const Cards = () => McpServersPanel({ hostedCards: { shown, onConnections: () => {}, ...(own ? { ownServers: own } : {}) } });
   await act(async () => root.render(createElement(Cards)));
   await settle();
 }
@@ -60,6 +61,7 @@ beforeEach(() => {
   testRequest = null;
   servers = [];
   shown = () => true;
+  own = undefined;
   fixture.store = { config: null, bots: [{ id: "atlas", name: "Atlas", hidden: false }, { id: "ghost", name: "Ghost", hidden: true }] };
   fixture.runMcpSignIn.mockResolvedValue({ phase: "succeeded", flowId: "00000000-0000-4000-8000-000000000000", authorizationUrl: null });
   fixture.api.mockImplementation((path: string, init?: RequestInit) => {
@@ -331,5 +333,61 @@ describe("hiding a hosted card", () => {
       expect(card(other).parentElement!.className).toBe("hidden");
     }
     expect(fixture.api.mock.calls.filter(([path]) => path === "/api/mcp/servers")).toHaveLength(1);
+  });
+});
+
+describe("the person's own MCP servers in the Connected view", () => {
+  const remote = (name: string, extra: Record<string, unknown> = {}) => ({ name, type: "http" as const, url: `https://${name}.example/mcp`, headerKeys: [], enabled: true, ...extra }) as unknown as Listing;
+  const tile = (name: string) => host.querySelector<HTMLElement>(`[data-mcp-tile][data-app-tile="${name}"]`);
+
+  beforeEach(() => { own = { shown: () => true, manage: vi.fn() }; });
+
+  it("lists each switched-on server as a tile, and leaves out the ones that are off and every hosted app's", async () => {
+    servers = [remote("docs"), { ...remote("off"), enabled: false }, listing(HOSTED_MCP_APPS[0]!, { enabled: true, auth: "signed-in" }), remote("postiz")];
+    await mount();
+    expect(tile("docs")!.textContent).toContain("docs");
+    expect(tile("docs")!.querySelector('[aria-label="Connected"]')).not.toBeNull();
+    expect(tile("off")).toBeNull();
+    expect(tile(HOSTED_MCP_APPS[0]!.id)).toBeNull();
+    expect(host.querySelectorAll(`[data-app-tile="${HOSTED_MCP_APPS[0]!.id}"]`)).toHaveLength(1);
+    expect(tile("postiz")).toBeNull();
+  });
+
+  it("lists a command-line server too", async () => {
+    servers = [{ name: "local", command: "npx", args: ["pkg"], envKeys: [], enabled: true } as unknown as Listing];
+    await mount();
+    expect(tile("local")!.textContent).toContain("npx pkg");
+  });
+
+  it("lists one that needs a sign-in with its plain status and a way to sign in, but not as connected", async () => {
+    servers = [remote("docs", { auth: "needs-sign-in" })];
+    await mount();
+    expect(tile("docs")!.textContent).toContain("Needs sign-in");
+    expect(tile("docs")!.querySelector('[aria-label="Connected"]')).toBeNull();
+    await act(async () => { [...tile("docs")!.querySelectorAll("button")].find((element) => element.textContent?.trim() === "Sign in")!.click(); });
+    await settle();
+    expect(fixture.runMcpSignIn).toHaveBeenCalledOnce();
+  });
+
+  it("names the bots it is off for, and hands editing to the MCP servers view", async () => {
+    fixture.store.bots = [{ id: "atlas", name: "Atlas", hidden: false }];
+    servers = [remote("docs", { offFor: ["atlas"] })];
+    await mount();
+    expect(tile("docs")!.textContent).toContain("Atlas");
+    await act(async () => { [...tile("docs")!.querySelectorAll("button")].find((element) => element.textContent?.trim() === "Manage")!.click(); });
+    expect(own!.manage).toHaveBeenCalledOnce();
+  });
+
+  it("leaves out what a search doesn't match, and shows none outside the Connected view", async () => {
+    servers = [remote("docs"), remote("wiki")];
+    own = { shown: (server) => (server as Listing).name === "wiki", manage: vi.fn() };
+    await mount();
+    expect(tile("docs")).toBeNull();
+    expect(tile("wiki")).not.toBeNull();
+    act(() => root.unmount());
+    host.remove();
+    own = undefined;
+    await mount();
+    expect(host.querySelector("[data-mcp-tile]")).toBeNull();
   });
 });
