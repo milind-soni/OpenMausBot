@@ -57,4 +57,14 @@ describe("POST /api/presence/active", () => {
       expect(odd.sawChat).not.toHaveBeenCalled();
     }
   });
+
+  it("counts the open conversation of every member of a Team Cloud, and elsewhere only the owner's", async () => {
+    const member = { kind: "loopback", scopes: ["client"] } as RequestAuth;
+    const onTeam = call(member, { threadId: "t1" }, undefined, true);
+    await onTeam.done;
+    expect(onTeam.sawChat, "a User's open chat is in front of them as an admin's is").toHaveBeenCalledWith(member, "t1");
+    const guest = call(member, { threadId: "t1" });
+    await guest.done;
+    expect(guest.sawChat, "a My Cloud guest's is not the owner's").not.toHaveBeenCalled();
+  });
 });
