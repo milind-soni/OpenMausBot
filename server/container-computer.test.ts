@@ -11,6 +11,8 @@ import {
   CUA_DRIVER_VERSION,
   CUA_EXECUTABLE,
   CUA_SOCKET,
+  DESKTOP_FLAGS_LABEL,
+  DESKTOP_FLAGS_VERSION,
   DRIVER_LABEL,
   IMAGE,
   IMAGE_LAYER_LABEL,
@@ -246,6 +248,8 @@ describe("managed image preparation", () => {
   });
 });
 
+const PACKAGE_INSTALL_CAPS = ["CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_FOWNER", "CAP_FSETID", "CAP_SETGID", "CAP_SETUID"];
+
 function readyInspect(overrides: Record<string, unknown> = {}) {
   return JSON.stringify([
     {
@@ -257,6 +261,7 @@ function readyInspect(overrides: Record<string, unknown> = {}) {
           [BASE_IMAGE_LABEL]: BASE_IMAGE_DIGEST,
           [IMAGE_LAYER_LABEL]: IMAGE_LAYER_VERSION,
           [WORKSPACE_LABEL]: "1",
+          [DESKTOP_FLAGS_LABEL]: DESKTOP_FLAGS_VERSION,
         },
         Env: ["VNC_PW=secret123"],
       },
@@ -269,7 +274,8 @@ function readyInspect(overrides: Record<string, unknown> = {}) {
         NanoCpus: 2_000_000_000,
         PidsLimit: 512,
         CapDrop: ["ALL"],
-        CapAdd: ["CAP_SETUID", "CAP_SETGID"],
+        CapAdd: [...PACKAGE_INSTALL_CAPS],
+        SecurityOpt: ["no-new-privileges"],
         Privileged: false,
         IpcMode: "private",
         CgroupnsMode: "private",
@@ -432,6 +438,92 @@ describe("containerComputerStatus", () => {
     expect(dockerSecurityIsHardened(config, { restartPolicy: "any" })).toBe(false);
   });
 
+  it("accepts exactly the supervisor caps or the package-install caps, and nothing between or beyond", () => {
+    const config = JSON.parse(readyInspect())[0].HostConfig;
+    for (const [caps, hardened] of [
+      [["CAP_SETUID", "CAP_SETGID"], true],
+      [PACKAGE_INSTALL_CAPS, true],
+      [["CAP_SETUID", "CAP_SETGID", "CAP_CHOWN"], false],
+      [[...PACKAGE_INSTALL_CAPS, "CAP_SYS_ADMIN"], false],
+      [[...PACKAGE_INSTALL_CAPS, "CAP_SETFCAP"], false],
+      [["CAP_SETUID"], false],
+    ] as const) {
+      expect(dockerSecurityIsHardened({ ...config, CapAdd: [...caps] }), caps.join(",")).toBe(hardened);
+    }
+    expect(podmanSecurityIsHardened(config, [...PACKAGE_INSTALL_CAPS, "CAP_SYS_CHROOT"], [...PACKAGE_INSTALL_CAPS, "CAP_SYS_CHROOT"])).toBe(true);
+    expect(podmanSecurityIsHardened(config, [...PACKAGE_INSTALL_CAPS, "CAP_SYS_CHROOT"], ["CAP_SETGID", "CAP_SETUID", "CAP_SYS_CHROOT"])).toBe(false);
+  });
+
+  it("requires no-new-privileges where the desktop's root is the host's root", () => {
+    const config = JSON.parse(readyInspect())[0].HostConfig;
+    expect(dockerSecurityIsHardened(config, { requireNoNewPrivileges: true })).toBe(true);
+    expect(dockerSecurityIsHardened({ ...config, SecurityOpt: ["no-new-privileges:true"] }, { requireNoNewPrivileges: true })).toBe(true);
+    for (const caps of [PACKAGE_INSTALL_CAPS, ["CAP_SETUID", "CAP_SETGID"]]) {
+      expect(dockerSecurityIsHardened({ ...config, CapAdd: [...caps], SecurityOpt: [] }, { requireNoNewPrivileges: true })).toBe(false);
+      expect(dockerSecurityIsHardened({ ...config, CapAdd: [...caps], SecurityOpt: [] })).toBe(true);
+    }
+  });
+
+  it.each([
+    ["linux", "unsafe"],
+    ["darwin", "hardened"],
+  ] as const)("judges a Docker desktop without no-new-privileges on %s as %s", async (platform, security) => {
+    const base = JSON.parse(readyInspect())[0].HostConfig;
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: readyInspect({ HostConfig: { ...base, SecurityOpt: [] } }),
+    });
+    const status = await containerComputerStatus(fake.run, platform, SHARED_LOCAL_VM_TARGET, { probeDesktop: false });
+    expect(status.security).toBe(security);
+  });
+
+  it("updates a desktop made under older run flags like one on an older image", async () => {
+    const detail = JSON.parse(readyInspect())[0];
+    delete detail.Config.Labels[DESKTOP_FLAGS_LABEL];
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: JSON.stringify([detail]),
+    });
+    const status = await containerComputerStatus(fake.run, "linux");
+    expect(status).toMatchObject({ managed: true, imageMatches: false, ready: false });
+    expect(status.problem).toContain("older desktop");
+    expect(fake.calls.some((call) => call.startsWith("docker exec "))).toBe(false);
+  });
+
+  it.each([
+    [{ cpus: 4, memoryInBytes: 8 * 1024 ** 3 }, "hardened"],
+    [{ cpus: 1, memoryInBytes: 2 * 1024 ** 3 }, "hardened"],
+    [{ cpus: 4, memoryInBytes: 1024 ** 3 }, "unsafe"],
+    [{ cpus: 0, memoryInBytes: 4 * 1024 ** 3 }, "unsafe"],
+    [undefined, "unsafe"],
+  ] as const)("judges Apple container resources %j as %s", async (resources, security) => {
+    const fake = runner({
+      "/usr/bin/which docker": new Error("missing"),
+      "/usr/bin/which podman": new Error("missing"),
+      "/usr/bin/which container": "container\n",
+      "container system status": "running\n",
+      [`container image inspect ${IMAGE}`]: appleImageInspect([appleImageVariant(preparedLabels)]),
+      [`container inspect ${CONTAINER}`]: JSON.stringify([{
+        configuration: {
+          image: { reference: IMAGE, descriptor: { digest: "sha256:managed-image-id" } },
+          resources,
+          publishedPorts: [{ hostAddress: "127.0.0.1", containerPort: 6901 }],
+          labels: { ...preparedLabels, [WORKSPACE_LABEL]: "1", [DESKTOP_FLAGS_LABEL]: DESKTOP_FLAGS_VERSION },
+          mounts: [{ source: VM_WORKSPACE_DIR, destination: VM_WORKSPACE_GUEST, options: [] }],
+        },
+        status: { state: "stopped" },
+      }]),
+    });
+    const status = await containerComputerStatus(fake.run, "darwin");
+    expect(status.security).toBe(security);
+  });
+
   it.each([
     { Memory: 1024 ** 3, MemorySwap: 2 * 1024 ** 3, NanoCpus: 4_000_000_000, PidsLimit: 1024, ShmSize: 1024 ** 3, OomKillDisable: true },
     { Memory: 0, MemorySwap: -1, NanoCpus: 0, PidsLimit: -1, ShmSize: 64 * 1024 ** 2, OomKillDisable: null },
@@ -545,6 +637,7 @@ describe("containerComputerStatus", () => {
               [BASE_IMAGE_LABEL]: BASE_IMAGE_DIGEST,
               [IMAGE_LAYER_LABEL]: IMAGE_LAYER_VERSION,
               [WORKSPACE_LABEL]: "1",
+              [DESKTOP_FLAGS_LABEL]: DESKTOP_FLAGS_VERSION,
             },
             mounts: [{ source: VM_WORKSPACE_DIR, destination: VM_WORKSPACE_GUEST, options: [] }],
           },
@@ -1033,6 +1126,7 @@ describe("containerComputerAction", () => {
       "docker info --format {{.ServerVersion}}": "29\n",
       [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
       [`docker inspect ${CONTAINER}`]: readyInspect({ State: { Running: false, FinishedAt: "2026-10-01T12:00:00Z" } }),
+      [`docker update --memory 8g --memory-swap 8g --cpus 4 ${CONTAINER}`]: CONTAINER,
       [`docker start ${CONTAINER}`]: CONTAINER,
     });
 
@@ -1040,8 +1134,10 @@ describe("containerComputerAction", () => {
     expect(localVmResumable(stopped)).toBe(true);
     expect(stopped.resumable).toBe(true);
     expect(stopped.stopped_at).toBe("2026-10-01T12:00:00Z");
-    await containerComputerAction("start", fake.run, "linux");
-    expect(fake.calls).toContain(`docker start ${CONTAINER}`);
+    await containerComputerAction("start", fake.run, "linux", SHARED_LOCAL_VM_TARGET, { memoryGb: 8, cpus: 4 });
+    const update = fake.calls.indexOf(`docker update --memory 8g --memory-swap 8g --cpus 4 ${CONTAINER}`);
+    expect(update).toBeGreaterThan(-1);
+    expect(update).toBeLessThan(fake.calls.indexOf(`docker start ${CONTAINER}`));
     expect(fake.calls.some(call => call.includes(" rm ") || call.includes(" run "))).toBe(false);
   });
 });
@@ -1095,12 +1191,15 @@ describe("setupCommands", () => {
     expect(setupCommands("docker", "linux").start).toBe(`docker start ${CONTAINER}`);
   });
 
-  it("limits resources and retains only the sandbox supervisor's identity-switch caps", () => {
+  it("limits resources and grants only the supervisor and package-install caps", () => {
     const command = setupCommands("docker", "linux").run!;
     expect(command).toContain("--memory 4g --memory-swap 4g");
     expect(command).toContain("--cpus 2 --pids-limit 4096");
     expect(command).toContain("--ipc private --cgroupns private");
-    expect(command).toContain("--cap-drop ALL --cap-add SETUID --cap-add SETGID");
+    expect(command).toContain(
+      "--cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add FSETID --cap-add SETGID --cap-add SETUID",
+    );
+    expect(command).toContain(`--label ${DESKTOP_FLAGS_LABEL}=${DESKTOP_FLAGS_VERSION}`);
     expect(command).toContain(`--label ${MANAGED_LABEL}=1`);
     expect(command).toContain(`--label ${DRIVER_LABEL}=${CUA_DRIVER_VERSION}`);
     expect(command).toContain(`--label ${WORKSPACE_LABEL}=1`);
@@ -1108,6 +1207,48 @@ describe("setupCommands", () => {
     expect(command).toContain(
       `--mount type=bind,source=${VM_WORKSPACE_DIR},target=${VM_WORKSPACE_GUEST}`,
     );
+  });
+
+  it("bars every route to root only where the desktop's root is the host's root", () => {
+    expect(setupCommands("docker", "linux").run).toContain("--security-opt no-new-privileges");
+    for (const [runtime, platform] of [["docker", "darwin"], ["docker", "win32"], ["podman", "linux"], ["container", "darwin"]] as const) {
+      expect(setupCommands(runtime, platform).run, `${runtime} on ${platform}`).not.toContain("no-new-privileges");
+    }
+  });
+
+  it("takes the configured memory and CPU limits", () => {
+    const resources = { memoryGb: 8, cpus: 4 };
+    for (const runtime of ["docker", "podman"] as const) {
+      const command = containerRunArgs(runtime, "secret", SHARED_LOCAL_VM_TARGET, { platform: "linux", resources, hostUser: null }).join(" ");
+      expect(command).toContain("--memory 8g --memory-swap 8g --cpus 4");
+    }
+    const apple = containerRunArgs("container", "secret", SHARED_LOCAL_VM_TARGET, { platform: "darwin", resources, hostUser: null }).join(" ");
+    expect(apple).toContain("--memory 8g --cpus 4 --cap-drop ALL");
+    expect(apple).not.toContain("--memory-swap");
+  });
+
+  it.each([
+    ["docker", "linux", { uid: 1001, gid: 1002 }, ["1001", "1002"]],
+    ["docker", "linux", { uid: 1000, gid: 1000 }, null],
+    ["docker", "linux", { uid: 1000, gid: 100 }, null],
+    ["docker", "linux", { uid: 0, gid: 0 }, null],
+    ["docker", "darwin", { uid: 501, gid: 20 }, null],
+    ["podman", "linux", { uid: 1001, gid: 1001 }, null],
+  ] as const)("on %s/%s with host user %j gives cua the host ids: %j", (runtime, platform, hostUser, ids) => {
+    const args = containerRunArgs(runtime, "secret", SHARED_LOCAL_VM_TARGET, {
+      platform,
+      resources: { memoryGb: 4, cpus: 2 },
+      hostUser,
+    });
+    const tail = args.slice(args.indexOf(IMAGE) + 1);
+    if (!ids) {
+      expect(tail).toEqual([]);
+      return;
+    }
+    expect(tail.slice(0, 2)).toEqual(["sh", "-c"]);
+    expect(tail.slice(3)).toEqual(["openmausbot-desktop", ...ids]);
+    expect(tail[2]).toContain("exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf");
+    expect(tail[2]).toMatch(/\|\| \{ echo "cua did not take uid \$uid gid \$gid" >&2; exit 1; \}\n  find /);
   });
 
   it("asks rootless Podman to map and privately relabel the durable workspace", () => {

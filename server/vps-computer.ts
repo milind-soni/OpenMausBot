@@ -9,6 +9,7 @@ import {
   CUA_SOCKET,
   IMAGE as CUA_IMAGE,
   cuaExecArgs,
+  desktopCapArgs,
   dockerSecurityIsHardened,
   imageLabelsMatch,
   managedImageDockerfile,
@@ -762,12 +763,8 @@ export function vpsContainerRunArgs(
     "private",
     "--cgroupns",
     "private",
-    "--cap-drop",
-    "ALL",
-    "--cap-add",
-    "SETUID",
-    "--cap-add",
-    "SETGID",
+    // No host mounts, so root in this desktop can install packages without reaching the host's files.
+    ...desktopCapArgs("docker"),
     "--shm-size",
     "512m",
     // Without a restart policy Docker leaves the container down after a VPS reboot; unless-stopped still honors Stop.

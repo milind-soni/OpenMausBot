@@ -1,5 +1,6 @@
 // The Local VM's settings, read from the config the server loaded.
 import type { AppConfig } from "./config.ts";
+import { DEFAULT_DESKTOP_RESOURCES, type DesktopResources } from "./container-limits.ts";
 
 export const DEFAULT_LOCAL_VM_MODE = "shared" as const;
 export const DEFAULT_LOCAL_VM_MAX_INSTANCES = 2;
@@ -24,4 +25,11 @@ export function localVmIdleTimeoutMinutes(cfg: AppConfig): number {
 /** App preservation is deliberately opt-in: a normal image replacement keeps its existing small, predictable footprint. */
 export function localVmPreservesInstalledApps(cfg: AppConfig): boolean {
   return cfg.localVm?.preserveInstalledApps === true;
+}
+
+export function localVmResources(cfg: AppConfig): DesktopResources {
+  return {
+    memoryGb: cfg.localVm?.memoryGb ?? DEFAULT_DESKTOP_RESOURCES.memoryGb,
+    cpus: cfg.localVm?.cpus ?? DEFAULT_DESKTOP_RESOURCES.cpus,
+  };
 }

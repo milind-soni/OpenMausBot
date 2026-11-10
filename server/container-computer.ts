@@ -2,7 +2,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { lstatSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, chown, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -10,7 +10,17 @@ import { promisify } from "node:util";
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { workspacePreparationDockerfile } from "./container-workspace.ts";
 import { DATA_DIR } from "./config.ts";
-import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
+import {
+  applyResourcesBeforeStart,
+  DEFAULT_DESKTOP_RESOURCES,
+  MAX_DESKTOP_CPUS,
+  MIN_DESKTOP_CPUS,
+  MIN_DESKTOP_MEMORY_GB,
+  PIDS_LIMIT,
+  raisePidsLimit,
+  resourceArgs,
+  type DesktopResources,
+} from "./container-limits.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 const run = promisify(execFile);
@@ -39,6 +49,9 @@ export const DRIVER_LABEL = "com.openmausbot.cua-driver";
 export const BASE_IMAGE_LABEL = "com.openmausbot.cua-base";
 export const WORKSPACE_LABEL = "com.openmausbot.workspace";
 export const TARGET_LABEL = "com.openmausbot.local-vm-target";
+/** The run flags a desktop was made with. A desktop made under other flags is updated like one on an older image. */
+export const DESKTOP_FLAGS_LABEL = "com.openmausbot.desktop-flags";
+export const DESKTOP_FLAGS_VERSION = "2";
 export const VM_WORKSPACE_DIR = join(DATA_DIR, "vm-home");
 export const VM_WORKSPACE_GUEST = "/home/cua/workspace";
 export const DISPLAY = ":1";
@@ -51,7 +64,57 @@ export type LifecycleAction = "pull" | "run" | "start" | "stop" | "remove";
 
 const INTERNAL_VIEWER_PORT = 6901;
 const HOST_VIEWER_PORT = 6080;
-const MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
+const GIB = 1024 * 1024 * 1024;
+const GUEST_UID = 1000;
+/** What supervisord needs to start each program as cua. */
+const SUPERVISOR_CAPS = ["SETGID", "SETUID"];
+/** apt and dpkg also need these to install a package as root (measured on Debian 12: without DAC_OVERRIDE every download fails). */
+const PACKAGE_INSTALL_CAPS = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", ...SUPERVISOR_CAPS];
+/** The only capability sets a hardened desktop may hold; one made with just SUPERVISOR_CAPS is sealed but cannot install packages. */
+const HARDENED_CAP_SETS = [SUPERVISOR_CAPS, PACKAGE_INSTALL_CAPS];
+/** The pinned base image's own CMD (trycua/xfce-cua 0.1.0). */
+const SUPERVISORD = "/usr/bin/supervisord -c /etc/supervisor/supervisord.conf";
+/** Runs as PID 1 before supervisord: gives cua the host workspace owner's ids, then fails closed if /etc/passwd did not take them. */
+const GUEST_IDS_SCRIPT = [
+  "set -eu",
+  'uid="$1"; gid="$2"; old_uid="$(id -u cua)"; old_gid="$(id -g cua)"',
+  'if [ "$old_uid:$old_gid" != "$uid:$gid" ]; then',
+  '  sed -i "s/^cua:x:$old_uid:$old_gid:/cua:x:$uid:$gid:/" /etc/passwd',
+  '  sed -i "s/^cua:x:$old_gid:/cua:x:$gid:/" /etc/group',
+  '  [ "$(id -u cua):$(id -g cua)" = "$uid:$gid" ] || { echo "cua did not take uid $uid gid $gid" >&2; exit 1; }',
+  '  find / -xdev -uid "$old_uid" -exec chown -h "$uid" {} +',
+  '  find / -xdev -gid "$old_gid" -exec chgrp -h "$gid" {} +',
+  "fi",
+  `exec ${SUPERVISORD}`,
+].join("\n");
+
+/** Rootful Docker on Linux runs the desktop's root as the host's root, so nothing in the desktop may gain root
+ * (no-new-privileges), and the guest account must take the host workspace owner's ids itself. */
+function desktopRootIsHostRoot(runtime: Runtime | null, platform: NodeJS.Platform): boolean {
+  return runtime === "docker" && platform === "linux";
+}
+
+export interface HostUser {
+  uid: number;
+  gid: number;
+}
+
+function currentHostUser(platform: NodeJS.Platform): HostUser | null {
+  return platform === "win32" || !process.getuid || !process.getgid ? null : { uid: process.getuid(), gid: process.getgid() };
+}
+
+/** Root's workspace is handed to cua instead (see ensureVmWorkspace), so cua is never given uid 0. */
+function guestIdsFor(runtime: Runtime, platform: NodeJS.Platform, host: HostUser | null): HostUser | null {
+  if (!desktopRootIsHostRoot(runtime, platform) || !host || host.uid === 0 || host.uid === GUEST_UID) return null;
+  return host;
+}
+
+export interface DesktopRunOptions {
+  platform: NodeJS.Platform;
+  resources: DesktopResources;
+  /** The account that owns the workspace on the host. */
+  hostUser: HostUser | null;
+}
 
 export interface LocalVmTarget {
   key: string;
@@ -516,14 +579,13 @@ export async function containerComputerStatus(
           ? normalizeImageId(detail.configuration.image.descriptor?.digest)
           : null;
       status.imageMatches =
-        appleImage === IMAGE && status.image_id !== null && appleImageId === status.image_id;
+        appleImage === IMAGE && status.image_id !== null && appleImageId === status.image_id &&
+        detail?.configuration?.labels?.[DESKTOP_FLAGS_LABEL] === DESKTOP_FLAGS_VERSION;
       status.managed = containerOwnershipLabelsMatch(detail?.configuration?.labels, target);
       status.persistence = appleWorkspaceMountIsSafe(detail?.configuration?.mounts, platform, target.workspaceDir)
         ? "durable"
         : "unsafe";
-      const resources = detail?.configuration?.resources;
-      status.security =
-        (resources?.memoryInBytes ?? 0) >= MEMORY_BYTES && resources?.cpus === 2 ? "hardened" : "unsafe";
+      status.security = appleResourcesAreLimited(detail?.configuration?.resources) ? "hardened" : "unsafe";
       status.viewer_url = viewerUrl(viewerPassword(detail?.configuration?.environment), status.viewer_port);
     } else {
       const inspected = JSON.parse(stdout) as Array<{
@@ -553,6 +615,7 @@ export async function containerComputerStatus(
       status.imageMatches =
         detail?.Config?.Image === IMAGE &&
         imageLabelsMatch(detail?.Config?.Labels) &&
+        detail?.Config?.Labels?.[DESKTOP_FLAGS_LABEL] === DESKTOP_FLAGS_VERSION &&
         status.image_id !== null &&
         normalizeImageId(detail?.Image) === status.image_id;
       status.managed = containerOwnershipLabelsMatch(detail?.Config?.Labels, target);
@@ -566,7 +629,9 @@ export async function containerComputerStatus(
       status.security = (
         status.runtime === "podman"
           ? podmanSecurityIsHardened(detail?.HostConfig, detail?.EffectiveCaps, detail?.BoundingCaps)
-          : dockerSecurityIsHardened(detail?.HostConfig)
+          : dockerSecurityIsHardened(detail?.HostConfig, {
+            requireNoNewPrivileges: desktopRootIsHostRoot(status.runtime, platform),
+          })
       ) ? "hardened" : "unsafe";
       status.viewer_url = viewerUrl(viewerPassword(detail?.Config?.Env), status.viewer_port);
     }
@@ -727,6 +792,13 @@ function dockerWorkspaceMountIsSafe(
   );
 }
 
+/** Apple container defaults to 1 GiB, below any limit this server sets, so a desktop made without our flags fails here. */
+function appleResourcesAreLimited(resources: { cpus?: number; memoryInBytes?: number } | undefined): boolean {
+  const cpus = resources?.cpus ?? 0;
+  return (resources?.memoryInBytes ?? 0) >= MIN_DESKTOP_MEMORY_GB * GIB &&
+    Number.isInteger(cpus) && cpus >= MIN_DESKTOP_CPUS && cpus <= MAX_DESKTOP_CPUS;
+}
+
 function appleWorkspaceMountIsSafe(
   mounts: Array<{ source?: string; destination?: string; options?: string[] }> | undefined,
   platform: NodeJS.Platform,
@@ -763,16 +835,33 @@ export interface DockerHardeningConfig {
   RestartPolicy?: { Name?: string; MaximumRetryCount?: number };
 }
 
+function capSetKey(caps: string[] | null | undefined): string {
+  return (caps ?? []).map((cap) => cap.toLowerCase().replace(/^cap_/, "")).sort().join(",");
+}
+
+function isHardenedCapSet(caps: string[] | null | undefined, podmanBrowserSandbox: boolean): boolean {
+  const key = capSetKey(caps);
+  return HARDENED_CAP_SETS.some((set) => capSetKey(podmanBrowserSandbox ? [...set, "SYS_CHROOT"] : set) === key);
+}
+
+export function desktopCapArgs(runtime: Runtime): string[] {
+  // Podman's default seccomp profile gates chroot on this capability, and Firefox chroots to build its sandbox.
+  const caps = runtime === "podman" ? [...PACKAGE_INSTALL_CAPS, "SYS_CHROOT"] : PACKAGE_INSTALL_CAPS;
+  return ["--cap-drop", "ALL", ...caps.flatMap((cap) => ["--cap-add", cap])];
+}
+
 /** Shared isolation contract for Local VM and VPS containers; Podman alone needs chroot for Firefox's sandbox. */
 export function dockerSecurityIsHardened(
   config: DockerHardeningConfig | undefined,
-  options: { restartPolicy?: "no" | "unless-stopped" | "any"; podmanBrowserSandbox?: boolean } = {},
+  options: {
+    restartPolicy?: "no" | "unless-stopped" | "any";
+    podmanBrowserSandbox?: boolean;
+    requireNoNewPrivileges?: boolean;
+  } = {},
 ): boolean {
   if (!config) return false;
   const capDrop = (config.CapDrop ?? []).map((cap) => cap.toLowerCase());
-  const capAdd = (config.CapAdd ?? [])
-    .map((cap) => cap.toLowerCase().replace(/^cap_/, ""))
-    .sort();
+  const noNewPrivileges = (config.SecurityOpt ?? []).some((option) => /^no-new-privileges(?:[:=]true)?$/i.test(option));
   const unsafeSecurityOption = (config.SecurityOpt ?? []).some((option) => /(?:^|=)(?:unconfined|disable)$/i.test(option));
   const restartPolicy = config.RestartPolicy?.Name;
   const restartPolicyOk =
@@ -781,7 +870,8 @@ export function dockerSecurityIsHardened(
       : restartPolicy === undefined || restartPolicy === "" || restartPolicy === "no");
   return (
     capDrop.includes("all") &&
-    capAdd.join(",") === (options.podmanBrowserSandbox ? "setgid,setuid,sys_chroot" : "setgid,setuid") &&
+    isHardenedCapSet(config.CapAdd, options.podmanBrowserSandbox === true) &&
+    (options.requireNoNewPrivileges !== true || noNewPrivileges) &&
     config.Privileged === false &&
     !config.PidMode &&
     config.IpcMode === "private" &&
@@ -803,12 +893,7 @@ export function podmanSecurityIsHardened(
   boundingCaps: string[] | undefined,
 ): boolean {
   if (!config) return false;
-  const normalizeCaps = (caps: string[] | undefined) => (caps ?? [])
-    .map((cap) => cap.toLowerCase().replace(/^cap_/, ""))
-    .sort();
-  const exactCaps = "setgid,setuid,sys_chroot";
-  if (normalizeCaps(effectiveCaps).join(",") !== exactCaps) return false;
-  if (normalizeCaps(boundingCaps).join(",") !== exactCaps) return false;
+  if (!isHardenedCapSet(effectiveCaps, true) || capSetKey(boundingCaps) !== capSetKey(effectiveCaps)) return false;
   return dockerSecurityIsHardened({
     ...config,
     CapDrop: ["all"],
@@ -826,6 +911,7 @@ export function containerRunArgs(
   runtime: Runtime,
   password = "CHANGE_ME",
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
+  desktop: DesktopRunOptions = { platform: process.platform, resources: DEFAULT_DESKTOP_RESOURCES, hostUser: null },
 ): string[] {
   if (runtime === "container" && target.key !== SHARED_LOCAL_VM_TARGET.key) {
     throw new Error("Per-bot Local VMs require Docker or Podman because Apple container requires a fixed host port");
@@ -848,51 +934,30 @@ export function containerRunArgs(
     `${WORKSPACE_LABEL}=1`,
     "--label",
     `${TARGET_LABEL}=${target.label}`,
+    "--label",
+    `${DESKTOP_FLAGS_LABEL}=${DESKTOP_FLAGS_VERSION}`,
   );
   if (runtime === "container") {
     // Apple container already places each Linux container in a lightweight VM.
-    common.push(
-      "--memory",
-      "4g",
-      "--cpus",
-      "2",
-      "--cap-drop",
-      "ALL",
-      "--cap-add",
-      "SETUID",
-      "--cap-add",
-      "SETGID",
-      "--shm-size",
-      "512m",
-    );
+    common.push(...resourceArgs(desktop.resources, { swap: false }), ...desktopCapArgs(runtime), "--shm-size", "512m");
   } else {
     common.push(
       "--hostname",
       target.containerName,
-      "--memory",
-      "4g",
-      "--memory-swap",
-      "4g",
-      "--cpus",
-      "2",
+      ...resourceArgs(desktop.resources, { swap: true }),
       "--pids-limit", String(PIDS_LIMIT),
       // Pinned: a daemon with host-mode IPC/cgroup defaults would create a container the hardening check then rejects.
       "--ipc",
       "private",
       "--cgroupns",
       "private",
-      "--cap-drop",
-      "ALL",
-      "--cap-add",
-      "SETUID",
-      "--cap-add",
-      "SETGID",
+      ...desktopCapArgs(runtime),
       "--shm-size",
       "512m",
     );
   }
-  // Podman's default seccomp profile gates chroot on this capability, and Firefox chroots to build its sandbox.
-  if (runtime === "podman") common.push("--cap-add", "SYS_CHROOT");
+  if (desktopRootIsHostRoot(runtime, desktop.platform)) common.push("--security-opt", "no-new-privileges");
+  const guestIds = guestIdsFor(runtime, desktop.platform, desktop.hostUser);
   common.push(
     "--mount",
     runtime === "podman"
@@ -906,12 +971,17 @@ export function containerRunArgs(
       : `127.0.0.1::${INTERNAL_VIEWER_PORT}`,
     IMAGE,
   );
+  if (guestIds) common.push("sh", "-c", GUEST_IDS_SCRIPT, "openmausbot-desktop", String(guestIds.uid), String(guestIds.gid));
   return common;
 }
 
-async function ensureVmWorkspace(platform: NodeJS.Platform, target: LocalVmTarget): Promise<void> {
+async function ensureVmWorkspace(platform: NodeJS.Platform, target: LocalVmTarget, runtime: Runtime): Promise<void> {
   await mkdir(target.workspaceDir, { recursive: true, mode: 0o700 });
-  if (platform !== "win32") await chmod(target.workspaceDir, 0o700);
+  if (platform === "win32") return;
+  await chmod(target.workspaceDir, 0o700);
+  if (desktopRootIsHostRoot(runtime, platform) && currentHostUser(platform)?.uid === 0) {
+    await chown(target.workspaceDir, GUEST_UID, GUEST_UID);
+  }
 }
 
 function baseImagePullArgs(runtime: Runtime): string[] {
@@ -934,6 +1004,7 @@ export async function containerComputerAction(
   runner: CommandRunner = sh,
   platform: NodeJS.Platform = process.platform,
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
+  resources: DesktopResources = DEFAULT_DESKTOP_RESOURCES,
 ): Promise<ContainerComputerStatus> {
   if (runner === sh && platform === process.platform) screenshotStatusCache.delete(target.key);
   const before = await containerComputerStatus(runner, platform, target);
@@ -969,10 +1040,17 @@ export async function containerComputerAction(
   if (action === "pull") {
     await prepareManagedImage(runtime, runner);
   } else {
-    if (action === "run") await ensureVmWorkspace(platform, target);
+    if (action === "run") await ensureVmWorkspace(platform, target, runtime);
+    if (action === "start" && runtime !== "container") {
+      await applyResourcesBeforeStart(target.containerName, resources, (args, timeoutMs) => runner(runtime, args, timeoutMs));
+    }
     const args =
       action === "run"
-        ? containerRunArgs(runtime, randomBytes(6).toString("base64url"), target)
+        ? containerRunArgs(runtime, randomBytes(6).toString("base64url"), target, {
+          platform,
+          resources,
+          hostUser: currentHostUser(platform),
+        })
         : action === "remove"
           ? ["rm", runtime === "container" ? "--force" : "-f", target.containerName]
           : [action, target.containerName];
@@ -1216,7 +1294,11 @@ export function setupCommands(
     run:
       runtime === "container" && target.key !== SHARED_LOCAL_VM_TARGET.key
         ? null
-        : command(containerRunArgs(runtime, "CHANGE_ME", target)),
+        : command(containerRunArgs(runtime, "CHANGE_ME", target, {
+          platform,
+          resources: DEFAULT_DESKTOP_RESOURCES,
+          hostUser: null,
+        })),
     start: command(["start", target.containerName]),
     stop: command(["stop", target.containerName]),
     remove: command(["rm", runtime === "container" ? "--force" : "-f", target.containerName]),

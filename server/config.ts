@@ -30,6 +30,7 @@ import { liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } 
 import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts";
 import { MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES, MAX_LOCAL_VM_MAX_INSTANCES, MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES, MIN_LOCAL_VM_MAX_INSTANCES } from "./local-vm-settings.ts";
+import { MAX_DESKTOP_CPUS, MAX_DESKTOP_MEMORY_GB, MIN_DESKTOP_CPUS, MIN_DESKTOP_MEMORY_GB } from "./container-limits.ts";
 export * from "./local-vm-settings.ts";
 
 const optionalText = z.string().optional();
@@ -103,6 +104,10 @@ const localVmConfigSchema = z.object({
     .max(MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
     .optional(),
   preserveInstalledApps: z.boolean().optional(),
+  /** Each desktop's memory limit in GiB, with swap capped to the same; 4 when unset. New desktops take a change; on Docker and Podman a stopped one takes it when it next starts. */
+  memoryGb: z.number().int().min(MIN_DESKTOP_MEMORY_GB).max(MAX_DESKTOP_MEMORY_GB).optional(),
+  /** Each desktop's CPU limit; 2 when unset. */
+  cpus: z.number().int().min(MIN_DESKTOP_CPUS).max(MAX_DESKTOP_CPUS).optional(),
 });
 /** A named browser session; its id names a durable Electron partition. */
 const browserProfileSchema = z.object({
@@ -497,7 +502,7 @@ export interface AppConfig extends HelperConfig {
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
-  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean };
+  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean; memoryGb?: number; cpus?: number };
   features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean };
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   browserProfiles?: BrowserProfile[];
