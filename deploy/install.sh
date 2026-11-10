@@ -975,11 +975,14 @@ connect_server() {
     [ -z "$fetched" ] || rm -f "$fetched"
     fail "MausBot is installed and running here, but what $ADMIN_URL sent is not the connector's installer. Nothing needs reinstalling: copy the install command from MausBot again."
   fi
+  # Always customer-run, on this install's folder (--dir included): the connector attaches to the server installed here
+  # and never starts a second one beside it. A connector installer that does not know --customer-run refuses it, and
+  # nothing is connected.
   status=0
   if [ "$INSTALL_DOCKER" = 1 ]; then
-    MAUSBOT_ADMIN_URL="$ADMIN_URL" sh "$connector_script" --install-docker "$CODE" || status=$?
+    MAUSBOT_ADMIN_URL="$ADMIN_URL" MAUSBOT_INSTALL_DIR="$INSTALL_DIR" sh "$connector_script" "$CODE" --customer-run --install-docker || status=$?
   else
-    MAUSBOT_ADMIN_URL="$ADMIN_URL" sh "$connector_script" "$CODE" || status=$?
+    MAUSBOT_ADMIN_URL="$ADMIN_URL" MAUSBOT_INSTALL_DIR="$INSTALL_DIR" sh "$connector_script" "$CODE" --customer-run || status=$?
   fi
   [ -z "$fetched" ] || rm -f "$fetched"
   [ "$status" = 0 ] || fail "MausBot is installed and running here, but connecting it did not finish (the reason is above). Nothing needs reinstalling: fix that and run this again with a new code."

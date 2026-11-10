@@ -362,7 +362,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   it("keeps the registry's token and the one-time code out of its output, and the token off every command line", () => {
     const connector = mkdtempSync(join(tmpdir(), "omb-server-install-connector-"));
     dirs.push(connector);
-    writeFileSync(join(connector, "install.sh"), `# stands in for mausbot-connector's installer\necho "$MAUSBOT_ADMIN_URL $#" > "${connector}/ran"\nprintf '%s' "$1" > "${connector}/code"\n`);
+    writeFileSync(join(connector, "install.sh"), `# stands in for mausbot-connector's installer\necho "$MAUSBOT_ADMIN_URL $MAUSBOT_INSTALL_DIR $# $2" > "${connector}/ran"\nprintf '%s' "$1" > "${connector}/code"\n`);
     const result = run(["--domain", "maus.example.com", CODE], { env: { MAUSBOT_CONNECTOR_INSTALLER: join(connector, "install.sh") } });
     expect(result.status).toBe(0);
     expect(result.all).not.toContain(TOKEN);
@@ -370,7 +370,8 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(result.calls.join("\n")).not.toContain(TOKEN);
     expect(result.calls.join("\n")).not.toContain(CODE);
     expect(readFileSync(join(result.dir, "calls.log.stdin"), "utf8")).toContain(`header = "Authorization: Bearer ${TOKEN}"`);
-    expect(readFileSync(join(connector, "ran"), "utf8")).toBe("https://admin.example.test 1\n");
+    // Customer-run, on this install's own folder: never a second server beside it.
+    expect(readFileSync(join(connector, "ran"), "utf8")).toBe(`https://admin.example.test ${result.install} 2 --customer-run\n`);
     expect(readFileSync(join(connector, "code"), "utf8")).toBe(CODE);
   });
 
