@@ -1,6 +1,7 @@
 /** The client-visible wire model for tasks, bots, messages and rooms. A field
  * here is one the server emits in every response and SSE frame that carries
  * the shape. */
+import type { PresenceFrame } from "./team-presence.ts";
 import type { DataBroadcast } from "./data-surface.ts";
 import type { ApprovalMode } from "./approval-mode.ts";
 import type { ToolScope } from "./tool-scope.ts";
@@ -992,5 +993,7 @@ export type ServerFrame =
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** A job is waiting for the phone whose registry key this is; it polls now. */
   | { kind: "device.job"; phone: string; id: string }
+  /** Who is here on a Team Cloud (shared/team-presence.ts). */
+  | PresenceFrame
   /** The config status object spread flat into the frame. */
   | ({ kind: "config" } & Record<string, unknown>);
