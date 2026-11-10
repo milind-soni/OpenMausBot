@@ -573,6 +573,25 @@ export function acquireDataDirLease(dataDir, options = {}) {
  * for a folder several computers share.
  */
 export function clearRecordsFromOtherMachines(dataDir) {
+  return clearRecords(dataDir, (record) => !sameMachine(record));
+}
+
+/**
+ * For a container's entry as it starts (server/server-launcher.ts): a record this same container left in an earlier run
+ * (its hostname, this boot, another pid namespace) belongs to a process that died with that run, since a container's
+ * pid namespace and every process in it end together, and a restarted container gets a new one. Without this, a
+ * server killed outright (out of memory, `kill -9`) was refused at every restart as "another machine". Removes those
+ * records and returns their holders. Another container's records (another hostname, as Docker names each container)
+ * stay, and acquireDataDirLease() refuses them as before.
+ */
+export function clearRecordsFromEarlierRunOfThisContainer(dataDir) {
+  const boot = bootSession();
+  const ns = pidNamespace();
+  if (boot === null || ns === null) return [];
+  return clearRecords(dataDir, (record) => record.host === hostname() && record.boot === boot && typeof record.ns === "string" && record.ns !== ns);
+}
+
+function clearRecords(dataDir, stale) {
   validateDataDir(dataDir);
   let entries;
   try {
@@ -589,7 +608,7 @@ export function clearRecordsFromOtherMachines(dataDir) {
   const cleared = [];
   for (const path of paths) {
     const record = readOwner(path);
-    if (!record || sameMachine(record)) continue;
+    if (!record || !stale(record)) continue;
     unlinkExact(path, "OpenMausBot could not remove the data-directory record another machine left.");
     cleared.push({ path, host: record.host, pid: record.pid });
   }

@@ -62,7 +62,11 @@ schedule that checks the app, or a webhook, does the job instead.
 
 **`OMB_COMPOSIO_BROKER=off`** in the environment of the desktop app, a server or a Cloud home turns the service off whether or not a key is saved: no registration, check-in, tool calls or app events. Connected apps then need your own key, and show the setup message until there is one. A saved installation is kept for if the switch is removed. `OMB_COMPOSIO_BROKER_URL` is not a switch: left blank it means the default service.
 
-Still on the service with a key saved: a Team Cloud's per-person apps (**each person connects their own**). With the switch off those are unavailable, and connecting one says so.
+A Team Cloud's per-person apps (**each person connects their own**) follow the same rule. With the team's key saved, each member is their own Composio user in the team's project (`omb_member_…`, made from the team's id and a hash of the person, never their address), and their connect links, connections, tool calls and disconnects go to Composio with the team's key. A member who leaves has that user's connections removed from the project; if Composio can't be reached then, it is tried again at the next start. App events are not available for them, as for the team's own apps with a key.
+
+Connections do not carry between the service and a project, or between two projects. After the team saves, removes or changes its key, a member's app shows as not connected, their page and their bot say to connect it again, and nothing is an error. An installation a member made on the service before the key was saved is left there, unused and not erased, and is theirs again if the key is removed; the Admin's signed read counts them (`appsLeftOnService`). Connections made in a project stay in that project when its key is removed or replaced.
+
+With the switch off and no key, a member's own apps can't be connected: their page and their bot say an admin needs to add the team's Composio key.
 
 ## Scoped key permissions
 

@@ -18,6 +18,7 @@ import { resolveElement } from "./selectors.ts";
 import { takeSnapshot, visibleText, type Snapshot } from "./snapshot.ts";
 import { releaseSession, setUpDocumentSession, setUpWorkerSession, type TargetSetup } from "./targets.ts";
 import { Lifecycle, waitFor, type LoadState, type WaitConditions, type WaitContext } from "./wait.ts";
+import { extensionPage } from "../extensions.ts";
 
 export const DEFAULT_NAVIGATION_TIMEOUT_MS = 15_000;
 
@@ -41,6 +42,8 @@ export interface PageHost {
 export interface NavigateOptions {
   readiness?: LoadState | "none";
   timeoutMs?: number;
+  /** The person picked an installed extension's page from the panel's Extensions menu; never set for a bot. */
+  personExtension?: boolean;
 }
 
 export interface NavigationResult {
@@ -206,8 +209,8 @@ export class CdpPage implements ActionContext, WaitContext {
     return this.#host.bringToFront(this);
   }
 
-  async navigate(url: string, { readiness = "load", timeoutMs = DEFAULT_NAVIGATION_TIMEOUT_MS }: NavigateOptions = {}): Promise<NavigationResult> {
-    if (!navigable(url)) throw new DriverError("refused", `Only http(s), about:blank and data: addresses open here, not ${url.slice(0, 80)}.`);
+  async navigate(url: string, { readiness = "load", timeoutMs = DEFAULT_NAVIGATION_TIMEOUT_MS, personExtension = false }: NavigateOptions = {}): Promise<NavigationResult> {
+    if (!navigable(url) && !(personExtension && extensionPage(url))) throw new DriverError("refused", `Only http(s), about:blank and data: addresses open here, not ${url.slice(0, 80)}.`);
     this.#usable();
     await this.bringToFront();
     return this.dialogs.acceptingBeforeUnload(async () => {
