@@ -167,8 +167,8 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(result.fixes).toEqual([]);
     for (const line of [
       "operating system: Ubuntu 24.04.1 LTS", "processor: x86-64", "processor cores: 4", "memory: 7.7 GB", "Docker: 27.3.1, with Compose", "free disk: 80 GB",
-      "ports 80 and 443: free", "DNS: maus.example.com points at this server (203.0.113.7)", "outbound: the image registries and Let's Encrypt are reachable",
-      "user namespaces: on", "clock: right", "version: v0.1.151, the newest release",
+      "ports 80 and 443: free", "user namespaces: on", "DNS: maus.example.com points at this server (203.0.113.7)",
+      "outbound: the image registries and Let's Encrypt are reachable", "clock: right", "version: v0.1.151, the newest release",
     ]) expect(result.stdout).toContain(`  ok    ${line}`);
     expect(result.docker.filter((call) => !READS.test(call))).toEqual([]);
     expect(existsSync(result.install)).toBe(false);
@@ -183,6 +183,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     ["one core", { env: { FAKE_CPUS: "1" } }, /^This server has 1 processor core\. MausBot needs at least 2/],
     ["2 GB of memory", { memoryKb: 2_000_000 }, /^This server has 1\.9 GB of memory\. MausBot needs at least 4 GB/],
     ["a full disk", { env: { FAKE_FREE_GB: "5" } }, /^This server has only 5 GB free at .*MausBot needs at least 20 GB/],
+    ["no curl", { without: ["curl"] }, /^curl isn't installed\. Run: sudo apt-get install -y curl/],
     ["no Docker", { without: ["docker"] }, /^Docker isn't installed\. Run this again with --install-docker/],
     ["Docker stopped", { env: { FAKE_DOCKER: "" } }, /^Docker is installed but not running\. Start it with: sudo systemctl enable --now docker/],
     ["an old Docker", { env: { FAKE_DOCKER: "20.10.24" } }, /^Docker 20\.10\.24 is too old; MausBot needs Docker 24 or newer/],
@@ -222,6 +223,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     const listening = 'LISTEN 0 4096 0.0.0.0:80 0.0.0.0:* users:(("docker-proxy",pid=9,fd=4))';
     const own = run(["--check", "--domain", "maus.example.com"], { env: { FAKE_SS_80: listening, FAKE_SS_443: listening, FAKE_OURS: "c1" } });
     expect(own.fixes).toEqual([]);
+    expect(own.stdout).toContain("  ok    ports 80 and 443: held by this install");
     const local = run(["--check", "--domain", "maus.example.com"], { env: { FAKE_DNS: "10.0.0.5" } });
     expect(local.stdout).toContain("DNS: maus.example.com points at this server (10.0.0.5)");
     const skipped = run(["--check", "--domain", "maus.example.com"], { env: { FAKE_DNS: "198.51.100.9", OMB_INSTALL_SKIP_DNS: "1" } });

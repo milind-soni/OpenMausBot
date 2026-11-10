@@ -293,10 +293,14 @@ check_ports() {
     return
   fi
   busy=""
+  own=""
   for port in 80 443; do
     line=$(listener_on "$port")
     [ -n "$line" ] || continue
-    if [ "$DOCKER_STATE" = ready ] && [ -n "$(docker ps -q --filter "label=com.docker.compose.project=$PROJECT" --filter "publish=$port" 2>/dev/null)" ]; then continue; fi
+    if [ "$DOCKER_STATE" = ready ] && [ -n "$(docker ps -q --filter "label=com.docker.compose.project=$PROJECT" --filter "publish=$port" 2>/dev/null)" ]; then
+      own=yes
+      continue
+    fi
     owner=$(printf '%s' "$line" | sed -n 's/.*users:(("\([^"]*\)".*/\1/p')
     if [ "$owner" = docker-proxy ]; then
       fix "Port $port is already in use by another Docker container. Find it with: sudo docker ps  and stop it, then run this again."
@@ -305,7 +309,8 @@ check_ports() {
     fi
     busy=yes
   done
-  [ -n "$busy" ] || ok "ports 80 and 443: free"
+  if [ -n "$busy" ]; then return; fi
+  if [ -n "$own" ]; then ok "ports 80 and 443: held by this install"; else ok "ports 80 and 443: free"; fi
 }
 
 public_address() {
@@ -487,9 +492,13 @@ preflight() {
   check_docker
   check_disk
   check_ports
+  check_userns
+  if ! command -v curl >/dev/null 2>&1; then
+    note "The domain, outbound reach, the clock and the version were not checked, because they need curl."
+    return
+  fi
   check_dns
   check_outbound
-  check_userns
   check_clock
   check_version
 }
