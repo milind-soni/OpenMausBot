@@ -149,7 +149,10 @@ export class LimitResetClock {
     for (const engine of this.refusals.keys()) {
       const until = this.blockedUntil(engine);
       const known = engines.get(engine);
-      if (until !== null) engines.set(engine, { ...(known ?? this.unnamed(engine)), blocked: true, usedPercent: 100, resetsAt: this.guessed.has(engine) ? known?.resetsAt ?? null : until });
+      if (until === null) continue;
+      const limit: EngineLimit = { ...(known ?? this.unnamed(engine)), blocked: true, usedPercent: 100, resetsAt: this.guessed.has(engine) ? known?.resetsAt ?? null : until };
+      if (!known?.blocked) limit.held = true;
+      engines.set(engine, limit);
     }
     return { checkedAt: this.checkedAt, engines: [...engines.values()] };
   }

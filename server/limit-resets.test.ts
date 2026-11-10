@@ -465,6 +465,7 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
       const instance = boot();
       expect(instance.release("claude"), "nothing held").toBe(false);
       instance.noteRefusal("claude", NOW + 23 * HOUR);
+      expect(instance.limit("claude")?.held, "only a hold offers Try again now").toBe(true);
       changed.mockClear();
       expect(instance.release("claude")).toBe(true);
       expect(changed).toHaveBeenCalled();

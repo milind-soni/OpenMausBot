@@ -135,7 +135,7 @@ export function UsageRows({ limit }: { limit: EngineLimit }) {
               className="font-medium text-ink underline underline-offset-2 hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60">
               {t("common.checkAgain")}
             </button>
-            <button type="button" data-usage-release disabled={checking} aria-busy={checking}
+            {limit.held && <button type="button" data-usage-release disabled={checking} aria-busy={checking}
               onClick={() => {
                 setChecking(true);
                 void releaseLimit(limit.engine)
@@ -144,7 +144,7 @@ export function UsageRows({ limit }: { limit: EngineLimit }) {
               }}
               className="font-medium text-ink underline underline-offset-2 hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60">
               {t("limits.tryAgainNow")}
-            </button>
+            </button>}
           </span>
         </div>
       )}
