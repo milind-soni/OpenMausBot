@@ -189,6 +189,23 @@ async function daemonOf(pid: number, table: Map<number, ListedProcess>): Promise
   return null;
 }
 
+export async function browserProfileProcessTrees(dir: string | undefined, binaryPath: string, session: string): Promise<BrowserProcessTree[] | null> {
+  if (!dir || process.platform === "win32") return [];
+  const table = await processTable(true);
+  if (!table) return null;
+  const daemons = new Set<number>();
+  const trees: BrowserProcessTree[] = [];
+  for (const [pid, entry] of table) {
+    if (entry.zombie || !namesProfile(entry.args ?? "", dir) || /(?:^|\s)--type=/.test(entry.args ?? "")) continue;
+    const daemon = await daemonOf(pid, table);
+    if (daemon === null || daemons.has(daemon)) continue;
+    daemons.add(daemon);
+    const tree = await browserProcessTree(binaryPath, daemon, session);
+    if (tree) trees.push(tree);
+  }
+  return trees;
+}
+
 /** POSIX Chrome locks its profile with a SingletonLock symlink to `<host>-<pid>`. A later launch on the profile hands itself
  * to the Chrome the lock names and exits, and refuses a lock that names another host (a renamed Mac, a moved Cloud volume).
  * A Chrome whose daemon was killed keeps running, re-parented, and would take every later launch, so it is stopped; then the

@@ -8,7 +8,7 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { browserBundlePaths } from "./browser-bundle-release.ts";
-import { browserProcessesRunning, browserProcessTree, releaseBrowserProfile, stopBrowserProcesses } from "./browser-processes.ts";
+import { browserProcessesRunning, browserProcessTree, browserProfileProcessTrees, releaseBrowserProfile, stopBrowserProcesses } from "./browser-processes.ts";
 import { BROWSER_VIEWPORT, viewportArgs, type PageSize } from "./browser-page-size.ts";
 import { browserRuntimeEnv, ownsBrowserViewport } from "./browser-runtime.ts";
 import { spawnBotWork } from "./oom-score.ts";
@@ -130,7 +130,16 @@ export function closeBrowserSession(binaryPath: string, env: NodeJS.ProcessEnv, 
   const session = env.AGENT_BROWSER_SESSION;
   if (!session || !/^[A-Za-z0-9_.-]{1,96}$/.test(session)) return Promise.resolve(false);
   const key = browserDaemonFile(env, ".pid");
-  const attempt = (closingBrowsers.get(key) ?? Promise.resolve(true)).then(() => closeOnce(binaryPath, env, session, timeoutMs)).catch(() => false).finally(() => {
+  const attempt = (closingBrowsers.get(key) ?? Promise.resolve(true)).then(async () => {
+    const trees = await browserProfileProcessTrees(env.AGENT_BROWSER_PROFILE, binaryPath, session);
+    if (trees === null) return false;
+    const closed = await closeOnce(binaryPath, env, session, timeoutMs);
+    let stopped = true;
+    for (const tree of trees) {
+      if (await browserProcessesRunning(tree) && !await stopBrowserProcesses(tree)) stopped = false;
+    }
+    return closed && stopped;
+  }).catch(() => false).finally(() => {
     if (closingBrowsers.get(key) === attempt) closingBrowsers.delete(key);
   });
   closingBrowsers.set(key, attempt);

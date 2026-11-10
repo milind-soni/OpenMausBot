@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { browserProfileProcessTrees } from "./browser-processes.ts";
 import { credentialStoreFlags } from "./browser/egress/gate.ts";
 import { browserRoot } from "./browser/chrome/profile.ts";
 import { strays } from "./browser/chrome/processes.ts";
@@ -405,6 +406,32 @@ describe("a browser daemon that will not close (#2603)", () => {
     }) as unknown as typeof spawn);
     return { actual, binaryPath, env, pids, profile: files.PROFILE_DIR, lateHelper: () => Number(readFileSync(`${files.HELPER_PID}.late`, "utf8")) };
   }
+
+  it.skipIf(!posix)("only discovers profile owners from the requested binary and session", async () => {
+    const { actual, binaryPath, pids, profile } = await engine({ close: () => 1 });
+    expect(await browserProfileProcessTrees(profile, binaryPath, "work")).toMatchObject([{ daemon: pids.daemon }]);
+    expect(await browserProfileProcessTrees(profile, binaryPath, "another-session")).toEqual([]);
+    expect(await browserProfileProcessTrees(profile, "/another/agent-browser", "work")).toEqual([]);
+    expect(await browserProfileProcessTrees(profile + "-another", binaryPath, "work")).toEqual([]);
+    for (const pid of Object.values(pids)) expect(gone(actual, pid), String(pid)).toBe(false);
+  });
+
+  it.skipIf(!posix)("closes the profile's predecessor after its session pid file was replaced", async () => {
+    let replacement = 0;
+    const { actual, binaryPath, env, pids, profile } = await engine({ close: () => {
+      process.kill(replacement, "SIGTERM");
+      return 0;
+    } });
+    const newer = actual.spawn(binaryPath, ["-e", "setInterval(() => {}, 1000)"], {
+      detached: true, stdio: "ignore",
+      env: { PATH: process.env.PATH, AGENT_BROWSER_DAEMON: "1", AGENT_BROWSER_SESSION: "work" },
+    });
+    replacement = newer.pid!;
+    groups.push(replacement);
+    writeFileSync(browserDaemonFile(env, ".pid"), String(replacement));
+    expect(await closeBrowserSession(binaryPath, { ...env, AGENT_BROWSER_PROFILE: profile }, 1_000)).toBe(true);
+    for (const pid of [...Object.values(pids), replacement]) expect(gone(actual, pid), String(pid)).toBe(true);
+  });
 
   it.skipIf(!posix)("stops the daemon and the browser under it when close fails, and removes the profile folder it would have", async () => {
     const { actual, binaryPath, env, pids, profile } = await engine({ close: () => 1 });
