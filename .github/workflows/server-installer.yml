@@ -8,6 +8,9 @@ on:
     paths:
       - deploy/install.sh
       - deploy/e2e/**
+      - deploy/box/**
+      - deploy/update.sh
+      - connector/profiles/**
       - deploy/Caddyfile
       - deploy/docker-compose.yml
       - scripts/server-installer.test.ts
@@ -25,7 +28,7 @@ jobs:
   e2e:
     name: check, install, run again and uninstall on Ubuntu 24.04
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,9 +55,25 @@ jobs:
             sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
             echo "free for Docker now: $(free_gb) GB"
           fi
+      - name: This checkout's server image, served from a registry on the runner
+        # Only an image with the hardened profile can run the bots' sandbox; until a release has it, the published
+        # image cannot show the installer turning the sandbox on, so this checkout's is built and installed instead.
+        id: image
+        run: |
+          set -euo pipefail
+          if ! grep -q 'OMB_IMAGE=server' Dockerfile; then
+            echo "this checkout's image has no hardened profile; installing the published release"
+            exit 0
+          fi
+          docker run -d --name installer-registry -p 127.0.0.1:5000:5000 registry:2 >/dev/null
+          docker build -q -t localhost:5000/openmausbot:e2e .
+          docker push -q localhost:5000/openmausbot:e2e
+          docker image rm localhost:5000/openmausbot:e2e >/dev/null
+          echo "image=localhost:5000/openmausbot:e2e" >> "$GITHUB_OUTPUT"
       - name: Check, install, run again and uninstall
         env:
           OUT: ${{ runner.temp }}/server-installer
+          OMB_INSTALL_IMAGE: ${{ steps.image.outputs.image }}
         run: bash deploy/e2e/run.sh
       - name: Keep the evidence
         if: always()

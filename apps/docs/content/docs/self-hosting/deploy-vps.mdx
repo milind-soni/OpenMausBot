@@ -31,8 +31,9 @@ The installer ([`deploy/install.sh`](https://github.com/milind-soni/OpenMausBot/
 | Docker | Docker 24 or newer with the Compose plugin, running, not rootless |
 | Ports | 80 and 443 are free |
 | DNS | the domain resolves to this server's public address |
-| Outbound | HTTPS reaches the image registries (`ghcr.io`, `pkg-containers.githubusercontent.com`, Docker Hub) and Let's Encrypt |
+| Outbound | HTTPS reaches the image registries (`ghcr.io`, `pkg-containers.githubusercontent.com`, Docker Hub), Let's Encrypt and `raw.githubusercontent.com` |
 | User namespaces | switched on, for the bots' sandbox |
+| Bots' sandbox | AppArmor is on with its tools, as it is on a stock Ubuntu |
 | Clock | within five minutes of the internet's |
 | Version | a MausBot release to install was found |
 
@@ -52,8 +53,12 @@ If Docker is missing, the installer asks before installing it with Docker's offi
 | `.env` | your settings: `DOMAIN`, the pinned version (`OMB_IMAGE`) and anything you add, such as [who may sign in with an email](/docs/self-hosting). The installer keeps your lines |
 | `data/` | everything MausBot stores: chats, bots, engine sign-ins, paired devices. Never touched once it exists |
 | `caddy/` | the HTTPS certificates |
+| `update.sh` | the update command, once this repository has it (see below) |
+| `compose.box.yaml`, `box/` | the sandbox's settings and the files that prepare the server for it, as this repository has them |
 
 It runs the newest release, pinned by its version; once a `stable` channel is published it follows that instead. It never runs `latest`, which follows every commit. It then waits until the server reports healthy and `https://maus.example.com` answers with a valid certificate, and prints the address.
+
+**The bots' sandbox.** A MausBot version with the hardened profile runs every bot in a sandbox, away from the server's settings, keys and other bots' files, and Docker's defaults do not let a container build one. For such a version the installer prepares the server (a seccomp profile in `/etc/mausbot` and an AppArmor profile in `/etc/apparmor.d`, the two the MausBot connector installs), starts the server with the four security settings in `compose.box.yaml` (no `--privileged`, no added capability), and then runs the server's own self-check, which among other things confirms that a bot cannot read `config.json`. If the check fails the installer says so and does not report success. For a version without the hardened profile it says the sandbox is not there yet; run the install command again after updating to one that has it. `--no-sandbox` skips all of this, for a server only you sign in to on a host without AppArmor.
 
 **Sign in as the first admin** with a one-time link made on the server:
 
@@ -63,10 +68,11 @@ cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair --label "Fi
 
 Open the link it prints, or paste it into the desktop app under **＋ → Connect to a server**. To sign in with an emailed code instead, run the installer with `--email you@example.com`.
 
-- **Update or repair:** run the same command again. It checks the server, rewrites its own files, moves to the newest release and leaves `.env` and `data/` alone.
+- **Update:** `sudo /opt/openmausbot/update.sh`, which backs the data up, checks the new version's health and puts the old one back if it fails. The installer places it once this repository has it and prints the command when it finishes; until then, running the install command again moves to the newest release. `update.sh` pins the version by digest in `.env`, and a later run of the installer keeps that pin.
+- **Repair:** run the install command again. It checks the server, rewrites its own files and leaves `.env` and `data/` alone.
 - **Stop:** `--uninstall` stops the server and removes its containers. It deletes nothing: your data stays in `/opt/openmausbot/data`.
 - **Every other command in this guide** that starts `docker compose` for path B works from `/opt/openmausbot`.
-- **What the installer contacts:** the registries and Let's Encrypt from the table, GitHub's release list, and `cloudflare.com/cdn-cgi/trace` to learn the server's public address for the DNS check. It sends no telemetry.
+- **What the installer contacts:** the registries and Let's Encrypt from the table, GitHub's release list, this repository's files on `raw.githubusercontent.com`, and `cloudflare.com/cdn-cgi/trace` to learn the server's public address for the DNS check. It sends no telemetry.
 - **Behind a load balancer or NAT** that forwards ports 80 and 443 to the server, set `OMB_INSTALL_SKIP_DNS=1` to skip the DNS check.
 
 The installer also accepts the one-time code of a server connected to MausBot. That offering is not available yet.

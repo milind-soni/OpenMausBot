@@ -9,7 +9,7 @@
 #
 # Nothing runs until the last line calls main, so a download that is cut off part-way runs nothing. It sends no
 # telemetry. The addresses it contacts are the ones the checks name: the image registries, Let's Encrypt, GitHub's
-# release list, and cloudflare.com/cdn-cgi/trace to learn this server's public address.
+# release list and this repository's files, and cloudflare.com/cdn-cgi/trace to learn this server's public address.
 set -eu
 
 settings() {
@@ -19,6 +19,10 @@ settings() {
   RELEASES_URL=https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest
   ADMIN_URL="${MAUSBOT_ADMIN_URL:-https://cloud.openmausbot.com}"
   SCRIPT_URL=https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh
+  # Where the files this installer places come from: this repository, or a copy of it (https://… or file:///…).
+  SOURCE="${OMB_INSTALL_SOURCE:-https://raw.githubusercontent.com/milind-soni/OpenMausBot/main}"
+  SECCOMP=seccomp-omb-home.json
+  APPARMOR_PROFILE=omb-home-narrow
   PROJECT=openmausbot
   MIN_DOCKER=24
   MIN_CPUS=2
@@ -33,6 +37,7 @@ settings() {
   EMAIL=""
   CODE=""
   INSTALL_DOCKER="${OMB_INSTALL_DOCKER:-}"
+  SANDBOX=yes
   FAILED=0
   DOCKER_STATE=unknown
   DOCKER_PROBLEM=""
@@ -67,6 +72,7 @@ usage() {
   say "  --email ADDRESS    the first admin's email, so they can sign in with an emailed code"
   say "  --install-docker   install Docker with Docker's official script when it is missing, without asking"
   say "  --dir PATH         where the install lives (default /opt/openmausbot)"
+  say "  --no-sandbox       do not prepare this server for the bots' sandbox (only for a server you alone sign in to)"
   say "  <code>             the one-time code MausBot shows, to also connect this server to MausBot"
 }
 
@@ -76,6 +82,7 @@ parse() {
       --check) MODE=check ;;
       --uninstall) MODE=uninstall ;;
       --install-docker) INSTALL_DOCKER=1 ;;
+      --no-sandbox) SANDBOX=no ;;
       --domain | --email | --dir)
         [ $# -ge 2 ] || fail "$1 needs a value. $(usage)"
         case "$1" in
@@ -133,8 +140,9 @@ tty_available() {
   (exec </dev/tty) 2>/dev/null
 }
 
+# From the install's folder, as a person and update.sh run it: Compose reads .env there, COMPOSE_FILE included.
 compose() {
-  docker compose --project-directory "$INSTALL_DIR" -f "$INSTALL_DIR/compose.yaml" "$@"
+  (cd "$INSTALL_DIR" && docker compose "$@")
 }
 
 env_value() { # name: its value in the install's .env, or nothing
@@ -353,6 +361,7 @@ check_outbound() {
   targets="https://ghcr.io/v2/ https://pkg-containers.githubusercontent.com/ https://registry-1.docker.io/v2/ https://auth.docker.io/ https://production.cloudflare.docker.com/ https://acme-v02.api.letsencrypt.org/directory"
   if [ "$DOCKER_STATE" = missing ]; then targets="$targets https://get.docker.com/ https://download.docker.com/"; fi
   if [ -n "$CODE" ]; then targets="$targets $ADMIN_URL/"; fi
+  case "$SOURCE" in https://*) targets="$targets https://$(host_of "$SOURCE")/" ;; esac
   blocked=""
   for url in $targets; do
     reachable "$url" || blocked="$blocked $(host_of "$url")"
@@ -379,6 +388,20 @@ check_userns() {
   else
     ok "user namespaces: on"
   fi
+}
+
+# The bots' sandbox needs two profiles on the host, which the install puts there. This only looks.
+check_sandbox() {
+  if [ "$SANDBOX" != yes ]; then
+    note "This server will not be prepared for the bots' sandbox, as asked. Do this only on a server you alone sign in to."
+    return
+  fi
+  enabled=$(cat "$SYSROOT/sys/module/apparmor/parameters/enabled" 2>/dev/null || true)
+  if [ "$enabled" != Y ] || ! command -v apparmor_parser >/dev/null 2>&1; then
+    fix "This server is missing AppArmor or its tools, which the bots' sandbox needs. Run: sudo apt-get install -y apparmor  then restart the server and run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
+    return
+  fi
+  ok "bots' sandbox: AppArmor is on, so this server can be prepared for it"
 }
 
 check_clock() {
@@ -454,6 +477,14 @@ check_version() {
     esac
     return
   fi
+  pinned=$(env_value OMB_IMAGE)
+  case "$pinned" in
+    *@sha256:*)
+      IMAGE=$pinned
+      ok "version: the one update.sh pinned here; it stays until update.sh changes it"
+      return
+      ;;
+  esac
   registry_ask stable
   if [ "$REGISTRY_STATUS" = 200 ]; then
     IMAGE="ghcr.io/$IMAGE_REPO:stable"
@@ -493,6 +524,7 @@ preflight() {
   check_disk
   check_ports
   check_userns
+  check_sandbox
   if ! command -v curl >/dev/null 2>&1; then
     note "The domain, outbound reach, the clock and the version were not checked, because they need curl."
     return
@@ -624,10 +656,17 @@ set_env() { # name value: that one line of .env, leaving every other line as the
   } | write_file "$env_file" 600
 }
 
+unset_env() { # name
+  env_file="$INSTALL_DIR/.env"
+  if grep -q "^$1=" "$env_file" 2>/dev/null; then
+    { grep -v "^$1=" "$env_file" || true; } | write_file "$env_file" 600
+  fi
+}
+
 write_settings() {
   if [ ! -f "$INSTALL_DIR/.env" ]; then
     write_file "$INSTALL_DIR/.env" 600 <<'ENV'
-# MausBot's settings on this server. The installer sets DOMAIN and OMB_IMAGE and keeps every other line.
+# MausBot's settings on this server. The installer sets DOMAIN, OMB_IMAGE and COMPOSE_FILE and keeps every other line.
 # Who may sign in with an emailed code: OMB_SIGNIN_EMAILS (admins) and OMB_SIGNIN_MEMBER_EMAILS, comma-separated.
 ENV
   fi
@@ -640,6 +679,78 @@ ENV
       *) set_env OMB_SIGNIN_EMAILS "${current:+$current,}$EMAIL" ;;
     esac
   fi
+}
+
+fetch() { # path-in-the-repository destination [mode]: 1 when it is not there
+  tmp_fetch=$(mktemp "$2.XXXXXX")
+  if curl -fsSL --max-time 60 "$SOURCE/$1" -o "$tmp_fetch" 2>/dev/null && [ -s "$tmp_fetch" ]; then
+    chmod "${3:-644}" "$tmp_fetch"
+    mv "$tmp_fetch" "$2"
+    return 0
+  fi
+  rm -f "$tmp_fetch"
+  return 1
+}
+
+# update.sh (deploy/update.sh) updates with a backup and a way back; it is this repository's file, placed as it is.
+place_update() {
+  fetch deploy/update.sh "$INSTALL_DIR/update.sh" 755 || true
+}
+
+# The sandbox's host preparation and Compose settings are this repository's own (deploy/box, connector/profiles),
+# fetched and used as they are. 1 when they are not published where SOURCE points.
+fetch_sandbox() {
+  mkdir -p "$INSTALL_DIR/box/profiles"
+  fetch deploy/box/prepare-host.sh "$INSTALL_DIR/box/prepare-host.sh" 755 &&
+    fetch deploy/box/compose.box.yaml "$INSTALL_DIR/compose.box.yaml" &&
+    fetch "connector/profiles/$SECCOMP" "$INSTALL_DIR/box/profiles/$SECCOMP" &&
+    fetch "connector/profiles/$APPARMOR_PROFILE.apparmor" "$INSTALL_DIR/box/profiles/$APPARMOR_PROFILE.apparmor"
+}
+
+# An image that runs the hardened profile says so in its settings (OMB_IMAGE=server).
+image_has_sandbox() {
+  case "$(docker image inspect -f '{{json .Config.Env}}' "$IMAGE" 2>/dev/null || true)" in
+    *'"OMB_IMAGE=server"'*) return 0 ;;
+  esac
+  return 1
+}
+
+# Sets SANDBOX to on when the server will start with the sandbox's settings, and says why when it will not.
+prepare_sandbox() {
+  if [ "$SANDBOX" != yes ]; then
+    unset_env COMPOSE_FILE
+    return
+  fi
+  if ! image_has_sandbox; then
+    unset_env COMPOSE_FILE
+    SANDBOX=absent
+    note "MausBot ${IMAGE##*[:@]} has no bots' sandbox yet. Run this command again after updating to a version that has it."
+    return
+  fi
+  if ! fetch_sandbox; then
+    fail "The files that prepare this server for the bots' sandbox could not be downloaded from $SOURCE. Check this server's outbound HTTPS and run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
+  fi
+  say "Preparing this server for the bots' sandbox..."
+  MAUSBOT_PROFILES_DIR="$INSTALL_DIR/box/profiles" sh "$INSTALL_DIR/box/prepare-host.sh" >/dev/null ||
+    fail "This server could not be prepared for the bots' sandbox (the reason is above). Fix that and run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
+  set_env COMPOSE_FILE compose.yaml:compose.box.yaml
+  SANDBOX=on
+}
+
+# The server's own self-check of the sandbox, as a bot meets it: among its checks, that config.json cannot be read.
+check_sandbox_runs() {
+  [ "$SANDBOX" = on ] || return 0
+  say "Checking that the bots' sandbox holds..."
+  report=$(compose exec -T omb node dist-server/bot-box/box-check.js --public=none 2>/dev/null | tr -d ' \n' || true)
+  case "$report" in
+    *'"box":"bwrap"'*'"failed":[]'* | *'"failed":[]'*'"box":"bwrap"'*)
+      case "$report" in
+        *'"config-hidden"'*) say "The bots' sandbox is on: a bot cannot read the server's settings, keys or other bots' files." ;;
+        *) fail "MausBot is running, but its sandbox self-check did not test that a bot cannot read the server's settings. Send us this line." ;;
+      esac
+      ;;
+    *) fail "MausBot is running, but its bots' sandbox failed its self-check, so bots are not safely separated from the server. See it with: cd $INSTALL_DIR && sudo docker compose exec omb node dist-server/bot-box/box-check.js --public=none  and send us what it prints." ;;
+  esac
 }
 
 # A new data folder is handed to the user the image runs as. A folder that already exists is never touched.
@@ -688,10 +799,13 @@ install_server() {
   write_settings
   say "Downloading MausBot (${IMAGE##*:})..."
   compose pull -q || fail "MausBot could not be downloaded (Docker's message is above). Check this server's outbound HTTPS, then run this again."
+  place_update
+  prepare_sandbox
   prepare_data
   say "Starting MausBot..."
   compose up -d --remove-orphans >/dev/null || fail "MausBot could not be started (Docker's message is above). Fix that, then run this again."
   wait_healthy || fail "MausBot started but did not report healthy within $HEALTH_WAIT_S seconds. Its log: cd $INSTALL_DIR && sudo docker compose logs omb --tail 50"
+  check_sandbox_runs
   say "Waiting for the HTTPS certificate of $DOMAIN..."
   wait_https || fail "MausBot is running, but https://$DOMAIN did not answer within $HTTPS_WAIT_S seconds, usually because the certificate could not be issued. Check that $DOMAIN points at this server and that ports 80 and 443 are open in your provider's firewall, then run this again. Caddy's reason: cd $INSTALL_DIR && sudo docker compose logs caddy --tail 30"
 }
@@ -736,7 +850,13 @@ finish() {
     say "Or open https://$DOMAIN/pair and sign in with an emailed code as: $admins"
   fi
   say ""
-  say "Settings: $INSTALL_DIR/.env    Your data: $INSTALL_DIR/data    Run this command again to update or repair."
+  if [ -x "$INSTALL_DIR/update.sh" ]; then
+    say "To update later, with a backup first and a way back:  sudo $INSTALL_DIR/update.sh"
+  else
+    say "To update later, run this command again."
+  fi
+  say ""
+  say "Settings: $INSTALL_DIR/.env    Your data: $INSTALL_DIR/data    Run this command again to repair."
 }
 
 run_install() {
@@ -776,6 +896,9 @@ run_uninstall() {
   say "Your data is kept in $INSTALL_DIR/data, your settings in $INSTALL_DIR/.env and the HTTPS certificates in $INSTALL_DIR/caddy."
   say "To start it again: $(command_line "--domain $(env_value DOMAIN)")"
   say "This command never deletes your data. To delete it yourself: sudo rm -rf $INSTALL_DIR"
+  if [ -f "$SYSROOT/etc/mausbot/$SECCOMP" ]; then
+    say "The sandbox's two profiles stay on this server: /etc/mausbot/$SECCOMP and /etc/apparmor.d/$APPARMOR_PROFILE."
+  fi
   if [ -n "$(docker ps -aq --filter name=mausbot-connector 2>/dev/null || true)" ]; then
     say "This server is still connected to MausBot. To disconnect it, run the uninstall command MausBot shows for the connector."
   fi
