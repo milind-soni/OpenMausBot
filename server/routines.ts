@@ -1537,7 +1537,6 @@ export class RoutineManager {
     }
   }
 
-  /** Lands at the end of the running save batch (server/save-batch.ts); what a caller rolls back on failure uses save. */
   private saveLater() { saveSoon(this, () => this.save()); }
   private save() {
     if (this.unreadable) { this.progress.written(); return; }
