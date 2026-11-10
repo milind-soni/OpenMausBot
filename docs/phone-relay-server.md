@@ -10,6 +10,15 @@ end-to-end encrypted connection the desktop app gives phones; the wire spec is
 It is off unless asked for, and it changes nothing about `--tunnel`, your own
 domain, `--public-url`, `--lan` or `--tailscale`.
 
+**For now `--relay` is only for a machine that has no tunnel address**, signed in
+with `openmausbot login --relay`. The control plane does not yet tell a server
+from a desktop: it gives back the tunnel of any installation that took a relay
+token in the last two days and then refuses it a tunnel for good. So the server
+keeps the relay off, and says why, when it serves `--tunnel`, runs on a fleet
+credential (`OMB_INSTALLATION_CREDENTIAL`), or holds a tunnel address from a
+plain `openmausbot login`. The same goes the other way: a machine that has used
+the relay cannot get a tunnel address until the control plane exempts servers.
+
 ## Use it
 
 ```sh
@@ -22,8 +31,11 @@ npx openmausbot devices         # every paired device; `devices revoke ID` remov
 `--relay` can join `--domain`, `--public-url`, `--tailscale` or `--lan`: those
 stay the way in for browsers and the desktop app, and the QR also names the
 server's HTTPS address for a phone app that has no encrypted connection yet. It
-cannot join `--tunnel` (see "The control plane" below). As a service:
-`openmausbot service install --relay`.
+cannot join `--tunnel`, and `start --relay` refuses when the saved startup
+choice is a tunnel. As a service: `openmausbot service install --relay`. A
+service prints no pairing QR into its log (the credential would sit in the
+journal); `serve --relay` shows it only at a terminal, and `pair --phone` makes
+one whenever asked.
 
 With Docker, set `OMB_PHONE_RELAY=1` in `.env` (both compose files pass it
 through), `docker compose up -d`, then:
@@ -32,9 +44,6 @@ through), `docker compose up -d`, then:
 docker compose exec omb openmausbot login --relay
 docker compose exec omb openmausbot pair --phone
 ```
-
-A fleet container that already has an installation credential can set
-`OMB_INSTALLATION_CREDENTIAL` instead of signing in.
 
 A phone code is chat and approvals only (`pair --phone`), as on every other way
 in. Up to 20 phones pair through the relay per server.
@@ -117,8 +126,7 @@ and `relayToken` in `control-plane-client.d.mts` are type declarations only.
 credential in `tunnel-account.json`, mode 0600. Plain `login` also reserves a
 tunnel address; `login --relay` reserves none (the account service's on-demand
 path, the one the desktop takes when the relay carries its phones), so a
-relay-only server never takes one of the scarce tunnels. A machine that already
-ran plain `login` can use the relay as it is. The server asks
+relay-only server never takes one of the scarce tunnels. The server asks
 `POST /v1/installations/self/relay-token` with exactly the body the desktop
 sends, `{appVersion, devices: {e2e, legacy}}`, hourly.
 
@@ -134,15 +142,17 @@ A server qualifies today; no control plane change is needed to get a token:
 
 What does need a control plane change, not in this pull request:
 
-- **Servers must be exempt from giving their tunnel back.** The tunnel release
-  cron and the legacy-phone cutoff treat an installation that holds a recent
-  relay token as carried by the relay. A server's tunnel also serves browsers
-  and the desktop app, so once `TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT` is raised,
-  a server that has used the relay would be answered `409 relay_capable`
-  ("retired") on its next `serve --tunnel`. Until the control plane can tell a
-  server apart, `--relay` and `--tunnel` cannot be combined, and a server
-  reports every non-relay session as `legacy`, which keeps
-  `relay_adoption.legacy_clear_at` empty so the release cron never picks it.
+- **Servers must be exempt from giving their tunnel back.** With the legacy
+  phone cutoff at 100%, the release cron gives back the tunnel of any
+  installation that took a relay token in the last two days at a relay-capable
+  version, and provisioning then answers it `409 relay_capable` ("retired") for
+  good. Neither reads the device counts a server reports, so nothing a server
+  sends can protect its tunnel. A server's tunnel serves browsers and the
+  desktop app too. Until the control plane tells a server apart, the server
+  protects itself: it never asks for a relay token while it serves a tunnel,
+  runs on a fleet credential, or holds a tunnel address (above). The `legacy`
+  count it reports (its sessions the relay does not carry) changes nothing
+  here.
 - **The change:** record the kind of installation (`"server"` from
   `openmausbot login` and the fleet; desktop otherwise), and leave servers out
   of the release cron, the cutoff and `relay_capable`. The relay-token schema
@@ -175,9 +185,11 @@ credential that only the owner can mint: `openmausbot pair --phone` on the
 machine (the owner, or on a shared server the per-launch owner token `serve`
 holds), or a signed-in admin in the web UI. It is both the handshake's key and
 the credential `/api/pair` redeems, so only someone holding the QR completes a
-handshake at all. The 12-character typed code never works through the relay. A
-window lasts 10 minutes unless `--ttl` says otherwise, and the session that
-redeems it closes after 150 seconds if it has not paired.
+handshake at all. Through the relay `/api/pair` takes only a credential: a
+12-character typed code is refused, and the browser's pairing route
+(`/api/auth/pair`) answers 404. A window lasts 10 minutes unless `--ttl` says
+otherwise, and the session that redeems it closes after 150 seconds if it has
+not paired.
 
 **Not a way around the server's sign-in.** A relayed request reaches the
 server's request handler with no peer address, which `request-auth.ts` always
@@ -186,7 +198,9 @@ treats as remote; its `Host`, proxy headers, cookies and every
 never owner or service trust: it needs a session bearer, the session's scopes
 apply (a chat-only phone stays chat-only), and a Team server's per-person rules
 apply. Inside one encrypted session only the session whose key opened it is
-accepted; before pairing, only `POST /api/pair` and `GET /api/health` are.
+accepted, as a bearer token or as a stream ticket (another session's ticket is
+refused without being spent); before pairing, only `POST /api/pair` and
+`GET /api/health` are.
 
 **Another account.** The relay identity (`h`) belongs to the installation, so
 signing the machine in to a different account gives it a new one, and phones
@@ -202,9 +216,14 @@ that member. Service trust is untouched, because no relayed request is local.
 
 **Rate limits.** The relay: 60 new sockets a minute and 256 open per IP; per
 server one control socket, 16 phone sessions and 32 admission values. The
-server: 16 handshakes at once; 20 relay phones; the pairing lockout (5 wrong in
-5 minutes locks pairing for 5 minutes) applies with the relay as one source.
-The control plane: 60 relay tokens an hour per installation.
+server: 16 handshakes at once; 20 relay phones; 4 live sessions per phone and 2
+per pairing window (a new one closes the oldest, so one phone cannot hold all
+16); the pairing lockout (5 wrong in 5 minutes locks pairing for 5 minutes),
+counted per paired phone and per pairing window, so a paired phone cannot lock
+pairing for others and whoever holds a window's QR is still locked out on it.
+Each stream must send complete request headers within 30 seconds of opening or
+of its last answer, and a request's whole body within 5 minutes, or it is
+closed. The control plane: 60 relay tokens an hour per installation.
 
 It never runs on a MausBot Cloud, a hosted workspace or the desktop app (whose
 companion already carries phones), whatever the environment says.
@@ -216,6 +235,7 @@ The server keeps working on every other way in; the relay only adds one. What
 
 | Situation | Line |
 |---|---|
+| The machine serves a tunnel, runs on a fleet credential or holds a tunnel address | MausBot Relay stays off here: (why). A relay token would make that tunnel go for good; use the relay on a machine signed in with `openmausbot login --relay`. |
 | Not signed in, or the sign-in expired | MausBot Relay needs this machine signed in to a MausBot account: `openmausbot login --relay` |
 | The control plane says no (rollout, blocked, switched off) | MausBot Relay is not available for this machine right now. The server keeps working here; it asks again every half hour. |
 | The control plane does not answer | The MausBot account service did not answer. The server keeps working here and keeps trying. |
@@ -240,8 +260,11 @@ again…".
 - Moving a phone already paired over HTTPS onto the relay without pairing
   again (trust on first use of `k` from `/api/companion/endpoints`). Small to
   medium, and needs the phone apps' behaviour confirmed.
-- The control plane's installation kind and its exemptions, then allowing
-  `--relay` with `--tunnel`. Small, plus a migration.
+- The control plane's installation kind and its exemptions; then the server
+  can drop its tunnel refusal and allow `--relay` with `--tunnel`. Small, plus a
+  migration.
+- The same stream deadlines on the desktop's companion: its encrypted streams
+  have the same gap, reachable only by a paired phone. Small.
 - Renewing the installation credential before its 90 days end. `serve
   --relay` does not run the account service that renews it, so after 90 days
   the relay reports "needs this machine signed in" until `login --relay` is run

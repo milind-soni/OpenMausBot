@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { parseArgs, runLogin } from "./cli.ts";
-import { relayPairingBlock, relayProblemLines, showRelayPairing } from "./cli-pairing.ts";
+import { applyStartupPreferences, parseArgs, runLogin, type CliOptions } from "./cli.ts";
+import { RELAY_NOT_WITH_TUNNEL, relayPairingBlock, relayProblemLines, showRelayPairing } from "./cli-pairing.ts";
+import { serviceServeArgs } from "./service-cli.ts";
 import type { PhoneRelayStatus } from "./phone-relay.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { startControlPlaneStub } from "./testing/control-plane-stub.ts";
@@ -40,6 +41,9 @@ describe("openmausbot serve --relay", () => {
     expect(relayProblemLines(status({ grant: "unavailable", relay: "off" }), "npx openmausbot")[0]).toMatch(/not available for this machine right now\. The server keeps working here/);
     expect(relayProblemLines(status({ relay: "connecting", node: null }), "openmausbot")[0]).toMatch(/^Can't reach MausBot Relay yet\. The server keeps working here/);
     expect(relayProblemLines(status(), "openmausbot")).toEqual([]);
+    expect(relayProblemLines(status({ grant: "tunnel", relay: "off", reason: "this server runs with --tunnel" }), "openmausbot")).toEqual([
+      "MausBot Relay stays off here: this server runs with --tunnel. A relay token would make that tunnel go for good; use the relay on a machine signed in with openmausbot login --relay.",
+    ]);
   });
 
   it("waits for the relay before making a code, and makes none it can't use", async () => {
@@ -47,11 +51,11 @@ describe("openmausbot serve --relay", () => {
     const lines: string[] = [];
     let minted = 0;
     const mint = async () => `code ${++minted}`;
-    expect(await showRelayPairing({ status: async () => reads.shift() ?? status(), mint, log: (line) => lines.push(line), prefix: "openmausbot", waitMs: 5_000 })).toBe(true);
+    expect(await showRelayPairing({ tty: true, status: async () => reads.shift() ?? status(), mint, log: (line) => lines.push(line), prefix: "openmausbot", waitMs: 5_000 })).toBe(true);
     expect(lines).toEqual(["code 1"]);
 
     lines.length = 0;
-    expect(await showRelayPairing({ status: async () => status({ grant: "signed-out", relay: "off" }), mint, log: (line) => lines.push(line), prefix: "openmausbot", waitMs: 0 })).toBe(false);
+    expect(await showRelayPairing({ tty: true, status: async () => status({ grant: "signed-out", relay: "off" }), mint, log: (line) => lines.push(line), prefix: "openmausbot", waitMs: 0 })).toBe(false);
     expect(minted).toBe(1);
     expect(lines[1]).toBe("Then: openmausbot pair --phone");
   });
@@ -77,5 +81,28 @@ describe("openmausbot serve --relay", () => {
       await stub.close();
       await removeTempDir(dataDir);
     }
+  });
+
+  it("never prints the one-time credential into a service's log", async () => {
+    const lines: string[] = [];
+    let minted = 0;
+    expect(await showRelayPairing({ tty: false, status: async () => status(), mint: async () => `code ${++minted}`, log: (line) => lines.push(line), prefix: "openmausbot" })).toBe(false);
+    expect(minted).toBe(0);
+    expect(lines).toEqual(["Pair a phone: openmausbot pair --phone"]);
+  });
+
+  it("keeps a saved tunnel choice and the relay apart, and passes --relay to a service", () => {
+    const start = (argv: string[]) => {
+      const parsed = parseArgs(argv, {});
+      if ("error" in parsed) throw new Error(parsed.error);
+      return parsed as CliOptions;
+    };
+    expect(() => applyStartupPreferences(start(["start", "--relay"]), { access: "tunnel" })).toThrow(RELAY_NOT_WITH_TUNNEL);
+    expect(applyStartupPreferences(start(["start", "--relay"]), { access: "local" })).toMatchObject({ relay: true, tunnel: false });
+    expect(applyStartupPreferences(start(["start", "--relay"]), undefined)).toMatchObject({ relay: true });
+    expect(applyStartupPreferences(start(["start"]), { access: "tunnel" })).toMatchObject({ tunnel: true });
+    expect(serviceServeArgs({ port: 8799, dataDir: "/d", relay: true })).toEqual(["--port", "8799", "--data-dir", "/d", "--relay"]);
+    expect(serviceServeArgs({ port: 8799, dataDir: "/d", domain: "maus.example.com", relay: true })).toEqual(["--port", "8799", "--data-dir", "/d", "--domain", "maus.example.com", "--relay"]);
+    expect(serviceServeArgs({ port: 8799, dataDir: "/d" })).toEqual(["--port", "8799", "--data-dir", "/d"]);
   });
 });

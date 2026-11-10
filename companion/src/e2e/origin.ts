@@ -42,18 +42,64 @@ export interface E2EOrigin {
   close(): void;
 }
 
+/** How long a stream may take to send a request's headers, and then its whole body. Node's own headersTimeout and
+ * requestTimeout are checked only by a server that listens, and this one never does. */
+export interface E2EOriginDeadlines {
+  headersMs: number;
+  requestMs: number;
+}
+
+/** Each stream must send complete request headers within `headersMs` of opening or of its last response, and a request's
+ * whole body within `requestMs`; otherwise the stream is destroyed. */
+function enforceDeadlines(server: ReturnType<typeof createServer>, deadlines: E2EOriginDeadlines) {
+  const timers = new WeakMap<object, { arm(): void; clear(): void }>();
+  const onRequest = (req: IncomingMessage, res?: ServerResponse) => {
+    const guard = timers.get(req.socket);
+    if (!guard) return;
+    guard.clear();
+    const body = setTimeout(() => req.socket.destroy(), deadlines.requestMs);
+    body.unref?.();
+    const done = () => clearTimeout(body);
+    req.once("end", done);
+    req.once("close", done);
+    res?.once("finish", () => guard.arm());
+  };
+  server.on("request", onRequest);
+  server.on("upgrade", (req: IncomingMessage) => {
+    timers.get(req.socket)?.clear();
+  });
+  return (socket: Duplex) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const clear = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    };
+    const arm = () => {
+      clear();
+      timer = setTimeout(() => socket.destroy(), deadlines.headersMs);
+      timer.unref?.();
+    };
+    socket.once("close", clear);
+    timers.set(socket, { arm, clear });
+    arm();
+  };
+}
+
 export function createE2EOrigin(
   handle: (req: IncomingMessage, res: ServerResponse) => void,
   upgrade: (req: IncomingMessage, socket: Duplex, head: Buffer) => void,
+  deadlines?: E2EOriginDeadlines,
 ): E2EOrigin {
   // Gzipped like the tunnel listener: the relay hop is the person's home upload too.
   const server = createServer(gzipTunnelReplies(handle));
   server.on("upgrade", upgrade);
+  const guard = deadlines ? enforceDeadlines(server, deadlines) : null;
   return {
     connect(context) {
       const [near, far] = duplexPair();
       const serverSide = socketLike(far);
       contexts.set(serverSide, context);
+      guard?.(serverSide);
       server.emit("connection", serverSide);
       return Promise.resolve(near);
     },

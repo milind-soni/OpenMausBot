@@ -2,12 +2,12 @@
 // pairing code the owner makes on the server is redeemed through the relay, and the phone is then a session like any.
 import { spawn, type ChildProcess } from "node:child_process";
 import { generateKeyPairSync, randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, openSync, closeSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, openSync, closeSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 
 import { verificationServerArgs, verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { admission, b64u, credentialHash, ed25519RawPublicKey, fromB64u, keyId, mintRelayToken, psk } from "../companion/src/e2e/credentials.ts";
@@ -29,6 +29,29 @@ let child: ChildProcess;
 let dataDir: string;
 let logPath: string;
 let base: string;
+const others: Array<{ child: ChildProcess; dataDir: string }> = [];
+
+/** A real server in a new data dir, signed in for the relay as `login --relay` leaves it: a credential, no tunnel address. */
+async function boot(extra: Record<string, string> = {}) {
+  const port = await freePortBlock([0, 1]);
+  const dir = mkdtempSync(join(tmpdir(), "omb-phone-relay-e2e-"));
+  mkdirSync(join(dir, "tmp"), { recursive: true });
+  writeFileSync(join(dir, "tunnel-account.json"), JSON.stringify({ companionInstallationCredential: credential }), { mode: 0o600 });
+  const env = {
+    ...verificationServerEnvironment(process.env, dir, port),
+    OMB_PHONE_RELAY: "1",
+    OMB_PHONE_RELAY_URL: relay.url,
+    OMB_CONTROL_PLANE_URL: `http://127.0.0.1:${(controlPlane.address() as AddressInfo).port}`,
+    ...extra,
+  };
+  const log = join(dir, "server.log");
+  const fd = openSync(log, "a", 0o600);
+  const started = spawn(process.execPath, verificationServerArgs(env), { env, stdio: ["ignore", fd, fd] });
+  closeSync(fd);
+  const url = `http://127.0.0.1:${port}`;
+  await waitFor(async () => (await fetch(`${url}/api/health`).then((r) => r.json(), () => null) as { app?: string } | null)?.app === "openmausbot", 30_000);
+  return { child: started, dataDir: dir, logPath: log, base: url };
+}
 
 beforeAll(async () => {
   relay = await startFakeRelay({ keys: new Map([["k1", ed25519RawPublicKey(signingKey)]]) });
@@ -46,26 +69,15 @@ beforeAll(async () => {
     }));
   });
   await new Promise<void>((resolve) => controlPlane.listen(0, "127.0.0.1", resolve));
-  const port = await freePortBlock([0, 1]);
-  base = `http://127.0.0.1:${port}`;
-  dataDir = mkdtempSync(join(tmpdir(), "omb-phone-relay-e2e-"));
-  mkdirSync(join(dataDir, "tmp"), { recursive: true });
-  const env = {
-    ...verificationServerEnvironment(process.env, dataDir, port),
-    OMB_PHONE_RELAY: "1",
-    OMB_PHONE_RELAY_URL: relay.url,
-    OMB_CONTROL_PLANE_URL: `http://127.0.0.1:${(controlPlane.address() as AddressInfo).port}`,
-    OMB_INSTALLATION_CREDENTIAL: credential,
-  };
-  logPath = join(dataDir, "server.log");
-  const log = openSync(logPath, "a", 0o600);
-  child = spawn(process.execPath, verificationServerArgs(env), { env, stdio: ["ignore", log, log] });
-  closeSync(log);
-  await waitFor(async () => (await fetch(`${base}/api/health`).then((r) => r.json(), () => null) as { app?: string } | null)?.app === "openmausbot", 30_000);
+  ({ child, dataDir, logPath, base } = await boot());
 }, 60_000);
 
 afterAll(async () => {
   await waitForExit(child, { signal: "SIGTERM", graceMs: 15_000 });
+  for (const other of others) {
+    await waitForExit(other.child, { signal: "SIGTERM", graceMs: 15_000 });
+    await removeTempDir(other.dataDir);
+  }
   await relay?.close();
   await new Promise((resolve) => controlPlane?.close(resolve));
   if (dataDir) await removeTempDir(dataDir);
@@ -118,4 +130,22 @@ describe("serve --relay", () => {
     expect(session.removed).toBe(true);
     expect((await owner("/api/auth/pairing")).body.relay.phones).toBe(0);
   }, 60_000);
+
+  it("stays off on a server that serves a tunnel or runs on a fleet credential, and asks the control plane nothing", async () => {
+    const asked = tokenRequests.length;
+    const socket = join(tmpdir(), `omb-relay-e2e-${process.pid}-${Date.now()}.sock`);
+    const tunnel = await boot({ OMB_TUNNEL_SOCKET: socket });
+    others.push(tunnel);
+    onTestFinished(() => rmSync(socket, { force: true }));
+    const fleet = await boot({ OMB_INSTALLATION_CREDENTIAL: credential });
+    others.push(fleet);
+    for (const server of [tunnel, fleet]) {
+      const status = await (await fetch(`${server.base}/api/auth/pairing`)).json() as { relay?: { grant: string; reason?: string } };
+      expect(status.relay).toMatchObject({ grant: "tunnel", reason: expect.any(String) });
+      const minted = await (await fetch(`${server.base}/api/auth/pairing`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scopes: ["client"] }) })).json() as { inviteUrl: string | null };
+      expect(minted.inviteUrl ?? "").not.toContain("e2e=");
+      expect(readFileSync(server.logPath, "utf8")).toMatch(/phone relay: off: .*login --relay/);
+    }
+    expect(tokenRequests.length).toBe(asked);
+  }, 90_000);
 });

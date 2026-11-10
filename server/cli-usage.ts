@@ -107,7 +107,8 @@ Ways in (pick one; --lan can join any):
 --relay      phones only, and it can join any of the above except --tunnel:
              the MausBot phone app pairs by QR through MausBot Relay,
              end-to-end encrypted, with no address, open port or VPN. Run
-             \`openmausbot login --relay\` once on this machine first.
+             \`openmausbot login --relay\` once on this machine first. Not on a
+             machine with a tunnel address: the relay stays off there.
 
 --no-open   do not open a browser window
 --no-pair   do not print a pairing code

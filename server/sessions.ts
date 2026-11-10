@@ -779,6 +779,12 @@ export class SessionRegistry {
     return { ticket, expiresAt };
   }
 
+  /** Whose a stream ticket is, without spending it. */
+  ticketOwner(ticket: string): string | null {
+    const entry = this.tickets.get(sha256(ticket));
+    return entry && entry.expiresAt > this.now() ? entry.sessionId : null;
+  }
+
   redeemStreamTicket(ticket: string): SessionRecord | null {
     this.prune();
     const hash = sha256(ticket);

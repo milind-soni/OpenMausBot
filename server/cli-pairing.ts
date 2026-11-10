@@ -83,9 +83,13 @@ export function formatSessions(sessions: Array<{ id: string; label: string; scop
 const isStatus = (value: unknown): value is PhoneRelayStatus =>
   typeof value === "object" && value !== null && typeof (value as PhoneRelayStatus).grant === "string" && typeof (value as PhoneRelayStatus).relay === "string";
 
+/** Until the control plane tells a server from a desktop, a machine that takes a relay token gives back its tunnel. */
+export const RELAY_NOT_WITH_TUNNEL = "--relay cannot be used on a machine whose saved choice is a tunnel address: a relay token would make the tunnel go for good. Start with --local, or use the relay on a machine signed in with `openmausbot login --relay`.";
+
 /** Why phones cannot pair through the relay yet, in words for the person at the terminal; empty when they can. */
 export function relayProblemLines(status: PhoneRelayStatus | null, prefix: string): string[] {
   if (!status) return [`MausBot Relay is off on this server. Start it with: ${prefix} serve --relay`];
+  if (status.grant === "tunnel") return [`MausBot Relay stays off here: ${status.reason ?? "this machine holds a tunnel address"}. A relay token would make that tunnel go for good; use the relay on a machine signed in with ${prefix} login --relay.`];
   if (status.grant === "signed-out") return [`MausBot Relay needs this machine signed in to a MausBot account: ${prefix} login --relay (then leave the server running; it connects within a minute).`];
   if (status.grant === "unavailable") return ["MausBot Relay is not available for this machine right now. The server keeps working here; it asks again every half hour."];
   if (status.grant === "failed") return ["The MausBot account service did not answer. The server keeps working here and keeps trying."];
@@ -109,14 +113,20 @@ export function relayPairingBlock(body: Record<string, unknown>, chatOnly: boole
   return lines.join("\n");
 }
 
-/** Waits for the relay to connect, then prints a phone code; otherwise says why not. True when it printed a code. */
+/** Waits for the relay to connect, then prints a phone code; otherwise says why not. True when it printed a code. A
+ * service's output lands in its log on every start, so the one-time credential is printed only at a terminal. */
 export async function showRelayPairing(input: {
+  tty: boolean;
   status: () => Promise<unknown>;
   mint: () => Promise<string>;
   log: (line: string) => void;
   prefix: string;
   waitMs?: number;
 }): Promise<boolean> {
+  if (!input.tty) {
+    input.log(`Pair a phone: ${input.prefix} pair --phone`);
+    return false;
+  }
   const deadline = Date.now() + (input.waitMs ?? 20_000);
   let status: PhoneRelayStatus | null = null;
   for (;;) {
@@ -130,6 +140,6 @@ export async function showRelayPairing(input: {
     return true;
   }
   for (const line of relayProblemLines(status, input.prefix)) input.log(line);
-  input.log(`Then: ${input.prefix} pair --phone`);
+  if (status?.grant !== "tunnel") input.log(`Then: ${input.prefix} pair --phone`);
   return false;
 }

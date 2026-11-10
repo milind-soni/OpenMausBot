@@ -13,17 +13,19 @@ import { relayBaseUrlOverride } from "../companion/src/e2e/config.ts";
 import { b64u, fromB64u } from "../companion/src/e2e/credentials.ts";
 import type { E2EDescriptor } from "../companion/src/e2e/descriptor.ts";
 import { generateKeyPair, keyPairFromPrivate, TRANSPORT_RELAY, type KeyPair } from "../companion/src/e2e/noise.ts";
-import { createE2EOrigin, e2eContextOf } from "../companion/src/e2e/origin.ts";
-import { E2ERegistry, type E2EContext, type E2EDevices } from "../companion/src/e2e/registry.ts";
+import { createE2EOrigin, e2eContextOf, type E2EOriginDeadlines } from "../companion/src/e2e/origin.ts";
+import { E2ERegistry, type E2EContext, type E2EDevices, type Peer } from "../companion/src/e2e/registry.ts";
 import { RelayClient, type RelayStatus } from "../companion/src/e2e/relay-client.ts";
 import { COMPANION_INSTALLATION_CREDENTIAL_FIELD, resolveCompanionControlPlaneURL } from "../electron/companion-account-service.mjs";
 import { createControlPlaneClient } from "../electron/control-plane-client.mjs";
-import { createRelayTokenService, type RelayGrant } from "../electron/relay-token.mjs";
+import { MANAGED_COMPANION_ENDPOINT_FIELD } from "../electron/managed-companion-tunnel.mjs";
+import { createRelayTokenService, validRelayGrant, type RelayGrant } from "../electron/relay-token.mjs";
 import { isLoopbackHost } from "../electron/server-address.mjs";
 import { writeFileAtomic } from "./atomic.ts";
 import { bearerToken, PROXY_HEADERS } from "./request-auth.ts";
-import type { SessionRegistry } from "./sessions.ts";
-import { fleetCredential, openTunnelCredentials } from "./tunnel.ts";
+import { isPairingCredential, type SessionRegistry } from "./sessions.ts";
+import { describeTunnelAccount, FLEET_CREDENTIAL_ENV, fleetCredential, openTunnelCredentials } from "./tunnel.ts";
+import type { E2ESession } from "../companion/src/e2e/session.ts";
 
 export const PHONE_RELAY_ENV = "OMB_PHONE_RELAY";
 export const PHONE_RELAY_KEY_FILE = "phone-relay-key.json";
@@ -35,16 +37,20 @@ const MAX_PAIRING_WINDOWS = 2;
 const ADMISSION_SETTLE_MS = 300;
 /** RFC 6761 reserves `.invalid`: a QR with no public address names a host that never resolves, so only the relay works. */
 const RELAY_ONLY_ADDRESS = "relay-only.invalid";
-/** The rate-limit source of a pairing over the relay: the source address of every relayed request is the relay. */
-const RELAY_SOURCE = "phone-relay";
+/** Live sessions one phone may hold, and sessions on one pairing window: the relay carries 16 per server. */
+export const MAX_SESSIONS_PER_PHONE = 4;
+const MAX_SESSIONS_PER_WINDOW = 2;
+const STREAM_DEADLINES: E2EOriginDeadlines = { headersMs: 30_000, requestMs: 300_000 };
 const PAIRING_SESSION_ROUTES = new Set(["POST /api/pair", "GET /api/health"]);
 
-export type PhoneRelayGrantState = "waiting" | "ok" | "signed-out" | "unavailable" | "failed";
+/** `tunnel`: this machine holds or needs a tunnel address, so it never asks for a relay token (`reason` says why). */
+export type PhoneRelayGrantState = "waiting" | "ok" | "signed-out" | "unavailable" | "failed" | "tunnel";
 
 export interface PhoneRelayStatus {
   relay: RelayStatus;
   node: string | null;
   grant: PhoneRelayGrantState;
+  reason?: string;
   phones: number;
   maxPhones: number;
 }
@@ -55,6 +61,8 @@ export interface PhoneRelay {
   invite(credential: string, name: string | undefined, publicOrigin: string | null): string | null;
   /** What `POST /api/pair` adds for a phone that paired through the relay. */
   pairedOver(req: IncomingMessage): { e2e?: E2EDescriptor };
+  /** Why `POST /api/pair` refuses this input, or null: through the relay only the QR's credential pairs, never a code. */
+  pairingRefusal(req: IncomingMessage, input: string): string | null;
   stop(): void;
 }
 
@@ -63,15 +71,16 @@ type Handler = (req: IncomingMessage, res: ServerResponse) => unknown;
 export interface PhoneRelayOptions {
   env: NodeJS.ProcessEnv;
   dataDir: string;
-  sessions: Pick<SessionRegistry, "bearerDigests" | "pairingDigests" | "onSessionIssued" | "onSessionRevoked" | "list">;
+  sessions: Pick<SessionRegistry, "bearerDigests" | "pairingDigests" | "onSessionIssued" | "onSessionRevoked" | "list" | "ticketOwner">;
   handle: Handler;
   serverName(): string;
   publicOrigin(): string | null;
   version: string;
   /** Why this server never runs the relay (a Cloud home, a hosted workspace, the desktop app), or null. */
   refusal: string | null;
-  /** Tests: the control plane's relay-token answer. */
+  /** Tests: the control plane's relay-token answer, and shorter stream deadlines. */
   fetchGrant?: (devices: { e2e: number; legacy: number }) => Promise<unknown>;
+  streamDeadlines?: E2EOriginDeadlines;
   log?: (line: string) => void;
 }
 
@@ -81,6 +90,12 @@ function sameDigest(a: string, b: string): boolean {
   const left = Buffer.from(a, "hex");
   const right = Buffer.from(b, "hex");
   return left.length === 32 && left.length === right.length && timingSafeEqual(left, right);
+}
+
+/** The pairing lockout's source for a relayed request: the device, or the pairing window the session holds. Every relayed
+ * request comes from the relay's address, and one phone must not lock pairing for every other. */
+function sourceOf(peer: Peer): string {
+  return peer.kind === "device" ? `relay-${peer.id.slice(0, 48)}` : `relay-window-${(peer.admHash ?? "none").slice(0, 22)}`;
 }
 
 /** Created once with mode 0600 and never replaced: every paired phone pinned its public half from the QR. */
@@ -126,6 +141,31 @@ function reply(res: ServerResponse, status: number, body: unknown): void {
   res.end(text);
 }
 
+/** Why this machine must not take a relay token, or null. Security: the control plane does not yet tell a server from a
+ * desktop, and gives back the tunnel of any installation that recently took a relay token, then refuses it another. So
+ * a machine that serves a tunnel, runs on a fleet credential, or holds a tunnel address from `login` never asks. */
+export function tunnelHolder(env: NodeJS.ProcessEnv, dataDir: string): string | null {
+  if (env.OMB_TUNNEL_SOCKET?.trim()) return "this server runs with --tunnel";
+  if (fleetCredential(env)) return `${FLEET_CREDENTIAL_ENV} is set, and a fleet installation keeps its tunnel`;
+  const account = openTunnelCredentials(dataDir);
+  if (account.status === "unavailable") return `${account.file} could not be read, so this machine may hold a tunnel address`;
+  const document = account.read();
+  if (describeTunnelAccount(document).address || document[MANAGED_COMPANION_ENDPOINT_FIELD]) return "this machine holds a tunnel address from `openmausbot login`";
+  return null;
+}
+
+function offForTunnel(reason: string): PhoneRelay {
+  return {
+    status: () => ({ relay: "off", node: null, grant: "tunnel", reason, phones: 0, maxPhones: MAX_RELAY_PHONES }),
+    invite: () => null,
+    pairedOver: () => ({}),
+    pairingRefusal: () => null,
+    stop: () => {},
+  };
+}
+
+const TUNNEL_HELD = "tunnel_held";
+
 /** Null unless OMB_PHONE_RELAY=1, and when it cannot run here: the server works on without it either way. */
 export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
   if (options.env[PHONE_RELAY_ENV] !== "1") return null;
@@ -135,6 +175,11 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
     return null;
   }
   const { sessions, dataDir } = options;
+  const holder = tunnelHolder(options.env, dataDir);
+  if (holder) {
+    log(`phone relay: off: ${holder}. Use the relay on a machine signed in with \`openmausbot login --relay\`, which holds no tunnel address.`);
+    return offForTunnel(holder);
+  }
   let key: KeyPair;
   try {
     key = phoneRelayKey(dataDir);
@@ -162,12 +207,13 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
   const pairing = new AsyncLocalStorage<E2EContext>();
   let relay: RelayClient | null = null;
   let grantState: PhoneRelayGrantState = "waiting";
+  let tunnelReason: string | null = null;
   const baseUrl = relayBaseUrlOverride(options.env.OMB_PHONE_RELAY_URL);
   const descriptor = () => e2e.descriptor(null);
 
   const counts = () => {
     const e2eCount = devices.records().length;
-    // Every other device of a server reaches it some other way, so the control plane never takes that way back.
+    // A server's other devices reach it some other way: they are the devices the relay does not carry.
     return { e2e: Math.min(e2eCount, 100), legacy: Math.min(Math.max(sessions.list().length - e2eCount, 0), 100) };
   };
   const controlPlane = resolveCompanionControlPlaneURL({ isPackaged: true, environment: options.env });
@@ -175,7 +221,9 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
   const fetchGrant = options.fetchGrant ?? (async (devicesNow: { e2e: number; legacy: number }) => {
     const document = openTunnelCredentials(dataDir).read();
     const stored = document[COMPANION_INSTALLATION_CREDENTIAL_FIELD];
-    const credential = fleetCredential(options.env) ?? (typeof stored === "string" ? stored : null);
+    tunnelReason = tunnelHolder(options.env, dataDir);
+    if (tunnelReason) throw Object.assign(new Error(tunnelReason), { code: TUNNEL_HELD });
+    const credential = typeof stored === "string" ? stored : null;
     if (!client || !credential) throw Object.assign(new Error("signed out"), { code: "signed_out" });
     return client.relayToken(credential, { appVersion: options.version, devices: devicesNow });
   });
@@ -184,11 +232,17 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
     fetchGrant: async () => {
       try {
         const grant = await fetchGrant(counts());
+        if (!validRelayGrant(grant)) throw Object.assign(new Error("invalid relay grant"), { code: "invalid_response" });
         grantState = "ok";
         return grant;
       } catch (error) {
         const failure = error as { code?: unknown; status?: unknown };
-        grantState = failure.code === "relay_unavailable" ? "unavailable" : failure.code === "signed_out" || failure.status === 401 ? "signed-out" : "failed";
+        if (failure.code === TUNNEL_HELD) applyGrant(null);
+        const current = tokens.grant;
+        grantState = failure.code === TUNNEL_HELD ? "tunnel"
+          : failure.code === "relay_unavailable" ? "unavailable"
+          : failure.code === "signed_out" || failure.status === 401 ? "signed-out"
+          : current && current.expiresAt > Date.now() && relay ? "ok" : "failed";
         throw error;
       }
     },
@@ -196,7 +250,26 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
     log: (line) => log(`phone relay: ${line}`),
   });
 
-  const origin = createE2EOrigin((req, res) => relayed(req, res), (_req, socket) => refuseUpgrade(socket));
+  const origin = createE2EOrigin((req, res) => relayed(req, res), (_req, socket) => refuseUpgrade(socket), options.streamDeadlines ?? STREAM_DEADLINES);
+
+  /** One phone (or one pairing window) holds a few live sessions; a new one closes its oldest, so a phone that lost its
+   * sessions without the relay noticing can still come back. */
+  const held = new Map<string, E2ESession<Peer>[]>();
+  const holdSession = (session: E2ESession<Peer>) => {
+    const peer = session.peer;
+    if (!peer) return;
+    const key = peer.kind === "device" ? `device ${peer.id}` : `window ${peer.admHash}`;
+    const list = held.get(key) ?? [];
+    list.push(session);
+    held.set(key, list);
+    const limit = peer.kind === "device" ? MAX_SESSIONS_PER_PHONE : MAX_SESSIONS_PER_WINDOW;
+    while (list.length > limit) list.shift()!.shutdown();
+    void session.closed.then(() => {
+      const index = list.indexOf(session);
+      if (index >= 0) list.splice(index, 1);
+      if (!list.length && held.get(key) === list) held.delete(key);
+    });
+  };
 
   function applyGrant(grant: RelayGrant | null): void {
     const hostId = grant ? fromB64u(grant.hostId) : null;
@@ -213,6 +286,7 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
       admissionSet: () => e2e.admissionSet(),
       accept: (transport) => {
         const session = e2e.accept(transport, TRANSPORT_RELAY, "relay", (context) => origin.connect(context));
+        void session?.ready.then(() => holdSession(session), () => {});
         return session && { receive: (data, binary) => session.receive(data, binary), transportClosed: (code) => session.transportClosed(code) };
       },
       tokenRejected: () => void tokens.refreshNow(),
@@ -228,21 +302,22 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
 
   /** Security: a relayed request is never this machine's. It has no peer address, which the request gate always treats as
    * remote, and whatever Host, proxy, cookie or owner headers the phone wrote are replaced: it needs a session of its own. */
-  function scrub(req: IncomingMessage): void {
+  function scrub(req: IncomingMessage, peer: Peer): void {
     for (const name of Object.keys(req.headers)) {
       if (name === "cookie" || name.startsWith("x-openmausbot-") || (PROXY_HEADERS as readonly string[]).includes(name)) delete req.headers[name];
     }
     req.headers.host = "phone-relay.invalid";
-    req.headers["x-forwarded-for"] = RELAY_SOURCE;
+    req.headers["x-forwarded-for"] = sourceOf(peer);
   }
 
   function relayed(req: IncomingMessage, res: ServerResponse): void {
     const context = e2eContextOf(req.socket);
     if (!context) return reply(res, 500, { error: "not a relayed request" });
-    scrub(req);
+    const peer = context.peer;
+    scrub(req, peer);
     const path = (req.url ?? "/").split("?")[0];
     const method = req.method ?? "GET";
-    const peer = context.peer;
+    if (method === "POST" && path === "/api/auth/pair") return reply(res, 404, { error: "pair a phone with its QR code" });
     if (peer.kind === "pairing") {
       if (!PAIRING_SESSION_ROUTES.has(`${method} ${path}`)) return reply(res, 401, { error: "pair this phone first" });
       if (method === "POST" && devices.records().length >= MAX_RELAY_PHONES) {
@@ -252,6 +327,8 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
       const bearer = bearerToken(req.headers.authorization);
       const own = devices.records().find((record) => record.id === peer.id);
       if (bearer && (!own || !sameDigest(own.tokenHash, sha256Hex(bearer)))) return reply(res, 401, { error: "this connection belongs to another device" });
+      const ticket = new URL(req.url ?? "/", "http://phone-relay.invalid").searchParams.get("ticket");
+      if (ticket && sessions.ticketOwner(ticket) !== peer.id) return reply(res, 401, { error: "this connection belongs to another device" });
       if (method === "GET" && path === "/api/companion/endpoints") {
         if (!bearer) return reply(res, 401, { error: "pair this device first" });
         const route = qrRoute(options.publicOrigin());
@@ -282,7 +359,7 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
   tokens.start();
 
   return {
-    status: () => ({ relay: relay?.status ?? "off", node: relay?.node ?? null, grant: grantState, phones: devices.records().length, maxPhones: MAX_RELAY_PHONES }),
+    status: () => ({ relay: relay?.status ?? "off", node: relay?.node ?? null, grant: grantState, ...(grantState === "tunnel" && tunnelReason ? { reason: tunnelReason } : {}), phones: devices.records().length, maxPhones: MAX_RELAY_PHONES }),
     invite(credential, name, publicOrigin) {
       const current = descriptor();
       if (!current?.h || !current.r) return null;
@@ -293,6 +370,7 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
       const current = e2eContextOf(req.socket) ? descriptor() : null;
       return current ? { e2e: current } : {};
     },
+    pairingRefusal: (req, input) => (e2eContextOf(req.socket) && !isPairingCredential(input) ? "pair a phone with its QR code" : null),
     stop() {
       stopIssued();
       stopRevoked();
