@@ -182,6 +182,8 @@ export interface StartOptions {
   codeRoots?: readonly string[];
   engineRoots?: readonly string[];
   log?: (line: string) => void;
+  /** The server runs the hardened profile (server/server-profile.ts): boxed by default, as a Cloud home is. */
+  hardened?: boolean;
   /** Overrides for tests. */
   detect?: (env: Record<string, string | undefined>) => BoxDetection;
 }
@@ -209,7 +211,7 @@ export class BotBox {
   async start(options: StartOptions): Promise<BoxDetection> {
     this.started = options;
     const env = options.env ?? process.env;
-    this.detection = (options.detect ?? ((e) => detectBox({ env: e })))(env);
+    this.detection = (options.detect ?? ((e) => detectBox({ env: e, hardened: options.hardened })))(env);
     const log = options.log ?? ((line: string) => console.log(line));
     if (this.detection.box !== "bwrap" || !this.detection.tools) {
       log(`bot box: off (${this.detection.reason})`);

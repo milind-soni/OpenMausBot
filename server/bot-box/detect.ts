@@ -1,7 +1,7 @@
-// Whether this machine can run the bot box, decided once at boot: on by default on a Cloud home, off everywhere else
-// unless OMB_BOT_BOX=1, and never on without a working unprivileged bubblewrap (a kernel that refuses user namespaces,
-// or an image without bwrap, reports `off` with its reason rather than running turns unboxed by surprise: the report
-// says so, and the Admin shows it).
+// Whether this machine can run the bot box, decided once at boot: on by default on a Cloud home and on a server in the
+// hardened profile (server/server-profile.ts), off everywhere else unless OMB_BOT_BOX=1, and never on without a working
+// unprivileged bubblewrap (a kernel that refuses user namespaces, or an image without bwrap, reports `off` with its
+// reason rather than running turns unboxed by surprise: the report says so, and the Admin shows it).
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
@@ -22,6 +22,8 @@ export interface DetectInput {
   /** Runs bwrap once with a harmless command; true when the box works. */
   probe?: (bwrap: string) => boolean;
   which?: (name: string) => string | null;
+  /** The server runs the hardened profile, so its turns are boxed as a Cloud home's are unless OMB_BOT_BOX says no. */
+  hardened?: boolean;
 }
 
 /** A Cloud home (`home`, or the Team Cloud role `team`) boxes turns unless told not to. */
@@ -29,7 +31,7 @@ export function cloudRole(env: Record<string, string | undefined>): boolean {
   return env.OMB_CLOUD_ROLE === "home" || env.OMB_CLOUD_ROLE === "team";
 }
 
-/** `OMB_BOT_BOX`: unset (Cloud homes on, others off), 0/off, 1/on/bwrap. */
+/** `OMB_BOT_BOX`: unset (Cloud homes and the hardened profile on, others off), 0/off, 1/on/bwrap. */
 export function boxWanted(env: Record<string, string | undefined>): "on" | "off" | "default" {
   const raw = (env.OMB_BOT_BOX ?? "").trim().toLowerCase();
   if (raw === "0" || raw === "off" || raw === "false" || raw === "no") return "off";
@@ -63,7 +65,7 @@ export function probeBwrap(bwrap: string): boolean {
 export function detectBox(input: DetectInput): BoxDetection {
   const wanted = boxWanted(input.env);
   if (wanted === "off") return { box: "off", reason: "switched-off", tools: null };
-  if (wanted === "default" && !cloudRole(input.env)) return { box: "off", reason: "not-cloud", tools: null };
+  if (wanted === "default" && !cloudRole(input.env) && !input.hardened) return { box: "off", reason: "not-cloud", tools: null };
   if ((input.platform ?? process.platform) !== "linux") return { box: "off", reason: "not-linux", tools: null };
   const which = input.which ?? ((name) => whichOnPath(name, input.env));
   const bwrap = which("bwrap");

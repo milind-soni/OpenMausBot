@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { CONTROL_PLANE_ENV, WORKSPACE_CREDENTIAL_ENV } from "../config.ts";
 import { BOX_BRIDGE_SCRIPT, botBox, type BotBox } from "./box.ts";
+import type { BoxDetection } from "./detect.ts";
 import { runBoxSelfCheck } from "./self-check.ts";
 
 export { botBox };
@@ -24,11 +25,13 @@ export async function startBotBoxAtBoot(options: {
   /** Off in tests that only want the gates. */
   selfCheck?: boolean;
   delayMs?: number;
-}): Promise<void> {
+  /** The server runs the hardened profile: its turns are boxed unless OMB_BOT_BOX says no. */
+  hardened?: boolean;
+}): Promise<BoxDetection> {
   const box = options.box ?? botBox;
   const log = options.log ?? ((line: string) => console.log(line));
-  const detection = await box.start({ dataDir: options.dataDir, home: options.home ?? homedir(), port: options.port, denyEnv: BOX_DENY_ENV, log });
-  if (detection.box !== "bwrap" || !detection.tools || options.selfCheck === false) return;
+  const detection = await box.start({ dataDir: options.dataDir, home: options.home ?? homedir(), port: options.port, denyEnv: BOX_DENY_ENV, log, hardened: options.hardened });
+  if (detection.box !== "bwrap" || !detection.tools || options.selfCheck === false) return detection;
   const tools = detection.tools;
   const timer = setTimeout(() => {
     runBoxSelfCheck({
@@ -41,4 +44,5 @@ export async function startBotBoxAtBoot(options: {
     }, (error) => log(`bot box: self-check failed to run: ${error instanceof Error ? error.message : String(error)}`));
   }, options.delayMs ?? BOX_SELF_CHECK_DELAY_MS);
   timer.unref();
+  return detection;
 }
