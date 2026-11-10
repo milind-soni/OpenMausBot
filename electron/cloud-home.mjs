@@ -317,6 +317,13 @@ export function parseCloudTeams(input) {
   return teams;
 }
 
+/** The session's `landing` (additive): the team an account with no Cloud of its own was invited into, only while the session
+ * lists that team. Null otherwise. */
+export function parseCloudLanding(input, teams) {
+  const teamId = record(input) && typeof input.teamId === "string" ? input.teamId : null;
+  return teamId && teams.some((team) => team.id === teamId) ? { teamId } : null;
+}
+
 export function parsePairingGrant(input, origin, now) {
   if (!input || typeof input !== "object" || input.cloudContractVersion !== 1 || input.origin !== origin) return null;
   if (typeof input.code !== "string" || !CODE.test(input.code)) return null;
