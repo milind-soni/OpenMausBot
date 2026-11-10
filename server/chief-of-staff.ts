@@ -31,13 +31,14 @@ export function chiefOfStaffSystemPrompt(
   chiefId: string,
   bots: ChiefTeamMember[],
   canDelegate: boolean,
+  also?: (bot: ChiefTeamMember) => boolean,
 ): string {
   const chief = bots.find((bot) => bot.id === chiefId);
   const chiefSection = sectionKey(chief?.section);
   const sectionName = peerName(chiefSection) || "General";
   const owner = chief ? botOwner(chief) : null;
   const person = owner ? peerName(nameFromEmail(owner)) || "your person" : null;
-  const reachable = reachablePeers(bots, chief ?? { id: chiefId, name: "" });
+  const reachable = reachablePeers(bots, chief ?? { id: chiefId, name: "" }, also);
   const team = chief ? reachable.filter((bot) => hasAuthority(chief, bot)) : reachable;
   const others = chief ? reachable.filter((bot) => !hasAuthority(chief, bot)) : [];
   const roster = renderRoster(team, {

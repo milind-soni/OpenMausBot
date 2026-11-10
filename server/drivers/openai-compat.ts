@@ -1,6 +1,7 @@
 // Transcript-replay driver for OpenRouter, Groq, Together, llama.cpp, and
 // other endpoints that speak the OpenAI chat-completions contract.
 import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
+import { operatorEnvKey } from "../credential-env.ts";
 import { isLoopback } from "../provider-key-check.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
 import { isContextName, isOllama, serveWithWindow } from "./ollama-context.ts";
@@ -187,8 +188,8 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       config.key ??
       input.environment[config.apiKeyEnv] ??
       (ownKeyVariable ? undefined : input.environment[DEFAULT_KEY_ENV]) ??
-      process.env[config.apiKeyEnv] ??
-      (ownKeyVariable ? undefined : process.env[DEFAULT_KEY_ENV]) ??
+      operatorEnvKey(config.apiKeyEnv) ??
+      (ownKeyVariable ? undefined : operatorEnvKey(DEFAULT_KEY_ENV)) ??
       "";
     // A server someone gave a fixed model list to is not asked what else it might be, unless it is on Ollama's own port.
     const ollamaCandidate = config.catalog === "ollama" || (config.catalog === undefined && (onOllamaPort(config.url) || (onThisNetwork(config.url) && !config.managedModels)));

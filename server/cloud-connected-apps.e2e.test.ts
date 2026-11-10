@@ -48,7 +48,7 @@ async function api(method: string, path: string, options: { body?: unknown; remo
   return { status: response.status, body: await response.json().catch(() => null) as any };
 }
 
-async function boot(): Promise<void> {
+async function boot(env: Record<string, string> = {}): Promise<void> {
   // Offline but for the stand-in service, so the server reaches nothing else.
   const prelude = `data:text/javascript,${encodeURIComponent(`const real = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
@@ -66,6 +66,7 @@ globalThis.fetch = async (input, init) => {
       OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${HOST}`,
       // From source the server registers nowhere unless told where, as here.
       OMB_COMPOSIO_BROKER_URL: brokerUrl,
+      ...env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -199,5 +200,31 @@ describe("connected apps on a Cloud home", { timeout: 90_000 }, () => {
     const reply = await api("GET", "/api/connectors/catalog");
     expect(reply.status).toBe(200);
     expect(reply.body).toMatchObject({ configured: false, mode: "unavailable", setup: "service-unavailable" });
+  });
+
+  async function bootOffTheService(env: Record<string, string>) {
+    await waitForExit(child!, { signal: "SIGTERM" });
+    child = null;
+    registrationOpen = true;
+    writeFileSync(join(dataDir, CLOUD_CONNECTED_APPS_FILE), JSON.stringify({ version: 1, brokerUrl, installationId: "install-cloud", token: brokerToken }), { mode: 0o600 });
+    brokerCalls.length = 0;
+    await boot(env);
+  }
+
+  it("with the owner's own key, starts without a word to the service, not even its token check", async () => {
+    await bootOffTheService({ COMPOSIO_API_KEY: "ak_owner_project", OMB_CLOUD_CONNECTED_APPS_GRANT: "grant" });
+    await expect.poll(async () => (await api("GET", "/api/connectors/catalog")).body?.mode, { timeout: 15_000, interval: 150 }).toBe("self-hosted");
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(brokerCalls).toEqual([]);
+  });
+
+  it("with OMB_COMPOSIO_BROKER=off, starts without a word to the service and asks for a key", async () => {
+    await bootOffTheService({ OMB_COMPOSIO_BROKER: "off", OMB_CLOUD_CONNECTED_APPS_GRANT: "grant" });
+    const reply = await api("GET", "/api/connectors/catalog");
+    expect(reply.status).toBe(200);
+    expect(reply.body).toMatchObject({ configured: false, mode: "unavailable", setup: "needs-setup" });
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(brokerCalls).toEqual([]);
+    expect(log).toContain("connected-apps service is switched off");
   });
 });

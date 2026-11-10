@@ -94,6 +94,8 @@ interface RuntimeOptions<Config> {
   models: () => ModelCatalog;
   requestBody(model: string, messages: OpenAIChatMessage[], stream: boolean): Record<string, unknown>;
   httpErrorLabel: string;
+  /** A refusal this provider words itself: the sentence the person sees instead of the HTTP line, or undefined. */
+  plainRefusal?: (status: number, body: string) => string | undefined;
   missingKeyError: string;
   unavailableReason: string;
   timeoutMs: number;
@@ -295,6 +297,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         signal: activeSignal,
       });
       const failure = (status: number, body: string): Error => {
+        const plain = options.plainRefusal?.(status, body); if (plain) return new Error(plain);
         const message = `${options.httpErrorLabel} HTTP ${status}${body ? `: ${httpErrorDetail(body)}` : ""}`;
         const refused = tools.length ? routeRefusal(route, status, body) : null;
         if (refused) return new ModelRouteRefused(refused, message);

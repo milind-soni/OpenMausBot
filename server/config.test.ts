@@ -913,6 +913,21 @@ describe("default fleet", () => {
     expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("groq");
   });
 
+  it("adds ModelGo to product fleets and sends its workspace key only to ModelGo's own host", () => {
+    const cfg: AppConfig = { modelgo: { key: "modelgo-workspace" }, instances: {
+      codex: { driver: "codex" },
+      modelgoCustomHost: { driver: "modelgo", config: { url: "https://another.example.test/v1" } },
+      modelgoSameHost: { driver: "modelgo", config: { url: "https://api.modelgo.ai/v1/" } },
+      modelgoOwn: { driver: "modelgo", environment: { MODELGO_API_KEY: "modelgo-own" } },
+    } };
+    const map = instanceConfigs(cfg);
+    expect(map.modelgo.environment).toEqual({ MODELGO_API_KEY: "modelgo-workspace" });
+    expect(map.codex.environment).toEqual({});
+    expect(map.modelgoCustomHost.environment).toEqual({});
+    expect(map.modelgoSameHost.environment).toEqual({ MODELGO_API_KEY: "modelgo-workspace" });
+    expect(map.modelgoOwn.environment).toEqual({ MODELGO_API_KEY: "modelgo-own" });
+  });
+
   it("preserves an existing compatible account named Groq when adding the built-in provider", () => {
     const map = instanceConfigs({ groq: { key: "workspace-key" }, instances: {
       codex: { driver: "codex" },
@@ -2435,5 +2450,25 @@ describe("DATA_DIR outside the suite's throwaway home", () => {
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+describe("a key the desktop app hands the server as an environment variable", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    ["OMB_OPENAI_API_KEY", "openai", "OMB_OPENAI_API_KEY"],
+    ["OMB_ANTHROPIC_API_KEY", "claudeApi", "ANTHROPIC_API_KEY"],
+    ["OMB_OPENROUTER_API_KEY", "openrouter", "OMB_OPENROUTER_API_KEY"],
+    ["MISTRAL_API_KEY", "mistral", "MISTRAL_API_KEY"],
+    ["CEREBRAS_API_KEY", "cerebras", "CEREBRAS_API_KEY"],
+    ["OMB_GROQ_API_KEY", "groq", "GROQ_API_KEY"],
+    ["OMB_GREENFERENCE_API_KEY", "greenference", "GREENFERENCE_API_KEY"],
+    ["OMB_META_API_KEY", "meta", "META_API_KEY"],
+    ["OMB_DEEPSEEK_API_KEY", "deepseek", "DEEPSEEK_API_KEY"],
+    ["OPENAI_COMPAT_API_KEY", "openaiCompat", "OPENAI_COMPAT_API_KEY"],
+  ])("reaches its engine: %s", (variable, instanceId, engineEnv) => {
+    vi.stubEnv(variable, `fixture-${variable}`);
+    expect(instanceConfigs(loadConfig())[instanceId]?.environment?.[engineEnv]).toBe(`fixture-${variable}`);
   });
 });

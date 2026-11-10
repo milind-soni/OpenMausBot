@@ -445,7 +445,7 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
     navigateMainWindow: url => calls.push(`navigate:${url}`), activeOrigin: () => context.environmentsState.environments.find(e => e.id === context.environmentsState.activeId)?.origin,
     homeWindow: { cloudOrigin: () => null, asking: () => false, cancel: () => {} }, cleanWorkspace: { profile: () => null }, showHome: async (options) => { calls.push(options ? `home:${JSON.stringify(options)}` : "home"); },
     homePlaces: { remember: (place) => calls.push(`remember:${JSON.stringify(place)}`) },
-    runningDataDir: "/data", desktopDataDir: () => "/data",
+    runningDataDir: "/data", desktopDataDir: () => "/data", placeSwitch: { replacing: () => false, before: () => null },
     handSaved, serverOpens: async (place) => { calls.push(`look:${place.id}`); return answers; }, session: { defaultSession: { fetch: async () => null } }, dialog: {},
   });
   let answers = true;
@@ -454,6 +454,24 @@ test("the Server menu opens My Cloud through the Cloud's own connection, never a
   assert.deepEqual(calls, ["remember:null", "connect"]);
   calls.length = 0; await context.switchEnvironment("vps");
   assert.deepEqual(calls, ["remember:null", "look:vps", "active:vps", `navigate:${other.origin}`, 'remember:{"server":"vps"}'], "another server replaces the remembered team for the next launch");
+  calls.length = 0;
+  context.environmentsState = { ...context.environmentsState, activeId: environments.LOCAL_ID };
+  const navigate = context.navigateMainWindow;
+  let finishNavigation;
+  let stale = false;
+  const navigating = new Promise(resolve => {
+    context.navigateMainWindow = url => {
+      navigate(url);
+      return new Promise(done => { finishNavigation = done; resolve(); });
+    };
+  });
+  const superseded = context.switchEnvironment("vps", () => stale);
+  await navigating;
+  stale = true;
+  finishNavigation();
+  await superseded;
+  context.navigateMainWindow = navigate;
+  assert.deepEqual(calls, ["remember:null", "look:vps", "active:vps", `navigate:${other.origin}`], "a superseded navigation does not set the next launch's place");
   calls.length = 0; context.environmentsState = { ...context.environmentsState, activeId: environments.LOCAL_ID }; answers = false;
   await context.switchEnvironment("vps");
   assert.deepEqual(calls, ["remember:null", "look:vps"], "a server that doesn't answer: the window stays where it is");

@@ -23,7 +23,6 @@
 // Picker ids are `<provider>/<model>` so bot settings, badges and config.json
 // stay readable; resolveTurnModel turns them into dsh's wire pair just before
 // the core selects the model.
-import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,7 +30,7 @@ import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
-import { resolveCli } from "../../procs.ts";
+import { resolveCli, spawnCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
 export const DEEPSEEK_MODELS: ModelCatalog = {
@@ -188,12 +187,14 @@ export function fetchDeepSeekCatalog(
   cli: string,
   env: Record<string, string | undefined>,
   cwd: string,
+  allowEnv: readonly string[] = [],
 ): Promise<ModelCatalog> {
   return new Promise((resolve, reject) => {
-    let child: ReturnType<typeof spawn>;
+    let child: ReturnType<typeof spawnCli>;
     try {
-      const resolved = resolveCli(cli, ["--profile", "acp"], env);
-      child = spawn(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, windowsHide: true });
+      // Security: while the bot box is on, dsh runs in it, as a bot's turn does: it reads ~/.dsh, which a bot can write.
+      const resolved = resolveCli(cli, ["--profile", "acp"], env as NodeJS.ProcessEnv);
+      child = spawnCli(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, box: { allowEnv } });
     } catch (error) {
       return reject(error instanceof Error ? error : new Error(String(error)));
     }
@@ -312,7 +313,7 @@ export const deepseekSupport: AcpSupport = {
   // ("session is already active"), so a turn with new tools needs a new process.
   restartOnMcpChange: true,
   // Refresh only: a fresh profile boot can take long, and startup must not wait on it.
-  resolveModels: (env, config) => fetchDeepSeekCatalog(config.cli || "dsh", env, tmpdir()),
+  resolveModels: (env, config, _instanceId, _fresh, allowEnv) => fetchDeepSeekCatalog(config.cli || "dsh", env, tmpdir(), allowEnv),
   resolveModelsOnCreate: false,
 
   // initialize advertises no auth methods; the key rides in the child env or

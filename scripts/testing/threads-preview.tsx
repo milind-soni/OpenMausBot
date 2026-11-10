@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 import App from "../../src/App";
 import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
 import { ADVANCED_MODE_KEY, setAdvancedMode } from "../../src/lib/interface-mode";
-import { GROK_MOVE_NOTICE } from "../../src/lib/notices";
+import { GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE } from "../../src/lib/notices";
 import { markSimpleModePromptSeen } from "../../src/lib/simple-mode-prompt";
 import { applySkinChoice, readSkinChoice } from "../../src/lib/skins";
 import "../../src/styles.css";
@@ -22,5 +22,7 @@ if (!new URLSearchParams(location.search).has("onboarding")) setEmailGateDone("s
 if (!new URLSearchParams(location.search).has("simpleModePrompt")) markSimpleModePromptSeen();
 // The same for the once-per-person Move from Grok Bot popup, with ?grokMovePopup=1.
 if (!new URLSearchParams(location.search).has("grokMovePopup")) localStorage.setItem(GROK_MOVE_NOTICE, "1");
+// And for the once-per-person ModelGo sponsor card, with ?modelgoOffer=1: it sits over the sidebar's foot, where tests click.
+if (!new URLSearchParams(location.search).has("modelgoOffer")) localStorage.setItem(MODELGO_OFFER_NOTICE, "1");
 applySkinChoice(readSkinChoice());
 createRoot(document.getElementById("root")!).render(<App />);

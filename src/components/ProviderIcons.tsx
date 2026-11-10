@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { cn } from "@/lib/cn";
 import { HermesMark } from "./HermesMark";
 import { CursorMark } from "./CursorMark";
@@ -153,6 +153,23 @@ export function GreenferenceMark({ size = 16, className }: IconProps) {
   </svg>;
 }
 
+export function ModelgoMark({ size = 16, className }: IconProps) {
+  const id = useId().replace(/\W/gu, "");
+  // The icon from ModelGo's supplied logo, without its wordmark, whose dark text is unreadable in the dark themes.
+  return <svg width={size} height={size} viewBox="0 18.09 31 31" fill="none" className={className} aria-hidden="true">
+    <defs>
+      <linearGradient id={`${id}a`} x1="10.5179" y1="25.8892" x2="2.29751" y2="41.3335" gradientUnits="userSpaceOnUse"><stop stopColor="#5071FF" /><stop offset="1" stopColor="#0410FF" /></linearGradient>
+      <linearGradient id={`${id}b`} x1="14" y1="29.5894" x2="17" y2="32.5894" gradientUnits="userSpaceOnUse"><stop stopColor="#2563EB" /><stop offset="1" stopColor="#16C784" /></linearGradient>
+      <linearGradient id={`${id}c`} x1="24.9101" y1="35.7894" x2="12.7635" y2="41.9022" gradientUnits="userSpaceOnUse"><stop stopColor="#13DA74" /><stop offset="1" stopColor="#1F83CD" /></linearGradient>
+    </defs>
+    <path fill={`url(#${id}a)`} d="M6.31271 27.713C7.94898 25.3277 11.1777 24.7425 13.5241 26.4059C15.8703 28.0693 16.446 31.3509 14.8099 33.7361L9.42862 41.5814C7.79234 43.9665 4.56361 44.5517 2.21725 42.8885C-0.129169 41.2252 -0.704765 37.9429 0.931485 35.5577L6.31271 27.713ZM13.0071 29.9972C12.0826 28.0346 9.41394 27.8263 8.2057 29.6228L2.7953 37.6672C2.1197 38.6719 2.36677 40.0427 3.34879 40.7389L3.51215 40.8544C4.49397 41.5504 5.84429 41.3127 6.53837 40.3214L13.2065 30.7957C13.2716 30.7027 13.2818 30.581 13.2334 30.478L13.0071 29.9972Z" />
+    <path fill="#16C784" d="M23.7889 27.7173C22.1526 25.3321 18.924 24.7469 16.5775 26.4103C14.2313 28.0737 13.6556 31.3559 15.2917 33.7411L21.1882 42.336C22.8245 44.7212 26.0526 45.3064 28.399 43.6431C30.7454 41.9798 31.3214 38.6981 29.6853 36.3128L23.7889 27.7173ZM17.2344 30.2879C18.159 28.3251 20.8276 28.1169 22.0359 29.9134L27.4463 37.9578C28.1218 38.9625 27.8752 40.3328 26.8934 41.0289L26.73 41.1451C25.7482 41.8411 24.3979 41.6029 23.7038 40.6115L17.0351 31.0858C16.9701 30.9928 16.9597 30.871 17.0082 30.7681L17.2344 30.2879Z" />
+    <path fill={`url(#${id}b)`} d="M15.6385 34.2402L15.1611 33.5552L16.944 30.958L17.3932 31.6002L15.6385 34.2402Z" />
+    <path fill="#16C784" d="M19.9475 40.5176L19.5264 39.8753L21.3513 37.1641L21.7724 37.7348L19.9475 40.5176Z" />
+    <path fill={`url(#${id}c)`} d="M18.0466 25.5876C20.1674 24.8708 22.585 25.6165 23.9285 27.5749L29.824 36.1696C31.2186 38.2028 31.0051 40.8864 29.4587 42.6647C29.1679 43.0226 28.827 43.3488 28.4353 43.6286C26.0801 45.3106 22.8295 44.7337 21.1746 42.3395L19.8152 40.3727C19.7017 40.2086 19.5993 40.0397 19.5066 39.8678L17.9372 42.2028C16.2924 44.5816 13.0617 45.1548 10.7214 43.4831C8.38107 41.8111 7.81697 38.5263 9.46166 36.1471L15.3884 27.5739C16.064 26.5967 17.0076 25.925 18.0466 25.5876ZM26.0671 36.6413C25.269 35.4872 23.7017 35.2084 22.5662 36.0192L21.6599 36.6667L21.3845 37.0749C21.382 37.1637 21.4066 37.2543 21.4607 37.3327L23.7488 40.6422C24.4093 41.5977 25.7063 41.8282 26.6462 41.1569C27.5862 40.4854 27.8125 39.1661 27.1521 38.2106L26.0671 36.6413ZM19.7917 28.9792C18.9257 28.944 18.0396 29.3246 17.4734 30.1579L12.0144 38.196C11.3768 39.1348 11.603 40.4208 12.5212 41.0768C13.4392 41.7324 14.706 41.5139 15.3591 40.5866L19.5124 34.7692C19.8833 34.0834 20.4104 33.4711 21.0828 32.9909C21.7305 32.5282 22.446 32.2362 23.1775 32.1061L21.8943 30.1989C21.3772 29.4303 20.5925 29.0301 19.7917 28.9762V28.9792Z" />
+  </svg>;
+}
+
 export function ProviderMark({ driverKind, size, className }: IconProps & { driverKind: string }) {
   switch (driverKind) {
     case "grok":
@@ -193,6 +210,8 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
       return <KiroMark size={size} className={className} />;
     case "greenference":
       return <GreenferenceMark size={size} className={className} />;
+    case "modelgo":
+      return <ModelgoMark size={size} className={className} />;
     default:
       return (
         <span className={cn("flex size-full items-center justify-center text-[10px] font-semibold tracking-tight text-ink-secondary", className)}>
