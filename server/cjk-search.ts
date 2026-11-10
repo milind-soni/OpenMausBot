@@ -5,9 +5,11 @@ import type { DatabaseSync } from "node:sqlite";
 // unicode61 treats as a separator and a reader never sees), and a query asks for its characters as phrases.
 const CJK = "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}";
 const CJK_CHAR = new RegExp(`[${CJK}]`, "u");
+const HAN = /\p{Script=Han}/u;
 const CJK_RUNS = new RegExp(`[${CJK}]+|[^${CJK}]+`, "gu");
 const CJK_BOUNDARY = new RegExp(`(?<=[${CJK}])(?=[\\p{L}\\p{N}])|(?<=[\\p{L}\\p{N}])(?=[${CJK}])`, "gu");
-const SEARCH_MARK = /​/g;
+/** U+200B ZERO WIDTH SPACE, written escaped so no editor or formatter can drop it unseen. */
+export const SEARCH_MARK = "\u200b";
 
 /** Particles and filler words say nothing about what a note is about; they also end a run, so no bigram straddles one. */
 const FILLER = new RegExp(
@@ -19,16 +21,16 @@ export const hasCjk = (text: string): boolean => CJK_CHAR.test(text);
 
 /** The indexed form of `text`, or null when it holds no CJK and is indexed as written. */
 export function cjkSearchText(text: string | null | undefined): string | null {
-  return text && hasCjk(text) ? text.replace(CJK_BOUNDARY, "​") : null;
+  return text && hasCjk(text) ? text.replace(CJK_BOUNDARY, SEARCH_MARK) : null;
 }
 
-export const withoutSearchMarks = (snippet: string): string => snippet.replace(SEARCH_MARK, "");
+export const withoutSearchMarks = (snippet: string): string => snippet.replaceAll(SEARCH_MARK, "");
 
 /** A quoted FTS5 phrase whose tokens line up with the indexed form. */
 export const ftsPhrase = (term: string): string => `"${term.replace(/"/g, "").replace(CJK_BOUNDARY, " ")}"`;
 
 /** `token` split into its CJK runs and the rest; each CJK run becomes its overlapping bigrams, so a paraphrase still
- * shares most of them with a note. */
+ * shares most of them with a note. A run with no bigram asks for its lone Han characters; a lone kana is a particle. */
 export function cjkTokenParts(token: string): { other: string[]; bigrams: string[] } {
   const other: string[] = [];
   const bigrams: string[] = [];
@@ -37,10 +39,10 @@ export function cjkTokenParts(token: string): { other: string[]; bigrams: string
       other.push(run);
       continue;
     }
-    for (const segment of run.replace(FILLER, " ").split(" ")) {
-      const chars = [...segment];
-      for (let i = 0; i + 1 < chars.length; i++) bigrams.push(chars[i]! + chars[i + 1]!);
-    }
+    const segments = run.replace(FILLER, " ").split(" ").map((segment) => [...segment]);
+    for (const chars of segments) for (let i = 0; i + 1 < chars.length; i++) bigrams.push(chars[i]! + chars[i + 1]!);
+    // A run with no bigram at all ("猫", "猫的粮") still asks for its Han characters; a leftover beside bigrams is noise.
+    if (segments.every((chars) => chars.length < 2)) for (const chars of segments) if (chars.length === 1 && HAN.test(chars[0]!)) bigrams.push(chars[0]!);
   }
   return { other, bigrams };
 }
