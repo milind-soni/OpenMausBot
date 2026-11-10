@@ -36,7 +36,7 @@ describe.skipIf(process.platform === "win32")("Qwen spoken sends during a real e
   };
   const botState = async (bot: Bot) => (await api("GET", "/api/bots")).body.bots.find((value: Bot) => value.id === bot.id);
   const lines = async (bot: Bot): Promise<Line[]> => (await botState(bot)).messages;
-  const command = (bot: Bot, action: "continuation" | "owner", text = "fixture continuation") => new Promise<{ requestMessageId: string | null }>((resolve, reject) => {
+  const command = (bot: Bot, action: "continuation" | "owner" | "hold-steer-ack" | "release-steer-ack" | "steer-state", text = "fixture continuation") => new Promise<{ requestMessageId: string | null; steerCalls: number; ackHeld: boolean }>((resolve, reject) => {
     const id = ++requestNumber;
     const timer = setTimeout(() => { child.off("message", received); reject(new Error(`fixture IPC timed out: ${output.slice(-1_000)}`)); }, 5_000);
     const received = (message: any) => {
@@ -180,6 +180,55 @@ describe.skipIf(process.platform === "win32")("Qwen spoken sends during a real e
       await expect.poll(() => results(call!.provider, "steered-speech").find(result => result.status === "completed"), { timeout: 10_000 }).toMatchObject({ request_id: owner, result: expect.stringContaining("also add spoken totals") });
     } finally { writeFileSync(gate, "finish"); await call?.close(); await api("POST", `/api/bots/${bot.id}/interrupt`); }
   }, 30_000);
+
+  it("pins a delayed steering receipt to the original request after a different request starts", async () => {
+    const bot = await createBot();
+    const spoken = "spoken addition for the original request";
+    let call: Awaited<ReturnType<typeof startQwen>> | undefined;
+    try {
+      const original = await api("POST", `/api/bots/${bot.id}/messages`, { text: "original request before delayed acknowledgement" });
+      expect(original.status).toBe(202);
+      await working(bot);
+      const originalId = (await command(bot, "owner")).requestMessageId;
+      expect(originalId).toEqual(expect.any(String));
+      await command(bot, "hold-steer-ack");
+      call = await startQwen(bot);
+      speak(call.provider, "delayed-steering", spoken);
+      await expect.poll(async () => (await command(bot, "steer-state")).ackHeld, { timeout: 10_000 }).toBe(true);
+      expect((await command(bot, "steer-state")).steerCalls).toBe(1);
+      await expect.poll(() => existsSync(steered)).toBe(true);
+      writeFileSync(gate, "finish");
+      await expect.poll(async () => (await lines(bot)).find(line => line.turnTerminal && line.requestMessageId === originalId), { timeout: 10_000 })
+        .toMatchObject({ text: expect.stringContaining(spoken) });
+      await expect.poll(async () => (await botState(bot)).busy).toBe(false);
+      rmSync(gate, { force: true });
+      const later = await api("POST", `/api/bots/${bot.id}/messages`, { text: "unrelated later request" });
+      expect(later.status).toBe(202);
+      const laterId = (await command(bot, "owner")).requestMessageId;
+      expect(laterId).toEqual(expect.any(String));
+      expect(laterId).not.toBe(originalId);
+      expect((await botState(bot)).busy).toBe(true);
+      await command(bot, "release-steer-ack");
+      await expect.poll(async () => (await lines(bot)).filter(line => line.text === spoken)).toHaveLength(1);
+      const spokenLine = (await lines(bot)).find(line => line.text === spoken)!;
+      expect(spokenLine).toMatchObject({ steered: true, via: "call", callId: call.callId });
+      expect(spokenLine.queueId).toBeUndefined();
+      expect((await command(bot, "steer-state")).steerCalls).toBe(1);
+      writeFileSync(gate, "finish");
+      await expect.poll(async () => (await lines(bot)).some(line => line.turnTerminal && line.requestMessageId === laterId), { timeout: 10_000 }).toBe(true);
+      await expect.poll(() => results(call!.provider, "delayed-steering").find(result => result.status === "completed"), { timeout: 10_000 })
+        .toMatchObject({ request_id: originalId, result: expect.stringContaining(spoken) });
+      expect(results(call.provider, "delayed-steering").filter(result => result.status === "completed")).toHaveLength(1);
+      expect(results(call.provider, "delayed-steering").some(result => result.request_id === laterId)).toBe(false);
+      expect((await lines(bot)).filter(line => line.text === spoken)).toHaveLength(1);
+      expect(JSON.stringify(call.provider.commands)).not.toContain(LIVE_COPY.noAnswer);
+    } finally {
+      await command(bot, "release-steer-ack");
+      writeFileSync(gate, "finish");
+      await call?.close();
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+    }
+  }, 40_000);
 
   it("preserves typed steering into a continuation without a request ID", async () => {
     const bot = await createBot();

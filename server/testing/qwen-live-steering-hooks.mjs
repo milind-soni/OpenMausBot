@@ -20,14 +20,42 @@ registerHooks({
         `new QwenLiveSocket({ ...input, history, upstream: new FixtureWebSocket(${JSON.stringify(target)}),`) };
     }
     if (url === server) return { ...result, source: source + `
+const fixtureSteerAcks = new Map();
+let fixtureSteerWrapped = false;
 process.on("message", (message) => {
   if (!message || message.fixture !== "qwen-steering") return;
   if (message.action === "continuation") {
     void startTurn(message.botId, message.text, { threadId: message.threadId, unattended: true, cardContinuation: true })
       .catch(error => process.send?.({ fixture: "qwen-steering", error: String(error) }));
   }
+  if (message.action === "hold-steer-ack") {
+    const adapter = registry.get("steer")?.adapter;
+    if (!adapter?.steer) throw new Error("The fixture requires a steering adapter");
+    if (!fixtureSteerWrapped) {
+      const steer = adapter.steer.bind(adapter);
+      adapter.steer = async (threadId, text, images) => {
+        const pending = fixtureSteerAcks.get(threadId);
+        if (pending) pending.calls += 1;
+        const outcome = await steer(threadId, text, images);
+        if (pending?.hold) {
+          pending.held = true;
+          process.send?.({ fixture: "qwen-steering", event: "steer-ack-held", threadId, outcome });
+          await pending.wait;
+          pending.held = false;
+        }
+        return outcome;
+      };
+      fixtureSteerWrapped = true;
+    }
+    let release;
+    const wait = new Promise(resolve => { release = resolve; });
+    fixtureSteerAcks.set(message.threadId, { hold: true, held: false, calls: 0, wait, release });
+  }
+  const pending = fixtureSteerAcks.get(message.threadId);
+  if (message.action === "release-steer-ack" && pending) { pending.hold = false; pending.release(); }
   process.send?.({ fixture: "qwen-steering", id: message.id,
-    requestMessageId: directRequestOwners.get(message.threadId)?.messageId ?? null });
+    requestMessageId: directRequestOwners.get(message.threadId)?.messageId ?? null,
+    steerCalls: pending?.calls ?? 0, ackHeld: pending?.held ?? false });
 });
 ` };
     return result;

@@ -90,7 +90,7 @@ import { createQueuedNotes, createWaitWords } from "./host/wait-words.ts";
 import { landTurnFiles, parkedFilesKey, settleParkedFiles, takeParkedFiles, type ParkedTurnAttachment } from "./host/turn-attachments.ts";
 import { createReplyVoiceNotes } from "./host/reply-voice-notes.ts";
 import { runtimeRequestCardFields } from "./request-card.ts";
-import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
+import { liveSendReceipt, type DirectSendInput, type DirectSendReceipt } from "./direct-send.ts";
 import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
 import { chosenPlace, pickComputer } from "./computer-selection.ts";
 import * as boat from "./boat.ts"; import { keyHint, keyStatus, nestedKeyStatus, withoutKeyHints } from "./key-hint.ts";
@@ -7284,12 +7284,14 @@ async function acceptDirectSend(
         const steerInput = extractTurnImages(text);
         const carriesImages = steerInput.images.length > 0;
         const steerTarget = handoffs.current(threadId);
+        const steerRequestId = directRequestOwners.get(threadId)?.messageId;
+        const steerGeneration = directTurnGenerationByThread.get(threadId);
         const busyAdmission = admit("direct-busy", {
           carriesImages,
           engineCanSteerImages: engineSteersImages(instance),
           pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
           engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
-          followUp, requireSteerRequestId: input.requireSteerRequestId, steerRequestId: directRequestOwners.get(threadId)?.messageId,
+          followUp, requireSteerRequestId: input.requireSteerRequestId, steerRequestId,
         });
         // A chosen wait (queue, or restart's Stop) is never cut short by person-first.
         const chose = busyAdmission.action === "queue" ? busyAdmission.chose : undefined;
@@ -7307,6 +7309,7 @@ async function acceptDirectSend(
           throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
         }
         const delivered = steered !== "refused";
+        const sameSteerTurn = directTurnGenerationByThread.get(threadId) === steerGeneration;
         if (delivered) {
           if (steered === "steered" && !current.busy) {
             throw Object.assign(
@@ -7315,7 +7318,7 @@ async function acceptDirectSend(
             );
           }
           // "indeterminate" is recorded too: the words may already be in a turn, and a resend could run them twice.
-          if (personPresent) clearUnattended(threadId);
+          if (sameSteerTurn && personPresent) clearUnattended(threadId);
           const message = store.appendMessage(threadId, {
             role: "user",
             kind: "text",
@@ -7328,10 +7331,10 @@ async function acceptDirectSend(
             ...spokenLineFields(via, callId),
           });
           store.setTaskAskedAt(botId, threadId, message.at);
-          handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
-          signInSettle.answerInChat(botId, threadId);
-          if (personsOwn) personFirst.wait(threadId, { requeue: (note) => void queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId, mentions }) });
-          return { ok: true as const, steered: true as const, threadId, message };
+          if (sameSteerTurn) handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
+          if (sameSteerTurn) signInSettle.answerInChat(botId, threadId);
+          if (sameSteerTurn && personsOwn) personFirst.wait(threadId, { requeue: (note) => void queueSteeredMessage(current.id, threadId, text, { prompt: note ? `${queuedPrompt}\n\n${note}` : queuedPrompt, rowId: message.id, first: true, queuedAt: message.at, replyToId: replyTo?.id, dataContext, sender, trigger, via, callId, mentions }) });
+          return { ok: true as const, steered: true as const, threadId, message, requestMessageId: steerRequestId };
         }
         if (!current.busy) {
           return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions);
@@ -12491,10 +12494,7 @@ const liveCalls = new LiveCallController({
       callId, requireSteerRequestId,
       personPresent: true,
     });
-    if ("queued" in receipt) return { kind: "queued", queueId: receipt.queueId };
-    return { kind: receipt.steered ? "steered" : "started", messageId: receipt.message.id,
-      ...(receipt.steered ? { requestMessageId: directRequestOwners.get(threadId)?.messageId } : {}),
-    };
+    return liveSendReceipt(receipt);
   },
   respond: async (input) => {
     const result = await respondToCard({ ...input, via: "call" });
