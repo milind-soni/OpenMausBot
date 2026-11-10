@@ -445,13 +445,12 @@ within an audience: its home is the same at each turn. A member who leaves takes
 (`server/host/delete-leftovers.ts`): the session it resumes and every session its event log says it started, unless a
 conversation that stays still resumes the same one. The files uploaded to it go too when no other conversation, picture
 or routine names them, and so does its box uploads folder. A deleted bot also takes its checkpoints
-(`checkpoints/<bot>`), its conversations' folders (`task-workspaces/<bot>`), its memory journal and the room and member
-memory layers kept beside its own folder. Nothing is reached through a link, and a cleanup that fails is logged
+(`checkpoints/<bot>`), its memory journal and the room and member memory layers kept beside its own folder. Nothing is reached through a link, and a cleanup that fails is logged
 (`delete leftovers: … stayed behind`) and never fails the delete. Still left: sessions kept by the other engines
-(OpenCode, Gemini and the rest of the ACP family, Muse), which only the engine itself can remove; a deleted
-conversation's own folder (`task-workspaces/<bot>/<thread>`), which the bot's other conversations can read, and the
-bot's per-folder checkpoints, which its conversations share, both until the bot is deleted; and anything on a computer
-other than this server.
+(OpenCode, Gemini and the rest of the ACP family, Muse), which only the engine itself can remove; the bot's
+per-folder checkpoints, which its conversations share, until the bot is deleted; and anything on a computer other than
+this server. Kept on purpose: a conversation's own folder (`task-workspaces/<bot>/<thread>`) holds the files the bot
+made for the person, and stays when the conversation or the bot is deleted.
 
 **The move.** The first turn after a Team Cloud starts with engine homes moves what the engines kept in the server's
 HOME. A Claude Code project's session (`projects/<folder>/<session>.jsonl` and its session folder, `file-history`,

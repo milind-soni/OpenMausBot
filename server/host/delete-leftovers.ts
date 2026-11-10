@@ -1,6 +1,7 @@
 // Deleting a conversation or a bot removes what it kept on disk outside its transcript: the files uploaded to the
-// conversation, its box uploads folder, the session files the engines wrote for it, and for a bot its checkpoints, its
-// conversations' folders and the memory layers kept beside its own folder.
+// conversation, its box uploads folder, the session files the engines wrote for it, and for a bot its checkpoints and
+// the memory layers kept beside its own folder. A conversation's own folder (task-workspaces/<bot>/<thread>) holds
+// files the bot made for the person, and stays when the conversation or the bot is deleted.
 //
 // Security: a file goes only when it is provably the deleted conversation's or bot's. An upload another conversation,
 // a picture or a routine still names stays; an engine session a remaining conversation still resumes stays. Nothing is
@@ -231,13 +232,22 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
     if (noted.size > MAX_NOTED) noted.delete(noted.keys().next().value!);
   }
 
+  /** On a Team Cloud each member's picture is named in their own people/<person>/profile.json. */
+  function memberPictures(): string {
+    const people = join(dataDir, "people");
+    return entries(people).map((person) => {
+      try { return readFileSync(join(people, person, "profile.json"), "utf8"); } catch { return ""; }
+    }).join("\n");
+  }
+
   function removeAttachments(names: ReadonlySet<string>): void {
     if (!names.size) return;
     const kept = deps.keptAttachments();
     if (!kept) return warn("delete leftovers: uploads stayed behind: what still uses them cannot be read right now");
+    const pictures = memberPictures();
     for (const name of names) {
       const path = join(attachments, name);
-      if (name.includes("..") || basename(name) !== name || kept.has(name) || !plainlyUnder(dataDir, path)) continue;
+      if (name.includes("..") || basename(name) !== name || kept.has(name) || pictures.includes(name) || !plainlyUnder(dataDir, path)) continue;
       attempt(`the upload ${name}`, () => {
         if (!lstatSync(path, { throwIfNoEntry: false })?.isFile() || deps.threadsReferencing(name).length) return;
         deps.deleteAttachment(name);
@@ -270,7 +280,6 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
     if (!ID.test(botId) || isLayerId(botId)) return;
     attempt(`checkpoints of ${botId}`, () => void removeUnder(dataDir, join(dataDir, "checkpoints", botId)));
     attempt(`box uploads of ${botId}`, () => void removeUnder(dataDir, join(dataDir, "box-uploads", botId)));
-    attempt(`conversation folders of ${botId}`, () => void removeUnder(dataDir, join(dataDir, "task-workspaces", botId)));
     const live = new Set(deps.store.bots.map((bot) => bot.id));
     for (const layer of entries(join(dataDir, "workspaces"))) {
       if (!isLayerId(layer) || baseBotId(layer) !== botId || live.has(layer)) continue;

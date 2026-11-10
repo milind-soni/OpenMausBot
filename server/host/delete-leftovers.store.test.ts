@@ -51,11 +51,13 @@ function fixture(over: Partial<DeleteLeftoversDeps> = {}) {
 describe("deleting through the store", () => {
   beforeEach(() => rmSync(DATA_DIR, { recursive: true, force: true }));
 
-  it("removes a deleted conversation's upload, engine session and box uploads", () => {
+  it("removes a deleted conversation's upload, engine session and box uploads, and keeps the files it made", () => {
     const { store, bot, task, files, leftovers } = fixture();
+    const made = put(join(DATA_DIR, "task-workspaces", bot.id, task.threadId, "result.txt"));
     expect(store.deleteTask(bot.id, task.threadId)).not.toBeNull();
     leftovers.flush();
     expect(Object.values(files).filter(existsSync)).toEqual([]);
+    expect(existsSync(made)).toBe(true);
   });
 
   it("keeps an upload a conversation that stays also shows", () => {
@@ -91,7 +93,7 @@ describe("deleting through the store", () => {
     ]);
   });
 
-  it("removes a deleted bot's conversations' files, checkpoints, memory layers and memory journal", () => {
+  it("removes a deleted bot's uploads, sessions, checkpoints, memory layers and memory journal, and keeps the files it made", () => {
     const { store, bot, files, leftovers } = fixture();
     const layer = `${bot.id}--member-p_bobbobbobbobbobbobbobb`;
     const mine = [
@@ -102,7 +104,7 @@ describe("deleting through the store", () => {
       put(journalFile(bot.id)),
     ];
     const other = store.createBot({ name: "Ledger" });
-    const others = [put(join(DATA_DIR, "checkpoints", other.id, "0123456789abcdef", ".git", "HEAD")), put(journalFile(other.id))];
+    const others = [put(join(DATA_DIR, "checkpoints", other.id, "0123456789abcdef", ".git", "HEAD")), put(journalFile(other.id)), put(join(DATA_DIR, "task-workspaces", bot.id, bot.threadId, "result.txt"))];
     expect(store.deleteBot(bot.id)).toBe(true);
     leftovers.flush();
     expect(mine.filter(existsSync)).toEqual([]);

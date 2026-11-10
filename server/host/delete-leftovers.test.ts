@@ -92,14 +92,15 @@ describe("a deleted conversation's uploads", () => {
     expect(stored(upload(1))).toBe(false);
   });
 
-  it("stay while another conversation, a picture or a routine still names them", () => {
-    const { bots, kept, say, deleteThreads, stored } = fixture();
+  it("stay while another conversation, a picture, a member's picture or a routine still names them", () => {
+    const { dataDir, bots, kept, say, deleteThreads, stored } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1" }, { threadId: "t2" }] });
     say("t2", upload(1));
-    say("t1", upload(1), upload(2), upload(3));
+    say("t1", upload(1), upload(2), upload(3), upload(4));
     kept.add(upload(2));
+    put(join(dataDir, "people", MEMBER, "profile.json"), JSON.stringify({ name: "Bob", avatarUrl: `/api/attachments/${upload(4)}` }));
     deleteThreads("t1");
-    expect([stored(upload(1)), stored(upload(2)), stored(upload(3))]).toEqual([true, true, false]);
+    expect([stored(upload(1)), stored(upload(2)), stored(upload(3)), stored(upload(4))]).toEqual([true, true, false, true]);
   });
 
   it("go once every conversation that named them is deleted together", () => {
@@ -240,19 +241,18 @@ describe("a deleted conversation's engine sessions", () => {
 });
 
 describe("a deleted bot", () => {
-  it("takes its checkpoints, its box uploads, its conversations' folders and the memory layers kept beside its own folder", () => {
+  it("takes its checkpoints, its box uploads and the memory layers kept beside its own folder, and keeps the files its conversations made", () => {
     const { dataDir, bots, deleteBot, forgotten } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1" }] }, { id: "scout-two", tasks: [{ threadId: "t9" }] });
     const layers = [`scout--member-${MEMBER}`, "scout--room-r1"];
     const mine = [
       put(join(dataDir, "checkpoints", "scout", "0123456789abcdef", ".git", "HEAD")),
       put(join(dataDir, "box-uploads", "scout", "t1", upload(1))),
-      put(join(dataDir, "task-workspaces", "scout", "t1", "report.md")),
       ...layers.flatMap((layer) => [put(join(dataDir, "workspaces", layer, "memory", "notes.md")), put(join(dataDir, "memory-journal", `${layer}.ndjson`))]),
     ];
     const others = [
       put(join(dataDir, "checkpoints", "scout-two", "0123456789abcdef", ".git", "HEAD")),
-      put(join(dataDir, "task-workspaces", "scout-two", "t9", "report.md")),
+      put(join(dataDir, "task-workspaces", "scout", "t1", "report.md")),
       put(join(dataDir, "workspaces", `scout-two--member-${MEMBER}`, "memory", "notes.md")),
       put(join(dataDir, "workspaces", "scout-two", "memory", "notes.md")),
       put(join(dataDir, "memory-journal", "scout-two.ndjson")),
