@@ -2587,6 +2587,8 @@
   "botLimit.paused.badge": "रुका हुआ",
   "botLimit.paused.saveFailed": "सेव नहीं हो सका। फिर से कोशिश करें।",
   "botLimit.paused.chooseAction": "जगे रहने वाले बॉट चुनें ({count} रुके हुए)",
+  "botLimit.created.title": "{name} बन गया, अभी रुका हुआ है",
+  "botLimit.created.body": "Starter {count} बॉट जगाए रखता है, इसलिए यह रुका हुआ है। चुनें कि कौन से {count} जगे रहें, या सबको जगाने के लिए अपग्रेड करें।",
   "chat.compactionExcerptTitle": "पिछला संदर्भ हाल के अंशों तक छोटा किया गया",
   "chat.compactionExcerptHint": "लिखित सारांश उपलब्ध नहीं था, इसलिए एजेंट इन अंशों और हाल के संदेशों से आगे बढ़ता है। पुराने विवरण उसके संदर्भ से छूट सकते हैं। आपकी पूरी बातचीत अब भी यहीं है।",
   "chat.turnStoppedByYou": "आपने इसे रोका।",

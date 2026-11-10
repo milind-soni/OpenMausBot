@@ -5048,6 +5048,8 @@
   "botLimit.paused.badge": "Duraklatıldı",
   "botLimit.paused.saveFailed": "Kaydedilemedi. Tekrar deneyin.",
   "botLimit.paused.chooseAction": "Uyanık botları seç ({count} duraklatıldı)",
+  "botLimit.created.title": "{name} oluşturuldu, şimdilik duraklatıldı",
+  "botLimit.created.body": "Starter {count} botu uyanık tutar, bu yüzden bu bot duraklatıldı. Hangi {count} botun uyanık kalacağını seçin ya da hepsini uyandırmak için yükseltin.",
   "voice.search": "Ses arayın veya bağlantı yapıştırın",
   "voice.noMatches": "Eşleşen ses yok",
   "voice.noMatchesHint": "Başka bir ad deneyin veya sesin bağlantısını yapıştırın.",

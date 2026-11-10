@@ -3,8 +3,19 @@ const TOKEN = /^[0-9a-f]{64}$/;
 /** OpenMausBot's connected-apps service (cloudflare/composio-broker): the packaged desktop app and a Cloud home use it. */
 export const DEFAULT_MANAGED_COMPOSIO_BROKER_URL = "https://openmausbot-composio.milindsoni201.workers.dev";
 
+/** OMB_COMPOSIO_BROKER=off: nothing reaches the managed service, whatever else is set. */
+export function managedComposioBrokerOff(environment = process.env) {
+  return /^(off|0|false|no)$/i.test(environment.OMB_COMPOSIO_BROKER?.trim() ?? "");
+}
+
+export function ownComposioKey(credentials, environment = process.env) {
+  const saved = credentials?.composioApiKey;
+  return Boolean((typeof saved === "string" && saved.trim()) || environment.COMPOSIO_API_KEY?.trim());
+}
+
 /** An explicit URL wins; otherwise the default, only for a shipped build, so development and tests never register. */
 export function managedComposioBrokerUrl(configured, shipped) {
+  if (managedComposioBrokerOff()) return "";
   const explicit = typeof configured === "string" ? configured.trim() : "";
   return normalizeManagedComposioBrokerUrl(explicit || (shipped ? DEFAULT_MANAGED_COMPOSIO_BROKER_URL : ""));
 }
@@ -24,6 +35,7 @@ export function normalizeManagedComposioBrokerUrl(value) {
 }
 
 export function managedComposioAccess(brokerUrl, credentials) {
+  if (managedComposioBrokerOff()) return null;
   const url = normalizeManagedComposioBrokerUrl(brokerUrl);
   const token = credentials?.composioBrokerToken;
   if (!url || !TOKEN.test(token ?? "")) return null;
@@ -52,6 +64,7 @@ export async function ensureManagedComposioCredentials({
   existingCredentialTimeoutMs = 8_000,
   registrationTimeoutMs = 15_000,
 }) {
+  if (managedComposioBrokerOff()) return credentials;
   const url = normalizeManagedComposioBrokerUrl(brokerUrl);
   if (!url) {
     if (brokerUrl) log("connected-apps broker URL rejected: HTTPS or a loopback HTTP URL is required");
@@ -94,4 +107,14 @@ export async function ensureManagedComposioCredentials({
     log(`connected-apps registration failed: ${error?.message ?? error}`);
   }
   return credentials;
+}
+
+export function registerManagedComposio({ brokerUrl, updateCredentials, fetchImpl, log }) {
+  if (!brokerUrl) return Promise.resolve();
+  return updateCredentials(async (credentials) => {
+    if (!ownComposioKey(credentials)) {
+      await ensureManagedComposioCredentials({ brokerUrl, credentials, fetchImpl, saveCredentials: async () => {}, log });
+    }
+    return credentials;
+  });
 }

@@ -79,9 +79,9 @@ export interface AppEventAttempt {
 }
 
 export interface AppTriggerService {
-  /** "self-hosted": this server uses its own Composio key, which app events do not support. */
+  /** "self-hosted": this server uses its own Composio key, which app events do not support. "off": OMB_COMPOSIO_BROKER=off. */
   available: boolean;
-  reason?: "self-hosted" | "unavailable";
+  reason?: "self-hosted" | "unavailable" | "off";
   plan?: "desktop" | "cloud";
   eventsPerDay?: number;
   eventsToday?: number;

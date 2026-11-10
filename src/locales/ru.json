@@ -6552,6 +6552,8 @@
   "botLimit.paused.badge": "На паузе",
   "botLimit.paused.saveFailed": "Не удалось сохранить. Попробуйте ещё раз.",
   "botLimit.paused.chooseAction": "Выбрать активных ботов (на паузе: {count})",
+  "botLimit.created.title": "{name} создан и пока на паузе",
+  "botLimit.created.body": "Starter держит активными {count} ботов, поэтому этот на паузе. Выберите, какие {count} останутся активными, или перейдите на план выше, чтобы разбудить всех.",
   "composer.setupRequest.placeholder": "Напишите {name}, с чем нужна помощь",
   "composer.setupRequest.waiting": "{name} готов к настройке",
   "composer.setupRequest.cancel": "Остановить настройку {name}",

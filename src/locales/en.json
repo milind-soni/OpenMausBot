@@ -7665,6 +7665,8 @@
   "botLimit.paused.badge": "Paused",
   "botLimit.paused.saveFailed": "Couldn't save that. Try again.",
   "botLimit.paused.chooseAction": "Choose awake bots ({count} paused)",
+  "botLimit.created.title": "Created {name}, paused for now",
+  "botLimit.created.body": "Starter keeps {count} bots awake, so this one is paused. Choose which {count} stay awake, or upgrade to wake them all.",
   "roomCard.restartNow": "Restart now",
   "roomCard.restartHint": "Takes about a minute, and stops anything running now.",
   "roomCard.restarting": "Restarting this Cloud with its new size. It's back in about a minute.",

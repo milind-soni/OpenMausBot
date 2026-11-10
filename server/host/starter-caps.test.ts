@@ -39,6 +39,15 @@ describe("how much work a Starter Cloud runs at once", () => {
     expect(made.pausedText("awake", "de")).toBeNull();
   });
 
+  it("tells a bot that made a paused one, without refusing anything or opening the popup", () => {
+    const { made, refusals } = caps({ paused: ["scout"] });
+    expect(made.createdPaused("scout")).toMatch(/^@scout was created, and is paused: this Cloud's Starter plan keeps 5 bots awake/);
+    expect(made.createdPaused("scout")).not.toMatch(/upgrade this Cloud to create|no room/);
+    expect(made.createdPaused("awake")).toBeNull();
+    expect(caps({ starter: false, paused: ["scout"] }).made.createdPaused("scout")).toBeNull();
+    expect([refusals(), made.status()?.refused]).toEqual([0, undefined]);
+  });
+
   it("refuses nothing off Starter", () => {
     const { made, refusals } = caps({ starter: false, paused: ["sleepy"] });
     expect(made.handoffs.refusal("sleepy", () => 100)).toBeNull();
