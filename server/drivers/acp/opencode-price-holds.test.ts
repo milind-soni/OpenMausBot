@@ -142,6 +142,25 @@ it("does not restore old status prices after a refresh invalidates them", async 
   } finally { pending.resolve(prices("free")); await status; }
 });
 
+it("uses retained prices when the catalog default is absent from the live session", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omb-price-fallback-"));
+  dirs.push(dir);
+  const catalog = prices("free");
+  const instance = await createOpenCodeDriver(async () => catalog, { everyMs: Infinity, liveLists: [] }).create({
+    instanceId: "priced-fallback", displayName: "OpenCode", enabled: true,
+    config: { cli: CLI, fullAuto: false, workspace: dir },
+    environment: { HOME: dir, USERPROFILE: dir, XDG_CONFIG_HOME: dir, XDG_DATA_HOME: dir, OPENCODE_API_KEY: "fixture-key",
+      FAKE_ACP_MODELS: `opencode/paid-first,${OTHER}` },
+  });
+  instances.push(instance);
+  const recorder = recordEvents(instance.adapter);
+  try {
+    await instance.adapter.sendTurn({ threadId: "priced-fallback", text: "hello" });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    expect(recorder.events.find((event) => event.type === "session.started")).toMatchObject({ model: OTHER });
+  } finally { recorder.stop(); }
+});
+
 function prices(other: "free" | "paid" | "unknown"): ModelCatalog {
   return parseOpenCodeModelsOutput([
     REFUSED, JSON.stringify({ cost: { input: 0, output: 0 } }),

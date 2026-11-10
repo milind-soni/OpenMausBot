@@ -685,7 +685,7 @@ const support = (
     fallbackModel: (sessionConfig, catalogDefault) => {
       const offered = offeredModels(sessionConfig, "model");
       if (catalogDefault && offered.includes(catalogDefault)) return catalogDefault;
-      return preferredOpenCodeModel(offered, catalogFromOpenCodeSession(sessionConfig)?.current) || null;
+      return preferredOpenCodeModel(offered, catalogFromOpenCodeSession(sessionConfig)?.current, priceCatalog) || null;
     },
     modelVariants: true,
     ownMcpOverHttp: true,
