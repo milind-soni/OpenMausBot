@@ -12,6 +12,7 @@ import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
 import { usePlaceViews } from "../PlaceChip";
 import { screenFramePreview } from "../ScreenFrame";
+import { CloudPreference } from "../bot-settings/AccessSection";
 import type { BotPatch, useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import type { SimplePageId } from "./page-registry";
 import { Card, NavRow, RadioRow } from "./rows";
@@ -111,6 +112,7 @@ export function WherePage({ bot, derived }: { bot: Bot; derived: Derived }) {
           ))}
         </div>
       </Card>
+      <CloudPreference bot={bot} patch={patch} />
       {usingNow && <p data-panel-using-now className="mx-1 text-[13px] text-ink-secondary">{t("computer.simple.usingNow", { place: usingNow })}</p>}
       <LocalComputerAutoWarning
         open={localAutoWarning !== null}
