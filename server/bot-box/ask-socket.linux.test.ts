@@ -18,7 +18,8 @@ const available = detection.box === "bwrap" && detection.tools !== null;
 const root = mkdtempSync(join(tmpdir(), "omb-box-ask-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-const home = join(root, "home"), dataDir = join(home, ".openmausbot"), cwd = join(dataDir, "task-workspaces", "bot-a", "t-1");
+const botId = "bot-a";
+const home = join(root, "home"), dataDir = join(home, ".openmausbot"), cwd = join(dataDir, "task-workspaces", botId, "t-1");
 const env = { PATH: "/usr/bin:/bin", HOME: home };
 
 /** One ask_user call through the helper in a box that puts back `rw`; the helper's MCP result. */
@@ -44,6 +45,7 @@ function askInBox(socket: string, rw: string[]): Promise<{ content: Array<{ text
 describe.skipIf(!available)(`a bot's question from inside a real box (${available ? "bubblewrap works here" : `skipped: ${detection.reason}`})`, () => {
   it("reaches the broker through the socket put back in the box, and says what to do instead without it", async () => {
     mkdirSync(cwd, { recursive: true });
+    mkdirSync(join(dataDir, "workspaces", botId), { recursive: true });
     const asked: string[] = [];
     const broker = await createPermissionBroker({
       socketPaths: [join(dataDir, "perm-test.sock")],
