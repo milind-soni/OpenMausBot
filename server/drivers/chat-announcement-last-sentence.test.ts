@@ -35,6 +35,26 @@ describe("announcesAction reads a report's last sentence", () => {
     ]) expect(announcesAction(text), text).toBe(false);
   });
 
+  it("catches plans phrased the way the model actually writes them", () => {
+    for (const text of [
+      "我会在 Screen 面板的 Browser 标签页查今天的副业话题和同类视频，再挑一个写成可直接录制的脚本。",
+      "我会查 Agents Anywhere 里 MacBook Pro 的 Codex 会话，按最近活动时间列出最新 20 条。",
+      "小克，我先查找项目仓库，核对它的功能、架构、部署方式和维护情况，重点看是否适合你现有的多电脑任务调度。",
+      "小克，这次重新读取项目的一手资料，给出有来源的调研结论，不把准备操作当成结果。",
+      "我会在 Screen 面板的 Browser 标签页核查今天的副业、防骗和 AI 副业话题，给你 3 个可拍选题和一条完整脚本，区分已核实信息与选题建议。",
+      "我按刚才的“双 11 兼职防骗”文案制作一条不露脸的竖屏成片，加上中文配音和字幕，先不发布。",
+      "小克，我先核对现有成员，再新建分工明确的短视频制作 Bot，把它们拉进同一个群。已有的 ComfyUI 视频流会优先复用。",
+    ]) expect(announcesAction(text), text).toBe(true);
+  });
+
+  it("leaves a recommendation and a report of what it already did alone", () => {
+    for (const text of [
+      "我建议你先确认授权范围，再决定要不要执行。",
+      "我已按建议先去核对了运行记录，结果如下。",
+      "我会说明如何创建看板，并给出每个选项的含义。",
+    ]) expect(announcesAction(text), text).toBe(false);
+  });
+
   it("keeps a question or an approval wait at one request", () => {
     for (const text of [
       "我在 Browser 标签页读取文档，需要你先确认授权。",
