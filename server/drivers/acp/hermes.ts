@@ -8,7 +8,7 @@ import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { findCliCandidates, harnessHome, resolveCliSpawn, splitCliString, whichWin } from "../../env-path.ts";
-import { spawnCli } from "../../procs.ts";
+import { resolveCli, spawnCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -280,7 +280,9 @@ export async function fetchHermesAcpModels(
   return await new Promise((resolve) => {
     let child: ReturnType<typeof spawnCli>;
     try {
-      child = spawnCli(cli, ["acp"], { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, box: { allowEnv } });
+      // Resolved on the supplied PATH (Windows npm shims), then spawned by spawnCli, which resolves on the app's.
+      const resolved = resolveCli(cli, ["acp"], env as NodeJS.ProcessEnv);
+      child = spawnCli(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, box: { allowEnv } });
     } catch {
       return resolve([]);
     }
