@@ -44,9 +44,7 @@ const NO_MODELS: ModelCatalog = { default: "", options: [] };
 
 const lastSuccessfulCatalog = new Map<string, ModelCatalog>();
 const catalogRevisions = new Map<string, number>();
-/** `models --verbose` (V1) prints Zen prices, cost 0 meaning free; V2 prints none, so a `-free` id suffix is the fallback. */
-const freeModels = new Set<string>();
-const paidModels = new Set<string>();
+const catalogPrices = new WeakMap<ModelCatalog, Pick<ParsedModels, "free" | "paid">>();
 
 const DISCOVERY_PROBE_TTL_MS = 30_000;
 /** How long a listing OpenCode 2 runs stays open for its own catalog refresh to land (2.2.5 fetched 11 MB in 4 s). */
@@ -72,16 +70,17 @@ function localModelRecord(record: Record<string, unknown>): boolean {
   }
 }
 
-export function isFreeOpenCodeModel(id: string): boolean {
-  if (freeModels.has(id)) return true;
-  if (paidModels.has(id)) return false;
+export function isFreeOpenCodeModel(id: string, catalog?: ModelCatalog): boolean {
+  const prices = catalog && catalogPrices.get(catalog);
+  if (prices?.free.includes(id)) return true;
+  if (prices?.paid.includes(id)) return false;
   return /(?:^|[-_/])free$/iu.test(id);
 }
 
 /** OpenCode 2 with a key picks a paid model on its own, so a free model wins unless the catalog is all paid. */
-export function preferredOpenCodeModel(offered: readonly string[], current?: string | null): string {
-  if (current && offered.includes(current) && isFreeOpenCodeModel(current)) return current;
-  const free = offered.filter(isFreeOpenCodeModel);
+export function preferredOpenCodeModel(offered: readonly string[], current?: string | null, catalog?: ModelCatalog): string {
+  if (current && offered.includes(current) && isFreeOpenCodeModel(current, catalog)) return current;
+  const free = offered.filter((id) => isFreeOpenCodeModel(id, catalog));
   return free.find((id) => id.startsWith("opencode/"))
     ?? free[0]
     ?? (current && offered.includes(current) ? current : offered[0] ?? "");
@@ -165,22 +164,17 @@ function parseOpenCodeModels(stdout: string): ParsedModels {
   return { options, free, paid };
 }
 
-function rememberPrices(parsed: Pick<ParsedModels, "free" | "paid">) {
-  for (const id of parsed.free) {
-    freeModels.add(id);
-    paidModels.delete(id);
-  }
-  for (const id of parsed.paid) {
-    paidModels.add(id);
-    freeModels.delete(id);
-  }
+function pricedCatalog(options: ModelCatalog["options"], prices: Pick<ParsedModels, "free" | "paid"> | null, current?: string | null): ModelCatalog {
+  const catalog = { default: "", options };
+  if (prices) catalogPrices.set(catalog, prices);
+  catalog.default = preferredOpenCodeModel(options.map((option) => option.id), current, catalog);
+  return catalog;
 }
 
 export function parseOpenCodeModelsOutput(stdout: string): ModelCatalog | null {
   const parsed = parseOpenCodeModels(stdout);
   if (!parsed.options.length) return null;
-  rememberPrices(parsed);
-  return { default: preferredOpenCodeModel(parsed.options.map((option) => option.id)), options: parsed.options };
+  return pricedCatalog(parsed.options, parsed);
 }
 function runOpenCodeModelsVerbose(
   cli: string,
@@ -253,7 +247,6 @@ export async function discoverOpenCodeModels(
   if (retry(session)) [session] = await Promise.allSettled([probeSession()]);
   if (retry(verbose)) [verbose] = await Promise.allSettled([readMetadata()]);
   const metadata = verbose.status === "fulfilled" ? verbose.value : null;
-  if (metadata) rememberPrices(metadata);
   const probe = session.status === "fulfilled" ? session.value : null;
   const live = probe ? catalogFromOpenCodeSession(probe.session) : null;
   let catalog: ModelCatalog | null = null;
@@ -263,11 +256,14 @@ export async function discoverOpenCodeModels(
       { ...option, ...details.get(option.id), id: option.id },
       probe.efforts.get(option.id),
     ));
-    catalog = { default: preferredOpenCodeModel(options.map((option) => option.id), live.current), options };
+    catalog = pricedCatalog(options, metadata, live.current);
   } else if (metadata?.options.length) {
-    catalog = { default: preferredOpenCodeModel(metadata.options.map((option) => option.id)), options: metadata.options };
+    catalog = pricedCatalog(metadata.options, metadata);
   }
-  if (!catalog) return lastSuccessfulCatalog.get(cli) ?? NO_MODELS;
+  if (!catalog) {
+    const previous = lastSuccessfulCatalog.get(cli);
+    return previous ? { ...previous } : NO_MODELS;
+  }
   if (options.refresh && !sameModelIds(lastSuccessfulCatalog.get(cli), catalog)) {
     catalogRevisions.set(cli, (catalogRevisions.get(cli) ?? 0) + 1);
   }
@@ -305,8 +301,6 @@ export function resetOpenCodeModelCache() {
   lastSuccessfulCatalog.clear();
   catalogRevisions.clear();
   discoveryProbeCache.clear();
-  freeModels.clear();
-  paidModels.clear();
 }
 
 export const resetOpenCodeGoModelCache = resetOpenCodeModelCache;
@@ -653,6 +647,7 @@ const support = (
   loadCatalog: OpenCodeCatalogLoader,
   ownAccess = new Map<string, boolean>(),
   sources: OpenCodeModelSources = {},
+  priceCatalogs = new Map<string, ModelCatalog>(),
 ): AcpSupport => ({
   driverKind: "opencodeGo",
   displayName: "OpenCode",
@@ -718,13 +713,16 @@ const support = (
   },
   classifyError: classifyOpenCodeError,
   promptUnreachedModel: openCodePromptUnreachedModel,
-  limitFacts: openCodeLimitFacts,
+  limitFacts: (text, model, instanceId) => openCodeLimitFacts(text, model, priceCatalogs.get(instanceId)),
   describeAccountError: describeOpenCodeAccountError,
   resolveModels: async (environment, config, instanceId, fresh) => {
+    priceCatalogs.delete(instanceId);
     if (fresh) markOpenCodeCatalogRefreshed(instanceId, (sources.now ?? Date.now)());
     await refreshLiveModelLists(environment, { lists: sources.liveLists, fetch: sources.fetch, now: sources.now });
     declareLiveOpenCodeModels(environment, sources.liveLists);
-    return mergeLocalInject(await loadCatalog(environment, config.cli, { refresh: fresh === true }), environment);
+    const catalog = await loadCatalog(environment, config.cli, { refresh: fresh === true });
+    priceCatalogs.set(instanceId, catalog);
+    return mergeLocalInject(catalog, environment);
   },
   buildPromptText: (turn) => turn.system ? `${turn.system}\n\n${turn.text}` : turn.text,
 });
@@ -746,10 +744,12 @@ const FREE_MODEL_LIMIT = /\bfree(?:UsageLimitError|\s+usage\s+limit)\b/iu;
 
 /** How far a usage limit OpenCode reported reaches: one provider's shared free allowance (with the free models that
  * allowance holds), or the whole account. */
-export function openCodeLimitFacts(text: string, model?: string): { limit: "engine" | "model"; limitModels?: string[] } {
+export function openCodeLimitFacts(text: string, model?: string, catalog?: ModelCatalog): { limit: "engine" | "model"; limitModels?: string[] } {
   if (!FREE_MODEL_LIMIT.test(text)) return { limit: "engine" };
   const provider = model?.includes("/") ? model.slice(0, model.indexOf("/")) : "";
-  const shared = provider ? [...freeModels].filter((id) => id.startsWith(`${provider}/`)) : [];
+  const offered = new Set(catalog?.options.map((option) => option.id));
+  const free = catalog && catalogPrices.get(catalog)?.free;
+  const shared = provider ? (free ?? []).filter((id) => offered.has(id) && id.startsWith(`${provider}/`)) : [];
   const models = [...new Set(model ? [model, ...shared] : shared)];
   return models.length > 1 ? { limit: "model", limitModels: models } : { limit: "model" };
 }

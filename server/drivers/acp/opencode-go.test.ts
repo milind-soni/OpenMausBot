@@ -363,12 +363,12 @@ describe("OpenCode catalog", () => {
 
   it("holds a provider's free models together, never a paid Go model", () => {
     // The catalog reports Zen's free models at cost 0; a Go model is paid.
-    parseOpenCodeModelsOutput([
+    const catalog = parseOpenCodeModelsOutput([
       "opencode/big-pickle", JSON.stringify({ cost: { input: 0, output: 0 } }),
       "opencode-go/deepseek-v4.1-flash", JSON.stringify({ cost: { input: 1, output: 2 } }),
     ].join("\n"));
     const said = 'AI_APICallError: Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go';
-    const facts = openCodeLimitFacts(said, "opencode/deepseek-v4.1-flash-free");
+    const facts = openCodeLimitFacts(said, "opencode/deepseek-v4.1-flash-free", catalog!);
     expect(facts.limit).toBe("model");
     expect(facts.limitModels).toEqual(expect.arrayContaining(["opencode/deepseek-v4.1-flash-free", "opencode/big-pickle"]));
     expect(facts.limitModels).not.toContain("opencode-go/deepseek-v4.1-flash");
@@ -585,8 +585,8 @@ describe("OpenCode catalog discovery from the ACP session", () => {
     const offered = ["opencode/claude-sonnet-5-5", "opencode/big-pickle", "opencode/longcat-2.5-preview-free"];
     expect(preferredOpenCodeModel(offered, "opencode/longcat-2.5-preview-free")).toBe("opencode/longcat-2.5-preview-free");
     expect(preferredOpenCodeModel(offered, "opencode/claude-sonnet-5-5")).toBe("opencode/longcat-2.5-preview-free");
-    parseOpenCodeModelsOutput(["opencode/big-pickle", JSON.stringify({ cost: { input: 0, output: 0 } })].join("\n"));
-    expect(preferredOpenCodeModel(offered, "opencode/big-pickle")).toBe("opencode/big-pickle");
+    const catalog = parseOpenCodeModelsOutput(["opencode/big-pickle", JSON.stringify({ cost: { input: 0, output: 0 } })].join("\n"));
+    expect(preferredOpenCodeModel(offered, "opencode/big-pickle", catalog!)).toBe("opencode/big-pickle");
     expect(preferredOpenCodeModel(["anthropic/claude-sonnet-5", "openai/gpt-6"], "openai/gpt-6")).toBe("openai/gpt-6");
     expect(preferredOpenCodeModel([], null)).toBe("");
   });
