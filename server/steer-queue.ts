@@ -84,13 +84,15 @@ const changed = () => {
   }
 };
 
-/** Public pending chips only: never expose provider prompts or reply context. */
-export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string) => boolean, whyHeld: (threadId: string, reason: SteerQueueReason | undefined) => string | undefined = () => undefined):
-  BotQueuedMessages {
+/** Public pending chips only: never expose provider prompts or reply context. `named`: a conversation several people
+ * write in, where each chip says whose it is. */
+export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string) => boolean, whyHeld: (threadId: string, reason: SteerQueueReason | undefined) => string | undefined = () => undefined,
+  named: (threadId: string) => boolean = () => false): BotQueuedMessages {
   return Object.fromEntries([...queues]
     .filter(([threadId, entry]) => ownsThread(entry.botId, threadId))
     .map(([threadId, entry]) => [threadId, entry.items.filter((item) => !item.rowId).map((item) => ({
       queueId: item.messageId, text: item.text, ...(item.reason ? { reason: item.reason, why: whyHeld(threadId, item.reason) } : {}),
+      ...(item.sender && named(threadId) ? { sender: item.sender } : {}),
     }))]));
 }
 
@@ -107,7 +109,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number; mentions?: string[] } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number; mentions?: string[]; aheadOfOthers?: string } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -134,8 +136,10 @@ export function queueSteeredMessage(
     ...(options.mentions?.length ? { mentions: options.mentions } : {}),
   };
   saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
-  // `first`: ahead of everything queued but the person's own messages sent before it.
-  const ahead = options.first ? entry.items.findIndex((other) => other.peerAsk !== undefined || other.unattended === true || other.queuedAt > item.queuedAt) : -1;
+  // `first`: ahead of everything queued but the person's own messages sent before it; with `aheadOfOthers` (the person
+  // whose request runs, where several people write), ahead of everyone else's too.
+  const ahead = options.first ? entry.items.findIndex((other) => other.peerAsk !== undefined || other.unattended === true || other.queuedAt > item.queuedAt
+    || (options.aheadOfOthers !== undefined && other.sender?.id !== options.aheadOfOthers)) : -1;
   if (ahead < 0) entry.items.push(item);
   else entry.items.splice(ahead, 0, item);
   queues.set(threadId, entry);
@@ -265,6 +269,13 @@ export function queuedSteeredMessage(
   if (!entry || entry.botId !== botId) return null;
   const item = entry.items.find((candidate) => candidate.sendId === sendId);
   return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId, ...(item.reason ? { reason: item.reason } : {}) } : null;
+}
+
+/** Whose waiting line this is, or null when nothing waits under that id. */
+export function queuedSteerSender(botId: string, threadId: string, queueId: string): { sender?: ResolvedSender } | null {
+  const item = queues.get(threadId)?.botId === botId ? queues.get(threadId)!.items.find((candidate) => candidate.messageId === queueId) : undefined;
+  if (!item) return null;
+  return item.sender ? { sender: item.sender } : {};
 }
 
 export function cancelSteeredMessage(botId: string, messageId: string, expectedThreadId?: string): boolean {

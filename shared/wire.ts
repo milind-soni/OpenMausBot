@@ -154,6 +154,7 @@ export interface WireTask extends InboxTask {
   /** Set when a bot, not a person, opened this thread. */ openedBy?: TaskOpenedBy;
   /** On a team's server: one person's conversation, seen by them alone (never by another member or an admin). */
   private?: true;
+  /** Team Cloud, where several people write, while it works: whose request runs (they or an Owner or Admin stop it). */ askedBy?: ResolvedSender;
   /** Set by close_thread; absent while the thread is open. */
   closedBy?: TaskClosedBy;
   archivedAt?: number;
@@ -926,9 +927,9 @@ export interface RoomHeldMessage {
  * turn (which runs one at a time per bot). */
 export type SteerQueueReason = "capacity" | "group-turn";
 
-/** Pending steer-queue chips, as `queuedSteerSnapshot` emits them and the
- * `bot.queued` frame carries them: threadId → queued items. */
-export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason; /** The reason in plain words, shown as it is. */ why?: string }>>;
+/** Pending steer-queue chips, as `queuedSteerSnapshot` emits them and the `bot.queued` frame carries them: threadId → queued items. */
+export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason; /** The reason in plain words, shown as it is. */ why?: string;
+  /** Team Cloud, where several people write: whose line waits; only they remove it, and it runs after as their own turn. */ sender?: ResolvedSender }>>;
 
 /** Skills library browse surface: one row per library entry, with the bots
  * currently assigned to it. Version is null for locally imported skills. */

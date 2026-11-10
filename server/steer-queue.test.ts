@@ -280,6 +280,21 @@ describe("steer-queue module", () => {
     expect(store.messages.map((message) => message.text)).toEqual(["first words", "second words"]);
   });
 
+  it("where several people write, runs each person's lines as their own turn, the asker's own addition first, and names each chip", () => {
+    const bot = fakeBot("bot-several", "thread-several", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    const tom = { name: "Tom", id: "p_tom" }, priya = { name: "Priya", id: "p_priya" };
+    queueSteeredMessage(bot.id, bot.threadId, "what is due", { sender: tom, first: true });
+    queueSteeredMessage(bot.id, bot.threadId, "and the PR", { sender: priya, first: true, aheadOfOthers: "p_priya" });
+    expect(queuedSteerSnapshot((id) => id === bot.id, undefined, () => true)[bot.threadId]!.map((chip) => chip.sender?.name)).toEqual(["Priya", "Tom"]);
+    expect(queuedSteerSnapshot((id) => id === bot.id)[bot.threadId]!.some((chip) => "sender" in chip)).toBe(false);
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run);
+    expect(run.mock.calls.map((call) => [call[2], call[6].sender?.name])).toEqual([["and the PR", "Priya"], ["what is due", "Tom"]]);
+  });
+
   it("drains one call's spoken lines as one turn, and the next call's as its own", () => {
     const bot = fakeBot("bot-call-groups", "thread-call-groups", true);
     const store = fakeStore([bot]);
