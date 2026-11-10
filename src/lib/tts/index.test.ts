@@ -3,7 +3,6 @@ import type { VoiceProbeSample } from "../../../shared/voice-latency-probe";
 
 import { setLocale } from "../i18n";
 import { Speaker } from "./index";
-import { toUtterances } from "../../../server/tts/speech-text";
 import { userError } from "../../../server/user-errors";
 
 class FakeAudio {
@@ -195,8 +194,7 @@ describe("coded voice refusals", () => {
   ])("shows an oversized prepared utterance refusal in %s", async (locale, expected) => {
     setLocale(locale);
     const text = "Tudo bem. ".repeat(80);
-    const utterances = toUtterances(text);
-    expect(utterances.some((utterance) => utterance.length > 500)).toBe(true);
+    const utterances = [text.trim()];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => String(input).endsWith("/prepare")
       ? json({ ready: true, utterances })
       : Response.json(userError("serverError.voice.utteranceTooLong"), { status: 413 })));

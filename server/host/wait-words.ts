@@ -41,8 +41,10 @@ export interface QueuedNotesDeps extends Pick<QueuedReasonDeps, "botName" | "thr
   language(threadId: string): string | undefined;
   parent(node: HandoffView): HandoffView | undefined;
   post(parent: HandoffView, node: HandoffView, line: string): void;
-  live(id: string): boolean;
+  node(id: string): HandoffView | undefined;
 }
+
+const stillHeld = (node: HandoffView | undefined): boolean => node?.status === "queued" || node?.status === "resume";
 
 /** One line in the requester's chat once a hand-off has been held a while, naming the limit. A computer's wait and a person's
  * open card say so themselves. */
@@ -59,7 +61,7 @@ export function createQueuedNotes(deps: QueuedNotesDeps) {
       : busy.length >= limit ? serverLine(language, "server.teammates.queued.slots", { bot, busy: busy.length, limit })
         : deps.groupTurn(node.botId) ? serverLine(language, "server.teammates.queued.room", { bot }) : undefined;
     if (!line) return;
-    for (const id of noted) if (!deps.live(id)) noted.delete(id);
+    for (const id of noted) if (!stillHeld(deps.node(id))) noted.delete(id);
     noted.add(node.id);
     deps.post(parent, node, line);
   };

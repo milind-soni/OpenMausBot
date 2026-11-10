@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -11,7 +11,7 @@ import {
   withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
 import {
-  cloudHomeChildEnvironments, cloudHomeDataDir, codeTrustProblem, edgeClientAddress, edgeHold, hardenHost, hasCapability, holdVolume, passwdIds, prepareCloudHomeData,
+  cloudHomeChildEnvironments, cloudHomeDataDir, codeTrustProblem, edgeCertIssuers, edgeClientAddress, edgeHold, hardenHost, hasCapability, holdVolume, passwdIds, prepareCloudHomeData,
   readCloudSecretsFile, setprivArgs, spawnWithSecrets,
 } from "./cloud-home-start.ts";
 import { RESTART_EXIT_CODE, restartPolicy } from "./restart.ts";
@@ -409,6 +409,74 @@ it("gives the edge only its routing name and the server the contract, never a ga
   expect(passwdIds("root:x:0:0::/root:/bin/sh\n", "maus")).toBeNull();
 });
 
+// The fallback CA's address is written into the edge's config, so nothing but a plain address may reach it.
+const fallbackIssuers = "cert_issuer acme\ncert_issuer acme https://acme.zerossl.com/v2/DV90 {\n\temail certs@example.test\n}";
+
+it("gives a home that ends TLS a fallback CA only when its operator names the account, Let's Encrypt first", () => {
+  const config = cloudHomeConfiguration(contract({ OMB_CLOUD_EDGE_TLS: "1" }))!;
+  const edge = (extra: NodeJS.ProcessEnv) => cloudHomeChildEnvironments(config, { ...contract({ OMB_CLOUD_EDGE_TLS: "1" }), PATH: "/usr/bin", ...extra }, "/data").edge;
+  expect(edge({}).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe("");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: "" }).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe("");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: "  " }).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe("");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: " certs@example.test " }).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe(fallbackIssuers);
+  // Let's Encrypt's issuer has no address, so it keeps the account it already has on the volume.
+  expect(fallbackIssuers.split("\n")[0]).toBe("cert_issuer acme");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test", OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "1" }).OMB_CLOUD_EDGE_CERT_ISSUERS)
+    .toBe("cert_issuer acme https://acme.zerossl.com/v2/DV90 {\n\temail certs@example.test\n}");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test", OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "0" }).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe(fallbackIssuers);
+  // The address is the edge's alone: the server never gets it.
+  expect(cloudHomeChildEnvironments(config, { ...contract({ OMB_CLOUD_EDGE_TLS: "1" }), PATH: "/usr/bin", OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test" }, "/data").server)
+    .not.toHaveProperty("OMB_CLOUD_EDGE_ACME_EMAIL");
+  // Without edge TLS (Fly, or a server where something else ends TLS) it is not read at all.
+  for (const extra of [{}, { FLY_APP_NAME: "omb-u-1a2b3c4d5e6f" }]) {
+    const flyEdge = cloudHomeChildEnvironments(cloudHomeConfiguration(contract())!, { ...contract(), PATH: "/usr/bin", OMB_CLOUD_EDGE_ACME_EMAIL: "not an address", ...extra }, "/data").edge;
+    expect(flyEdge).not.toHaveProperty("OMB_CLOUD_EDGE_CERT_ISSUERS");
+    expect(flyEdge).not.toHaveProperty("OMB_CLOUD_EDGE_ACME_EMAIL");
+  }
+});
+
+it("refuses a fallback CA setting the edge's config would read as more", () => {
+  const invalid = /OMB_CLOUD_EDGE_ACME_EMAIL must be one plain address/;
+  for (const value of ["certs", "certs@", "@example.test", "certs@example", "certs@example.test\ncert_issuer internal", "certs@example.test {", "a b@example.test", "a@b@example.test", "#a@example.test", "<<a@example.test", "a\"@example.test", `a${"b".repeat(260)}@example.test`]) {
+    expect(() => edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_EMAIL: value }), value).toThrow(invalid);
+  }
+  expect(() => edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test", OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "yes" })).toThrow(/must be 1/);
+  expect(() => edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "1" })).toThrow(/needs OMB_CLOUD_EDGE_ACME_EMAIL/);
+  expect(edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "0" })).toBe("");
+  expect(edgeCertIssuers({})).toBe("");
+});
+
+// `caddy validate` on the real template with what the launcher writes. Needs a Caddy: OMB_CADDY_BIN or one on the PATH (the
+// image's own 2.10.2 runs the same check at build, in the Dockerfile). Skipped when there is none.
+const caddyBin = process.env.OMB_CADDY_BIN || (spawnSync("caddy", ["version"], { stdio: "ignore" }).status === 0 ? "caddy" : "");
+it.skipIf(!caddyBin)("renders a Caddyfile.tls that Caddy accepts, with Let's Encrypt alone unless the setting is there", () => {
+  const dir = directory();
+  for (const file of ["Caddyfile.tls", "edge-routes.caddy"]) copyFileSync(join(import.meta.dirname, "../deploy/fly", file), join(dir, file));
+  const base = { PATH: "/usr/bin:/bin", HOME: dir, XDG_DATA_HOME: join(dir, "data"), XDG_CONFIG_HOME: join(dir, "config"), OMB_CLOUD_PUBLIC_HOST: "validate.example.com",
+    OMB_CLOUD_EDGE_STORAGE: join(dir, "edge"), OMB_CLOUD_EDGE_TRUSTED_PROXIES: "", OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "X-Forwarded-For", OMB_CLOUD_EDGE_HOLD: "0s" };
+  const run = (command: string, issuers?: string) => {
+    const result = spawnSync(caddyBin, [command, "--config", join(dir, "Caddyfile.tls"), "--adapter", "caddyfile"], { encoding: "utf8", env: { ...base, ...(issuers === undefined ? {} : { OMB_CLOUD_EDGE_CERT_ISSUERS: issuers }) } });
+    expect(result.status, result.stderr).toBe(0);
+    return result;
+  };
+  const issuersOf = (issuers?: string) => (JSON.parse(run("adapt", issuers).stdout) as { apps: { tls?: { automation?: { policies?: { issuers?: unknown[] }[] } } } }).apps.tls?.automation?.policies?.[0]?.issuers;
+  // Unset and empty: the same config as today, and it validates.
+  expect(issuersOf()).toBeUndefined();
+  expect(issuersOf("")).toBeUndefined();
+  expect(issuersOf(edgeCertIssuers({}))).toBeUndefined();
+  run("validate"); run("validate", "");
+  // A formatting warning would come at every boot of every home.
+  for (const issuers of [undefined, ""]) expect(run("adapt", issuers).stderr).not.toMatch(/not formatted/);
+  // Set: Let's Encrypt first, with no address, then the fallback with its account's.
+  const rendered = edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test" });
+  run("validate", rendered);
+  expect(issuersOf(rendered)).toEqual([{ module: "acme" }, { ca: "https://acme.zerossl.com/v2/DV90", email: "certs@example.test", module: "acme" }]);
+  // The live check's setting: the fallback alone.
+  const only = edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test", OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "1" });
+  run("validate", only);
+  expect(issuersOf(only)).toEqual([{ ca: "https://acme.zerossl.com/v2/DV90", email: "certs@example.test", module: "acme" }]);
+});
+
 it("holds requests at the edge while the server starts only when the Admin asked for it (a plan that sleeps)", () => {
   const config = cloudHomeConfiguration(withGateway())!;
   expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin" }, "/data").edge.OMB_CLOUD_EDGE_HOLD).toBe("0s");
@@ -473,6 +541,9 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(edgeFile("Caddyfile")).toMatch(/^\tauto_https off$/m);
   expect(edgeFile("Caddyfile.tls")).toMatch(/^http:\/\/:8080 \{\n\timport edge-routes\.caddy\n\}\n\n\{\$OMB_CLOUD_PUBLIC_HOST\} \{\n\timport edge-routes\.caddy\n\}\n/m);
   expect(edgeFile("Caddyfile.tunnel")).toMatch(/^:8080 \{\n\timport edge-routes\.caddy\n\}\n\n:8812 \{\n\tbind 127\.0\.0\.1\n\timport edge-routes\.caddy\n\}\n/m);
+  // Only the edge that ends TLS issues certificates, and its issuers are the launcher's to say (edgeCertIssuers).
+  expect(edgeFile("Caddyfile.tls").match(/^\t\{\$OMB_CLOUD_EDGE_CERT_ISSUERS\}$/gm)).toHaveLength(1);
+  for (const config of [edgeFile("Caddyfile"), edgeFile("Caddyfile.tunnel")]) expect(config).not.toContain("OMB_CLOUD_EDGE_CERT_ISSUERS");
   // The tunnel's listener, on loopback alone, believes Cloudflare's header; :8080 believes only what the launcher says.
   expect(edgeFile("Caddyfile.tunnel")).toMatch(/^\tservers 127\.0\.0\.1:8812 \{\n\t\ttrusted_proxies static 127\.0\.0\.1\/32\n\t\ttrusted_proxies_strict\n\t\tclient_ip_headers Cf-Connecting-IP\n\t\}$/m);
   expect(edgeFile("Caddyfile.tunnel").match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(4);
@@ -502,6 +573,8 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(check).toBeGreaterThan(image.lastIndexOf("COPY "));
   expect(check).toBeLessThan(image.indexOf("CMD ["));
   expect(image).toContain("COPY deploy/fly/Caddyfile deploy/fly/Caddyfile.tls deploy/fly/Caddyfile.tunnel deploy/fly/edge-routes.caddy /app/cloud/");
+  // The build's own Caddy validates Caddyfile.tls as the launcher renders it with a fallback CA.
+  expect(image).toContain('OMB_CLOUD_EDGE_CERT_ISSUERS="$(OMB_CLOUD_EDGE_ACME_EMAIL=validate@example.com node --input-type=module -e \'import { edgeCertIssuers } from "/app/dist-server/cloud-home-start.js"; process.stdout.write(edgeCertIssuers(process.env));\')" caddy validate --config /app/cloud/Caddyfile.tls');
   // The bot box (server/bot-box) needs bubblewrap and socat in the image; pnpm is what bots' projects ask for.
   expect(image).toMatch(/apt-get install -y --no-install-recommends [^\n]*\bbubblewrap\b[^\n]*\bsocat\b/);
   expect(image).toMatch(/npm install -g pnpm@10\.33\.0/);

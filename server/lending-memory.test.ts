@@ -170,6 +170,18 @@ describe("a bot's memory and a lent Mac (server/lending-memory.ts)", () => {
     expect(reloaded.needsReview("bot1")).toBe(false);
     expect(reloaded.reconcile("bot1", false).changedBySomeoneElse).toBe(false);
   });
+  it("tells the owner once, as the bot becomes locked", async () => {
+    const ws = workspace();
+    const locked: string[] = [];
+    const memory = createLendingMemory({ file: join(dir, "lending-memory.json"), files: () => memoryFiles(ws), knownBots: () => ["bot1"], onLocked: (bot) => locked.push(bot) });
+    memory.reconcile("bot1", false);
+    memory.noteForeignTurn("bot1");
+    appendFileSync(join(ws, "MEMORY.md"), "- planted\n");
+    expect(memory.reconcile("bot1", true).changedBySomeoneElse).toBe(true);
+    memory.reconcile("bot1", true);
+    await Promise.resolve();
+    expect(locked).toEqual(["bot1"]);
+  });
   it("the owner's own changes, and a foreign turn that changed nothing, are not flagged", () => {
     const ws = workspace();
     const memory = tracker(ws);

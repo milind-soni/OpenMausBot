@@ -152,7 +152,8 @@ it("lets Ada connect her own Gmail and mail key, and nobody reads them back", as
   // Admins see that she connected, never what with.
   const read = await team.signed("GET", "/api/cloud/team/admin");
   expect(read.body.scopes).toEqual({ apps: ["gmail"], mcp: ["mail"] });
-  expect(read.body.people).toEqual({ apps: { gmail: [ADA.email] }, mcp: { mail: [ADA.email] } });
+  const states = Object.fromEntries([OWNER, ADMIN, ADA, CLEO].map((member) => [member.email, member === ADA ? "connected" : "not-connected"]));
+  expect(read.body.people).toEqual({ apps: { gmail: [ADA.email] }, mcp: { mail: [ADA.email] }, states: { apps: { gmail: states }, mcp: { mail: states } } });
   const held = JSON.parse(readFileSync(join(team.home, ".openmausbot", "people-connections", "apps.json"), "utf8")).people[personKey({ id: "", email: ADA.email })].token as string;
   for (const answer of [read.body, (await team.as(owner, "GET", "/api/mcp/servers")).body, (await team.as(admin, "GET", "/api/config")).body,
     (await team.as(owner, "GET", "/api/connectors/connected")).body, (await team.as(admin, "GET", "/api/team/my-connections")).body]) {

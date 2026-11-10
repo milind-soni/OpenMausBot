@@ -32,7 +32,8 @@ export type OutboundHoldAnswer = { ok: true; approved: boolean } | { ok: false; 
  * sending rule of its own sends without asking; a stored rule is kept exactly as set. */
 function sendsWithoutAsking(rule: OutboundPolicy | undefined, fullAccess: boolean, opaque: boolean): "full-access" | "allow" | null {
   if (fullAccess && rule === undefined) return "full-access";
-  return (rule ?? DEFAULT_OUTBOUND_POLICY).policy === "allow" && !opaque ? "allow" : null;
+  // A call it cannot inspect (code run) goes out under "allow" only at Full access, as it would with no rule.
+  return (rule ?? DEFAULT_OUTBOUND_POLICY).policy === "allow" && (!opaque || fullAccess) ? "allow" : null;
 }
 
 export interface OutboundHold {

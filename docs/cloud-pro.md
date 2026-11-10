@@ -897,8 +897,20 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   of lending for good, because a resumed session carries everything said in
   it. A conversation a bot opened (a hand-off's work thread, one a bot
   started itself, a Chief's notices) starts with that bot's words, which are
-  no line in it, so it is never the owner's either: not for the Mac, and not
-  for memory capture, the daily log, recall or the brief. A conversation a guest opened (and
+  no line in it, so it is not the owner's for memory capture, the daily log,
+  recall or the brief. For the Mac, work handed on with `coordinate_bots`, whose
+  result comes back to its sender, keeps the Mac only when the turn that handed it on could itself use it at that
+  moment, on the owner's own line in a one-on-one conversation (not a card, a
+  routine or a webhook), recorded by the harness as it was handed on, and only
+  at a level no looser than that turn's conversation. A one-way notice
+  (`reply: "none"`) or a consult never carries it. The thread opened for it then counts
+  as the owner's for the Mac and nothing else: it can't write the bot's memory
+  or reach their phones, and what it writes is still watched. More work or an
+  answer from a turn that can't use the Mac ends that for good. A result
+  reported back by work it handed on does not: as with any turn, that is
+  evidence to check. A thread a bot starts with
+  `start_thread` stays refused, since Stop on the turn that started it doesn't
+  reach it. A conversation a guest opened (and
   named) is never the owner's, whoever writes in it. Whenever a computer is lent but a turn can't use it,
   `list_shared_computers` answers why in `unavailable` and `say` (`cloudLendingRefusalText` in
   `server/cloud-lending.ts`), and a refused `shared_computer` call answers the same, so the bot says the reason instead
@@ -1019,7 +1031,11 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
     reaction or a process on the Cloud), and counted only while it records
     the owner as its answerer; the request goes on by itself once they allow
     it (in a group chat they ask again). **Not now** is
-    not asked again for that line. A webhook's or a routine's run, or a line a
+    not asked again for that line. The moment a bot's memory locks, a card like
+    it also goes to the bot's own main chat, so the owner hears about the lock
+    instead of finding out when something fails: **Allow** there accepts
+    exactly what it showed and starts no turn, and **Not now** holds until the
+    memory changes again. A webhook's or a routine's run, or a line a
     bot handed in, never raises one. The same card lets the owner's own line
     through the work a bot opened a conversation with, for that line alone:
     work a bot hands into it after they allowed it (made or run then) shuts it
@@ -1285,6 +1301,7 @@ start.
 | --- | --- |
 | `OMB_PUBLIC_URL` | `https://` and the name people use, e.g. `https://mausbot.acme.eu`. Its DNS points at the server. |
 | `OMB_CLOUD_EDGE_TLS` | `1`: the edge gets and renews a Let's Encrypt certificate for that name and serves it on 443. Unset or `0`: the edge serves only `:8080`, for the agent, and something else ends TLS. |
+| `OMB_CLOUD_EDGE_ACME_EMAIL` | With `OMB_CLOUD_EDGE_TLS=1`: a fallback CA for when Let's Encrypt refuses a certificate (its rate limits, say). The address of the account ZeroSSL's ACME endpoint gets: Caddy creates that account by itself from the address, with no sign-up or key to set. Let's Encrypt stays first and keeps its own account, and whichever CA issued the certificate stays on the volume. Unset or empty: Let's Encrypt alone. Anything but one plain address stops the home with a message naming the variable. It has no default; the operator sets it. |
 | `OMB_CLOUD_TRUSTED_PROXIES` | Only when the owner's own proxy stands in front: its addresses or ranges (`10.0.0.5`, `10.0.0.0/24`, `private_ranges`), separated by spaces or commas, at most 32. Unset: none. A `/0` range, a host name or anything else stops the home with a message naming the variable. |
 | `OMB_CLOUD_CLIENT_IP_HEADER` | The header those proxies put the client's address in. Default `X-Forwarded-For`; it needs `OMB_CLOUD_TRUSTED_PROXIES`. |
 | `OMB_CLOUD_TUNNEL_TOKEN` | For a server with no inbound port: the connector token of the home's own Cloudflare tunnel. `OMB_PUBLIC_URL` is then the tunnel's address. Not with `OMB_CLOUD_EDGE_TLS`. |
@@ -1817,6 +1834,17 @@ the desktop's version check, `sync`, `lending`, `phone`, `presence`, `session`,
 `pair`, `admin`, `health`, `webhook`, `sign-in`, `api`, `page`) and whether it
 was a background one; `null` otherwise. The Admin counts it for a wake by
 Fly's proxy, to tell which app reaches a sleeping home.
+
+**`POST /api/cloud/machines/woke`** on the Admin (additive, sent by the home,
+signed with its machine secret over `{"v":1,"wokeAt":<ms>}`, as
+`omb-power-woke-v1\n<machine id>\n<timestamp>\n<nonce>\n<hash of the body>`;
+sent at each wake (a resume, or a boot from a sleep it was stopped for), never
+retried; an Admin without it answers `404` and nothing changes). It says the
+home is awake now, so the Admin can move `cloud.power` on at the desktops' next
+session read instead of at its next power read. The lent computers also get a
+grace window: for about 90 s after a wake, a bot's `shared_computer` call and
+`list_shared_computers` wait for a computer lent to this home instead of
+failing at once (`server/shared-computers.ts`).
 
 **`POST /api/cloud/power/sleep`**, signed over its JSON body
 `{"v":1,"idleMinutes":10}`. `409 {"ok":false,"busy":[…]}` while not idle;

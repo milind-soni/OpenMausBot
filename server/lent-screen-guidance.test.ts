@@ -38,7 +38,7 @@ describe("a lent screen's answers carry the fix", () => {
     expect(texts(quarantined)).toHaveLength(1);
     expect(texts(quarantined)[0]).toMatch(/^Computer control could not start on this computer: its helper, cua-driver, is missing or blocked\. .*Protection history/);
     expect(JSON.stringify(quarantined)).not.toContain("Ana");
-    expect(texts(lentScreenResult(call("click"), failed("Computer-control transport closed")))[0]).toMatch(/^Computer control stopped on this computer: .*Try the action once more/);
+    expect(texts(lentScreenResult(call("click"), failed("Computer-control transport closed")))[0]).toMatch(/^Computer control stopped on this computer because .*try the action once more/);
     expect(texts(lentScreenResult(call("click"), failed("Computer control is unavailable. Enable it in the local app and grant OS permissions first.")))[0]).toMatch(/^Computer control is not running on this computer\./);
     expect(texts(lentScreenResult(call("click"), failed("fetch failed")))[0]).toMatch(/restart OpenMausBot on that computer/);
   });

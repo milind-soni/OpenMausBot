@@ -1,5 +1,5 @@
 import { agentsProxyLaunch } from "../agents-bridge-switch.ts";
-import { agentsServerEnv, type AgentsConversation, type AgentsTurn } from "../agents-turn.ts";
+import { agentsServerEnv, botDrivenConversation, type AgentsConversation, type AgentsTurn } from "../agents-turn.ts";
 import type { BotRecord } from "../store.ts";
 
 export function createAgentsIntegration(deps: {
@@ -7,16 +7,17 @@ export function createAgentsIntegration(deps: {
   speaking(botId: string, threadId: string): BotRecord | null;
   room(threadId: string): boolean;
   teamComputer(bot: BotRecord): boolean;
+  task(botId: string, threadId: string): Parameters<typeof botDrivenConversation>[0];
   host(botId: string, speaking: BotRecord | null): AgentsConversation["host"];
   mint(botId: string, threadId: string, turn: AgentsTurn): string;
   port: number;
   savedFiles: boolean;
 }) {
-  return (botId: string, threadId: string, depth: number, skillAuthoring: boolean, generation: string, roomHandoffId?: string, hostFiles = false) => {
+  return (botId: string, threadId: string, depth: number, skillAuthoring: boolean, generation: string, roomHandoffId?: string, hostFiles = false, automated = false) => {
     const bot = deps.bot(botId);
     const speaking = deps.speaking(botId, threadId) ?? bot;
     return { ...agentsProxyLaunch(), env: agentsServerEnv({ threadId, bot: bot ?? { id: botId }, room: deps.room(threadId),
-      teamComputer: Boolean(bot && deps.teamComputer(bot)), host: deps.host(botId, speaking) },
+      teamComputer: Boolean(bot && deps.teamComputer(bot)), botDriven: automated || botDrivenConversation(deps.task(botId, threadId)), host: deps.host(botId, speaking) },
     { generation, depth, skillAuthoring, roomHandoffId, ...(hostFiles && deps.savedFiles ? { deliversSavedFiles: true } : {}) },
     (turn) => deps.mint(botId, threadId, turn), `http://127.0.0.1:${deps.port}`) };
   };

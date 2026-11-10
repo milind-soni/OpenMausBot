@@ -30,6 +30,7 @@ vi.mock("@/lib/logins", () => ({
 
 import { LoginForm } from "./LoginForm";
 import { SignInBanner, SignInRequestCard } from "./SignInRequestCard";
+import { VaultChoices } from "./VaultChoices";
 
 const card = (signIn: Record<string, unknown> = {}): Message => ({
   id: "card-1",
@@ -233,5 +234,15 @@ describe("SignInBanner", () => {
     expect(html).toContain("Take control");
     nodes.find((node) => node.type === "button" && node.props.onClick === takeControl.onClick)!.props.onClick!();
     expect(takeControl.onClick).toHaveBeenCalledOnce();
+  });
+});
+
+describe("SignInRequestCard saved logins", () => {
+  it("offers the Vault's logins only where they can be filled, the bot's own browser, and not while one is being typed", () => {
+    const offered = (signIn?: Record<string, unknown>) => tree(signIn).some((node) => node.type === VaultChoices);
+    expect(offered()).toBe(true);
+    expect(offered({ place: "vm" })).toBe(false);
+    fixture.setters = []; fixture.states = { 2: true };
+    expect(offered()).toBe(false);
   });
 });
