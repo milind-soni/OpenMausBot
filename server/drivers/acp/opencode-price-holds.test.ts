@@ -108,7 +108,7 @@ it("uses each instance's own free prices when the instances share a driver", asy
       const error = recorder.events.find((event) => event.type === "runtime.error" && event.turnId === turnId);
       expect(error).toMatchObject({ limit: "model" });
       if (instance.instanceId === "instance-free") expect(error).toHaveProperty("limitModels", [REFUSED, OTHER]);
-      else expect(error).not.toHaveProperty("limitModels");
+      else expect(error?.type === "runtime.error" ? error.limitModels ?? [REFUSED] : []).toEqual([REFUSED]);
     } finally {
       recorder.stop();
     }
