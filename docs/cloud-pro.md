@@ -897,8 +897,20 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   of lending for good, because a resumed session carries everything said in
   it. A conversation a bot opened (a hand-off's work thread, one a bot
   started itself, a Chief's notices) starts with that bot's words, which are
-  no line in it, so it is never the owner's either: not for the Mac, and not
-  for memory capture, the daily log, recall or the brief. A conversation a guest opened (and
+  no line in it, so it is not the owner's for memory capture, the daily log,
+  recall or the brief. For the Mac, work handed on with `coordinate_bots`, whose
+  result comes back to its sender, keeps the Mac only when the turn that handed it on could itself use it at that
+  moment, on the owner's own line in a one-on-one conversation (not a card, a
+  routine or a webhook), recorded by the harness as it was handed on, and only
+  at a level no looser than that turn's conversation. A one-way notice
+  (`reply: "none"`) or a consult never carries it. The thread opened for it then counts
+  as the owner's for the Mac and nothing else: it can't write the bot's memory
+  or reach their phones, and what it writes is still watched. More work or an
+  answer from a turn that can't use the Mac ends that for good. A result
+  reported back by work it handed on does not: as with any turn, that is
+  evidence to check. A thread a bot starts with
+  `start_thread` stays refused, since Stop on the turn that started it doesn't
+  reach it. A conversation a guest opened (and
   named) is never the owner's, whoever writes in it. Whenever a computer is lent but a turn can't use it,
   `list_shared_computers` answers why in `unavailable` and `say` (`cloudLendingRefusalText` in
   `server/cloud-lending.ts`), and a refused `shared_computer` call answers the same, so the bot says the reason instead
@@ -1019,7 +1031,11 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
     reaction or a process on the Cloud), and counted only while it records
     the owner as its answerer; the request goes on by itself once they allow
     it (in a group chat they ask again). **Not now** is
-    not asked again for that line. A webhook's or a routine's run, or a line a
+    not asked again for that line. The moment a bot's memory locks, a card like
+    it also goes to the bot's own main chat, so the owner hears about the lock
+    instead of finding out when something fails: **Allow** there accepts
+    exactly what it showed and starts no turn, and **Not now** holds until the
+    memory changes again. A webhook's or a routine's run, or a line a
     bot handed in, never raises one. The same card lets the owner's own line
     through the work a bot opened a conversation with, for that line alone:
     work a bot hands into it after they allowed it (made or run then) shuts it
@@ -1259,6 +1275,21 @@ feeds the pairing lockout, never authorization. Apart from `/api/health`,
 Caddy answers only for the machine's own name (`OMB_PUBLIC_URL`) and refuses
 any other `Host`.
 
+**A home that moved to another provider.** Its old address (say
+`<app>.fly.dev`) is served by a forwarder that proxies to the new one and
+rewrites `Host` to the new name, so the edge's host matcher, and in
+`OMB_CLOUD_EDGE_TLS` mode the certificate it serves for that name, already
+match: the edge is not widened for the old name. What still names the old
+address is the `Origin` of a page or client on it (a browser tab, a device
+paired by code straight to it), which the server's same-origin checks would
+refuse. `OMB_CLOUD_LEGACY_ORIGINS` lists those old origins, and the server
+counts exactly those as its own besides its `Host`'s: for cookie sessions,
+a browser sign-in's changes, WebSockets, the event stream and the viewers.
+`X-Forwarded-Host` is never read. Requests through the forwarder reach the
+edge from the forwarder's address, so in `OMB_CLOUD_EDGE_TLS` mode they share
+one pairing lockout unless the forwarder is named in
+`OMB_CLOUD_TRUSTED_PROXIES`. New pairing links name the new address.
+
 ### On your own server: how people reach it
 
 A home on a server of its owner's (Team on your own server) runs the same
@@ -1270,6 +1301,7 @@ start.
 | --- | --- |
 | `OMB_PUBLIC_URL` | `https://` and the name people use, e.g. `https://mausbot.acme.eu`. Its DNS points at the server. |
 | `OMB_CLOUD_EDGE_TLS` | `1`: the edge gets and renews a Let's Encrypt certificate for that name and serves it on 443. Unset or `0`: the edge serves only `:8080`, for the agent, and something else ends TLS. |
+| `OMB_CLOUD_EDGE_ACME_EMAIL` | With `OMB_CLOUD_EDGE_TLS=1`: a fallback CA for when Let's Encrypt refuses a certificate (its rate limits, say). The address of the account ZeroSSL's ACME endpoint gets: Caddy creates that account by itself from the address, with no sign-up or key to set. Let's Encrypt stays first and keeps its own account, and whichever CA issued the certificate stays on the volume. Unset or empty: Let's Encrypt alone. Anything but one plain address stops the home with a message naming the variable. It has no default; the operator sets it. |
 | `OMB_CLOUD_TRUSTED_PROXIES` | Only when the owner's own proxy stands in front: its addresses or ranges (`10.0.0.5`, `10.0.0.0/24`, `private_ranges`), separated by spaces or commas, at most 32. Unset: none. A `/0` range, a host name or anything else stops the home with a message naming the variable. |
 | `OMB_CLOUD_CLIENT_IP_HEADER` | The header those proxies put the client's address in. Default `X-Forwarded-For`; it needs `OMB_CLOUD_TRUSTED_PROXIES`. |
 | `OMB_CLOUD_TUNNEL_TOKEN` | For a server with no inbound port: the connector token of the home's own Cloudflare tunnel. `OMB_PUBLIC_URL` is then the tunnel's address. Not with `OMB_CLOUD_EDGE_TLS`. |
@@ -1357,6 +1389,7 @@ never echoes a secret.
 | `OMB_CLOUD_ADMIN_URL` | secret | The Cloud origin, exact `https://`, e.g. `https://cloud.openmausbot.com`. |
 | `OMB_CLOUD_BOOTSTRAP_SECRET` | secret | 43 base64url characters (256 bits): the key the Admin signs pairing requests with. |
 | `OMB_PUBLIC_URL` | env | The machine's exact `https://` origin, `https://<app>.fly.dev`. |
+| `OMB_CLOUD_LEGACY_ORIGINS` | env | Optional, only for a home that moved to another provider: the exact `https://` origins it answered at before, comma-separated (at most 8, never a loopback name), e.g. `https://<app>.fly.dev`. |
 
 - The machine must not also carry `OMB_ADMIN_URL`, `OMB_ADMIN_WORKSPACE` or
   `OMB_ADMIN_MEMBERSHIP`: a Cloud home is a personal server with pairing codes
@@ -1802,6 +1835,17 @@ the desktop's version check, `sync`, `lending`, `phone`, `presence`, `session`,
 was a background one; `null` otherwise. The Admin counts it for a wake by
 Fly's proxy, to tell which app reaches a sleeping home.
 
+**`POST /api/cloud/machines/woke`** on the Admin (additive, sent by the home,
+signed with its machine secret over `{"v":1,"wokeAt":<ms>}`, as
+`omb-power-woke-v1\n<machine id>\n<timestamp>\n<nonce>\n<hash of the body>`;
+sent at each wake (a resume, or a boot from a sleep it was stopped for), never
+retried; an Admin without it answers `404` and nothing changes). It says the
+home is awake now, so the Admin can move `cloud.power` on at the desktops' next
+session read instead of at its next power read. The lent computers also get a
+grace window: for about 90 s after a wake, a bot's `shared_computer` call and
+`list_shared_computers` wait for a computer lent to this home instead of
+failing at once (`server/shared-computers.ts`).
+
 **`POST /api/cloud/power/sleep`**, signed over its JSON body
 `{"v":1,"idleMinutes":10}`. `409 {"ok":false,"busy":[…]}` while not idle;
 `200 {"ok":true,"nextDueAt":…}` once the home agreed. From then on, until a
@@ -1888,6 +1932,14 @@ token (`Authorization: Bearer omc_…`). Contract version 1 adds:
 Optional, additive fields the app reads when the Admin sends them (an Admin
 without them works as before; a malformed one is dropped, never the machine):
 
+- `cloud.formerOrigins: string[]`, and the same beside each `clouds[].origin`
+  and each `teams[].machine.origin`: the addresses that Cloud answered at
+  before it moved to another provider (`electron/cloud-home.mjs`
+  `parseFormerOrigins`; each a valid `https://` origin, never its `origin`
+  now; anything else is left out). The desktop knows My Cloud again by them
+  and by its id in `clouds[]`, so a computer whose bots moved to it follows it
+  to its new address instead of reading the move as My Cloud ending; see
+  [This computer's bots move to your Cloud](#this-computers-bots-move-to-your-cloud).
 - `cloud.setup: {step, slow}` while `setting_up` (`step` is `reserving`,
   `storage`, `starting` or `checking`): the app shows the same four steps as
   the Cloud page, and says when setup is slow.
@@ -2341,6 +2393,16 @@ all arrived, and freezes this computer's copy so nothing runs in two places
 (`server/cloud-move-http.ts`); a backup file still restores from Settings →
 Backups. [docs/verification/cloud-send.md](verification/cloud-send.md) has the
 tests.
+
+The move's journal names the Cloud by its address and, once the session lists
+it, by its id (the person's own Cloud in `clouds[]` at My Cloud's address).
+When My Cloud moves to another provider, the verified session gives it a new
+`origin` and lists the old one in `formerOrigins`: the same id, or the
+journal's address among those, is the same Cloud, so the journal follows it
+to the new address and the move goes on, or stays done, there. The window
+opens it there, and its saved place moves with it. A Cloud with another id
+whose former addresses don't include the journal's is another Cloud, and
+ends the move as before.
 
 ## Security summary
 

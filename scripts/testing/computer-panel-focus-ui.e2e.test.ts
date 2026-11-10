@@ -43,8 +43,6 @@ if (!enabled) console.info("skipping computer panel focus UI e2e: set OMB_UI_E2E
     })()`);
     const panelOpen = () => visible('[data-computer-panel-close]');
 
-    // The chat header only carries the computer button in advanced mode.
-    await evaluate("(async () => { const mode = await import('/src/lib/interface-mode.ts'); mode.setAdvancedMode(true); return true; })()");
     await expect.poll(() => visible('[data-tour="computer"]'), { timeout: 15_000 }).toBe(true);
 
     await evaluate("(() => { document.querySelector('[data-tour=\"computer\"]').focus(); return true; })()");

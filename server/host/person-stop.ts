@@ -12,6 +12,8 @@ export interface PersonStopDeps {
   routines(): Pick<RoutineManager, "activeBotRunForBot" | "cancelRun"> | null;
   handoffs(): Pick<Handoffs, "stoppedByPerson">;
   interruptDirectThread(botId: string, threadId: string): Promise<void>;
+  /** Read before the interrupt: what frees the thread once it is interrupted, when no turn's end will. */
+  stopping(botId: string, threadId: string): () => void;
   clearUnattended(threadId: string): void;
   /** Remembers that the person stopped the turn running in this thread, so it ends as their stop. */
   markStopped(threadId: string): void;
@@ -44,14 +46,15 @@ export function createPersonStop(deps: PersonStopDeps) {
   async function stopThreadForPerson(botId: string, threadId: string): Promise<void> {
     const routines = deps.routines();
     const routine = routines?.activeBotRunForBot(botId);
-    if (routine?.threadId === threadId) {
-      await routines!.cancelRun(routine.id);
-      return;
+    const free = deps.stopping(botId, threadId);
+    if (routine?.threadId === threadId) await routines!.cancelRun(routine.id);
+    else {
+      deps.handoffs().stoppedByPerson(threadId);
+      deps.markStopped(threadId);
+      deps.stopGoal(threadId);
+      await deps.interruptDirectThread(botId, threadId);
     }
-    deps.handoffs().stoppedByPerson(threadId);
-    deps.markStopped(threadId);
-    deps.stopGoal(threadId);
-    await deps.interruptDirectThread(botId, threadId);
+    free();
   }
 
   /** Only a message made of stop words, from a person, acts as Stop: it is recorded, and never reaches the turn it ends. With no

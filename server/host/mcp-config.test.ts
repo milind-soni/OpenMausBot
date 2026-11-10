@@ -112,6 +112,13 @@ describe("shared MCP config", () => {
     probe.mockRestore();
   });
 
+  it("says which server it could not find", async () => {
+    const { config } = fixture();
+    const missing = { status: 404, error: 'MCP server "mail" not found. It may have been removed: check Apps → MCP servers.' };
+    expect(config.remove("mail")).toEqual(missing);
+    await expect(config.test("mail", { signal: new AbortController().signal })).resolves.toEqual(missing);
+  });
+
   it("a write while busy returns 409 \"MCP servers are already being updated.\"", () => {
     const { config, changed, setBusy } = fixture();
     setBusy(true);

@@ -73,6 +73,8 @@ export interface ConfigRouteDeps {
   sharedComputerControl: Pick<SharedComputerControl, "close">;
   hostedModels: boolean;
   cloudHome: boolean;
+  /** Security: a Team Cloud never takes over another installation's Composio user, since every member's bots would then get that person's apps. */
+  sharedMembership: () => boolean;
   lendingEnabled(): boolean;
   providerConfigs(): InstanceConfigMap;
   localVmIdleMs(): number;
@@ -107,7 +109,7 @@ export interface ConfigRouteDeps {
 export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
-    closeBrowser, browserEngineSwitched, sharedComputers, sharedComputerControl, hostedModels, cloudHome: CLOUD_HOME, lendingEnabled, providerConfigs,
+    closeBrowser, browserEngineSwitched, sharedComputers, sharedComputerControl, hostedModels, cloudHome: CLOUD_HOME, sharedMembership, lendingEnabled, providerConfigs,
     localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy,
     providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
     perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
@@ -358,7 +360,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (requestedComposioKey !== undefined) {
         if (requestedComposioKey.trim()) {
           try {
-            const prepared = await composio.prepareProjectSession(requestedComposioKey, cfg.composio);
+            const prepared = await composio.prepareProjectSession(requestedComposioKey, cfg.composio, undefined, { reuseEarlierUser: !sharedMembership() });
             patch.composio = { ...patch.composio, ...prepared };
           } catch (error) {
             return json(res, 400, { error: error instanceof Error ? error.message : String(error) });

@@ -283,6 +283,11 @@ export class VaultStore {
     }
   }
 
+  /** One saved secret with its value, for handing to a bot. */
+  secret(id: string): StoredSecret | null {
+    return this.read().secrets?.find((secret) => secret.id === id) ?? null;
+  }
+
   listSecrets(): VaultSecret[] {
     return (this.read().secrets ?? []).map(summarizeSecret).sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -294,6 +299,10 @@ export class VaultStore {
     const matches = (this.read().secrets ?? []).filter((secret) => vaultNameKey(secret.name) === key && loginUsableBy(secret, botId) &&
       (delivery === "ref" || !secret.refOnly));
     return matches.sort((a, b) => Number(b.bots !== "all") - Number(a.bots !== "all") || b.updatedAt - a.updatedAt)[0] ?? null;
+  }
+
+  secretNamesFor(botId: string): Array<{ name: string; refOnly?: true }> {
+    return (this.read().secrets ?? []).filter((secret) => loginUsableBy(secret, botId)).map(({ name, refOnly }) => ({ name, ...(refOnly ? { refOnly } : {}) }));
   }
 
   /** The same name saved again for the same bots replaces its value; otherwise it is a new secret. */

@@ -51,6 +51,8 @@ export const VITEST_SUBSETS = {
     part: "locale tests",
     files: [
       "src/",
+      "electron/cua-launch.test.mjs",
+      "electron/cua-windows-isolation.test.mjs",
       "electron/menu.test.mjs",
       "electron/updater.test.mjs",
       "scripts/generate-locale.test.mjs",

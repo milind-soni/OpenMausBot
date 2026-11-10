@@ -56,6 +56,14 @@ describe("glass surface", () => {
     expect(surface).toContain("backdrop-filter: none");
   });
 
+  it("is the opaque menu colour, without a blur, when the desktop app renders without a GPU", () => {
+    const surface = rule(":root[data-software-rendering] .glass-surface");
+    expect(surface).toContain("background: var(--color-menu)");
+    expect(surface).toContain("-webkit-backdrop-filter: none");
+    expect(surface).toContain("backdrop-filter: none");
+    expect(css.indexOf(":root[data-software-rendering] .glass-surface {")).toBeGreaterThan(css.indexOf(".glass-surface {"));
+  });
+
   it("lives outside every skin block, and every skin still defines the tokens it reads", () => {
     const blocks = skinBlocks();
     expect(blocks).toHaveLength(SKIN_IDS.length);

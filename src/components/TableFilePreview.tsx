@@ -8,7 +8,7 @@ import { t } from "@/lib/i18n";
 /** A preview limit, not a download limit: chunked responses are bounded too. */
 export async function readTableResponse(response: Response, signal: AbortSignal, maxBytes = TABLE_FILE_MAX_BYTES): Promise<string> {
   if (Number(response.headers.get("content-length")) > maxBytes) {
-    await response.body?.cancel(); throw new Error("size");
+    await response.body?.cancel().catch(() => {}); throw new Error("size"); // A body that already errored must not hide "size".
   }
   const reader = response.body?.getReader();
   if (!reader) return "";

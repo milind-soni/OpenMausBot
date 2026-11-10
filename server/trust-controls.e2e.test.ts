@@ -202,14 +202,13 @@ it("honors outbound approval and Send without asking at Full access, and still r
   expect((await relay(token, "SLACK_SEND_MESSAGE", { channel: "fixture", text: "Sent without asking" })).body.result.isError).not.toBe(true);
   expect((await relay(token, "GMAIL_SEND_EMAIL", { to: "second@fixture.test" })).body.result.isError).not.toBe(true);
   expect((await cards(b.threadId)).filter(row => row.card?.outboundRequest)).toHaveLength(cardCount);
-  const opaque = relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print(1)" });
-  const opaqueCard = await pending(b.threadId);
-  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: opaqueCard.card.requestId, behavior: "deny" });
-  expect((await opaque).body.result.isError).toBe(true);
-  expect(relayed).toHaveLength(before + 3);
+  // A code run goes out without a card too, as it does at Full access with no rule.
+  expect((await relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print(1)" })).body.result.isError).not.toBe(true);
+  expect((await cards(b.threadId)).filter(row => row.card?.outboundRequest)).toHaveLength(cardCount);
+  expect(relayed).toHaveLength(before + 4);
   await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } });
   expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
-  expect(relayed).toHaveLength(before + 3);
+  expect(relayed).toHaveLength(before + 4);
 });
 
 it("honors Ask every time at Full access before the first send for any prompt language", async () => {

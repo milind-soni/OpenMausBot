@@ -6,6 +6,8 @@ export type CloudUnreachableCause = "host" | "no_answer";
 export interface CloudMachine {
   status: CloudMachineStatus;
   origin?: string;
+  /** The addresses it answered at before it moved to another provider, when the Admin says: never its `origin`. */
+  formerOrigins?: string[];
   /** While setting up, when the Admin says: the step it is at, and whether it is slow. */
   setup?: { step: CloudSetupStep; slow?: true };
   /** A failed setup's next automatic try, when the Admin says. */
@@ -127,6 +129,7 @@ export declare const CLOUD_UNREACHABLE_CAUSES: readonly CloudUnreachableCause[];
 export declare const INSTALLATION_ID: RegExp;
 export declare function parseCloudPower(input: unknown): import("./cloud-power.mjs").CloudPower | null;
 export declare function parseCloudSummary(input: unknown): CloudMachine | null;
+export declare function parseFormerOrigins(input: unknown, origin: string | null): string[];
 export type CloudTeamRole = "owner" | "admin" | "member";
 /** A team this account is in, from the verified session: its Cloud as the Admin describes it, null while it has none. */
 export interface CloudTeam { id: string; name: string; role: CloudTeamRole; machine: CloudMachine | null }
