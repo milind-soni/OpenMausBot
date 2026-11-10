@@ -135,11 +135,31 @@ export function ensureDefaultBot(store: DefaultBotStore, options: { dataDir: str
   return bot;
 }
 
-/** A move brought this place's MausBot from another computer: it becomes the one MausBot here, and the one this place
- * had becomes an ordinary bot (retireUnusedStarter archives it when nobody used it). */
-export function takeArrivingDefaultBot(store: Pick<Store, "bots" | "patchBot">, id: string): void {
+/** True once the person has made this bot their own: written to it, opened a second chat, or changed who it is. */
+function usedBot(store: Pick<Store, "messagesFor">, bot: BotRecord): boolean {
+  if (bot.soul?.trim() || bot.title || bot.description || bot.avatarUrl || (bot.tasks?.length ?? 1) > 1) return true;
+  return store.messagesFor(bot.threadId).some((message) => message.role === "user");
+}
+
+/** This place's own MausBot that stays the MausBot when another arrives by a move: the visible one the person already used. */
+export function keptDefaultBot(store: Pick<Store, "bots" | "messagesFor">, arrivingId: string): BotRecord | undefined {
+  return store.bots.find((bot) => bot.id !== arrivingId && bot.defaultBot && !defaultBotPerson(bot) && !bot.hidden && usedBot(store, bot));
+}
+
+/** A move brought this place's MausBot from another computer. When nobody used the MausBot this place had, the arriving
+ * one becomes the one MausBot here, and the one this place had becomes an ordinary bot (retireUnusedStarter archives it).
+ * When this place's own MausBot was used, it stays the MausBot, and the arriving one becomes an ordinary bot that can be
+ * deleted, named for the computer it came from so the two are told apart. */
+export function takeArrivingDefaultBot(store: Pick<Store, "bots" | "patchBot" | "messagesFor">, id: string, computer?: string): void {
   const arriving = store.bots.find((bot) => bot.id === id);
   if (!arriving) return;
+  const kept = keptDefaultBot(store, id);
+  if (kept) {
+    const from = computer?.trim() || "another computer";
+    const plain = [DEFAULT_BOT_NAME, kept.name].map((name) => name.trim().toLowerCase()).includes(arriving.name.trim().toLowerCase());
+    store.patchBot(id, { defaultBot: undefined, sidebarHidden: undefined, ...(plain ? { name: `${DEFAULT_BOT_NAME} (from ${from})` } : {}) });
+    return;
+  }
   for (const bot of store.bots) {
     if (bot.id !== id && bot.defaultBot && !defaultBotPerson(bot)) store.patchBot(bot.id, { defaultBot: undefined, sidebarHidden: undefined });
   }
@@ -152,8 +172,6 @@ export function takeArrivingDefaultBot(store: Pick<Store, "bots" | "patchBot">, 
 export function retireUnusedStarter(store: Pick<Store, "bot" | "patchBot" | "messagesFor">, dataDir: string): void {
   const own = ledger(dataDir)[""];
   const seed = own ? store.bot(own) : null;
-  if (!seed || seed.defaultBot || seed.chiefOfStaff || seed.hidden) return;
-  if (seed.soul?.trim() || seed.title || seed.description || seed.avatarUrl || (seed.tasks?.length ?? 1) > 1) return;
-  if (store.messagesFor(seed.threadId).some((message) => message.role === "user")) return;
+  if (!seed || seed.defaultBot || seed.chiefOfStaff || seed.hidden || usedBot(store, seed)) return;
   store.patchBot(seed.id, { hidden: true, pinned: undefined });
 }

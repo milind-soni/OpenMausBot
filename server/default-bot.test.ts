@@ -254,11 +254,11 @@ describe("MausBot, every person's helper", () => {
     const OWNER = { person: "p_owner0000000000000000", name: "Amit" };
     const deps = (store: Store): MoveKindsDeps => ({ dataDir: DATA_DIR, store, routines: () => null, calls: () => null, webhooks: () => null, appEvents: () => null,
       claudeCodeSkills: () => [], instanceExists: () => true, owner: () => OWNER, ownRoutine: () => {} } as unknown as MoveKindsDeps);
-    async function arrive(store: Store, id: string, record: Record<string, unknown>) {
+    async function arrive(store: Store, id: string, record: Record<string, unknown>, computer?: string) {
       let status = 0;
       await moveKindsRoute(deps(store), { path: "/api/cloud-send/kind", method: "PUT", url: new URL("http://127.0.0.1/api/cloud-send/kind"), auth: {} as never, req: {} as never,
         res: { setHeader() {} } as never, json: ((_res: unknown, code: number) => { status = code; }) as never,
-        readBody: (async () => ({ v: 1, key: `bot:${id}`, dataDir: "/Users/amit/.openmausbot", record })) as never });
+        readBody: (async () => ({ v: 1, key: `bot:${id}`, dataDir: "/Users/amit/.openmausbot", record, ...(computer ? { computer } : {}) })) as never });
       return status;
     }
     const fields = (bot: Record<string, unknown>) => Object.fromEntries(MOVE_BOT_FIELDS.map((name) => [name, bot[name] ?? null]));
@@ -295,14 +295,41 @@ describe("MausBot, every person's helper", () => {
       expect(cloud.bot(starter.id)?.defaultBot).toBeUndefined();
     });
 
-    it("keeps a My Cloud MausBot someone already used as an ordinary bot", async () => {
+    it("keeps a My Cloud MausBot someone already used as the MausBot, and the arriving one becomes an ordinary bot named for its computer (email 1a1c22b6)", async () => {
       const cloud = new Store(selection);
+      cloud.seedIfEmpty();
       const theirs = boot(cloud)!;
       cloud.appendMessage(theirs.threadId, { role: "user", kind: "text", text: "Hi" });
       const arriving = cloud.createBot({ name: "MausBot" }, { id: "desk-maus-000002", seedMessages: false });
-      expect(await arrive(cloud, arriving.id, fields({ defaultBot: {} }))).toBe(200);
-      expect(placeMausBots(cloud).map((bot) => bot.id)).toEqual([arriving.id]);
+      expect(await arrive(cloud, arriving.id, fields({ defaultBot: {}, sidebarHidden: true }), "Amit's MacBook")).toBe(200);
+      expect(placeMausBots(cloud).map((bot) => bot.id)).toEqual([theirs.id]);
+      expect(cloud.bot(theirs.id)).toMatchObject({ name: "MausBot", chiefOfStaff: true });
       expect(cloud.bot(theirs.id)?.hidden).toBeFalsy();
+      const moved = cloud.bot(arriving.id)!;
+      expect(moved).toMatchObject({ name: "MausBot (from Amit's MacBook)" });
+      expect([moved.defaultBot, moved.sidebarHidden, moved.hidden]).toEqual([undefined, undefined, undefined]);
+      expect(defaultBotPatchRefusal(moved, { hidden: true })).toBeNull();
+      expect(defaultBotPatchRefusal(cloud.bot(theirs.id), { hidden: true })).toContain("can't be deleted or archived");
+      expect(boot(cloud)?.id).toBe(theirs.id);
+      // A Mac MausBot that was the Chief there doesn't take the crown from the one kept here.
+      const chief = cloud.createBot({ name: "MausBot" }, { id: "desk-maus-000006", seedMessages: false });
+      expect(await arrive(cloud, chief.id, fields({ defaultBot: {}, chiefOfStaff: true }), "Amit's MacBook")).toBe(200);
+      expect(cloud.bots.filter((bot) => bot.chiefOfStaff).map((bot) => bot.id)).toEqual([theirs.id]);
+      expect(placeMausBots(cloud).map((bot) => bot.id)).toEqual([theirs.id]);
+    });
+
+    it("keeps a used MausBot here and leaves a renamed arriving one its own name, or names an unknown computer plainly", async () => {
+      const cloud = new Store(selection);
+      const theirs = boot(cloud)!;
+      cloud.patchBot(theirs.id, { soul: "Answer in French." });
+      const jarvis = cloud.createBot({ name: "Jarvis" }, { id: "desk-maus-000004", seedMessages: false });
+      expect(await arrive(cloud, jarvis.id, fields({ defaultBot: {} }), "Amit's MacBook")).toBe(200);
+      expect(cloud.bot(jarvis.id)).toMatchObject({ name: "Jarvis" });
+      expect(cloud.bot(jarvis.id)?.defaultBot).toBeUndefined();
+      const unnamed = cloud.createBot({ name: "MausBot" }, { id: "desk-maus-000005", seedMessages: false });
+      expect(await arrive(cloud, unnamed.id, fields({ defaultBot: {} }))).toBe(200);
+      expect(cloud.bot(unnamed.id)).toMatchObject({ name: "MausBot (from another computer)" });
+      expect(placeMausBots(cloud).map((bot) => bot.id)).toEqual([theirs.id]);
     });
 
     it("comes home to exactly the one MausBot My Cloud had, and makes none", () => {
