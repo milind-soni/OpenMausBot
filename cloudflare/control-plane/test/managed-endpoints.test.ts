@@ -3737,16 +3737,18 @@ describe("the relay first, a tunnel only when it cannot serve", () => {
     expect((await askForTunnel(worker, computer, 1)).status).toBe(200);
   });
 
-  it("never fails a relay-capable computer at the tunnel limit, while an older desktop is told it is full", async () => {
+  it("never fails a computer that reads the reason at the tunnel limit, and keeps earlier desktops on the 503 they retry from", async () => {
     const cloudflare = new FakeCloudflare();
     const worker = createWorker(cloudflare.fetch);
     const owner = await signIn(worker, "relay-cap@example.com");
+    const reads = await createInstallation(worker, owner.token, "relay-cap-reads", "0.1.152");
     const current = await createInstallation(worker, owner.token, "relay-cap-current", "0.1.151");
     const older = await createInstallation(worker, owner.token, "relay-cap-older", "0.1.140");
     cloudflare.providerErrors.set("create_tunnel", 1_045);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const ask = (credential: string, appVersion: string, vars = relayVars()) => call(worker, "/v1/installations/self/endpoint", {
-      body: { appVersion, legacyDevices: 2 },
+    const named = { TUNNEL_REASON_MIN_VERSION: "0.1.152" };
+    const ask = (credential: string, appVersion: string, legacyDevices: number, vars = relayVars(named)) => call(worker, "/v1/installations/self/endpoint", {
+      body: { appVersion, legacyDevices },
       env: { ...env, ...vars } as unknown as Env,
       method: "POST",
       token: credential,
@@ -3754,17 +3756,25 @@ describe("the relay first, a tunnel only when it cannot serve", () => {
 
     // Cloudflare refuses the first; the second is answered from the refusal gate. Both pair over the relay.
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const full = await ask(current.credential, "0.1.151");
+      const full = await ask(reads.credential, "0.1.152", 2);
       expect(full.status).toBe(409);
       await expect(full.json()).resolves.toEqual({ error: "relay_capable", tunnel: "full" });
     }
-    const old = await ask(older.credential, "0.1.140");
-    expect(old.status).toBe(503);
-    await expect(old.json()).resolves.toEqual({ error: "endpoint_capacity" });
-    // With the relay off there is nothing to fall back to: the limit is the answer.
-    const relayOff = await ask(current.credential, "0.1.151", relayVars({ RELAY_DISABLED: "1" }));
-    expect(relayOff.status).toBe(503);
-    await expect(relayOff.json()).resolves.toEqual({ error: "endpoint_capacity" });
+    // A release that would take the 409 as "done" and stop retrying, and one from before the relay: the 503.
+    for (const [credential, appVersion] of [[current.credential, "0.1.151"], [older.credential, "0.1.140"]] as const) {
+      const full = await ask(credential, appVersion, 2);
+      expect(full.status).toBe(503);
+      expect(full.headers.get("retry-after")).toBe("600");
+      await expect(full.json()).resolves.toEqual({ error: "endpoint_capacity" });
+    }
+    // With no old phone nothing is waited for, whatever the release.
+    expect((await ask(current.credential, "0.1.151", 0)).status).toBe(409);
+    // Until the release is named, and with the relay off, the limit is the answer.
+    for (const vars of [relayVars(), relayVars({ ...named, RELAY_DISABLED: "1" })]) {
+      const full = await ask(reads.credential, "0.1.152", 2, vars);
+      expect(full.status).toBe(503);
+      await expect(full.json()).resolves.toEqual({ error: "endpoint_capacity" });
+    }
   });
 });
 
@@ -3847,6 +3857,36 @@ describe("releasing tunnels the relay has replaced", () => {
     expect((await endpointState(computer.id)).status).toBe("deleted");
   });
 
+  it("stops marking while the cleanup sweep is failing, so no queue of rows their owners cannot take back builds up", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "release-backlog@example.com");
+    const computers: Computer[] = [];
+    for (const name of ["a", "b", "c"]) {
+      const computer = await computerWithTunnel(worker, cloudflare, owner.token, `release-backlog-${name}`);
+      expect(await reportPhones(worker, computer, { e2e: 1, legacy: 0 })).toBe(200);
+      await clearSince(computer.id, 5);
+      computers.push(computer);
+    }
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    cloudflare.failures.add("delete_tunnel");
+    const vars = relayVars({ RELAY_TUNNEL_RELEASE_PERCENT: "100", OMB_CLEANUP_SWEEP_LIMIT: "2" });
+    const deleting = async () => (await Promise.all(computers.map((each) => endpointState(each.id)))).filter((state) => state.status === "deleting").length;
+
+    await runScheduledCleanup(worker, vars);
+    expect(await deleting()).toBe(2);
+    for (let run = 0; run < 3; run += 1) await runScheduledCleanup(worker, vars);
+    expect(await deleting()).toBe(2);
+
+    // Cleanup works again: the queue drains (after its backoff), and marking resumes.
+    cloudflare.failures.delete("delete_tunnel");
+    await env.DB.prepare("UPDATE installation_endpoints SET last_cleanup_attempt_at = 0 WHERE status = 'deleting'").run();
+    await runScheduledCleanup(worker, vars);
+    await runScheduledCleanup(worker, vars);
+    expect((await Promise.all(computers.map((each) => endpointState(each.id)))).map((state) => state.status)).toEqual(["deleted", "deleted", "deleted"]);
+  });
+
   it("keeps the tunnel of a computer whose relay token has gone stale", async () => {
     const cloudflare = new FakeCloudflare();
     const worker = createWorker(cloudflare.fetch);
@@ -3890,6 +3930,35 @@ describe("the cutoffs", () => {
     expect(await endpointState(withOldPhone.id)).toMatchObject({ status: "deleted", tunnel_id: null });
     expect(cloudflare.tunnels.has(withOldPhone.state.tunnel_name)).toBe(false);
 
+    // A current desktop the relay has never carried (no token) keeps a tunnel that works, on Retry and in the cron.
+    const neverOnRelay = await computerWithTunnel(worker, cloudflare, owner.token, "cutoff-never-on-relay");
+    const kept = await askForTunnel(worker, neverOnRelay, 1, relayVars(on));
+    expect(kept.status).toBe(200);
+    await runScheduledCleanup(worker, relayVars(on));
+    expect((await endpointState(neverOnRelay.id)).status).toBe("ready");
+    // Its token gone stale reads the same.
+    expect(await reportPhones(worker, neverOnRelay, { e2e: 0, legacy: 1 })).toBe(200);
+    await env.DB.prepare("UPDATE relay_adoption SET token_at = ? WHERE installation_id = ?").bind(Date.now() - 3 * DAY_MS, neverOnRelay.id).run();
+    expect((await askForTunnel(worker, neverOnRelay, 1, relayVars(on))).status).toBe(200);
+    await runScheduledCleanup(worker, relayVars(on));
+    expect((await endpointState(neverOnRelay.id)).status).toBe("ready");
+
+    // The rollout lowered below a computer: the cron leaves the tunnel provisioning would hand back, so nothing loops.
+    const rolledBack = await computerWithTunnel(worker, cloudflare, owner.token, "cutoff-rolled-back");
+    expect(await reportPhones(worker, rolledBack, { e2e: 0, legacy: 1 })).toBe(200);
+    const lowered = relayVars({ ...on, RELAY_ROLLOUT_PERCENT: "0" });
+    for (let round = 0; round < 2; round += 1) {
+      await runScheduledCleanup(worker, lowered);
+      expect((await endpointState(rolledBack.id)).status).toBe("ready");
+      expect((await askForTunnel(worker, rolledBack, 1, lowered)).status).toBe(200);
+    }
+    const deletesBefore = deleteURLs(cloudflare).length;
+    await runScheduledCleanup(worker, lowered);
+    expect(deleteURLs(cloudflare).length).toBe(deletesBefore);
+    // Admitted by name it is on the relay again, and inside the cutoff.
+    await runScheduledCleanup(worker, relayVars({ ...on, RELAY_ROLLOUT_PERCENT: "0", RELAY_ALLOW_INSTALLATIONS: rolledBack.id }));
+    expect((await endpointState(rolledBack.id)).status).toBe("deleted");
+
     // A desktop from before the relay cannot use it, so this switch leaves it alone.
     expect((await endpointState(olderDesktop.id)).status).toBe("ready");
     expect((await askForTunnel(worker, olderDesktop, 2, relayVars(on))).status).toBe(200);
@@ -3927,6 +3996,21 @@ describe("the cutoffs", () => {
     expect((await endpointState(unknown.id)).status).toBe("deleted");
     expect((await endpointState(current.id)).status).toBe("ready");
     expect((await askForTunnel(worker, current, 1, minimum)).status).toBe(200);
+
+    // A computer that has not called for days may have updated since: its stored release proves nothing.
+    const away = await computerWithTunnel(worker, cloudflare, owner.token, "cutoff-version-away", "0.1.140");
+    await env.DB.prepare("UPDATE installations SET last_seen_at = ? WHERE id = ?").bind(Date.now() - 3 * DAY_MS, away.id).run();
+    expect((await releaseHealth(worker, minimum)).minAppVersion).toEqual({ on: true, eligible: 0 });
+    await runScheduledCleanup(worker, minimum);
+    expect((await endpointState(away.id)).status).toBe("ready");
+
+    // A desktop that updated itself while its tunnel kept working says so with its hourly relay token.
+    const selfUpdated = await computerWithTunnel(worker, cloudflare, owner.token, "cutoff-version-updated", "0.1.140");
+    expect(await reportPhones(worker, { ...selfUpdated, appVersion: "0.1.151" }, { e2e: 0, legacy: 1 })).toBe(200);
+    expect(await env.DB.prepare("SELECT app_version FROM installations WHERE id = ?").bind(selfUpdated.id).first())
+      .toEqual({ app_version: "0.1.151" });
+    await runScheduledCleanup(worker, minimum);
+    expect((await endpointState(selfUpdated.id)).status).toBe("ready");
 
     // Updated: the same address comes back.
     const updated = await askForTunnel(worker, { ...old, appVersion: "0.1.151" }, 1, minimum);

@@ -95,9 +95,14 @@
     // (from the release that reads `tunnel` on 409 relay_capable). Ramp 10, then 100. If the relay itself fails,
     // RELAY_DISABLED "1" (or a lower RELAY_ROLLOUT_PERCENT) stops the cutoff and desktops get their address back.
     // TUNNEL_MIN_APP_VERSION (x.y.z): a desktop below it neither gets nor keeps a tunnel and is answered
-    // 426 update_required. Empty: no minimum.
+    // 426 update_required. The cron removes a tunnel only from a computer seen in the last two days, whose stored
+    // release is therefore current. Empty: no minimum.
     "TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT": "0",
-    "TUNNEL_MIN_APP_VERSION": ""
+    "TUNNEL_MIN_APP_VERSION": "",
+    // The first desktop release that reads `tunnel` on 409 relay_capable and keeps asking afterwards (x.y.z). From
+    // it, a relay-served desktop with an old phone is answered relay_capable ("full") at the tunnel limit instead of
+    // 503 endpoint_capacity; earlier releases keep the 503 they show and retry on. Empty: always the 503.
+    "TUNNEL_REASON_MIN_VERSION": ""
   },
   "secrets": {
     "required": ["BETTER_AUTH_SECRET", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN_MAUSBOT_SI", "RELAY_TOKEN_SIGNING_KEY"]

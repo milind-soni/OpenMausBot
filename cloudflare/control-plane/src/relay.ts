@@ -4,7 +4,7 @@
 import { z } from "zod";
 
 import { errorResponse, HTTPError, json, readBoundedJSON } from "./http";
-import { requireInstallation } from "./installations";
+import { recordReportedAppVersion, requireInstallation } from "./installations";
 
 const HOUR_MS = 60 * 60 * 1_000;
 export const RELAY_TOKEN_TTL_S = 12 * 60 * 60;
@@ -247,26 +247,52 @@ async function recordLegacyClear(env: Env, use: Pick<RelayUse, "installationId" 
   ).bind(use.installationId, use.legacy, use.now).run().catch(() => undefined);
 }
 
+/** The relay gave the computer a token this recently: tokens are renewed hourly while the relay is in use, so two
+ * days covers a night off and a sleeping laptop. */
+export const RELAY_FRESH_MS = 2 * 24 * HOUR_MS;
+
 /**
- * Whether the relay can carry this computer right now: it is on, the computer is not blocked, and it is inside the
- * rollout (or admitted by name). Only then may it go without a tunnel. `bucket` is its place (0-99) in every
- * percentage rollout, null when unknown. A database that cannot answer (a Worker ahead of migration 0012) reads as
- * served, which is what a relay-capable desktop got before this check existed.
+ * The one rule for "the relay carries this computer", shared by provisioning and the release cron so they can never
+ * disagree: the relay is on, the computer is not blocked, and it is inside the rollout or admitted by name. `bucket`
+ * is its place (0-99) in every percentage rollout.
  */
-export async function relayStanding(env: Env, installationId: string): Promise<{ serves: boolean; bucket: number | null }> {
+export async function relayAdmits(
+  settings: Pick<RelaySettings, "allowInstallations" | "rolloutPercent"> | null,
+  computer: { installationId: string; hostId: string | null; blocked: boolean },
+): Promise<{ admitted: boolean; bucket: number | null }> {
+  const bytes = computer.hostId === null ? null : fromB64u(computer.hostId);
+  const bucket = bytes === null || bytes.length !== 16 ? null : await rolloutBucket(bytes);
+  if (!settings || computer.blocked) return { admitted: false, bucket };
+  return {
+    admitted: settings.allowInstallations.has(computer.installationId) || (bucket !== null && bucket < settings.rolloutPercent),
+    bucket,
+  };
+}
+
+export interface RelayStanding {
+  /** `relayAdmits`: the relay would carry it. */
+  serves: boolean;
+  bucket: number | null;
+  /** It also holds a relay token from the last two days: the relay is what it is using. */
+  proven: boolean;
+}
+
+/** `relayAdmits` for one installation, making its host id if it has none. A database that cannot answer (a Worker
+ * ahead of migration 0012) reads as served and unproven, which is what a relay-capable desktop got before. */
+export async function relayStanding(env: Env, installationId: string, now = Date.now()): Promise<RelayStanding> {
   const settings = await readRelaySettings(env);
-  if (!settings) return { serves: false, bucket: null };
+  if (!settings) return { serves: false, bucket: null, proven: false };
   let host: { hostId: string; blocked: boolean };
   try {
     host = await hostIdFor(env, installationId);
   } catch {
-    return { serves: true, bucket: null };
+    return { serves: true, bucket: null, proven: false };
   }
-  const bytes = fromB64u(host.hostId);
-  const bucket = bytes === null ? null : await rolloutBucket(bytes);
-  if (host.blocked) return { serves: false, bucket };
-  const serves = settings.allowInstallations.has(installationId) || (bucket !== null && bucket < settings.rolloutPercent);
-  return { serves, bucket };
+  const { admitted, bucket } = await relayAdmits(settings, { installationId, hostId: host.hostId, blocked: host.blocked });
+  if (!admitted) return { serves: false, bucket, proven: false };
+  const adoption = await env.DB.prepare("SELECT token_at FROM relay_adoption WHERE installation_id = ?")
+    .bind(installationId).first<{ token_at: number | null }>().catch(() => null);
+  return { serves: true, bucket, proven: (adoption?.token_at ?? 0) >= now - RELAY_FRESH_MS };
 }
 
 export async function issueRelayToken(request: Request, env: Env): Promise<Response> {
@@ -274,6 +300,11 @@ export async function issueRelayToken(request: Request, env: Env): Promise<Respo
   const parsed = requestSchema.safeParse(await readBoundedJSON(request).catch(() => null));
   if (!parsed.success) throw new HTTPError(400, "invalid_request");
   const now = Date.now();
+  // The one request every relay-capable desktop makes each hour: it keeps the stored release current, so a desktop
+  // that updated itself is never judged by the version it registered with.
+  if (parsed.data.appVersion !== installation.app_version) {
+    await recordReportedAppVersion(env, installation.installation_id, parsed.data.appVersion).catch(() => undefined);
+  }
   const [limited] = await env.DB.batch([limitStatement(env, installation.installation_id, now)]);
   if (limited?.meta.changes === 0) {
     const response = errorResponse(429, "rate_limited");

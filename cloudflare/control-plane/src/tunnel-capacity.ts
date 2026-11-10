@@ -42,6 +42,16 @@ const CAPACITY_HEALTH_CACHE_SECONDS = 120;
 const CAPACITY_HEALTH_CACHE = "healthz-capacity";
 // Never routed. Bump the version when AccountSnapshot changes: copies outlive deploys.
 const DAY_MS = 24 * 60 * 60 * 1_000;
+/** Three cron runs: a pass missing a page for longer starts over. */
+const PREVIEW_PASS_GAP_MS = 15 * 60 * 1_000;
+/** /healthz reads the dry-run total at most this often per isolate. */
+const PREVIEW_MEMO_MS = 5 * 60 * 1_000;
+let previewMemo: { at: number; key: string; value: JSONValue | null } | null = null;
+
+/** Test-only. */
+export function forgetReclaimPreview(): void {
+  previewMemo = null;
+}
 const CAPACITY_HEALTH_CACHE_PATH = "/__internal/healthz-capacity-row/v2";
 
 interface ScanEndpointRow {
@@ -308,19 +318,19 @@ async function recordReclaimPreview(
   eligible: number,
   now: number,
 ): Promise<void> {
+  // Off: nothing is written. A row left from an earlier preview is ignored.
   const previewMs = config.capacity.reclaimPreviewMs;
-  if (previewMs === null) {
-    await env.DB.prepare("DELETE FROM managed_endpoint_reclaim_preview WHERE provider_account = ?")
-      .bind(account.accountId).run().catch(() => undefined);
-    return;
-  }
+  if (previewMs === null) return;
   const days = previewMs / DAY_MS;
   try {
     const row = await env.DB.prepare(
-      "SELECT days, running, eligible, completed_at FROM managed_endpoint_reclaim_preview WHERE provider_account = ?",
-    ).bind(account.accountId).first<{ completed_at: number | null; days: number; eligible: number | null; running: number | null }>();
-    // A pass counts only from its first page, at one threshold throughout.
-    const inPass = page === 1 || (row !== null && row.days === days && row.running !== null);
+      "SELECT days, running, eligible, completed_at, updated_at FROM managed_endpoint_reclaim_preview WHERE provider_account = ?",
+    ).bind(account.accountId).first<{ completed_at: number | null; days: number; eligible: number | null; running: number | null; updated_at: number }>();
+    // A pass counts only from its first page, at one threshold throughout,
+    // with no gap: a running total last touched before the previous cron run
+    // or two belongs to a preview that was switched off part-way.
+    const inPass = page === 1
+      || (row !== null && row.days === days && row.running !== null && row.updated_at >= now - PREVIEW_PASS_GAP_MS);
     const sameDays = row !== null && row.days === days;
     const running = inPass ? (page === 1 ? 0 : row?.running ?? 0) + eligible : null;
     const finished = lastPage && running !== null;
@@ -345,10 +355,18 @@ async function recordReclaimPreview(
 
 /** What a full pass would reclaim at the preview threshold, summed over the
  * accounts: null until every account has finished a pass at it. */
-async function reclaimPreview(env: Env, config: ControlPlaneConfig): Promise<JSONValue | null> {
+async function reclaimPreview(env: Env, config: ControlPlaneConfig, now: number): Promise<JSONValue | null> {
   const previewMs = config.capacity.reclaimPreviewMs;
   if (previewMs === null) return null;
   const days = previewMs / DAY_MS;
+  const key = `${days}:${accountIds(config).join(",")}`;
+  if (previewMemo && previewMemo.key === key && now - previewMemo.at < PREVIEW_MEMO_MS) return previewMemo.value;
+  const value = await readReclaimPreview(env, config, days);
+  previewMemo = { at: now, key, value };
+  return value;
+}
+
+async function readReclaimPreview(env: Env, config: ControlPlaneConfig, days: number): Promise<JSONValue | null> {
   const found = await env.DB.prepare(
     `SELECT provider_account, eligible FROM managed_endpoint_reclaim_preview
       WHERE days = ? AND provider_account IN (SELECT value FROM json_each(?))`,
@@ -732,7 +750,7 @@ export async function capacityHealth(
 ): Promise<JSONValue> {
   const pool = poolHealth(config, await cachedSnapshots(env, config, ctx), now);
   const only = pool.accounts.length === 1 ? pool.accounts[0] : undefined;
-  const dryRun = await reclaimPreview(env, config);
+  const dryRun = await reclaimPreview(env, config, now);
   const preview: Record<string, JSONValue> = dryRun === null ? {} : { preview: dryRun };
   if (only) {
     return {

@@ -7,16 +7,17 @@
 import type { ControlPlaneConfig } from "./config";
 import { ACTED_ON_ENDPOINT_SQL, actedOnAccounts, appVersionAtLeast } from "./endpoint-accounts";
 import type { JSONValue } from "./http";
-import { readRelaySettings, rolloutBucket } from "./relay";
+import { readRelaySettings, RELAY_FRESH_MS, relayAdmits } from "./relay";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const VERSION = /^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$/;
 /** Three days: longer than a weekend away, so a phone that still dials the
  * tunnel has had working days to show up as an old phone and stop the wait. */
 export const DEFAULT_RELEASE_DAYS = 3;
-/** The relay served the computer this recently: its token is renewed hourly
- * while it is in use, so two days covers a night off and a sleeping laptop. */
-export const RELAY_FRESH_MS = 2 * DAY_MS;
+/** A computer called the control plane this recently, so what is stored about
+ * it is current: a desktop with remote access on checks in every few minutes,
+ * and a relay-capable one reports its release with each hourly relay token. */
+export const SEEN_FRESH_MS = 2 * DAY_MS;
 /** Release marks per cron run, all reasons together: with the cleanup sweep's
  * 20 rows a run, a wave never outgrows what cleanup removes. */
 export const RELEASE_MARK_LIMIT = 20;
@@ -34,6 +35,9 @@ export interface TunnelPolicy {
   releaseMs: number;
   /** TUNNEL_MIN_APP_VERSION: a desktop below it neither gets nor keeps a tunnel. */
   minAppVersion: string | null;
+  /** TUNNEL_REASON_MIN_VERSION: the first desktop release that reads `tunnel` on 409 relay_capable and keeps
+   * asking afterwards. Only from it is a full account answered with relay_capable instead of 503. */
+  tunnelReasonMinVersion: string | null;
   /** TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT: the share of relay-served computers that give up their tunnel whatever
    * phones they have, so an old phone app no longer holds one. */
   legacyCutoffPercent: number;
@@ -57,6 +61,7 @@ export function readTunnelPolicy(env: Env): TunnelPolicy {
     releasePercent: relayMinVersion === null ? 0 : integer(vars.RELAY_TUNNEL_RELEASE_PERCENT, 0, 0, 100),
     releaseMs: integer(vars.RELAY_TUNNEL_RELEASE_DAYS, DEFAULT_RELEASE_DAYS, 1, 90) * DAY_MS,
     minAppVersion: version(vars.TUNNEL_MIN_APP_VERSION),
+    tunnelReasonMinVersion: version(vars.TUNNEL_REASON_MIN_VERSION),
     legacyCutoffPercent: relayMinVersion === null ? 0 : integer(vars.TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT, 0, 0, 100),
   };
 }
@@ -64,6 +69,10 @@ export function readTunnelPolicy(env: Env): TunnelPolicy {
 /** A missing or unreadable version is below every minimum. */
 export function belowMinimum(policy: TunnelPolicy, appVersion: string | null): boolean {
   return policy.minAppVersion !== null && !appVersionAtLeast(appVersion, policy.minAppVersion);
+}
+
+export function readsTunnelReason(policy: TunnelPolicy, appVersion: string | null): boolean {
+  return policy.tunnelReasonMinVersion !== null && appVersionAtLeast(appVersion, policy.tunnelReasonMinVersion);
 }
 
 export function relayCapableVersion(policy: TunnelPolicy, appVersion: string | null): boolean {
@@ -89,7 +98,14 @@ const RELAY_PROVEN_SQL = `${RELAY_SERVED_SQL}
         AND a.legacy_clear_at IS NOT NULL
         AND a.legacy_clear_at <= ?`;
 
+/** The stored release can be trusted as current: the computer called lately,
+ * and had it updated to a relay-capable release it would have said so with
+ * its relay token. A computer that has been off is left to idle reclaim. */
+const SEEN_LATELY_SQL = "i.last_seen_at IS NOT NULL AND i.last_seen_at >= ?";
+
 interface VersionRow {
+  /** Of `tunnels`, those whose computer called lately. */
+  seen: number;
   proven: number;
   relay_served: number;
   tunnels: number;
@@ -103,6 +119,7 @@ async function heldByVersion(env: Env, config: ControlPlaneConfig, policy: Tunne
   const found = await env.DB.prepare(
     `SELECT COALESCE(i.app_version, '') AS version,
             COUNT(*) AS tunnels,
+            COALESCE(SUM(CASE WHEN ${SEEN_LATELY_SQL} THEN 1 ELSE 0 END), 0) AS seen,
             COALESCE(SUM(CASE WHEN ${RELAY_SERVED_SQL} THEN 1 ELSE 0 END), 0) AS relay_served,
             COALESCE(SUM(CASE WHEN ${RELAY_PROVEN_SQL} THEN 1 ELSE 0 END), 0) AS proven
        FROM installation_endpoints e
@@ -110,13 +127,14 @@ async function heldByVersion(env: Env, config: ControlPlaneConfig, policy: Tunne
        LEFT JOIN relay_adoption a ON a.installation_id = e.installation_id
       WHERE ${HELD_TUNNEL_SQL}
       GROUP BY 1`,
-  ).bind(fresh, fresh, fresh, now - policy.releaseMs, actedOnAccounts(config)).all<VersionRow>();
+  ).bind(now - SEEN_FRESH_MS, fresh, fresh, fresh, now - policy.releaseMs, actedOnAccounts(config)).all<VersionRow>();
   return found.results;
 }
 
 export interface ReleasePreview {
-  /** Held tunnels of desktops below TUNNEL_MIN_APP_VERSION, or, while that is
-   * unset, below RELAY_CAPABLE_MIN_VERSION: what a version cutoff would clear. */
+  /** Held tunnels of desktops seen in the last two days below
+   * TUNNEL_MIN_APP_VERSION, or, while that is unset, below
+   * RELAY_CAPABLE_MIN_VERSION: what a version cutoff would clear. */
   belowMinVersion: number;
   /** Held tunnels of relay-served desktops that are not yet proven: what the
    * old-phone cutoff would clear beyond the release. */
@@ -130,7 +148,7 @@ function preview(rows: readonly VersionRow[], policy: TunnelPolicy): ReleasePrev
   const totals: ReleasePreview = { belowMinVersion: 0, legacyPhones: 0, relayProven: 0 };
   for (const row of rows) {
     if (cutoff !== null && !appVersionAtLeast(row.version, cutoff)) {
-      totals.belowMinVersion += row.tunnels;
+      totals.belowMinVersion += row.seen;
       continue;
     }
     if (!relayCapableVersion(policy, row.version)) continue;
@@ -164,6 +182,11 @@ export async function tunnelReleaseHealth(env: Env, config: ControlPlaneConfig, 
   }, () => null);
   healthMemo = { at: now, value };
   return value;
+}
+
+interface Candidate {
+  installation_id: string;
+  relay_host_id: string | null;
 }
 
 export interface ReleaseSummary {
@@ -224,15 +247,27 @@ export async function releaseTunnels(
     marked: { legacy_cutoff: 0, min_version: 0, relay_proven: 0 },
     preview: preview(rows, policy),
   };
-  let budget = RELEASE_MARK_LIMIT;
+  // Never more waiting for cleanup than one sweep removes: while the sweep is
+  // failing or rate-limited its queue stays full and nothing more is marked,
+  // so no owner is left with a row it cannot take back.
+  const queued = await env.DB.prepare(
+    `SELECT COUNT(*) AS count FROM installation_endpoints e WHERE e.status = 'deleting' AND ${ACTED_ON_ENDPOINT_SQL}`,
+  ).bind(actedOnAccounts(config)).first<{ count: number }>();
+  let budget = Math.max(0, Math.min(RELEASE_MARK_LIMIT, config.capacity.cleanupSweepLimit) - (queued?.count ?? 0));
   const fresh = now - RELAY_FRESH_MS;
   const versions = rows.map((row) => row.version);
   const below = JSON.stringify(versions.filter((each) => belowMinimum(policy, each)));
   const capable = JSON.stringify(versions.filter((each) => relayCapableVersion(policy, each) && !belowMinimum(policy, each)));
-  // With the relay switched off nobody is moved onto it.
-  const relayOn = (await readRelaySettings(env)) !== null;
+  // With the relay switched off, or a computer outside its rollout, nobody is
+  // moved onto it: the same `relayAdmits` provisioning answers by, so a tunnel
+  // provisioning would hand back is never marked.
+  const relay = await readRelaySettings(env);
+  const inside = (percent: number) => async (row: Candidate) => {
+    const { admitted, bucket } = await relayAdmits(relay, { installationId: row.installation_id, hostId: row.relay_host_id, blocked: false });
+    return admitted && bucket !== null && bucket < percent;
+  };
 
-  const run = async (reason: ReleaseReason, guard: string, bindings: unknown[], admit?: (hostId: string | null) => Promise<boolean>) => {
+  const run = async (reason: ReleaseReason, guard: string, bindings: unknown[], admit?: (row: Candidate) => Promise<boolean>) => {
     if (budget <= 0) return;
     const found = await env.DB.prepare(
       `SELECT e.installation_id, i.relay_host_id
@@ -245,10 +280,10 @@ export async function releaseTunnels(
         ORDER BY e.updated_at ASC, e.installation_id ASC
         LIMIT ?`,
     ).bind(actedOnAccounts(config), now, ...bindings, admit ? PROVEN_SCAN_LIMIT : budget)
-      .all<{ installation_id: string; relay_host_id: string | null }>();
+      .all<Candidate>();
     for (const row of found.results) {
       if (budget <= 0) break;
-      if (admit && !(await admit(row.relay_host_id))) continue;
+      if (admit && !(await admit(row))) continue;
       if (await mark(env, config, row.installation_id, guard, bindings, now)) {
         budget -= 1;
         summary.marked[reason] += 1;
@@ -256,16 +291,14 @@ export async function releaseTunnels(
     }
   };
 
-  if (policy.minAppVersion !== null) await run("min_version", VERSION_IN_SQL, [below]);
+  if (policy.minAppVersion !== null) {
+    await run("min_version", `${VERSION_IN_SQL} AND ${SEEN_LATELY_SQL}`, [below, now - SEEN_FRESH_MS]);
+  }
   const servedGuard = `${VERSION_IN_SQL} AND i.relay_blocked_at IS NULL`;
-  const inside = (percent: number) => async (hostId: string | null) => {
-    const bytes = hostId === null ? null : hostBytes(hostId);
-    return bytes !== null && (await rolloutBucket(bytes)) < percent;
-  };
-  if (relayOn && policy.legacyCutoffPercent > 0) {
+  if (relay && policy.legacyCutoffPercent > 0) {
     await run("legacy_cutoff", `${servedGuard} AND ${RELAY_SERVED_SQL}`, [capable, fresh], inside(policy.legacyCutoffPercent));
   }
-  if (relayOn && policy.releasePercent > 0) {
+  if (relay && policy.releasePercent > 0) {
     await run(
       "relay_proven",
       `${servedGuard} AND ${RELAY_PROVEN_SQL}`,
@@ -285,14 +318,4 @@ export async function releaseTunnels(
     eligible: summary.preview,
   }));
   return summary;
-}
-
-function hostBytes(text: string): Uint8Array | null {
-  if (!/^[A-Za-z0-9_-]{22}$/.test(text)) return null;
-  try {
-    const binary = atob(text.replace(/-/g, "+").replace(/_/g, "/") + "==");
-    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  } catch {
-    return null;
-  }
 }

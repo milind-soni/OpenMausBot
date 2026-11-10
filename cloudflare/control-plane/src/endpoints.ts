@@ -37,8 +37,8 @@ import {
   releaseCleanedCapacity,
   type AccountCleanup,
 } from "./tunnel-capacity";
-import { belowMinimum, readTunnelPolicy, relayCapableVersion } from "./tunnel-release";
-import { relayStanding } from "./relay";
+import { belowMinimum, readsTunnelReason, readTunnelPolicy, relayCapableVersion } from "./tunnel-release";
+import { relayStanding, type RelayStanding } from "./relay";
 
 type EndpointStatus = "pending" | "provisioning" | "ready" | "deleting" | "deleted" | "error";
 
@@ -1191,7 +1191,7 @@ export async function provisionManagedEndpoint(
   // The relay first: a desktop it can carry gets a tunnel only for an old phone, and only while old phones may
   // still hold one. A desktop the relay cannot carry (an older release, the relay off, outside the rollout,
   // blocked) falls through to a tunnel, as before the relay existed.
-  let standing: { serves: boolean; bucket: number | null } | null = null;
+  let standing: RelayStanding | null = null;
   const onRelay = async () => {
     if (!relayCapableVersion(policy, reportedVersion)) return null;
     standing ??= await relayStanding(env, installation.installation_id);
@@ -1199,13 +1199,21 @@ export async function provisionManagedEndpoint(
   };
   if (policy.legacyCutoffPercent > 0) {
     const relay = await onRelay();
-    if (relay && relay.bucket !== null && relay.bucket < policy.legacyCutoffPercent) {
+    // A tunnel that works is given up only by a computer the relay is known to be carrying (the cron's rule).
+    if (
+      relay && relay.bucket !== null && relay.bucket < policy.legacyCutoffPercent
+      && (relay.proven || !holdsTunnel(existing))
+    ) {
       return relayCapableResponse(legacyDevices === 0 ? undefined : "retired");
     }
   }
   if (legacyDevices === 0 && !holdsTunnel(existing) && await onRelay()) return relayCapableResponse();
-  // At the limit a desktop on the relay still pairs: new phones use the relay, and only its old phones wait.
-  const atCapacity = async () => (await onRelay() ? relayCapableResponse("full") : capacityResponse());
+  // At the limit a desktop on the relay still pairs new phones over it, and only its old phones wait. Only a
+  // release that reads `tunnel` is told so: an earlier one takes any relay_capable as "nothing more to do" and
+  // would stop retrying, so it keeps the 503 it shows and retries on.
+  const atCapacity = async () => (
+    readsTunnelReason(policy, reportedVersion) && await onRelay() ? relayCapableResponse("full") : capacityResponse()
+  );
   // Only a new row chooses its account; an existing one keeps its own.
   const row = existing
     ?? await ensureEndpointRow(env, installation.installation_id, await newEndpointAccount(config, allocation));
