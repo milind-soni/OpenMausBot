@@ -26,7 +26,7 @@ function computer({ connections, answers = {}, release = () => ({ released: true
 }
 
 /** My Cloud's own routes over the owner session, each call recorded; `reply` answers anything not set up here. */
-function cloud({ connections = [], engines = [], commands = ["npx", "node"], reply = () => ({ status: 200, body: {} }), readyAfter = 0 } = {}) {
+function cloud({ connections = [], engines = [], commands = ["npx", "node"], reply = () => ({ status: 200, body: {} }), readyAfter = 0, vaultKeys = false } = {}) {
   const calls = [];
   let reads = 0;
   return {
@@ -35,7 +35,7 @@ function cloud({ connections = [], engines = [], commands = ["npx", "node"], rep
       calls.push([method, route, body]);
       if (method === "GET" && route === "/api/cloud-connections") {
         reads++;
-        return { ok: true, status: 200, body: { computer: { environmentId: "env-cloud", label: "omb-u-1" }, connections, engines: reads > readyAfter ? engines : [], commands } };
+        return { ok: true, status: 200, body: { computer: { environmentId: "env-cloud", label: "omb-u-1" }, connections, engines: reads > readyAfter ? engines : [], commands, ...(vaultKeys ? { vaultKeys } : {}) } };
       }
       const answer = reply(method, route, body) ?? { status: 200, body: {} };
       return { ok: answer.status >= 200 && answer.status < 300, ...answer };
@@ -118,6 +118,27 @@ test("a server that needs this computer goes marked as running on it, and a serv
   assert.equal(target.calls.some(([method, route]) => method === "PATCH" && route === "/api/mcp/servers/fetch"), false, "a server switched off here stays off there");
   assert.deepEqual(result.runsHere, [{ id: "mcp:notes", label: "notes" }, { id: "mcp:fetch", label: "fetch", needs: "uvx", off: true }, { id: "mcp:lent", label: "lent" }]);
   assert.deepEqual(result.moved.map((item) => item.id), ["mcp:docs"]);
+});
+
+test("a server's Vault keys go with it as pointers, and only to a Cloud that can read them", async () => {
+  const item = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const connections = [{ id: "mcp:stripe", kind: "mcp", label: "stripe", launcher: "npx" }];
+  const answers = { "mcp:stripe": { connection: { mcp: { name: "stripe", server: { command: "npx", args: ["x"], env: { KEY: `vault:${item}` }, enabled: false }, keys: [item] } } } };
+  const here = computer({ connections, answers });
+  const collected = await collectConnections(here);
+
+  const newer = cloud({ vaultKeys: true });
+  assert.deepEqual((await sendConnections(collected, newer, { local: here, waitMs: 0 })).failed, []);
+  const added = newer.calls.find(([method, route]) => method === "POST" && route === "/api/mcp/servers");
+  assert.deepEqual(added[2].vaultKeys, [item]);
+  assert.equal(added[2].env.KEY, `vault:${item}`);
+
+  const older = cloud({});
+  const stayed = await sendConnections(collected, older, { local: here, waitMs: 0 });
+  assert.equal(stayed.failed.length, 1);
+  assert.match(stayed.failed[0].message, /update/u);
+  assert.equal(stayed.failed[0].final, false);
+  assert.deepEqual(writes(older), []);
 });
 
 test("a sign-in moves and this computer lets go of it; one that refreshed meanwhile goes again first", async () => {

@@ -10,7 +10,7 @@ import type { TeamConnectionsHost } from "./team-connections-host.ts";
 
 const remote = (url = "https://data.example.com/mcp"): StoredMcpServer => ({ type: "http", url, headers: {}, enabled: false }) as StoredMcpServer;
 
-function fixture(options: { refuse?: (name: string) => string | undefined; personal?: string[] } = {}) {
+function fixture(options: { refuse?: (name: string) => string | undefined; personal?: string[]; keys?: Parameters<typeof createMcpConfig>[0]["keys"] } = {}) {
   const cfg: Pick<AppConfig, "mcpServers" | "postiz"> = { mcpServers: {} };
   const mcpOAuth = new McpOAuthManager({ file: join(DATA_DIR, "mcp-config-oauth.json") });
   const forget = vi.spyOn(mcpOAuth, "forget");
@@ -29,9 +29,46 @@ function fixture(options: { refuse?: (name: string) => string | undefined; perso
     persistMcpServers: (next) => { cfg.mcpServers = next; },
     savedCustomDomain: () => null,
     changed,
+    ...(options.keys ? { keys: options.keys } : {}),
   });
   return { cfg, config, changed, forget, setBusy: (value: boolean) => { busy = value; } };
 }
+
+describe("an MCP server's key kept in the Vault", () => {
+  const server = { command: "npx", args: ["x"], env: { KEY: "vault:88888888-8888-4888-8888-888888888888" }, enabled: true };
+  const off = { ok: false as const, reason: "removed" as const, why: "its key is no longer in the Vault." };
+
+  it("Test reads it when it runs, and without it answers like a missing key instead of starting the server", async () => {
+    const warm = vi.fn(async () => {});
+    const resolve = vi.fn((_name: string, target: StoredMcpServer) => ({ ok: true as const, server: { ...target, env: { KEY: "sk_fake-tested" } } }));
+    const { cfg, config } = fixture({ keys: { warm, resolve } as never });
+    cfg.mcpServers = { keyed: server as never };
+    const probe = vi.spyOn(probeModule, "probeMcpServer").mockResolvedValue({ ok: true, tools: [] });
+    expect(await config.test("keyed", { signal: new AbortController().signal, asBot: { id: "b", cwd: "/" } })).toMatchObject({ status: 200, body: { ok: true } });
+    expect(warm).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledWith("keyed", expect.anything(), "b");
+    expect((probe.mock.calls[0]![0] as { env: Record<string, string> }).env.KEY).toBe("sk_fake-tested");
+    resolve.mockReturnValueOnce(off as never);
+    probe.mockClear();
+    expect(await config.test("keyed", { signal: new AbortController().signal })).toEqual({ status: 200, body: { ok: false, reason: "keys", error: "its key is no longer in the Vault." } });
+    expect(probe).not.toHaveBeenCalled();
+    probe.mockRestore();
+  });
+
+  it("a server added or replaced by a move is given its items before it is saved, and removing it forgets them", () => {
+    const grant = vi.fn();
+    const forgetServer = vi.fn();
+    const { cfg, config } = fixture({ keys: { grant, forgetServer } as never });
+    expect("body" in config.add("keyed", server as never, ["88888888-8888-4888-8888-888888888888"])).toBe(true);
+    expect(grant).toHaveBeenCalledWith("keyed", ["88888888-8888-4888-8888-888888888888"]);
+    expect(cfg.mcpServers).toHaveProperty("keyed");
+    grant.mockClear();
+    expect("body" in config.replace("keyed", server as never, ["99999999-9999-4999-8999-999999999999"])).toBe(true);
+    expect(grant).toHaveBeenCalledWith("keyed", ["99999999-9999-4999-8999-999999999999"]);
+    expect("body" in config.remove("keyed")).toBe(true);
+    expect(forgetServer).toHaveBeenCalledWith("keyed");
+  });
+});
 
 describe("shared MCP config", () => {
   it("keeps personal header and test sign-in refusals coded without changing English or status", async () => {

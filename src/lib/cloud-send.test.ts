@@ -3,10 +3,19 @@ import { setLocale } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import en from "@/locales/en.json";
 import ptBr from "@/locales/pt-br.json";
-import { ipcErrorText, moveLine } from "./cloud-send";
+import { countedList, ipcErrorText, moveLine } from "./cloud-send";
 
 beforeEach(() => { setLocale("en"); });
 afterEach(() => { setLocale("en"); });
+
+describe("what a send got across", () => {
+  it("counts saved secrets beside logins, and says nothing of them when none went", () => {
+    const sent = { bots: 0, updatedBots: 0, skills: 0, logins: 1, onePassword: false, settings: 0, chats: null };
+    expect(countedList({ ...sent, secrets: 2 })).toEqual(["1 login", "2 secrets"]);
+    expect(countedList({ ...sent, secrets: 1 })).toEqual(["1 login", "1 secret"]);
+    expect(countedList(sent)).toEqual(["1 login"]);
+  });
+});
 
 describe("the one-time move's line", () => {
   it("never says everything is here when a connector stayed on this computer, and says why", () => {

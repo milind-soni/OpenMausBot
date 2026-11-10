@@ -243,10 +243,12 @@ function connectorServiceLabel(slug: string): string {
     .join(" ");
 }
 
-export function customMcpPrompt(names: string[], off: ReadonlyArray<{ name: string; error: string }> = []): string {
+export function customMcpPrompt(names: string[], off: ReadonlyArray<{ name: string; error: string; key?: boolean }> = []): string {
   const list = names.map((name) => `"${name}"`).join(", ");
   const mounted = names.length === 0 ? "" : ` The user also added ${names.length === 1 ? "an MCP server" : "MCP servers"} for you: ${list}. Use their available tools under the engine's normal approval rules.`;
-  const left = off.map(({ name, error }) => ` The MCP server "${name}" is off for you because it doesn't start for you (${error}); it is tried again on its own.`).join("");
+  const left = off.map(({ name, error, key }) => (key
+    ? ` The MCP server "${name}" is off for you: ${error} If you need it, ask for the key with request_credential (delivery ref) and send the secretRef with mcp_server action update.`
+    : ` The MCP server "${name}" is off for you because it doesn't start for you (${error}); it is tried again on its own.`)).join("");
   return mounted + left;
 }
 /** At Full access ("Just do it") nothing a bot can settle waits on the person; the cheapest way to find something out
