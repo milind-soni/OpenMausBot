@@ -1,5 +1,9 @@
 # Self-hosting the MausBot server
 
+To keep MausBot and its agents on your current computer and use a VPS only as a
+bot’s remote desktop, see [Bring Your Own VPS](byo-vps.md) and the
+[published setup guide](https://docs.openmausbot.com/docs/computers/byo-vps).
+
 Run the server on a machine you control (a VPS, a home server, a Mac mini in a
 closet). Then connect the desktop app, browsers and phones to it. Every path
 below ends the same way: the server prints **one link**, and you paste it into
