@@ -412,7 +412,8 @@ export class AdoptedHome {
     }
   }
 
-  /** Caddy shares the home's network, so it stops first and starts only once the home is up again. */
+  /** Caddy stops first and starts only once the home is up again: in an install from before Caddy had its own container
+   * (#5303), it shares the home's network, and would stay in the old, dead one. The current layout needs no order. */
   private async takeDown(): Promise<void> {
     const front = await this.container(FRONT);
     if (front) await this.docker.stopContainer(front.Id, 10);
@@ -440,7 +441,8 @@ export class AdoptedHome {
     }
     const front = await this.container(FRONT);
     if (!front) return;
-    // A Caddy that kept running while the home restarted is still in the old home's network.
+    // In the layout from before Caddy had its own container, a Caddy that kept running while the home restarted is still
+    // in the old home's network.
     if (front.State.Running && !wasRunning) await this.docker.stopContainer(front.Id, 10);
     await this.docker.startContainer(front.Id).catch((error) => this.log(`could not start Caddy again: ${errorText(error)}`));
   }
