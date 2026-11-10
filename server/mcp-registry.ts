@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { RESERVED_MCP_NAMES, slugMcpName } from "../shared/mcp-name.ts";
 import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts";
+import { MCP_RESTART_ENV } from "./mcp-app-catalog.ts";
 
 export { importedMcpServerName } from "../shared/mcp-name.ts";
 
@@ -14,7 +15,9 @@ export interface McpRunsOn {
   label: string;
 }
 
-/** One config.json `mcpServers` entry: the block Claude Code, Cursor and Claude Desktop write. */
+/** One config.json `mcpServers` entry: the block Claude Code, Cursor and Claude Desktop write. An env or header value (or
+ * an OAuth client secret) may be a `vault:<id>` pointer that a bot's secretRef left there: the secret stays in the Vault
+ * and the pointer is resolved when the server starts or is called. */
 export interface StoredStdioMcpServer extends StdioMcpSpec {
   enabled: boolean;
   /** Characters of one tool result allowed into context; 0 = never trim, absent = OMB_MCP_RESULT_BUDGET, else 8,000. */
@@ -88,6 +91,9 @@ const resultBudgetSchema = z.number({ message: "The result size limit must be a 
   .min(0, "The result size limit cannot be negative.")
   .max(MAX_RESULT_BUDGET, `The result size limit can be at most ${MAX_RESULT_BUDGET.toLocaleString("en-US")} characters; use 0 for no limit.`);
 const MCP_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+
+/** A server the request named is not saved here: its name, in the words every route answers with. */
+export const mcpServerNotFound = (name: string): string => `MCP server "${name}" not found. It may have been removed: check Apps → MCP servers.`;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** An HTTP header field name: RFC 9110 token characters. */
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/;
@@ -101,6 +107,22 @@ export function isHarnessOwnedMcpEnvName(name: string): boolean {
 export function isReservedMcpEnvEntry(name: string, value: string): boolean {
   if (name === "ELECTRON_RUN_AS_NODE") return value !== "1";
   return isHarnessOwnedMcpEnvName(name);
+}
+
+/** Custom command servers as Codex mounts them, with new MCP children every turn: the host's restart count (MCP_RESTART_ENV)
+ * only tells an engine that keeps servers across turns to start a new one, so it is dropped here instead of failing every
+ * turn as an OMB_ name; any other reserved variable is refused. */
+export function perTurnCustomMcp<T extends { integrations?: { custom?: Record<string, McpServerSpec> } }>(turn: T): T {
+  if (!turn.integrations?.custom) return turn;
+  const custom = { ...turn.integrations.custom };
+  for (const [name, server] of Object.entries(custom)) {
+    if ("url" in server) continue;
+    const { [MCP_RESTART_ENV]: _restarts, ...env } = server.env;
+    const reserved = Object.entries(env).find(([key, value]) => isReservedMcpEnvEntry(key, value));
+    if (reserved) throw new Error(`Custom MCP server “${name}” cannot set reserved environment variable “${reserved[0]}”`);
+    custom[name] = { ...server, env };
+  }
+  return { ...turn, integrations: { ...turn.integrations, custom } };
 }
 
 function environmentEntryError(name: string, value: string): string | null {
@@ -140,6 +162,8 @@ const runsOnSchema = z.object({
 }).strict();
 
 const stdioEntrySchema = z.object({
+  /** Optional, as other MCP clients write it; a command always runs over stdio, so it is not stored. */
+  type: z.literal("stdio").optional(),
   command: z.string().trim().min(1).max(1_024),
   args: z.array(z.string().max(4_096)).max(MAX_ARGS).optional(),
   env: z.record(z.string(), z.string().max(16_384)).optional(),

@@ -25,6 +25,7 @@ vi.mock("@/state/store", async (original) => ({
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 
 import { SecretRequestCard } from "./SecretRequestCard";
+import { VaultChoices } from "./VaultChoices";
 import { setLocale } from "@/lib/i18n";
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request";
 
@@ -234,6 +235,25 @@ describe("SecretRequestCard mailbox", () => {
     expect(view({})).not.toContain('type="email"');
   });
 
+  it("connects with Connect, and while it checks shows the incoming server that took the password", () => {
+    expect(view({ ...email, address: "me@shop.example" })).toContain(">Connect<");
+    const html = view({ ...email, address: "me@shop.example", emailReading: "imap.shop.example" });
+    expect(html).toMatch(/data-email-check="done".*imap\.shop\.example/su);
+    expect(html).toContain('data-email-check="waiting"');
+  });
+
+  it("for a mailbox that reads but can't send, asks only for its outgoing server, filled with what is known", () => {
+    const html = view({ ...email, label: "Outgoing server for me@shop.example", placeholder: "Password for sending", address: "me@shop.example", emailOutgoing: { smtpHost: "smtp.shop.example", smtpPort: 587 } });
+    expect(html).toContain("data-email-outgoing-request");
+    expect(html).toContain("Outgoing server for me@shop.example");
+    expect(html).toContain('value="smtp.shop.example"');
+    expect(html).toContain('value="587"');
+    expect(html).toContain('type="password"');
+    expect(html).toContain("Save securely");
+    expect(html).not.toContain('type="email"');
+    expect(html).not.toContain(">Connect<");
+  });
+
   it("says the bot goes on once connected, without the address field", () => {
     const html = view({ ...email, provided: true, resumed: true, address: "me@shop.example" });
     expect(html).toContain('data-ask-card="settled"');
@@ -309,15 +329,23 @@ describe("SecretRequestCard key analytics", () => {
     expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "xai", via: "chat_request", result: "unverified" }]]);
   });
 
-  // Settings keeps an AI provider key in the server's settings, not the desktop's store: the card does the same.
-  it("saves an Anthropic key where Settings does, never through the desktop store, keeping Claude sign-ins", async () => {
-    const setCredential = vi.fn();
+  it("saves an Anthropic key in the desktop store as Settings does, keeping Claude sign-ins", async () => {
+    const setCredential = vi.fn().mockResolvedValue({ anthropic: { configured: true } });
     vi.stubGlobal("window", { ogb: { setCredential } });
+    fixture.api.mockResolvedValueOnce({ ok: true });
+    await submit("anthropicApiKey", "sk-ant-ZZtestSECRET0123456789");
+    expect(setCredential).toHaveBeenCalledExactlyOnceWith("anthropicApiKey", "sk-ant-ZZtestSECRET0123456789", { everyClaudeBot: false });
+    expect(fixture.api.mock.calls.map(([path]) => path)).toEqual(["/api/bots/bot-1/secret-cards/secret-card/provided"]);
+    expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "anthropic", via: "chat_request", result: "unverified" }]]);
+  });
+
+  it("sends a provider key typed on a desktop paired to another computer to that computer's server", async () => {
+    const setCredential = vi.fn();
+    vi.stubGlobal("window", { ogb: { setCredential, remoteClient: { active: true } } });
     fixture.api.mockResolvedValueOnce({ anthropic: { configured: true } }).mockResolvedValueOnce({ ok: true });
     await submit("anthropicApiKey", "sk-ant-ZZtestSECRET0123456789");
     expect(setCredential).not.toHaveBeenCalled();
     expect(fixture.api.mock.calls[0]).toEqual(["/api/config", { method: "PUT", body: JSON.stringify({ anthropic: { key: "sk-ant-ZZtestSECRET0123456789", everyClaudeBot: false } }) }]);
-    expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "anthropic", via: "chat_request", result: "unverified" }]]);
   });
 
   it("saves the Composio key in the desktop store's slot, as Settings does", async () => {
@@ -378,5 +406,22 @@ describe("SecretRequestCard custom secrets", () => {
     expect(file).not.toContain("Where to get this key");
     const ref = view({ target: "customSecret", label: "Notion key", reason: "For Notion.", helpUrl: "", delivery: "ref" });
     expect(ref).toContain("MausBot keeps it for one use by its own tools. Your bot never sees it");
+  });
+});
+
+describe("SecretRequestCard saved secrets", () => {
+  type Props = { children?: ReactNode };
+  const nodes = (tree: ReactNode): Array<ReactElement<Props>> =>
+    Children.toArray(tree).flatMap((child) => isValidElement<Props>(child) ? [child, ...nodes(child.props.children)] : []);
+  const offered = (secret: Record<string, unknown>) => {
+    Object.assign(fixture, { counting: true, index: 0, values: [] });
+    try { return nodes(SecretRequestCard({ botId: "bot-1", threadId: "thread-1", message: secretCard(secret) })).some((node) => node.type === VaultChoices); }
+    finally { fixture.counting = false; }
+  };
+
+  it("offers the Vault's secrets on a card for any other secret, never for a key the app keeps or a mailbox", () => {
+    expect(offered({ target: "customSecret", label: "Stripe secret key", delivery: "ref", helpUrl: "" })).toBe(true);
+    expect(offered({})).toBe(false);
+    expect(offered({ target: "customSecret", label: "Connect your mailbox", delivery: "email", helpUrl: "" })).toBe(false);
   });
 });

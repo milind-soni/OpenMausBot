@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, ChartNoAxesColumn, Cloud, CloudDownload, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Settings, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen, ImagePlus } from "lucide-react";
+import { Archive, Cloud, Gauge, CloudDownload, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Settings, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen, ImagePlus } from "lucide-react";
 import { useStore, type AppSettingsSection } from "@/state/store";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { type LocaleKey } from "@/locales";
@@ -19,7 +19,8 @@ import { DecisionModelSettings } from "./DecisionModelSettings";
 import { ImageGenerationSettings } from "./ImageGenerationSettings";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
-import { CompanionSection } from "./CompanionSection";
+import { PhoneDevicesSection } from "./PhoneDevicesSection";
+import { pageIsThisComputer } from "@/lib/companion-bridge";
 import { ServerPairingCard } from "./ServerPairingCard";
 import { PeopleSection } from "./PeopleSection";
 import { ActivitySection } from "./ActivitySection";
@@ -28,7 +29,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { currentPhonePairingTarget, phonePairingSettingsAction } from "@/lib/phone-pairing";
 import { CustomDomainSettings } from "./CustomDomainSettings";
 import { BuiltInBrowserRow, ServerSitesRow } from "./BrowserSettingsRows";
-import { LoginsSettings } from "./LoginsSettings";
+import { VaultSettings } from "./VaultSettings";
 import { RemoteComputerSection } from "./RemoteComputerSection";
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
 import { PlaceLookCard } from "./PlaceLookCard";
@@ -39,6 +40,7 @@ import { CloudAccountSettings } from "./CloudAccountSettings";
 import { ProSettingsCard } from "./ProIntroduction";
 import { CloudUsageSettings } from "./CloudUsageMeter";
 import { Card, SettingsGroup, SIMPLE_BUTTONS } from "./SettingsPrimitives";
+import { Layer, useIsTopLayer } from "./Layer";
 import { shortcutLabel } from "./ShortcutHint";
 import { UsageSection } from "./UsageSection";
 import { SkillsSection } from "./SkillsSection";
@@ -50,6 +52,7 @@ import { ChatWidthRow, FontRow, SidebarToolsLayoutRow } from "./AppearanceSelect
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { McpCallTimeoutSettings } from "./McpCallTimeoutSettings";
 import { ProfileFields } from "./ProfileSettings";
+import { AwayEmailsSetting } from "./AwayEmailsSetting";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
 import { AutomaticRecoverySettings } from "./AutomaticRecoverySettings";
 import { ThreadCleanupSettings } from "./ThreadCleanupSettings";
@@ -63,10 +66,11 @@ import { scrollWithin } from "@/lib/scroll-within";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { NotificationRows } from "./NotificationSettingsRows";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { Select } from "./Select";
 import { SavedStepsRow } from "./SavedStepsRow";
 import { BrowserProfilesRow, ColorUserBubblesRow, AdvancedModeRow, ExperimentalFeaturesRow, LanguageRow, NewBotEffortRow, PinnedCirclesRow, ReplayTourRow, RunCardRow, FollowUpRow, SendKeyRow, ShowThreadsRow, ToolCallsRow, UniversalPinsRow, UpdatesRow } from "./AppSettingsRows";
-import { SIMPLE_ADVANCED_ONLY, SimpleAiPage, SimpleBillingPage, SimpleComputerPage, SimpleGeneralPage, SimpleLooksPage, SimpleUpdatesPage, type Disclose, type SimpleDisclosureId } from "./SettingsSimplePages";
+import { SIMPLE_ADVANCED_ONLY, SIMPLE_MORE_LIMITS, SimpleAiPage, SimpleBillingPage, SimpleComputerPage, SimpleGeneralPage, SimpleLooksPage, SimpleMorePage, SimpleUpdatesPage, type Disclose, type SimpleDisclosureId } from "./SettingsSimplePages";
 
 // labelKey, not a label: t() reads the active pack when called, so a label resolved at module scope would freeze the
 // boot language.
@@ -88,16 +92,16 @@ export const SECTIONS: Array<{
   keywords: string[];
 }> = [
   { id: "general", group: "you", labelKey: "settings.section.general", icon: User, keywords: ["profile", "pinned panels", "web panel", "dashboard", "pin a page", "name", "email", "about me", "about", "suggestions", "suggested", "memory", "analytics", "updates", "product updates", "newsletter", "email updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "attachments", "clear attachments", "event log", "event-log", "log size", "automatic recovery", "backup model", "fallback", "routines", "conversation", "schedule", "usage", "limit", "plan", "upgrade", "cloud desktop hours", "storage", "saved steps", "repeat", "replay", "computer tasks", "without ai", "forget", ...talkShortcutKeywords()] },
-  { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "chat width", "width", "wide", "full width", "bubble", "bubbles", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top", "send", "enter", "return", "shift+enter", "ctrl+enter", "cmd+enter", "⌘+enter", "new line", "keyboard", "ime", "japanese", "message color", "my messages", "toolbar", "tools layout", "footer", "routines", "triggers", "team map", "color", "colour", "cloud color", "server color", "tint", "sidebar color", "sidebar picture", "picture", "image", "banner", "background", "computers", "your computers", "rail", "strip", "frame", "window frame", "title bar"] },
+  { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "font", "typeface", "chat width", "width", "wide", "full width", "bubble", "bubbles", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top", "send", "enter", "return", "shift+enter", "ctrl+enter", "cmd+enter", "⌘+enter", "new line", "keyboard", "ime", "japanese", "message color", "my messages", "toolbar", "tools layout", "footer", "routines", "triggers", "team map", "color", "colour", "cloud color", "server color", "tint", "sidebar color", "sidebar picture", "picture", "image", "banner", "background", "computers", "your computers", "rail", "strip", "frame", "window frame", "title bar"] },
   { id: "companion", group: "you", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "engines", group: "ai", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "model providers", "engines", "claude", "codex", "grok", "providers", "cli", "sign in", "subscription"] },
-  { id: "connections", group: "ai", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "cerebras", "meta", "muse", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "greenference", "opencode", "deepseek", "provider", "lm studio", "lmstudio", "llm studio", "llmstudio", "bionic"] },
+  { id: "connections", group: "ai", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "cerebras", "meta", "muse", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "greenference", "modelgo", "opencode", "deepseek", "provider", "lm studio", "lmstudio", "llm studio", "llmstudio", "bionic"] },
   { id: "decisionModel", group: "ai", labelKey: "settings.section.decisionModel", icon: Zap, keywords: ["decision", "extraction", "jev", "typesafe", "cloudflare", "workers ai", "clef", "clairic", "email", "routing", "auto", "rooms", "who answers"] },
   { id: "imageGeneration", group: "ai", labelKey: "settings.section.imageGeneration", icon: ImagePlus, keywords: ["image", "images", "picture", "generate", "avatar", "gpt image", "grok imagine", "gemini", "nano banana", "openrouter", "flux", "backup"] },
   { id: "skills", group: "ai", labelKey: "settings.section.skills", icon: BookOpen, keywords: ["skills", "library", "assign", "agent skills", "skill md"] },
   { id: "desktopWorkspaces", group: "computers", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local"] },
   { id: "computer", group: "computers", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop", "browser", "built-in browser", "profiles", "browser profiles"] },
-  { id: "logins", group: "computers", labelKey: "settings.section.logins", icon: LockKeyhole, keywords: ["logins", "login", "passwords", "password", "sign in", "2fa", "one-time code", "totp", "fill_login", "1password", "vault"] },
+  { id: "logins", group: "computers", labelKey: "settings.section.vault", icon: LockKeyhole, keywords: ["vault", "logins", "login", "passwords", "password", "sign in", "2fa", "one-time code", "totp", "fill_login", "1password", "password manager", "secrets", "secret", "token", ".env", "env"] },
   { id: "cloudAccount", group: "account", labelKey: "settings.section.cloudAccount", icon: Cloud, keywords: ["cloud", "my cloud", "account", "personal", "sign in", "pro", "subscription", "billing", "sync", "send", "this computer", "bots", "logins", "1password"] },
   { id: "organization", group: "account", labelKey: "settings.section.organization", icon: Building2, keywords: ["company", "organization", "organisation", "sign in", "enroll", "managed", "models", "disconnect"] },
   { id: "usage", group: "account", labelKey: "settings.section.usage", icon: Coins, keywords: ["tokens", "cost", "billing", "plan", "quota", "remaining", "weekly", "5-hour", "model", "used"] },
@@ -120,11 +124,11 @@ export type SimpleSettingsPage = {
 
 export const SIMPLE_PAGES: SimpleSettingsPage[] = [
   { id: "general", labelKey: "settings.section.general", icon: Settings, sections: ["general", "appearance", "people", "import", "organization", "activity"],
-    keywords: ["account", "theme", "looks", "open at login", "startup", "analytics", "advanced mode"] },
+    keywords: ["account", "theme", "looks", "open at login", "startup", "analytics", "advanced mode", "more settings", "limits", "timeout"] },
   { id: "botAccess", labelKey: "settings.section.botAccess", icon: Users, sections: ["botAccess"] },
-  { id: "ai", labelKey: "settings.group.ai", icon: Sparkles, sections: ["engines", "connections"] },
+  { id: "ai", labelKey: "settings.group.ai", icon: Sparkles, sections: ["engines", "connections"], keywords: ["new bots", "defaults", "effort"] },
   { id: "computer", labelKey: "settings.simple.page.computer", icon: Monitor, sections: ["companion", "desktopWorkspaces", "computer", "logins"] },
-  { id: "billing", labelKey: "settings.simple.page.billing", icon: ChartNoAxesColumn, sections: ["usage", "cloudAccount"], keywords: ["billing", "included", "allowance", "cloud hours", "voice"] },
+  { id: "billing", labelKey: "settings.simple.page.billing", icon: Gauge, sections: ["usage", "cloudAccount"], keywords: ["billing", "included", "allowance", "cloud hours", "voice"] },
   { id: "updates", labelKey: "settings.simple.page.updates", icon: CloudDownload, sections: ["updates"],
     keywords: ["update", "version", "release", "product updates", "newsletter", "email updates", "welcome", "tour", "diagnostics", "logs", "support"] },
 ];
@@ -179,12 +183,19 @@ export function keySearchResults(query: string): KeyEntry[] {
 export const openKeyResult = (entry: KeyEntry) => entry.uses ? openKeySettings(entry.uses, entry.id) : openKeySettings(entry.id);
 
 export function SettingsModal() {
+  return <Layer modal><SettingsDialog /></Layer>;
+}
+
+function SettingsDialog() {
+  const isTop = useIsTopLayer();
   const { state, dispatch } = useStore();
   const advanced = useAdvancedMode();
   const remoteActive = window.ogb?.remoteClient?.active === true;
   const requested = state.appSettingsSection;
   const section: AppSettingsSection =
-    (remoteActive && !["appearance", "desktopWorkspaces"].includes(requested)) || requested === "remote"
+    advanced && requested === "remote" && window.ogb?.environments
+      ? "desktopWorkspaces"
+      : (remoteActive && !["appearance", "desktopWorkspaces"].includes(requested)) || requested === "remote"
       ? "companion"
       : advanced && requested === "updates" ? "general" : requested;
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -195,7 +206,11 @@ export function SettingsModal() {
   useEffect(() => window.ogb?.onOpenAppSettings?.(() => setQuery("")), []);
   const q = query.trim().toLowerCase();
   const ownerOrAdmin = useOwnerOrAdmin();
-  const baseSections = SECTIONS.filter((entry) => !remoteActive || entry.id === "companion" || entry.id === "appearance" || entry.id === "desktopWorkspaces")
+  const thisComputer = pageIsThisComputer();
+  const sectionsHere = SECTIONS.map((entry) => entry.id === "companion"
+    ? { ...entry, labelKey: thisComputer ? "settings.section.phoneDevices" as const : "settings.section.thisServer" as const }
+    : entry);
+  const baseSections = sectionsHere.filter((entry) => !remoteActive || entry.id === "companion" || entry.id === "appearance" || entry.id === "desktopWorkspaces")
     .filter((entry) => entry.id !== "desktopWorkspaces" || Boolean(window.ogb?.environments))
     .filter((entry) => entry.id !== "organization" || Boolean(window.ogb?.organization))
     .filter((entry) => entry.id !== "cloudAccount" || Boolean(window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true)))
@@ -212,7 +227,7 @@ export function SettingsModal() {
   const currentPage = simplePages.find((page) => page.sections.includes(section));
 
   const sectionLabelKey = advanced
-    ? SECTIONS.find((entry) => entry.id === section)?.labelKey
+    ? sectionsHere.find((entry) => entry.id === section)?.labelKey
     : currentPage?.labelKey;
   const nextVisibleSection = advanced
     ? visibleSections.some((entry) => entry.id === section) ? undefined : visibleSections[0]?.id
@@ -231,13 +246,17 @@ export function SettingsModal() {
     const open = q !== "" || (folds[id] ?? SIMPLE_FOLDED[requested] === id);
     return { id, open, onToggle: () => setFolds((current) => ({ ...current, [id]: !open })) };
   };
-  const [looks, setLooks] = useState(false);
+  const [openSubPage, setOpenSubPage] = useState<{ view: "looks" | "more"; for: AppSettingsSection } | null>(null);
+  const subPage = openSubPage?.for === requested ? openSubPage.view : null;
+  const setSubPage = (view: "looks" | "more" | null, at: AppSettingsSection = requested) => setOpenSubPage(view && { view, for: at });
+  useEffect(() => { setOpenSubPage((current) => current?.for === requested ? current : null); }, [requested]);
   const [reveal, setReveal] = useState<string | null>(null);
-  const advancedMatches = advanced || !q ? [] : SIMPLE_ADVANCED_ONLY.filter((key) => t(key).toLowerCase().includes(q));
+  const advancedMatches = advanced || SIMPLE_ONLY || !q ? [] : SIMPLE_ADVANCED_ONLY.filter((key) => t(key).toLowerCase().includes(q));
+  const moreSections = availableSections.filter((entry) => SIMPLE_HIDDEN_SECTIONS.includes(entry.id));
   const keyResults = remoteActive || !availableSections.some((entry) => entry.id === "connections") ? [] : keySearchResults(q);
   const keyResultButtons = (className: string) => keyResults.map((entry) => (
     <button key={entry.id} type="button" data-settings-key-result={entry.id} className={className}
-      onClick={() => { setQuery(""); setLooks(false); dispatch(openKeyResult(entry)); }}>
+      onClick={() => { setQuery(""); setSubPage(null); dispatch(openKeyResult(entry)); }}>
       <span>{t(entry.labelKey)} <span className="text-ink-secondary">· {t(keySection(entry).titleKey)}</span></span>
     </button>
   ));
@@ -262,6 +281,7 @@ export function SettingsModal() {
     else dialog?.focus();
 
     const onKey = (event: KeyboardEvent) => {
+      if (!isTop()) return;
       if (!searchFirst.current && dialog && document.activeElement === dialog && event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey
         && search?.checkVisibility()) {
         event.preventDefault();
@@ -307,24 +327,24 @@ export function SettingsModal() {
       window.removeEventListener("keydown", onKey);
       previousFocus?.focus();
     };
-  }, [dispatch]);
+  }, [dispatch, isTop]);
 
   const openSection = (id: AppSettingsSection) => dispatch({ type: "toggleAppSettings", open: true, section: id });
 
   const phoneFocus = state.appSettingsPhonePairing;
   const computerPairs = currentPhonePairingTarget(state.config?.cloudHome === true) === "computer";
   const remoteAccess = {
-    client: <RemoteComputerSection hideWhenUnavailable={!advanced} />,
-    domain: remoteActive ? null : <CustomDomainSettings />,
+    client: <RemoteComputerSection hideWhenUnavailable legacyOnly />,
+    domain: remoteActive || thisComputer ? null : <CustomDomainSettings />,
     // Security: the server decides who may pair (an owner or admin session), not this gate.
-    pairing: <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} team={state.config?.team?.name} teamPhoneBlocked={state.config?.managedPolicy?.remoteAccess === false ? t("policy.teamRemoteBlocked", { organization: state.config.managedPolicy.organizationName }) : null} simple={!advanced} />,
-    companion: remoteActive ? null : <CompanionSection profileEmail={state.config?.profile?.email} focusRequest={computerPairs ? phoneFocus : 0} />,
+    pairing: thisComputer ? null : <ServerPairingCard cloudHome={state.config?.cloudHome === true} focusRequest={computerPairs ? 0 : phoneFocus} team={state.config?.team?.name} teamPhoneBlocked={state.config?.managedPolicy?.remoteAccess === false ? t("policy.teamRemoteBlocked", { organization: state.config.managedPolicy.organizationName }) : null} simple={!advanced} />,
+    companion: thisComputer ? <PhoneDevicesSection profileEmail={state.config?.profile?.email} focusRequest={phoneFocus} simple={!advanced} /> : null,
   };
 
   const renderSection = (id: AppSettingsSection) => {
     switch (id) {
       case "desktopWorkspaces":
-        return <ConnectedWorkspacesSettings />;
+        return <><ConnectedWorkspacesSettings />{remoteAccess.client}</>;
       case "organization":
         return window.ogb?.organization && !remoteActive ? <OrganizationSettings /> : null;
       case "cloudAccount":
@@ -344,6 +364,7 @@ export function SettingsModal() {
             <CloudUsageSettings />
             <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>
               <ProfileFields />
+              <AwayEmailsSetting />
             </Card>
 
             <LanguageRow />
@@ -409,11 +430,11 @@ export function SettingsModal() {
       case "backups": return <AdminOnly><WorkspaceBackupSettings /><CompanyBackupSettings /></AdminOnly>;
       case "import": return <AdminOnly><ImportSettings /></AdminOnly>;
       case "companion":
-        return <>{remoteAccess.client}{remoteAccess.domain}{remoteAccess.pairing}{remoteAccess.companion}</>;
+        return <>{remoteAccess.companion}{remoteAccess.pairing}{remoteAccess.domain}{window.ogb?.environments ? null : remoteAccess.client}</>;
       case "computer":
         return <><BuiltInBrowserRow /><ServerSitesRow /><BrowserProfilesRow /><AdminOnly><LocalComputerSection /></AdminOnly></>;
       case "logins":
-        return <LoginsSettings />;
+        return <VaultSettings />;
       case "usage":
         return <AdminOnly note="settings.adminOnly.usage"><UsageSection /></AdminOnly>;
       case "skills":
@@ -431,18 +452,26 @@ export function SettingsModal() {
     }
   };
 
+  const openMore = () => { openSection("general"); setSubPage("more", "general"); };
   const renderSimplePage = (page: SimpleSettingsPage) => {
     const has = (id: AppSettingsSection) => page.sections.includes(id);
     switch (page.id) {
-      case "general": return looks
-        ? <SimpleLooksPage onBack={() => { setLooks(false); setReveal("appearance"); }} />
-        : <SimpleGeneralPage has={has} peopleOpen={section === "people"} onLooks={() => setLooks(true)} />;
+      case "general": return subPage === "looks"
+        ? <SimpleLooksPage toolCalls={!remoteActive} onBack={() => { setSubPage(null); setReveal("appearance"); }} />
+        : subPage === "more"
+          ? <SimpleMorePage sections={moreSections} onOpen={(id) => { setSubPage(null); openSection(id); }} onBack={() => { setSubPage(null); setReveal("more"); }} />
+          : <SimpleGeneralPage has={has} peopleOpen={section === "people"} onLooks={() => setSubPage("looks")} onMore={has("general") ? () => setSubPage("more") : undefined} />;
       case "ai": return <SimpleAiPage has={has} disclose={disclose} connections={renderSection("connections")} />;
-      case "computer": return <SimpleComputerPage has={has} remoteAccess={remoteAccess} servers={renderSection("desktopWorkspaces")} disclose={disclose} />;
+      case "computer": return <SimpleComputerPage has={has} remoteAccess={remoteAccess} servers={<ConnectedWorkspacesSettings />} disclose={disclose} />;
       case "billing": return <SimpleBillingPage has={has} disclose={disclose} cloudAccount={renderSection("cloudAccount")} />;
       case "updates": return <SimpleUpdatesPage remoteActive={remoteActive} />;
       default:
-        return page.sections.map((id) => <section key={id} data-settings-block={id} className="flex scroll-mt-4 flex-col gap-4">{renderSection(id)}</section>);
+        return <>
+          {SIMPLE_HIDDEN_SECTIONS.includes(page.sections[0]!) && simpleAvailable.has("general") && (
+            <div><button type="button" className="ui-button" onClick={openMore}>{t("settings.simple.looks.back")}</button></div>
+          )}
+          {page.sections.map((id) => <section key={id} data-settings-block={id} className="flex scroll-mt-4 flex-col gap-4">{renderSection(id)}</section>)}
+        </>;
     }
   };
 
@@ -468,8 +497,14 @@ export function SettingsModal() {
   );
 
   if (!advanced) {
-    const looksOpen = looks && currentPage?.id === "general";
-    const goTo = (id: AppSettingsSection) => { setLooks(false); openSection(id); };
+    const subOpen = currentPage?.id === "general" ? subPage : null;
+    const resultClass = "flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-left text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none";
+    const goTo = (id: AppSettingsSection) => { setSubPage(null); openSection(id); };
+    const moreMatches = !q ? [] : [
+      ...moreSections.filter((entry) => sectionMatches(entry, q)).map((entry) => ({ key: entry.id, labelKey: entry.labelKey, open: () => goTo(entry.id) })),
+      ...(simpleAvailable.has("general") ? SIMPLE_MORE_LIMITS : []).filter((key) => t(key).toLowerCase().includes(q))
+        .map((key) => ({ key, labelKey: key, open: () => { openMore(); setReveal("limits"); } })),
+    ];
     return (
       <div
         className="glass-popup-frame"
@@ -494,7 +529,7 @@ export function SettingsModal() {
               "mb-2 flex h-8 shrink-0 items-center gap-2 rounded-lg bg-ink/[0.05] px-[9px] text-[13px] focus-within:ring-2 focus-within:ring-focus/60",
               "w-full min-w-0 bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none",
             )}
-            {visiblePages.length === 0 && advancedMatches.length === 0 && keyResults.length === 0 && (
+            {visiblePages.length === 0 && advancedMatches.length === 0 && moreMatches.length === 0 && keyResults.length === 0 && (
               <div className="px-[9px] py-3 text-[13px] leading-[18px] text-ink-secondary">{t("settings.noMatch", { query: query.trim() })}</div>
             )}
             {visiblePages.map((page) => {
@@ -523,12 +558,23 @@ export function SettingsModal() {
                 type="button"
                 data-settings-advanced-only={key}
                 onClick={() => { setQuery(""); goTo("general"); setReveal("advanced-mode"); }}
-                className="flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-left text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none"
+                className={resultClass}
               >
                 <span>{t(key)} <span className="text-ink-secondary">· {t("settings.simple.advanced")}</span></span>
               </button>
             ))}
-            {keyResultButtons("flex min-h-8 shrink-0 cursor-pointer items-center rounded-lg px-[9px] py-1.5 text-left text-[13px] leading-[18px] text-ink transition-colors hover:bg-ink/[0.06] motion-reduce:transition-none")}
+            {moreMatches.map((match) => (
+              <button
+                key={match.key}
+                type="button"
+                data-settings-more-result={match.key}
+                onClick={() => { setQuery(""); match.open(); }}
+                className={resultClass}
+              >
+                <span>{t(match.labelKey)} <span className="text-ink-secondary">· {t("settings.simple.more.title")}</span></span>
+              </button>
+            ))}
+            {keyResultButtons(resultClass)}
           </nav>
 
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -547,7 +593,7 @@ export function SettingsModal() {
                 ))}
               </Select>
               <h2 className="hidden truncate text-[17px] font-medium leading-6 tracking-[-0.008em] text-ink sm:block">
-                {looksOpen ? t("settings.simple.page.looks") : currentPage ? t(currentPage.labelKey) : null}
+                {subOpen === "looks" ? t("settings.simple.page.looks") : subOpen === "more" ? t("settings.simple.more.title") : currentPage ? t(currentPage.labelKey) : null}
               </h2>
             </header>
             <button
@@ -555,7 +601,7 @@ export function SettingsModal() {
               onClick={close}
               aria-label={t("settings.close")}
               title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
-              className="absolute right-3 top-3 flex size-8 cursor-pointer items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink motion-reduce:transition-none"
+              className="absolute right-5 top-[18px] flex size-8 cursor-pointer items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink motion-reduce:transition-none"
             >
               <X size={16} aria-hidden="true" />
             </button>
@@ -564,7 +610,7 @@ export function SettingsModal() {
               ref={scrollRef}
               data-settings-scroll
               className={cn(
-                "flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-4 pb-8 pt-4 sm:px-8 sm:pb-7 sm:pt-[22px]",
+                "settings-scroll flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-10 pt-4 sm:px-8 sm:pb-12 sm:pt-[22px]",
                 SIMPLE_BUTTONS,
                 "[&_.uppercase]:normal-case [&_.uppercase]:tracking-normal",
               )}

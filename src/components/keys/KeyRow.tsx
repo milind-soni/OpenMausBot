@@ -11,7 +11,7 @@ import { keyEntry, keyForInstance, looksLikeOtherKey, savedState, shownKeyEntry,
 import { checkKey, cleanKey, looksLikeKey, saveKey } from "./key-save";
 
 export const KEY_FIELD = "h-8 w-full min-w-0 rounded-lg border border-hairline/60 bg-inset px-3 font-mono text-[13px] leading-8 text-ink placeholder:text-ink-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus/60 disabled:opacity-60";
-export const KEY_ROW = "group flex scroll-mt-24 flex-col gap-2 rounded-[10px] px-4 py-2.5 transition-[background-color,box-shadow] duration-500 data-[key-highlight]:bg-accent/10 data-[key-highlight]:ring-1 data-[key-highlight]:ring-accent/40 motion-reduce:transition-none";
+export const KEY_ROW = "group flex scroll-mt-24 flex-col gap-2 rounded-[8px] px-4 py-2.5 transition-[background-color,box-shadow] duration-500 data-[key-highlight]:bg-accent/10 data-[key-highlight]:ring-1 data-[key-highlight]:ring-accent/40 motion-reduce:transition-none";
 const MASK = "••••••••";
 
 export function KeyMarkIcon({ entry }: { entry: KeyEntry }) {
@@ -199,6 +199,7 @@ export function KeyRow({
       if (hadFocus) focusAfter.current = now.configured ? "replace" : "input";
       if (!now.configured) setProblem(t("keys.row.notKept"));
       onSaved?.(now.configured);
+      if (now.configured && via === "settings") target.settingsEvent?.("add_key");
       keySaved(target.analytics, via, now.configured && target.test ? await runCheck() : savedKeyResult(target.analytics));
     } catch (cause) {
       setProblem(errorText(cause));
@@ -394,7 +395,7 @@ export function KeyRow({
             {(fieldShown && target.href) || (!fieldShown && saved.configured && target.test) ? (
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 {fieldShown && target.href && (
-                  <a href={target.href} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-medium text-accent-text hover:underline">
+                  <a href={target.href} target="_blank" rel="noopener noreferrer" onClick={() => { if (via === "settings") target.settingsEvent?.("get_key"); }} className="inline-flex items-center gap-1 font-medium text-accent-text hover:underline">
                     {t("keys.row.getKey")}
                     <ExternalLink size={11} aria-hidden="true" />
                   </a>

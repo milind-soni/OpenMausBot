@@ -10,7 +10,8 @@ import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotic
 import { AppCopyNotice } from "./EngineAppCopy";
 import { forgetAppCopySwitches } from "@/state/engine-install";
 import { AccountsCard, AddAccount, accountGroupOf, accountsReady, type AccountGroup } from "./EngineAccounts";
-import { ClaudeEndpoints } from "./ClaudeEndpoints";
+import { ClaudeEndpoints, CodexEndpoints } from "./ClaudeEndpoints";
+import { ClaudeBedrockEndpoints } from "./ClaudeBedrock";
 import { DEVICE_SIGN_IN_COPY, deviceSignInProvider } from "./DeviceSignIn";
 import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
 import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
@@ -387,7 +388,7 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
   return (
     <EngineCard instance={instance} bare={bare}>
       {policyNote}
-      {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} unframed />}
+      {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} description={instance.codexEndpoint ? t("agentEndpoints.codexHint") : undefined} unframed />}
       {engineReady(instance) && <ApiKeyEngineManage instance={instance} className="mt-3" />}
       {/* The setup panel that first said so is gone once the engine is Ready. */}
       {engineReady(instance) && <AppCopyNotice instance={instance} className="mt-3" />}
@@ -518,7 +519,7 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
   const { state } = useStore();
   // Leaving Settings ends the "now uses the copy OpenMausBot installed" lines.
   useEffect(() => forgetAppCopySwitches, []);
-  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined);
+  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.claudeBedrock !== undefined || i.codexEndpoint !== undefined);
   // A provider's accounts share one card, which takes the place of its first account.
   const groups = new Map<AccountGroup, InstanceInfo[]>();
   for (const instance of listed) {
@@ -533,19 +534,21 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
   // A hidden ordinary Claude instance takes its card, and the endpoint section inside it, away. A hosted
   // workspace lists every engine read-only and refuses instance changes, so there the section has no Add.
   const hostedWorkspace = rows.length > 0 && rows.every((instance) => instance.readOnly);
+  const orphanCodexEndpoints = !groups.has("chatgpt") && !hostedWorkspace;
   const orphanEndpoints = !groups.has("claude") && !hostedWorkspace;
   const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
   const renderEngine = (instance: InstanceInfo, bare = false) => {
     const group = groupOf(instance);
     return group
       ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare}
-        advanced={<>{group === "claude" && <ClaudeEndpoints />}<EngineAdvanced instance={instance} /></>} />
+        advanced={<>{group === "claude" ? <><ClaudeEndpoints /><ClaudeBedrockEndpoints /></> : <CodexEndpoints />}<EngineAdvanced instance={instance} /></>} />
       : <EngineRow instance={instance} bare={bare} />;
   };
 
   if (simple && more) return <>
     <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} more={more} />
-    {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /></div>}
+    {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
+    {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
   </>;
 
   return (
@@ -558,7 +561,8 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
         <RefreshEngines />
       </div>
       <EngineSections instances={rows} isReady={isReady} renderEngine={renderEngine} />
-      {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /></div>}
+      {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
+      {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
       <HiddenEngines />
       <CacheKeepWarmSettings />
     </div>

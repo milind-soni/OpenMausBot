@@ -10,7 +10,7 @@ export const PERSON_AWAY_SECONDS = 30;
 const READS = new Set([
   "list_apps", "list_windows", "get_window_state", "get_accessibility_tree", "get_desktop_state", "get_screen_size",
   "get_cursor_position", "zoom", "get_browser_state", "start_session", "end_session", "get_session_state", "escalate_session",
-  "get_agent_cursor_state", "set_agent_cursor_enabled", "set_agent_cursor_motion", "set_agent_cursor_style", "move_cursor",
+  "get_agent_cursor_state", "set_agent_cursor_enabled", "set_agent_cursor_motion", "move_cursor",
 ]);
 
 /** Whether a lent screen call would take the person's mouse, keyboard or front app. `launch_app` opens hidden (the driver

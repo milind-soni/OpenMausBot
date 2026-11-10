@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { buildNotification, buildSpendNotification, summarize } from "./notify.ts";
+import { buildNotification, buildSpendNotification, summarize, unaskedBotThread } from "./notify.ts";
 import { conversationLanguage, setConversationLanguage } from "./server-lines.ts";
 import "./server-line-packs.ts";
 
@@ -121,6 +121,13 @@ describe("summarize", () => {
     expect(long.endsWith("…")).toBe(true);
     expect(summarize("short")).toBe("short");
   });
+
+  it("reads a bot's Markdown as the plain line a lock screen shows", () => {
+    expect(summarize("**Facture reçue** — consulter le [document](https://example.com/facture)"))
+      .toBe("Facture reçue — consulter le document");
+    expect(summarize("I added the **cover card** to the deck.")).toBe("I added the cover card to the deck.");
+    expect(summarize("Run `pnpm test` and *ship* it.")).toBe("Run pnpm test and ship it.");
+  });
 });
 
 describe("buildSpendNotification", () => {
@@ -156,5 +163,28 @@ describe("a notification's title", () => {
     expect(buildNotification("sign-in", bot, "beaver-main", "")?.title).toBe("Biber braucht deine Anmeldung bei einer Website");
     expect(buildNotification("done", bot, "beaver-main", "Done.")?.title).toBe("Biber ist fertig");
     expect(buildNotification("routine-failed", bot, "other", "x")?.title).toBe("Biber's routine failed");
+  });
+});
+
+describe("unaskedBotThread", () => {
+  const opened = { openedBy: { botId: "chief" } };
+  const person = (at: number) => ({ role: "user", kind: "text", at });
+  const peer = (at: number) => ({ role: "user", kind: "text", at, peerAsk: {} });
+  const reply = (at: number) => ({ role: "bot", kind: "text", at });
+
+  it("is quiet while the newest request in a bot-opened thread is a bot's", () => {
+    expect(unaskedBotThread(opened, [])).toBe(true);
+    expect(unaskedBotThread(opened, [peer(1), reply(2)])).toBe(true);
+    expect(unaskedBotThread(opened, [peer(1), reply(2), person(3), reply(4), peer(5)])).toBe(true);
+    expect(unaskedBotThread(opened, [person(1), reply(2)], 3)).toBe(true);
+  });
+
+  it("speaks for the person's own request, a failure report, and any thread a person opened", () => {
+    expect(unaskedBotThread(opened, [peer(1), reply(2), person(3), reply(4)])).toBe(false);
+    expect(unaskedBotThread(opened, [reply(2), person(3)], 1)).toBe(false);
+    expect(unaskedBotThread(opened, [{ ...peer(1), peerAsk: { incident: {} } }])).toBe(false);
+    expect(unaskedBotThread({}, [peer(1)])).toBe(false);
+    expect(unaskedBotThread({}, [person(1)], 2)).toBe(false);
+    expect(unaskedBotThread(undefined, [])).toBe(false);
   });
 });

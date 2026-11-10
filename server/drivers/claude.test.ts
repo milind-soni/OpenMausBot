@@ -483,6 +483,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     delete process.env.FAKE_CLAUDE_PROMPTS;
     delete process.env.FAKE_CLAUDE_TRANSIENTS;
     delete process.env.FAKE_CLAUDE_PARTIAL_FAILS;
+    delete process.env.FAKE_CLAUDE_ANSWERED_FAILS;
     delete process.env.FAKE_CLAUDE_STATE;
     delete process.env.FAKE_CLAUDE_RETRY_SCALE;
     delete process.env.FAKE_CLAUDE_TEXT_HANG;
@@ -590,6 +591,18 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events[beat]).toMatchObject({ itemType: "tool" });
     expect(beat).toBeGreaterThan(types.indexOf("item.started"));
     expect(beat).toBeLessThan(types.lastIndexOf("item.completed"));
+  });
+
+  it("marks an image a tool's result returned as the tool's", async () => {
+    const data = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]).toString("base64");
+    await create(undefined, {
+      FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([{ name: "Read", input: { file_path: "brief.pdf" }, output: [{ type: "image", source: { type: "base64", media_type: "image/png", data } }] }]),
+    });
+    await instance.adapter.sendTurn({ threadId: "t-tool-image", text: "check the brief" });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "assistant_image")).toEqual([
+      expect.objectContaining({ data, fromTool: true }),
+    ]);
   });
 
   it("names the CLI process while a long tool runs, and no process once the turn is over", async () => {
@@ -1851,7 +1864,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const stdio = (name: string) => ({ command: process.execPath, args: [`/fake/${name}.js`], env: {} });
     const integrations = {
       agents: stdio("agents"), browser: stdio("browser"), composio: stdio("composio"), composioOwn: stdio("own-apps"),
-      localComputer: stdio("computer"), phone: stdio("phone"), data: stdio("data"), highlevel: stdio("highlevel"), email: stdio("email"),
+      localComputer: stdio("computer"), phone: stdio("phone"), data: stdio("data"), email: stdio("email"),
       device: stdio("device"), dweb: { url: "http://127.0.0.1:1" },
       custom: {
         shop: { command: "npx", args: ["shop"], env: {} }, docs: { type: "http" as const, url: "https://docs.example.test/mcp", headers: {} },
@@ -1878,7 +1891,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const browsing = await mounted("t-tool-search", true);
     expect(browsing.toolSearch).toBe("true");
     expect(browsing.alwaysLoaded).toEqual(["agents", "browser", "ogb"]);
-    expect(browsing.onDemand).toEqual(["composio", "computer", "data", "device", "docs", "dweb", "email", "highlevel", "own_apps", "phone", "postiz", "shop"]);
+    expect(browsing.onDemand).toEqual(["composio", "computer", "data", "device", "docs", "dweb", "email", "own_apps", "phone", "postiz", "shop"]);
     const other = await mounted("t-tool-search-no-browse", false);
     expect(other.alwaysLoaded).toEqual(["agents", "ogb"]);
     expect(other.onDemand).toContain("browser");
@@ -1962,6 +1975,83 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv).not.toContain("--autocompact");
     expect(seen.argv).toContain("--strict-mcp-config");
+  });
+
+  it("drops --autocompact after the CLI rejects it as an unknown option, relaunching on the same cursor", async () => {
+    const dump = join(scratch, "rejects-autocompact.json");
+    const refused = join(scratch, "refused-autocompact.jsonl");
+    const cursor = "existing-claude-session";
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_REJECT_AUTOCOMPACT: refused });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({ threadId: "t-rejects-autocompact", text: "first", resumeCursor: cursor });
+    const first = await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-rejects-autocompact");
+    expect(first).toMatchObject({ type: "turn.completed", ok: true });
+    const refusals = readFileSync(refused, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toContain("--autocompact");
+    const relaunch = JSON.parse(readFileSync(dump, "utf8")).argv as string[];
+    expect(relaunch).not.toContain("--autocompact");
+    expect(relaunch[relaunch.indexOf("--resume") + 1]).toBe(cursor);
+    // A later turn, such as a routine's own retry, launches without the refused flag too.
+    await instance.adapter.sendTurn({ threadId: "t-rejects-autocompact-2", text: "second" });
+    const done = await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-rejects-autocompact-2");
+    expect(done).toMatchObject({ type: "turn.completed", ok: true });
+    expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
+    expect(readFileSync(refused, "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
+  it("keeps --autocompact for a newer CLI when an older CLI's turn refuses it after the newer help probe", async () => {
+    const dump = join(scratch, "newer-cli-autocompact.json");
+    const refused = join(scratch, "older-cli-refused.jsonl");
+    const gate = join(scratch, "older-cli-gate");
+    const saved = { ...process.env };
+    try {
+      Object.assign(process.env, { FAKE_CLAUDE_REJECT_AUTOCOMPACT: refused, FAKE_CLAUDE_REJECT_GATE: gate, FAKE_CLAUDE_VERSION: "2.1.232" });
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump });
+      await instance.snapshot();
+      await instance.adapter.sendTurn({ threadId: "t-older-cli-refuses", text: "first" });
+      await vi.waitFor(() => expect(existsSync(`${gate}.waiting`)).toBe(true), { timeout: 10_000 });
+      // The CLI is swapped for a newer one that accepts the flag; its help probe lands before the old turn exits.
+      delete process.env.FAKE_CLAUDE_REJECT_AUTOCOMPACT;
+      process.env.FAKE_CLAUDE_VERSION = "2.1.240";
+      await instance.snapshot();
+      writeFileSync(gate, "");
+      const done = await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-older-cli-refuses");
+      expect(done).toMatchObject({ type: "turn.completed", ok: true });
+      expect(readFileSync(refused, "utf8").trim().split("\n")).toHaveLength(1);
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toContain("--autocompact");
+    } finally {
+      for (const key of ["FAKE_CLAUDE_REJECT_AUTOCOMPACT", "FAKE_CLAUDE_REJECT_GATE", "FAKE_CLAUDE_VERSION"]) {
+        if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
+      }
+    }
+  });
+
+  it("keeps --autocompact off for a CLI version that refused it, even after another version and a rollback", async () => {
+    const dump = join(scratch, "rollback-autocompact.json");
+    const refused = join(scratch, "rollback-refused.jsonl");
+    const saved = { ...process.env };
+    const turn = async (threadId: string, version: string) => {
+      process.env.FAKE_CLAUDE_VERSION = version;
+      await instance.snapshot();
+      await instance.adapter.sendTurn({ threadId, text: "hi" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId)).toMatchObject({ ok: true });
+    };
+    try {
+      process.env.FAKE_CLAUDE_REJECT_AUTOCOMPACT = refused;
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump });
+      await turn("t-rollback-a", "2.1.232");
+      await turn("t-rollback-b", "2.1.240");
+      expect(readFileSync(refused, "utf8").trim().split("\n")).toHaveLength(2);
+      // Rolling back to the first version must not pass the flag it already refused.
+      await turn("t-rollback-a-again", "2.1.232");
+      expect(readFileSync(refused, "utf8").trim().split("\n")).toHaveLength(2);
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
+    } finally {
+      for (const key of ["FAKE_CLAUDE_REJECT_AUTOCOMPACT", "FAKE_CLAUDE_VERSION"]) {
+        if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
+      }
+    }
   });
 
   it("keeps only the isolation flag a very old CLI accepts", async () => {
@@ -2334,6 +2424,29 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-built-ins-inherit", text: "hi" });
     await recorder.until((event) => event.type === "turn.completed");
     expect(JSON.parse(readFileSync(inherited, "utf8")).argv).not.toContain("--disallowedTools");
+  });
+
+  it("denies the native skills this bot switched off, and only for that bot", async () => {
+    const { setNativeSkillEnabled } = await import("../native-skill-choices.ts");
+    setNativeSkillEnabled("bot-skills-off", "pdf", false);
+    setNativeSkillEnabled("bot-skills-off", "hatch-pet", false);
+    try {
+      const dump = join(scratch, "skills-off.json");
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump, OMB_CLAUDE_INHERIT_USER_CONFIG: "1" });
+      await instance.adapter.sendTurn({ threadId: "t-skills-off", botId: "bot-skills-off", text: "hi" });
+      await recorder.until((event) => event.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv[seen.argv.indexOf("--disallowedTools") + 1].split(",")).toEqual(["Skill(hatch-pet)", "Skill(pdf)"]);
+
+      const other = join(scratch, "skills-other.json");
+      await create(undefined, { FAKE_CLAUDE_DUMP: other, OMB_CLAUDE_INHERIT_USER_CONFIG: "1" });
+      await instance.adapter.sendTurn({ threadId: "t-skills-other", botId: "bot-skills-on", text: "hi" });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(JSON.parse(readFileSync(other, "utf8")).argv).not.toContain("--disallowedTools");
+    } finally {
+      setNativeSkillEnabled("bot-skills-off", "pdf", true);
+      setNativeSkillEnabled("bot-skills-off", "hatch-pet", true);
+    }
   });
 
   it("passes an explicit empty available set to disable every Claude built-in", async () => {
@@ -3320,6 +3433,21 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.filter((e) => e.type === "turn.completed" && e.turnId === second.turnId))
       .toMatchObject([{ ok: true }]);
   });
+
+  it("never sends a turn again once one of its model calls answered, even when the exit reads transient", async () => {
+    process.env.FAKE_CLAUDE_TRANSIENTS = "1";
+    process.env.FAKE_CLAUDE_ANSWERED_FAILS = "1";
+    const state = join(scratch, "launches-answered");
+    process.env.FAKE_CLAUDE_STATE = state;
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-answered", text: "go" });
+
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "turn.retrying")).toEqual([]);
+    expect(recorder.events.filter((e) => e.type === "turn.completed")).toMatchObject([{ ok: false, stopReason: "exit_before_result" }]);
+    expect(readFileSync(state, "utf8")).toBe("1");
+  }, 20_000);
 
   it("stops retrying at the attempt cap and settles the turn as failed", async () => {
     process.env.FAKE_CLAUDE_TRANSIENTS = "9";

@@ -18,14 +18,15 @@ export interface WaitWordsDeps {
 
 export function createWaitWords(deps: WaitWordsDeps): EngineWaits & { queued(threadId: string, reason: SteerQueueReason | undefined): string | undefined } {
   return {
-    text(threadId, { first, running, ahead }) {
+    text(threadId, { first, running, ahead, limit }) {
       const language = deps.language(threadId);
+      if (limit !== undefined) return serverLine(language, first ? "server.planTurns.wait" : "server.planTurns.still", { limit, ahead });
       if (!first) return serverLine(language, "server.memory.still", { running, ahead });
       const wait = serverLine(language, "server.memory.wait", { running, ahead });
       return deps.starter() ? `${wait} ${serverLine(language, "server.memory.starter")}` : wait;
     },
-    began(threadId, { running, ahead }) {
-      deps.held(threadId, `memory: ${running} running, ${ahead} ahead${deps.starter() ? ", on Starter" : ""}`);
+    began(threadId, { running, ahead, limit }) {
+      deps.held(threadId, limit !== undefined ? `plan: ${limit} at once, ${ahead} ahead` : `memory: ${running} running, ${ahead} ahead${deps.starter() ? ", on Starter" : ""}`);
     },
     changed: deps.changed,
     queued(threadId, reason) {
@@ -40,8 +41,10 @@ export interface QueuedNotesDeps extends Pick<QueuedReasonDeps, "botName" | "thr
   language(threadId: string): string | undefined;
   parent(node: HandoffView): HandoffView | undefined;
   post(parent: HandoffView, node: HandoffView, line: string): void;
-  live(id: string): boolean;
+  node(id: string): HandoffView | undefined;
 }
+
+const stillHeld = (node: HandoffView | undefined): boolean => node?.status === "queued" || node?.status === "resume";
 
 /** One line in the requester's chat once a hand-off has been held a while, naming the limit. A computer's wait and a person's
  * open card say so themselves. */
@@ -58,7 +61,7 @@ export function createQueuedNotes(deps: QueuedNotesDeps) {
       : busy.length >= limit ? serverLine(language, "server.teammates.queued.slots", { bot, busy: busy.length, limit })
         : deps.groupTurn(node.botId) ? serverLine(language, "server.teammates.queued.room", { bot }) : undefined;
     if (!line) return;
-    for (const id of noted) if (!deps.live(id)) noted.delete(id);
+    for (const id of noted) if (!stillHeld(deps.node(id))) noted.delete(id);
     noted.add(node.id);
     deps.post(parent, node, line);
   };

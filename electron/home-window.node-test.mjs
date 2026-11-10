@@ -572,13 +572,18 @@ test("main shows the switcher at home only with somewhere else to go: My Cloud a
   const start = MAIN.indexOf("const homeAlone = "), end = MAIN.indexOf("\n", start);
   assert.ok(start > 0 && end > start);
   const cloud = { id: "c", kind: "remote", name: "My Cloud", origin: CLOUD }, office = { id: "o", kind: "remote", name: "Office", origin: "https://office.example.test" };
-  const context = vm.createContext({ homeWindow: { cloudOrigin: () => CLOUD }, otherPlaces: environments.otherPlaces, environmentsState: { environments: [cloud], activeId: "c" } });
+  const workspaces = [];
+  const context = vm.createContext({ homeWindow: { cloudOrigin: () => CLOUD }, otherPlaces: environments.otherPlaces, environmentsState: { environments: [cloud], activeId: "c" },
+    localProfiles: { places: () => workspaces } });
   vm.runInContext(`${MAIN.slice(start, end)}; this.homeAlone = homeAlone;`, context);
   assert.equal(context.homeAlone(), true, "My Cloud alone: no switcher");
   context.environmentsState = { environments: [cloud, office], activeId: "c" };
   assert.equal(context.homeAlone(), false, "a saved server besides: the switcher lists both");
   context.environmentsState = { environments: [cloud, { id: "l", kind: "local", name: "Lab", dataDir: "/lab" }], activeId: "c" };
   assert.equal(context.homeAlone(), true, "a named folder of this computer is not a place once home is My Cloud");
+  workspaces.push({ id: "default" });
+  assert.equal(context.homeAlone(), false, "a workspace of this computer's own is: the Server menu lists it, for when the rail is hidden");
+  workspaces.length = 0;
   context.homeWindow = { cloudOrigin: () => null };
   assert.equal(context.homeAlone(), false, "no home: the switcher as before");
 });

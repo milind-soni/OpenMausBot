@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import { isRoutineProblemRun } from "../shared/routines.ts";
 import { ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED } from "./routine-execution.ts";
+import { RUN_PROGRESS_WINDOW_MS } from "./routine-progress-save.ts";
 import {
   nextOccurrence,
   RoutineManager,
@@ -592,7 +593,11 @@ describe("a run waiting on an approval nobody is there to give", () => {
     const h = harness();
     const at = await started(h);
     h.setNow(at + minutes(1));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     h.manager.handleRuntimeEvent(opened("thread-1", "r1", "mcp__composio__COMPOSIO_SEARCH_TOOLS"));
+    // The two minutes waited outlast the progress window: the ask is on disk.
+    vi.advanceTimersByTime(RUN_PROGRESS_WINDOW_MS);
+    vi.useRealTimers();
     h.options.hasPendingDelegations = (threadId) => threadId === "thread-1";
     h.setNow(at + minutes(3));
     const restarted = new RoutineManager(h.options);
@@ -3971,6 +3976,24 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     await h.manager.tick();
     expect(h.manager.listRuns()).toEqual([]);
     expect(h.started).toEqual([]);
+  });
+
+  it("fails a paused bot's runs at once in the person's words, making no conversation and waking nothing for them", async () => {
+    const h = harness(start);
+    let paused: string | null = "Paused: Starter keeps 5 bots awake.";
+    h.options.pausedText = (botId) => (botId === "maus-1" ? paused : null);
+    h.manager.create(once(start + 60_000));
+    expect(h.manager.nextDueAt()).toBeNull();
+    h.setNow(start + 60_000);
+    await h.manager.tick();
+    h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-1", runOn: "maus", deliveryId: "d1", receivedAt: start });
+    await h.manager.tick();
+    expect([h.taskTitles, h.started]).toEqual([[], []]);
+    expect(h.manager.listRuns().map((run) => [run.status, run.error])).toEqual([["failed", "Paused: Starter keeps 5 bots awake."], ["failed", "Paused: Starter keeps 5 bots awake."]]);
+
+    paused = null;
+    h.manager.create(once(start + 120_000));
+    expect(h.manager.nextDueAt()).toBe(start + 120_000);
   });
 });
 

@@ -2,7 +2,7 @@
 // endpoint that answers the Google tools the way Composio's multi-execute tool does, as the default connected account.
 import { createServer } from "node:http";
 
-import { CALENDAR_LIST_TOOL, CALENDARS_TOOL, GMAIL_FETCH_TOOL, GMAIL_MESSAGE_TOOL, GMAIL_PROFILE_TOOL, GMAIL_THREAD_TOOL } from "../connected-reads.ts";
+import { CALENDAR_LIST_TOOL, CALENDARS_TOOL, GMAIL_FETCH_TOOL, GMAIL_MESSAGE_TOOL, GMAIL_PROFILE_TOOL, GMAIL_THREAD_TOOL, OUTLOOK_LIST_TOOL, OUTLOOK_MESSAGE_TOOL } from "../connected-reads.ts";
 
 export interface FakeConnectedApps {
   url: string;
@@ -14,6 +14,8 @@ export interface FakeConnectedApps {
   /** Composio GMAIL_FETCH_EMAILS messages. */
   emails: unknown[];
   calendars: unknown[];
+  /** Microsoft Graph message resources, as Composio's Outlook tools pass them on. */
+  outlook: unknown[];
   /** A thread's messages by thread id; unset, the inbox entries with that thread id. */
   threads: Record<string, unknown[]>;
   /** While set, every Gmail tool answers with this error, as Composio passes Google's on. */
@@ -32,7 +34,7 @@ const field = (value: unknown, name: string): unknown => (value && typeof value 
 
 export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
   const fake: Omit<FakeConnectedApps, "url" | "token" | "close"> = {
-    connected: { gmail: true, googlecalendar: true }, address: "me@example.test", events: [], emails: [], calls: [], threads: {},
+    connected: { gmail: true, googlecalendar: true }, address: "me@example.test", events: [], emails: [], calls: [], threads: {}, outlook: [],
     calendars: [{ id: "me@example.test", primary: true, accessRole: "owner", selected: true }],
   };
 
@@ -43,6 +45,15 @@ export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
     if (slug === GMAIL_FETCH_TOOL) {
       const after = Number(/after:(\d+)/.exec(String(field(args, "query")))?.[1] ?? 0) * 1000;
       return { messages: fake.emails.filter((message) => Date.parse(String(field(message, "messageTimestamp"))) >= after) };
+    }
+    if (slug === OUTLOOK_LIST_TOOL) {
+      const after = Date.parse(String(field(args, "received_date_time_ge")));
+      return { value: fake.outlook.filter((message) => Date.parse(String(field(message, "receivedDateTime"))) >= after) };
+    }
+    if (slug === OUTLOOK_MESSAGE_TOOL) {
+      const message = fake.outlook.find((one) => field(one, "id") === field(args, "message_id"));
+      if (!message) throw new ToolFailure(NOT_FOUND);
+      return message;
     }
     if (slug === GMAIL_PROFILE_TOOL) return { emailAddress: fake.address };
     if (slug === GMAIL_MESSAGE_TOOL) {

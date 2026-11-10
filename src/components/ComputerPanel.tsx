@@ -5,9 +5,10 @@ import { Switch } from "./SettingsPrimitives";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
-import { CalendarClock, ChevronRight, Columns2, Box, Check, Cloud, Sparkles, Globe, Hand, Loader2, Maximize2, Monitor, Moon, Power, Settings, X } from "lucide-react";
+import { CalendarClock, ChevronRight, Columns2, Globe, Hand, Loader2, Maximize2, Monitor, Moon, Power, Settings, X } from "lucide-react";
 import { api, ApiError, currentTaskBot, useStore, type Bot, type ConfigStatus } from "@/state/store";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
+import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { ComputerFilesPane } from "./ComputerFilesPane";
 import { effectivePlace, isComputerPlace, personPin, placeLabelKey, placeOffered } from "@/lib/place";
 import type { CloudBackend } from "../../shared/wire";
@@ -19,6 +20,8 @@ import { listenLiveFrames } from "@/lib/live-events";
 import { CloudScreenPreview } from "./CloudScreenPreview";
 import { isActiveTurnRefusal, isRemoteScreenshotContention } from "@/lib/remote-desktop";
 import { CloudBackendPicker } from "./CloudBackendPicker";
+import { SimpleVpsChoices } from "./SimpleVpsChoices";
+import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnSelected } from "./WorksOnGrid";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutinesSection } from "./bot-settings/RoutinesSection";
 import { routineRunLabel, routineRunTone } from "@/lib/routine-display";
@@ -32,6 +35,7 @@ import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } fro
 import { parseComputerHelp, transitionComputerControlLease, type ComputerControlAction } from "@/lib/computer-control";
 import { openProviderDesktop, useComputerTakeover } from "./computer-takeover";
 import { SignInBanner } from "./SignInRequestCard";
+import { FullScreenButton } from "./FullScreenButton";
 import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
 import { MacLocalControl } from "./MacLocalControl"; import { WindowsLocalControl } from "./WindowsLocalControl";
@@ -882,6 +886,7 @@ export function ComputerPanel({
     }
   };
 
+  const takeBlocked = pending === "join" || (phase === "vm" && !liveTarget);
   const takeControl = async (expand = false) => {
     if (!liveTarget) return cloudPreviewReady ? openDesktop() : undefined;
     if (takeover.here) return takeover.setExpanded(expand || takeover.expanded);
@@ -1039,6 +1044,9 @@ export function ComputerPanel({
   };
 
   const openConnectionSettings = () => dispatch(openKeySettings("vps"));
+  const vpsPhase = computerStatusCurrent && (phase === "vps-unconfigured" || phase === "vps-stopped" || phase === "vps-incompatible");
+  const canProvisionVps = computerStatusCurrent && canManageCloud && (phase === "vps-stopped" || (phase === "vps-unconfigured" && Boolean(vpsStatus?.configured)));
+  const canReplaceVps = computerStatusCurrent && canManageCloud && phase === "vps-incompatible" && Boolean(vpsStatus?.managed);
 
   const browserCanTurnOn = browserAvailableHere || state.config?.browserEngine?.installable === true;
   const [browserTurningOn, setBrowserTurningOn] = useState(false);
@@ -1104,17 +1112,9 @@ export function ComputerPanel({
   const cloudView = viewOf("cloud", cloudRefused);
   const autoView = viewOf("auto");
   const localHidden = pageOnRemoteServer(capabilities);
-  const placeOptions = ([
-    [null, "vm.dest.auto", "computer.dest.autoDesc", Sparkles],
-    ["cloud", "place.cloud", "computer.dest.cloudDesc", Cloud],
-    ["vm", "vm.dest.vm", "computer.dest.vmDesc", Box],
-    ["local", "vm.dest.local", "computer.dest.localDesc", Monitor],
-    ["browser", "vm.dest.browser", "computer.dest.browserDesc", Globe],
-    ["off", "vm.dest.off", "computer.dest.offDesc", Power],
-  ] as const).filter(([mode]) => mode === null || mode === "off" || (placeOffered(mode, state.config) && !(mode === "local" && localHidden))).map(([mode, labelKey, descriptionKey, Icon]) => {
-    const selected = mode === null ? !profileBot.computer || (profileBot.computer === "local" && localHidden) : profileBot.computer === mode;
-    const managedKind = mode === "local" ? "thisComputer" : mode === "vm" ? "localVm" : mode === "cloud" ? (profileBot.cloudBackend === "vps" ? "vps" : "box") : null;
-    const managedBy = managedPolicy && managedKind && !managedPolicy.computers[managedKind] ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : undefined;
+  const placeOptions = worksOnChoices(state.config, capabilities).map(([mode, labelKey, descriptionKey, Icon]) => {
+    const selected = worksOnSelected(mode, profileBot.computer, capabilities);
+    const managedBy = placeManagedBy(mode, profileBot.cloudBackend, managedPolicy);
     const view = mode === null ? autoView : mode === "cloud" ? cloudView : viewOf(mode);
     const disabled = Boolean(managedBy) || placeBlocked(view);
     const issue = !managedBy && placeHasIssue(view);
@@ -1465,16 +1465,15 @@ export function ComputerPanel({
                   </button>
                 )
               )}
-              {!advanced && computerStatusCurrent && (phase === "vps-unconfigured" || phase === "vps-stopped" || phase === "vps-incompatible") && (
+              {!advanced && vpsPhase && (
                 <>
                   <p className="text-[12px]">{t("computer.simple.needsSetup", { name: bot.name })}</p>
-                  <button
-                    type="button"
-                    onClick={() => setAdvancedMode(true)}
+                  {!canProvisionVps && !canReplaceVps && <button type="button"
+                    onClick={SIMPLE_ONLY ? openConnectionSettings : () => setAdvancedMode(true)}
                     className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
                   >
-                    {t("computer.simple.showAdvanced")}
-                  </button>
+                    {t(SIMPLE_ONLY ? "computer.openVpsSettings" : "computer.simple.showAdvanced")}
+                  </button>}
                 </>
               )}
               {advanced && computerStatusCurrent && (phase === "vps-unconfigured" || phase === "vps-stopped") && (
@@ -1485,8 +1484,7 @@ export function ComputerPanel({
                   {t("computer.openVpsSettings")}
                 </button>
               )}
-              {advanced && computerStatusCurrent && (phase === "vps-stopped" || (phase === "vps-unconfigured" && vpsStatus?.configured)) &&
-                canManageCloud && (
+              {canProvisionVps && (
                 <button
                   onClick={() => run("provision")}
                   disabled={pending === "provision"}
@@ -1496,8 +1494,7 @@ export function ComputerPanel({
                   {phase === "vps-stopped" ? t("computer.startVps") : t("computer.prepareVps")}
                 </button>
               )}
-              {advanced && computerStatusCurrent && phase === "vps-incompatible" && vpsStatus?.managed &&
-                canManageCloud && (
+              {canReplaceVps && (
                 <button
                   onClick={() => void replaceVpsComputer()}
                   disabled={pending === "vps-replace"}
@@ -1601,7 +1598,7 @@ export function ComputerPanel({
               <button
                 type="button"
                 onClick={() => void takeControl()}
-                disabled={controlPending || pending === "join" || (phase === "vm" && !liveTarget)}
+                disabled={controlPending || takeBlocked}
                 className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink hover:brightness-110 disabled:opacity-50"
                 title={t("computer.takeControlTitle")}
               >
@@ -1609,16 +1606,10 @@ export function ComputerPanel({
                 {t("computer.takeControl")}
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => void takeControl(true)}
-              disabled={pending === "join" || (!control.held && controlPending) || (phase === "vm" && !liveTarget)}
-              className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
-              title={t("computer.openLiveDesktop")}
-            >
-              <Maximize2 size={14} />
-              {t("computer.fullScreen")}
-            </button>
+            <FullScreenButton
+              held={control.held} frame={frameSrc} name={bot.name} onTakeControl={(expand) => void takeControl(expand)}
+              disabled={control.held && takeBlocked} takeDisabled={controlPending || takeBlocked} error={errorText}
+            />
             {cloudPreviewReady && canManageCloud && (cloudBackend === "vps" || boatState !== "archived") && (
               <button
                 type="button"
@@ -1682,35 +1673,7 @@ export function ComputerPanel({
             <p className="mt-1 text-[12px] leading-5 text-ink-secondary">
               {t(state.config?.cloudHome ? "computer.worksOnHintCloudHome" : "computer.worksOnHint")}
             </p>
-          <div role="group" aria-label={t("computer.destinationAria")} className="mt-3 grid auto-rows-fr grid-cols-2 gap-2">
-            {placeOptions.map(({ mode, labelKey, descriptionKey, Icon, selected, managedBy, disabled, unavailableTitle, issue, view }) => (
-              <button
-                key={mode ?? "auto"}
-                disabled={disabled}
-                title={unavailableTitle}
-                onClick={() => selectPlace(mode)}
-                type="button"
-                aria-pressed={selected}
-                className={cn(
-                  "min-w-0 rounded-lg border px-2.5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-card",
-                  selected
-                    ? "border-accent/60 bg-accent/10 text-ink"
-                    : "border-hairline/50 bg-panel/30 text-ink-secondary",
-                  disabled
-                    ? "cursor-not-allowed"
-                    : "hover:border-accent/40 hover:bg-control/60",
-                )}
-              >
-                <span className="flex items-center gap-2 text-[12px] font-medium leading-4">
-                  {selected ? <Check size={14} className="shrink-0 text-accent" /> : <Icon size={14} className="shrink-0 text-ink-secondary" />}
-                  <span>{t(labelKey)}</span>
-                </span>
-                <span className="mt-1.5 block text-[11px] leading-4 text-ink-secondary">
-                  {managedBy ?? (issue ? view.short : t(descriptionKey))}
-                </span>
-              </button>
-            ))}
-          </div>
+          <WorksOnGrid options={placeOptions} onSelect={selectPlace} />
           {livePin && (
             <p className="mt-2 text-[12px] leading-5 text-ink-secondary" data-testid="place-pinned-note">
               {t("place.pinnedNote", { place: t(placeLabelKey(livePin)) })}
@@ -1788,6 +1751,8 @@ export function ComputerPanel({
                 </button>
               </div>
             )}
+            {vpsPhase && <SimpleVpsChoices bot={bot} backend={cloudBackend} onBackend={(backend) => updateComputerSelection({ cloudBackend: backend })}
+              onAutoStart={() => dispatch({ type: "updateBot", botId: bot.id, patch: { autoStartVps: !bot.autoStartVps } })} />}
           </div>
         )}
       </div>

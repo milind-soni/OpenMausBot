@@ -25,6 +25,8 @@
 //   FAKE_CLAUDE_CACHE_READ_TOKENS  cache_read_input_tokens per model call (default 2)
 //   FAKE_CLAUDE_PING_DUMP  path for a keep-warm ping's {argv, env, prompt, mcpConfig, settings, systemPrompt}
 //   FAKE_CLAUDE_PING_USAGE  JSON usage for a keep-warm ping's result (default: warm read 150000, write 40)
+//   FAKE_CLAUDE_STARTS_MCP  comma list of --mcp-config command servers a fork (`--fork-session`) starts as it launches,
+//     before it answers and whatever its hooks say, as Claude Code 2.1.321 starts every listed one; each runs to its exit
 //   FAKE_CLAUDE_PING_RESULT  raw json result for a keep-warm ping
 //   FAKE_CLAUDE_TEXT_DUMP  FAKE_CLAUDE_DUMP for one-shot text runs
 //   FAKE_CLAUDE_TEXT_LOG  JSON-lines file every one-shot prompt is appended to
@@ -50,10 +52,13 @@
 //   FAKE_CLAUDE_CONTEXT_GROWTH  "<start>:<per turn>": a session starts at <start> tokens and each turn's work adds <per turn>,
 //     which that turn's model calls report as their prompt; kept per session in FAKE_CLAUDE_CONTEXT_STATE (a folder) across
 //     processes; a compaction leaves FAKE_CLAUDE_COMPACTED_TOKENS (default 30000)
+//   FAKE_CLAUDE_REJECT_AUTOCOMPACT  a file: --help still lists --autocompact, but a turn given it appends its argv
+//     there as a JSON line and exits 1 with "error: unknown option '--autocompact'" (a CLI that changed under a running app)
+//   FAKE_CLAUDE_REJECT_GATE  path: that refusal first writes `<path>.waiting`, then waits until <path> exists
 //   FAKE_CLAUDE_AUTOCOMPACT_AT  tokens: a turn that starts at or above it compacts first, as Claude Code does at its threshold
 //     (PreCompact, FAKE_CLAUDE_COMPACT_MS of nothing, compact_boundary, then SessionStart "compact")
 //   FAKE_CLAUDE_COMPACT_MS  how long a compaction takes: that one, or a one-shot `/compact` on a fork
-//   FAKE_CLAUDE_COMPACT_DUMP  path: a one-shot `/compact` on a fork (`--resume S --fork-session`) writes its {argv, prompt,
+//   FAKE_CLAUDE_COMPACT_DUMP  path: a one-shot `/compact` on a fork (`--resume S --fork-session`) writes its {argv, env, prompt,
 //     systemPrompt, mcpConfig, settings} here and answers with a new session; FAKE_CLAUDE_COMPACT_RESULT is its raw answer
 //   FAKE_CLAUDE_CONTEXT_TOKENS  latest-prompt size reported in a scripted room-plan reply
 //   FAKE_CLAUDE_AUTH  in (default) | out | unsupported | malformed | inherited-api-key: what `auth status` says
@@ -100,6 +105,17 @@ const streamCadence = (() => {
   const parsed = { chars: Number(chars), ms: Number(ms) };
   return Number.isSafeInteger(parsed.chars) && parsed.chars > 0 && Number.isSafeInteger(parsed.ms) && parsed.ms >= 0 ? parsed : null;
 })();
+
+function startListedMcpServers(): void {
+  const names = (process.env.FAKE_CLAUDE_STARTS_MCP ?? "").split(",").filter(Boolean);
+  if (!names.length) return;
+  let servers: Record<string, { command?: string; args?: string[]; env?: Record<string, string> }> = {};
+  try { servers = JSON.parse(readFileSync(argAfter("--mcp-config") ?? "", "utf8")).mcpServers ?? {}; } catch {}
+  for (const name of names) {
+    const server = servers[name];
+    if (server?.command) spawnSync(server.command, server.args ?? [], { env: { ...process.env, ...server.env }, input: "", timeout: 10_000 });
+  }
+}
 
 // Concurrent turns share a capture path: publish whole JSON in one rename.
 const writeDumpAtomic = (path: string, contents: string): void => {
@@ -317,6 +333,15 @@ if (argv[0] === "--help") {
   process.exit(0);
 }
 
+if (process.env.FAKE_CLAUDE_REJECT_AUTOCOMPACT && argv.includes("--autocompact")) {
+  const gate = process.env.FAKE_CLAUDE_REJECT_GATE;
+  if (gate) writeFileSync(`${gate}.waiting`, "");
+  while (gate && !existsSync(gate)) await new Promise((resolve) => setTimeout(resolve, 20));
+  appendFileSync(process.env.FAKE_CLAUDE_REJECT_AUTOCOMPACT, `${JSON.stringify(argv)}\n`);
+  process.stderr.write("error: unknown option '--autocompact'\n");
+  process.exit(1);
+}
+
 if (argv[0] === "update") {
   if (process.env.FAKE_CLAUDE_UPDATE === "fail") {
     process.stderr.write("fake-claude: simulated update failure\n");
@@ -388,6 +413,7 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
     process.stdin.on("data", (chunk) => { input += chunk; });
     process.stdin.on("end", () => resolve(input));
   });
+  if (argv.includes("--fork-session")) startListedMcpServers();
   if (argv.includes("--fork-session") && prompt.trimStart().startsWith("/compact")) {
     const file = (flag: string) => {
       const path = argAfter(flag);
@@ -396,7 +422,7 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
     };
     if (process.env.FAKE_CLAUDE_COMPACT_DUMP) {
       writeDumpAtomic(process.env.FAKE_CLAUDE_COMPACT_DUMP, JSON.stringify({
-        pid: process.pid, argv, prompt, cwd: process.cwd(), mcpConfig: JSON.parse(file("--mcp-config") ?? "null"),
+        pid: process.pid, argv, env: process.env, prompt, cwd: process.cwd(), mcpConfig: JSON.parse(file("--mcp-config") ?? "null"),
         settings: JSON.parse(file("--settings") ?? "null"), systemPrompt: file("--append-system-prompt-file"),
         hookEnv: Object.keys(process.env).filter((key) => key.startsWith("OMB_HOOK_")),
       }, null, 2));
@@ -896,7 +922,8 @@ const playTurn = (prompt: JsonValue, late = false) => {
     process.exit(3);
   }
   // FAKE_CLAUDE_TRANSIENTS launches fail transiently (exit 5), counted in the FAKE_CLAUDE_STATE file;
-  // FAKE_CLAUDE_PARTIAL_FAILS makes the first one emit a text delta before failing.
+  // FAKE_CLAUDE_PARTIAL_FAILS makes the first one emit a text delta before failing; FAKE_CLAUDE_ANSWERED_FAILS makes it
+  // finish one model call (a tool use) before failing.
   if (process.env.FAKE_CLAUDE_TRANSIENTS && process.env.FAKE_CLAUDE_STATE) {
     let launched = 0;
     try {
@@ -908,6 +935,9 @@ const playTurn = (prompt: JsonValue, late = false) => {
     if (launched < quota) {
       if (process.env.FAKE_CLAUDE_PARTIAL_FAILS) {
         out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "half an answer" } } });
+      }
+      if (process.env.FAKE_CLAUDE_ANSWERED_FAILS) {
+        out({ type: "assistant", session_id: sessionId, message: { content: [{ type: "tool_use", id: "toolu_spent", name: "Read", input: { file_path: "notes.md" } }] } });
       }
       // an MCP server's question still open when the launch fails
       if (process.env.FAKE_CLAUDE_ELICIT) out({ type: "control_request", request_id: "elicit-1", request: { subtype: "elicitation", ...JSON.parse(process.env.FAKE_CLAUDE_ELICIT) } });

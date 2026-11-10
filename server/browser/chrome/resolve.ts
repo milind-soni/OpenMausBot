@@ -100,6 +100,23 @@ export function agentBrowserChrome(host: ChromeHost): string | null {
   return versions.map((version) => join(browsers, version, layout)).find((candidate) => host.exists(candidate)) ?? null;
 }
 
+/** agent-browser's own search on Linux: these browsers on PATH, then Puppeteer's and Playwright's caches. */
+const LINUX_ENGINE_BROWSERS = ["google-chrome", "google-chrome-stable", "google-chrome-unstable", "chromium", "chromium-browser", "brave-browser", "brave-browser-stable"];
+
+/** Where Puppeteer and Playwright unpack Chrome inside a cache entry; an entry without one is incomplete. */
+const LINUX_CACHE_EXECUTABLES = ["chrome-linux64/chrome", "chrome-linux/chrome"];
+
+/** A Linux server where agent-browser already finds a browser keeps it rather than downloading another. */
+export function engineFindsLinuxBrowser(host: ChromeHost): boolean {
+  const { join } = posix;
+  const onPath = (host.env.PATH ?? "").split(":").filter(Boolean);
+  if (onPath.some((directory) => LINUX_ENGINE_BROWSERS.some((name) => host.exists(join(directory, name))))) return true;
+  const cached = (directory: string, prefix: string) => host.list(directory)
+    .some((name) => name.startsWith(prefix) && LINUX_CACHE_EXECUTABLES.some((executable) => host.exists(join(directory, name, executable))));
+  return cached(join(host.env.PUPPETEER_CACHE_DIR || join(host.home, ".cache", "puppeteer"), "chrome"), "linux")
+    || cached(host.env.PLAYWRIGHT_BROWSERS_PATH || join(host.home, ".cache", "ms-playwright"), "chromium-");
+}
+
 export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null): ChromePlan {
   const { env, platform } = host;
   if (env.OMB_BROWSER_LEGACY_SHELL?.trim() === "1") return { kind: "legacy", reason: "OMB_BROWSER_LEGACY_SHELL=1" };
@@ -110,7 +127,8 @@ export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null)
     return { kind: "chrome", chrome: { path: paths(platform).isAbsolute(named) ? named : resolve(named), source: "named" }, fallback: null };
   }
   if (!engine?.managed) return { kind: "legacy", reason: "agent-browser was named, so it picks its own browser" };
-  const pin = platform === "darwin" || platform === "win32" ? chromeForTestingPin(platform, host.arch) : null;
+  // The Linux desktop app keeps its bundled browser; a Linux server downloads Chrome for Testing like a Mac.
+  const pin = platform === "linux" && env.OMB_RESOURCES_PATH ? null : chromeForTestingPin(platform, host.arch);
   const installed = installedGoogleChrome(host);
   if (installed && !chromePolicyManaged(host)) return { kind: "chrome", chrome: { path: installed, source: "installed" }, fallback: pin };
   if (platform === "linux" && env.OMB_RESOURCES_PATH) return { kind: "legacy", reason: installed ? "Google Chrome here is managed by an organization" : "Google Chrome is not installed" };
@@ -118,7 +136,9 @@ export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null)
   if (own) return { kind: "chrome", chrome: { path: own, source: "agent-browser" }, fallback: null };
   if (pin) {
     const executable = chromeForTestingExecutable(host.dataDir, pin);
-    return host.exists(executable) ? { kind: "chrome", chrome: { path: executable, source: "downloaded" }, fallback: null } : { kind: "download", pin };
+    if (host.exists(executable)) return { kind: "chrome", chrome: { path: executable, source: "downloaded" }, fallback: null };
+    if (platform === "linux" && engineFindsLinuxBrowser(host)) return { kind: "legacy", reason: "agent-browser found a browser on this server" };
+    return { kind: "download", pin };
   }
   return { kind: "legacy", reason: installed ? "Google Chrome here is managed by an organization" : "no Chrome is installed and none is pinned for this platform" };
 }

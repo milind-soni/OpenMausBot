@@ -34,11 +34,16 @@ import { runSentinelCli } from "./sentinel/cli.ts";
 import { runFleetCommand, type FleetInput } from "./fleet-cli.ts";
 import { startFleetAgent } from "./fleet-agent.ts";
 import { fleetLayout } from "./fleet.ts";
-import { explainTailscaleFailure, tailscaleServe, tailscaleServeOff, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
+import { clearLeftoverTailscaleServe, explainTailscaleFailure, tailscaleServe, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
-import { HEADLESS_VERB_NAMES, USAGE } from "./cli-usage.ts";
+import { HEADLESS_VERB_NAMES, usage } from "./cli-usage.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
-import { browserSignInLines, pairingBlock } from "./cli-pairing.ts";
+import { browserSignInLines, formatSessions, pairingBlock } from "./cli-pairing.ts";
+import { cliCommand, cliPrefix } from "./cli-invocation.ts";
+import { checkReach, envPublicUrl, lanProblem, localLinkBase, noRouteLines, publicUrlProblem, reachLines, waitForReach, type Route } from "./cli-reach.ts";
+import { lanUrl } from "./lan-address.ts";
+import { isLoopbackHost } from "../electron/server-address.mjs";
+import { parseDuration } from "./headless/args.ts";
 import type { AppConfig } from "./config.ts";
 import {
   cleanupTunnelOrigin,
@@ -63,7 +68,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export interface CliOptions {
-  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "access" | "service" | "browser" | "fleet" | "help";
+  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "access" | "service" | "browser" | "fleet" | "help" | "version";
   port: number;
   dataDir: string;
   label?: string;
@@ -72,6 +77,8 @@ export interface CliOptions {
   domain?: string;
   tailscale: boolean;
   tunnel: boolean;
+  /** `serve --lan`: every private address of this machine, plain http, each connection held to private ends. */
+  lan?: boolean;
   client: boolean;
   pair: boolean;
   revoke?: string;
@@ -108,18 +115,20 @@ export interface CliOptions {
   open?: boolean;
   guided?: boolean;
   phone?: "ios" | "android";
+  /** `pair --ttl 24h`: how long the code stays open. */
+  pairTtlMs?: number;
 }
 
-const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "access", "service", "browser", "fleet", "help", "--help", "-h"];
+const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "devices", "status", "login", "logout", "access", "service", "browser", "fleet", "help", "--help", "-h", "--version", "-v", "version"];
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions | { error: string } {
-  const implicitStart = !argv.length || (argv[0]!.startsWith("--") && argv[0] !== "--help");
+  const implicitStart = !argv.length || (argv[0]!.startsWith("--") && argv[0] !== "--help" && argv[0] !== "--version");
   const [command = "start", ...rest] = implicitStart ? ["start", ...argv] : argv;
   if (!COMMANDS.includes(command)) {
     return { error: `unknown command "${command}"` };
   }
   const options: CliOptions = {
-    command: command === "--help" || command === "-h" ? "help" : (command as CliOptions["command"]),
+    command: command === "--help" || command === "-h" ? "help" : command === "--version" || command === "-v" ? "version" : command === "devices" ? "sessions" : (command as CliOptions["command"]),
     port: Number(env.OMB_PORT || 8799),
     dataDir: env.OMB_DATA_DIR || join(homedir(), ".openmausbot"),
     tailscale: false,
@@ -144,25 +153,29 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (arg === "--label") options.label = value();
       else if (arg === "--public-url") options.publicUrl = value().replace(/\/+$/, "");
       else if (arg === "--tailscale") options.tailscale = true;
+      else if (arg === "--lan") options.lan = true;
       else if (arg === "--domain") {
         const domain = normalizeDomainOption(value());
         if (typeof domain !== "string") return domain;
         options.domain = domain;
       }
       else if (arg === "--tunnel") options.tunnel = true;
-      else if (arg === "--client") options.client = true;
-      // Which phone will scan, for runs nobody types into; only Android needs a different QR.
+      else if (arg === "--client" || (options.command === "pair" && arg === "--chat-only")) options.client = true;
+      // Which phone will scan; only Android needs a different QR. `pair --phone` alone is a chat-only code for any phone.
       else if (arg === "--phone") {
-        const kind = value().toLowerCase();
-        if (kind !== "ios" && kind !== "android") return { error: "--phone takes ios or android" };
-        options.phone = kind;
+        const kind = rest[i + 1]?.toLowerCase();
+        if (kind === "ios" || kind === "android") { options.phone = kind; i += 1; }
+        else if (options.command === "pair") options.phone = "ios";
+        else return { error: "--phone takes ios or android" };
       }
+      else if (options.command === "pair" && arg === "--ttl") options.pairTtlMs = parseDuration(value(), "--ttl", { min: 60_000 });
+      else if (arg === "--help" || arg === "-h") options.command = "help";
       else if (arg === "--no-pair") options.pair = false;
       else if (arg === "--no-open") options.open = false;
       else if (arg === "--local") options.local = true;
       else if (arg === "--json") options.json = true;
       else if (arg === "--email") options.email = value();
-      else if (options.command === "sessions" && arg === "revoke") options.revoke = value();
+      else if (options.command === "sessions" && (arg === "revoke" || arg === "list")) { if (arg === "revoke") options.revoke = value(); }
       else if (options.command === "access" && !options.accessAction && (arg === "list" || arg === "add" || arg === "remove")) {
         options.accessAction = arg;
         if (arg !== "list") options.email = value();
@@ -194,12 +207,13 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     }
   }
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65_535) return { error: "--port must be 1-65535" };
-  if (options.publicUrl && !/^https?:\/\//.test(options.publicUrl)) return { error: "--public-url must start with http:// or https://" };
+  const publicUrlRefusal = options.publicUrl ? publicUrlProblem(options.publicUrl) : null;
+  if (publicUrlRefusal) return { error: publicUrlRefusal };
   if (options.tailscale && options.tunnel) return { error: "choose one of --tailscale (your tailnet) and --tunnel (a public address)" };
   if (options.command === "access" && !options.accessAction) return { error: "access needs one of: list, add EMAIL [--chat-only], remove EMAIL" };
   if (options.command === "service" && !options.serviceAction) return { error: "service needs one of: install [the same options as serve], uninstall" };
   if (options.domain && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--domain already gives the server its address; drop --tailscale, --tunnel and --public-url" };
-  if (options.local && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--local cannot be combined with a remote-access option" };
+  if (options.local && (options.tailscale || options.tunnel || options.publicUrl || options.lan)) return { error: "--local cannot be combined with a remote-access option" };
   if (options.command === "browser" && !options.browserAction) return { error: "browser needs an action: install or status" };
   if (options.command === "fleet") {
     if (!options.fleetAction) return { error: "fleet needs one of: init --domain HOST [--operator USER], create NAME --admin EMAIL, list, users NAME add|remove EMAIL, suspend NAME, resume NAME, delete NAME --yes, upgrade, agent" };
@@ -294,24 +308,19 @@ export async function openDashboard(port: number, env = process.env): Promise<bo
   });
 }
 
+/** Something already answers there as a MausBot server (before this one has started). */
+const answersAsMausBot = async (origin: string) => typeof (await fetch(`${origin}/.well-known/openmausbot/environment`, { signal: AbortSignal.timeout(3_000) }).then((r) => r.json() as Promise<{ environmentId?: unknown }>).catch(() => null))?.environmentId === "string";
+
 /** Its public descriptor must identify this exact server; never sends a pairing code or credential. */
 export async function verifyPhoneEndpoint(port: number, origin: string): Promise<boolean> {
-  if (!normalizePhoneOrigin(origin)) return false;
-  try {
-    const local = await api(port, "/.well-known/openmausbot/environment");
-    const remote = await fetch(`${origin}/.well-known/openmausbot/environment`, { signal: AbortSignal.timeout(5000), redirect: "error" });
-    if (local.status !== 200 || !remote.ok) return false;
-    const descriptor = await remote.json() as { environmentId?: unknown };
-    return typeof local.body?.environmentId === "string" && local.body.environmentId.length > 0
-      && descriptor.environmentId === local.body.environmentId;
-  } catch { return false; }
+  return Boolean(normalizePhoneOrigin(origin)) && (await checkReach(port, origin)).ok;
 }
 
 export function applyStartupPreferences(options: CliOptions, saved: AppConfig["cliStartup"]): CliOptions {
   if (options.local) return { ...options, tunnel: false, tailscale: false, publicUrl: undefined, phone: undefined };
   if (!saved || options.tunnel || options.tailscale || options.publicUrl) return options;
   if (saved.access === "public-url" && (!saved.publicUrl || !normalizePhoneOrigin(saved.publicUrl))) {
-    throw new Error("The saved phone address is not a valid HTTPS origin. Run openmausbot setup to correct it, or openmausbot --local to start only on this computer.");
+    throw new Error(`The saved phone address is not a valid HTTPS origin. Run ${cliCommand("setup")} to correct it, or ${cliCommand("--local")} to start only on this computer.`);
   }
   return {
     ...options,
@@ -336,7 +345,7 @@ async function showPhonePairing(options: CliOptions, origin: string | undefined,
   const ready = !!origin && await verifyPhoneEndpoint(options.port, origin);
   if (!ready) {
     log("Phone access is not reachable yet. OpenMausBot is ready on this computer; no phone pairing code was created.");
-    log("Check the HTTPS connection, then run openmausbot pair again with the same --data-dir and --port.");
+    log(`Check the HTTPS connection, then run ${cliCommand("pair")} again with the same --data-dir and --port.`);
     return false;
   }
   for (const line of phonePairingInstructions(options.phone ?? "ios", { origin: origin!, ready })) log(line);
@@ -345,60 +354,35 @@ async function showPhonePairing(options: CliOptions, origin: string | undefined,
   return true;
 }
 
-async function mintPairing(port: number, options: { label?: string; client?: boolean; publicUrl?: string; phone?: "ios" | "android"; guided?: boolean }): Promise<string> {
-  const request: { label?: string; scopes?: string[] } = {};
-  if (options.label) request.label = options.label;
-  if (options.client) request.scopes = ["client"];
+async function mintPairing(port: number, options: { label?: string; client?: boolean; publicUrl?: string; phone?: "ios" | "android"; guided?: boolean; ttlMs?: number }): Promise<string> {
+  const chatOnly = Boolean(options.client || options.phone);
+  const request = { ...(options.label ? { label: options.label } : {}), ...(chatOnly ? { scopes: ["client"] } : {}), ...(options.ttlMs ? { ttlMs: options.ttlMs } : {}) };
   const { status, body } = await api(port, "/api/auth/pairing", { method: "POST", body: JSON.stringify(request) });
   if (refusedAsService(status, body)) throw new Error(SERVICE_TRUST_HELP);
   if (status !== 200) throw new Error(`server refused to mint a pairing code: ${typeof body?.error === "string" ? body.error : status}`);
-  const url = options.publicUrl ? `${options.publicUrl}/pair#code=${body.code}` : typeof body.url === "string" ? body.url : null;
-  const invite = (options.publicUrl && typeof body.credential === "string"
-    ? phonePairingLink({ address: options.publicUrl, token: body.credential, name: typeof body.serverName === "string" ? body.serverName : undefined })
+  const reachable = options.publicUrl && !isLoopbackHost(new URL(options.publicUrl).hostname) ? options.publicUrl : null;
+  const link = reachable ? `${reachable}/pair#code=${body.code}` : typeof body.url === "string" && !isLoopbackHost(new URL(body.url).hostname) ? body.url : null;
+  const invite = (reachable && typeof body.credential === "string"
+    ? phonePairingLink({ address: reachable, token: body.credential, name: typeof body.serverName === "string" ? body.serverName : undefined })
     : null) ?? (typeof body.inviteUrl === "string" ? body.inviteUrl : null);
-  const localUrl = options.phone ? null : `http://127.0.0.1:${port}/pair#code=${body.code}`;
-  if (options.guided && localUrl) return browserSignInLines(localUrl, body.code, body.expiresAt);
-  return pairingBlock({ code: body.code, url, inviteUrl: invite, localUrl, expiresAt: body.expiresAt, hint: typeof body.hint === "string" ? body.hint : null, phone: options.phone });
+  const local = localLinkBase(options.publicUrl ?? null, port);
+  if (options.guided) return browserSignInLines(`${local.base}/pair#code=${body.code}`, body.code, body.expiresAt);
+  return pairingBlock({ code: body.code, expiresAt: body.expiresAt, chatOnly, link, localLink: `${local.base}/pair#code=${body.code}`, localPlace: local.place, inviteUrl: invite, phone: options.phone, prefix: cliPrefix() });
 }
 
+/** Never asks anything: the running server's own address (its routes) goes in the link. */
 export async function runPair(options: CliOptions): Promise<number> {
   if (!(await serverUp(options.port))) {
-    console.error(`no OpenMausBot server on http://127.0.0.1:${options.port}; start one with \`openmausbot serve\` or set OMB_PORT`);
+    console.error(`No MausBot server is running here. Start it: ${cliCommand("serve")}${options.port !== 8799 ? ` (or name its port: --port ${options.port})` : ""}`);
     return 1;
   }
-  if (process.stdin.isTTY && process.stdout.isTTY && !options.label && !options.client) {
-    const advertised = await api(options.port, "/api/auth/pairing");
-    let launch = options;
-    let origin = options.publicUrl ?? (typeof advertised.body?.publicUrl === "string" ? advertised.body.publicUrl : undefined);
-    if (!origin) {
-      const { readCliStartup } = await import("./cli-setup.ts");
-      launch = applyStartupPreferences(options, readCliStartup(options.dataDir));
-      origin = launch.publicUrl;
-      if (launch.tunnel) origin = describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() }).credentials.read()).address ?? undefined;
-      if (launch.tailscale) {
-        const status = await tailscaleStatus();
-        if (!("failure" in status) && status.status.dnsName) origin = `https://${status.status.dnsName}`;
-      }
-    }
-    if (!origin || !normalizePhoneOrigin(origin)) {
-      console.log("Your workspace is running only on this computer. A phone cannot use its localhost address.");
-      console.log("Stop the server, run openmausbot setup and choose phone access, then start openmausbot again.");
-      return 1;
-    }
-    const ui = defaultSetupIo();
-    try {
-      const selected = await ui.choose("Which phone are you connecting?", ["iPhone / iPad — app or Safari", "Android — app or browser", "Cancel"], 0);
-      if (selected === 2) return 0;
-      launch = { ...launch, phone: selected === 0 ? "ios" : "android" };
-      return await showPhonePairing(launch, origin, ui.log) ? 0 : 1;
-    } catch (error) {
-      if (!(error instanceof SetupCancelled)) throw error;
-      console.log("Pairing cancelled. Existing devices are unchanged.");
-      return 130;
-    }
+  const advertised = await api(options.port, "/api/auth/pairing").catch(() => ({ status: 0, body: {} as any }));
+  const origin = options.publicUrl ?? (typeof advertised.body?.publicUrl === "string" ? advertised.body.publicUrl : undefined);
+  console.log(await mintPairing(options.port, { label: options.label, client: options.client, publicUrl: origin, phone: options.phone, ttlMs: options.pairTtlMs }));
+  if (origin && origin.startsWith("https:") && !isLoopbackHost(new URL(origin).hostname)) {
+    const reach = await checkReach(options.port, origin);
+    if (!reach.ok) for (const line of [...reachLines("public-url", origin, options.port, cliPrefix(), reach), "The code works once the address answers."]) console.log(line);
   }
-  console.log(await mintPairing(options.port, { label: options.label, client: options.client, publicUrl: options.publicUrl, phone: options.phone }));
-  if (options.client) console.log("(client scope: chat and approvals only; cannot change settings or pair others)");
   return 0;
 }
 
@@ -435,41 +419,29 @@ export async function runSessions(options: CliOptions): Promise<number> {
     return 0;
   }
   if (!sessions.length) {
-    console.log("no paired devices yet: run `openmausbot pair`");
+    console.log(`no paired devices yet: run ${cliCommand("pair")}`);
     return 0;
   }
   console.log(formatSessions(sessions));
   return 0;
 }
 
-export function formatSessions(sessions: Array<{ id: string; label: string; scopes: string[]; lastSeenAt: number; expiresAt: number }>, now = Date.now()): string {
-  const age = (ms: number) => {
-    const m = Math.max(0, Math.floor((now - ms) / 60_000));
-    return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
-  };
-  const rows = sessions.map((s) => [s.id, s.label || "(unnamed)", s.scopes.includes("admin") ? "admin" : "client", age(s.lastSeenAt), new Date(s.expiresAt).toISOString().slice(0, 10)]);
-  const head = ["id", "device", "scope", "last seen", "expires"];
-  const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
-  const line = (r: string[]) => r.map((c, i) => c.padEnd(widths[i])).join("  ");
-  return [line(head), ...rows.map(line), "", "revoke one with: openmausbot sessions revoke <id>"].join("\n");
-}
-
 export async function runStatus(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
-  let code = 0;
-  try {
-    const res = await fetch(`http://127.0.0.1:${options.port}/.well-known/openmausbot/environment`);
-    const body: any = await res.json();
-    io.log(options.json ? JSON.stringify(body, null, 2) : `${body.label} · OpenMausBot ${body.version} on ${body.platform} · id ${body.environmentId}`);
-  } catch {
-    io.error(`no OpenMausBot server on http://127.0.0.1:${options.port}`);
-    code = 1;
+  const body: any = await fetch(`http://127.0.0.1:${options.port}/.well-known/openmausbot/environment`).then((r) => r.json()).catch(() => null);
+  if (body && options.json) io.log(JSON.stringify(body, null, 2));
+  if (!body) io.error(`No MausBot server is running here. Start it: ${cliCommand("serve")}`);
+  if (body && !options.json) {
+    io.log(`Server "${body.label}"   running · MausBot ${body.version} on ${body.platform}\n  Local        127.0.0.1:${options.port}`);
+    const address = await api(options.port, "/api/auth/pairing").then((r) => (typeof r.body?.publicUrl === "string" ? r.body.publicUrl as string : null)).catch(() => null);
+    if (!address || isLoopbackHost(new URL(address).hostname)) io.log(`  Address      none: reachable from this machine only. Ways in: ${cliCommand("serve --help")}`);
+    else for (const line of reachLines(address.startsWith("http:") ? "lan" : "public-url", address, options.port, cliPrefix(), address.startsWith("http:") ? undefined : await checkReach(options.port, address))) io.log(`  ${line.replace(/^Reach   /, "Address     ")}`);
+    const sessions = await api(options.port, "/api/auth/sessions").catch(() => null);
+    if (Array.isArray(sessions?.body?.sessions)) io.log(`Paired   ${sessions.body.sessions.length} device${sessions.body.sessions.length === 1 ? "" : "s"}   ${cliCommand("devices")}`);
   }
-  if (!options.json) {
-    const account = describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() }).credentials.read());
-    if (fleetCredential()) io.log(`public address: managed by the fleet (${FLEET_CREDENTIAL_ENV} is set; the address is fetched when serve --tunnel starts)`);
-    else if (account.address) io.log(`public address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with --tunnel)`);
-  }
-  return code;
+  const account = options.json ? null : describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() }).credentials.read());
+  if (!options.json && fleetCredential()) io.log(`MausBot web address: managed by the fleet (${FLEET_CREDENTIAL_ENV} is set)`);
+  else if (account?.address) io.log(`MausBot web address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with ${cliCommand("serve --tunnel")})`);
+  return body ? 0 : 1;
 }
 
 /** Edits the sign-in allow-list in config.json, server live or stopped (read per request); OMB_SIGNIN_EMAILS wins when set. */
@@ -528,7 +500,7 @@ export async function runAccess(options: CliOptions, io: CliIo = defaultIo()): P
       return 1;
     }
     await write({ admins: without(admins), members: without(members) });
-    io.log(`${entry} can no longer sign in (existing sessions stay until they expire or are revoked with \`openmausbot sessions revoke\`)`);
+    io.log(`${entry} can no longer sign in (existing sessions stay until they expire or are revoked with ${cliCommand("devices revoke ID")})`);
     return 0;
   }
   await write(options.chatOnly ? { admins: without(admins), members: [...without(members), entry] } : { admins: [...without(admins), entry], members: without(members) });
@@ -552,7 +524,7 @@ export async function runLogin(options: CliOptions, io: CliIo = defaultIo()): Pr
   if (existing.address) io.log(`already signed in as ${existing.email ?? "?"} (${existing.address}); signing in again refreshes it`);
   const email = (options.email ?? (await io.ask("Email for your OpenMausBot account: "))).trim();
   if (!email) {
-    io.error("an email address is needed: openmausbot login --email you@example.com");
+    io.error(`an email address is needed: ${cliCommand("login --email you@example.com")}`);
     return 1;
   }
   try {
@@ -576,7 +548,7 @@ export async function runLogin(options: CliOptions, io: CliIo = defaultIo()): Pr
   }
   io.log(`Signed in as ${signedIn.email ?? email}.`);
   io.log(`This machine's public address: ${signedIn.address}`);
-  io.log("Serve there with:  openmausbot serve --tunnel");
+  io.log(`Serve there with:  ${cliCommand("serve --tunnel")}`);
   return 0;
 }
 
@@ -631,11 +603,11 @@ export async function runBrowser(options: CliOptions, io: CliIo = defaultIo()): 
     await ensureChrome(binary, { withDeps: options.withDeps === true, log: io.log });
   } catch (error) {
     io.error(`Chrome is not ready: ${message(error)}`);
-    if (process.platform === "linux" && !options.withDeps) io.error("on Linux, install Chrome's system libraries with `sudo openmausbot browser install --with-deps`, then retry `openmausbot browser install` as the user running serve");
+    if (process.platform === "linux" && !options.withDeps) io.error(`on Linux, install Chrome's system libraries with: sudo ${cliCommand("browser install --with-deps")}, then retry ${cliCommand("browser install")} as the user running serve`);
     return 1;
   }
   io.log("browser installed for this user and data directory; run serve as the same user, then enable it under Settings → Computers and per bot");
-  if (process.platform === "linux" && options.withDeps) io.log("if serve runs as another user, run `openmausbot browser install` from that user's login shell too");
+  if (process.platform === "linux" && options.withDeps) io.log(`if serve runs as another user, run ${cliCommand("browser install")} from that user's login shell too`);
   return 0;
 }
 
@@ -680,18 +652,18 @@ async function planTunnel(options: CliOptions, log: (line: string) => void, reco
     account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion(), recovery, log: (line) => log(`tunnel: ${line}`) });
     if (account.credentials.status === "unavailable") return fail(`${account.credentials.file} exists but could not be read; fix or remove it`);
     if (!describeTunnelAccount(account.credentials.read()).email) {
-      return fail("no account on this machine yet: run `openmausbot login` first, then `openmausbot serve --tunnel`");
+      return fail(`no account on this machine yet: run ${cliCommand("login")} first, then ${cliCommand("serve --tunnel")}`);
     }
     try {
       const state = await account.service.retry();
       const saved = tunnelAccess(account.credentials.read()) !== null;
-      if (state.status === "signed-out") log(`tunnel: the sign-in on this machine expired; run \`openmausbot login\` to renew it${saved ? " (serving the saved address until then)" : ""}`);
+      if (state.status === "signed-out") log(`tunnel: the sign-in on this machine expired; run ${cliCommand("login")} to renew it${saved ? " (serving the saved address until then)" : ""}`);
       else if (state.message) log(`tunnel: ${state.message}${saved ? " Serving the saved address for now." : ""}`);
     } catch (error) {
       log(`tunnel: control plane not reachable right now (${message(error)}); using the saved address`);
     }
     access = tunnelAccess(account.credentials.read());
-    if (!access) return fail("this machine has no public address; run `openmausbot login` again");
+    if (!access) return fail(`this machine has no public address; run ${cliCommand("login")} again`);
   }
   let binary: string;
   try {
@@ -707,11 +679,12 @@ async function planTunnel(options: CliOptions, log: (line: string) => void, reco
 export async function runServe(options: CliOptions, log: (line: string) => void = console.log): Promise<number> {
   const { browserEngineStatus, describeBrowserEngine } = await import("./browser-engine.ts");
   if (await serverUp(options.port)) {
-    console.error(`something already answers on http://127.0.0.1:${options.port}; use \`openmausbot pair\` against it, or --port for a second server`);
+    console.error(`something already answers on http://127.0.0.1:${options.port}; use ${cliCommand("pair")} against it, or --port for a second server`);
     return 1;
   }
-  let publicUrl = options.publicUrl;
+  let publicUrl = options.publicUrl ?? (options.local ? undefined : envPublicUrl(process.env, log));
   let tailscale: TailscaleStatus | null = null;
+  if (await clearLeftoverTailscaleServe(options.dataDir) && !options.tailscale) log(`Turned off a Tailscale share an earlier run left on. Add --tailscale to share again.`);
   if (options.tailscale) {
     const probe = await tailscaleStatus();
     if ("failure" in probe) {
@@ -760,10 +733,13 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   if (entry.skillsDir && !process.env.OMB_SKILLS_DIR) env.OMB_SKILLS_DIR = entry.skillsDir;
   if (options.label && !process.env.OMB_ENVIRONMENT_LABEL) env.OMB_ENVIRONMENT_LABEL = options.label;
   if (plan) env.OMB_TUNNEL_SOCKET = plan.origin.socketPath;
+  const lanRefusal = options.lan ? lanProblem() : null;
+  if (lanRefusal) log(lanRefusal);
+  if (options.lan && !lanRefusal) env.OMB_LAN = "1";
+  else delete env.OMB_LAN;
   let logPath: string | undefined;
   let logFd: number | undefined;
-  let tailscaleServing = false;
-  let tailscaleAttempted = false;
+  let tailscaleShare: { origin: string; stop(): Promise<void> } | null = null;
   let startupCancelled = false;
   const cancelStartup = () => { startupCancelled = true; };
   process.on("SIGINT", cancelStartup);
@@ -778,11 +754,10 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
       log("\nStarting your workspace…");
     }
     if (tailscale) {
-      tailscaleAttempted = true;
-      const served = await tailscaleServe(tailscale, options.port);
+      const served = await tailscaleServe(tailscale, options.port, { dataDir: options.dataDir, otherServer: answersAsMausBot });
+      if (!("failure" in served)) tailscaleShare = served;
       if (startupCancelled) throw new SetupCancelled();
       if ("failure" in served) throw new Error(`--tailscale: ${explainTailscaleFailure(served.failure)}`);
-      tailscaleServing = true;
       publicUrl = served.origin;
       log(`tailscale: serving https://${tailscale.dnsName} → http://127.0.0.1:${options.port} (only your tailnet can reach it)`);
     }
@@ -795,7 +770,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
       serveOwnerToken = ownerToken;
     }
   } catch (error) {
-    if ((tailscaleServing || (startupCancelled && tailscaleAttempted)) && tailscale) await tailscaleServeOff(tailscale).catch(() => undefined);
+    await tailscaleShare?.stop().catch(() => undefined);
     plan?.account?.service.dispose();
     if (plan) cleanupTunnelOrigin(plan.origin);
     if (error instanceof SetupCancelled) {
@@ -823,7 +798,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
       // The gateway and the edge stop accepting before the server they forward to goes away.
       if (tunnel) await tunnel.stop().catch(() => undefined);
       if (caddy) await caddy.stop().catch(() => undefined);
-      if (tailscaleServing && tailscale) await tailscaleServeOff(tailscale).catch(() => undefined);
+      await tailscaleShare?.stop().catch(() => undefined);
       if (exited === null) {
         child.kill("SIGTERM");
         const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
@@ -882,39 +857,43 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
       serving.tunnel = tunnel;
       void plan.account?.service.restore().catch(() => undefined);
     }
+    const prefix = cliPrefix();
+    const described = await api(options.port, "/.well-known/openmausbot/environment").catch(() => null);
+    const route: Route | null = plan ? "tunnel" : options.domain ? "domain" : tailscaleShare ? "tailscale" : publicUrl ? "public-url" : env.OMB_LAN === "1" ? "lan" : null;
+    const origin = route === "lan" ? lanUrl(options.port, env) : publicUrl ?? null;
     log("");
-    log(`OpenMausBot is running on http://127.0.0.1:${options.port}${publicUrl ? `, reachable at ${publicUrl}` : ""}`);
+    log(`MausBot ${serverVersion()} · server "${described?.body?.label ?? options.label ?? "this machine"}"`);
     if (options.guided) {
       log("Your bots and conversations are saved automatically.");
       log(`Details if you need help: ${logPath}`);
-      if (options.open !== false && !await openDashboard(options.port)) log("Open the local address above in a browser on this computer.");
+      if (options.open !== false && !await openDashboard(options.port)) log(`Open http://127.0.0.1:${options.port} in a browser on this computer.`);
     } else {
       log(`data: ${options.dataDir}`);
       log(describeBrowserEngine(browserEngineStatus({ dataDir: options.dataDir })));
     }
+    const reach = route && origin && route !== "lan" ? await waitForReach(options.port, origin, route === "public-url" ? 3_000 : 15_000) : undefined;
+    if (route && origin) for (const line of reachLines(route, origin, options.port, prefix, reach)) log(line);
+    const interactive = process.stdout.isTTY === true;
     if (options.pair && options.phone) {
       log("");
-      if (tunnel) {
-        // No pairing secret is created or sent to the public address until its identity is verified.
-        log("Preparing the phone connection…");
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([tunnel.started.catch(() => undefined), childExit,
-          new Promise((done) => { timer = setTimeout(done, 15_000); })]);
-        if (timer) clearTimeout(timer);
-      }
       if (!stopping && exited === null) await showPhonePairing(options, publicUrl, log).catch((error: unknown) => log(`no pairing code: ${message(error)}`));
-    } else if (options.pair) {
+    } else if (options.pair && (options.guided || ((route || serviceTrust) && interactive))) {
       log("");
       try {
-        log(await mintPairing(options.port, { label: options.label ? `${options.label} owner` : undefined, client: options.client, publicUrl: publicUrl ?? undefined, guided: options.guided }));
-        if (!options.guided) log("\nanother device later:  openmausbot pair --label \"Kitchen iPad\"");
+        log(await mintPairing(options.port, { label: options.label ? `${options.label} owner` : undefined, client: options.client, publicUrl: origin ?? undefined, guided: options.guided && !route }));
+        if (reach && !reach.ok) log("The code works once the address answers.");
       } catch (error) {
         log(`no pairing code: ${message(error)}`);
-        log("start without one next time:  openmausbot serve --no-pair");
       }
+    } else if (!route) {
+      log("");
+      for (const line of noRouteLines(options.port, prefix)) log(line);
+    } else if (!serviceTrust) {
+      log(`Get a pairing code: ${prefix} pair`);
     }
-    log(options.guided ? "\nKeep this terminal open while using your bots. Ctrl+C stops the server, not your saved work." : "stop with Ctrl+C");
-    if (options.guided) log("Next time: openmausbot · Change AI or phone setup: openmausbot setup · Pair another phone: openmausbot pair");
+    if (serviceTrust && !(options.pair && interactive)) log(`This shared server takes no pairing commands from this machine. Let people sign in with their email: ${prefix} access add you@example.com`);
+    if (interactive && !options.guided) log(`New code later   ${prefix} pair\nStop with Ctrl+C`);
+    if (options.guided) log(`\nKeep this terminal open while using your bots. Ctrl+C stops the server, not your saved work.\nNext time: ${prefix} · Change AI or phone setup: ${prefix} setup · Pair another device: ${prefix} pair`);
     return await childExit;
   } finally {
     serveOwnerToken = undefined;
@@ -945,7 +924,7 @@ export async function runOnboardingCommand(
 ): Promise<number> {
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
   if (options.command === "setup" && !interactive) {
-    io.error("Setup needs an interactive terminal. Run `npx openmausbot setup` in a terminal, then use `npx openmausbot serve` for unattended starts.");
+    io.error(`Setup needs an interactive terminal. Run ${cliCommand("setup")} in a terminal, or start unattended with ${cliCommand("serve")}.`);
     return 1;
   }
   process.env.OMB_DATA_DIR = options.dataDir;
@@ -964,11 +943,11 @@ export async function runOnboardingCommand(
   try {
     if (options.command === "setup" || !(await isSetupComplete(options.dataDir))) {
       if (!interactive) {
-        io.error("No completed setup was found. Run `npx openmausbot setup` in an interactive terminal first, or use `npx openmausbot serve` with an existing configuration.");
+        io.error(`No setup yet. Run ${cliCommand("setup")} in an interactive terminal first, or start unattended with ${cliCommand("serve")}.`);
         return 1;
       }
       if (!(await runSetup({ dataDir: options.dataDir, port: options.port }))) {
-        io.log("Setup cancelled. Run openmausbot when you're ready.");
+        io.log(`Setup cancelled. Run ${cliPrefix()} when you're ready.`);
         return 130;
       }
     }
@@ -988,7 +967,7 @@ export async function runOnboardingCommand(
       saveCliStartup(options.dataDir, startupPreferences(launch));
     }
     if (options.command === "setup") {
-      io.log("\nAll set. Start with: openmausbot (or npx openmausbot without a global install).");
+      io.log(`\nAll set. Start with: ${cliPrefix()}`);
       if (options.dataDir !== join(homedir(), ".openmausbot") || options.port !== 8799) {
         io.log(`Use the same --data-dir (${options.dataDir}) and --port (${options.port}) options when starting.`);
       }
@@ -998,7 +977,7 @@ export async function runOnboardingCommand(
     return startServer({ ...launch, guided: interactive });
   } catch (error) {
     if (!(error instanceof SetupCancelled)) throw error;
-    io.log("\nSetup stopped. Any AI setup already saved is kept; no server was started. Run openmausbot setup to continue.");
+    io.log(`\nSetup stopped. Any AI setup already saved is kept; no server was started. Run ${cliCommand("setup")} to continue.`);
     return 130;
   }
 }
@@ -1008,7 +987,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (HEADLESS_VERB_NAMES.has(argv[0] ?? "") || (argv[0] === "help" && HEADLESS_VERB_NAMES.has(argv[1] ?? ""))) return (await import("./headless/main.ts")).runHeadless(argv);
   const options = parseArgs(argv);
   if ("error" in options) {
-    console.error(`${options.error}\n\n${USAGE}`);
+    console.error(`${options.error}\nAll commands and options: ${cliCommand("--help")}`);
     return 2;
   }
   process.env.OMB_DATA_DIR = options.dataDir;
@@ -1031,7 +1010,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     case "service":
       return runServiceCommand({
         action: options.serviceAction ?? "install", dataDir: options.dataDir, port: options.port, domain: options.domain, tunnel: options.tunnel,
-        tailscale: options.tailscale, label: options.label, sentinel: options.sentinel, script: process.argv[1] ?? "", node: process.execPath,
+        tailscale: options.tailscale, publicUrl: options.publicUrl, lan: options.lan, label: options.label, sentinel: options.sentinel, script: process.argv[1] ?? "", node: process.execPath,
       }, { log: (line) => console.log(line), error: (line) => console.error(line) });
     case "fleet":
       if (options.fleetAction === "agent") {
@@ -1071,10 +1050,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       }, { log: (line) => console.log(line), error: (line) => console.error(line) });
     case "logout":
       return runLogout(options);
+    case "version":
+      console.log(serverVersion());
+      return 0;
     case "browser":
       return runBrowser(options);
     default:
-      console.log(USAGE);
+      console.log(usage(cliPrefix()));
       return 0;
   }
 }

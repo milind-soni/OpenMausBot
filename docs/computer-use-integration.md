@@ -24,7 +24,7 @@ Electron main process
   servers get injected into each bot's `--mcp-config`. Same pattern as Claude
   Desktop / Cherry Studio / LibreChat.
 - **Local desktop use = `cua-driver`**. macOS packages the Rust Mach-O in app
-  Resources; Ubuntu x64 packages the certified 0.19.3 ELF plus its cursor-theme
+  Resources; Ubuntu x64 packages the certified 0.41.3 ELF plus its cursor-theme
   sidecar outside ASAR. Both remain paired with the application release. This
   applies to the Ubuntu 24.04 GNOME/Xorg beta and guarded GNOME/Wayland beta;
   remote/cloud Boat computers and the isolated Local VM remain separate providers.

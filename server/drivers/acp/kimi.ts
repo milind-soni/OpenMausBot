@@ -1,11 +1,11 @@
 // Kimi Code: Moonshot's `kimi acp` on the Kimi Code subscription login
 // (~/.kimi-code/credentials), not a Moonshot API key. Verified on kimi-code 0.29.1.
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ModelCatalog } from "../../contracts.ts";
-import type { DeviceSignIn } from "../device-auth.ts";
+import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, LOCAL_HOSTS, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -57,6 +57,28 @@ function kimiSignedIn(env: Record<string, string | undefined>): boolean {
   }
 }
 
+/** The sign-out probe: a credential folder that cannot be read is `unknown`, so sign-out refuses instead of
+ * reporting a removal that never happened. `kimiSignedIn` keeps its boolean contract for turn gating. */
+function kimiSignInState(env: Record<string, string | undefined>): DeviceSignInState {
+  const credentials = join(kimiDataRoot(env), "credentials");
+  let names: string[];
+  try {
+    names = readdirSync(credentials);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "signed-out" : "unknown";
+  }
+  return names.some((name) => KIMI_TOKEN_FILE.test(name) && kimiTokenHeld(join(credentials, name))) ? "signed-in" : "signed-out";
+}
+
+/** Kimi Code 2.4.1 ships no logout command, so sign-out removes the credential files the login created — the same
+ * cleanup the sign-out flow confirms afterwards. */
+function kimiRemoveCredentials(env: Record<string, string | undefined>): void {
+  const credentials = join(kimiDataRoot(env), "credentials");
+  for (const name of readdirSync(credentials)) {
+    if (KIMI_TOKEN_FILE.test(name)) unlinkSync(join(credentials, name));
+  }
+}
+
 /** Never the CLI's own words, which may carry tokens (kimi-code 2.4.1 ends with "Login failed: …" or "Login cancelled: …",
  * and after 900s with "Login failed: Device authorization timed out"). */
 function kimiLoginFailure(output: string): string {
@@ -65,7 +87,8 @@ function kimiLoginFailure(output: string): string {
   return "Kimi sign-in did not finish. Check the server's connection, then try again.";
 }
 
-/** `kimi login`, Kimi Code's device-code login (kimi-code 2.4.1). Kimi has no status command, so nothing is checked first. */
+/** `kimi login`, Kimi Code's device-code login (kimi-code 2.4.1). Kimi has no status or logout command, so the
+ * stored credential files are both the sign-in check and what sign-out removes. */
 export const KIMI_DEVICE_SIGN_IN: DeviceSignIn = {
   provider: "kimi",
   product: "Kimi",
@@ -76,6 +99,8 @@ export const KIMI_DEVICE_SIGN_IN: DeviceSignIn = {
   install: "Install it with Moonshot's installer (https://code.kimi.com), or from Settings when this server has npm, then try again.",
   failure: kimiLoginFailure,
   signedIn: kimiSignedIn,
+  signInState: kimiSignInState,
+  removeCredentials: kimiRemoveCredentials,
 };
 
 function quoteToml(value: string): string {

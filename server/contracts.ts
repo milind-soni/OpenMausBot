@@ -6,6 +6,7 @@ import type { EffortLevel } from "../shared/wire.ts";
 import type {
   DriverKind, InstanceId, ModelVariantOption, RuntimeEventListener, ThreadId, TurnId,
 } from "../shared/runtime-events.ts";
+import type { LocalModelFacts } from "../shared/local-model.ts";
 import type { ProviderIcon } from "../shared/provider-icon.ts";
 
 export type { CloudBackend, EffortLevel, ModelSelection } from "../shared/wire.ts";
@@ -191,8 +192,6 @@ export interface SendTurnInput {
     browser?: { command: string; args: string[]; env: Record<string, string> };
     /** The Data tools' MCP proxy: DuckDB on this bot's own database. */
     data?: { command: string; args: string[]; env: Record<string, string> };
-    /** The HighLevel CRM tools' MCP proxy: the harness holds the tokens and the per-bot verdict. */
-    highlevel?: { command: string; args: string[]; env: Record<string, string> };
     /** The Email tools' MCP proxy: the harness holds the passwords and the per-bot verdict. */
     email?: { command: string; args: string[]; env: Record<string, string> };
     /** The paired phone's app tools' MCP proxy: the harness holds the jobs and the per-bot verdict. */
@@ -262,8 +261,8 @@ export interface ProviderAdapter {
     browserMcp?: boolean;
     /** The driver can mount the Data tools MCP. */
     dataMcp?: boolean;
-    /** The driver can mount the HighLevel CRM tools MCP, and the Email tools the same way. */
-    highlevelMcp?: boolean;
+    /** The driver can mount the Email tools MCP. */
+    emailMcp?: boolean;
     /** The driver can mount the phone apps MCP. */
     deviceMcp?: boolean;
     /** The engine accepts images in the prompt (gates composer paste). */
@@ -484,6 +483,7 @@ export interface ModelCatalog {
     variants?: ModelVariantOption[];
     /** The organization of the signed-in account turned this model off: the engine would answer with another. */
     orgBlocked?: true;
+    local?: LocalModelFacts;
   }>;
 }
 

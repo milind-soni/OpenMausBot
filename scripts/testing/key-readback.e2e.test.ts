@@ -119,7 +119,7 @@ const saveds = KEY_CATALOG.filter((entry) => entry.target || EXTRA_PATCH[entry.i
 it("saves every kind of credential, reads it back and shows it masked to its last four, then removes it", async () => {
   setLocale("en");
   expect(saveds.map((entry) => entry.id)).toEqual([
-    "openai", "anthropic", "xai", "openrouter", "mistral", "cerebras", "groq", "greenference", "meta", "deepseek", "opencodeGo", "openaiCompat",
+    "openai", "anthropic", "xai", "openrouter", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "deepseek", "opencodeGo", "openaiCompat",
     "liveKey", "elevenlabs", "geminiTts", "fishAudio", "box", "composio", "treg", "postiz", "jev", "openrouterHelper", "workersAi", "imageOpenai", "imageCustom",
   ]);
   for (const storage of ["", "?secretStorage=external"]) {
@@ -135,6 +135,7 @@ it("saves every kind of credential, reads it back and shows it masked to its las
 
       const config = (await call("GET", "/api/config")).body;
       expect(savedState(entry, config as never), `${entry.id}${storage}`).toEqual({ configured: true, last4 });
+      if (storage) expect(readFileSync(join(fixture.info.dataDir, "config.json"), "utf8"), `${entry.id} config.json`).not.toContain(key);
       expect(JSON.stringify(config), entry.id).not.toContain(key);
       view.config = config;
       const html = renderToStaticMarkup(createElement(KeyCatalogRow, { entry }));

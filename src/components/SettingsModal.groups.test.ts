@@ -144,9 +144,11 @@ describe("Settings rail groups", () => {
     expect(rail(render())).toEqual({ you: ["appearance", "companion"], computers: ["desktopWorkspaces"] });
   });
 
-  it("keeps the old deep links landing on the same page", () => {
+  it("lands the old deep links where their cards now live", () => {
     vi.stubGlobal("window", { ogb: { environments: {} } });
     fixture.section = "remote" as AppSettingsSection;
+    expect(render()).toContain('data-settings-section="desktopWorkspaces" aria-current="page"');
+    vi.stubGlobal("window", { ogb: {} });
     expect(render()).toContain('data-settings-section="companion" aria-current="page"');
     fixture.section = "connections";
     expect(render()).toContain('data-settings-section="connections" aria-current="page"');

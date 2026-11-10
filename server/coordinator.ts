@@ -2,6 +2,7 @@ import { RuntimeCoordinator } from "./runtime-coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
 import type { LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import type { Answerer, Assignment, EnvelopeNames, Level, Limits, Mode, Origin, Outcome, Owner, Reply, Requester, StatusView, TurnEvidence } from "./runtime/types.ts";
+import type { ModelSelection } from "../shared/wire.ts";
 
 /** One coordinate_bots call, as the internal route hands it to the server. */
 export type CoordinateBotsCall = {
@@ -21,6 +22,8 @@ export type CoordinateBotsCall = {
   projectId?: string;
   /** The assignment whose question the message answers, instead of new work. */
   answers?: string;
+  /** start_thread's report_back: the one target is the sender's own new thread, run on this model. */
+  ownThread?: { modelSelection?: ModelSelection; approvalMode?: "ask" };
 };
 
 export type { LegacyThreadResolver };
@@ -44,7 +47,6 @@ export interface HandoffView {
   executions: number;
   startedAt?: number;
   lastProgressAt?: number;
-  approvalGranted: boolean;
   kind: "work" | "assignment";
   origin?: WorkOrigin;
   restarts: number;
@@ -101,10 +103,11 @@ export interface HandoffOptions {
   mode?: Mode;
   reply?: Reply;
   thread?: "standing" | "new";
-  approvalGranted?: boolean;
   rework?: boolean;
   requestBatchKey?: string;
   doneWhen?: string;
+  /** The target is a new thread of the requester's own bot (start_thread with report_back). */
+  ownThread?: boolean;
 }
 
 export type RoomAddress = Pick<HandoffView, "groupId" | "threadId" | "botId">;
@@ -176,6 +179,8 @@ export interface Coordinator {
   poll(owner: Owner): { items: StatusView["inbox"]; assignments: HandoffView[] };
   /** Non-terminal work the conversation in this thread is waiting on, rooms included. */
   outstandingFor(threadId: string): HandoffView[];
+  /** Running assignments whose turn happens in this thread; reads only that thread's rows, so it stays cheap to ask often. */
+  runningIn(threadId: string): HandoffView[];
   beginTurn(req: BeginTurnRequest): HandoffView;
   endTurn(id: string, result: HostTurnResult): void;
   /** The parked node's next turn carries `text`, given by the person unless `by` says otherwise. */
@@ -215,9 +220,17 @@ export interface Coordinator {
   awaitingAnswer(threadId: string): boolean;
 }
 
+/** A plan's limit on handing out work. */
+export interface HandoffLimit {
+  /** Why handing work to this bot is refused now, in words for the model that asked; null when it may go. `open` counts the
+   * hand-offs not yet ended. */
+  refusal(botId: string, open: () => number): string | null;
+}
+
 export interface CoordinatorOptions {
   dataDir: string;
   host: CoordinatorHost;
+  handoffLimit?: HandoffLimit;
   now?: () => number;
   runtimeLimits?: Partial<Limits>;
   log?: (line: string) => void;

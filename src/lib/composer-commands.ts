@@ -32,7 +32,7 @@ export interface ComposerSlashTrigger {
 export function composerSlashTrigger(text: string, caretInput: number): ComposerSlashTrigger | null {
   const caret = Math.max(0, Math.min(text.length, Math.floor(caretInput)));
   const prefix = text.slice(0, caret);
-  const match = /(?:^|\s)\/([a-z0-9-]*)$/i.exec(prefix);
+  const match = /(?:^|\s)\/([\p{L}\p{N}\p{M}-]*)$/u.exec(prefix);
   if (!match) return null;
   const query = match[1] ?? "";
   const start = caret - query.length - 1;

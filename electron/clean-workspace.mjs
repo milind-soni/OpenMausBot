@@ -7,10 +7,16 @@
 // and no page of it can show. It sits beside the data folder, not in it: a move carries that folder and forgetting the frozen
 // copy empties it, and neither ever reaches this one. Nothing made here is merged anywhere.
 //
-// Security: the move's code knows one server, this computer's own copy. A top-up, a send or a lift pointed at the clean
-// workspace would upload it over the person's Cloud or report a freeze lifted that wasn't, so while the clean workspace runs
-// `realCopy` answers only what the copy's own files can say, and refuses the rest; `holding` brings the copy back first for
-// the two things that must reach it (lifting the freeze, forgetting the copy).
+// A person signed in to the Cloud their bots moved to can open a workspace of this computer's own from the rail too: a
+// profile, one folder per profile under one folder beside the data folder, named by its stable id. It is fresh, the same
+// swap opens it, and this computer stays lent to their Cloud while it runs, since that account is the one lending answers to.
+//
+// Security: the move's code knows one server, this computer's own copy, the one on its own data folder. A move, a top-up, a
+// send or a lift pointed at any other folder's server (the clean workspace, a profile, a named local environment) would
+// carry and freeze that folder instead, upload it over the person's Cloud, or report a freeze lifted that wasn't, so while
+// any other folder runs `realCopy` answers only what the copy's own files can say, and refuses the rest. `holding` brings
+// the copy back first from the clean workspace or a profile for the two things that must reach it (lifting the freeze,
+// forgetting the copy); a named local environment the person chose stays, and those wait until they open the copy again.
 import nodeFs from "node:fs";
 import path from "node:path";
 
@@ -24,6 +30,12 @@ const NO_MOVE_POPUP = "grok-move-2026-11";
 const CLEAN = "clean-workspace";
 
 export const cleanWorkspaceDir = (dataDir) => `${dataDir}-clean`;
+export const profilesDir = (dataDir) => `${dataDir}-profiles`;
+/** The profile the rail calls This Mac (or This PC). */
+export const DEFAULT_PROFILE = "default";
+/** A profile id: its folder's name, and nothing that could reach outside the profiles' folder. */
+export const PROFILE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+export const profileDir = (dataDir, id) => path.join(profilesDir(dataDir), id);
 
 /** A clean workspace's first config: never the new-user setup, which would read as the person's bots being gone. Connecting
  * an AI isn't part of this: the page's line offers it while none works (HomeLine). */
@@ -46,10 +58,18 @@ export function cleanWorkspaceConfig(language = null, now = new Date()) {
  */
 export function createCleanWorkspace({ dataDir, running, swap, allowed = () => true, changed = () => {}, log = () => {}, fs = nodeFs, t = nativeText.englishText.t }) {
   const folder = () => cleanWorkspaceDir(dataDir());
-  const active = () => running() === folder();
+  const stranded = () => running() === folder();
+  const profile = () => {
+    const dir = running();
+    return typeof dir === "string" && path.dirname(dir) === profilesDir(dataDir()) && PROFILE_ID.test(path.basename(dir)) ? path.basename(dir) : null;
+  };
+  const active = () => stranded() || profile() !== null;
   let held = 0, swapping = false;
-  /** This computer's own copy is the server that answers now: not the clean workspace, and not on its way between them. */
-  const ownCopy = () => !active() && !swapping;
+  /** `dir` is this computer's own data folder, however it is spelled; no folder at all (no server) is not. */
+  const own = (dir) => typeof dir === "string" && dir !== "" && path.resolve(dir) === path.resolve(dataDir());
+  /** This computer's own copy is the server that answers now: its server runs on the data folder, and isn't on its way to
+   * or from another. */
+  const ownCopy = () => !swapping && own(running());
   let queue = Promise.resolve();
   /** One swap at a time: a second would stop the server the first just started. */
   const inTurn = (work) => {
@@ -85,19 +105,35 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
   }
 
   return {
+    /** The clean workspace or a profile runs, not this computer's own copy. */
     active,
+    /** The clean workspace for nobody here who can reach the bots runs: nothing is lent from it. */
+    stranded,
+    /** The id of the profile that runs, or null. */
+    profile,
     ownCopy,
     marker,
     /** Opens the clean workspace; true once it runs. False when it can't, and the window says why as before. A named local
-     * environment the person chose is no frozen copy, so it stays. */
+     * environment the person chose is no frozen copy, so it stays, and so does a profile. */
     enter: () => inTurn(async () => {
       if (active()) return true;
       if (!allowed() || held > 0) return false;
-      if (running() !== dataDir()) return true;
+      if (!own(running())) return true;
       try { seed(folder()); } catch (error) { log(`clean workspace: could not set it up (${error?.message ?? error})`); return false; }
       return swapTo(folder());
     }),
+    /** Opens profile `id`, set up fresh the first time; true once it runs. */
+    open: (id = DEFAULT_PROFILE) => inTurn(async () => {
+      if (!PROFILE_ID.test(id)) return false;
+      if (profile() === id) return true;
+      if (!allowed() || held > 0) return false;
+      const dir = profileDir(dataDir(), id);
+      try { seed(dir); } catch (error) { log(`profile ${id}: could not set it up (${error?.message ?? error})`); return false; }
+      return swapTo(dir);
+    }),
     leave,
+    /** Settles once the swaps asked for so far are done. */
+    settled: () => queue,
     /** Runs `work` on this computer's own copy, its server back first, and nothing opens the clean workspace meanwhile. */
     async holding(work) {
       held++;
@@ -106,7 +142,7 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
         return await work();
       } finally { held--; }
     },
-    /** `request` (this computer's server) as the move may use it: while the clean workspace runs, what the frozen copy's own
+    /** `request` (this computer's server) as the move may use it: while any other folder runs, what the frozen copy's own
      * files say, and everything else refused. */
     realCopy(request) {
       return async (route, init) => {

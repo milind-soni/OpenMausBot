@@ -60,6 +60,18 @@ Talk to them like contacts. Watch them work. Approve what matters.
 <br>
 <br>
 
+<sub>Inference provider sponsor</sub>
+<br>
+<a href="https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=readme&campaign_id=openmausbot&ad_group_id=readme">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/sponsors/modelgo-logo-white.svg">
+    <img src="docs/assets/sponsors/modelgo-logo.svg" alt="ModelGo (modelgo.ai)" height="22">
+  </picture>
+</a>
+
+<br>
+<br>
+
 <img src="docs/screenshots/hero.png" alt="OpenMausBot — a Telegram-style chat app where every chat is a real AI agent" width="900">
 
 </div>
@@ -183,7 +195,7 @@ channel and its bots under a named context, then rename it or change its members
 
 ### ⚡ Fast decisions with Jev
 
-Add a TypeSafe Jev key, or an OpenRouter key and model, in **Settings → Decision model** and rooms set to **Auto** pick the bot
+Add a Cloudflare Workers AI token with its account ID, a TypeSafe Jev key, or an OpenRouter key and model, in **Settings → Decision and extraction** and rooms set to **Auto** pick the bot
 that fits each un-mentioned message in a few hundred milliseconds, falling back to the room's lead whenever the decision model is off or unsure.
 See [docs/decision-model.md](docs/decision-model.md).
 
@@ -260,6 +272,7 @@ expressions · screenshots of the bot's work folded into the transcript.
 | **Electron** | Desktop shells for macOS, Windows, and Ubuntu |
 | **React + Vite + Tailwind CSS** | The chat app UI and its build |
 | **Boat** ([boat.dev](https://boat.dev)) | Each bot's cloud computer · our sponsor |
+| **ModelGo** ([modelgo.ai](https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=readme&campaign_id=openmausbot&ad_group_id=readme)) | One API key for every model · our inference provider sponsor |
 | **Composio** | Connected apps — Gmail, Slack, GitHub, and more |
 | **Cua Driver** | Native computer use on your own machine |
 | **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |
@@ -370,12 +383,12 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage + verified CUA runtime
 | Packaged app, embedded harness, local agent CLIs | Supported | Beta | Beta |
 | Composio and Boat/cloud computers | Supported | Beta | Beta |
 | Explicit preview-only local screen capture | Supported | Beta | Beta |
-| Bot control of this computer | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate |
+| Bot control of this computer | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate (Omarchy with Cua's Hyprland plugin: experimental) |
 | Native on-device dictation | Supported | Planned | Planned |
 | Dictation and Take turns calls through Fish Audio (needs a Fish Audio key) | Not used, on-device instead | Supported | Supported |
 
 The Linux preview is user-initiated and never enables local bot control or Auto routing. On Xorg, the reviewed Cua
-Driver 0.19.3 runtime starts only after explicit opt-in and without its full-screen cursor overlay. On Wayland the
+Driver 0.41.3 runtime starts only after explicit opt-in and without its full-screen cursor overlay. On Wayland the
 app never starts it and clears legacy opt-ins while that real-seat safety gate remains unresolved. Chat, preview,
 Cloud, and Local VM remain available on both sessions. See the [Ubuntu Desktop guide](docs/linux-desktop.md) and tracking
 issues [#29](https://github.com/milind-soni/OpenMausBot/issues/29),
@@ -503,18 +516,25 @@ installation and pairing.
 
 Run `openmausbot setup` to reconfigure without resetting bots or conversations;
 the saved model default applies only to new bots. Native setup confirms provider
-sign-in; API setup asks before a potentially billable test message. API keys are
-saved as plaintext, not encrypted, in private `config.json` (`0600` on Unix).
+sign-in; API setup asks before a potentially billable test message. API keys
+from `openmausbot setup` and the server are saved as plaintext, not encrypted,
+in private `config.json` (`0600` on Unix). The packaged desktop app keeps your
+AI provider and service keys encrypted through the operating system instead;
+its `config.json` still holds OpenCode provider keys, keys given to one engine,
+and MCP header values in plaintext (a key a bot set from a secret card is kept
+in the Vault, and `config.json` holds only a pointer to it).
 See the [short setup guide](docs/cli-onboarding.md) for account differences,
 phone choices, credential storage, and cancellation.
 
-For a background service on a VPS or an always-on computer, use
-`npx openmausbot serve` with explicit remote options: `--tunnel` after
-`npx openmausbot login` for a managed public address, `--tailscale` for your
-tailnet, or the Docker stack for your own domain. These are separate from
-AI-provider sign-in. Devices pair once with a short code. The deployment guide is
-[docs/deploy-vps.md](docs/deploy-vps.md); the reference is
-[docs/self-hosting.md](docs/self-hosting.md).
+For a server on a VPS or an always-on computer, run `npx openmausbot serve`
+with one way in: `--public-url` behind your own cloudflared, Caddy or nginx,
+`--domain` for a certificate on your own domain, `--tailscale` for your
+tailnet, `--lan` for this network only, or `--tunnel` (after
+`npx openmausbot login`) for a free MausBot web address. It prints one
+pairing link; paste it into the desktop app under **＋ → Connect to a
+server**. The short path for each install method (npx, Docker, a service) is
+at the top of [docs/self-hosting.md](docs/self-hosting.md); a server from
+scratch is [docs/deploy-vps.md](docs/deploy-vps.md).
 
 ## License
 

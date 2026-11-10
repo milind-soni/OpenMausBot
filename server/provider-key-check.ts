@@ -1,12 +1,14 @@
 // OpenRouter's catalog is public, so /key proves the key there; elsewhere /models proves only catalog access. Keys go only over TLS (or loopback).
-export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "meta";
+import { isIP } from "node:net";
+
+export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta";
 
 export type ProviderKeyVerdict =
   /** `freeTier`: OpenRouter's /key says the account never bought credit, so paid models refuse it. */
   | { ok: true; check: "authentication" | "models"; models: string[]; freeTier?: boolean }
   | { ok: false; reason: "rejected" | "unreachable" | "unexpected"; status?: number };
 
-export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "meta"];
+export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta"];
 
 const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
   anthropic: "https://api.anthropic.com",
@@ -18,6 +20,7 @@ const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
   cerebras: "https://api.cerebras.ai/v1",
   groq: "https://api.groq.com/openai/v1",
   greenference: "https://llm.eu.greenference.com/v1",
+  modelgo: "https://api.modelgo.ai/v1",
   meta: "https://api.meta.ai/v1",
 };
 
@@ -26,7 +29,7 @@ const MAX_MODELS = 5;
 /** A URL hostname on this machine: the only place a key may go over plain http. */
 export function isLoopback(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "");
-  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.startsWith("127.");
+  return host === "localhost" || host === "::1" || (isIP(host) === 4 && host.startsWith("127."));
 }
 
 export function providerBaseUrl(provider: ProviderKeyKind, base?: string | null): string {

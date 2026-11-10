@@ -17,6 +17,7 @@ import {
   eventInstallation,
   type InstallationRow,
 } from "./common";
+import { eraseInstallation } from "./erase";
 import { adoptSharedUser, me, shareUser } from "./sharing";
 import { createTrigger, deleteTrigger, getTriggerType, listTriggers, listTriggerTypes, updateTrigger } from "./triggers";
 
@@ -69,8 +70,8 @@ const sessionWireSchema = z.object({
 });
 type SessionWire = z.infer<typeof sessionWireSchema>;
 
-// A Session reaches a toolkit Composio doesn't manage auth for (HighLevel, a
-// BYO OAuth app) only if created with the project's auth config id under
+// A Session reaches a toolkit Composio doesn't manage auth for (a BYO OAuth
+// app) only if created with the project's auth config id under
 // `auth_configs`.
 const authConfigItemSchema = z.object({
   id: z.string().optional(),
@@ -721,6 +722,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
   const appEvents = await appEventRoute(request, url, installation, env, ctx);
   if (appEvents) return appEvents;
   if (request.method === "GET" && url.pathname === "/v1/me") return me(installation);
+  if (request.method === "DELETE" && url.pathname === "/v1/installation") {
+    await limitSessionRequests(installation, env);
+    return eraseInstallation(installation, env);
+  }
   if (request.method === "POST" && url.pathname === "/v1/installation/share") return shareUser(request, installation, env);
   if (request.method === "POST" && url.pathname === "/v1/installation/adopt") {
     const adopted = await adoptSharedUser(request, installation, env);

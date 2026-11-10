@@ -71,10 +71,10 @@ test("a server's answer is kept only in the shape main relies on", () => {
   assert.equal(parseSendSummary(null), null);
 });
 
-test("a bot's fields reach My Cloud without Custom approval and without naming bots My Cloud lacks", () => {
-  const ember = { id: "ember", soul: "Be brief.", approvalMode: "custom", alwaysAllow: ["Bash(ls)"], peers: ["juno", "kit"], modelSelection: { instanceId: "claude", model: "m", extra: 1 }, cwd: "/Users/amit/work" };
-  const body = botPatch(ember, ["soul", "access", "team", "model"], new Set(["juno"]));
-  assert.deepEqual(body, { soul: "Be brief.", alwaysAllow: ["Bash(ls)"], peers: ["juno"], modelSelection: { instanceId: "claude", model: "m" }, requireAvailableModel: true });
+test("a bot's fields reach My Cloud without Custom approval", () => {
+  const ember = { id: "ember", soul: "Be brief.", approvalMode: "custom", alwaysAllow: ["Bash(ls)"], section: "Ops", modelSelection: { instanceId: "claude", model: "m", extra: 1 }, cwd: "/Users/amit/work" };
+  const body = botPatch(ember, ["soul", "access", "team", "model"]);
+  assert.deepEqual(body, { soul: "Be brief.", alwaysAllow: ["Bash(ls)"], section: "Ops", modelSelection: { instanceId: "claude", model: "m" }, requireAvailableModel: true });
   assert.ok(!Object.values(BOT_PARTS).flat().includes("cwd"), "a working folder is this computer's");
   assert.deepEqual(parseSendState({ auto: false, clouds: { "javascript:alert(1)": {}, [CLOUD]: { off: { a: "you", b: "nonsense" }, created: { "bot:x": true, "login:y": true }, creating: { "bot:z": true, "skill:q": true }, release: [{ id: "mcp:a", digest: "d" }, { id: 3 }] } } }),
     { v: 1, clouds: { [CLOUD]: { sent: {}, off: { a: "you" }, dismissed: "", last: null, whole: null, arrived: { bots: 0, updatedBots: 0, skills: 0, logins: 0, settings: 0, onePassword: false, chats: { conversations: 0, messages: 0 } },
@@ -114,6 +114,41 @@ function fakeSides({ cloudItems = [], localItems = [], refuse = {} } = {}) {
     },
   };
 }
+
+test("a saved secret goes under its own id, kept to the bots My Cloud has; the value goes only over the owner session", async () => {
+  const secret = { key: itemKey.secret("s1"), kind: "secret", label: "Stripe secret key", id: "s1", parts: { saved: "a" } };
+  const calls = [];
+  const reply = (status, body) => ({ status, ok: status < 400, body });
+  const session = { close: async () => { calls.push({ logout: true }); }, call: async (method, route, body) => {
+    calls.push({ method, route, ...(body === undefined ? {} : { body }) });
+    if (route === "/api/cloud-send") return reply(200, { ...summary([bot("ember", { soul: "s" })]), vault: 1 });
+    return reply(200, {});
+  } };
+  const json = (value) => new Response(JSON.stringify(value), { status: 200 });
+  const asked = [];
+  const send = createCloudSend({
+    local: async (route) => route === "/api/cloud-send" ? json(summary([bot("ember", { soul: "s" }), secret])) : new Response("{}", { status: 404 }),
+    cloud: { origin: () => CLOUD, asleep: () => false, read: async () => json({ ...summary([bot("ember", { soul: "s" })]), vault: 1 }), open: async () => session },
+    handoff: async (what) => { asked.push(what); return what.kind === "secret" ? { secret: { id: "s1", name: "Stripe secret key", value: "sk_fake-sent", bots: ["ember", "ghost"], source: "card", refOnly: true } } : {}; },
+    store: { read: () => null, write() {} },
+  });
+  const { result } = await send.send({ keys: [secret.key] });
+  assert.deepEqual(asked, [{ kind: "secret", id: "s1" }]);
+  const saved = calls.find((call) => call.route === "/api/vault/secrets");
+  assert.deepEqual(saved?.body, { id: "s1", name: "Stripe secret key", value: "sk_fake-sent", bots: ["ember"], source: "card", refOnly: true });
+  assert.equal(result.secrets, 1);
+  assert.deepEqual(result.notes, [{ kind: "narrowed", login: "Stripe secret key" }]);
+});
+
+test("a Cloud that can't keep a secret by its id is sent none, so nothing waits forever or goes twice", async () => {
+  const secret = { key: itemKey.secret("s1"), kind: "secret", label: "Stripe", id: "s1", parts: { saved: "a" } };
+  const sides = fakeSides({ localItems: [bot("ember", { soul: "s" }), secret], cloudItems: [bot("ember", { soul: "s" })] });
+  const send = createCloudSend(sides.deps);
+  const seen = await send.compare();
+  assert.equal(seen.rows.some((row) => row.kind === "secret"), false);
+  await send.send({});
+  assert.equal(sides.calls.includes("POST /api/vault/secrets"), false);
+});
 
 test("a send adds a bot with its own id over one session, says what My Cloud refused, and always signs out", async () => {
   const sides = fakeSides({ localItems: [bot("ember", { soul: "s" })], refuse: { "/api/bots": { status: 409, error: "this workspace is limited to 50 bots" } } });

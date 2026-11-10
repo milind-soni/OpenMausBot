@@ -426,6 +426,15 @@
    "hex": "000300000000000000000002"
   },
   {
+   "name": "go_away_3",
+   "about": "GoAway removed: only from the computer, before it closes with 4001",
+   "type": 3,
+   "flags": 0,
+   "streamId": 0,
+   "length": 3,
+   "hex": "000300000000000000000003"
+  },
+  {
    "name": "stream_3",
    "about": "the next stream the phone opens",
    "type": 1,
@@ -2070,6 +2079,26 @@
       "0001000100000005001c0000"
      ]
     }
+   },
+   {
+    "name": "phone_hears_removed",
+    "about": "GoAway removed is no protocol error at the phone; it sends nothing back",
+    "role": "phone",
+    "steps": [
+     {
+      "open": true
+     },
+     {
+      "in": {
+       "header": "000300000000000000000003"
+      }
+     }
+    ],
+    "expect": {
+     "sent": [
+      "0001000100000001001c0000"
+     ]
+    }
    }
   ]
  },
@@ -2175,6 +2204,21 @@
      "v": 1,
      "k": "BJiFmi3bzpQUayMJErl6eqt24mUOvHEUR6uzutPTHfundIgyZxs3bSzUMydGOfgbWdwQshIyzzlMWqxMkNHnmd0",
      "routes": "any"
+    }
+   },
+   {
+    "name": "routes_local_with_relay",
+    "value": "eyJ2IjoxLCJrIjoiQkppRm1pM2J6cFFVYXlNSkVybDZlcXQyNG1VT3ZIRVVSNnV6dXRQVEhmdW5kSWd5WnhzM2JTelVNeWRHT2ZnYldkd1FzaEl5enpsTVdxeE1rTkhubWQwIiwiaCI6Imx6ODFpc0IzQnVOVjZySGdZZ0czV2ciLCJyIjpbInJlbGF5MS5vcGVubWF1c2JvdC5jb20iLCJyZWxheTIub3Blbm1hdXNib3QuY29tIl0sInJvdXRlcyI6ImxvY2FsIn0",
+    "chars": 271,
+    "parsed": {
+     "v": 1,
+     "k": "BJiFmi3bzpQUayMJErl6eqt24mUOvHEUR6uzutPTHfundIgyZxs3bSzUMydGOfgbWdwQshIyzzlMWqxMkNHnmd0",
+     "h": "lz81isB3BuNV6rHgYgG3Wg",
+     "r": [
+      "relay1.openmausbot.com",
+      "relay2.openmausbot.com"
+     ],
+     "routes": "local"
     }
    }
   ],
@@ -2321,12 +2365,6 @@
     "name": "routes_not_a_string",
     "value": "eyJ2IjoxLCJrIjoiQkppRm1pM2J6cFFVYXlNSkVybDZlcXQyNG1VT3ZIRVVSNnV6dXRQVEhmdW5kSWd5WnhzM2JTelVNeWRHT2ZnYldkd1FzaEl5enpsTVdxeE1rTkhubWQwIiwicm91dGVzIjoxfQ",
     "chars": 150,
-    "outcome": "reject"
-   },
-   {
-    "name": "routes_local_with_relay",
-    "value": "eyJ2IjoxLCJrIjoiQkppRm1pM2J6cFFVYXlNSkVybDZlcXQyNG1VT3ZIRVVSNnV6dXRQVEhmdW5kSWd5WnhzM2JTelVNeWRHT2ZnYldkd1FzaEl5enpsTVdxeE1rTkhubWQwIiwiaCI6Imx6ODFpc0IzQnVOVjZySGdZZ0czV2ciLCJyIjpbInJlbGF5MS5vcGVubWF1c2JvdC5jb20iLCJyZWxheTIub3Blbm1hdXNib3QuY29tIl0sInJvdXRlcyI6ImxvY2FsIn0",
-    "chars": 271,
     "outcome": "reject"
    },
    {

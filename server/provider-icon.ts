@@ -2,6 +2,7 @@ import { z } from "zod";
 import { persistableInstanceConfigs, type AppConfig } from "./config.ts";
 import type { InstanceConfig } from "./contracts.ts";
 import { PROVIDER_ICON_PRESETS, type ProviderIcon, type ProviderIconPreset } from "../shared/provider-icon.ts";
+import { isOllamaServer } from "./drivers/ollama.ts";
 
 const iconSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("preset"), preset: z.enum(PROVIDER_ICON_PRESETS) }).strict(),
@@ -21,7 +22,7 @@ export function withInstanceIcon(cfg: AppConfig, instanceId: string, icon: Provi
 }
 
 /** Who runs a server, by its host. `*` is one DNS label, or the rest of one. Only providers we have a mark for:
- * Groq, Together, Fireworks, Ollama and LM Studio servers keep the driver's own mark. */
+ * Groq, Together, Fireworks and LM Studio servers keep the driver's own mark; Ollama isn't told by its host. */
 const SERVER_HOSTS: Record<string, ProviderIconPreset> = {
   "api.openai.com": "openai", "*.api.openai.com": "openai",
   "*.openai.azure.com": "azure", "*.services.ai.azure.com": "azure", "*.cognitiveservices.azure.com": "azure",
@@ -30,6 +31,7 @@ const SERVER_HOSTS: Record<string, ProviderIconPreset> = {
   "api.x.ai": "xai",
   "api.deepseek.com": "deepseek",
   "dashscope.aliyuncs.com": "qwen", "dashscope-*.aliyuncs.com": "qwen",
+  "*.*.maas.aliyuncs.com": "qwen",
   "api.moonshot.ai": "moonshot", "api.moonshot.cn": "moonshot",
   "api.mistral.ai": "mistral", "codestral.mistral.ai": "mistral",
   "api.cohere.com": "cohere", "api.cohere.ai": "cohere",
@@ -54,11 +56,21 @@ export function serverIconPreset(url: string): ProviderIconPreset | undefined {
   return SERVER_MARKS.find(([pattern]) => pattern.test(host))?.[1];
 }
 
+const servesOllama = (entry: InstanceConfig | undefined) => entry?.driver === "openai-compat" && isOllamaServer(entry.config);
+
 /** The mark an instance shows everywhere the instance list goes: a stored icon (set before v0.1.102) wins; an
  * OpenAI-compatible server otherwise shows the mark of whoever runs it; anything else keeps its driver's mark. */
 export function instanceIcon(entry: InstanceConfig | undefined): { icon?: ProviderIcon } {
   if (entry?.icon) return { icon: entry.icon };
+  if (servesOllama(entry)) return { icon: { kind: "preset", preset: "ollama" } };
   const url = entry?.driver === "openai-compat" ? (entry.config as { url?: unknown } | undefined)?.url : undefined;
   const preset = typeof url === "string" ? serverIconPreset(url) : undefined;
   return preset ? { icon: { kind: "preset", preset } } : {};
+}
+
+/** How the instance list shows an instance: its mark, and for an OpenAI-compatible server that is really Ollama,
+ * `serverKind` and Ollama's name in place of the driver's own (a name someone gave it stays). */
+export function instanceLook(entry: InstanceConfig | undefined): { icon?: ProviderIcon; serverKind?: "ollama"; displayName?: string } {
+  if (!servesOllama(entry)) return instanceIcon(entry);
+  return { ...instanceIcon(entry), serverKind: "ollama", ...(entry!.displayName ? {} : { displayName: "Ollama" }) };
 }

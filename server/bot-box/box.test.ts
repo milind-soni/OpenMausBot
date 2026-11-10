@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, procHidepid, writeSeccompFile } from "./box.ts";
+import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, writeSeccompFile } from "./box.ts";
+import { processStart, seesProcess } from "./box-probe.ts";
+import { procHidepid } from "./hidepid.ts";
 import { visibleInBox } from "./plan.ts";
 import { DENIED_SYSCALLS, seccompBytes } from "./seccomp.ts";
 import { engineInstallRoots, npmEnginesPrefix } from "../engine-roots.ts";
@@ -57,6 +59,19 @@ describe("BoxRunner.wrap", () => {
     const wrapped = runner.wrap({ command: "/opt/chrome", args: ["--headless"], env: { PATH: "/usr/bin" }, net: "shared" });
     expect(wrapped.env).toEqual({ PATH: "/usr/bin" });
     expect(wrapped.args.slice(wrapped.args.indexOf("--") + 1)).toEqual(["/opt/chrome", "--headless"]);
+  });
+
+  // The box's paths are POSIX paths inside it, which Windows' path module would write with drive letters and backslashes.
+  it.skipIf(process.platform === "win32")("a relay is bound in and dialed by the Node bridge, even where socat bridges the gates; a shared-network box has none", () => {
+    const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
+    const relay = "/data/.openmausbot/box/relay-ab12.sock";
+    const wrapped = runner.wrap({ command: "/data/.openmausbot/tools/agy", args: ["--uid="], env: { PATH: "/usr/bin" }, relay });
+    expect(wrapped.args.join(" ")).toContain(`--bind ${relay} /run/omb/relay.sock`);
+    const inner = wrapped.args.slice(wrapped.args.indexOf("--") + 1);
+    expect(inner).toEqual([bridge.node, bridge.bridgeScript, "--bridge=3128=/run/omb/egress.sock", "--bridge=8799=/run/omb/harness.sock", "--relay=/run/omb/relay.sock", "--", "/data/.openmausbot/tools/agy", "--uid="]);
+    const shared = runner.wrap({ command: "/opt/chrome", args: [], env: {}, net: "shared", relay });
+    expect(shared.args).not.toContain(relay);
+    expect(shared.args.slice(shared.args.indexOf("--") + 1)).toEqual(["/opt/chrome"]);
   });
 
   it("the env-all mutation hands over the whole environment (so the self-check can prove the allow-list)", () => {
@@ -156,6 +171,18 @@ describe("BotBox", () => {
     expect(box.report().checks).toEqual({ passed: 20, total: 21, failed: ["egress-public-allowed"], at: 1 });
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/^bot box: on \(bubblewrap, node bridges, credential broker, seccomp (on|unsupported here)\)$/);
+    const relay = (await box.openRelay())!;
+    expect(relay.socketPath.startsWith(join(dataDir, "box", "relay-"))).toBe(true);
+    expect(existsSync(relay.socketPath)).toBe(true);
+    relay.close();
+    expect(existsSync(relay.socketPath)).toBe(false);
+  });
+
+  it("off: no relay", async () => {
+    const box = new BotBox();
+    boxes.push(box);
+    await box.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: {}, log: () => {} });
+    expect(await box.openRelay()).toBeNull();
   });
 });
 
@@ -253,5 +280,22 @@ describe("BoxRunner.lend", () => {
     runner.lend("bot-a", "thread-1", []);
     expect(runner.wrap(request).plan.writable).not.toContain(layer);
     expect(runner.lentTo("bot-a", "thread-1")).toEqual([]);
+  });
+});
+
+describe("the probe tells the server and the canary from a box process with the same pid", () => {
+  // /proc/<pid>/stat as Linux 6.8 writes it; the command may hold spaces and parentheses.
+  const stat = (start: string) => `331 (node (MainThread)) S 1 331 331 0 -1 4194560 26085 0 0 0 63 12 0 0 20 0 11 0 ${start} 1270784000 23468 18446744073709551615`;
+
+  it("reads a process's start after its command, however that is spelled", () => {
+    expect(processStart(331, () => stat("4321789"))).toBe("4321789");
+    expect(processStart(331, () => { throw new Error("ENOENT"); })).toBeNull();
+    if (process.platform === "linux") expect(processStart("self")).toMatch(/^\d+$/);
+  });
+
+  it("counts a pid as the same process only when it started at the same moment", () => {
+    expect(seesProcess(7, "4321789", () => "4321789")).toBe(true);
+    expect(seesProcess(7, "4321789", () => "88")).toBe(false);
+    expect(seesProcess(7, "4321789", () => null)).toBe(false);
   });
 });

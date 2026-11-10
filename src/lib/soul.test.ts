@@ -18,6 +18,27 @@ describe("firstSentence", () => {
     expect(firstSentence("No punctuation here")).toBe("No punctuation here");
   });
 
+  it.each(["。", "！", "？"])("ends a Chinese sentence at %s without requiring whitespace", (ending) => {
+    expect(firstSentence(`  整理文件${ending}不要制造噪音。`)).toBe(`整理文件${ending}`);
+    expect(firstSentence(`  整理檔案${ending}不要製造雜訊。`)).toBe(`整理檔案${ending}`);
+  });
+
+  it("keeps the existing English punctuation boundaries", () => {
+    expect(firstSentence("Use v1.2, e.g. for files. Next.")).toBe("Use v1.2, e.g.");
+    expect(firstSentence("No.space!inside?here")).toBe("No.space!inside?here");
+    expect(firstSentence("Files bugs?! Never noise.")).toBe("Files bugs?!");
+  });
+
+  it("caps UTF-16 length without splitting an astral Han character or emoji", () => {
+    for (const astral of ["𠀀", "🐭"]) {
+      const prefix = "文".repeat(199);
+      expect(firstSentence(`${prefix}${astral}继续`)).toBe(prefix);
+      const complete = `${"文".repeat(198)}${astral}`;
+      expect(firstSentence(`${complete}继续`)).toBe(complete);
+      expect(firstSentence(`${astral}。下一句`, 1)).toBe("");
+    }
+  });
+
   it("stops at the first line break and caps the length", () => {
     expect(firstSentence("Line one\nLine two.")).toBe("Line one");
     expect(firstSentence("a".repeat(500), 200)).toHaveLength(200);

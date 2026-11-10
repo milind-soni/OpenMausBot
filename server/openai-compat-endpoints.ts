@@ -30,7 +30,7 @@ export const addEndpointSchema = z.object({
   url: z.string().max(512),
   key: z.string().trim().min(1).max(4096),
   models: z.array(z.string().trim().min(1).max(200)).max(64).optional(),
-  catalog: z.literal("lmstudio").optional(),
+  catalog: z.enum(["lmstudio", "ollama"]).optional(),
 }).strict();
 
 export type AddEndpoint = z.infer<typeof addEndpointSchema>;
@@ -56,7 +56,9 @@ export function withEndpointUrls(described: unknown, configs: InstanceConfigMap)
   if (!Array.isArray(described)) return described;
   return described.map((instance: { instanceId?: string }) => {
     const entry = instance.instanceId ? configs[instance.instanceId] : undefined;
-    const url = entry && isAddedEndpoint(instance.instanceId!, entry) ? endpointDisplayUrl(entry.config) : undefined;
-    return url ? { ...instance, url } : instance;
+    if (!entry || !isAddedEndpoint(instance.instanceId!, entry)) return instance;
+    const url = endpointDisplayUrl(entry.config);
+    const managedModels = (entry.config as { managedModels?: unknown } | undefined)?.managedModels;
+    return { ...instance, ...(url ? { url } : {}), ...(Array.isArray(managedModels) ? { managedModels } : {}) };
   });
 }

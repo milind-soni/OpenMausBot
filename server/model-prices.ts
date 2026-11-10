@@ -39,6 +39,7 @@ export const LIST_PRICES: Readonly<Record<string, ListPrice>> = {
   // gpt-5.3-codex-spark has no published API price: unpriced.
 
   // Anthropic: base input, cache hit, output. No long-context tier, except that a Haiku 5.5 prompt over 100,000 tokens costs 5x.
+  "claude-fable-5-2": price(ANTHROPIC, 8, 0.2, 40, { asOf: "2026-11-10" }),
   "claude-fable-5-1": price(ANTHROPIC, 10, 0.25, 50),
   "claude-fable-5": price(ANTHROPIC, 10, 1, 50),
   "claude-opus-5": price(ANTHROPIC, 5, 0.5, 25),
@@ -74,6 +75,7 @@ export const LIST_PRICES: Readonly<Record<string, ListPrice>> = {
   "openai/gpt-5.4": price(OPENROUTER, 2.5, 0.25, 15),
   "openai/gpt-5.4-mini": price(OPENROUTER, 0.75, 0.075, 4.5),
   "openai/gpt-5.3-codex": price(OPENROUTER, 1.75, 0.175, 14),
+  "anthropic/claude-fable-5.2": price(OPENROUTER, 8, 0.2, 40, { asOf: "2026-11-10" }),
   "anthropic/claude-fable-5.1": price(OPENROUTER, 10, 0.25, 50),
   "anthropic/claude-fable-5": price(OPENROUTER, 10, 1, 50),
   "anthropic/claude-opus-5": price(OPENROUTER, 5, 0.5, 25),

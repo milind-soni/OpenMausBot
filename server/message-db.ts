@@ -99,7 +99,7 @@ function open(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS notification_log_at ON notification_log(at);
   `);
   const notificationColumns = db.prepare("PRAGMA table_info(notification_log)").all() as Array<{ name: string }>;
-  if (!notificationColumns.some((column) => column.name === "for_person")) db.exec("ALTER TABLE notification_log ADD COLUMN for_person TEXT");
+  for (const added of ["for_person", "read_by"]) if (!notificationColumns.some((column) => column.name === added)) db.exec(`ALTER TABLE notification_log ADD COLUMN ${added} TEXT`);
   ensureRecallIndex(db);
   ensureMemoryIndex(db);
   return db;
@@ -321,22 +321,17 @@ export function logNotification(notification: Notification): NotificationLogEntr
   return entry;
 }
 
-export function recentNotificationLog(limit = NOTIFICATION_LOG_LIMIT): NotificationLogEntry[] {
-  const rows = db().prepare(
-    "SELECT id, at, kind, bot_id, bot_name, thread_id, group_id, title, body, avatar_url, for_person, read FROM notification_log ORDER BY at DESC, rowid DESC LIMIT ?",
-  ).all(limit) as Array<Parameters<typeof rowToNotificationLogEntry>[0]>;
+export function recentNotificationLog(limit = NOTIFICATION_LOG_LIMIT, reader?: string): NotificationLogEntry[] {
+  const read = reader === undefined ? "read" : "(read = 1 OR EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?)) AS read";
+  const rows = db().prepare(`SELECT id, at, kind, bot_id, bot_name, thread_id, group_id, title, body, avatar_url, for_person, ${read} FROM notification_log ORDER BY at DESC, rowid DESC LIMIT ?`)
+    .all(...(reader === undefined ? [] : [reader]), limit) as Array<Parameters<typeof rowToNotificationLogEntry>[0]>;
   return rows.map(rowToNotificationLogEntry);
 }
-
-export function markNotificationLogRead(ids: readonly string[]): void {
-  db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0 AND id IN (SELECT value FROM json_each(?))").run(JSON.stringify(ids));
+export function markNotificationLogRead(ids: readonly string[], reader?: string): void {
+  if (reader === undefined) db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0 AND id IN (SELECT value FROM json_each(?))").run(JSON.stringify(ids));
+  else db().prepare("UPDATE notification_log SET read_by = json_insert(coalesce(read_by, '[]'), '$[#]', ?1) WHERE id IN (SELECT value FROM json_each(?2)) AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?1)").run(reader, JSON.stringify(ids));
 }
-
-/** Opening a conversation reads its notifications, questions and approvals included. Returns the ids it flipped. */
-export function markThreadNotificationLogRead(threadId: string, includeSpend = true): string[] {
-  const rows = db().prepare("UPDATE notification_log SET read = 1 WHERE thread_id = ? AND read = 0 AND (? OR kind != 'spend') RETURNING id").all(threadId, includeSpend ? 1 : 0) as Array<{ id: string }>;
-  return rows.map((row) => row.id);
-}
+export function forgetNotificationReader(person: string): void { db().prepare("UPDATE notification_log SET read_by = (SELECT json_group_array(value) FROM json_each(read_by) WHERE value <> ?1) WHERE EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?1)").run(person); }
 
 export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {
   writeFollowups((connection) => connection.prepare(
@@ -695,6 +690,11 @@ export function appDocRefs(): string[] {
   return rows.flatMap((row) => (typeof row.doc === "string" && row.doc ? [row.doc] : []));
 }
 
+/** Pages shown with show_html `live`, newest first: the rows a server picks up again after a restart. */
+export function liveAppRows(limit = 100): Array<{ threadId: string; messageId: string }> {
+  return db().prepare("SELECT thread_id AS threadId, id AS messageId FROM messages WHERE kind = 'app' AND json_extract(json, '$.app.live') = 1 ORDER BY rowid DESC LIMIT ?").all(limit) as Array<{ threadId: string; messageId: string }>;
+}
+
 export function threadsReferencing(fragment: string): string[] {
   if (!fragment) return [];
   const rows = db().prepare("SELECT DISTINCT thread_id FROM messages WHERE instr(json, ?) > 0").all(fragment) as Array<{ thread_id: string }>;
@@ -764,7 +764,7 @@ const RECALL_FILLER = new Set(
 
 export function recallTerms(query: string): string[] {
   const out: string[] = [];
-  for (const raw of query.split(/\s+|(?<=\p{L})[/,;:.—–-]+(?=\p{L})/u)) {
+  for (const raw of query.split(/[\s、。！？；：，（）【】《》〈〉「」『』]+|(?<=\p{L})[/,;:.—–-]+(?=\p{L})/u)) {
     const token = raw.replace(/"/g, "").replace(/^[\s.,;:!?()[\]{}'`“”‘’]+|[\s.,;:!?()[\]{}'`“”‘’]+$/g, "").toLowerCase();
     if (token.length < 2 && !/\d/.test(token)) continue;
     if (!/[\p{L}\p{N}]/u.test(token)) continue;

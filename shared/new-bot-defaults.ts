@@ -7,17 +7,18 @@ export type BotDefaultsProfile = Partial<Pick<WireBot,
   "name" | "title" | "description" | "soul" | "notifications" | "avatarUrl" | "avatarCrop" |
   "mascotBody" | "mascotFaceColor" | "color" | "voice" | "speakReplies" | "section" | "modelSelection" |
   "cloudBackend" | "autoStartVps" | "approvalMode" | "alwaysAllow" | "chiefOfStaff" |
-  "managedSections" | "approvePeerComms" | "composio" | "browser"
+  "managedSections" | "composio" | "browser" | "voiceNotes"
 >> & {
   mascotExpression?: string | null;
   computer?: WireBot["computer"] | null;
   cwd?: string | null;
-  peers?: string[] | null;
   browserProfile?: string | null;
   mcpServers?: string[] | null;
   toolScope?: ToolScope | null;
   parkDirectMessages?: boolean;
   helperModel?: boolean;
+  /** null or absent: follows the installation's `tts.everyReply`. */
+  voiceNoteEveryReply?: boolean | null;
 };
 
 export type BotRoutineTemplate = Omit<RoutineInput, "botId" | "target" | "groupId" | "resultsThreadId">;

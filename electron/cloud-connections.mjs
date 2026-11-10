@@ -1,5 +1,5 @@
 // This computer's connections, moved once with the rest of the person's things to their own Cloud: MCP servers with
-// their secrets and sign-ins, the AI keys bots run on, connected apps, HighLevel and mailboxes. Secrets reach main only over the
+// their secrets and sign-ins, the AI keys bots run on, connected apps and mailboxes. Secrets reach main only over the
 // server's private port (cloud-logins.mjs) and go only to the move's owner session on My Cloud. A sign-in that
 // refreshes itself moves: once My Cloud has it, this computer forgets its own copy, so only My Cloud uses it.
 //
@@ -14,16 +14,16 @@ import nativeText from "./native-text.cjs";
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null);
 const pick = (source, names) => Object.fromEntries(names.filter((name) => source[name] !== undefined && source[name] !== null).map((name) => [name, source[name]]));
-const ID = /^(?:mcp:[a-z][a-z0-9_-]{0,31}|key:\w{1,40}|composio|highlevel|email)$/u;
+const ID = /^(?:mcp:[a-z][a-z0-9_-]{0,31}|key:\w{1,40}|composio|email)$/u;
 const INSTALLATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const ENVIRONMENT = /^[\w-]{1,128}$/u;
 const SLUG = /^[a-z0-9_][a-z0-9_-]{0,80}$/u;
 const ENGINE = /^[\w.:-]{1,128}$/u;
 const LAUNCHER = /^[a-z0-9._+-]{1,40}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
-const KINDS = new Set(["mcp", "key", "composio", "highlevel", "email"]);
+const KINDS = new Set(["mcp", "key", "composio", "email"]);
 /** Keys first, so the engines they run are ready before anything that follows them; connected apps last. */
-const ORDER = { key: 0, mcp: 1, highlevel: 2, email: 2, composio: 3 };
+const ORDER = { key: 0, mcp: 1, email: 2, composio: 3 };
 const MCP_FIELDS = ["command", "args", "env", "type", "url", "headers", "oauth", "resultBudget", "enabled", "runsOn"];
 /** How long a move waits for My Cloud to run the engines whose keys just went. */
 const ENGINE_WAIT_MS = 10_000;
@@ -57,7 +57,7 @@ export function parseConnections(value) {
       ...(typeof item.installationId === "string" && INSTALLATION.test(item.installationId) ? { installationId: item.installationId } : {}),
     }));
   return { computer: { environmentId, label: label.trim().slice(0, 120) }, connections, engines: strings(value.engines, ENGINE, 200), commands: strings(value.commands, LAUNCHER, 40),
-    ...(value.managedApps === false ? { managedApps: false } : {}) };
+    ...(value.managedApps === false ? { managedApps: false } : {}), ...(value.vaultKeys === true ? { vaultKeys: true } : {}) };
 }
 
 /** This computer's connections, by name only, and the computer they are on. */
@@ -90,12 +90,12 @@ async function runningEngines(target, engines, waitMs, cloud) {
   }
 }
 
-const signInRoute = (item) => (item.kind === "mcp" ? `/api/cloud-connections/mcp/${item.id.slice("mcp:".length)}/sign-in` : "/api/cloud-connections/highlevel");
+const signInRoute = (item) => `/api/cloud-connections/mcp/${item.id.slice("mcp:".length)}/sign-in`;
 
 /** This computer's newer copy of a sign-in, in place of the one My Cloud took from it (`onCloud`); its digest, or null. */
 async function sendAgain(local, target, item, onCloud) {
   const fresh = await secrets(local, item).catch(() => null);
-  const signIn = item.kind === "mcp" ? fresh?.connection.mcp?.signIn : fresh?.connection.highlevel;
+  const signIn = fresh?.connection.mcp?.signIn;
   if (!record(signIn) || !fresh.digest) return null;
   const answer = await target.call("PUT", `${signInRoute(item)}?replaces=${onCloud}`, signIn).catch(() => null);
   return answer?.ok && answer.body?.adopted === true ? fresh.digest : null;
@@ -191,16 +191,19 @@ export async function sendConnections(collected, target, { local, release = true
     },
     async mcp(item) {
       const { connection, digest } = await secrets(local, item);
-      const { name, server, signIn } = record(connection.mcp) ? connection.mcp : {};
+      const { name, server, signIn, keys } = record(connection.mcp) ? connection.mcp : {};
       if (typeof name !== "string" || !record(server)) throw new ConnectionMoveError("local", `${item.label} could not be read on this computer.`);
+      // A Cloud too old to read a `vault:<id>` key would save the pointer as the key itself: it goes once the Cloud has updated.
+      if (Array.isArray(keys) && keys.length && !cloud.vaultKeys) throw new ConnectionMoveError("outdated", "My Cloud needs an update before it can take this computer's apps and keys. It updates by itself.");
       const { enabled, runsOn: marked, ...definition } = pick(server, MCP_FIELDS);
       const missing = item.launcher && !cloud.commands.includes(item.launcher) ? item.launcher : null;
       const runsOn = record(marked) ? marked : item.runsHere || missing ? collected.computer : null;
+      const keysField = Array.isArray(keys) && keys.length ? { vaultKeys: keys } : {};
       let saved;
       if (cloud.connections.some((theirs) => theirs.id === item.id)) {
-        saved = await target.call("PUT", `/api/mcp/servers/${name}`, { ...definition, enabled: enabled === true, runsOn });
+        saved = await target.call("PUT", `/api/mcp/servers/${name}`, { ...definition, enabled: enabled === true, runsOn, ...keysField });
       } else {
-        saved = await target.call("POST", "/api/mcp/servers", { name, ...definition, ...(runsOn ? { runsOn } : {}) });
+        saved = await target.call("POST", "/api/mcp/servers", { name, ...definition, ...(runsOn ? { runsOn } : {}), ...keysField });
         if (saved.ok && enabled === true) saved = await target.call("PATCH", `/api/mcp/servers/${name}`, { enabled: true });
       }
       if (!saved.ok) throw refused(saved, `My Cloud did not take ${item.label}.`);
@@ -211,15 +214,6 @@ export async function sendConnections(collected, target, { local, release = true
         if (!signIns) return void result.later.push({ id: item.id, label: item.label });
         await moveSignIn(item, signIn, digest);
       }
-    },
-    async highlevel(item) {
-      if (item.signIn && !signIns) return void result.later.push({ id: item.id, label: item.label });
-      const { connection, digest } = await secrets(local, item);
-      const highlevel = connection.highlevel;
-      if (!record(highlevel) || (highlevel.kind === "oauth" && !digest)) throw new ConnectionMoveError("local", "HighLevel could not be read on this computer.");
-      const kept = result.kept.length;
-      await moveSignIn(item, highlevel, highlevel.kind === "oauth" ? digest : undefined);
-      if (result.kept.length === kept) done(item);
     },
     async email(item) {
       const accounts = (await secrets(local, item)).connection.email;

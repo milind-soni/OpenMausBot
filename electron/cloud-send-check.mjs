@@ -49,12 +49,14 @@ export function manifestGaps(here, there, { sent = {}, removed = new Set(), skip
   const carried = new Set();
   for (const item of list(here.items)) {
     if (removed.has(item.key) || skip.has(item.key) || (item.bot && (removed.has(`bot:${item.bot}`) || skip.has(`bot:${item.bot}`)))) continue;
+    // A Cloud too old to take saved secrets by id is sent none.
+    if (item.kind === "secret" && there.vault !== 1) continue;
     carried.add(item.key);
     if (item.kind === "bot") bots.add(item.id);
     const on = theirs.get(item.key);
     if (!on) { gaps.items.push({ key: item.key, kind: item.kind, label: item.label }); continue; }
     // Logins and 1Password are compared by their secrets' fingerprints, never by when they changed.
-    if (item.kind === "login" || item.kind === "1password") continue;
+    if (item.kind === "login" || item.kind === "1password" || item.kind === "secret") continue;
     const differs = Object.entries(item.parts ?? {}).filter(([part, hash]) => {
       const cloud = on.parts?.[part] ?? EMPTY;
       const pair = sent[item.key]?.[part];
@@ -176,7 +178,7 @@ export async function checkSecrets({ handoff, session, skip = new Set(), nonce =
   if (!record(here) || !record(there)) throw Object.assign(new Error("The credentials could not be checked."), { status: answer.status });
   const out = { equal: [], differs: [], missing: [] };
   for (const [id, value] of Object.entries(here)) {
-    if (skip.has(id)) continue;
+    if (skip.has(id) || (id.startsWith("secret:") && answer.body?.vault !== 1)) continue;
     out[typeof there[id] !== "string" ? "missing" : there[id] === value ? "equal" : "differs"].push(id);
   }
   return out;

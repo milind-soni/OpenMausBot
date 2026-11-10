@@ -33,8 +33,8 @@ of a real provider's planning quality or authentication.
 - Immediate tool results say the change was applied. No unanswered review
   card or extra setup continuation appears, and new specialists start at the
   default level, Full access.
-- Real peer coordination succeeds with `approvePeerComms` enabled. Its one
-  downstream summary is expected; unrelated setup continuations are not.
+- Real peer coordination succeeds. Its one downstream summary is expected;
+  unrelated setup continuations are not.
 - An explicit Ask sibling retains four pending reviews even though the bot
   default is Full. Conversely, an explicit Full thread applies its profile
   change while the bot default remains Ask.
@@ -42,9 +42,10 @@ of a real provider's planning quality or authentication.
   an existing bot outside the Chief's team scope.
 
 Connected-app sends follow **Sending on your behalf** at Full access:
-**Ask every time** waits for consent and **Allow a daily amount** consumes
-the configured cap. The [Gmail and outbound fixture](gmail-drafts.md) verifies
-both policies, opaque execution, delegation and changes before dispatch.
+**Ask every time** waits for consent, and **Send without asking** or no
+setting at all sends with no daily limit. The
+[Gmail and outbound fixture](gmail-drafts.md) verifies both policies, opaque
+execution, delegation and changes before dispatch.
 
 ## Evidence and limits
 

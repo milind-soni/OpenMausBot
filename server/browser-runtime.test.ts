@@ -229,6 +229,7 @@ lines.on('line', line => {
   else if (m.params.name === 'agent_browser_snapshot' && process.env.HANG_VERIFICATION === '1') return;
   else if (m.params.name === 'agent_browser_snapshot' && process.env.EMPTY_VERIFICATION === '1') result = { content:[] };
   else if (m.params.name === 'agent_browser_snapshot' && process.env.FAIL_VERIFICATION === '1') result = { isError:true, content:[{type:'text',text:'Snapshot unavailable'}] };
+  else if (m.params.name === 'agent_browser_snapshot' && process.env.SNAPSHOT_ORIGIN) result = { content:[{type:'text',text:'(empty page)'}], structuredContent:{ response:{ success:true, data:{ origin:process.env.SNAPSHOT_ORIGIN, refs:{}, snapshot:'(empty page)' }, error:null } } };
   // LEAK: a page that shows a filled password back, in every kind of result.
   else if (process.env.LEAK && m.params.name !== 'agent_browser_get_url') result = { content:[{type:'text',text:'page says ' + process.env.LEAK},{type:'image',data:'AAAA',mimeType:'image/png'}], structuredContent:{ value: process.env.LEAK } };
   else if (m.params.name === 'agent_browser_eval' && process.env.FAIL_EVAL === '1') result = { isError:true, content:[{type:'text',text:'Evaluation failed'}] };
@@ -358,6 +359,36 @@ describe("server-owned browser MCP runtime", () => {
     expect(result.content[1].text).toContain("sign-in");
     expect(result.content[1].text).toContain("Its refs are current");
     expect(JSON.parse(result.content[2].text)).toEqual({ name: "agent_browser_snapshot", arguments: { compact: true } });
+  });
+  it("rejects a successful website navigation whose verification observes about:blank, without retrying", async () => {
+    const daemon = daemonSpec();
+    daemon.spec.env.SNAPSHOT_ORIGIN = "about:blank";
+    try {
+      const result = await runtime().agentRpc("lost-page", daemon.spec, "tools/call", {
+        name: "agent_browser_open", arguments: { url: "https://example.com" },
+      }) as { isError?: boolean; content: Array<{ text: string }> };
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text).name).toBe("agent_browser_open");
+      expect(result.content[1].text).toContain("verification failed");
+      expect(result.content[1].text).not.toContain("Its refs are current");
+      expect(result.content[2].text).toBe("(empty page)");
+      expect(daemon.calls()).toEqual(["agent_browser_open", "agent_browser_snapshot"]);
+    } finally { daemon.cleanup(); }
+  });
+  it.each([
+    [{ url: "about:blank" }, "about:blank"],
+    [{}, "about:blank"],
+    [{ url: "https://example.com" }, "https://example.com/"],
+    [{ url: "https://example.com" }, "https://signin.example.net/login"],
+  ])("allows an intentional blank page, empty website or redirect: %j -> %s", async (args, origin) => {
+    const daemon = spec();
+    daemon.env.SNAPSHOT_ORIGIN = origin;
+    const result = await runtime().agentRpc("allowed-page", daemon, "tools/call", {
+      name: "agent_browser_open", arguments: args,
+    }) as { isError?: boolean; content: Array<{ text: string }> };
+    expect(result.isError).not.toBe(true);
+    expect(result.content[1].text).toContain("Its refs are current");
+    expect(result.content[2].text).toBe("(empty page)");
   });
   it("says what an action changed on the page, read with eval so the model's refs stay valid", async () => {
     const result = await runtime().agentRpc("act", spec(), "tools/call", {

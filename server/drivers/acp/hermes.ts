@@ -1,7 +1,6 @@
 // Hermes Agent (Nous Research's `hermes acp`), custom-only. ACP ignores `hermes -m` (cmd_acp does not
 // forward it), and OPENAI_API_KEY makes provider:auto resolve to OpenRouter without its key ("HTTP 401:
 // Missing Authentication header"), so injects write providers.<host> and set_model `custom:<host>:<model>`.
-import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +8,7 @@ import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { findCliCandidates, harnessHome, resolveCliSpawn, splitCliString, whichWin } from "../../env-path.ts";
-import { resolveCli } from "../../procs.ts";
+import { resolveCli, spawnCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -270,16 +269,20 @@ function hermesAcpModelsTimeoutMs(env: Record<string, string | undefined>): numb
     : HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS;
 }
 
-/** Hermes advertises its whole catalog on session/new and has no `hermes models` subcommand. */
+/** Hermes advertises its whole catalog on session/new and has no `hermes models` subcommand. Security: while the bot box
+ * is on, it runs in the box, as a bot's turn does, since Hermes reads its settings from a HOME a bot can write.
+ * `allowEnv`: the keys the instance's own settings put in `env`. */
 export async function fetchHermesAcpModels(
   cli: string,
   env: Record<string, string | undefined>,
+  allowEnv: readonly string[] = [],
 ): Promise<{ id: string; label: string; custom: true }[]> {
   return await new Promise((resolve) => {
-    let child: ReturnType<typeof spawn>;
+    let child: ReturnType<typeof spawnCli>;
     try {
-      const resolved = resolveCli(cli, ["acp"], env);
-      child = spawn(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, windowsHide: true });
+      // Resolved on the supplied PATH (Windows npm shims), then spawned by spawnCli, which resolves on the app's.
+      const resolved = resolveCli(cli, ["acp"], env as NodeJS.ProcessEnv);
+      child = spawnCli(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, box: { allowEnv } });
     } catch {
       return resolve([]);
     }
@@ -372,11 +375,12 @@ export async function fetchHermesAcpModels(
 export async function resolveHermesModels(
   env: Record<string, string | undefined>,
   config?: { cli?: string },
+  allowEnv: readonly string[] = [],
 ): Promise<ModelCatalog> {
   const cli = config?.cli || "hermes";
   const catalog = await mergeLocalInject(EMPTY, env);
   const configured = hermesConfiguredModel(env);
-  const remote = configured ? await fetchHermesAcpModels(cli, env) : [];
+  const remote = configured ? await fetchHermesAcpModels(cli, env, allowEnv) : [];
   const seen = new Set<string>();
   const options = [...(configured ? [configured] : []), ...remote, ...catalog.options].filter((o) => {
     if (seen.has(o.id)) return false;
@@ -409,7 +413,7 @@ const support: AcpSupport = {
   displayName: "Hermes",
   access: "custom",
   models: EMPTY,
-  resolveModels: (env: Record<string, string | undefined>, config: any) => resolveHermesModels(env, config),
+  resolveModels: (env: Record<string, string | undefined>, config: any, _instanceId: string, _fresh?: boolean, allowEnv?: readonly string[]) => resolveHermesModels(env, config, allowEnv),
   resolveTurnModel: (model, env) => {
     // Never inherit a broad or stale compatibility grant from the parent; bind one concrete model.
     bindHermesScreenshotCompat(env, model);

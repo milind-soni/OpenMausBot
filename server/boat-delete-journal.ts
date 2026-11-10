@@ -17,6 +17,9 @@ const BOAT_ID = /^bx_[23456789abcdefghjkmnpqrstuvwxyz]{8}$/;
 const OPERATION_ID = /^bdop_[a-f0-9]{32}$/;
 const PROVIDER_STATUSES = new Set(["pending", "processing", "blocked", "completed"]);
 
+/** Codes of a create refused while the bot's previous computer is being removed, or right after its removal finished. */
+export const BOAT_DELETING = "computer_deleting", BOAT_DELETION_FINISHED = "previous_deletion_finished";
+
 export type BoatDeletionPhase = "prepared" | "accepted" | "blocked";
 export type BoatDeletionStatus = "pending" | "processing" | "blocked" | "completed";
 

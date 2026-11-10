@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createPhoneClaim, findPackages, parseDevices, parseLaunchablePackages, parseUiNodes } from "./phone-proxy.ts";
+import { TOOLS, createPhoneClaim, findPackages, launchTarget, parseDevices, parseLaunchablePackages, parseUiNodes, typePhoneText } from "./phone-proxy.ts";
 
 describe("phone MCP parsing", () => {
   it("keeps physical USB devices distinguishable from network and emulator transports", () => {
@@ -29,10 +29,80 @@ emulator-5554 device product:sdk model:Emulator transport_id:6
     expect(findPackages("Skyscanner", packages)).toEqual(["net.skyscanner.android.main"]);
   });
 
+  it("tells the bot to pass a package name when no app name matches", () => {
+    const packages = ["com.taobao.idlefish", "com.ubercab"];
+    expect(() => launchTarget("闲鱼", packages)).toThrow("call list_apps without a query and pass the package name");
+    expect(launchTarget("com.taobao.idlefish", packages)).toBe("com.taobao.idlefish");
+  });
+
+  it("keeps naming the candidates when an app name is ambiguous", () => {
+    expect(() => launchTarget("taobao", ["com.taobao.idlefish", "com.taobao.taobao"])).toThrow("App name is ambiguous: com.taobao.idlefish, com.taobao.taobao");
+  });
+
+  it("offers keys that turn the screen on and off", () => {
+    const press = TOOLS.find((tool) => tool.name === "press") as { inputSchema: { properties: { key: { enum: string[] } } } } | undefined;
+    expect(press?.inputSchema.properties.key.enum).toEqual(expect.arrayContaining(["wakeup", "sleep"]));
+  });
+
   it("turns Android UI XML into tap-ready visible nodes", () => {
     expect(parseUiNodes(`<?xml version="1.0"?><hierarchy><node text="Where to?" resource-id="com.ubercab:id/input" class="android.widget.TextView" content-desc="Destination" bounds="[12,100][400,180]" /></hierarchy>`)).toEqual([
       { text: "Where to?", description: "Destination", id: "com.ubercab:id/input", className: "android.widget.TextView", bounds: [12, 100, 400, 180] },
     ]);
+  });
+});
+
+describe("phone MCP text input", () => {
+  const ADB_KEYBOARD = "com.android.adbkeyboard/.AdbIME";
+  const VENDOR_KEYBOARD = "com.baidu.input_huawei/.ImeService";
+  const SENT = "Sent the text to ADBKeyBoard. Use read_screen to check that it reached the field.";
+  const device = (keyboard: string) => {
+    const commands: string[][] = [];
+    const shell = async (...command: string[]) => {
+      commands.push(command);
+      return command[0] === "settings" ? `${keyboard}\n` : "";
+    };
+    return { commands, shell };
+  };
+
+  it.each([ADB_KEYBOARD, VENDOR_KEYBOARD])("types basic ASCII with Android input whatever the keyboard (%s)", async (keyboard) => {
+    const phone = device(keyboard);
+    await expect(typePhoneText(phone.shell, "iPad mini_6")).resolves.toBe("Typed text into the focused Android field");
+    expect(phone.commands).toEqual([["input", "text", "iPad%smini_6"]]);
+  });
+
+  it("types any other text through ADBKeyBoard as Base64 UTF-8", async () => {
+    const phone = device(ADB_KEYBOARD);
+    await expect(typePhoneText(phone.shell, "二手 iPad +86 😀")).resolves.toBe(SENT);
+    expect(phone.commands).toEqual([
+      ["settings", "get", "secure", "default_input_method"],
+      ["am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", "5LqM5omLIGlQYWQgKzg2IPCfmIA="],
+    ]);
+  });
+
+  it.each(["二".repeat(256), "😀".repeat(256)])("types up to 256 characters of other text, counting each emoji once", async (text) => {
+    const phone = device(ADB_KEYBOARD);
+    await expect(typePhoneText(phone.shell, text)).resolves.toBe(SENT);
+    expect(phone.commands.map((command) => command[0])).toEqual(["settings", "am"]);
+  });
+
+  it.each(["iPad", "二手"])("reports a failed adb command instead of claiming it typed (%s)", async (text) => {
+    const shell = async (...command: string[]) => {
+      if (command[0] === "settings") return `${ADB_KEYBOARD}\n`;
+      throw new Error("error: closed");
+    };
+    await expect(typePhoneText(shell, text)).rejects.toThrow("error: closed");
+  });
+
+  it("asks for ADBKeyBoard and types nothing when another keyboard is chosen", async () => {
+    const phone = device(VENDOR_KEYBOARD);
+    await expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow("ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
+    expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"]]);
+  });
+
+  it.each(["", "a".repeat(257), "😀".repeat(257)])("refuses empty or over-long text without touching the phone", async (text) => {
+    const phone = device(ADB_KEYBOARD);
+    await expect(typePhoneText(phone.shell, text)).rejects.toThrow("Android text must be 1 to 256 characters");
+    expect(phone.commands).toEqual([]);
   });
 });
 

@@ -14,6 +14,7 @@ import { createMoveSession } from "./move-session.mjs";
 import { createMoveStatusReport, moveStatus } from "./move-status.mjs";
 import { createHomeAgain } from "./one-home-again.mjs";
 import { awayIn, createOneHome, parseJournal, underWay } from "./one-home.mjs";
+import { myCloudOf } from "./cloud-list.mjs";
 import { teamPlan } from "./cloud-team-plan.mjs";
 import { installTeamMove } from "./team-move-main.mjs";
 import nativeText from "./native-text.cjs";
@@ -43,9 +44,11 @@ export function oneHomeCloud(state) {
   if (typeof account !== "string" || !account) return null;
   const connected = state.status === "connected", machine = connected ? state.machine ?? null : null;
   const trialOn = ["active", "ending"].includes(state.trial?.state ?? "");
-  const homecoming = machine?.hold?.homecoming ?? null;
+  const homecoming = machine?.hold?.homecoming ?? null, mine = myCloudOf(state);
   return {
     origin: machine?.origin ?? null,
+    ...(mine?.id ? { id: mine.id } : {}),
+    ...(mine?.formerOrigins.length ? { formerOrigins: mine.formerOrigins } : {}),
     account,
     machine: machine?.origin ?? null,
     ready: connected && machine?.status === "ready" && Boolean(machine.origin),
@@ -106,7 +109,7 @@ async function answer(response) {
  *   journalFile(): string,
  *   tempRoot(): string,
  *   lend?(projects: string[]): Promise<unknown>,
- *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
+ *   phone?: { paired(): boolean, start(): Promise<void> },
  *   openHome?(): void,
  *   openLocal?(): void,
  *   restart?(): void,
@@ -294,7 +297,7 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
     holding: () => { const bot = teamMove.view()?.phase; return home.moving() || (bot && !["done", "failed"].includes(bot)) ? "moving" : null; },
     /** Goes on with the move, and with any bot moving into a team: at launch, and whenever the MausBot Cloud sign-in changes. */
     kick: () => { void teamMove.kick(); return home.kick(); },
-    /** Home is My Cloud: this computer's own server is frozen for good, and its phone link stays off. */
+    /** Home is My Cloud: this computer's own server is frozen for good. */
     away: () => home.away(),
     view: () => home.view(),
     close: () => { teamMove.close(); home.close(); report.close(); void moveSession.end(); },

@@ -276,7 +276,7 @@ for (const skinId of ["daylight", "pop"]) {
     ["--color-danger-ink", "--color-danger"],
     ["--color-success-ink", "--color-success"],
   ]) {
-    const ratio = contrast(bubble[fg] ?? "", bubble[bg] ?? "");
+    const ratio = contrast(resolve(bubble[fg] ?? "", bubble), resolve(bubble[bg] ?? "", bubble));
     if (ratio === null || ratio < 4.5) {
       failed = true;
       bubbleFailed = true;

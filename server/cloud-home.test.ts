@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,7 +10,10 @@ import {
   cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, cloudRequestSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
   withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
-import { cloudHomeChildEnvironments, cloudHomeDataDir, codeTrustProblem, edgeClientAddress, edgeHold, hardenHost, holdVolume, passwdIds, prepareCloudHomeData, spawnWithSecrets } from "./cloud-home-start.ts";
+import {
+  cloudHomeChildEnvironments, cloudHomeDataDir, codeTrustProblem, edgeCertIssuers, edgeClientAddress, edgeHold, hardenHost, hasCapability, holdVolume, passwdIds, prepareCloudHomeData,
+  readCloudSecretsFile, setprivArgs, spawnWithSecrets,
+} from "./cloud-home-start.ts";
 import { RESTART_EXIT_CODE, restartPolicy } from "./restart.ts";
 import { hostedModelPolicy } from "./hosted-models.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
@@ -45,14 +48,35 @@ it("is off on every ordinary server and desktop", () => {
 
 it("reads the Admin's contract", () => {
   expect(cloudHomeConfiguration(contract())).toEqual({
-    role: "home", team: null, machineId, adminOrigin: "https://cloud.example.test", publicOrigin: "https://omb-u-1a2b3c4d5e6f.fly.dev", bootstrapSecret: secret, warnings: [],
+    role: "home", team: null, machineId, adminOrigin: "https://cloud.example.test", publicOrigin: "https://omb-u-1a2b3c4d5e6f.fly.dev", legacyOrigins: [], bootstrapSecret: secret,
+    warnings: [],
   });
   expect(cloudHomeConfiguration(contract({ OMB_CLOUD_ADMIN_URL: "https://cloud.example.test/" }))!.adminOrigin).toBe("https://cloud.example.test");
 });
 
+it("reads the addresses a moved home answered at before, exactly and once each, without its own", () => {
+  const legacy = (value: string) => cloudHomeConfiguration(contract({ OMB_CLOUD_LEGACY_ORIGINS: value }))!.legacyOrigins;
+  expect(legacy("https://omb-u-old.fly.dev")).toEqual(["https://omb-u-old.fly.dev"]);
+  expect(legacy(" https://omb-u-old.fly.dev/ , https://older.example.test,https://omb-u-old.fly.dev,https://omb-u-1a2b3c4d5e6f.fly.dev ,"))
+    .toEqual(["https://omb-u-old.fly.dev", "https://older.example.test"]);
+  expect(legacy("")).toEqual([]);
+});
+
+it.each([
+  ["an http origin", "http://omb-u-old.fly.dev"],
+  ["an origin with a path", "https://omb-u-old.fly.dev/app"],
+  ["an origin with credentials", "https://user:pass@omb-u-old.fly.dev"],
+  ["a host that is not written as its origin", "https://OMB-U-OLD.fly.dev"],
+  ["a loopback name", "https://localhost"],
+  ["a loopback address", "https://127.0.0.1:8443"],
+  ["too many", Array.from({ length: 9 }, (_, at) => `https://old-${at}.example.test`).join(",")],
+])("refuses to start with %s as a former address", (_why, value) => {
+  expect(() => cloudHomeConfiguration(contract({ OMB_CLOUD_LEGACY_ORIGINS: value }))).toThrow(/Cloud home configuration is invalid: .*OMB_CLOUD_LEGACY_ORIGINS/);
+});
+
 it("ignores a platform gateway's settings with one warning, whatever they hold, and never serves them", () => {
   const all = cloudHomeConfiguration(withGateway())!;
-  expect(Object.keys(all).sort()).toEqual(["adminOrigin", "bootstrapSecret", "machineId", "publicOrigin", "role", "team", "warnings"]);
+  expect(Object.keys(all).sort()).toEqual(["adminOrigin", "bootstrapSecret", "legacyOrigins", "machineId", "publicOrigin", "role", "team", "warnings"]);
   expect(all.warnings).toEqual(["ignoring OMB_HOSTED_MODEL_URL, OMB_HOSTED_MODEL_TOKEN, OMB_HOSTED_MODELS: Cloud Pro includes no AI; people sign in with their own Claude or ChatGPT account, or an API key"]);
   for (const stray of [{ OMB_HOSTED_MODEL_TOKEN: token }, { OMB_HOSTED_MODEL_TOKEN: "sk-ant-api03-platform-key" }, { OMB_HOSTED_MODELS: "{not json" },
     { OMB_HOSTED_MODEL_URL: "https://gateway.attacker.test/v1" }, { OMB_HOSTED_MODELS: "" }]) {
@@ -345,18 +369,18 @@ it.skipIf(!existsSync("/usr/bin/flock"))("a second home on a volume a live home 
   holdVolume(home);
 });
 
-it("lets only the tunnel name the client on an own server, and only Fly's proxy on Fly, exactly as before", () => {
+it("lets nobody name the client on an own server unless its owner names a proxy, and only Fly's proxy on Fly", () => {
   const config = cloudHomeConfiguration(contract())!;
   const own = cloudHomeChildEnvironments(config, { ...contract(), PATH: "/usr/bin" }, "/data").edge;
-  expect(own).toMatchObject({ OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "Cf-Connecting-IP", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "127.0.0.1/32 ::1/128" });
+  expect(own).toMatchObject({ OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "X-Forwarded-For", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "" });
   const fly = cloudHomeChildEnvironments(config, { ...contract(), PATH: "/usr/bin", FLY_APP_NAME: "omb-u-1a2b3c4d5e6f" }, "/data").edge;
   expect(fly).toMatchObject({ OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "Fly-Client-IP", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "private_ranges" });
   expect(edgeClientAddress({ FLY_APP_NAME: " " })).toEqual(edgeClientAddress({}));
-  // Both values are written into the edge's config as they are, so neither may come from anywhere but here.
+  // Both values are written into the edge's config as they are, so the edge's own names are never taken from outside.
   for (const env of [{}, { FLY_APP_NAME: "omb-u-1a2b3c4d5e6f" }, { OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "X-Real-IP", OMB_CLOUD_EDGE_TRUSTED_PROXIES: "0.0.0.0/0" }]) {
     const edge = cloudHomeChildEnvironments(config, { ...contract(), PATH: "/usr/bin", ...env }, "/data").edge;
-    expect(edge.OMB_CLOUD_EDGE_CLIENT_IP_HEADER).toMatch(/^(?:Fly-Client-IP|Cf-Connecting-IP)$/);
-    expect(edge.OMB_CLOUD_EDGE_TRUSTED_PROXIES).toMatch(/^(?:private_ranges|127\.0\.0\.1\/32 ::1\/128)$/);
+    expect(edge.OMB_CLOUD_EDGE_CLIENT_IP_HEADER).toMatch(/^(?:Fly-Client-IP|X-Forwarded-For)$/);
+    expect(edge.OMB_CLOUD_EDGE_TRUSTED_PROXIES).toMatch(/^(?:private_ranges|)$/);
   }
   expect(cloudHomeChildEnvironments(config, { ...contract(), PATH: "/usr/bin", FLY_APP_NAME: "omb-u-1a2b3c4d5e6f" }, "/data").server).not.toHaveProperty("OMB_CLOUD_EDGE_CLIENT_IP_HEADER");
 });
@@ -385,6 +409,74 @@ it("gives the edge only its routing name and the server the contract, never a ga
   expect(passwdIds("root:x:0:0::/root:/bin/sh\n", "maus")).toBeNull();
 });
 
+// The fallback CA's address is written into the edge's config, so nothing but a plain address may reach it.
+const fallbackIssuers = "cert_issuer acme\ncert_issuer acme https://acme.zerossl.com/v2/DV90 {\n\temail certs@example.test\n}";
+
+it("gives a home that ends TLS a fallback CA only when its operator names the account, Let's Encrypt first", () => {
+  const config = cloudHomeConfiguration(contract({ OMB_CLOUD_EDGE_TLS: "1" }))!;
+  const edge = (extra: NodeJS.ProcessEnv) => cloudHomeChildEnvironments(config, { ...contract({ OMB_CLOUD_EDGE_TLS: "1" }), PATH: "/usr/bin", ...extra }, "/data").edge;
+  expect(edge({}).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe("");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: "" }).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe("");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: "  " }).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe("");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: " certs@example.test " }).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe(fallbackIssuers);
+  // Let's Encrypt's issuer has no address, so it keeps the account it already has on the volume.
+  expect(fallbackIssuers.split("\n")[0]).toBe("cert_issuer acme");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test", OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "1" }).OMB_CLOUD_EDGE_CERT_ISSUERS)
+    .toBe("cert_issuer acme https://acme.zerossl.com/v2/DV90 {\n\temail certs@example.test\n}");
+  expect(edge({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test", OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "0" }).OMB_CLOUD_EDGE_CERT_ISSUERS).toBe(fallbackIssuers);
+  // The address is the edge's alone: the server never gets it.
+  expect(cloudHomeChildEnvironments(config, { ...contract({ OMB_CLOUD_EDGE_TLS: "1" }), PATH: "/usr/bin", OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test" }, "/data").server)
+    .not.toHaveProperty("OMB_CLOUD_EDGE_ACME_EMAIL");
+  // Without edge TLS (Fly, or a server where something else ends TLS) it is not read at all.
+  for (const extra of [{}, { FLY_APP_NAME: "omb-u-1a2b3c4d5e6f" }]) {
+    const flyEdge = cloudHomeChildEnvironments(cloudHomeConfiguration(contract())!, { ...contract(), PATH: "/usr/bin", OMB_CLOUD_EDGE_ACME_EMAIL: "not an address", ...extra }, "/data").edge;
+    expect(flyEdge).not.toHaveProperty("OMB_CLOUD_EDGE_CERT_ISSUERS");
+    expect(flyEdge).not.toHaveProperty("OMB_CLOUD_EDGE_ACME_EMAIL");
+  }
+});
+
+it("refuses a fallback CA setting the edge's config would read as more", () => {
+  const invalid = /OMB_CLOUD_EDGE_ACME_EMAIL must be one plain address/;
+  for (const value of ["certs", "certs@", "@example.test", "certs@example", "certs@example.test\ncert_issuer internal", "certs@example.test {", "a b@example.test", "a@b@example.test", "#a@example.test", "<<a@example.test", "a\"@example.test", `a${"b".repeat(260)}@example.test`]) {
+    expect(() => edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_EMAIL: value }), value).toThrow(invalid);
+  }
+  expect(() => edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test", OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "yes" })).toThrow(/must be 1/);
+  expect(() => edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "1" })).toThrow(/needs OMB_CLOUD_EDGE_ACME_EMAIL/);
+  expect(edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "0" })).toBe("");
+  expect(edgeCertIssuers({})).toBe("");
+});
+
+// `caddy validate` on the real template with what the launcher writes. Needs a Caddy: OMB_CADDY_BIN or one on the PATH (the
+// image's own 2.10.2 runs the same check at build, in the Dockerfile). Skipped when there is none.
+const caddyBin = process.env.OMB_CADDY_BIN || (spawnSync("caddy", ["version"], { stdio: "ignore" }).status === 0 ? "caddy" : "");
+it.skipIf(!caddyBin)("renders a Caddyfile.tls that Caddy accepts, with Let's Encrypt alone unless the setting is there", () => {
+  const dir = directory();
+  for (const file of ["Caddyfile.tls", "edge-routes.caddy"]) copyFileSync(join(import.meta.dirname, "../deploy/fly", file), join(dir, file));
+  const base = { PATH: "/usr/bin:/bin", HOME: dir, XDG_DATA_HOME: join(dir, "data"), XDG_CONFIG_HOME: join(dir, "config"), OMB_CLOUD_PUBLIC_HOST: "validate.example.com",
+    OMB_CLOUD_EDGE_STORAGE: join(dir, "edge"), OMB_CLOUD_EDGE_TRUSTED_PROXIES: "", OMB_CLOUD_EDGE_CLIENT_IP_HEADER: "X-Forwarded-For", OMB_CLOUD_EDGE_HOLD: "0s" };
+  const run = (command: string, issuers?: string) => {
+    const result = spawnSync(caddyBin, [command, "--config", join(dir, "Caddyfile.tls"), "--adapter", "caddyfile"], { encoding: "utf8", env: { ...base, ...(issuers === undefined ? {} : { OMB_CLOUD_EDGE_CERT_ISSUERS: issuers }) } });
+    expect(result.status, result.stderr).toBe(0);
+    return result;
+  };
+  const issuersOf = (issuers?: string) => (JSON.parse(run("adapt", issuers).stdout) as { apps: { tls?: { automation?: { policies?: { issuers?: unknown[] }[] } } } }).apps.tls?.automation?.policies?.[0]?.issuers;
+  // Unset and empty: the same config as today, and it validates.
+  expect(issuersOf()).toBeUndefined();
+  expect(issuersOf("")).toBeUndefined();
+  expect(issuersOf(edgeCertIssuers({}))).toBeUndefined();
+  run("validate"); run("validate", "");
+  // A formatting warning would come at every boot of every home.
+  for (const issuers of [undefined, ""]) expect(run("adapt", issuers).stderr).not.toMatch(/not formatted/);
+  // Set: Let's Encrypt first, with no address, then the fallback with its account's.
+  const rendered = edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test" });
+  run("validate", rendered);
+  expect(issuersOf(rendered)).toEqual([{ module: "acme" }, { ca: "https://acme.zerossl.com/v2/DV90", email: "certs@example.test", module: "acme" }]);
+  // The live check's setting: the fallback alone.
+  const only = edgeCertIssuers({ OMB_CLOUD_EDGE_ACME_EMAIL: "certs@example.test", OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY: "1" });
+  run("validate", only);
+  expect(issuersOf(only)).toEqual([{ ca: "https://acme.zerossl.com/v2/DV90", email: "certs@example.test", module: "acme" }]);
+});
+
 it("holds requests at the edge while the server starts only when the Admin asked for it (a plan that sleeps)", () => {
   const config = cloudHomeConfiguration(withGateway())!;
   expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin" }, "/data").edge.OMB_CLOUD_EDGE_HOLD).toBe("0s");
@@ -402,18 +494,25 @@ it("hands the server the Admin's export-only switch, so an ended Cloud started f
   expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_CLOUD_EXPORT_ONLY: "1" }, "/data").server).toMatchObject({ OMB_CLOUD_EXPORT_ONLY: "1" });
 });
 
+it("hands the server the addresses a moved home answered at before, and never its edge", () => {
+  const env = contract({ PATH: "/usr/bin", OMB_CLOUD_LEGACY_ORIGINS: "https://omb-u-old.fly.dev" });
+  const children = cloudHomeChildEnvironments(cloudHomeConfiguration(env)!, env, "/data");
+  expect(children.server).toMatchObject({ OMB_CLOUD_LEGACY_ORIGINS: "https://omb-u-old.fly.dev" });
+  expect(children.edge).not.toHaveProperty("OMB_CLOUD_LEGACY_ORIGINS");
+});
+
 it("gives the server only an allow-listed environment: a secret added later, a test's key or anything unknown never reaches it", () => {
   const config = cloudHomeConfiguration(contract())!;
   const env = { ...contract(), PATH: "/usr/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_ENV: "production", OMB_STATIC_DIR: "/app/dist",
     OMB_CLOUD_BOAT_URL: "https://cloud.example.test/boat", OMB_TTS_DEFAULT_VOICE: "alloy", OMB_CLOUD_AI_URL: "https://cloud.example.test/api/cloud/services/ai",
-    OMB_COMPOSIO_BROKER_URL: "https://broker.example.test", OMB_COMPOSIO_BROKER_TOKEN: "b".repeat(64),
+    OMB_COMPOSIO_BROKER_URL: "https://broker.example.test", OMB_COMPOSIO_BROKER_TOKEN: "b".repeat(64), OMB_COMPOSIO_BROKER: "off",
     OMB_CLOUD_FUTURE_SECRET: "later", OMB_TEST_CLOUD_LEFT_BEHIND_KEY: "k".repeat(43), FLY_API_TOKEN: "fly", SOME_TOKEN: "t", HOME: "/root" };
   const { server, dropped } = cloudHomeChildEnvironments(config, env, "/data");
   expect(server).toMatchObject({ PATH: "/usr/bin", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", NODE_ENV: "production", OMB_STATIC_DIR: "/app/dist",
     OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: machineId, OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
     OMB_CLOUD_BOAT_URL: "https://cloud.example.test/boat", OMB_TTS_DEFAULT_VOICE: "alloy", OMB_CLOUD_AI_URL: "https://cloud.example.test/api/cloud/services/ai", HOME: "/data",
     // A staging Cloud may name its connected-apps service; the Cloud registers its own token, never one from outside.
-    OMB_COMPOSIO_BROKER_URL: "https://broker.example.test" });
+    OMB_COMPOSIO_BROKER_URL: "https://broker.example.test", OMB_COMPOSIO_BROKER: "off" });
   for (const name of ["OMB_CLOUD_FUTURE_SECRET", "OMB_TEST_CLOUD_LEFT_BEHIND_KEY", "FLY_API_TOKEN", "SOME_TOKEN", "OMB_COMPOSIO_BROKER_TOKEN"]) {
     expect(server).not.toHaveProperty(name);
     expect(dropped).toContain(name);
@@ -436,8 +535,26 @@ it("the root supervisor runs and trusts only root's code, never the volume's or 
 });
 
 it("ships an edge and a Fly template that keep the server private", () => {
-  const caddy = readFileSync(join(import.meta.dirname, "../deploy/fly/Caddyfile"), "utf8");
-  expect(caddy).toMatch(/^:8080 \{/m);
+  const edgeFile = (name: string) => readFileSync(join(import.meta.dirname, "../deploy/fly", name), "utf8");
+  const caddy = edgeFile("edge-routes.caddy");
+  expect(edgeFile("Caddyfile")).toMatch(/^:8080 \{\n\timport edge-routes\.caddy\n\}\n/m);
+  expect(edgeFile("Caddyfile")).toMatch(/^\tauto_https off$/m);
+  expect(edgeFile("Caddyfile.tls")).toMatch(/^http:\/\/:8080 \{\n\timport edge-routes\.caddy\n\}\n\n\{\$OMB_CLOUD_PUBLIC_HOST\} \{\n\timport edge-routes\.caddy\n\}\n/m);
+  expect(edgeFile("Caddyfile.tunnel")).toMatch(/^:8080 \{\n\timport edge-routes\.caddy\n\}\n\n:8812 \{\n\tbind 127\.0\.0\.1\n\timport edge-routes\.caddy\n\}\n/m);
+  // Only the edge that ends TLS issues certificates, and its issuers are the launcher's to say (edgeCertIssuers).
+  expect(edgeFile("Caddyfile.tls").match(/^\t\{\$OMB_CLOUD_EDGE_CERT_ISSUERS\}$/gm)).toHaveLength(1);
+  for (const config of [edgeFile("Caddyfile"), edgeFile("Caddyfile.tunnel")]) expect(config).not.toContain("OMB_CLOUD_EDGE_CERT_ISSUERS");
+  // The tunnel's listener, on loopback alone, believes Cloudflare's header; :8080 believes only what the launcher says.
+  expect(edgeFile("Caddyfile.tunnel")).toMatch(/^\tservers 127\.0\.0\.1:8812 \{\n\t\ttrusted_proxies static 127\.0\.0\.1\/32\n\t\ttrusted_proxies_strict\n\t\tclient_ip_headers Cf-Connecting-IP\n\t\}$/m);
+  expect(edgeFile("Caddyfile.tunnel").match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(4);
+  for (const config of [edgeFile("Caddyfile"), edgeFile("Caddyfile.tls"), edgeFile("Caddyfile.tunnel")]) {
+    expect(config.match(/^(?!#)\S[^\n]* \{$/gm)?.length, "every site imports the same routes").toBe(config.match(/^\timport edge-routes\.caddy$/gm)?.length);
+    expect(config).not.toMatch(/reverse_proxy|respond/);
+    // Who may name the client on :8080 and 443, and in which header, is the launcher's to say (edgeClientAddress).
+    expect(config).toMatch(/^\t\ttrusted_proxies static \{\$OMB_CLOUD_EDGE_TRUSTED_PROXIES\}\r?\n\t\ttrusted_proxies_strict\r?\n\t\tclient_ip_headers \{\$OMB_CLOUD_EDGE_CLIENT_IP_HEADER\}\r?\n/m);
+  }
+  for (const config of [edgeFile("Caddyfile"), edgeFile("Caddyfile.tls")]) expect(config.match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(2);
+  expect(caddy).not.toMatch(/trusted_proxies|client_ip_headers/);
   const upstreams = [...caddy.matchAll(/reverse_proxy (\S+)/g)].map(match => match[1]);
   expect(new Set(upstreams)).toEqual(new Set(["127.0.0.1:8799", "127.0.0.1:8800"]));
   expect(caddy).toMatch(/handle \/hooks\/\* \{\s*reverse_proxy 127\.0\.0\.1:8800 \{/);
@@ -448,17 +565,16 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(caddy.slice(homeStart, homeEnd)).toContain("handle /hooks/* {");
   expect(caddy.match(/header_up X-Forwarded-For \{client_ip\}/g)).toHaveLength(upstreams.length);
   expect(caddy.match(/lb_try_interval 50ms/g)).toHaveLength(upstreams.length);
-  // Who may name the client, and in which header, is the launcher's to say (edgeClientAddress); the file names neither.
-  expect(caddy).toMatch(/^\t\ttrusted_proxies static \{\$OMB_CLOUD_EDGE_TRUSTED_PROXIES\}\r?\n\t\ttrusted_proxies_strict\r?\n\t\tclient_ip_headers \{\$OMB_CLOUD_EDGE_CLIENT_IP_HEADER\}\r?\n/m);
-  expect(caddy.match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(2);
   // The root supervisor's code is root's, maus owns only the volume; the image's last step refuses to build otherwise.
   const dockerfile = readFileSync(join(import.meta.dirname, "../Dockerfile"), "utf8");
   const image = dockerfile.slice(dockerfile.indexOf("FROM runtime AS cloud-home"), dockerfile.indexOf("FROM runtime AS server"));
-  const check = image.indexOf('untrusted="$(find /app /usr/local/bin/caddy \\( ! -user root -o ! -type l -perm /022 \\) -print)"');
+  const check = image.indexOf('untrusted="$(find /app /usr/local/bin/caddy /usr/local/bin/cloudflared \\( ! -user root -o ! -type l -perm /022 \\) -print)"');
   expect(image.slice(check)).toMatch(/^untrusted=.*\n && if \[ -n "\$untrusted" \]; then .*exit 1; fi \\\n/);
   expect(check).toBeGreaterThan(image.lastIndexOf("COPY "));
   expect(check).toBeLessThan(image.indexOf("CMD ["));
-  expect(image).toContain("COPY deploy/fly/Caddyfile /app/cloud/Caddyfile");
+  expect(image).toContain("COPY deploy/fly/Caddyfile deploy/fly/Caddyfile.tls deploy/fly/Caddyfile.tunnel deploy/fly/edge-routes.caddy /app/cloud/");
+  // The build's own Caddy validates Caddyfile.tls as the launcher renders it with a fallback CA.
+  expect(image).toContain('OMB_CLOUD_EDGE_CERT_ISSUERS="$(OMB_CLOUD_EDGE_ACME_EMAIL=validate@example.com node --input-type=module -e \'import { edgeCertIssuers } from "/app/dist-server/cloud-home-start.js"; process.stdout.write(edgeCertIssuers(process.env));\')" caddy validate --config /app/cloud/Caddyfile.tls');
   // The bot box (server/bot-box) needs bubblewrap and socat in the image; pnpm is what bots' projects ask for.
   expect(image).toMatch(/apt-get install -y --no-install-recommends [^\n]*\bbubblewrap\b[^\n]*\bsocat\b/);
   expect(image).toMatch(/npm install -g pnpm@10\.33\.0/);
@@ -559,19 +675,85 @@ it("captures a child's stdout and stderr when asked, and shares this process's o
   expect(shared.child.stderr).toBeNull();
 });
 
+// /proc/mounts and /proc/self/status as a Docker container on Linux 6.8 shows them.
+const mounts = (procOptions: string) => `overlay / overlay rw,relatime,lowerdir=/var/lib/docker/overlay2/l/A 0 0\nproc /proc proc ${procOptions} 0 0\ntmpfs /dev tmpfs rw,nosuid,size=65536k,mode=755 0 0\n`;
+const capStatus = (bounding: string, effective = bounding) => `Name:\tnode\nCapInh:\t0000000000000000\nCapPrm:\t${effective}\nCapEff:\t${effective}\nCapBnd:\t${bounding}\nCapAmb:\t0000000000000000\n`;
+// CHOWN, KILL, SETGID, SETUID; with SETPCAP and SYS_ADMIN, as the connector grants an image that drops them.
+const FOUR = "00000000000000e1", WITH_SYS_ADMIN = "00000000002001e1";
+
 it("the Cloud supervisor hardens the host before anything runs as maus: hidepid on /proc and Fly's socket folder root-only, each a note, never fatal", () => {
   const calls: string[] = [];
-  const run = (status: number, exists = true) => ({
+  const run = (status: number, exists = true, files: Record<string, string> = {}) => ({
     exec: (command: string, args: string[]) => { calls.push(`${command} ${args.join(" ")}`); return { status, stderr: status ? "mount: permission denied\n" : "" }; },
     chmod: (path: string, mode: number) => { calls.push(`chmod ${mode.toString(8)} ${path}`); },
     exists: () => exists,
+    read: (path: string) => files[path] ?? "",
   });
-  expect(hardenHost({}, run(0))).toEqual(["/proc: hidepid=invisible", "/.fly: root only"]);
+  expect(hardenHost({}, run(0))).toEqual({ notes: ["/proc: hidepid=invisible", "/.fly: root only"], dropCapabilities: false });
   expect(calls).toEqual(["mount -o remount,hidepid=invisible /proc", "chmod 700 /.fly"]);
-  expect(hardenHost({}, run(32, false))).toEqual(["/proc: hidepid not applied (mount: permission denied)"]);
-  expect(hardenHost({ OMB_CLOUD_HARDEN: "0" }, run(0))).toEqual(["hardening skipped (OMB_CLOUD_HARDEN=0)"]);
+  expect(hardenHost({}, run(32, false)).notes).toEqual(["/proc: hidepid not applied (mount: permission denied)"]);
+  expect(hardenHost({ OMB_CLOUD_HARDEN: "0" }, run(0))).toEqual({ notes: ["hardening skipped (OMB_CLOUD_HARDEN=0)"], dropCapabilities: false });
   const failing = { ...run(0), chmod: () => { throw new Error("read-only"); } };
-  expect(hardenHost({}, failing)).toEqual(["/proc: hidepid=invisible", "/.fly: left as is (read-only)"]);
+  expect(hardenHost({}, failing).notes).toEqual(["/proc: hidepid=invisible", "/.fly: left as is (read-only)"]);
+  // Already hidden (the supervisor started again, or the platform mounted /proc so): no second remount, no false failure.
+  calls.splice(0);
+  expect(hardenHost({}, run(32, false, { "/proc/mounts": mounts("rw,hidepid=invisible") })).notes).toEqual(["/proc: hidepid=invisible"]);
+  expect(calls).toEqual([]);
+});
+
+it("CAP_SYS_ADMIN serves only the hidepid remount: the supervisor starts again through setpriv without it, and says when it could not", () => {
+  const run = (files: Record<string, string>, setpriv = true) => ({
+    exec: () => ({ status: 0 }), chmod: () => {}, exists: (path: string) => path === "/usr/bin/setpriv" && setpriv,
+    read: (path: string) => files[path] ?? "",
+  });
+  const granted = { "/proc/mounts": mounts("rw"), "/proc/self/status": capStatus(WITH_SYS_ADMIN) };
+  expect(hardenHost({}, run(granted))).toEqual({ notes: ["/proc: hidepid=invisible"], dropCapabilities: true });
+  // Started again: hidepid stays, and the capability is gone from every set it could come back from.
+  const dropped = { "/proc/mounts": mounts("rw,hidepid=invisible"), "/proc/self/status": capStatus(FOUR) };
+  expect(hardenHost({ OMB_CLOUD_CAPS_DROPPED: "1" }, run(dropped))).toEqual({ notes: ["/proc: hidepid=invisible", "CAP_SYS_ADMIN dropped"], dropCapabilities: false });
+  // setpriv without CAP_SETPCAP exits 0 and drops nothing: the next start sees it and never loops.
+  const kept = { "/proc/mounts": mounts("rw,hidepid=invisible"), "/proc/self/status": capStatus(WITH_SYS_ADMIN) };
+  expect(hardenHost({ OMB_CLOUD_CAPS_DROPPED: "1" }, run(kept))).toEqual({ notes: ["/proc: hidepid=invisible", "CAP_SYS_ADMIN kept: it could not be dropped (CAP_SETPCAP is missing)"], dropCapabilities: false });
+  expect(hardenHost({}, run(granted, false)).notes).toEqual(["/proc: hidepid=invisible", "CAP_SYS_ADMIN kept: /usr/bin/setpriv is missing"]);
+  // A remount that failed still drops a capability nothing needs.
+  expect(hardenHost({}, { ...run(granted), exec: () => ({ status: 32, stderr: "mount: denied" }) }).dropCapabilities).toBe(true);
+  // The connector's four capabilities: nothing to drop, nothing to start again.
+  expect(hardenHost({}, run({ "/proc/self/status": capStatus(FOUR) })).dropCapabilities).toBe(false);
+  expect(setprivArgs("/usr/local/bin/node", "/app/dist-server/cloud-home-start.js")).toEqual([
+    "setpriv", "--inh-caps=-sys_admin,-setpcap", "--bounding-set=-sys_admin,-setpcap", "--", "/usr/local/bin/node", "/app/dist-server/cloud-home-start.js",
+  ]);
+});
+
+it("reads a capability bit the way the kernel writes it", () => {
+  expect(hasCapability(capStatus(WITH_SYS_ADMIN), "CapBnd", 21)).toBe(true);
+  expect(hasCapability(capStatus(FOUR), "CapBnd", 21)).toBe(false);
+  expect(hasCapability(capStatus(FOUR, WITH_SYS_ADMIN), "CapEff", 21)).toBe(true);
+  expect(hasCapability(capStatus("000001ffffffffff"), "CapBnd", 21)).toBe(true);
+  expect(hasCapability("", "CapBnd", 21)).toBe(false);
+});
+
+it("takes an own server's secrets from the root-only file the connector mounts, and only the secrets it knows", () => {
+  const file = "/run/mausbot/secrets.json";
+  const fs = (overrides: { file?: { uid: number; mode: number; symlink?: boolean }; dir?: { uid: number; mode: number }; text?: string; exists?: boolean } = {}) => ({
+    exists: () => overrides.exists ?? true,
+    lstat: () => {
+      const entry = overrides.file ?? { uid: 0, mode: 0o100400 };
+      return { ...entry, isFile: () => !entry.symlink, isSymbolicLink: () => Boolean(entry.symlink) };
+    },
+    stat: (path: string) => (path === file ? overrides.file ?? { uid: 0, mode: 0o100400 } : path === "/run/mausbot" ? overrides.dir ?? { uid: 0, mode: 0o40700 } : { uid: 0, mode: 0o40755 }),
+    read: () => overrides.text ?? JSON.stringify({
+      OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_TUNNEL_TOKEN: "t".repeat(40),
+      OMB_PUBLIC_URL: "https://elsewhere.example", PATH: "/tmp",
+    }),
+  });
+  expect(readCloudSecretsFile("/data", file, fs())).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_CLOUD_BOAT_TOKEN: `box_omb_${"b".repeat(43)}`, OMB_CLOUD_TUNNEL_TOKEN: "t".repeat(40) });
+  expect(readCloudSecretsFile("/data", file, fs({ exists: false }))).toEqual({});
+  expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 0, mode: 0o100644 } }))).toThrow("readable by others than root");
+  expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 1001, mode: 0o100400 } }))).toThrow(`${file} is not root's`);
+  expect(() => readCloudSecretsFile("/data", file, fs({ dir: { uid: 0, mode: 0o40777 } }))).toThrow("/run/mausbot is writable by others than root");
+  expect(() => readCloudSecretsFile("/data", file, fs({ file: { uid: 0, mode: 0o120777, symlink: true } }))).toThrow("is not a plain file");
+  expect(() => readCloudSecretsFile("/data", file, fs({ text: "[1]" }))).toThrow("is not a JSON object");
+  expect(() => readCloudSecretsFile("/data", "/data/secrets.json", fs())).toThrow("is on the volume");
 });
 
 it("boots as a Team Cloud with the Admin's team id and name, and refuses a team without them", () => {
@@ -664,4 +846,31 @@ it("a My Cloud refuses a team claim: it is one person's", () => {
   expect(f.mint(f.sign(JSON.stringify({ member: { email: "ada@acme.test", role: "member" } })))).toEqual({ status: 400, body: { error: "not_a_team" } });
   expect(f.mint(f.sign(JSON.stringify({ team: { id: "team-1" } })))).toEqual({ status: 400, body: { error: "not_a_team" } });
   expect(f.sessions.openPairings()).toHaveLength(0);
+});
+
+it("a Team Cloud with remote access turned off refuses a User's browser sign-in, keeps an Owner's and an Admin's, and every app pairing", () => {
+  const root = directory();
+  let off = true, counter = 0;
+  const now = 1_800_000_000_000;
+  const sessions = new SessionRegistry({ file: join(root, "sessions.json"), now: () => now });
+  const pairing = createCloudPairing({ secret, sessions, team: { id: "team-1", name: "Acme" }, memberBrowserOff: () => off, now: () => now });
+  const mint = (claims: Record<string, unknown>) => {
+    const body = JSON.stringify({ label: "Web browser", ttlSeconds: 120, ...claims });
+    const timestamp = String(Math.floor(now / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
+    return pairing.handle({ timestamp, nonce, signature: `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}`, body: Buffer.from(body), source: "203.0.113.9" });
+  };
+  const browser = (email: string, role: string) => mint({ purpose: "browser", owner: email, member: { email, role } });
+  expect(browser("ada@acme.test", "member")).toEqual({ status: 403, body: { error: "remote_access_off" } });
+  expect(browser("ben@acme.test", "admin").status).toBe(200);
+  expect(browser("olive@acme.test", "owner").status).toBe(200);
+  expect(mint({ member: { email: "ada@acme.test", role: "member" } }).status, "the app's pairing stays: it is how the team reaches its Cloud").toBe(200);
+  off = false;
+  expect(browser("ada@acme.test", "member").status).toBe(200);
+  // Turned off again: the User's open browser signs out, the admins' stay.
+  const ada = sessions.exchange({ code: (browser("ada@acme.test", "member").body.credential as string), browser: true, label: "", source: "s" });
+  const ben = sessions.exchange({ code: (browser("ben@acme.test", "admin").body.credential as string), browser: true, label: "", source: "s" });
+  expect(ada.ok && ben.ok).toBe(true);
+  expect(sessions.closeMemberBrowsers()).toBe(1);
+  expect(sessions.list().map((session) => session.email)).toEqual(expect.arrayContaining(["ben@acme.test"]));
+  expect(sessions.list().map((session) => session.email)).not.toContain("ada@acme.test");
 });

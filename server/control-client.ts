@@ -28,6 +28,10 @@ export const CONTROL_BUSY =
 export const CONTROL_UNCONFIRMED =
   "OpenMausBot could not confirm that this computer is free, so this call was NOT performed and nothing happened on the screen. " +
   "Retry in a few seconds.";
+/** The gate no longer accepts this call's turn capability (401: the turn settled, or its computer was switched or taken back), so no retry can succeed. */
+export const CONTROL_TURN_ENDED =
+  "This turn no longer has access to this computer (the turn already ended, or the computer was switched or taken back), so this call was NOT performed and nothing happened on the screen. " +
+  "Retrying will not help: stop calling the computer tools now and end your turn. The computer can be used again in a new turn.";
 
 export interface ControlState {
   held: boolean;
@@ -45,6 +49,7 @@ export interface ControlClient {
 
 const DISENGAGED: ControlState = { held: false, helpOpen: false };
 const UNCONFIRMED: ControlState = { held: true, helpOpen: false, blockedReason: CONTROL_UNCONFIRMED };
+const TURN_ENDED: ControlState = { held: true, helpOpen: false, blockedReason: CONTROL_TURN_ENDED };
 
 export function controlRefusal(state: Pick<ControlState, "reason" | "blockedReason">): string {
   return state.blockedReason ?? (state.reason === "person" ? CONTROL_REFUSAL_PLAIN : CONTROL_UNCONFIRMED);
@@ -77,6 +82,7 @@ export function createControlClient(options?: {
         target = withCall.href;
       }
       const res = await fetchImpl(target, { headers, signal: AbortSignal.timeout(timeoutMs) });
+      if (res.status === 401) return TURN_ENDED;
       if (!res.ok) return UNCONFIRMED;
       const body: any = await res.json().catch(() => null);
       if (typeof body?.held !== "boolean" || typeof body?.helpOpen !== "boolean") return UNCONFIRMED;

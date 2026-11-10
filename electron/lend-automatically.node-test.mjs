@@ -99,6 +99,50 @@ async function computer(t, { places = [myCloud, clientA, acme], screen = () => f
   return { dir, file, target, summaries, dials, signedIn, get sharing() { return sharing; }, restart: () => { sharing.close(); sharing = make(); return sharing; } };
 }
 
+test("a Cloud that won't take this computer, or a signed-in My Cloud with no saved place, says so where the person can see it", async t => {
+  const refuses = cloudHome();
+  const answer = refuses.fetch;
+  refuses.fetch = async (url, init) => new URL(url).pathname === "/api/shared-computers/connect"
+    ? { ok: false, status: 403, headers: { get: () => null }, body: (async function* () { yield Buffer.from("{}"); })() }
+    : answer(url, init);
+  const mac = await computer(t, { homes: { [HOME]: refuses }, places: [myCloud] });
+  mac.sharing.start();
+  await until(() => mac.summaries.at(-1)?.problems?.length === 1, "the refusal to be reported");
+  assert.deepEqual(mac.summaries.at(-1).problems, [{ name: "My Cloud", why: "this app's sign-in to it ended. Open it from this app to sign in again." }]);
+  assert.equal(indicatorText(mac.summaries.at(-1), "Mac").problems[0], "My Cloud can't use this Mac: this app's sign-in to it ended. Open it from this app to sign in again.");
+  mac.sharing.pause();
+  assert.equal(mac.summaries.at(-1).problems, undefined, "Paused is the person's own choice, not a problem");
+
+  const homeless = await computer(t, { places: [] });
+  homeless.sharing.start();
+  await until(() => homeless.summaries.at(-1)?.problems?.length === 1, "the missing place to be reported");
+  assert.deepEqual(homeless.summaries.at(-1).problems, [{ name: "My Cloud", why: "this app has no saved place for it yet. Open My Cloud from this app once." }]);
+});
+
+test("the menu shows what is keeping a Cloud away, and one notification says so once it has lasted", t => {
+  const shown = [];
+  class Notification { constructor(options) { this.options = options; } show() { shown.push(this.options); } }
+  const timers = [];
+  const trays = [];
+  class Tray { constructor() { trays.push(this); } on() {} setToolTip(value) { this.tip = value; } setTitle() {} setContextMenu(menu) { this.menu = menu; } isDestroyed() { return false; } destroy() {} }
+  const indicator = createLendingIndicator({ Tray, Menu: { buildFromTemplate: items => items }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, iconPath: "icon.png",
+    onPause() {}, onResume() {}, onActivity() {}, onTerminal() {}, device: "Mac", Notification, setTimer: (run) => { timers.push(run); return { unref() {} }; }, clearTimer: () => { timers.length = 0; } });
+  const problem = { name: "My Cloud", why: "this app can't reach it." };
+  indicator.update({ clouds: [], using: [], paused: false, problems: [problem] });
+  assert.equal(trays.length, 1, "shown even with nothing else lent yet");
+  assert.equal(trays[0].menu[0].label, "My Cloud can't use this Mac: this app can't reach it.");
+  assert.equal(shown.length, 0, "a blip is no news");
+  timers.shift()();
+  assert.deepEqual(shown, [{ title: "My Cloud can't use this Mac", body: "this app can't reach it." }]);
+  indicator.update({ clouds: ["My Cloud"], using: [], paused: false, problems: [problem] });
+  assert.equal(timers.length, 0, "already told");
+  indicator.update({ clouds: ["My Cloud"], using: [], paused: false, problems: [] });
+  indicator.update({ clouds: ["My Cloud"], using: [], paused: false, problems: [problem] });
+  timers.shift()();
+  assert.equal(shown.length, 2, "it came back, so it is news again");
+  t.diagnostic("the notification names the Cloud and the fix");
+});
+
 test("each Cloud of the person's own is lent this computer by itself: the internet connection, their Chrome and the home folder with editing; not the terminal unless turned on", async t => {
   const homes = { [HOME]: cloudHome(), [OTHER]: cloudHome() };
   const dir = await scratch(t);
@@ -209,7 +253,7 @@ test("Pause stops every Cloud at once and lasts across restarts; Resume lends ag
   await until(() => homes[HOME].connects.length === 1 && homes[OTHER].connects.length === 1, "both Clouds to be lent");
   mac.sharing.pause();
   await until(() => homes[HOME].disconnects.length === 1 && homes[OTHER].disconnects.length === 1, "both Clouds to be told");
-  assert.deepEqual(mac.summaries.at(-1), { lending: [], clouds: ["My Cloud", "Client A"], waiting: [], using: [], paused: true, terminal: false, busy: null, screen: null });
+  assert.deepEqual(mac.summaries.at(-1), { lending: [], clouds: ["My Cloud", "Client A"], waiting: [], using: [], paused: true, terminal: false, terminalSwitch: true, busy: null, screen: null });
   assert.equal(mac.sharing.lentToCloud(myCloud).paused, true, "Files keeps My Cloud's copies, and holds bots' changes there");
   const plans = path.join(mac.dir, "Plans");
   await mkdir(plans);

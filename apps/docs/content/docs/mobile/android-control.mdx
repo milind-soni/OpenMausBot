@@ -4,7 +4,7 @@ description: Let a bot inspect and operate a physically connected Android phone.
 icon: Cable
 ---
 
-OpenMausBot can expose a USB-connected Android device through its Phone Harness skill. A supported agent can inspect the screen, open apps, tap, type, swipe, scroll, and capture screenshots.
+MausBot can expose a USB-connected Android device through its Phone Harness skill. A supported agent can inspect the screen, open apps, tap, type, swipe, scroll, and capture screenshots.
 
 ## Requirements
 
@@ -14,3 +14,11 @@ OpenMausBot can expose a USB-connected Android device through its Phone Harness 
 - The packaged Android platform tools or a compatible local ADB installation
 
 Phone access is a separate capability from desktop computer use. Keep the device unlocked and visible while testing, and review actions that may send messages, change accounts, or expose private content.
+
+## Screen and lock
+
+A bot can turn the screen on and off. It never unlocks a PIN, pattern, or password lock: it asks you to unlock the phone.
+
+## Typing other languages
+
+The bot types letters, digits, spaces, and `_.,@-` through Android's own input. For other text, such as Chinese, emoji, or `+`, install [ADBKeyBoard](https://github.com/senzhk/ADBKeyBoard) on the phone and choose it as the keyboard. ADBKeyBoard shows no on-screen keyboard, so switch back to your usual keyboard when you type on the phone yourself. It also takes typing from any app on the phone, not only from OpenMausBot, so use it only on a phone whose apps you trust.

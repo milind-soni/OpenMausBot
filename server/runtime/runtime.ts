@@ -1,10 +1,11 @@
 // The store is the only state: tick() is the only place work is admitted or dispatched, and no timer lives here.
 import { randomUUID } from "node:crypto";
+import { redactSecretsInText } from "../../shared/redact.ts";
 
 import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
-import { answersSender, asking, awaited, childrenSince, settledSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, path, restartNote, wakeOwner } from "./tree.ts";
+import { answersSender, asking, awaited, childrenSince, settledSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, ownThread, path, restartNote, wakeOwner } from "./tree.ts";
 import { DEFAULT_LIMITS, type Answerer, type Assignment, type Assignee, type Clock, type EndResult, type EnqueueRequest, type EnqueueResult, type EnvelopeNames,
   type EventKind, type InboxItem, type InboxKind, type Level, type Limits, type LiveEdge, type Origin, type Outcome, type Owner,
   type Reply, type Requester, type RunInput, type RunResult, type StatusView, type TurnRunner } from "./types.ts";
@@ -192,7 +193,8 @@ export class Runtime {
     const lineage = parent ? path(this.store, parent) : [];
     const root = lineage[0];
     const target = req.assignee;
-    if (!answersSender(parent, mode, { botId: target.botId, ...target.destination }) && lineage.some(a => a.assignee.botId === target.botId &&
+    const ancestors = ownThread(lineage, target, req.ownThread) ? lineage.slice(0, -1) : lineage;
+    if (!answersSender(parent, mode, { botId: target.botId, ...target.destination }) && ancestors.some(a => a.assignee.botId === target.botId &&
       (!a.assignee.destination.groupId || !target.destination.groupId || a.assignee.destination.groupId === target.destination.groupId))) {
       return refuse("Cannot assign work back to an ancestor; results return automatically");
     }
@@ -545,7 +547,8 @@ export class Runtime {
     const n = this.store.get(id);
     if (!n || n.status !== "needs_input") return false;
     const now = this.clock.now();
-    n.answer = clip(text, BRIEF_MAX); delete n.question; delete n.decide; n.status = "queued"; n.lastActivityAt = now;
+    // Mask secrets before an over-long answer is clipped, so the cut can never leave part of one that redaction no longer matches.
+    n.answer = clip(text.length > BRIEF_MAX ? redactSecretsInText(text) : text, BRIEF_MAX); delete n.question; delete n.decide; n.status = "queued"; n.lastActivityAt = now;
     if (by) n.answeredBy = by; else delete n.answeredBy;
     const root = n.parentId ? this.store.get(n.rootId) : undefined;
     this.store.transaction(() => {

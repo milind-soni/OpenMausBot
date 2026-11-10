@@ -5,12 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({ state: { config: { cloudHome: true, botLimit: 5 } as Record<string, unknown>, bots: [] as unknown[] } }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: fixture.state, dispatch: vi.fn() }) }));
-vi.mock("./Avatar", () => ({ MausAvatar: () => createElement("i", { "data-mark": "" }) }));
+vi.mock("./Avatar", () => ({ MausAvatar: () => createElement("i", { "data-mark": "" }), BotAvatar: () => createElement("i", { "data-avatar": "" }) }));
+const posted = vi.hoisted(() => [] as Array<{ path: string; body: unknown }>);
+vi.mock("@/state/api", () => ({ api: vi.fn(async (path: string, init?: { body?: string }) => { posted.push({ path, body: init?.body ? JSON.parse(init.body) : undefined }); return {}; }) }));
 vi.mock("@/lib/app-links", async (original) => ({ ...await original<typeof import("@/lib/app-links")>(), openExternalLink: vi.fn(async () => {}) }));
 
-import { botLimitShown, closeBotLimit, showBotLimit } from "@/lib/bot-limit";
+import { botLimitShown, closeBotLimit, showBotLimit, showCreatedPaused } from "@/lib/bot-limit";
 import { openExternalLink } from "@/lib/app-links";
 import { setLocale } from "@/lib/i18n";
+import { initialAwake } from "./AwakeBotsPicker";
 import { BotLimitPopup } from "./BotLimitPopup";
 
 const STARTER = { tier: "starter", resetsAt: 1, meters: [], upgrades: [{ tier: "pro", amount: 4900 }, { tier: "max", amount: 9900 }] };
@@ -33,10 +36,10 @@ function bridge(snapshot: Record<string, unknown>) {
     upgrade: vi.fn(async (plan: string) => ({ outcome: "upgraded", tier: plan })),
   };
 }
-async function open(plan?: ReturnType<typeof bridge>) {
+async function open(plan?: ReturnType<typeof bridge>, reason?: "tasks" | "paused") {
   (window as unknown as { ogb?: unknown }).ogb = plan ? { cloudPlan: plan } : undefined;
   await act(async () => { root.render(createElement(BotLimitPopup)); });
-  await act(async () => { showBotLimit(); });
+  await act(async () => { showBotLimit(reason); });
   await act(async () => {});
 }
 
@@ -148,5 +151,71 @@ describe("the bot limit popup", () => {
     await key("Escape");
     expect(botLimitShown()).toBe(true);
     expect(dialog(), "back to the card").not.toBeNull();
+  });
+});
+
+describe("the popup for Starter's other limits", () => {
+  it("says Starter runs two tasks at once when work handed out was refused, with the upgrade", async () => {
+    fixture.state = { config: { cloudHome: true, botLimit: 5, planTurns: { running: 2, waiting: 4 } }, bots: made(3) };
+    await open(bridge({ status: "paid", tier: "starter", usage: STARTER }), "tasks");
+    expect(dialog()!.querySelector("h2")?.textContent).toBe("Starter runs 2 tasks at once");
+    expect(dialog()!.querySelector("p")?.textContent).toContain("Upgrade to run more at once");
+    expect(buttons()).toContain("Upgrade to Pro · $49/month");
+  });
+
+  it("opens by itself when a config frame says work was just refused, and not for a refusal from before", async () => {
+    fixture.state = { config: { cloudHome: true, botLimit: 5, planTurns: { running: 2, waiting: 4, refusedAt: 1, refused: "tasks" } }, bots: made(3) };
+    await act(async () => { root.render(createElement(BotLimitPopup)); });
+    expect(dialog()).toBeNull();
+    fixture.state = { config: { cloudHome: true, botLimit: 5, planTurns: { running: 2, waiting: 4, refusedAt: 2, refused: "tasks" } }, bots: made(3) };
+    await act(async () => { root.render(createElement(BotLimitPopup)); });
+    expect(dialog()!.querySelector("h2")?.textContent).toBe("Starter runs 2 tasks at once");
+  });
+
+  it("lets the person choose which five stay awake, and saves exactly five", async () => {
+    posted.length = 0;
+    fixture.state = { config: { cloudHome: true, botLimit: 5, awakeLimit: 5, pausedBots: ["b5", "b6"] }, bots: made(7).map((bot) => ({ ...bot, name: bot.id })) };
+    await open(bridge({ status: "paid", tier: "starter", usage: STARTER }), "paused");
+    expect(dialog()!.querySelector("h2")?.textContent).toBe("Starter keeps 5 bots awake");
+    const picker = dialog()!.querySelector("[data-awake-bots]")!;
+    expect(picker.textContent).toContain("5 of 5 chosen");
+    const row = (id: string) => [...picker.querySelectorAll<HTMLButtonElement>('[role="checkbox"]')].find((node) => node.textContent?.includes(id))!;
+    expect([row("b5").disabled, row("b0").getAttribute("aria-checked")]).toEqual([true, "true"]);
+    await act(async () => { row("b0").click(); });
+    await act(async () => { row("b5").click(); });
+    await press("Keep these awake", picker);
+    expect(posted).toEqual([{ path: "/api/starter/awake", body: { awake: ["b1", "b2", "b3", "b4", "b5"] } }]);
+    expect(botLimitShown()).toBe(false);
+  });
+
+  it("says a bot just made is paused, and swaps it in for the least recently used idle bot with one tap", async () => {
+    posted.length = 0;
+    const bots = made(6).map((bot, n) => ({ ...bot, name: n === 5 ? "Scout" : bot.id, tasks: [{ updatedAt: n === 1 ? 1 : 100 + n }], ...(n === 0 ? { busy: true } : {}) }));
+    // A server that makes any number of bots sends no botLimit.
+    fixture.state = { config: { cloudHome: true, awakeLimit: 5, pausedBots: ["b5"] }, bots };
+    (window as unknown as { ogb?: unknown }).ogb = { cloudPlan: bridge({ status: "paid", tier: "starter", usage: STARTER }) };
+    await act(async () => { root.render(createElement(BotLimitPopup)); });
+    await act(async () => { showCreatedPaused("b5"); });
+    await act(async () => {});
+    expect(dialog()!.querySelector("h2")?.textContent).toBe("Created Scout, paused for now");
+    expect(dialog()!.textContent).toContain("Starter keeps 5 bots awake, so this one is paused. Choose which 5 stay awake, or upgrade to wake them all.");
+    expect(dialog()!.textContent).not.toContain("You've reached");
+    const picker = dialog()!.querySelector("[data-awake-bots]")!;
+    await press("Keep these awake", picker);
+    expect(posted).toEqual([{ path: "/api/starter/awake", body: { awake: ["b0", "b2", "b3", "b4", "b5"] } }]);
+    expect(botLimitShown()).toBe(false);
+  });
+});
+
+describe("the bots first offered awake", () => {
+  const bot = (id: string, at: number, busy = false) => ({ id, busy, tasks: [{ updatedAt: at }] as never });
+  it("keeps the awake ones as they are when nothing new is swapped in", () => {
+    expect(initialAwake([bot("a", 1), bot("b", 2), bot("c", 3)], new Set(["c"]), 2)).toEqual(new Set(["a", "b"]));
+  });
+
+  it("swaps a new bot in for the least recently active one that isn't working, even before the paused list arrives", () => {
+    const bots = [bot("new", 9), bot("a", 1, true), bot("b", 2), bot("c", 3), bot("d", 4), bot("e", 5)];
+    expect(initialAwake(bots, new Set(["new"]), 5, "new")).toEqual(new Set(["new", "a", "c", "d", "e"]));
+    expect(initialAwake(bots, new Set(), 5, "new")).toEqual(new Set(["new", "a", "c", "d", "e"]));
   });
 });
