@@ -1,6 +1,8 @@
 import { createContext, use, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Check, Copy, Ellipsis, Reply, X } from "lucide-react";
+import { createPortal } from "react-dom";
 import { popoverClosesOnKey, usePopoverDismiss } from "@/hooks/use-popover-dismiss";
+import { useMessageSwipeReply } from "@/hooks/use-message-swipe-reply";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
@@ -44,12 +46,14 @@ export function MessageActions({
   forceOpen = false,
   className,
   menu: items = [],
+  onReply,
   children,
 }: {
   side: "user" | "bot";
   forceOpen?: boolean;
   className?: string;
   menu?: MessageMenuItem[];
+  onReply?: () => void;
   children?: ReactNode;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -128,6 +132,7 @@ export function MessageActions({
     };
   }, []);
 
+  const swipe = useMessageSwipeReply(rowRef, menuOpen ? undefined : onReply, LONG_PRESS_MS);
   usePopoverDismiss(tapped && !menuOpen, rowRef, () => setTapped(false));
   usePopoverDismiss(menuOpen, rootRef, () => {
     setMenuOpen(false);
@@ -163,7 +168,11 @@ export function MessageActions({
     items[(next + items.length) % items.length]?.focus();
   };
 
-  return (
+  return <>
+    {swipe.row && swipe.offset > 0 && createPortal(
+      <span aria-hidden="true" data-swipe-reply="" className="pointer-events-none absolute -left-6 top-1/2 -translate-y-1/2 text-accent" style={{ opacity: swipe.progress }}><Reply {...ACTION_ICON} /></span>,
+      swipe.row,
+    )}
     <div
       ref={rootRef}
       className={cn(
@@ -230,7 +239,7 @@ export function MessageActions({
         </div>
       )}
     </div>
-  );
+  </>;
 }
 
 export function ReplyAction({ onReply }: { onReply: () => void }) {
