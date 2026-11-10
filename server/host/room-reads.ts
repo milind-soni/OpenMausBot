@@ -32,7 +32,9 @@ export function roomUnreadFor(path: readonly PathMessage[], readUpTo: string | u
   return path.slice(from).some(isReply);
 }
 
-export function createRoomReads(dataDir: string) {
+/** `alsoForget`: a person's other marks of their own (their bots' order, their notification reads), which go with
+ * their read lines when they leave the team. */
+export function createRoomReads(dataDir: string, alsoForget?: (person: string) => void) {
   const file = join(dataDir, ROOM_READS_FILE);
   let reads: Record<string, Record<string, string>> = {};
   try {
@@ -67,6 +69,7 @@ export function createRoomReads(dataDir: string) {
       save();
     },
     forgetPerson(person: string): void {
+      alsoForget?.(person);
       const rooms = Object.values(reads).filter((room) => room[person] !== undefined);
       if (!rooms.length) return;
       for (const room of rooms) delete room[person];

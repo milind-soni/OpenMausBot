@@ -5,7 +5,7 @@ import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 /** Whether an entry is in one request's list; `reader` is the person whose own read marks it reads and writes (a Team
- * Cloud), absent where an entry has one mark for everyone. */
+ * Cloud: `read_by` on the feed's row, never sent; a mark made before stays read), absent where an entry has one mark. */
 export type NotificationListing = ((entry: NotificationLogEntry) => boolean) & { reader?: string };
 
 /** Opening a conversation reads the notifications its opener's list shows, so every open app of theirs drops them too:

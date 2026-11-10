@@ -78,3 +78,10 @@ it("reads a bot's shared chat per person, leaves a private chat's one mark alone
   expect(rooms.personMarkThread!(ada, "mine", false), "a private chat keeps its one mark").toBe(false);
   expect(rooms.taskForPerson(own, adaKey)).toBe(own);
 });
+
+it("forgets a person's other marks of their own with their read lines", () => {
+  const forgotten: string[] = [];
+  const reads = createRoomReads(mkdtempSync(join(tmpdir(), "room-reads-")), (person) => forgotten.push(person));
+  reads.forgetPerson("p_ada");
+  expect(forgotten, "even with no read line of theirs").toEqual(["p_ada"]);
+});

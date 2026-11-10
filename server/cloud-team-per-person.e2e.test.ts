@@ -4,10 +4,12 @@
 // person reading, marking or reordering changes nothing for another, and their streams hear only their own. The engine
 // is the synthetic Claude CLI.
 import { randomBytes } from "node:crypto";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
+import { personKey } from "./person-key.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
 const OWNER = { email: "olive@acme.test", role: "owner" as const };
@@ -195,3 +197,28 @@ it("a User's open chat counts as in front of them, and nobody can name another p
   expect((await team.as(ada, "POST", "/api/presence/active", { source: "desktop", threadId: private_ })).status).toBe(200);
   for (const token of [cleo, owner]) expect((await team.as(token, "POST", "/api/presence/active", { source: "desktop", threadId: private_ })).status).toBe(404);
 }, hostTimeout(60_000));
+
+it("when Ada leaves the team, her own order and her read marks go with her, and Cleo's stay", async () => {
+  const dataDir = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+  const adaKey = personKey({ id: "", email: ADA.email }), cleoKey = personKey({ id: "", email: CLEO.email });
+  const readers = () => {
+    const db = new DatabaseSync(dataDir("messages.db"), { readOnly: true });
+    try {
+      return (db.prepare("SELECT read_by FROM notification_log WHERE read_by IS NOT NULL").all() as Array<{ read_by: string }>).flatMap((row) => JSON.parse(row.read_by) as string[]);
+    } finally {
+      db.close();
+    }
+  };
+  // Ada and Cleo both read the same notification, so a row lists them both.
+  await turn(owner, "One more for the road.");
+  for (const token of [ada, cleo]) expect((await team.as(token, "POST", "/api/notifications/read-all")).status).toBe(200);
+  expect(readers()).toEqual(expect.arrayContaining([adaKey, cleoKey]));
+  expect(readFileSync(dataDir("bot-orders.json"), "utf8")).toContain(adaKey);
+  const left = await team.signed("POST", "/api/cloud/team/member-left", { email: ADA.email });
+  expect(left.status, JSON.stringify(left.body)).toBe(200);
+  expect(readers(), "her read marks are gone").not.toContain(adaKey);
+  expect(readers(), "Cleo's stay").toContain(cleoKey);
+  expect(readFileSync(dataDir("bot-orders.json"), "utf8"), "her order is gone").not.toContain(adaKey);
+  expect(readFileSync(dataDir("room-reads.json"), "utf8")).not.toContain(adaKey);
+  expect((await team.as(cleo, "GET", "/api/notifications")).status).toBe(200);
+}, hostTimeout(90_000));

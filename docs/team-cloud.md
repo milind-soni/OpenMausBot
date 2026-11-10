@@ -26,7 +26,7 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   line, and a read reaches only their own streams. A private chat keeps its one mark. A notification everyone who sees
   a conversation gets (a "done", a mention) is one entry with each person's own read mark (`read_by` on the feed's
   row, never sent): reading it, Read all and opening its conversation mark it read for that person alone and tell only
-  their own apps (`notifications.read`). A mark made before marks were each person's stays read for everyone. A bot's shared chats say who can read them, *"Shared · everyone in Acme can see"* or, on a bot set to Only people added (`onlyPeopleAdded` on everyone's copy of it), *"Shared · only people added and admins can see"*. Every private chat says so in its header, *"Private · only you"*, and the first one on a
+  their own apps (`notifications.read`). A mark made before marks were each person's stays read for everyone. A person's read marks go when they leave the team. A bot's shared chats say who can read them, *"Shared · everyone in Acme can see"* or, on a bot set to Only people added (`onlyPeopleAdded` on everyone's copy of it), *"Shared · only people added and admins can see"*. Every private chat says so in its header, *"Private · only you"*, and the first one on a
   device also says it as a sentence: *"Your chats in Acme are private. Only you can see them: not other members, not
   Acme's admins."* The server marks such a conversation `private: true` on the wire (`WireTask.private`). When you leave
   the team (or are removed), your private chats and everything only yours there are deleted, never handed to an admin
@@ -38,7 +38,7 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   /api/bots/order`, any level, Can view included) changes only their list and reaches only their streams. Whoever has
   never ordered theirs sees the team's order, which an Owner's or Admin's reorder sets: an admin's order is the team's,
   for every admin and every User without their own. A bot added later takes its place in the team's order in every
-  list.
+  list. A person's own order goes when they leave the team.
 - **Who is speaking.** A bot knows who wrote each line it reads. Your own typed line in your own chat with it is the
   only line that carries no note; every other line opens with one, written by the Cloud and never by the sender:
   `[From <who> · <what> · <authority>]`, as in `[From Ben (person) · message · their own request]` on each person's

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { json, readBody } from "../harness/http.ts";
 import type { NotificationLogEntry } from "../../shared/notification.ts";
-import { insertNotificationLog, markNotificationLogRead, recentNotificationLog } from "../message-db.ts";
+import { forgetNotificationReader, insertNotificationLog, markNotificationLogRead, recentNotificationLog } from "../message-db.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { createNotificationRoutes, notificationListedFor, readThreadNotifications } from "./notifications.ts";
 import { dispatchRoutes } from "./table.ts";
@@ -107,6 +107,16 @@ describe("notification routes", () => {
     expect(unreadFor("p_ada")).toEqual(["a2"]);
     expect(recentNotificationLog().filter((entry) => entry.threadId === "team-t" && !entry.read).map((entry) => entry.id).sort(), "the one mark is untouched").toEqual(["a1", "a2"]);
     expect(Object.keys(recentNotificationLog(undefined, "p_ada")[0]!)).not.toContain("readBy");
+  });
+
+  it("forgets one person's read marks, a row they alone read included, and nobody else's", () => {
+    for (const id of ["f1", "f2"]) insertNotificationLog({ ...sample, id, threadId: "leave-t" });
+    markNotificationLogRead(["f1", "f2"], "p_ada");
+    markNotificationLogRead(["f2"], "p_cleo");
+    forgetNotificationReader("p_ada");
+    const unread = (person: string) => recentNotificationLog(undefined, person).filter((entry) => entry.threadId === "leave-t" && !entry.read).map((entry) => entry.id).sort();
+    expect(unread("p_ada")).toEqual(["f1", "f2"]);
+    expect(unread("p_cleo")).toEqual(["f1"]);
   });
 
   it("leaves other paths and methods to the next handler", async () => {

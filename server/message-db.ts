@@ -321,7 +321,6 @@ export function logNotification(notification: Notification): NotificationLogEntr
   return entry;
 }
 
-/** `reader`: a Team Cloud's person: read as they read it (`read_by`, never sent; an older mark stays read), marked for them alone. */
 export function recentNotificationLog(limit = NOTIFICATION_LOG_LIMIT, reader?: string): NotificationLogEntry[] {
   const read = reader === undefined ? "read" : "(read = 1 OR EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?)) AS read";
   const rows = db().prepare(`SELECT id, at, kind, bot_id, bot_name, thread_id, group_id, title, body, avatar_url, for_person, ${read} FROM notification_log ORDER BY at DESC, rowid DESC LIMIT ?`)
@@ -332,6 +331,7 @@ export function markNotificationLogRead(ids: readonly string[], reader?: string)
   if (reader === undefined) db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0 AND id IN (SELECT value FROM json_each(?))").run(JSON.stringify(ids));
   else db().prepare("UPDATE notification_log SET read_by = json_insert(coalesce(read_by, '[]'), '$[#]', ?1) WHERE id IN (SELECT value FROM json_each(?2)) AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?1)").run(reader, JSON.stringify(ids));
 }
+export function forgetNotificationReader(person: string): void { db().prepare("UPDATE notification_log SET read_by = (SELECT json_group_array(value) FROM json_each(read_by) WHERE value <> ?1) WHERE EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?1)").run(person); }
 
 export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {
   writeFollowups((connection) => connection.prepare(
