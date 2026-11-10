@@ -17,7 +17,7 @@ import {
   eventInstallation,
   type InstallationRow,
 } from "./common";
-import { adoptSharedUser, me, shareUser } from "./sharing";
+import { adoptSharedUser, me, shareUser, unshareSharedUser } from "./sharing";
 import { createTrigger, deleteTrigger, getTriggerType, listTriggers, listTriggerTypes, updateTrigger } from "./triggers";
 
 interface ComposioSession {
@@ -321,6 +321,26 @@ async function currentInstallation(env: Env, id: string) {
   const current = await env.DB.prepare("SELECT * FROM installations WHERE id = ?").bind(id).first<InstallationRow>();
   if (!current || current.disabled_at !== null) throw json({ error: "unauthorized" }, 401);
   return current;
+}
+
+/** A shared user is only reachable while some enabled installation still owns it. When the sharer is gone
+ *  (disabled or revoked), adopters fall back to their own user instead of holding the sharer's connected
+ *  apps forever: the link is cleared here, once, and their next session is their own. */
+async function dropDeadSharedUser(installation: InstallationRow, env: Env) {
+  const shared = installation.shared_user_id;
+  if (!shared) return;
+  const anchor = await env.DB.prepare(
+    "SELECT 1 FROM installations WHERE composio_user_id = ? AND disabled_at IS NULL LIMIT 1",
+  ).bind(shared).first();
+  if (anchor) return;
+  const cleared = await env.DB.prepare(
+    "UPDATE installations SET shared_user_id = NULL, session_id = NULL WHERE id = ? AND shared_user_id = ?",
+  ).bind(installation.id, shared).run();
+  if (cleared.meta.changes) {
+    if (installation.session_id) forgetSession(installation.session_id);
+    installation.shared_user_id = null;
+    installation.session_id = null;
+  }
 }
 
 async function verifySession(installation: InstallationRow, env: Env, ctx: ExecutionContext) {
@@ -718,6 +738,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
   if (!url.pathname.startsWith("/v1/")) return json({ error: "not found" }, 404);
   const installation = await authenticate(request, env);
   if (!installation) return json({ error: "unauthorized" }, 401);
+  await dropDeadSharedUser(installation, env);
   const appEvents = await appEventRoute(request, url, installation, env, ctx);
   if (appEvents) return appEvents;
   if (request.method === "GET" && url.pathname === "/v1/me") return me(installation);
@@ -726,6 +747,11 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
     const adopted = await adoptSharedUser(request, installation, env);
     if (adopted.ok) forgetSession(installation.session_id ?? "");
     return adopted.response;
+  }
+  if (request.method === "POST" && url.pathname === "/v1/installation/unshare") {
+    const response = await unshareSharedUser(installation, env);
+    forgetSession(installation.session_id ?? "");
+    return response;
   }
   if (request.method === "POST" && url.pathname === "/v1/mcp") return proxyMcp(request, installation, env, ctx);
   if (request.method === "GET" && url.pathname === "/v1/catalog") return catalog(env, url);
