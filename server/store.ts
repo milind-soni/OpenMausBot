@@ -5,7 +5,7 @@ import { OwnedFile, writeFileAtomic } from "./atomic.ts"; import { saveSoon } fr
 import { commitRegistryChange, keptRevocation, saveRegistryFor, touchesPermissions } from "./registry-save.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts"; import { grantScopedApps } from "../shared/connector-scopes.ts"; import { dropRetiredApps } from "./retired-apps.ts";
 import { reorderStable } from "../shared/bot-order.ts"; import { trimOutboundPolicy } from "../shared/outbound.ts";
-import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.ts";
+import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.ts"; import { reshowWhenMoved } from "../shared/default-bot.ts";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
 import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
@@ -773,7 +773,7 @@ export class Store {
       return "Stop this department's active work before deleting it";
     }
     const nextBots = this.bots.map(bot => ({ ...bot,
-      ...(sectionKey(bot.section) === name ? { section: undefined } : {}),
+      ...(sectionKey(bot.section) === name ? reshowWhenMoved(bot, { section: undefined }) : {}),
       ...(bot.managedSections ? { managedSections: bot.managedSections.filter(section => sectionKey(section) !== name) } : {}),
     }));
     if (chiefConflict(nextBots)) {
@@ -1388,7 +1388,7 @@ export class Store {
       } else {
         if (at < 0) throw new Error("A setup target no longer exists");
         const previous = nextBots[at];
-        next = { ...previous, ...operation.fields };
+        next = { ...previous, ...reshowWhenMoved(previous, operation.fields) };
         if (operation.fields.modelSelection) next.tasks = this.withDefaultModel(previous, operation.fields.modelSelection);
         nextBots[at] = next;
       }
@@ -1494,7 +1494,7 @@ export class Store {
 
   patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {
     const bot = this.bot(id);
-    if (!bot) return null;
+    if (!bot) return null; patch = reshowWhenMoved(bot, patch);
     if (patch.connectorTools !== undefined) {
       const parsed = parseConnectorTools(patch.connectorTools);
       if (!parsed.ok) throw new Error(parsed.error);
@@ -1550,7 +1550,7 @@ export class Store {
   patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "lastProfileRequestId">>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
-    const next = { ...bot, ...patch };
+    const next = { ...bot, ...reshowWhenMoved(bot, patch) };
     if (patch.soul !== undefined) {
       next.soulHash = soulHash(patch.soul);
       next.soulDrift = false;
@@ -1582,7 +1582,7 @@ export class Store {
     const selected = targets as BotRecord[];
     const patches = new Map<string, Partial<BotRecord>>();
     for (const bot of selected) {
-      patches.set(bot.id, { section: targetSection || undefined });
+      patches.set(bot.id, reshowWhenMoved(bot, { section: targetSection || undefined }));
     }
     if (chiefConflict(this.bots.map((bot) => ({ ...bot, ...patches.get(bot.id) })))) return { ok: false, reason: "chief-conflict" };
 
@@ -1619,7 +1619,7 @@ export class Store {
       if (removes.has(id) && sectionKey(bot.section) !== key) return { ok: false, reason: "membership-changed" };
     }
     const next = this.bots.map(bot => ids.has(bot.id)
-      ? { ...bot, section: adds.has(bot.id) ? key : undefined } : bot);
+      ? { ...bot, ...reshowWhenMoved(bot, { section: adds.has(bot.id) ? key : undefined }) } : bot);
     if (chiefConflict(next)) return { ok: false, reason: "chief-conflict" };
     if (ids.size) {
       this.saveBots(next);
