@@ -114,14 +114,18 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
   };
 }
 
-/** The heights reported once the frame has stopped changing, or after 20 rounds of a frame that never does. */
+const macrotask = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** Heights once a reflow has been reported. The helper queues the measure, its postMessage and the resize's
+ * next report as timers, each from the timer before it. One delay can expire first when a timer slot is coarse,
+ * and the height is then missing. */
 async function settled(page: ReturnType<typeof boot>) {
   await expect.poll(() => page.seen.heights.length).toBeGreaterThan(0);
   let count = -1;
   for (let round = 0; round < 20 && count !== page.seen.heights.length; round++) {
     count = page.seen.heights.length;
     page.reflow();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    for (let step = 0; step < 6; step++) await macrotask();
   }
   return page.seen.heights;
 }
