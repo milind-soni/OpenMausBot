@@ -174,8 +174,7 @@ export type CliOwner = "bot" | "openmausbot";
  * paths or the host's network, and `false` keeps a spawn out of it. */
 export interface BoxSpawnOptions {
   box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "botThreads" | "allowEnv" | "relay">;
-  /** On a Team Cloud, runs in its conversation's engine home though it is not a bot's engine (a keep-warm ping, which
-   * also names `box`: it starts the bot's own MCP servers). */
+  /** On a Team Cloud, runs in its conversation's engine home though it is not a bot's engine (a keep-warm ping). */
   engineHome?: boolean;
   /** A bot's own work that is not its engine (its browser, a helper engine): memory runs out on it first, as on a `bot`
    * spawn (oom-score.ts), with no box and no engine tracking. */

@@ -19,7 +19,7 @@ import { ClaudeDriver } from "./claude.ts";
 import { forkSpawnOptions } from "./claude-keepwarm.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
-const KNOBS = ["FAKE_CLAUDE_PING_DUMP", "FAKE_CLAUDE_COMPACT_DUMP", "FAKE_CLAUDE_STARTS_MCP"] as const;
+const KNOBS = ["FAKE_CLAUDE_DUMP", "FAKE_CLAUDE_PING_DUMP", "FAKE_CLAUDE_COMPACT_DUMP", "FAKE_CLAUDE_STARTS_MCP"] as const;
 const TMPDIR = process.env.TMPDIR;
 
 /** A stand-in for bubblewrap with no namespaces: it runs what follows `--`, and what it runs can tell it is inside. */
@@ -114,6 +114,69 @@ describe("keep-warm forks in the bot box", () => {
     const summary = boxedForks(wrap, "summary");
     expect(summary, "the summary went through the box").toHaveLength(1);
     expect(visibleInBox(summary[0]!.plan, join(DATA_DIR, "config.json"))).toBe("none");
+  }, 90_000);
+
+  // A ping is worth its cost only when its request starts byte for byte as the conversation's next turn will, and Claude
+  // Code builds that start from what it is launched with: its working folder, environment, system prompt file, MCP
+  // servers (whose tools it lists), flags, and the files it can see. So a fork must be launched as the boxed turn was.
+  it.skipIf(process.platform === "win32")("launch a ping and a summary as the boxed turn was launched, so they read the turn's cached prefix", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-keepwarm-prefix-"));
+    dirs.push(scratch);
+    const fakeBwrap = join(scratch, "fake-bwrap.sh");
+    writeFileSync(fakeBwrap, MARKING_BWRAP);
+    chmodSync(fakeBwrap, 0o755);
+    await botBox.start({
+      dataDir: DATA_DIR, home: homedir(), port: 8799, denyEnv: new Set(), env: {}, log: () => {},
+      detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: fakeBwrap, socat: "/usr/bin/true" } }),
+    });
+    const wrap = vi.spyOn(botBox, "wrap");
+    delete process.env.TMPDIR;
+    const turnDump = join(scratch, "turn.json"), pingDump = join(scratch, "ping.json"), compactDump = join(scratch, "compact.json");
+    process.env.FAKE_CLAUDE_DUMP = turnDump;
+    process.env.FAKE_CLAUDE_PING_DUMP = pingDump;
+    process.env.FAKE_CLAUDE_COMPACT_DUMP = compactDump;
+    instance = await ClaudeDriver.create({ instanceId: "claude-keepwarm-prefix", displayName: "Claude", environment: {}, enabled: true, config: { cli: FAKE_CLI, permissionMode: "acceptEdits" } });
+    const recorder = recordEvents(instance.adapter);
+    const cwd = join(DATA_DIR, "task-workspaces", "bot-a", "t-warm-prefix");
+    mkdirSync(cwd, { recursive: true });
+    await instance.adapter.sendTurn({
+      threadId: "t-warm-prefix", botId: "bot-a", text: "hi", approvalMode: "full", cwd, model: "claude-sonnet-5", system: "You are Editor.",
+      integrations: { custom: { notes: botServer(join(scratch, "started.txt"), join(scratch, "none")) }, customResultBudgets: { notes: 0 } },
+    });
+    await recorder.until((event) => event.type === "turn.completed", 30_000);
+    expect(await instance.adapter.cacheKeepWarm!.ping("t-warm-prefix")).toMatchObject({ ok: true });
+    expect(await instance.adapter.cacheKeepWarm!.compact!("t-warm-prefix", { instructions: "" })).toMatchObject({ ok: true });
+
+    const turn = JSON.parse(readFileSync(turnDump, "utf8"));
+    const turnSpawn = wrap.mock.results.map((result) => result.value as WrappedSpawn | null).find((spawned) => spawned?.args.includes("stream-json"));
+    expect(turnSpawn, "the turn went through the box").toBeTruthy();
+    // Each boxed process gets its own broker token in place of the key; the broker sends the same key upstream.
+    const sameUpstream = (env: Record<string, string>) => Object.fromEntries(Object.entries(env).map(([name, value]) => [name, value.replace(/omb_t0_[a-f0-9]{48}/g, "<broker token>")]));
+    // The deny hook's folder and the dead permission socket are the fork's own; neither is in the request.
+    const servers = (config: { mcpServers: Record<string, { args?: string[] }> }) => Object.fromEntries(Object.entries(config.mcpServers)
+      .map(([name, server]) => [name, name === "ogb" ? { ...server, args: server.args?.slice(0, -1) } : server]));
+    const PREFIX_FLAGS = ["--model", "--permission-mode", "--strict-mcp-config", "--setting-sources", "--system-prompt-snapshot", "--allowedTools", "--disallowedTools", "--effort", "--permission-prompt-tool"];
+    const flags = (argv: string[]) => PREFIX_FLAGS.map((flag) => [flag, argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : null]);
+    // What the box shows, but for each process's own private files: the turn's MCP config, prompt and permission socket,
+    // the fork's folder.
+    const PRIVATE = /\/(omb-(mcp|system|keepwarm|hook)-[^/]+|perm-[^/]+\.sock)(\/|$)/;
+    const view = (spawned: WrappedSpawn) => ({
+      mounts: spawned.plan.mounts.filter((mount) => !("source" in mount && PRIVATE.test(mount.source))),
+      net: spawned.plan.net, botId: spawned.plan.botId, options: spawned.plan.options,
+    });
+    for (const [what, dumpPath] of [["ping", pingDump], ["summary", compactDump]] as const) {
+      const fork = JSON.parse(readFileSync(dumpPath, "utf8"));
+      expect(fork.cwd, what).toBe(turn.cwd);
+      expect(sameUpstream(fork.env), `the ${what}'s environment`).toEqual(sameUpstream(turn.env));
+      expect(fork.systemPrompt, what).toBe(turn.systemPromptFile);
+      expect(servers(fork.mcpConfig), `the ${what}'s MCP servers`).toEqual(servers(turn.mcpConfig));
+      expect(flags(fork.argv), what).toEqual(flags(turn.argv));
+      const forkSpawn = boxedForks(wrap, what)[0];
+      expect(forkSpawn, `the ${what} went through the box`).toBeTruthy();
+      expect(view(forkSpawn!), `what the ${what} can see`).toEqual(view(turnSpawn!));
+    }
   }, 90_000);
 
   it.skipIf(process.platform === "win32")("with the box off, a fork runs as it did", async () => {

@@ -134,8 +134,8 @@ export function runKeepWarmPing(opts: {
 }
 
 /** One prompt on a fork of a live session, with that session's exact launch contract so its cached prompt start is read
- * again; no tool can run in it, and the servers it starts run where a turn's do. Never throws. The credentialed MCP config, settings and prompt live in a 0700 temp dir
- * removed at exit. */
+ * again; no tool can run in it, and the servers it starts run where a turn's do. Never throws. The credentialed MCP
+ * config, settings and prompt live in a 0700 temp dir removed at exit. */
 export function runForkedPrompt<T>(opts: {
   cli: string;
   contract: KeepWarmContract;
