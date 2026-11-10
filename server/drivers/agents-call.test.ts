@@ -136,6 +136,37 @@ describe("team creation with every optional field filled in", () => {
       recording(calls, { id: "b1", name: "Scout" }));
     expect(calls[0].body.modelSelection).toEqual({ instanceId: "codex", model: "gpt-5" });
   });
+
+  it("propose_team_setup drops null optional fields but keeps an empty description", async () => {
+    const calls: Array<{ path: string; body: any }> = [];
+    await callTool("propose_team_setup", {
+      reason: "Shop team",
+      operations: [
+        { action: "create", key: "buyer", fields: { name: "Buyer", description: null, cwd: null, chiefOfStaff: null } },
+        { action: "update", botId: "b-1", fields: { description: "" } },
+      ],
+    }, recording(calls, { state: "applied" }));
+    expect(calls[0].body.plan.operations).toEqual([
+      { action: "create", key: "buyer", fields: { name: "Buyer" } },
+      { action: "update", botId: "b-1", fields: { description: "" } },
+    ]);
+  });
+
+  it("propose_model drops blank effort and variant from the model choice", async () => {
+    const calls: Array<{ path: string; body: any }> = [];
+    const result = await callTool("propose_model", { model_selection: { instanceId: "codex", model: "gpt-5", effort: "", variant: null }, reason: "Faster." },
+      recording(calls, { state: "applied" }));
+    expect(result.isError).toBeFalsy();
+    expect(calls[0].body.modelSelection).toEqual({ instanceId: "codex", model: "gpt-5" });
+  });
+
+  it("start_thread drops a blank effort from the model choice", async () => {
+    const calls: Array<{ path: string; body: any }> = [];
+    const result = await callTool("start_thread", { title: "Review", message: "Review it.", model_selection: { instanceId: "codex", model: "gpt-5", effort: " " } },
+      recording(calls, { self: true, state: "queued", threadId: "t-1", title: "Review" }));
+    expect(result.isError).toBeFalsy();
+    expect(calls[0].body.modelSelection).toEqual({ instanceId: "codex", model: "gpt-5" });
+  });
 });
 
 describe("mcp_server", () => {

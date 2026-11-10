@@ -32,7 +32,8 @@ function withoutBlankModelChoice(selection: unknown): unknown {
 }
 
 /** Same for team setup: a create also carries a blank botId and an update a blank key, which the receiver refuses as
- * unrecognized keys. A non-blank one is kept, so a real mistake is still named. */
+ * unrecognized keys, and optional fields arrive as null. A non-blank one is kept, so a real mistake is still named; an
+ * empty string field (a cleared description) is kept too. */
 function withoutBlankTeamSetupFields(input: Json): Json {
   if (!Array.isArray(input.operations)) return input;
   return {
@@ -40,18 +41,24 @@ function withoutBlankTeamSetupFields(input: Json): Json {
     operations: input.operations.map((operation) => {
       if (!jsonRecord(operation)) return operation;
       const out = withoutBlank(operation, operation.action === "create" ? ["botId"] : operation.action === "update" ? ["key"] : []);
-      if (jsonRecord(out.fields) && out.fields.modelSelection !== undefined) {
-        out.fields = { ...out.fields, modelSelection: withoutBlankModelChoice(out.fields.modelSelection) };
+      if (jsonRecord(out.fields)) {
+        const fields = withoutBlank(out.fields, Object.keys(out.fields), (value) => value === null);
+        if (fields.modelSelection !== undefined) fields.modelSelection = withoutBlankModelChoice(fields.modelSelection);
+        out.fields = fields;
       }
       return out;
     }),
   };
 }
 
+/** Tools whose model choice (effort / variant) strict engines fill with blanks, and the argument that holds it. */
+const MODEL_CHOICE_ARGUMENT: Readonly<Record<string, string>> = { create_bot: "modelSelection", propose_model: "model_selection", start_thread: "model_selection" };
+
 export function dropBlankArguments(name: string, input: Json): Json {
   if (!jsonRecord(input)) return input;
   if (name === "propose_team_setup") return withoutBlankTeamSetupFields(input);
-  if (name === "create_bot" && input.modelSelection !== undefined) return { ...input, modelSelection: withoutBlankModelChoice(input.modelSelection) };
+  const selectionKey = Object.hasOwn(MODEL_CHOICE_ARGUMENT, name) ? MODEL_CHOICE_ARGUMENT[name] : undefined;
+  if (selectionKey && input[selectionKey] !== undefined) return { ...input, [selectionKey]: withoutBlankModelChoice(input[selectionKey]) };
   const keys = Object.hasOwn(BLANK_MEANS_LEFT_OUT, name) ? BLANK_MEANS_LEFT_OUT[name] : undefined;
   return keys ? withoutBlank(input, keys, blankText) : input;
 }
