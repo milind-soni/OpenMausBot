@@ -54,6 +54,7 @@ function fixture() {
     routines: () => routines,
     deleteRoutine: (id) => { routines.splice(routines.findIndex((routine) => routine.id === id), 1); },
     handRoutine: (id, left, to) => { handed.push([id, left, to]); },
+    forgetOnBots: () => 0,
     ownerOf: (botId) => (botId === "scout" ? "olive@acme.test" : botId === "ledger" ? BOB : null),
     record: (row) => { rows.push(row); },
   };
@@ -77,6 +78,7 @@ describe("createTeamMemberLeft", () => {
     expect(fx.rows).toEqual([
       { category: "bot", action: "routine.handover", target: { kind: "routine", id: "standup", name: "Standup" }, after: { owner: "olive@acme.test" } },
       { category: "bot", action: "routine.handover", target: { kind: "routine", id: "tally", name: "Tally" }, after: { owner: null } },
+      { category: "people", action: "member.left", target: { kind: "person", name: BOB }, after: { botsHandedBack: 0, routinesHandedOver: 2 } },
     ]);
     expect(fx.deleted).toEqual([own]);
     expect(result).toMatchObject({ routines: 1, routinesHandedOver: 2 });

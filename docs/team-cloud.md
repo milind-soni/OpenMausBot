@@ -267,7 +267,7 @@ the Admin (404). A session is also kept only across a clean restart.
 **When someone leaves.** The Admin tells the machine when a member is removed or leaves: `POST
 /api/cloud/team/member-left` with `{ "email": "<address>" }`, signed with its body like the sleep request (400
 `invalid_member` for a bad address; only on a Team Cloud). The machine then deletes what was that person's alone and
-answers `{ ok, chats, layers, sessions, files, browsers, bots, routines, routinesHandedOver }`: every
+answers `{ ok, chats, layers, sessions, files, browsers, bots, routines, routinesHandedOver, botsHandedBack }`: every
 session and phone of theirs and any open code of theirs end at once; their own MausBot is deleted as the app deletes a
 bot, with its chats and notes (`bots`, its chats counted in `chats`), and should they join again they get a new one;
 their private chats with every bot are deleted as the app deletes a conversation (messages, notifications, follow-ups,
@@ -283,7 +283,12 @@ own chats before they go is not built.
 What they did for the team stays, without them. A routine they wrote for a shared place (a bot, a group chat) keeps
 running as the routine of whoever looks after its bot now, or nobody's when nobody does, whose asks go to the Admins
 (`routinesHandedOver`); one that reported into a chat of theirs gets a chat of its new owner's. Each is one admin
-activity row, *Handed a routine over*, naming the routine and its new owner.
+activity row, *Handed a routine over*, naming the routine and its new owner. They come off every bot's sharing
+(`access.people` and `visibility`, an `@domain` entry kept) and "Looked after by": a bot they looked after, by
+`reportsTo` or as its creator, is nobody's and falls to the Admins (`botsHandedBack`); a Chief that would then be its
+department's second gives up its crown. So joining again restores nothing: they start as a new member. One more row,
+*Left the team*, names who left and when, with `botsHandedBack` and `routinesHandedOver` and nothing of what was
+theirs alone.
 
 **A member's own code (their phone).** `POST /api/team/phone-pairing` (any team session, Member included) makes a pairing
 code carrying the caller's `member` claim (address, role, the role's scopes) and the time the Admin last vouched for
@@ -658,7 +663,7 @@ person as before, and `message_person` and the inbox do not exist.
 - **Per-member engine sign-ins.** Every audience's engine signs in as the team (its key through the broker, or the
   team's sign-in files in each engine home, above); a member cannot sign an engine in as themselves, by design.
 - **A roster read from the Admin.** Without the Admin's `member-left` request (above), removal takes effect within the
-  hour, and nothing is deleted or handed over.
+  hour, and nothing is deleted, handed over or taken off a bot.
 - **Engine homes without a box, and engines outside the list.** Without the bot box (bubblewrap refused, or switched
   off) a shell reaches every file of the server's user, engine homes included; only the box keeps them apart. An engine
   whose sign-in file is not named in `engine-homes/layout.ts` starts signed out in every audience's home. Engines

@@ -4087,6 +4087,7 @@
   "activity.action.access.decline": "Recusou um pedido para conversar com um bot",
   "activity.action.owner.update": "Alterou a quem um bot responde",
   "activity.action.routine.handover": "Passou uma rotina adiante",
+  "activity.action.member.left": "Saiu da equipe",
   "activity.action.room.audience-reset": "Ampliou a visibilidade de um grupo",
   "activity.action.webhook.create": "Criou um webhook",
   "activity.action.webhook.update": "Alterou um webhook",

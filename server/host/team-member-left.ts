@@ -5,7 +5,9 @@
 // engine home (its transcripts), their "About you", their own connections, their own browsers, and every session and
 // phone of theirs. Nothing of it is handed to an admin. A routine they wrote for a shared place keeps running, as the
 // routine of whoever looks after its bot now (the Admins when nobody does), and admin activity says it was handed over.
-// The Admin tells this machine with a signed request (`POST /api/cloud/team/member-left`, cloud-signed.ts).
+// They come off every bot's sharing and "Looked after by" (what they looked after falls to the Admins), so joining again
+// restores nothing, and one admin activity row says who left, in counts. The Admin tells this machine with a signed
+// request (`POST /api/cloud/team/member-left`, cloud-signed.ts).
 //
 // Each conversation keeps its starter (thread-starters.json, a hash): what other records still name it (a decision's
 // row, a usage trace) stays someone else's, so no admin ever reads it there either.
@@ -59,13 +61,15 @@ export interface TeamMemberLeftDeps {
   /** The routine runs as `to`'s from now on (a person key), or nobody's, whose asks go to the Admins (null); it stops
    * reporting into a chat of `left`, the person who left. */
   handRoutine(id: string, left: string, to: string | null): void;
+  /** Takes the address off every bot's sharing and "Looked after by"; how many bots they looked after. */
+  forgetOnBots(email: string): number;
   /** Who looks after the bot (an address), else null. */
   ownerOf(botId: string): string | null;
   /** One row of the team's admin activity. */
   record(row: Omit<AdminActionRow, "at" | "actor">): void;
 }
 
-export type TeamMemberLeftResult = { chats: number; layers: number; sessions: number; files: number; browsers: boolean; bots: number; botsKept: number; routines: number; routinesHandedOver: number };
+export type TeamMemberLeftResult = { chats: number; layers: number; sessions: number; files: number; browsers: boolean; bots: number; botsKept: number; routines: number; routinesHandedOver: number; botsHandedBack: number };
 
 export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) => Promise<TeamMemberLeftResult> {
   const workspaces = join(deps.dataDir, "workspaces");
@@ -76,6 +80,7 @@ export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) 
     // First, so nothing of theirs is opened, written or streamed while it goes.
     const sessions = deps.revokeSessions(email);
     const address = email.trim().toLowerCase();
+    const botsHandedBack = deps.forgetOnBots(address);
     // Before their chats go: which routine lives in one is read from those chats.
     const everyRoutine = deps.routines();
     const ownRoutines = everyRoutine.filter((routine) => routine.home === person);
@@ -140,6 +145,8 @@ export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) 
     rmSync(audienceHome(deps.dataDir, memberAudience(person)), { recursive: true, force: true });
     deps.forgetConnections(person);
     const browsers = await deps.eraseBrowsers(memberAudience(person)).catch(() => false);
-    return { chats, layers, sessions, files: removed, browsers, bots, botsKept, routines: ownRoutines.length, routinesHandedOver: written.length };
+    // Counts of shared things only: nothing here says what was theirs alone.
+    deps.record({ category: "people", action: "member.left", target: { kind: "person", name: address }, after: { botsHandedBack, routinesHandedOver: written.length } });
+    return { chats, layers, sessions, files: removed, browsers, bots, botsKept, routines: ownRoutines.length, routinesHandedOver: written.length, botsHandedBack };
   };
 }

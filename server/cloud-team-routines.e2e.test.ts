@@ -221,3 +221,23 @@ it("when Bob leaves, his private routines go and the shared ones he wrote are ha
   const activity = JSON.stringify(entries);
   for (const secret of ["Kumquat", "Quince", "quince", bobThread]) expect(activity).not.toContain(secret);
 }, hostTimeout(240_000));
+
+it("Bob is off every bot when he leaves, Activity says so in counts, and joining again restores nothing", async () => {
+  const ledgerNow = (await botsOf(owner)).find((bot) => bot.id === ledger.id)!;
+  expect(JSON.stringify(ledgerNow)).not.toContain(BOB.email);
+  expect(ledgerNow.reportsTo).toBeUndefined();
+  expect(ledgerNow.access?.people, "the Owner kept editing it when she handed it to Bob").toEqual({ [OWNER.email]: "edit", [BEN.email]: "chat" });
+  type Entry = { action: string; at: string; target?: { kind: string; name?: string }; after?: Record<string, unknown> };
+  let entries: Entry[] = [];
+  await until(async () => {
+    entries = (await team.as(admin, "GET", "/api/admin-activity?what=people")).body.entries as Entry[];
+    return entries.some((entry) => entry.action === "member.left");
+  }, 10_000);
+  expect(entries.filter((entry) => entry.action === "member.left")).toEqual([
+    expect.objectContaining({ at: expect.any(String), target: { kind: "person", name: BOB.email }, after: { botsHandedBack: 1, routinesHandedOver: 2 } }),
+  ]);
+  for (const secret of ["Kumquat", "Quince", bobThread]) expect(JSON.stringify(entries)).not.toContain(secret);
+  const again = (await team.pair(BOB)).token!;
+  expect((await botsOf(again)).map((bot) => bot.id), "Ledger was shared with him by name").not.toContain(ledger.id);
+  expect((await routinesOf(again)).routines.map((routine) => routine.id)).not.toContain(kumquat);
+}, hostTimeout(60_000));
