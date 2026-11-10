@@ -30,14 +30,22 @@ export class AuthChallenges {
   }
 
   watch(session: CdpSession): () => void {
+    const clear = () => {
+      if (this.#pending?.session !== session) return;
+      clearTimeout(this.#pending.timer);
+      this.#pending = null;
+      this.#emit(null);
+    };
     const offs = [
       session.on("Fetch.requestPaused", (params: Params) => {
         void session.send("Fetch.continueRequest", { requestId: params.requestId }).catch(() => {});
       }),
       session.on("Fetch.authRequired", (params: Params) => this.#required(session, params)),
+      session.onDetach(clear),
     ];
     return () => {
       for (const off of offs) off();
+      clear();
     };
   }
 
