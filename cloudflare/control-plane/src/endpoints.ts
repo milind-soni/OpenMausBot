@@ -6,6 +6,7 @@ import {
   type CloudflareDNSRecord,
   type CloudflareFetch,
   type CloudflareTunnel,
+  TUNNEL_CONNECTED_CODE,
 } from "./cloudflare-api";
 import type { ControlPlaneConfig, EndpointAccount } from "./config";
 import {
@@ -73,7 +74,7 @@ const LEASE_MS = 60_000;
 const ENDPOINT_ACTION_WINDOW_MS = 60 * 60 * 1_000;
 const ENDPOINT_RECONCILE_LIMIT = 20;
 const ENDPOINT_DELETE_LIMIT = 30;
-// A cleanup makes at most ten Cloudflare API calls; five rows at a time stays
+// A cleanup makes at most 14 Cloudflare API calls; five rows at a time stays
 // inside the Workers limit of six connections awaiting headers.
 const CLEANUP_CONCURRENCY = 5;
 const CLEANUP_BACKOFF_1_MS = 5 * 60 * 1_000;
@@ -81,6 +82,9 @@ const CLEANUP_BACKOFF_2_MS = 15 * 60 * 1_000;
 const CLEANUP_BACKOFF_3_MS = 60 * 60 * 1_000;
 const CLEANUP_BACKOFF_4_MS = 6 * 60 * 60 * 1_000;
 const CLEANUP_BACKOFF_MAX_MS = 24 * 60 * 60 * 1_000;
+/** Connection cleanups, each followed at once by a delete, that a forced
+ * removal makes after Cloudflare answers that the tunnel is still connected. */
+const FORCED_TUNNEL_DELETE_ROUNDS = 2;
 const MANUAL_CLEANUP_THRESHOLD_MS = 24 * 60 * 60 * 1_000;
 /** Cloudflare blocks a rate-limited API token for up to five minutes. */
 const RATE_LIMIT_RETRY_AFTER_DEFAULT_SECONDS = 60;
@@ -657,6 +661,30 @@ async function deleteVerifiedTunnel(
   }
 }
 
+/** Removes a tunnel taken on purpose (a release, the owner's delete, a revoked
+ * installation) even while its computer is online. Cloudflare refuses to delete
+ * a tunnel with active connections, and a running cloudflared reconnects within
+ * seconds of losing them, so each round drops the connections and deletes at
+ * once: first as documented, last with `cascade` as cloudflared's own forced
+ * delete sends it. Bounded: two calls per round. */
+async function forceDeleteTunnel(
+  env: Env,
+  claim: ClaimedEndpoint,
+  api: CloudflareAPI,
+  tunnelId: string,
+): Promise<void> {
+  for (let round = 0; ; round += 1) {
+    try {
+      await api.deleteTunnel(tunnelId, { cascade: round === FORCED_TUNNEL_DELETE_ROUNDS });
+      return;
+    } catch (error) {
+      if (errorCode(error) !== TUNNEL_CONNECTED_CODE || round >= FORCED_TUNNEL_DELETE_ROUNDS) throw error;
+    }
+    await renewClaim(env, claim);
+    await api.cleanupTunnelConnections(tunnelId);
+  }
+}
+
 async function rollbackCreatedResources(
   env: Env,
   claim: ClaimedEndpoint,
@@ -1141,7 +1169,10 @@ async function deleteClaim(
           return "cancelled";
         }
         await renewClaim(env, claim);
-        await api.deleteTunnel(tunnelId);
+        // An idle reclaim never forces: a tunnel that answers "still connected"
+        // is left to the next attempt, which finds it connected and cancels.
+        if (idleReclaim) await api.deleteTunnel(tunnelId);
+        else await forceDeleteTunnel(env, claim, api, tunnelId);
         freed.tunnels += 1;
       }
       tunnelId = null;
