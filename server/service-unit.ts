@@ -47,6 +47,8 @@ export function systemdUnit(spec: ServiceSpec): string {
     `WorkingDirectory=${spec.home}`,
     `Environment=HOME=${spec.home}`,
     `Environment=OMB_DATA_DIR=${spec.dataDir}`,
+    // A service is a server, whatever it was installed from: a checkout run from source follows the profile's rules too.
+    "Environment=OMB_PROFILE=auto",
     ...(spec.cliPrefix ? [`Environment=${quoteSystemd(`OMB_CLI_PREFIX=${spec.cliPrefix}`)}`] : []),
     `ExecStart=${serviceCommand(spec).map(quoteSystemd).join(" ")}`,
     "Restart=always",
@@ -86,6 +88,8 @@ export function launchdPlist(spec: ServiceSpec): string {
     `\t\t<string>${xml(spec.home)}</string>`,
     "\t\t<key>OMB_DATA_DIR</key>",
     `\t\t<string>${xml(spec.dataDir)}</string>`,
+    "\t\t<key>OMB_PROFILE</key>",
+    "\t\t<string>auto</string>",
     ...(spec.cliPrefix ? ["\t\t<key>OMB_CLI_PREFIX</key>", `\t\t<string>${xml(spec.cliPrefix)}</string>`] : []),
     "\t\t<key>PATH</key>",
     "\t\t<string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>",

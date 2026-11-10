@@ -25,7 +25,7 @@ import { parseAllowList } from "./account-signin.ts";
 import { appendAdminAction, flushAdminActivity, sharedSignIn } from "./admin-activity.ts";
 import { bindDecisionRetention, decisionRetentionDays } from "./decision-log.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
-import { resolveLoopbackTrust } from "./request-auth.ts";
+import { resolveLoopbackTrust } from "./request-auth.ts"; import { readOperatorToken, resolveServerProfile, signInListsFor } from "./server-profile.ts";
 import { restartPolicy } from "./restart.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
@@ -257,18 +257,18 @@ export function serverVersion(here = HERE): string {
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/** On a service-trust server: the secret `serve` handed the server it started, which opens its pairing route. */
+/** On a service-trust server: the secret `serve` handed the server it started, which opens its pairing route; else the server's operator token, read from its data folder. */
 let serveOwnerToken: string | undefined;
 
 async function api(port: number, path: string, init: { method?: string; body?: string } = {}): Promise<{ status: number; body: any }> {
   // x-openmausbot-cli names the tool in the activity log; on loopback it grants nothing.
-  const headers: Record<string, string> = { "content-type": "application/json", "x-openmausbot-cli": "1", ...(serveOwnerToken ? { "x-openmausbot-cli-owner": serveOwnerToken } : {}) };
+  const owner = serveOwnerToken ?? readOperatorToken(process.env.OMB_DATA_DIR), headers: Record<string, string> = { "content-type": "application/json", "x-openmausbot-cli": "1", ...(owner ? { "x-openmausbot-cli-owner": owner } : {}) };
   const res = await fetch(`http://127.0.0.1:${port}${path}`, { method: init.method, body: init.body, headers, signal: AbortSignal.timeout(3000) });
   const body: unknown = await res.json().catch(() => ({}));
   return { status: res.status, body };
 }
 
-export const SERVICE_TRUST_HELP = "This server does not treat commands on this computer as its owner (OMB_LOOPBACK_TRUST=service, or a hosted workspace), so it will not pair devices or list sessions for them. Sign in as an admin and use Settings → Remote access, let people sign in with their email (openmausbot access add you@example.com), or restart the server with OMB_LOOPBACK_TRUST=owner.";
+export const SERVICE_TRUST_HELP = "This server does not treat commands on this computer as its owner (more than one person can sign in to it, OMB_LOOPBACK_TRUST=service, or a hosted workspace), so it will not pair devices or list sessions for them. Sign in as an admin and use Settings → Remote access, let people sign in with their email (openmausbot access add you@example.com), or restart the server with OMB_LOOPBACK_TRUST=owner.";
 
 function refusedAsService(status: number, body: any): boolean {
   return status === 403 && typeof body?.error === "string" && /shared server|Sign in through the workspace portal/.test(body.error);
@@ -725,10 +725,10 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   };
   if (options.local) delete env.OMB_PUBLIC_URL;
   // The per-launch secret goes over stdin, not the environment that every engine the server starts inherits.
-  const serviceTrust = resolveLoopbackTrust({ env, desktopManaged: false, hostedWorkspace: hostedWorkspaceConfigured(env) }).trust === "service";
+  const hardened = resolveServerProfile({ env, desktopManaged: false, cloudHome: false, hostedWorkspace: hostedWorkspaceConfigured(env), signIn: signInListsFor(options.dataDir, env), fromSource: import.meta.url.endsWith(".ts") }).name === "hardened";
+  const serviceTrust = resolveLoopbackTrust({ env, desktopManaged: false, hostedWorkspace: hostedWorkspaceConfigured(env), hardened }).trust === "service";
   const ownerToken = serviceTrust ? randomBytes(32).toString("base64url") : undefined;
-  if (ownerToken) env.OMB_CLI_OWNER_STDIN = "1";
-  else delete env.OMB_CLI_OWNER_STDIN;
+  if (ownerToken) env.OMB_CLI_OWNER_STDIN = "1"; else delete env.OMB_CLI_OWNER_STDIN;
   if (entry.staticDir) env.OMB_STATIC_DIR = entry.staticDir;
   if (entry.skillsDir && !process.env.OMB_SKILLS_DIR) env.OMB_SKILLS_DIR = entry.skillsDir;
   if (options.label && !process.env.OMB_ENVIRONMENT_LABEL) env.OMB_ENVIRONMENT_LABEL = options.label;

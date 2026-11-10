@@ -1,0 +1,17 @@
+# Lets the server's container build the bot box (docs/self-hosting.md, "The
+# hardened profile"). Add it to either Compose file, after preparing the host
+# once with `sudo sh deploy/box/prepare-host.sh`:
+#
+#   docker compose -f compose.yaml -f deploy/box/compose.box.yaml up -d
+#   docker compose -f deploy/docker-compose.yml -f deploy/box/compose.box.yaml up -d
+#
+# No --privileged and no added capability: a seccomp profile and an AppArmor
+# profile that allow bubblewrap's namespaces and mounts, and /proc without
+# Docker's masks, which a sandbox's own /proc cannot be mounted beside.
+services:
+  omb:
+    security_opt:
+      - seccomp=/etc/mausbot/seccomp-omb-home.json
+      - apparmor=omb-home-narrow
+      - systempaths=unconfined
+      - no-new-privileges=true
