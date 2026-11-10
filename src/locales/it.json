@@ -3954,7 +3954,6 @@
   "vm.isolation.subtitle": "Condiviso mantiene il comportamento originale a un solo desktop. Per bot dà a ogni bot un proprio container, una cartella, una porta del visore, una concessione e un timer di inattività.",
   "vm.isolation.shared": "Condiviso",
   "vm.isolation.max": "Numero massimo di desktop per bot",
-  "vm.isolation.maxDetail": "Limita lo spazio e l'uso delle risorse dell'host; ogni desktop in esecuzione può usare fino a 4 GB e 2 CPU.",
   "vm.isolation.maxAria": "Numero massimo di desktop per bot",
   "vm.idle.label": "Ferma i desktop inattivi dopo",
   "vm.idle.detail": "Vale per i desktop condivisi e per bot. Un desktop con un turno in corso non viene mai fermato. Lo spegnimento per inattività conserva i file e le app installate.",

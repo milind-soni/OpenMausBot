@@ -1673,7 +1673,6 @@
   "vm.isolation.shared": "साझा",
   "vm.isolation.perBot": "हर बॉट",
   "vm.isolation.max": "हर बॉट के अधिकतम डेस्कटॉप",
-  "vm.isolation.maxDetail": "स्टोरेज और होस्ट संसाधनों का उपयोग सीमित करता है; हर चालू डेस्कटॉप 4 GB और 2 CPU तक ले सकता है।",
   "vm.isolation.maxAria": "हर बॉट के अधिकतम डेस्कटॉप",
   "vm.saving": "सहेजा जा रहा है…",
   "vm.unmanagedError": "यह कंटेनर {app} द्वारा प्रबंधित नहीं है और यहाँ से नहीं हटाया जा सकता।",

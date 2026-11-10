@@ -452,6 +452,9 @@ describe("containerComputerStatus", () => {
     }
     expect(podmanSecurityIsHardened(config, [...PACKAGE_INSTALL_CAPS, "CAP_SYS_CHROOT"], [...PACKAGE_INSTALL_CAPS, "CAP_SYS_CHROOT"])).toBe(true);
     expect(podmanSecurityIsHardened(config, [...PACKAGE_INSTALL_CAPS, "CAP_SYS_CHROOT"], ["CAP_SETGID", "CAP_SETUID", "CAP_SYS_CHROOT"])).toBe(false);
+    const caps = [...PACKAGE_INSTALL_CAPS, "CAP_SYS_CHROOT"];
+    expect(podmanSecurityIsHardened({ ...config, SecurityOpt: [] }, caps, caps, { requireNoNewPrivileges: true })).toBe(false);
+    expect(podmanSecurityIsHardened(config, caps, caps, { requireNoNewPrivileges: true })).toBe(true);
   });
 
   it("requires no-new-privileges where the desktop's root is the host's root", () => {
@@ -480,7 +483,7 @@ describe("containerComputerStatus", () => {
     expect(status.security).toBe(security);
   });
 
-  it("updates a desktop made under older run flags like one on an older image", async () => {
+  it("updates a Docker Engine desktop made under older run flags like one on an older image", async () => {
     const detail = JSON.parse(readyInspect())[0];
     delete detail.Config.Labels[DESKTOP_FLAGS_LABEL];
     const fake = runner({
@@ -494,6 +497,22 @@ describe("containerComputerStatus", () => {
     expect(status).toMatchObject({ managed: true, imageMatches: false, ready: false });
     expect(status.problem).toContain("older desktop");
     expect(fake.calls.some((call) => call.startsWith("docker exec "))).toBe(false);
+  });
+
+  it("leaves an older desktop alone where its root is not the host's root", async () => {
+    const detail = JSON.parse(readyInspect())[0];
+    delete detail.Config.Labels[DESKTOP_FLAGS_LABEL];
+    detail.HostConfig.CapAdd = ["CAP_SETUID", "CAP_SETGID"];
+    detail.HostConfig.SecurityOpt = [];
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: JSON.stringify([detail]),
+    });
+    const status = await containerComputerStatus(fake.run, "darwin", SHARED_LOCAL_VM_TARGET, { probeDesktop: false });
+    expect(status).toMatchObject({ managed: true, imageMatches: true, security: "hardened" });
   });
 
   it.each([
@@ -1211,6 +1230,12 @@ describe("setupCommands", () => {
 
   it("bars every route to root only where the desktop's root is the host's root", () => {
     expect(setupCommands("docker", "linux").run).toContain("--security-opt no-new-privileges");
+    const rootPodman = containerRunArgs("podman", "secret", SHARED_LOCAL_VM_TARGET, {
+      platform: "linux",
+      resources: { memoryGb: 4, cpus: 2 },
+      hostUser: { uid: 0, gid: 0 },
+    });
+    expect(rootPodman.join(" "), "Podman run by root keeps the host id map").toContain("--security-opt no-new-privileges");
     for (const [runtime, platform] of [["docker", "darwin"], ["docker", "win32"], ["podman", "linux"], ["container", "darwin"]] as const) {
       expect(setupCommands(runtime, platform).run, `${runtime} on ${platform}`).not.toContain("no-new-privileges");
     }
@@ -1229,6 +1254,7 @@ describe("setupCommands", () => {
 
   it.each([
     ["docker", "linux", { uid: 1001, gid: 1002 }, ["1001", "1002"]],
+    ["docker", "linux", { uid: 1001, gid: 0 }, ["1001", "1000"]],
     ["docker", "linux", { uid: 1000, gid: 1000 }, null],
     ["docker", "linux", { uid: 1000, gid: 100 }, null],
     ["docker", "linux", { uid: 0, gid: 0 }, null],
@@ -1248,7 +1274,10 @@ describe("setupCommands", () => {
     expect(tail.slice(0, 2)).toEqual(["sh", "-c"]);
     expect(tail.slice(3)).toEqual(["openmausbot-desktop", ...ids]);
     expect(tail[2]).toContain("exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf");
-    expect(tail[2]).toMatch(/\|\| \{ echo "cua did not take uid \$uid gid \$gid" >&2; exit 1; \}\n  find /);
+    const script = tail[2];
+    expect(script.indexOf("find / -xdev"), "files move before /etc/passwd, so an interrupted start resumes")
+      .toBeLessThan(script.indexOf("sed -i"));
+    expect(script).toMatch(/\|\| \{ echo "cua did not take uid \$uid gid \$gid" >&2; exit 1; \}\nfi\nexec /);
   });
 
   it("asks rootless Podman to map and privately relabel the durable workspace", () => {

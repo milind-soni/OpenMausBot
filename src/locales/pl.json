@@ -4025,7 +4025,6 @@
   "vm.isolation.shared": "Współdzielone",
   "vm.isolation.perBot": "Dla botów",
   "vm.isolation.max": "Maksymalna liczba pulpitów dla botów",
-  "vm.isolation.maxDetail": "Ogranicza użycie miejsca i zasobów hosta; każdy działający pulpit może zużywać do 4 GB i 2 CPU.",
   "vm.isolation.maxAria": "Maksymalna liczba pulpitów dla botów",
   "vm.idle.label": "Zatrzymuj bezczynne pulpity po",
   "vm.idle.detail": "Dotyczy pulpitów współdzielonych i dla botów. Pulpit z trwającą turą nigdy nie jest zatrzymywany. Wyłączenie z powodu bezczynności zachowuje jego pliki i zainstalowane aplikacje.",

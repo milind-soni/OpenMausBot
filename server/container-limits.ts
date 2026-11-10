@@ -15,7 +15,8 @@ export const MAX_DESKTOP_MEMORY_GB = 128;
 export const MIN_DESKTOP_CPUS = 1;
 export const MAX_DESKTOP_CPUS = 64;
 
-/** Swap is capped at the memory limit, so a desktop over its budget is stopped rather than left thrashing the host. */
+/** Memory and swap share one limit, so a desktop gets no swap: past its budget the kernel kills processes in it rather than
+ * letting it thrash the host. */
 export function resourceArgs(resources: DesktopResources, options: { swap: boolean }): string[] {
   const memory = `${resources.memoryGb}g`;
   return ["--memory", memory, ...(options.swap ? ["--memory-swap", memory] : []), "--cpus", String(resources.cpus)];

@@ -40,7 +40,7 @@ Local VMs always run on the same physical host as the OpenMausBot desktop proces
 
 ## Memory and CPU
 
-Each desktop gets 4 GiB of memory (swap capped at the same) and 2 CPUs. To change that, set `memoryGb` (2 to 128) and `cpus` (1 to 64) in `config.json`:
+Each desktop gets 4 GiB of memory, with no swap beyond it, and 2 CPUs. To change that, set `memoryGb` and `cpus` in `config.json`. Both are whole numbers: `memoryGb` from 2 to 128, and `cpus` from 1 to 64 but no more than your container runtime has (on Docker Desktop, its VM's CPU setting). A value outside those rules makes MausBot ignore the whole file, so check the server log after editing.
 
 ```json
 {
@@ -51,17 +51,19 @@ Each desktop gets 4 GiB of memory (swap capped at the same) and 2 CPUs. To chang
 }
 ```
 
-A new desktop is created with these limits. On Docker and Podman, a stopped desktop takes them the next time it starts. On Apple container, remove and recreate the desktop to apply them. Every running desktop counts against the machine's memory, so leave room for MausBot itself.
+A new desktop is created with these limits. On Docker and Podman, MausBot also applies them to a stopped desktop when it next starts; if the runtime refuses the change, the desktop starts with its old limits. On Apple container, remove and recreate the desktop to apply them. Every running desktop counts against the machine's memory, so leave room for MausBot itself.
 
 ## Installing packages
 
 A bot can install system packages in its desktop with `sudo apt-get install`. Packages installed this way live in the desktop's own filesystem, not the durable workspace, so recreating the desktop (or an update that recreates it) removes them. User-level installs such as `pip install --user` or anything under `~/.local` are stored in the workspace and survive recreation.
 
-On Linux with Docker Engine, a desktop's root account is the host's root account. Those desktops therefore run with `no-new-privileges`: `sudo` is off and system packages cannot be installed. User-level installs still work. Use rootless Podman on Linux when a bot needs `sudo` in its desktop.
+On Linux with Docker Engine, or with Podman when MausBot runs as root, a desktop's root account is the host's root account. Those desktops therefore run with `no-new-privileges`: `sudo` is off and system packages cannot be installed. User-level installs still work. Use rootless Podman, with MausBot running as a regular user, when a bot needs `sudo` in its desktop.
+
+Desktops made before this change keep their old capabilities until they are recreated. Where the desktop's root is the host's root (as above), MausBot recreates them once automatically. Elsewhere, remove and recreate a desktop from App Settings to let it install packages. Recreating keeps the durable workspace and browser sign-ins, but files elsewhere in the desktop, such as `~/Downloads`, are lost.
 
 ## Linux accounts
 
-On Linux with Docker Engine, the desktop's `cua` account takes the user ID and group ID of the account running MausBot, so files the bot writes in its workspace belong to you on the host. The first start of a new desktop takes longer while it does this. Rootless Podman maps the IDs itself.
+On Linux with Docker Engine, the desktop's `cua` account takes the user ID and group ID of the account running MausBot, so files the bot writes in its workspace belong to you on the host. The first start of a new desktop takes longer while it does this. If MausBot runs as root, the workspace is handed to user ID 1000 instead, which is the desktop's own `cua` account. Rootless Podman maps the IDs itself. Rootless Docker is not covered: its user IDs inside containers do not match the host's.
 
 ## Persistence
 

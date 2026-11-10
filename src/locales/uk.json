@@ -2002,7 +2002,6 @@
   "vm.isolation.shared": "Спільний",
   "vm.isolation.perBot": "На бота",
   "vm.isolation.max": "Максимум столів на бота",
-  "vm.isolation.maxDetail": "Обмежує сховище та використання ресурсів хоста; кожен запущений стіл може брати до 4 ГБ і 2 CPU.",
   "vm.isolation.maxAria": "Максимум столів на бота",
   "vm.saving": "Зберігаємо…",
   "vm.unmanagedError": "Цей контейнер не керується {app} і не може бути видалений тут.",

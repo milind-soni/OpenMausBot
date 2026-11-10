@@ -2,7 +2,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { lstatSync } from "node:fs";
-import { chmod, chown, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -74,24 +74,25 @@ const PACKAGE_INSTALL_CAPS = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", ...SU
 const HARDENED_CAP_SETS = [SUPERVISOR_CAPS, PACKAGE_INSTALL_CAPS];
 /** The pinned base image's own CMD (trycua/xfce-cua 0.1.0). */
 const SUPERVISORD = "/usr/bin/supervisord -c /etc/supervisor/supervisord.conf";
-/** Runs as PID 1 before supervisord: gives cua the host workspace owner's ids, then fails closed if /etc/passwd did not take them. */
+/** Runs as PID 1 before supervisord and gives cua the host workspace owner's ids. Files move before /etc/passwd does, so a
+ * start interrupted mid-way finds the old ids again and finishes; it fails closed if /etc/passwd did not take them. */
 const GUEST_IDS_SCRIPT = [
   "set -eu",
   'uid="$1"; gid="$2"; old_uid="$(id -u cua)"; old_gid="$(id -g cua)"',
   'if [ "$old_uid:$old_gid" != "$uid:$gid" ]; then',
+  '  find / -xdev -uid "$old_uid" -exec chown -h "$uid" {} +',
+  '  find / -xdev -gid "$old_gid" -exec chgrp -h "$gid" {} +',
   '  sed -i "s/^cua:x:$old_uid:$old_gid:/cua:x:$uid:$gid:/" /etc/passwd',
   '  sed -i "s/^cua:x:$old_gid:/cua:x:$gid:/" /etc/group',
   '  [ "$(id -u cua):$(id -g cua)" = "$uid:$gid" ] || { echo "cua did not take uid $uid gid $gid" >&2; exit 1; }',
-  '  find / -xdev -uid "$old_uid" -exec chown -h "$uid" {} +',
-  '  find / -xdev -gid "$old_gid" -exec chgrp -h "$gid" {} +',
   "fi",
   `exec ${SUPERVISORD}`,
 ].join("\n");
 
-/** Rootful Docker on Linux runs the desktop's root as the host's root, so nothing in the desktop may gain root
- * (no-new-privileges), and the guest account must take the host workspace owner's ids itself. */
-function desktopRootIsHostRoot(runtime: Runtime | null, platform: NodeJS.Platform): boolean {
-  return runtime === "docker" && platform === "linux";
+/** Docker Engine on Linux, and Podman run by root (whose keep-id is the host's own id map), run the desktop's root as the
+ * host's root, so nothing in the desktop may gain root there (no-new-privileges). */
+function desktopRootIsHostRoot(runtime: Runtime | null, platform: NodeJS.Platform, host: HostUser | null): boolean {
+  return platform === "linux" && (runtime === "docker" || (runtime === "podman" && host?.uid === 0));
 }
 
 export interface HostUser {
@@ -103,10 +104,11 @@ function currentHostUser(platform: NodeJS.Platform): HostUser | null {
   return platform === "win32" || !process.getuid || !process.getgid ? null : { uid: process.getuid(), gid: process.getgid() };
 }
 
-/** Root's workspace is handed to cua instead (see ensureVmWorkspace), so cua is never given uid 0. */
+/** Docker Engine keeps host ids, so cua takes the workspace owner's. Root's workspace is handed to cua instead (see
+ * ensureVmWorkspace), so cua never takes uid 0 or gid 0. */
 function guestIdsFor(runtime: Runtime, platform: NodeJS.Platform, host: HostUser | null): HostUser | null {
-  if (!desktopRootIsHostRoot(runtime, platform) || !host || host.uid === 0 || host.uid === GUEST_UID) return null;
-  return host;
+  if (runtime !== "docker" || platform !== "linux" || !host || host.uid === 0 || host.uid === GUEST_UID) return null;
+  return { uid: host.uid, gid: host.gid === 0 ? GUEST_UID : host.gid };
 }
 
 export interface DesktopRunOptions {
@@ -534,6 +536,7 @@ export async function containerComputerStatus(
   options: { probeDesktop?: boolean } = {},
 ): Promise<ContainerComputerStatus> {
   const status = emptyStatus(platform, target);
+  const host = currentHostUser(platform);
   const runtimeStatus = await containerRuntimeStatus(runner, platform);
   status.available = runtimeStatus.available;
   status.runtime = runtimeStatus.runtime;
@@ -579,8 +582,7 @@ export async function containerComputerStatus(
           ? normalizeImageId(detail.configuration.image.descriptor?.digest)
           : null;
       status.imageMatches =
-        appleImage === IMAGE && status.image_id !== null && appleImageId === status.image_id &&
-        detail?.configuration?.labels?.[DESKTOP_FLAGS_LABEL] === DESKTOP_FLAGS_VERSION;
+        appleImage === IMAGE && status.image_id !== null && appleImageId === status.image_id;
       status.managed = containerOwnershipLabelsMatch(detail?.configuration?.labels, target);
       status.persistence = appleWorkspaceMountIsSafe(detail?.configuration?.mounts, platform, target.workspaceDir)
         ? "durable"
@@ -608,6 +610,7 @@ export async function containerComputerStatus(
         Image?: string;
       }>;
       const detail = inspected[0];
+      const rootIsHostRoot = desktopRootIsHostRoot(status.runtime, platform, host);
       status.container = detail?.State?.Running ? "running" : "stopped";
       status.stopped_at = status.container === "stopped" ? detail?.State?.FinishedAt ?? null : null;
       status.network = dockerPortsAreLocal(detail?.HostConfig?.PortBindings) ? "loopback" : "unsafe";
@@ -615,7 +618,7 @@ export async function containerComputerStatus(
       status.imageMatches =
         detail?.Config?.Image === IMAGE &&
         imageLabelsMatch(detail?.Config?.Labels) &&
-        detail?.Config?.Labels?.[DESKTOP_FLAGS_LABEL] === DESKTOP_FLAGS_VERSION &&
+        (!rootIsHostRoot || detail?.Config?.Labels?.[DESKTOP_FLAGS_LABEL] === DESKTOP_FLAGS_VERSION) &&
         status.image_id !== null &&
         normalizeImageId(detail?.Image) === status.image_id;
       status.managed = containerOwnershipLabelsMatch(detail?.Config?.Labels, target);
@@ -628,10 +631,10 @@ export async function containerComputerStatus(
       ) ? "durable" : "unsafe";
       status.security = (
         status.runtime === "podman"
-          ? podmanSecurityIsHardened(detail?.HostConfig, detail?.EffectiveCaps, detail?.BoundingCaps)
-          : dockerSecurityIsHardened(detail?.HostConfig, {
-            requireNoNewPrivileges: desktopRootIsHostRoot(status.runtime, platform),
+          ? podmanSecurityIsHardened(detail?.HostConfig, detail?.EffectiveCaps, detail?.BoundingCaps, {
+            requireNoNewPrivileges: rootIsHostRoot,
           })
+          : dockerSecurityIsHardened(detail?.HostConfig, { requireNoNewPrivileges: rootIsHostRoot })
       ) ? "hardened" : "unsafe";
       status.viewer_url = viewerUrl(viewerPassword(detail?.Config?.Env), status.viewer_port);
     }
@@ -891,6 +894,7 @@ export function podmanSecurityIsHardened(
   config: DockerHardeningConfig | undefined,
   effectiveCaps: string[] | undefined,
   boundingCaps: string[] | undefined,
+  options: { requireNoNewPrivileges?: boolean } = {},
 ): boolean {
   if (!config) return false;
   if (!isHardenedCapSet(effectiveCaps, true) || capSetKey(boundingCaps) !== capSetKey(effectiveCaps)) return false;
@@ -904,7 +908,7 @@ export function podmanSecurityIsHardened(
     UsernsMode: config.UsernsMode === "private" || config.UsernsMode === "keep-id:uid=1000,gid=1000"
       ? "" : config.UsernsMode,
     CgroupnsMode: config.CgroupnsMode || "private",
-  }, { podmanBrowserSandbox: true });
+  }, { podmanBrowserSandbox: true, requireNoNewPrivileges: options.requireNoNewPrivileges });
 }
 
 export function containerRunArgs(
@@ -956,7 +960,7 @@ export function containerRunArgs(
       "512m",
     );
   }
-  if (desktopRootIsHostRoot(runtime, desktop.platform)) common.push("--security-opt", "no-new-privileges");
+  if (desktopRootIsHostRoot(runtime, desktop.platform, desktop.hostUser)) common.push("--security-opt", "no-new-privileges");
   const guestIds = guestIdsFor(runtime, desktop.platform, desktop.hostUser);
   common.push(
     "--mount",
@@ -979,9 +983,13 @@ async function ensureVmWorkspace(platform: NodeJS.Platform, target: LocalVmTarge
   await mkdir(target.workspaceDir, { recursive: true, mode: 0o700 });
   if (platform === "win32") return;
   await chmod(target.workspaceDir, 0o700);
-  if (desktopRootIsHostRoot(runtime, platform) && currentHostUser(platform)?.uid === 0) {
-    await chown(target.workspaceDir, GUEST_UID, GUEST_UID);
-  }
+  const host = currentHostUser(platform);
+  if (host?.uid !== 0 || !desktopRootIsHostRoot(runtime, platform, host)) return;
+  // -h: a link the bot left in its workspace must never hand a host file to uid 1000.
+  await run("chown", ["-R", "-h", `${GUEST_UID}:${GUEST_UID}`, target.workspaceDir], { timeout: 5 * 60_000 }).catch((error: unknown) => {
+    // A root service without CAP_CHOWN still gets its desktop; only the workspace stays unwritable to it.
+    console.warn(`Local VM: could not give uid ${GUEST_UID} the folder ${target.workspaceDir}: ${error instanceof Error ? error.message : error}`);
+  });
 }
 
 function baseImagePullArgs(runtime: Runtime): string[] {

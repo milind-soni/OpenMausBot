@@ -104,9 +104,9 @@ const localVmConfigSchema = z.object({
     .max(MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
     .optional(),
   preserveInstalledApps: z.boolean().optional(),
-  /** Each desktop's memory limit in GiB, with swap capped to the same; 4 when unset. New desktops take a change; on Docker and Podman a stopped one takes it when it next starts. */
+  /** Each desktop's memory limit in GiB, with no swap beyond it; 4 when unset. New desktops take a change; on Docker and Podman a stopped one takes it when it next starts. */
   memoryGb: z.number().int().min(MIN_DESKTOP_MEMORY_GB).max(MAX_DESKTOP_MEMORY_GB).optional(),
-  /** Each desktop's CPU limit; 2 when unset. */
+  /** Each desktop's CPU limit; 2 when unset. Docker refuses more CPUs than its engine has. */
   cpus: z.number().int().min(MIN_DESKTOP_CPUS).max(MAX_DESKTOP_CPUS).optional(),
 });
 /** A named browser session; its id names a durable Electron partition. */
