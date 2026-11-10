@@ -163,10 +163,10 @@ describe("Settings in Simple mode", () => {
     for (const id of hidden) expect(SIMPLE_HIDDEN_SECTIONS).toContain(id);
   });
 
-  it("opens General on Account, then Appearance, Language and typing, Notifications, System and Import, with More settings last as a plain row and no Advanced mode", () => {
+  it("opens General on Account, then Appearance, Language and typing, Notifications, System, Training data and Import, with More settings last as a plain row and no Advanced mode", () => {
     const html = render();
     expect(currentPage(html)).toBe("general");
-    expect(groupLabels(html)).toEqual(["Account", "Appearance", "Language and typing", "Notifications", "System", "Import", "Organization"]);
+    expect(groupLabels(html)).toEqual(["Account", "Appearance", "Language and typing", "Notifications", "System", "Training data", "Import", "Organization"]);
     expect(blocks(html).at(-1)).toBe("more");
     expect(blocks(html)).not.toContain("advanced-mode");
     expect(html).toContain(">More settings<");

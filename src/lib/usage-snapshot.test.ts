@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConfigStatus, InstanceInfo } from "@/state/store";
 import {
-  APP, CLOUD_COMPUTER_SOURCE, CLOUD_PLAN, CONNECTORS_MODE, DECIDER, EDITION, ENGINE, KEY_PROVIDER, LOCAL_VM_MODE, PLATFORM,
-  TRIAL_CREDIT, VOICE,
+  APP, CLOUD_COMPUTER_SOURCE, CLOUD_PLAN, CONNECTORS_MODE, COUNT_BUCKETS, DECIDER, EDITION, ENGINE, KEY_PROVIDER, LOCAL_VM_MODE, PLATFORM,
+  TRAINING_DATA, TRIAL_CREDIT, VOICE,
 } from "./analytics-allowlist";
 import {
   buildUsageSnapshot, cloudPlanFromAccount, cloudPlanFromSnapshot, type SnapshotState, type UsageInput, type UsageSources,
@@ -51,13 +51,14 @@ const DOCUMENTED = [
   "routines_interval", "routines_cron", "webhooks", "engines", "engine_count", "custom_endpoints", "trial_credit", "apps",
   "apps_connected", "connectors_mode", "local_vm_mode", "vps_configured", "voice", "voice_included", "decider", "decider_included",
   "live_calls", "phones_paired", "paired_devices", "phone_paired", "members", "cloud_home", "cloud_plan", "cloud_trial", "edition",
-  "org_managed", "onboarded", "first_turn", "platform", "remote_client",
+  "org_managed", "onboarded", "first_turn", "platform", "remote_client", "training_data", "training_turns", "quick_fallbacks_30d",
 ];
 
 const WORDS: Record<string, readonly string[]> = {
   key_providers: KEY_PROVIDER, cloud_computer_source: CLOUD_COMPUTER_SOURCE, engines: [...ENGINE, "other"], trial_credit: TRIAL_CREDIT,
   apps: [...APP, "other"], connectors_mode: [...CONNECTORS_MODE, "other"], local_vm_mode: [...LOCAL_VM_MODE, "other"],
   voice: [...VOICE, "other"], decider: [...DECIDER, "other"], cloud_plan: CLOUD_PLAN, edition: [...EDITION, "other"], platform: PLATFORM,
+  training_data: [...TRAINING_DATA, "other"], training_turns: COUNT_BUCKETS, quick_fallbacks_30d: COUNT_BUCKETS,
 };
 
 function expectOnlyCountsFlagsAndWords(props: Record<string, unknown>) {
@@ -144,6 +145,8 @@ function hostileSources(overrides: Partial<UsageSources> = {}): UsageSources & {
         } as T;
       }
       if (path === "/api/computers/usage") return { cloudComputers: 3, teamComputers: 1 } as T;
+      if (path === "/api/training-data") return { mode: "share", turns: 250, steps: 999, bytes: 1, available: true, upload: { lastError: HOSTILE } } as T;
+      if (path.startsWith("/api/usage/models?")) return { models: [{ model: HOSTILE, fallbacks: 3 }, { model: "x", fallbacks: 1 }] } as T;
       throw new Error(`unexpected ${path}`);
     },
     connectedApps: async () => {
@@ -205,7 +208,7 @@ describe("the daily usage snapshot", () => {
       voice: "fish", voice_included: false, decider: "jev", decider_included: false, live_calls: true,
       phones_paired: 2, paired_devices: 2, phone_paired: true, members: 1,
       cloud_home: false, cloud_plan: "max", cloud_trial: true, edition: "enterprise", org_managed: true, onboarded: true, first_turn: true,
-      platform: "desktop", remote_client: false,
+      platform: "desktop", remote_client: false, training_data: "share", training_turns: "100-999", quick_fallbacks_30d: "1-99",
     });
     expect(Object.keys(sent!).sort()).toEqual([...DOCUMENTED].sort());
     expectOnlyCountsFlagsAndWords(sent!);

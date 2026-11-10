@@ -75,7 +75,7 @@ import { imageGenerationReady } from "./image-generation.ts";
 import { createImageToolRoutes } from "./routes/image-tools.ts"; import { createMeetingsHost } from "./host/meetings-host.ts";
 import { createImageSettingsRoutes } from "./routes/image-settings.ts";
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
-import { routeDirectTurn } from "./turn-route.ts"; import { QuickModelFallback } from "./quick-model-fallback.ts"; import { COMPUTER_JOURNAL_PATH, createSavedSteps, personRequest, savedStepsEnabled } from "./saved-steps/saved-steps.ts";
+import { routeDirectTurn } from "./turn-route.ts"; import { QuickModelFallback } from "./quick-model-fallback.ts"; import { trainingLog } from "./training-log.ts"; import { TrainingUploader, trainingDataEndpoint } from "./training-upload.ts"; import { createTrainingDataRoutes } from "./routes/training-data.ts"; import { COMPUTER_JOURNAL_PATH, createSavedSteps, personRequest, savedStepsEnabled } from "./saved-steps/saved-steps.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinutes, parseConversationTurnTimeout, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
@@ -1501,7 +1501,7 @@ utilityParentPort?.on("message", (event) => {
 const savedSteps = createSavedSteps({ enabled: () => savedStepsEnabled(cfg), bot: (id) => store.bot(id), publish: (event) => bus.publish(event), engines: { get: (threadId) => runningTurnEngines.get(threadId), set: (threadId, engine) => { runningTurnEngines.set(threadId, engine); } }, stopped: (threadId) => directRequestOwners.get(threadId)?.stopped === true, generation: (threadId) => directTurnGenerationByThread.get(threadId), patchMessage: (threadId, messageId, patch) => { store.patchMessage(threadId, messageId, patch); }, withholdHandoff: (threadId) => handoffs.withhold(threadId), contextChanged: (botId, threadId) => { const owner = store.bot(botId); if (owner) markTaskContextExternallyUpdated(owner, threadId); } });
 const quickFallback = new QuickModelFallback({ file: join(DATA_DIR, "refused-quick-models.json"), publish: (event) => { if (!savedSteps.dispatch.take(event)) bus.publish(event); }, stopped: (threadId) => directRequestOwners.get(threadId)?.stopped === true });
 const bus = new EventBus(undefined, (event) => quickFallback.take(event) || savedSteps.dispatch.take(event));
-bus.attach(registry.instances()); bus.subscribe((event) => savedSteps.observe(event));
+bus.attach(registry.instances()); bus.subscribe((event) => savedSteps.observe(event)); const trainingDataHere = () => !sharedMembership() && !HOSTED_WORKSPACE; trainingLog.configure({ dir: join(DATA_DIR, "training"), mode: () => (trainingDataHere() ? cfg.features?.trainingData ?? "off" : "off") }); const trainingUploader = new TrainingUploader({ log: trainingLog, dir: join(DATA_DIR, "training"), endpoint: () => trainingDataEndpoint(process.env, CLOUD_HOME?.adminOrigin), allowed: trainingDataHere }); bus.subscribe((event) => { if (event.type === "turn.completed") trainingLog.outcome(event); }); setInterval(() => { trainingLog.sweep(); void trainingUploader.tick(); }, 10 * 60_000).unref(); ROUTES.push(createTrainingDataRoutes({ log: trainingLog, uploader: trainingUploader, available: trainingDataHere }));
 let companyRuntimeReady!: () => void;
 const companyRuntimeStarted = new Promise<void>(resolve => { companyRuntimeReady = resolve; });
 const managedPolicy = new ManagedDesktopPolicy({ onChange: () => {
@@ -6790,7 +6790,7 @@ bus.subscribe((event: RuntimeEvent) => {
           threadId: event.threadId,
           instanceId: selection.instanceId,
           driverKind: registry.get(selection.instanceId)?.driverKind ?? "unknown",
-          model: routedModel ?? selection.model,
+          model: routedModel ?? selection.model, ...quickFallback.routeOf(event.threadId),
           input: tokens?.input ?? 0,
           output: tokens?.output ?? 0,
           ...(typeof tokens?.cachedInput === "number" ? { cachedInput: tokens.cachedInput } : {}),
@@ -11807,7 +11807,7 @@ function configStatus() {
       autoRecall: autoRecallEnabled(cfg),
       roomMemoryCapture: roomMemoryCaptureEnabled(cfg),
       parallelRoomJobs: parallelRoomJobsEnabled(cfg),
-      llmThreadTitles: llmThreadTitlesEnabled(cfg), savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(),
+      llmThreadTitles: llmThreadTitlesEnabled(cfg), savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(), trainingData: trainingLog.currentMode(),
     },
     onboarding: {
       completedAt: cfg.onboarding?.completedAt ?? "",

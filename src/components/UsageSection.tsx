@@ -12,6 +12,7 @@ import { BotAvatar } from "./Avatar";
 import { PlanUsage } from "./PlanUsage";
 import { Select } from "./Select";
 import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
+import { ModelPerformance } from "./usage/ModelPerformance";
 import { TraceView } from "./usage/TraceView";
 import { LiveBadge, modelName, StatStrip, totalsStats } from "./usage/TraceWaterfall";
 
@@ -237,6 +238,7 @@ export function UsageSection() {
               : <div className="flex items-center gap-2 p-5 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin" />{t("common.checking")}</div>}
           </section>
           <WhereItWent range={range} version={version} onBudget={setBudget} />
+          <ModelPerformance range={range} version={version} />
           <section className="rounded-2xl border border-hairline/50 bg-card p-2" aria-label={t("usage.page.runs")}>
             <div className="px-3 pb-1 pt-3">
               <h3 className="text-[15px] font-medium text-ink">{t("usage.page.runs")}</h3>

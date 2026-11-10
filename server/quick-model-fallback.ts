@@ -92,6 +92,12 @@ export class QuickModelFallback {
     return armed && armed.phase !== "retrying" ? armed.quick.model : undefined;
   }
 
+  /** How the thread's settling turn was routed, for its usage row: undefined for a turn on the bot's own model. */
+  routeOf(threadId: string): { route: "quick" | "fallback"; quickModel: string } | undefined {
+    const armed = this.armed.get(threadId);
+    return armed ? { route: armed.phase === "retrying" ? "fallback" : "quick", quickModel: armed.quick.model } : undefined;
+  }
+
   sendTurn(engine: Engine, input: SendTurnInput, quick?: QuickRoute): Promise<TurnStartResult> {
     this.armed.delete(input.threadId);
     if (!quick) return engine.adapter.sendTurn(input);

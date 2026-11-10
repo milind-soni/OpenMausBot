@@ -79,6 +79,9 @@ export const CALL_MODE = ["turns", "live"] as const;
 export const ROOM_MODE = ["chat", "goal"] as const;
 export const CLOUD_COMPUTER_SOURCE = ["own_key", "included", "none"] as const;
 export const VOICE = ["elevenlabs", "fish", "system", "chatterbox", "xai", "gemini", "openai", "none"] as const;
+export const TRAINING_DATA = ["off", "local", "share"] as const;
+/** Counts the snapshot only sends as a range. */
+export const COUNT_BUCKETS = ["0", "1-99", "100-999", "1000+"] as const;
 export const DECIDER = ["jev", "openrouter", "off"] as const;
 export const CONNECTORS_MODE = ["managed", "self_hosted", "unavailable"] as const;
 export const LOCAL_VM_MODE = ["shared", "per_bot", "pool"] as const;

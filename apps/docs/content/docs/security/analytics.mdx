@@ -113,6 +113,9 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `paired_devices` | count | Devices signed in to this server without an email, other than this one |
 | `phone_paired` | true/false | Either count above is more than zero |
 | `members` | count | People signed in to this server with an email, other than you |
+| `training_data` | `off`, `local`, `share` | The Training data setting in Settings → General; left out on a Team Cloud |
+| `training_turns` | `0`, `1-99`, `100-999`, `1000+` | Turns kept on this computer as training data, as a range |
+| `quick_fallbacks_30d` | `0`, `1-99`, `100-999`, `1000+` | Quick-model turns in the last 30 days that ran again on the bot's own model, as a range |
 | `cloud_home` | true/false | This server is a MausBot Cloud |
 | `cloud_plan` | `starter`, `personal`, `pro`, `max`, `other`, `none`, `unknown` | The Cloud plan: `none` when free or signed out, `unknown` when the app cannot tell |
 | `cloud_trial` | true/false | A Cloud trial is running |

@@ -13,6 +13,7 @@ import { newEventId, newId } from "../contracts.ts";
 import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQuestions, questionChoices } from "../../shared/ask-question.ts";
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { redactSecretsInText } from "../redact.ts";
+import { trainingLog } from "../training-log.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
 import { ChatToolSessionError, chatToolNotices, mountChatTools, refitChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
 import { noteToolBudget } from "../tool-budgets.ts";
@@ -620,7 +621,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           unread = turnEntry.asides.splice(0);
           if (unread.length) messages.push({ role: "user", content: unread.join("\n\n") });
           turnEntry.ending = round === MAX_CHAT_ROUNDS - 1;
-          native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions));
+          native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions)); const recorded = trainingLog.capture(messages, tools.definitions);
           let attempt = 0;
           let resized = false;
           let completion: Completion;
@@ -720,7 +721,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               abort.signal.throwIfAborted();
             }
           }
-          native("in", options.nativeLog.incoming(completion));
+          native("in", options.nativeLog.incoming(completion)); trainingLog.step(recorded, { threadId: turn.threadId, botId: turn.botId, turnId, round, model, driverKind: options.driverKind, local: options.localModel === true, safeText }, completion);
           unread = [];
           if (completion.usage) {
             usage.input += completion.usage.input;

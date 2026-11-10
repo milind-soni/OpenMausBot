@@ -7,6 +7,7 @@ import { SIMPLE_ONLY } from "@/lib/simple-only";
 import type { LocaleKey } from "@/locales";
 import { productName } from "../lib/brand";
 import { AnalyticsRow } from "./AnalyticsRow";
+import { TrainingDataRow } from "./TrainingDataRow";
 import { UpdatesConsentRow } from "./UpdatesConsent";
 import { OpenAtLoginRow } from "./OpenAtLoginRow";
 import { DefaultBotSidebarRow } from "./DefaultBotControls";
@@ -111,6 +112,7 @@ export function SimpleGeneralPage({ has, peopleOpen, onLooks, onMore }: { has: H
           </SettingsRows>
         </SettingsGroup>
       )}
+      {has("general") && <SettingsGroup label={t("trainingData.title")} block="training-data"><AdminOnly><TrainingDataRow simple /></AdminOnly></SettingsGroup>}
       {has("import") && <SettingsGroup label={t("settings.section.import")} block="import"><AdminOnly><ImportSettings /></AdminOnly></SettingsGroup>}
       {has("organization") && <SettingsGroup label={t("settings.section.organization")} block="organization"><OrganizationSettings /></SettingsGroup>}
       {has("activity") && <SettingsGroup label={t("settings.section.activity")} block="activity"><ActivitySection /></SettingsGroup>}
