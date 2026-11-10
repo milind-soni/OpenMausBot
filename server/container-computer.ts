@@ -13,14 +13,26 @@ import { DATA_DIR } from "./config.ts";
 import {
   applyResourcesBeforeStart,
   DEFAULT_DESKTOP_RESOURCES,
-  MAX_DESKTOP_CPUS,
-  MIN_DESKTOP_CPUS,
-  MIN_DESKTOP_MEMORY_GB,
   PIDS_LIMIT,
   raisePidsLimit,
   resourceArgs,
   type DesktopResources,
 } from "./container-limits.ts";
+import {
+  appleResourcesAreLimited,
+  currentHostUser,
+  DESKTOP_FLAGS_LABEL,
+  DESKTOP_FLAGS_VERSION,
+  desktopCapArgs,
+  desktopRootIsHostRoot,
+  dockerSecurityIsHardened,
+  GUEST_UID,
+  guestIdsCommand,
+  guestIdsFor,
+  podmanSecurityIsHardened,
+  type DockerHardeningConfig,
+  type HostUser,
+} from "./container-isolation.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 const run = promisify(execFile);
@@ -49,9 +61,6 @@ export const DRIVER_LABEL = "com.openmausbot.cua-driver";
 export const BASE_IMAGE_LABEL = "com.openmausbot.cua-base";
 export const WORKSPACE_LABEL = "com.openmausbot.workspace";
 export const TARGET_LABEL = "com.openmausbot.local-vm-target";
-/** The run flags a desktop was made with. A desktop made under other flags is updated like one on an older image. */
-export const DESKTOP_FLAGS_LABEL = "com.openmausbot.desktop-flags";
-export const DESKTOP_FLAGS_VERSION = "2";
 export const VM_WORKSPACE_DIR = join(DATA_DIR, "vm-home");
 export const VM_WORKSPACE_GUEST = "/home/cua/workspace";
 export const DISPLAY = ":1";
@@ -64,53 +73,6 @@ export type LifecycleAction = "pull" | "run" | "start" | "stop" | "remove";
 
 const INTERNAL_VIEWER_PORT = 6901;
 const HOST_VIEWER_PORT = 6080;
-const GIB = 1024 * 1024 * 1024;
-const GUEST_UID = 1000;
-/** What supervisord needs to start each program as cua. */
-const SUPERVISOR_CAPS = ["SETGID", "SETUID"];
-/** apt and dpkg also need these to install a package as root (measured on Debian 12: without DAC_OVERRIDE every download fails). */
-const PACKAGE_INSTALL_CAPS = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", ...SUPERVISOR_CAPS];
-/** The only capability sets a hardened desktop may hold; one made with just SUPERVISOR_CAPS is sealed but cannot install packages. */
-const HARDENED_CAP_SETS = [SUPERVISOR_CAPS, PACKAGE_INSTALL_CAPS];
-/** The pinned base image's own CMD (trycua/xfce-cua 0.1.0). */
-const SUPERVISORD = "/usr/bin/supervisord -c /etc/supervisor/supervisord.conf";
-/** Runs as PID 1 before supervisord and gives cua the host workspace owner's ids. Files move before /etc/passwd does, so a
- * start interrupted mid-way finds the old ids again and finishes; it fails closed if /etc/passwd did not take them. */
-const GUEST_IDS_SCRIPT = [
-  "set -eu",
-  'uid="$1"; gid="$2"; old_uid="$(id -u cua)"; old_gid="$(id -g cua)"',
-  'if [ "$old_uid:$old_gid" != "$uid:$gid" ]; then',
-  '  find / -xdev -uid "$old_uid" -exec chown -h "$uid" {} +',
-  '  find / -xdev -gid "$old_gid" -exec chgrp -h "$gid" {} +',
-  '  sed -i "s/^cua:x:$old_uid:$old_gid:/cua:x:$uid:$gid:/" /etc/passwd',
-  '  sed -i "s/^cua:x:$old_gid:/cua:x:$gid:/" /etc/group',
-  '  [ "$(id -u cua):$(id -g cua)" = "$uid:$gid" ] || { echo "cua did not take uid $uid gid $gid" >&2; exit 1; }',
-  "fi",
-  `exec ${SUPERVISORD}`,
-].join("\n");
-
-/** Docker Engine on Linux, and Podman run by root (whose keep-id is the host's own id map), run the desktop's root as the
- * host's root, so nothing in the desktop may gain root there (no-new-privileges). */
-function desktopRootIsHostRoot(runtime: Runtime | null, platform: NodeJS.Platform, host: HostUser | null): boolean {
-  return platform === "linux" && (runtime === "docker" || (runtime === "podman" && host?.uid === 0));
-}
-
-export interface HostUser {
-  uid: number;
-  gid: number;
-}
-
-function currentHostUser(platform: NodeJS.Platform): HostUser | null {
-  return platform === "win32" || !process.getuid || !process.getgid ? null : { uid: process.getuid(), gid: process.getgid() };
-}
-
-/** Docker Engine keeps host ids, so cua takes the workspace owner's. Root's workspace is handed to cua instead (see
- * ensureVmWorkspace), so cua never takes uid 0 or gid 0. */
-function guestIdsFor(runtime: Runtime, platform: NodeJS.Platform, host: HostUser | null): HostUser | null {
-  if (runtime !== "docker" || platform !== "linux" || !host || host.uid === 0 || host.uid === GUEST_UID) return null;
-  return { uid: host.uid, gid: host.gid === 0 ? GUEST_UID : host.gid };
-}
-
 export interface DesktopRunOptions {
   platform: NodeJS.Platform;
   resources: DesktopResources;
@@ -795,13 +757,6 @@ function dockerWorkspaceMountIsSafe(
   );
 }
 
-/** Apple container defaults to 1 GiB, below any limit this server sets, so a desktop made without our flags fails here. */
-function appleResourcesAreLimited(resources: { cpus?: number; memoryInBytes?: number } | undefined): boolean {
-  const cpus = resources?.cpus ?? 0;
-  return (resources?.memoryInBytes ?? 0) >= MIN_DESKTOP_MEMORY_GB * GIB &&
-    Number.isInteger(cpus) && cpus >= MIN_DESKTOP_CPUS && cpus <= MAX_DESKTOP_CPUS;
-}
-
 function appleWorkspaceMountIsSafe(
   mounts: Array<{ source?: string; destination?: string; options?: string[] }> | undefined,
   platform: NodeJS.Platform,
@@ -814,101 +769,6 @@ function appleWorkspaceMountIsSafe(
       mounts[0]?.destination === VM_WORKSPACE_GUEST &&
       !options.some((option) => option === "ro" || option === "readonly"),
   );
-}
-
-export interface DockerHardeningConfig {
-  Memory?: number;
-  MemorySwap?: number;
-  NanoCpus?: number;
-  PidsLimit?: number | null;
-  CapDrop?: string[] | null;
-  CapAdd?: string[] | null;
-  Privileged?: boolean;
-  PidMode?: string;
-  IpcMode?: string;
-  UTSMode?: string;
-  ShmSize?: number;
-  Devices?: unknown[] | null;
-  DeviceRequests?: unknown[] | null;
-  SecurityOpt?: string[] | null;
-  UsernsMode?: string;
-  CgroupnsMode?: string;
-  OomKillDisable?: boolean | null;
-  AutoRemove?: boolean;
-  RestartPolicy?: { Name?: string; MaximumRetryCount?: number };
-}
-
-function capSetKey(caps: string[] | null | undefined): string {
-  return (caps ?? []).map((cap) => cap.toLowerCase().replace(/^cap_/, "")).sort().join(",");
-}
-
-function isHardenedCapSet(caps: string[] | null | undefined, podmanBrowserSandbox: boolean): boolean {
-  const key = capSetKey(caps);
-  return HARDENED_CAP_SETS.some((set) => capSetKey(podmanBrowserSandbox ? [...set, "SYS_CHROOT"] : set) === key);
-}
-
-export function desktopCapArgs(runtime: Runtime): string[] {
-  // Podman's default seccomp profile gates chroot on this capability, and Firefox chroots to build its sandbox.
-  const caps = runtime === "podman" ? [...PACKAGE_INSTALL_CAPS, "SYS_CHROOT"] : PACKAGE_INSTALL_CAPS;
-  return ["--cap-drop", "ALL", ...caps.flatMap((cap) => ["--cap-add", cap])];
-}
-
-/** Shared isolation contract for Local VM and VPS containers; Podman alone needs chroot for Firefox's sandbox. */
-export function dockerSecurityIsHardened(
-  config: DockerHardeningConfig | undefined,
-  options: {
-    restartPolicy?: "no" | "unless-stopped" | "any";
-    podmanBrowserSandbox?: boolean;
-    requireNoNewPrivileges?: boolean;
-  } = {},
-): boolean {
-  if (!config) return false;
-  const capDrop = (config.CapDrop ?? []).map((cap) => cap.toLowerCase());
-  const noNewPrivileges = (config.SecurityOpt ?? []).some((option) => /^no-new-privileges(?:[:=]true)?$/i.test(option));
-  const unsafeSecurityOption = (config.SecurityOpt ?? []).some((option) => /(?:^|=)(?:unconfined|disable)$/i.test(option));
-  const restartPolicy = config.RestartPolicy?.Name;
-  const restartPolicyOk =
-    options.restartPolicy === "any" || (options.restartPolicy === "unless-stopped"
-      ? restartPolicy === "unless-stopped"
-      : restartPolicy === undefined || restartPolicy === "" || restartPolicy === "no");
-  return (
-    capDrop.includes("all") &&
-    isHardenedCapSet(config.CapAdd, options.podmanBrowserSandbox === true) &&
-    (options.requireNoNewPrivileges !== true || noNewPrivileges) &&
-    config.Privileged === false &&
-    !config.PidMode &&
-    config.IpcMode === "private" &&
-    !config.UTSMode &&
-    (!config.Devices || config.Devices.length === 0) &&
-    (!config.DeviceRequests || config.DeviceRequests.length === 0) &&
-    !unsafeSecurityOption &&
-    !config.UsernsMode &&
-    config.CgroupnsMode === "private" &&
-    config.AutoRemove !== true &&
-    restartPolicyOk
-  );
-}
-
-/** Podman normalizes HostConfig capability and namespace fields in inspect output, so its effective/bounding sets decide. */
-export function podmanSecurityIsHardened(
-  config: DockerHardeningConfig | undefined,
-  effectiveCaps: string[] | undefined,
-  boundingCaps: string[] | undefined,
-  options: { requireNoNewPrivileges?: boolean } = {},
-): boolean {
-  if (!config) return false;
-  if (!isHardenedCapSet(effectiveCaps, true) || capSetKey(boundingCaps) !== capSetKey(effectiveCaps)) return false;
-  return dockerSecurityIsHardened({
-    ...config,
-    CapDrop: ["all"],
-    CapAdd: effectiveCaps,
-    PidMode: config.PidMode === "private" ? "" : config.PidMode,
-    UTSMode: config.UTSMode === "private" ? "" : config.UTSMode,
-    // Rootless keep-id maps the workspace owner to the guest cua account; never arbitrary userns sharing or host namespaces.
-    UsernsMode: config.UsernsMode === "private" || config.UsernsMode === "keep-id:uid=1000,gid=1000"
-      ? "" : config.UsernsMode,
-    CgroupnsMode: config.CgroupnsMode || "private",
-  }, { podmanBrowserSandbox: true, requireNoNewPrivileges: options.requireNoNewPrivileges });
 }
 
 export function containerRunArgs(
@@ -975,7 +835,7 @@ export function containerRunArgs(
       : `127.0.0.1::${INTERNAL_VIEWER_PORT}`,
     IMAGE,
   );
-  if (guestIds) common.push("sh", "-c", GUEST_IDS_SCRIPT, "openmausbot-desktop", String(guestIds.uid), String(guestIds.gid));
+  if (guestIds) common.push(...guestIdsCommand(guestIds));
   return common;
 }
 

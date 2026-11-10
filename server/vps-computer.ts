@@ -9,12 +9,9 @@ import {
   CUA_SOCKET,
   IMAGE as CUA_IMAGE,
   cuaExecArgs,
-  desktopCapArgs,
-  dockerSecurityIsHardened,
   imageLabelsMatch,
   managedImageDockerfile,
   wholeScreenshot,
-  type DockerHardeningConfig,
   BASE_IMAGE_DIGEST,
   BASE_IMAGE_LABEL,
   DRIVER_LABEL,
@@ -22,6 +19,7 @@ import {
   IMAGE_LAYER_VERSION,
   MANAGED_LABEL,
 } from "./container-computer.ts";
+import { desktopCapArgs, dockerSecurityIsHardened, type DockerHardeningConfig } from "./container-isolation.ts";
 import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
 import { DATA_DIR, isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";

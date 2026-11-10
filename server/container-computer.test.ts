@@ -11,8 +11,6 @@ import {
   CUA_DRIVER_VERSION,
   CUA_EXECUTABLE,
   CUA_SOCKET,
-  DESKTOP_FLAGS_LABEL,
-  DESKTOP_FLAGS_VERSION,
   DRIVER_LABEL,
   IMAGE,
   IMAGE_LAYER_LABEL,
@@ -29,19 +27,18 @@ import {
   containerComputerStatus,
   containerRuntimeStatus,
   containerRunArgs,
-  dockerSecurityIsHardened,
   localVmRecreatableOnDemand,
   localVmResumable,
   localVmWorkspaceExists,
   managedImageDockerfile,
   perBotLocalVmTarget,
-  podmanSecurityIsHardened,
   SHARED_LOCAL_VM_TARGET,
   setupCommands,
   type CommandRunner,
   type LocalVmTarget,
   autoLocalVmAttachable,
 } from "./container-computer.ts";
+import { DESKTOP_FLAGS_LABEL, DESKTOP_FLAGS_VERSION, dockerSecurityIsHardened, podmanSecurityIsHardened } from "./container-isolation.ts";
 import { PIDS_LIMIT } from "./container-limits.ts";
 
 function runner(responses: Record<string, string | Error>) {
