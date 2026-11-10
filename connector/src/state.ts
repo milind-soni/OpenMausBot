@@ -4,6 +4,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { ServerMode } from "./protocol.ts";
 import { HOME_SECRET_ENV, HOME_SECRETS_DIR, HOME_SECRETS_FILE } from "./settings.ts";
 
 export interface AgentRecord {
@@ -17,6 +18,14 @@ export interface AgentRecord {
   /** The Admin's signing keys by id, pinned at enrolment; only a hello signed by one of them replaces them. */
   adminKeys: Record<string, string>;
   enrolledAt: number;
+  /** Who runs this server (protocol.ts `ServerMode`), set when it enrolled; absent on a record made before modes: `operated`. */
+  mode?: ServerMode;
+}
+
+/** The server's admin paused remote management (`mausbot-connector pause`): every job and request from MausBot is refused. */
+export interface PauseRecord {
+  paused: boolean;
+  at: number;
 }
 
 /** The Admin's newest signed config this box verified (protocol.ts `ConfigPayload`), kept as signed. */
@@ -82,6 +91,7 @@ const FILES = {
   selfUpdate: "self-update.json",
   count: "connect-count.json",
   config: "admin-config.json",
+  pause: "pause.json",
 } as const;
 
 export class StateStore {
@@ -182,6 +192,15 @@ export class StateStore {
 
   saveStatus(patch: Partial<StatusRecord>): void {
     this.write(FILES.status, { ...this.status(), ...patch });
+  }
+
+  /** Read from the disk each time: `mausbot-connector pause` is another process. */
+  paused(): boolean {
+    return this.read<PauseRecord>(FILES.pause)?.paused === true;
+  }
+
+  savePause(paused: boolean, now = Date.now()): void {
+    this.write(FILES.pause, { paused, at: now } satisfies PauseRecord);
   }
 
   selfUpdate(): SelfUpdateRecord | null {

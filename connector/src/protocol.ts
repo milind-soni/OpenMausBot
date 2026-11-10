@@ -13,6 +13,14 @@
 
 export const PROTOCOL_VERSION = 2;
 
+/**
+ * Who runs the server. `operated`: MausBot does (a Team Cloud on a server we manage), and the connector does whatever
+ * the Admin signs. `customer-run`: its owner does; the connector then runs only the jobs, answers only the requests and
+ * reports only the fields listed in customer-run.ts, whatever the Admin sends. The mode is chosen on the server when
+ * it enrols and kept there; the Admin is told it (`EnrollRequest.mode`, `Heartbeat`) and can never change it.
+ */
+export type ServerMode = "operated" | "customer-run";
+
 /** `POST {admin}{ENROLL_PATH}` with an `EnrollRequest`; answers an `EnrollResponse`. The code is single use. */
 export const ENROLL_PATH = "/api/cloud/box/v1/enroll";
 /** `GET {admin}{CONNECT_PATH}`, upgraded to a WebSocket with subprotocol `CHANNEL_PROTOCOL` and header `x-omb-box`. */
@@ -133,7 +141,17 @@ export interface CopyInfo {
 
 /** Connector → Admin, every `HEARTBEAT_INTERVAL_MS` and once right after connecting. */
 export interface Heartbeat {
-  heartbeat: { host: HostHealth; home: HomeReport; connector: ConnectorIdentity };
+  heartbeat: {
+    host: HostHealth;
+    home: HomeReport;
+    connector: ConnectorIdentity;
+    /** Only from a customer-run server; absent means `operated`. */
+    mode?: "customer-run";
+    /** Customer-run only: the server's admin has paused remote management, so every job and request is refused. */
+    paused?: boolean;
+    /** Customer-run only: how many people can sign in to the home; null when the home does not say. Never who. */
+    seats?: number | null;
+  };
 }
 
 export interface JobArgs {
@@ -183,7 +201,9 @@ export type JobErrorCode =
   | "invalid_job" | "unknown_job" | "invalid_args" | "busy" | "interrupted" | "audit_unavailable" | "refused_by_policy" | "image_refused"
   | "no_home" | "docker" | "pull_failed" | "unhealthy" | "update_rolled_back" | "rollback_failed"
   | "not_found" | "disk_full" | "port_in_use" | "box_unavailable" | "transfer_failed" | "self_update_failed"
-  | "unsigned_job" | "wrong_box" | "expired_job" | "pending_box";
+  | "unsigned_job" | "wrong_box" | "expired_job" | "pending_box"
+  /** A customer-run server only: the job is not on its list, its admin has paused remote management, or its own updater is missing or declined. */
+  | "refused_by_mode" | "paused" | "update_unavailable" | "update_not_started";
 
 /** `message` is plain words for the Admin's log and alerts; it never carries a secret. */
 export interface JobError {
@@ -210,6 +230,12 @@ export interface EnrollRequest {
   publicKey: string;
   host: HostFacts;
   connector: ConnectorIdentity;
+  /**
+   * Sent only by a customer-run server, so an `operated` enrolment is the same request as before this field existed.
+   * The Admin keeps it with the box: such a box refuses `export-disk`, `import-disk`, a `start` that carries an image
+   * or settings, every request to the home outside its list, and reports only the reduced heartbeat.
+   */
+  mode?: "customer-run";
 }
 
 /**

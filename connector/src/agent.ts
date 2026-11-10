@@ -4,13 +4,14 @@
 // arrive as yamux streams.
 import { randomBytes } from "node:crypto";
 
+import { checkCustomerRunJob } from "./customer-run.ts";
 import { errorText, type Log } from "./log.ts";
 import { MuxSession, type MuxStream } from "./mux.ts";
 import {
   BOX_HEADER, CHANNEL_DEAD_MS, CHANNEL_PING_MS, CHANNEL_PROTOCOL, CLOSE_KEY_COPIED, CLOSE_PROTOCOL, CLOSE_REPLACED, CLOSE_SILENT,
   CLOSE_UNAUTHORIZED, CONNECT_PATH, HANDSHAKE_MS, HEARTBEAT_INTERVAL_MS, TRANSFER_SCHEME, TRANSFER_TOKEN_MS, authText, checkConfig, checkHello, checkJob,
   checkJobPayload, checkNonce, type Auth, type BoxState, type ConfigPayload, type Heartbeat, type Job, type JobAck, type JobErrorCode, type JobReply,
-  type JobType, type TransferPayload,
+  type JobType, type ServerMode, type TransferPayload,
 } from "./protocol.ts";
 import { b64u, seal, signText, unseal } from "./signed.ts";
 import type { AgentRecord, ConfigRecord, StatusRecord } from "./state.ts";
@@ -67,6 +68,10 @@ export interface AgentOptions {
   stream?: (stream: MuxStream, accept: () => void) => void;
   /** A job refused before it ran; for the audit log. */
   refused?: (refusal: Refusal) => void;
+  /** Absent: `operated`. */
+  mode?: ServerMode;
+  /** What a reply becomes before it leaves the server (customer-run: customer-run.ts `reducedReply`). */
+  outgoing?: (reply: JobReply) => JobReply;
   status?: (patch: Partial<StatusRecord>) => void;
   now?: () => number;
   random?: () => number;
@@ -172,7 +177,8 @@ export class Agent {
   }
 
   /** A reply to send now and on each new connection, until the Admin acknowledges it. */
-  reply(reply: JobReply): void {
+  reply(made: JobReply): void {
+    const reply = this.options.outgoing ? this.options.outgoing(made) : made;
     this.replies.set(reply.id, reply);
     while (this.replies.size > KEPT_REPLIES) this.replies.delete(this.replies.keys().next().value as string);
     const text = JSON.stringify(reply);
@@ -399,9 +405,10 @@ export class Agent {
     const claimed = typeof opened.payload.job === "object" && opened.payload.job !== null ? opened.payload.job as { id?: unknown; type?: unknown } : {};
     const id = typeof claimed.id === "string" ? claimed.id.slice(0, 64) : undefined;
     if (!payload.ok) return this.refuse({ code: payload.code, message: payload.message, id, type: typeof claimed.type === "string" ? claimed.type.slice(0, 32) : undefined }, true);
-    const checked = checkJob(payload.job);
+    const checked = this.options.mode === "customer-run" ? checkCustomerRunJob(payload.job) : checkJob(payload.job);
     if (!checked.ok) {
-      if (checked.id) this.reply({ id: checked.id, ok: false, error: { code: checked.code, message: checked.message } });
+      if (checked.code === "refused_by_mode") this.refuse({ code: checked.code, message: checked.message, id: checked.id ?? undefined, type: typeof claimed.type === "string" ? claimed.type.slice(0, 32) : undefined }, true);
+      else if (checked.id) this.reply({ id: checked.id, ok: false, error: { code: checked.code, message: checked.message } });
       else this.options.log(`ignored a job without a valid id: ${checked.message}`);
       return;
     }
