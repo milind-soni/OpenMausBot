@@ -4334,6 +4334,8 @@
   "remote.checkAgain": "Verificar novamente",
   "remote.devices.lastSeen": "Visto por último {when}",
   "remote.devices.paused": "Pausado após 30 dias sem uso. Ele se reconecta quando você abre esta página.",
+  "remote.devices.retired": "Este celular tem um app MausBot mais antigo. Atualize o app e depois pareie o celular de novo aqui.",
+  "remote.devices.retiredNotice": "Agora os celulares chegam a este computador pelo MausBot Relay, e o link seguro antigo foi desativado. Um celular com um app MausBot mais antigo não consegue mais se conectar fora do seu Wi-Fi. Atualize o app MausBot nesse celular e depois pareie de novo aqui, em Configurações → Celular e dispositivos.",
   "remote.devices.remove": "Remover {name}",
   "remote.devices.allowView": "Permitir ver o computador",
   "remote.devices.allowViewDetail": "Acesso interativo completo a partir deste dispositivo.",

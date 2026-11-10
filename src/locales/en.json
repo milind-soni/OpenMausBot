@@ -4590,6 +4590,8 @@
   "remote.checkAgain": "Check again",
   "remote.devices.lastSeen": "Last seen {when}",
   "remote.devices.paused": "Paused after 30 days unused. It reconnects when you open this page.",
+  "remote.devices.retired": "This phone has an older MausBot app. Update the app, then pair it again here.",
+  "remote.devices.retiredNotice": "Phones now reach this computer through MausBot Relay, and the older secure link has been switched off. A phone with an older MausBot app can no longer connect away from your Wi-Fi. Update the MausBot app on that phone, then pair it again here in Settings → Phone & devices.",
   "remote.devices.remove": "Remove {name}",
   "remote.devices.allowView": "Allow computer view",
   "remote.devices.allowViewDetail": "Full interactive access from this device.",
