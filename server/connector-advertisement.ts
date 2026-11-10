@@ -1,7 +1,7 @@
 // Trims the connector bridge's tools/list to the bot's grants; call-time enforcement stays the authority. Whenever
 // filtering cannot run (no env var, malformed, oversized) the bridge relays the list untouched.
 import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN, type ConnectorToolGrant } from "../shared/wire.ts";
-import { serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
+import { APP_SANDBOX_SERVICE, APP_SANDBOX_TOOLS, serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
 
 export const CONNECTOR_ALLOWED_TOOLS_ENV = "OMB_CONNECTOR_ALLOWED_TOOLS";
 
@@ -22,6 +22,13 @@ export const CONNECTOR_META_TOOLS: readonly string[] = [
   "COMPOSIO_MANAGE_CONNECTIONS",
   "COMPOSIO_WAIT_FOR_CONNECTIONS",
 ];
+
+/** What a bot's tools/list offers: its grants, and the apps' sandbox's code tools while its turn runs at Full access (the
+ * relay judges each call again). */
+export function advertisedGrants(grants: Record<string, ConnectorToolGrant> | undefined, fullAccess: boolean): Record<string, ConnectorToolGrant> | undefined {
+  if (grants === undefined || !fullAccess) return grants;
+  return { ...grants, [APP_SANDBOX_SERVICE]: { tools: [...APP_SANDBOX_TOOLS] } };
+}
 
 const CONNECTION_TOOL_SUFFIXES = ["_MANAGE_CONNECTIONS", "_WAIT_FOR_CONNECTIONS"];
 
@@ -128,20 +135,29 @@ const AUTH_CONFIG_PARAMETER = {
     + "connect the one listed toolkit with. Leave it out to use their most recently created enabled config for it.",
 };
 
-/** COMPOSIO_MANAGE_CONNECTIONS as OpenMausBot's connection cards read it: Composio's schema has no auth config id. */
-export function withAuthConfigParameter(frame: Record<string, unknown>): Record<string, unknown> {
+const FIND_PARAMETER = {
+  type: "string",
+  description: "Read by OpenMausBot, instead of toolkits: what the app is for, in plain words (\"something for spreadsheets\"). "
+    + "Searches every app that can be connected and lists their slugs. Use it when you are not sure of an app's exact slug.",
+};
+
+/** COMPOSIO_MANAGE_CONNECTIONS as OpenMausBot's connection cards read it: Composio's schema has no auth config id and no
+ * search, and a search names no toolkits. */
+export function withConnectionParameters(frame: Record<string, unknown>): Record<string, unknown> {
   const result = frame.result;
   if (!result || typeof result !== "object" || Array.isArray(result)) return frame;
   const tools = (result as { tools?: unknown }).tools;
   if (!Array.isArray(tools)) return frame;
-  const withParameter = tools.map((tool) => {
+  const withParameters = tools.map((tool) => {
     if (!tool || typeof tool !== "object" || Array.isArray(tool)) return tool;
     const { name, inputSchema } = tool as { name?: unknown; inputSchema?: unknown };
     if (typeof name !== "string" || !name.endsWith("_MANAGE_CONNECTIONS")) return tool;
     if (!inputSchema || typeof inputSchema !== "object" || Array.isArray(inputSchema)) return tool;
-    const properties = (inputSchema as { properties?: unknown }).properties;
+    const { properties, required } = inputSchema as { properties?: unknown; required?: unknown };
     if (!properties || typeof properties !== "object" || Array.isArray(properties) || "auth_config_id" in properties) return tool;
-    return { ...tool, inputSchema: { ...inputSchema, properties: { ...properties, auth_config_id: AUTH_CONFIG_PARAMETER } } };
+    const stillRequired = Array.isArray(required) ? required.filter((key) => key !== "toolkits") : undefined;
+    const { required: _required, ...rest } = inputSchema as Record<string, unknown>;
+    return { ...tool, inputSchema: { ...rest, properties: { ...properties, auth_config_id: AUTH_CONFIG_PARAMETER, find: FIND_PARAMETER }, ...(stillRequired?.length ? { required: stillRequired } : {}) } };
   });
-  return { ...frame, result: { ...(result as Record<string, unknown>), tools: withParameter } };
+  return { ...frame, result: { ...(result as Record<string, unknown>), tools: withParameters } };
 }

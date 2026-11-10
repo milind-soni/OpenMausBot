@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Loader2, RefreshCw, Search, Server, TriangleAlert, X } from "lucide-react";
 import { api, useStore, type Bot, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -29,7 +29,10 @@ import { BotAvatar } from "./Avatar";
 import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 import { appCategoryLabel, CATEGORY_SECTION_SIZE, catalogSections, connectorDescription, inCategory, rankCategories } from "@/lib/app-catalog";
 import { McpServersPanel } from "./McpServersPanel";
-import { HOSTED_MCP_APPS, type HostedApp, type HostedConnections } from "@/lib/hosted-mcp-apps";
+import { HOSTED_MCP_APPS, mcpServerConnected, ownMcpServer, type HostedApp, type HostedConnections } from "@/lib/hosted-mcp-apps";
+import { isRemoteMcpListing, type McpServerListing } from "./mcp-draft";
+import { useSuggestedApps } from "@/lib/app-suggestions";
+import { matchesCatalogSearch } from "../../shared/app-suggestions";
 import { EmailCard } from "./EmailCard";
 import { PostizCard } from "./PostizCard";
 import { POSTIZ_CATALOG_CARD, POSTIZ_SEARCH } from "@/lib/postiz";
@@ -142,6 +145,7 @@ export function PluginsPanel() {
   const [xConnected, setXConnected] = useState<boolean | null>(null);
   const [postizConnected, setPostizConnected] = useState<boolean | null>(null);
   const [emailConnected, setEmailConnected] = useState<boolean | null>(null);
+  const [mcpServers, setMcpServers] = useState<McpServerListing[]>([]);
 
   const polls = useRef(new Map<string, () => void>());
   const statusGenerations = useRef(new Map<string, number>());
@@ -302,6 +306,8 @@ export function PluginsPanel() {
     };
   }, [dispatch]);
 
+  const { suggestions, picking, pick } = useSuggestedApps(cards !== null && configured && inventoryPhase === "ready", `${cardsRefresh}:${Object.keys(status).filter((slug) => status[slug]?.connected).sort().join()}`);
+
   const openConnectUrl = async (url: string) => {
     if (opening.current) return;
     const launch = reserveConnectionPage();
@@ -389,19 +395,24 @@ export function PluginsPanel() {
   };
 
   const matching = (cards ?? []).filter((c) => (!managedConnectorUnavailableReason(mode, c.slug) || hasActiveConnection(status[c.slug]))
-    && (!search || `${c.label} ${c.slug} ${connectorDescription(c)}`.toLowerCase().includes(search.toLowerCase())));
+    && matchesCatalogSearch(`${c.label} ${c.slug} ${connectorDescription(c)} ${(c.categories ?? []).join(" ")}`, search));
   const isConnected = (slug: string) => Boolean(status[slug]?.connected || status[slug]?.accounts?.length);
   const filter: AppsFilter = surface === "mcp" ? "mcp" : tab === "connected" ? "connected" : "all";
-  const shownHosted = new Set(HOSTED_MCP_APPS.filter((app) => hostedShown(app, search, filter, hostedConnected)).map((app) => app.id));
-  const showEmail = (!search || `email mail imap smtp mailbox ${t("email.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (filter === "all" || (filter === "connected" && emailConnected !== false));
-  const showX = (!search || `${X_CARD_SEARCH} ${t("apps.x.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (filter === "all" || (filter === "connected" && xConnected !== false));
-  const showPostiz = (!search || `${POSTIZ_SEARCH} ${t("postiz.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (filter === "all" || (filter === "connected" && postizConnected !== false));
-  const visible = (filter === "connected" ? matching.filter((card) => isConnected(card.slug)) : matching)
+  const searching = search.trim().length > 0;
+  /** A search covers the whole catalog, whichever view it was typed in. */
+  const listing: AppsFilter = searching && filter === "connected" ? "all" : filter;
+  const shownHosted = new Set(HOSTED_MCP_APPS.filter((app) => hostedShown(app, search, listing, hostedConnected)).map((app) => app.id));
+  const showEmail = (!search || `email mail imap smtp mailbox ${t("email.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (listing === "all" || (listing === "connected" && emailConnected !== false));
+  const showX = (!search || `${X_CARD_SEARCH} ${t("apps.x.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (listing === "all" || (listing === "connected" && xConnected !== false));
+  const showPostiz = (!search || `${POSTIZ_SEARCH} ${t("postiz.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (listing === "all" || (listing === "connected" && postizConnected !== false));
+  const visible = (listing === "connected" ? matching.filter((card) => isConnected(card.slug)) : matching)
     .map((card, index) => ({ card, index }))
     .sort((a, b) => Number(isConnected(b.card.slug)) - Number(isConnected(a.card.slug)) || a.index - b.index)
     .map(({ card }) => card);
   const connectedHosted = HOSTED_MCP_APPS.filter((app) => hostedConnected?.[app.id]);
-  const connectedCount = Object.values(status).filter(hasActiveConnection).length + connectedHosted.length + Number(emailConnected === true) + Number(xConnected === true) + Number(postizConnected === true);
+  const ownServers = mcpServers.filter((server) => ownMcpServer(server));
+  const ownServerShown = (server: McpServerListing) => matchesCatalogSearch(`${server.name} ${isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ")}`, search);
+  const connectedCount = Object.values(status).filter(hasActiveConnection).length + connectedHosted.length + ownServers.filter(mcpServerConnected).length + Number(emailConnected === true) + Number(xConnected === true) + Number(postizConnected === true);
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
   const setupNotice = connectorSetupNotice({ configured, stale, setup, remoteClient });
@@ -418,11 +429,11 @@ export function PluginsPanel() {
   const ranked = rankCategories([...(cards ?? []), POSTIZ_CATALOG_CARD], undefined, POSTIZ_CATALOG_CARD.categories);
   const moreCategories = ranked.more;
   const categoryInMore = category !== null && moreCategories.includes(category);
-  const inCategoryView = filter === "all" && category !== null;
+  const inCategoryView = filter === "all" && category !== null && !searching;
   const postizHere = showPostiz && (!inCategoryView || inCategory(POSTIZ_CATALOG_CARD, category));
-  const nativeCardsShown = (!inCategoryView && (shownHosted.size > 0 || showEmail || showX)) || postizHere;
+  const nativeCardsShown = (!inCategoryView && (shownHosted.size > 0 || showEmail || showX)) || postizHere || (filter === "connected" && ownServers.some((server) => server.enabled && ownServerShown(server)));
   const categoryCards = inCategoryView ? visible.filter((card) => inCategory(card, category)) : visible;
-  const sectioned = filter === "all" && !search && category === null;
+  const sectioned = filter === "all" && !searching && category === null;
   const sections = sectioned ? catalogSections(visible, isConnected, ranked.inline) : [];
   const allSection = sections.find((section) => section.kind === "all");
   const allCards = sectioned ? allSection?.cards ?? [] : categoryCards;
@@ -434,10 +445,10 @@ export function PluginsPanel() {
     setTab("marketplace");
     if (surface !== "apps") dispatch({ type: "togglePlugins", open: true, surface: "apps" });
   };
-  const listTitle = filter === "connected"
-    ? t("connectors.section.yours")
-    : search
-      ? t("connectors.section.results")
+  const listTitle = searching
+    ? t("connectors.section.results")
+    : filter === "connected"
+      ? t("connectors.section.yours")
       : category ? appCategoryLabel(category) : (sections.length > 1 ? t("apps.section.all") : t("connectors.section.available"));
   const pill = "inline-flex h-7 shrink-0 items-center justify-center gap-2 rounded-full px-3 text-[13px] font-medium leading-5 transition-colors";
   const pillTone = (selected: boolean) => selected
@@ -623,15 +634,18 @@ export function PluginsPanel() {
 
           {filter !== "mcp" && (
             <div data-apps-grid className="@container flex flex-col gap-7 pt-1">
+              {!sections.some((section) => section.kind === "connected") && renderSuggested()}
               {sections.filter((section) => section.kind !== "all").map((section) => section.kind === "connected" ? (
-                <AppsSection
-                  key="connected"
-                  id="apps-section-connected"
-                  title={t("apps.section.connected")}
-                  viewAll={section.cards.length > CATEGORY_SECTION_SIZE ? { label: t("apps.viewAll"), onClick: () => chooseFilter("connected") } : undefined}
-                >
-                  {section.cards.slice(0, CATEGORY_SECTION_SIZE).map((card) => renderTile(card))}
-                </AppsSection>
+                <Fragment key="connected">
+                  <AppsSection
+                    id="apps-section-connected"
+                    title={t("apps.section.connected")}
+                    viewAll={section.cards.length > CATEGORY_SECTION_SIZE ? { label: t("apps.viewAll"), onClick: () => chooseFilter("connected") } : undefined}
+                  >
+                    {section.cards.slice(0, CATEGORY_SECTION_SIZE).map((card) => renderTile(card))}
+                  </AppsSection>
+                  {renderSuggested()}
+                </Fragment>
               ) : (
                 <AppsSection
                   key={section.category}
@@ -678,10 +692,10 @@ export function PluginsPanel() {
                     {cards !== null && allShown.length === 0 && !nativeCardsShown && sections.length <= 1 && (
                       <div className="flex min-h-40 flex-col items-center justify-center text-center">
                         <div className="text-[14px] font-medium text-ink">
-                          {filter === "connected" ? connectedEmptyCopy.title : t("connectors.noAppsFound")}
+                          {listing === "connected" ? connectedEmptyCopy.title : t("connectors.noAppsFound")}
                         </div>
                         <div className="mt-1 text-[13px] text-ink-secondary">
-                          {filter === "connected" ? connectedEmptyCopy.description : t("connectors.tryDifferentSearch")}
+                          {listing === "connected" ? connectedEmptyCopy.description : t("connectors.tryDifferentSearch")}
                         </div>
                         {filter === "connected" && inventoryPhase === "error" && (
                           <button
@@ -699,7 +713,7 @@ export function PluginsPanel() {
                   </>
                 )}
               >
-                <McpServersPanel hostedCards={{ shown: (id) => !inCategoryView && shownHosted.has(id), onConnections: setHostedConnected }} refreshKey={cardsRefresh} />
+                <McpServersPanel hostedCards={{ shown: (id) => !inCategoryView && shownHosted.has(id), onConnections: setHostedConnected, onServers: setMcpServers, ...(filter === "connected" ? { ownServers: { shown: ownServerShown, manage: () => chooseFilter("mcp") } } : {}) }} refreshKey={cardsRefresh} />
                 <div data-native-card="x" className={showX && !inCategoryView ? "contents" : "hidden"}><XCard refreshKey={cardsRefresh} onConnection={setXConnected} /></div>
                 <div data-native-card="email" className={showEmail && !inCategoryView ? "contents" : "hidden"}><EmailCard refreshKey={cardsRefresh} onConnection={setEmailConnected} /></div>
                 <div data-native-card="postiz" className={postizHere ? "contents" : "hidden"}><PostizCard refreshKey={cardsRefresh} onConnection={setPostizConnected} /></div>
@@ -727,6 +741,21 @@ export function PluginsPanel() {
       </div>
     </div>
   );
+
+  function renderSuggested() {
+    const shown = suggestions.cards.filter((card) => !isConnected(card.slug));
+    if (!sectioned || shown.length === 0) return null;
+    const action = suggestions.pick === "available"
+      ? { label: t(picking ? "apps.suggested.picking" : "apps.suggested.show"), onClick: pick }
+      : suggestions.pick === "needs-key" && !remoteClient
+        ? { label: t("apps.suggested.addKey"), onClick: () => { close(); dispatch(openKeySettings("jev")); } }
+        : undefined;
+    return (
+      <AppsSection id="apps-section-suggested" title={t("apps.section.suggested")} note={suggestions.pick === "picked" ? t("apps.suggested.picked") : undefined} viewAll={action}>
+        {shown.map((card) => renderTile(card))}
+      </AppsSection>
+    );
+  }
 
   function renderTile(card: ToolkitCard) {
     const serviceStatus = status[card.slug];

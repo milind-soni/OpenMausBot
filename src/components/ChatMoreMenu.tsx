@@ -1,5 +1,5 @@
 import { useMemo, useState, type JSX } from "react";
-import { Bug, Copy, Cpu, Download, Gauge, ListChecks, MessagesSquare, Monitor, MoreHorizontal, Search, Share, SquarePen, UserRound } from "lucide-react";
+import { Bug, Copy, Cpu, Download, Gauge, ListChecks, MessagesSquare, Monitor, MoreHorizontal, RotateCcw, Search, Share, SquarePen, UserRound } from "lucide-react";
 import { currentTaskBot, openBotThread, useStore, visibleMessages, type Bot } from "@/state/store";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
+import { useContextAction } from "./ContextWarning";
 import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_OPEN } from "./elevated";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
@@ -37,6 +38,8 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const usage = usageSummary(bot, state.instances);
   const hasMessages = messages.length > 0;
+  const contextAction = useContextAction();
+  const atFreshStart = messages.at(-1)?.compaction?.fresh === true;
   const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
   const side = useConversationSide(profile);
   const threads = showThreads ? [] : orderedThreadList((side ? tasksOfSide(profile, side) : profile.tasks ?? []).filter((task) => !task.routineRunId));
@@ -104,6 +107,14 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       })),
       onSelect: () => {},
     } satisfies SidebarMenuItem]),
+    {
+      key: "start-fresh",
+      label: t("chat.startFresh"),
+      icon: <RotateCcw size={16} />,
+      disabled: bot.busy || contextAction.pending || !hasMessages || atFreshStart,
+      title: t(bot.busy ? "contextWarning.busy" : "chat.startFresh.hint"),
+      onSelect: () => contextAction.run(`/api/bots/${profile.id}/start-fresh`, { threadId: bot.threadId }),
+    },
     {
       key: "copy",
       heading: t("chat.export.heading"),

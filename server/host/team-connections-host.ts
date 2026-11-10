@@ -14,9 +14,10 @@ import type { CloudTeam, TeamRole } from "../cloud-team.ts";
 import type * as Composio from "../composio.ts";
 import type { AppConfig } from "../config.ts";
 import type { McpServerSpec } from "../contracts.ts";
+import { advertisedGrants } from "../connector-advertisement.ts";
 import { serviceSlugFor } from "../connector-verdict.ts";
 import { type McpOAuthManager, type McpRefreshOutcome, type McpSignInPhase, withMcpSignIn, withoutPendingSignIn } from "../mcp-oauth.ts";
-import { isRemoteMcpServer, parseStoredMcpServer } from "../mcp-registry.ts";
+import { isRemoteMcpServer, parseStoredMcpServer, type McpOAuthClientConfig } from "../mcp-registry.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { appLabel, ConnectionScopes, PeopleConnections, personAppOf, SCOPES_FILE, type BrokerAccess } from "../team-connections.ts";
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolsFor } from "../connector-app-tools.ts";
@@ -45,6 +46,8 @@ export interface TeamConnectionsHostDeps {
   mcpOAuth: McpOAuthManager;
   /** The bot's enabled MCP servers, as policy allows them, before any sign-in is attached. */
   botMcp(bot: McpBot): Record<string, McpServerSpec>;
+  /** An admin's OAuth app as a member's sign-in uses it: its client secret read from the Vault when it is kept there. */
+  oauthClient?(name: string, oauth: McpOAuthClientConfig): McpOAuthClientConfig;
   /** Whether whoever started a member's sign-in (a session, or a chat's Sign in card) is still there to finish it. */
   isOwnerLive(owner: string): boolean;
   onSettled?(name: string, phase: McpSignInPhase, owner: string): void;
@@ -54,6 +57,8 @@ export interface TeamConnectionsHostDeps {
   onPersonChanged?(person: string, kind: "app" | "mcp", id: string): void;
   /** The connected-apps service a member's own installation is made on; null: none here. */
   brokerUrl(): string | null;
+  /** Whether this bot's turn in this conversation runs at Full access: its tools/list then offers the apps' sandbox. */
+  fullAccess?(botId: string, threadId: string): boolean;
   composio: Pick<typeof Composio, "configured" | "mcpIntegration" | "connectedServices" | "verifiedConnectedServiceSlugs" | "authorizeService" | "removeService">;
 }
 
@@ -77,7 +82,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
   const people = new PeopleConnections({
     dataDir: deps.dataDir,
     brokerUrl: deps.brokerUrl,
-    clients: (name, url) => { const server = teamServer(name); return server && isRemoteMcpServer(server) && server.url === url ? server.oauth : undefined; },
+    clients: (name, url) => { const server = teamServer(name); return server && isRemoteMcpServer(server) && server.url === url ? (server.oauth && deps.oauthClient ? deps.oauthClient(name, server.oauth) : server.oauth) : undefined; },
     isOwnerLive: deps.isOwnerLive,
     ...(deps.onSettled ? { onSettled: deps.onSettled } : {}),
     ...(deps.onRefresh ? { onRefresh: deps.onRefresh } : {}),
@@ -238,7 +243,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     async appsIntegrations(bot: Bot, threadId: string, generation: string, names: "dotted" | "plain" = "plain"): Promise<{ composio?: Integration; composioOwn?: Integration }> {
       const cfg = deps.cfg();
       const out: { composio?: Integration; composioOwn?: Integration } = {};
-      const base = { harnessUrl: deps.harnessUrl, botId: bot.id, threadId, connectorTools: bot.connectorTools };
+      const base = { harnessUrl: deps.harnessUrl, botId: bot.id, threadId, connectorTools: advertisedGrants(bot.connectorTools, deps.fullAccess?.(bot.id, threadId) === true) };
       const shared = await deps.composio.mcpIntegration(cfg, { ...base, commsToken: deps.mint({ botId: bot.id, threadId, generation }) });
       if (shared) out.composio = await withAppTools(shared, bot, names);
       const person = personApps().length ? turnPerson(threadId, generation) : null;

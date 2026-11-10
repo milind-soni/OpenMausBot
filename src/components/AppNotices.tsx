@@ -204,8 +204,9 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const modelgoNow = !modelgoHere || moving || welcomeFinishedThisLaunch() || launchDialogShown() === "mausbot" || desktopState?.seen.includes(MODELGO_OFFER_NOTICE) ? false
     : organization === null || moving === null || firstChat === null || mausBotFirst || (state.liveCall && state.liveCall.status !== "ended") || (desktop && !desktopState) ? null : true;
   const launch = launchNotice();
-  // After a closed popup only the product-updates question may follow in this launch; nothing else does.
-  const notice = waits ? null : closed ? (consentNow === true ? UPDATES_CONSENT_NOTICE : null)
+  // After a closed popup only the product-updates question and ModelGo's card may follow in this launch (nextNotice's
+  // FOLLOWERS); nothing else does.
+  const notice = waits ? null
     : firstChatQuiet(state) ? (grokNow === true && (launch === null || launch === GROK_MOVE_NOTICE) ? GROK_MOVE_NOTICE : null)
     : cards || whatsNewHere || consentHere || simpleDue || boatHere || modelgoHere || twoFact !== false || grokNow !== false ? nextNotice({
     [GROK_MOVE_NOTICE]: grokNow,
@@ -226,7 +227,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       : organization === null || moving === null || afterWelcome === null || mausBotFirst || (desktop && !desktopState) ? null : !organization,
     [STAR_NOTICE]: !bridge || moving || brandStatus().source === "file" || !usedBefore(state.bots) ? false : moving === null ? null : true,
   }, id => id === CLOUD_INTRO ? stage === "done" && !introOpen
-    : id === STAR_NOTICE || id === PRODUCT_HUNT_NOTICE || id === BOAT_OFFER_NOTICE || id === MODELGO_OFFER_NOTICE ? noticeSeen(record, id) : false, launch) : null;
+    : id === STAR_NOTICE || id === PRODUCT_HUNT_NOTICE || id === BOAT_OFFER_NOTICE || id === MODELGO_OFFER_NOTICE ? noticeSeen(record, id) : false, launch, closed) : null;
 
   const shownKey = notice === CLOUD_TRIAL_NOTICE ? key : notice;
   useEffect(() => {
