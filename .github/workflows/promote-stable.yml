@@ -95,23 +95,41 @@ jobs:
           echo "home=$IMAGE-cloud-home@$(digest_of "$IMAGE-cloud-home:v$VERSION")" >> "$GITHUB_OUTPUT"
 
       - name: Write the record, refusing to move stable back
+        id: record
         env:
           VERSION: ${{ steps.release.outputs.version }}
           SERVER: ${{ steps.images.outputs.server }}
           HOME_IMAGE: ${{ steps.images.outputs.home }}
         run: |
           set -euo pipefail
+          # Only a branch that is not there means "no record yet". Anything else that goes wrong while reading it stops
+          # here: taken for a first promotion, it would skip the move-back guard and drop the history.
           current=()
-          if git fetch --depth 1 origin channels 2>/dev/null && git show FETCH_HEAD:stable.json > "$RUNNER_TEMP/current.json" 2>/dev/null; then
+          if git ls-remote --exit-code --heads origin channels >/dev/null; then
+            git fetch --depth 1 origin channels
+            git show FETCH_HEAD:stable.json > "$RUNNER_TEMP/current.json"
             current=(--current "$RUNNER_TEMP/current.json")
+            # Where the tags go back to if the record cannot be published after they moved.
+            echo "previous_server=$(jq -er .image "$RUNNER_TEMP/current.json")" >> "$GITHUB_OUTPUT"
+            echo "previous_home=$(jq -er .cloudHomeImage "$RUNNER_TEMP/current.json")" >> "$GITHUB_OUTPUT"
+          else
+            status=$?
+            if [ "$status" != 2 ]; then
+              echo "::error::Could not ask GitHub whether the channels branch exists (git ls-remote exited $status). Nothing was changed; run this again."
+              exit 1
+            fi
+            echo "There is no channels branch yet: this is the first promotion."
           fi
+          echo "first=$([ ${#current[@]} = 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           node scripts/stable-channel.mjs record --version "$VERSION" --image "$SERVER" --cloud-home "$HOME_IMAGE" \
             --release "$RUNNER_TEMP/release.json" "${current[@]}" $([ "$ALLOW_OLDER" = "true" ] && echo --allow-older) > "$RUNNER_TEMP/stable.json"
           cat "$RUNNER_TEMP/stable.json"
 
       # The tags move before the record does: a server follows the record, and the record never names a digest the
-      # `stable` tag did not reach. Running this again with the same version repairs a run that stopped in between.
+      # `stable` tag did not reach. When the record then cannot be published, the last step puts the tags back where
+      # the record still says; running this again with the same version also repairs a run that stopped in between.
       - name: Move the stable tags, without building
+        id: tags
         env:
           IMAGE: ${{ steps.release.outputs.image }}
           SERVER: ${{ steps.images.outputs.server }}
@@ -125,12 +143,17 @@ jobs:
           test "$IMAGE-cloud-home@$(digest_of "$IMAGE-cloud-home:stable")" = "$HOME_IMAGE"
 
       - name: Publish the record on the channels branch
+        id: publish
         env:
           VERSION: ${{ steps.release.outputs.version }}
+          FIRST: ${{ steps.record.outputs.first }}
         run: |
           set -euo pipefail
           work="$RUNNER_TEMP/channels"
-          if git fetch --depth 1 origin channels 2>/dev/null; then
+          if [ "$FIRST" != true ]; then
+            git fetch --depth 1 origin channels
+            # The record was written from this stable.json; one that changed since is not overwritten.
+            git show FETCH_HEAD:stable.json | cmp -s - "$RUNNER_TEMP/current.json" || { echo "::error::stable.json changed while this ran. Run it again."; exit 1; }
             git worktree add --detach "$work" FETCH_HEAD
           else
             git worktree add --detach "$work"
@@ -146,6 +169,22 @@ jobs:
             git -C "$work" -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "stable: $VERSION"
             git -C "$work" push origin HEAD:refs/heads/channels
           fi
+
+      - name: Put the stable tags back where the record says
+        if: failure() && steps.tags.outcome != 'skipped' && steps.publish.outcome != 'success'
+        env:
+          IMAGE: ${{ steps.release.outputs.image }}
+          PREVIOUS_SERVER: ${{ steps.record.outputs.previous_server }}
+          PREVIOUS_HOME: ${{ steps.record.outputs.previous_home }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PREVIOUS_SERVER" ] || [ -z "$PREVIOUS_HOME" ]; then
+            echo "::warning::There is no earlier record to put the stable tags back to. They may name the new version while no record does; run this again to publish the record."
+            exit 0
+          fi
+          docker buildx imagetools create --tag "$IMAGE:stable" "$PREVIOUS_SERVER"
+          docker buildx imagetools create --tag "$IMAGE-cloud-home:stable" "$PREVIOUS_HOME"
+          echo "::warning::The record was not published, so the stable tags were put back to $PREVIOUS_SERVER and $PREVIOUS_HOME."
 
       - name: Summary
         env:

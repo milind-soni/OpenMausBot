@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # deploy/update.sh for real, on a host with Docker and nothing else running in it (CI, or a private docker:dind):
-# a server on one released version, then --check, an update to a stable record naming the next release by digest, the
-# same again (nothing to do), --rollback, an update to an image that never answers and damages the data (it must roll
-# back and leave every file as it was), and an update killed with SIGKILL while it waits, finished by the next run.
+# a server on one released version, then --check, an update to a stable record (with a history of earlier versions)
+# naming the next release by digest, the same again (nothing to do), --rollback, an update to an image that never
+# answers and damages the data (it must roll back and leave every file as it was), an update killed with SIGKILL while
+# it waits (the next run asks before it puts the data back), a rollback whose restore fails (data and copy untouched,
+# tried again on request), an update whose terminal hangs up half-way (it finishes), and a refused downgrade.
 #   LAYOUT=installer  /opt/openmausbot with compose.yaml and a ./data folder, as deploy/install.sh lays it out
 #   LAYOUT=checkout   a copy of deploy/ with docker-compose.yml and the named volume `data`
 #   OUT=<evidence folder> LAYOUT=installer bash deploy/e2e/update.sh
@@ -15,8 +17,8 @@ REPO=ghcr.io/milind-soni/openmausbot
 FROM=${FROM_VERSION:-0.1.150}
 TO=${TO_VERSION:-0.1.151}
 mkdir -p "$OUT"
-if [ "$LAYOUT" = installer ]; then DIR=/opt/openmausbot DATA=/opt/openmausbot/data COPY=openmausbot_data-before-update
-else DIR=/srv/openmausbot-e2e/deploy DATA=deploy_data COPY=deploy_data-before-update; fi
+if [ "$LAYOUT" = installer ]; then DIR=/opt/openmausbot DATA=/opt/openmausbot/data
+else DIR=/srv/openmausbot-e2e/deploy DATA=deploy_data; fi
 UPDATE=(bash "$ROOT/deploy/update.sh" --dir "$DIR")
 
 step() { printf '\n== %s\n' "$*"; }
@@ -29,6 +31,14 @@ running_image() { docker inspect -f '{{.Image}}' "$(cd "$DIR" && docker compose 
 version() { (cd "$DIR" && docker compose exec -T omb curl -sf http://127.0.0.1:8799/.well-known/openmausbot/environment) | sed -n 's/.*"version":"\([^"]*\)".*/\1/p'; }
 wait_version() { for _ in $(seq 1 60); do [ "$(version)" = "$1" ] && return 0; sleep 3; done; return 1; }
 in_data() { docker run --rm --network none --user 0:0 -v "$DATA:/d" --entrypoint sh "$REPO:v$FROM" -c "$1"; }
+# The copies of the data the updates made: one Docker volume each, and never more than one once an update is done.
+copies() { docker volume ls -q --filter label=com.mausbot.role=update-backup; }
+copy() {
+  local found
+  found=$(copies)
+  [ "$(printf '%s\n' "$found" | grep -c .)" = 1 ] || fail "expected one copy of the data, found: $(printf '%s ' $found)"
+  printf '%s' "$found"
+}
 # Every file of the data with its owner, mode and checksum. Read while the server is stopped.
 manifest() { docker run --rm --network none --user 0:0 -v "$1:/d:ro" --entrypoint sh "$REPO:v$FROM" -c 'cd /d && find . -type f -print0 | sort -z | xargs -0 -r stat -c "%u:%g %a %n"; find . -type f -print0 | sort -z | xargs -0 -r sha256sum'; }
 
@@ -36,7 +46,7 @@ step "a $LAYOUT install on $FROM"
 for old in /opt/openmausbot /srv/openmausbot-e2e/deploy; do
   if [ -d "$old" ]; then (cd "$old" && docker compose down -v) >/dev/null 2>&1; fi
 done
-docker volume rm -f "$COPY" >/dev/null 2>&1
+for volume in $(copies); do docker volume rm -f "$volume" >/dev/null 2>&1; done
 rm -rf "$DIR" && mkdir -p "$DIR"
 docker pull -q "$REPO:v$FROM" >/dev/null && docker pull -q "$REPO:v$TO" >/dev/null || fail "could not pull the two releases"
 if [ "$LAYOUT" = installer ]; then
@@ -90,7 +100,8 @@ wait_version "$FROM" || fail "$FROM did not come up"
 OLD_ID=$(running_image)
 cp "$DIR/.env" "$OUT/env.before"
 STABLE=$(docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$REPO:v$TO" | grep "^$REPO@" | head -n 1)
-printf '{\n  "channel": "stable",\n  "version": "%s",\n  "image": "%s",\n  "history": [{ "version": "%s", "promotedAt": "2026-11-12T00:00:00.000Z" }]\n}\n' "$TO" "$STABLE" "$TO" >"$OUT/stable.json"
+# As promote-stable.yml writes it: the history names older versions after the current one.
+printf '{\n  "channel": "stable",\n  "version": "%s",\n  "image": "%s",\n  "history": [\n    { "version": "%s", "promotedAt": "2026-11-12T00:00:00.000Z" },\n    { "version": "%s", "promotedAt": "2026-11-05T00:00:00.000Z" },\n    { "version": "0.1.140", "promotedAt": "2026-10-01T00:00:00.000Z" }\n  ]\n}\n' "$TO" "$STABLE" "$TO" "$FROM" >"$OUT/stable.json"
 export OMB_STABLE_URL="file://$OUT/stable.json"
 echo "the stable record names $STABLE"
 
@@ -106,7 +117,7 @@ grep -qx "OMB_IMAGE=$STABLE" "$DIR/.env" || fail ".env is not pinned by digest"
 [ "$(stat -c %a "$DIR/.env")" = 600 ] || fail ".env changed its mode"
 in_data 'cat /d/.openmausbot/e2e-sentinel.txt' | grep -q "written under $FROM" || fail "the data did not carry over"
 [ "$(cd "$DIR" && docker compose ps --status running --services | sort | tr '\n' ' ')" = "caddy omb " ] || fail "caddy or omb is not running"
-docker volume inspect "$COPY" >/dev/null || fail "no copy of the data"
+copy >/dev/null || fail "expected one copy of the data"
 
 step "3. the same again: nothing to do"
 "${UPDATE[@]}" | tee "$OUT/3-again.txt"
@@ -136,7 +147,8 @@ grep -q "did not work: it did not answer within 45 seconds" "$OUT/5-failed-updat
 grep -q "Your server runs $FROM again, with its data as it was before the update." "$OUT/5-failed-update.txt" || fail "no plain outcome"
 [ "$(running_image)" = "$OLD_ID" ] || fail "after the rollback another image runs"
 cmp -s "$DIR/.env" "$OUT/env.before" || fail "after the rollback .env differs"
-manifest "$COPY" >"$OUT/5-copy.txt"
+snapshot=$(copy) || fail "expected one copy of the data"
+manifest "$snapshot" >"$OUT/5-copy.txt"
 diff "$OUT/5-data-before.txt" "$OUT/5-copy.txt" >"$OUT/5-copy-vs-before.diff" || fail "the copy differs from the data before the update"
 (cd "$DIR" && docker compose stop) >/dev/null 2>&1
 manifest "$DATA" >"$OUT/5-data-after.txt"
@@ -146,7 +158,7 @@ in_data 'grep -q "written under" /d/.openmausbot/e2e-sentinel.txt && test ! -e /
 (cd "$DIR" && docker compose start) >/dev/null 2>&1
 wait_version "$FROM" || fail "$FROM does not answer after the rollback"
 
-step "6. an update killed while it waits is finished by the next run"
+step "6. an update killed while it waits: the next run asks, changes nothing unanswered, and puts the data back on yes"
 OMB_UPDATE_WAIT_S=120 "${UPDATE[@]}" --image omb-e2e-broken:1 >"$OUT/6-killed.txt" 2>&1 &
 pid=$!
 for _ in $(seq 1 180); do grep -q "^phase=wait" "$DIR/.update/journal" 2>/dev/null && break; sleep 1; done
@@ -158,14 +170,64 @@ cat "$OUT/6-killed.txt"
 [ -f "$DIR/.update/journal" ] || fail "no journal after the kill"
 in_data 'grep -qx damaged /d/.openmausbot/e2e-sentinel.txt && test -e /d/.openmausbot/left-by-the-broken-version' || fail "the broken version did not damage the data, so this proves nothing"
 echo "the killed update left the broken version running on damaged data"
-OMB_UPDATE_WAIT_S=45 "${UPDATE[@]}" | tee "$OUT/6-next-run.txt"
+OMB_UPDATE_WAIT_S=45 "${UPDATE[@]}" </dev/null | tee "$OUT/6-unanswered.txt"
+[ "${PIPESTATUS[0]}" = 4 ] || fail "a run nobody answered did not exit 4"
+grep -q "Everything made on this server since then (chats, files, settings) is lost." "$OUT/6-unanswered.txt" || fail "the question does not say what is lost"
+[ -f "$DIR/.update/journal" ] || fail "a run nobody answered dropped the journal"
+in_data 'grep -qx damaged /d/.openmausbot/e2e-sentinel.txt' || fail "a run nobody answered changed the data"
+printf 'yes\n' | OMB_UPDATE_WAIT_S=45 "${UPDATE[@]}" | tee "$OUT/6-next-run.txt"
 grep -q "Your server runs $FROM again, with its data as it was before the update." "$OUT/6-next-run.txt" || fail "the next run did not put the old version back"
 [ "$(running_image)" = "$OLD_ID" ] || fail "after the recovery another image runs"
 in_data 'grep -q "written under" /d/.openmausbot/e2e-sentinel.txt' || fail "after the recovery the data is damaged"
 cmp -s "$DIR/.env" "$OUT/env.before" || fail "after the recovery .env differs"
+
+step "7. a rollback whose restore fails leaves the data and the copy alone, keeps the journal, and is tried again on request"
+(cd "$DIR" && docker compose stop) >/dev/null 2>&1
+manifest "$DATA" >"$OUT/7-data-before.txt"
+OMB_UPDATE_WAIT_S=120 "${UPDATE[@]}" --image omb-e2e-broken:1 >"$OUT/7-failed-restore.txt" 2>&1 &
+pid=$!
+for _ in $(seq 1 180); do grep -q "^phase=wait" "$DIR/.update/journal" 2>/dev/null && break; sleep 1; done
+grep -q "^phase=wait" "$DIR/.update/journal" || fail "the update never reached its wait"
+# The restore runs in a helper from the old image: without it, putting the data back fails before it starts.
+docker image rm -f "$OLD_ID" >/dev/null || fail "could not remove the old image"
+wait "$pid"
+code=$?
+cat "$OUT/7-failed-restore.txt"
+[ "$code" = 2 ] || fail "a rollback whose restore failed exited $code, not 2"
+grep -q "Neither was changed" "$OUT/7-failed-restore.txt" || fail "no plain account of the failed restore"
+[ -f "$DIR/.update/journal" ] || fail "the failed restore dropped the journal"
+[ -z "$(cd "$DIR" && docker compose ps -q --status running omb)" ] || fail "a server was started on data that was not put back"
+docker pull -q "$REPO:v$FROM" >/dev/null || fail "could not pull $FROM again"
+in_data 'grep -qx damaged /d/.openmausbot/e2e-sentinel.txt && test ! -e /d/.omb-restore && test ! -e /d/.omb-replaced' || fail "the failed restore changed the data"
+snapshot=$(copy) || fail "expected one copy of the data"
+manifest "$snapshot" >"$OUT/7-copy.txt"
+diff "$OUT/7-data-before.txt" "$OUT/7-copy.txt" >/dev/null || fail "the failed restore changed the copy"
+OMB_UPDATE_WAIT_S=120 "${UPDATE[@]}" --rollback --yes | tee "$OUT/7-again.txt"
+[ "${PIPESTATUS[0]}" = 0 ] || fail "--rollback after the failed restore did not exit 0"
+[ "$(running_image)" = "$OLD_ID" ] || fail "after the second try another image runs"
+in_data 'grep -q "written under" /d/.openmausbot/e2e-sentinel.txt' || fail "after the second try the data is damaged"
+[ ! -f "$DIR/.update/journal" ] || fail "the journal outlived a finished rollback"
+
+step "8. an update whose terminal hangs up half-way finishes"
+"${UPDATE[@]}" >"$OUT/8-hangup.txt" 2>&1 &
+pid=$!
+for _ in $(seq 1 180); do grep -q "^phase=wait" "$DIR/.update/journal" 2>/dev/null && break; sleep 1; done
+grep -q "^phase=wait" "$DIR/.update/journal" || fail "the update never reached its wait"
+kill -HUP "$pid"
+wait "$pid"
+code=$?
+cat "$OUT/8-hangup.txt"
+[ "$code" = 0 ] || fail "the update exited $code after a hangup"
+[ "$(version)" = "$TO" ] || fail "after the hangup the server says $(version)"
+[ ! -f "$DIR/.update/journal" ] || fail "the hung-up update left its journal"
+
+step "9. no older version without --allow-older"
+"${UPDATE[@]}" --version "$FROM" | tee "$OUT/9-older.txt"
+[ "${PIPESTATUS[0]}" = 5 ] || fail "going back to $FROM did not exit 5"
+[ "$(version)" = "$TO" ] || fail "a refused downgrade changed the version"
 cp "$DIR/.update/update.log" "$OUT/update.log"
 
 (cd "$DIR" && docker compose down -v) >/dev/null 2>&1
-docker volume rm -f "$COPY" >/dev/null 2>&1
+for volume in $(copies); do docker volume rm -f "$volume" >/dev/null 2>&1; done
 docker image rm -f omb-e2e-broken:1 openmausbot-before-update:local >/dev/null 2>&1
 step "ALL PASSED ($LAYOUT)"

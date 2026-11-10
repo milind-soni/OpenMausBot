@@ -6,6 +6,8 @@ export const LATEST_RELEASE_URL = "https://api.github.com/repos/milind-soni/Open
 /** Written by .github/workflows/promote-stable.yml: the released version our own Clouds have run for 48 hours. */
 export const STABLE_CHANNEL_URL = "https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json";
 const CACHE_MS = 60 * 60_000;
+/** How long the last answer stands in when the channel cannot be read: an outage of GitHub is no reason to say nothing. */
+const STALE_MS = 24 * 60 * 60_000;
 
 /** "managed" is a hosted or Cloud server that is updated for its owner. */
 export type InstallKind = "desktop" | "managed" | "docker" | "podman" | "npm" | "git" | "unknown";
@@ -101,6 +103,8 @@ export function createUpdateChecker(options: {
   const now = options.now ?? Date.now;
   const channel = options.channel ?? "stable";
   let cached: { at: number; result: UpdateCheck } | undefined;
+  /** The last answer that was read, kept past the hour for a channel that cannot be read for a while. */
+  let lastGood: { at: number; result: UpdateCheck } | undefined;
   let inflight: Promise<UpdateCheck> | undefined;
   const base = (): UpdateCheck => ({
     current: options.current,
@@ -146,8 +150,13 @@ export function createUpdateChecker(options: {
           ...(found.releaseUrl ? { releaseUrl: found.releaseUrl } : {}),
           ...updateCommand(options.install, { version: found.version, stable: promoted !== null }),
         };
-        cached = { at: now(), result };
+        cached = lastGood = { at: now(), result };
         return result;
+      } catch (error) {
+        // Never a fall back to the newest release, which the stable channel has not taken yet: the last answer it gave,
+        // when there is one from the last day, else the error.
+        if (lastGood && now() - lastGood.at < STALE_MS) return lastGood.result;
+        throw error;
       } finally {
         inflight = undefined;
       }

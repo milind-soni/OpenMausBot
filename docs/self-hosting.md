@@ -1457,7 +1457,11 @@ git pull && pnpm install && sudo systemctl restart openmausbot          # from s
 `deploy/update.sh` is the whole routine for a Docker Compose install: the
 stable image by digest, a copy of `/data` first, a health check that includes
 "an engine can still start a bot", and the old image and the copy put back
-when the check fails. It is safe to interrupt and to run twice.
+when the check fails. It is safe to interrupt and to run twice, carries on
+when the terminal closes, never goes to an older version unless told to
+(`--allow-older`; a server on `latest` moves to stable once the stable version
+is newer than the one it reports), and asks before it puts back data from an
+update an earlier run left unfinished.
 [Every step, the rollback and the exit codes](deploy-vps.md#update).
 
 For the npm service there is no one-command updater yet:

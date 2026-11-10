@@ -89,6 +89,23 @@ describe("server update check", () => {
     await expect(createUpdateChecker({ current: "0.1.92", install: "docker", fetch })()).rejects.toThrow("The stable channel answered 500");
   });
 
+  it("gives the last answer while the channel cannot be read, for a day, and never the newest release instead", async () => {
+    let now = 0;
+    let down = false;
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      if (down) return { ok: false, status: 503, json: async () => ({}) } as Response;
+      return String(url) === STABLE_CHANNEL_URL ? promoted("0.1.93") : release("v0.1.99");
+    });
+    const check = createUpdateChecker({ current: "0.1.92", install: "docker", fetch, now: () => now });
+    expect(await check()).toMatchObject({ channel: "stable", latest: "0.1.93", available: true });
+    down = true;
+    now = 2 * 60 * 60_000;
+    expect(await check()).toMatchObject({ channel: "stable", latest: "0.1.93", available: true });
+    expect(fetch.mock.calls.map(([url]) => String(url))).not.toContain(LATEST_RELEASE_URL);
+    now = 25 * 60 * 60_000;
+    await expect(check()).rejects.toThrow("The stable channel answered 503");
+  });
+
   it("says up to date, and asks at most once an hour", async () => {
     let now = 0;
     const fetch = github("v0.1.92", "0.1.92");

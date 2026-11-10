@@ -26,9 +26,10 @@ const envFile = () => (existsSync(join(process.cwd(), ".env")) ? readFileSync(jo
 const pinned = () => process.env.OMB_IMAGE ?? /^OMB_IMAGE=(.*)$/m.exec(envFile())?.[1] ?? null;
 const composeImage = () => (state.composeReadsPin && pinned()) || state.defaultImage;
 
-/** `{step: "compose up", signal: "SIGKILL"}`: the update script is signalled as this call starts, once. */
+/** `{step: "compose up", signal: "SIGKILL"}`: the update script is signalled as this call starts, once. `match`, a
+ * regular expression, instead picks the call by any part of it. */
 const trip = state.signalOn;
-if (trip && line.startsWith(trip.step)) {
+if (trip && (trip.match ? new RegExp(trip.match).test(line) : line.startsWith(trip.step))) {
   delete state.signalOn;
   save();
   process.kill(Number(readFileSync(join(process.cwd(), ".update", "lock", "pid"), "utf8")), trip.signal);
@@ -54,6 +55,7 @@ function compose(rest) {
   if (verb === "ps" && more.includes("-aq")) return omb ? out(omb.id) : undefined;
   if (verb === "ps") return Object.entries(state.containers).filter(([, container]) => container?.status === "running").forEach(([name]) => out(name));
   if (verb === "stop") {
+    if (state.failStop) fail("Error response from daemon: cannot stop container: permission denied");
     for (const container of Object.values(state.containers)) if (container) Object.assign(container, { status: "exited" });
     return;
   }
@@ -86,7 +88,8 @@ function imageInspect(format, ref) {
   if (!found) fail(`No such image: ${ref}`);
   if (format === "{{.Id}}") return out(found.id);
   if (format.includes(".RepoDigests")) return found.refs.filter((name) => name.includes("@sha256:")).forEach((name) => out(name));
-  if (format.includes("image.version")) return out(found.version ? `v${found.version}` : "");
+  // `label`: what the image says it is, when that is not its version (a build of main says the branch).
+  if (format.includes("image.version")) return out(found.label ?? (found.version ? `v${found.version}` : ""));
   fail(`fake docker: unknown image format: ${format}`, 64);
 }
 
@@ -100,13 +103,22 @@ function run(rest) {
   });
   const entry = rest[rest.indexOf("--entrypoint") + 1];
   const tail = rest.slice(rest.indexOf("--entrypoint") + 3);
+  const script = entry === "sh" ? tail[1] : "";
   if (state.failCopy && entry === "cp") fail("cp: error writing '/to/messages.db': No space left on device");
-  if (state.failRestore && entry === "sh" && tail[1].includes("find /to")) fail("cp: cannot create regular file");
+  // A restore that fails while it copies into its own folder, before the data is touched (a full disk, a killed helper).
+  if (state.failRestore && script.includes(".omb-restore")) fail("cp: cannot create regular file '/to/.omb-restore/messages.db': No space left on device");
   if (Object.values(mounts).some((folder) => !folder.startsWith(join(dir, "volumes")))) fail("fake docker: a mount outside the fixture", 64);
   const inFolders = (text) => text.replace(/\/(from|to)(?=[/\s.]|$)/g, (_, name) => mounts[`/${name}`] ?? join(dir, "volumes", "unmounted"));
-  if (entry === "sh" && tail[1].startsWith("du -sk")) return out(`${state.dataKb ?? 1024}\n${state.freeKb ?? 50_000_000}`);
+  // Every /from and /to must become a fixture folder: a script that names one any other way would reach the real disk.
+  if (tail.map(inFolders).some((arg) => /(^|[^\w.-])\/(from|to)\b/.test(arg))) fail("fake docker: a container path the fixture cannot map", 64);
+  if (script.startsWith("du -sk")) return out(`${state.dataKb ?? 1024}\n${state.freeKb ?? 50_000_000}`);
   const done = spawnSync(entry, tail.map(inFolders), { stdio: "inherit" });
   if (done.status !== 0) fail(`helper exited ${done.status}`, done.status ?? 1);
+  // `corruptCopy`: the copy lands, and then a file in it is not what was copied (a bad disk, a copy cut short).
+  if (state.corruptCopy && entry === "cp") {
+    delete state.corruptCopy;
+    appendFileSync(join(mounts["/to"], "started-by.txt"), "garbled\n");
+  }
 }
 
 function main() {
@@ -125,9 +137,20 @@ function main() {
   if (verb === "run") return run(rest);
   if (verb === "volume") {
     const name = rest.at(-1);
-    if (rest[0] === "rm") return rmSync(volume(name), { recursive: true, force: true });
-    if (rest[0] === "create") return mkdirSync(volume(name), { recursive: true });
+    state.volumeLabels ??= {};
+    if (rest[0] === "rm") {
+      delete state.volumeLabels[name];
+      return rmSync(volume(name), { recursive: true, force: true });
+    }
+    if (rest[0] === "create") {
+      state.volumeLabels[name] = rest.flatMap((arg, at) => (rest[at - 1] === "--label" ? [arg] : []));
+      return mkdirSync(volume(name), { recursive: true });
+    }
     if (rest[0] === "inspect") return existsSync(volume(name)) ? out(name) : fail(`no such volume: ${name}`);
+    if (rest[0] === "ls") {
+      const wanted = rest.flatMap((arg, at) => (rest[at - 1] === "--filter" && arg.startsWith("label=") ? [arg.slice("label=".length)] : []));
+      return Object.entries(state.volumeLabels).filter(([, labels]) => wanted.every((label) => labels.includes(label))).forEach(([found]) => out(found));
+    }
   }
   fail(`fake docker: unknown command: ${line}`, 64);
 }

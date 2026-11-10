@@ -30,6 +30,12 @@ function tree(dir: string, prefix = ""): Record<string, string> {
   return files;
 }
 
+/** A stable.json as promote-stable.yml writes it: the newest entry first, then every version stable before it. */
+function stableRecord(version: string, image: string, earlier: string[] = []) {
+  const history = [version, ...earlier].map((entry, at) => ({ version: entry, promotedAt: `2026-11-${String(10 - at).padStart(2, "0")}T00:00:00.000Z` }));
+  return JSON.stringify({ channel: "stable", version, image, cloudHomeImage: `${REPO}-cloud-home@${id("9")}`, platforms: ["linux/amd64", "linux/arm64"], promotedAt: history[0]!.promotedAt, history }, null, 2);
+}
+
 /** A Compose install on version 0.1.150 with some data, and a stable channel that names `target`. */
 function install(target: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) {
   const root = mkdtempSync(join(tmpdir(), "omb-update-"));
@@ -55,25 +61,34 @@ function install(target: Record<string, unknown> = {}, extra: Record<string, unk
     containers: { omb: { id: "omb-1", image: OLD.id, status: "running", restarts: 0 }, caddy: { id: "caddy-1", status: "running" } },
     ...extra,
   }));
-  writeFileSync(join(root, "stable.json"), JSON.stringify({ channel: "stable", version: next.version, image: next.refs[0], history: [{ version: next.version, promotedAt: "2026-11-10T00:00:00Z" }] }, null, 2));
+  writeFileSync(join(root, "stable.json"), stableRecord(next.version, next.refs[0]!));
   const state = () => JSON.parse(readFileSync(join(fake, "state.json"), "utf8"));
   const run = (args: string[] = [], options: { input?: string; env?: Record<string, string> } = {}) => {
     const result = spawnSync("bash", [join(deploy, "update.sh"), ...args], {
       encoding: "utf8", input: options.input ?? "", timeout: 60_000,
       env: {
-        PATH: `${join(root, "bin")}:/usr/bin:/bin`, HOME: root, FAKE_DOCKER_DIR: fake, OMB_STABLE_URL: `file://${join(root, "stable.json")}`,
+        // sbin: sha256sum is /sbin/sha256sum on macOS.
+        PATH: `${join(root, "bin")}:/usr/bin:/bin:/usr/sbin:/sbin`, HOME: root, FAKE_DOCKER_DIR: fake,
+        OMB_STABLE_URL: `file://${join(root, "stable.json")}`, OMB_NEWEST_URL: `file://${join(root, "newest.json")}`,
         OMB_UPDATE_POLL_S: "0", OMB_UPDATE_WAIT_S: "120", ...wait, ...options.env,
       },
     });
     return { ...result, said: result.stdout.trim().split("\n") };
   };
   const calls = () => (existsSync(join(fake, "calls.log")) ? readFileSync(join(fake, "calls.log"), "utf8").trim().split("\n") : []);
+  /** The copies of the data an update made, oldest first: one Docker volume each. */
+  const copies = () => readdirSync(join(fake, "volumes")).filter((name) => name.startsWith("deploy_data-before-update-")).sort();
   return {
-    root, deploy, fake, data, state, run, calls,
+    root, deploy, fake, data, state, run, calls, copies,
     setState: (patch: Record<string, unknown>) => writeFileSync(join(fake, "state.json"), JSON.stringify({ ...state(), ...patch })),
     env: () => readFileSync(join(deploy, ".env"), "utf8"),
-    backup: () => join(fake, "volumes", "deploy_data-before-update"),
+    backup: () => {
+      const [only, ...more] = copies();
+      if (!only || more.length) throw new Error(`expected one copy of the data, found: ${copies().join(", ")}`);
+      return join(fake, "volumes", only);
+    },
     journal: () => existsSync(join(deploy, ".update", "journal")),
+    last: () => existsSync(join(deploy, ".update", "last")),
   };
 }
 
@@ -93,9 +108,10 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
       "Starting 0.1.151…",
       "Waiting for it to answer and to be able to start bots…",
       "Updated from 0.1.150 to 0.1.151.",
-      "The data from before the update is kept in the Docker volume deploy_data-before-update until the next update.",
+      `The data from before the update is kept in the Docker volume ${box.copies()[0]} until the next update.`,
       "To go back to it: ./update.sh --rollback",
     ]);
+    expect(box.copies()).toEqual([expect.stringMatching(/^deploy_data-before-update-\d{8}T\d{6}Z$/)]);
     expect(box.env()).toBe(`${ENV}OMB_IMAGE=${NEW.refs[0]}\n`);
     expect(box.state().containers.omb).toMatchObject({ image: NEW.id, status: "running" });
     expect(tree(box.backup())).toEqual(before);
@@ -104,13 +120,16 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     const calls = box.calls();
     const order = [
       calls.findIndex((call) => call.startsWith("pull")), calls.indexOf("compose stop"), calls.findIndex((call) => call.includes("--entrypoint cp")),
-      calls.findIndex((call) => call.startsWith("compose up")), calls.findLastIndex((call) => call.includes("/api/health")),
+      calls.findIndex((call) => call.includes("same /from /to")), calls.findIndex((call) => call.startsWith("compose up")),
+      calls.findLastIndex((call) => call.includes("/api/health")),
     ];
     expect(order.every((at) => at >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(calls.find((call) => call.includes("--entrypoint cp"))).toBe(
-      `run --rm --network none --user 0:0 --label com.mausbot.role=update-helper -v deploy_data:/from:ro -v deploy_data-before-update:/to --entrypoint cp ${OLD.id} -a /from/. /to/`,
+      `run --rm --network none --user 0:0 --label com.mausbot.role=update-helper -v deploy_data:/from:ro -v ${box.copies()[0]}:/to --entrypoint cp ${OLD.id} -a /from/. /to/`,
     );
+    // The server was stopped, and seen to be stopped, before the copy.
+    expect(calls.slice(calls.indexOf("compose stop"), calls.findIndex((call) => call.includes("--entrypoint cp"))).some((call) => call.includes("{{.State.Running}}"))).toBe(true);
   });
 
   it("changes nothing when it is run again", () => {
@@ -120,7 +139,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     const again = box.run();
     expect(again.status).toBe(0);
     expect(again.said).toEqual(["Downloading 0.1.151…", "This server already runs 0.1.151. Nothing to do."]);
-    expect(box.calls().slice(calls).some((call) => /^(compose (stop|up)|run|volume)/.test(call))).toBe(false);
+    expect(box.calls().slice(calls).some((call) => /^(compose (stop|up)|run|volume (create|rm))/.test(call))).toBe(false);
     expect(box.env()).toBe(`${ENV}OMB_IMAGE=${NEW.refs[0]}\n`);
   });
 
@@ -191,9 +210,9 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     const before = tree(box.data);
     const refused = box.run();
     expect(refused.status).toBe(4);
-    expect(refused.said.at(-1)).toMatch(/^Copying the data aside failed .* Nothing was changed, and the server was started again\.$/);
+    expect(refused.said.at(-1)).toMatch(/^Copying the data aside failed, .* Nothing was changed, and the server was started again\.$/);
     expect(box.state().containers.omb).toMatchObject({ image: OLD.id, status: "running" });
-    expect(existsSync(box.backup())).toBe(false);
+    expect(box.copies()).toEqual([]);
     expect(tree(box.data)).toEqual({ ...before, "started-by.txt": "0.1.150\n0.1.150\n" });
   });
 
@@ -226,7 +245,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(done.status, done.stdout + done.stderr).toBe(0);
   });
 
-  it("finishes an update that was killed while the new version started: the next run puts the old one back", () => {
+  it("asks before it undoes an update an earlier run left unhealthy, says what that loses, and changes nothing without a yes", () => {
     const box = install({ behaviour: "silent" }, { signalOn: { step: "compose up", signal: "SIGKILL" } });
     const before = tree(box.data);
     const killed = box.run();
@@ -235,10 +254,21 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(box.env()).toContain("OMB_IMAGE=");
     const next = box.run(["--check"]);
     expect(next.status).toBe(0);
+    expect(next.stdout).toContain("An earlier update did not finish.");
     expect(box.journal()).toBe(true);
-    const repaired = box.run();
-    expect(repaired.said.slice(0, 3)).toEqual([
-      "The update to 0.1.151 was interrupted.",
+    // The new version has been running on the data since: nothing may take that away unasked.
+    const since = tree(box.data);
+    for (const unanswered of [box.run(), box.run([], { input: "no\n" }), box.run(["--rollback"])]) {
+      expect(unanswered.status).toBe(4);
+      expect(unanswered.stdout).toMatch(/An earlier update to 0\.1\.151, started \S+Z, did not finish/);
+      expect(unanswered.stdout).toContain("Everything made on this server since then (chats, files, settings) is lost.");
+      expect(unanswered.said.at(-1)).toContain("Nothing was changed.");
+      expect(tree(box.data)).toEqual(since);
+      expect(box.journal()).toBe(true);
+    }
+    const repaired = box.run([], { input: "yes\n" });
+    expect(repaired.said.slice(-3)).toEqual([
+      "Going back, as asked.",
       "Putting back the version and the data from before the update…",
       "Your server runs 0.1.150 again, with its data as it was before the update.",
     ]);
@@ -249,7 +279,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
   });
 
   it("keeps a new version that turned out healthy when the update was killed while waiting for it", () => {
-    const box = install({}, { signalOn: { step: "compose exec -T omb sh", signal: "SIGKILL" } });
+    const box = install({}, { signalOn: { match: "/api/health", signal: "SIGKILL" } });
     expect(box.run().signal).toBe("SIGKILL");
     const next = box.run();
     expect(next.status).toBe(0);
@@ -259,7 +289,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
   });
 
   it("on Ctrl-C while copying, starts the server again with nothing changed; while waiting, puts the old version back", () => {
-    const copying = install({}, { signalOn: { step: "run --rm --network none --user 0:0 --label com.mausbot.role=update-helper -v deploy_data:/from:ro -v deploy_data-before-update:/to", signal: "SIGINT" } });
+    const copying = install({}, { signalOn: { match: "--entrypoint cp ", signal: "SIGINT" } });
     const stopped = copying.run();
     expect(stopped.status).toBe(130);
     expect(stopped.stdout).toContain("The update stopped while it copied the data aside. Nothing was changed, and the server was started again.");
@@ -267,7 +297,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(copying.env()).toBe(ENV);
     expect(copying.journal()).toBe(false);
 
-    const waiting = install({}, { signalOn: { step: "compose exec -T omb sh", signal: "SIGTERM" } });
+    const waiting = install({}, { signalOn: { match: "/api/health", signal: "SIGTERM" } });
     const before = tree(waiting.data);
     const back = waiting.run();
     expect(back.status).toBe(1);
@@ -302,13 +332,36 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(box.env()).toBe(ENV);
   });
 
-  it("says so, and leaves the copy alone, when the data cannot be put back", () => {
+  it("when the data cannot be put back: leaves the data and the copy as they are, keeps the journal, and tries again only when asked", () => {
     const box = install({ behaviour: "silent" }, { failRestore: true });
     const before = tree(box.data);
     const failed = box.run();
     expect(failed.status).toBe(2);
-    expect(failed.said.at(-1)).toContain("The data could not be put back from the Docker volume deploy_data-before-update");
+    expect(failed.stdout).toContain(`The data could not be put back from the Docker volume ${box.copies()[0]}`);
+    expect(failed.said.at(-1)).toContain("./update.sh --rollback tries again");
+    // Nothing half-restored, no old version started on the data the new one left, and nothing forgotten.
+    const left = tree(box.data);
+    expect(left).toEqual({ ...before, "started-by.txt": "0.1.150\n0.1.151\n" });
     expect(tree(box.backup())).toEqual(before);
+    expect(box.state().containers.omb.status).toBe("exited");
+    expect(box.env()).toBe(`${ENV}OMB_IMAGE=${NEW.refs[0]}\n`);
+    expect(box.journal()).toBe(true);
+
+    // The next update neither replaces the copy nor touches the data until someone says yes.
+    box.setState({ failRestore: false });
+    const next = box.run();
+    expect(next.status).toBe(4);
+    expect(next.stdout).toContain("was being undone, and putting its data back did not finish.");
+    expect(tree(box.data)).toEqual(left);
+    expect(tree(box.backup())).toEqual(before);
+    expect(box.calls().filter((call) => call.includes("--entrypoint cp"))).toHaveLength(1);
+
+    const back = box.run(["--rollback", "--yes"]);
+    expect(back.status, back.stdout).toBe(0);
+    expect(back.said.at(-1)).toBe("Your server runs 0.1.150 again, with its data as it was before the update.");
+    expect(tree(box.data)).toEqual({ ...before, "started-by.txt": "0.1.150\n0.1.150\n" });
+    expect(box.env()).toBe(ENV);
+    expect(box.journal()).toBe(false);
   });
 
   it("updates to a named version, and --check changes nothing", () => {
@@ -321,5 +374,155 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(done.status, done.stdout).toBe(0);
     expect(box.calls()).toContain(`pull -q ${REPO}:v0.1.151`);
     expect(box.env()).toBe(`${ENV}OMB_IMAGE=${NEW.refs[0]}\n`);
+  });
+
+  it("reads the version from the record's top level, whatever its history holds", () => {
+    const box = install();
+    writeFileSync(join(box.root, "stable.json"), stableRecord("0.1.151", NEW.refs[0]!, ["0.1.150", "0.1.149", "0.1.148"]));
+    const done = box.run();
+    expect(done.status, done.stdout).toBe(0);
+    expect(done.said).toContain("Updated from 0.1.150 to 0.1.151.");
+    // Keys in any order, on one line, with the history before the version.
+    const again = install();
+    writeFileSync(join(again.root, "stable.json"), JSON.stringify({ history: [{ version: "0.1.151" }, { version: "0.1.140" }], image: NEW.refs[0], version: "0.1.151" }));
+    expect(again.run().said).toContain("Updated from 0.1.150 to 0.1.151.");
+    // A record whose top level names no version is refused, not read from its history.
+    const bare = install();
+    writeFileSync(join(bare.root, "stable.json"), JSON.stringify({ image: NEW.refs[0], history: [{ version: "0.1.151" }] }));
+    const refused = bare.run();
+    expect(refused.status).toBe(4);
+    expect(refused.stdout).toContain("The stable channel names no image this script accepts.");
+  });
+
+  it("carries on when the terminal closes in the middle of an update", () => {
+    const box = install({}, { signalOn: { match: "/api/health", signal: "SIGHUP" } });
+    const done = box.run();
+    expect(done.signal).toBe(null);
+    expect(done.status, done.stdout).toBe(0);
+    expect(done.said).toContain("Updated from 0.1.150 to 0.1.151.");
+    expect(box.state().containers.omb.image).toBe(NEW.id);
+    expect(box.journal()).toBe(false);
+  });
+
+  it("on Ctrl-C while it looks at an earlier run's unfinished update, changes nothing", () => {
+    const box = install({ behaviour: "silent" }, { signalOn: { step: "compose up", signal: "SIGKILL" } });
+    expect(box.run().signal).toBe("SIGKILL");
+    const since = tree(box.data);
+    box.setState({ signalOn: { match: "State.Status", signal: "SIGINT" } });
+    const stopped = box.run([], { input: "yes\n" });
+    expect(stopped.status).toBe(130);
+    expect(stopped.said.slice(-2)).toEqual(["Interrupted.", "Nothing was changed."]);
+    expect(box.journal()).toBe(true);
+    expect(tree(box.data)).toEqual(since);
+    expect(box.calls().some((call) => call.includes(".omb-restore"))).toBe(false);
+  });
+
+  it("keeps the server as it is when an earlier update is left unfinished and the owner says keep", () => {
+    const box = install({ behaviour: "silent" }, { signalOn: { match: "/api/health", signal: "SIGKILL" } });
+    expect(box.run().signal).toBe("SIGKILL");
+    const kept = box.run([], { input: "keep\n" });
+    expect(kept.status, kept.stdout).toBe(0);
+    expect(kept.stdout).toContain("Left as it is.");
+    expect(kept.said.at(-1)).toBe("This server already runs 0.1.151. Nothing to do.");
+    expect(box.state().containers.omb.image).toBe(NEW.id);
+    expect(box.journal()).toBe(false);
+    expect(box.last()).toBe(true);
+  });
+
+  it("never goes to an older version unless told to, judged by the version the server says it is", () => {
+    // 0.1.152 runs, and stable is still 0.1.151.
+    const newer = install();
+    newer.setState({ images: [{ ...OLD, version: "0.1.152" }, NEW] });
+    const refused = newer.run();
+    expect(refused.status).toBe(5);
+    expect(refused.stdout).toContain("This server runs 0.1.152, which is newer than 0.1.151.");
+    expect(refused.said.at(-1)).toContain("Nothing was changed. To go ahead anyway, with the data copied first: ./update.sh --allow-older");
+    expect(newer.calls().some((call) => /^(compose (stop|up)|run)/.test(call))).toBe(false);
+    expect(newer.env()).toBe(ENV);
+    expect(newer.journal()).toBe(false);
+    expect(newer.copies()).toEqual([]);
+    expect(newer.run(["--check"]).stdout).toContain("./update.sh would change nothing without --allow-older.");
+    const told = newer.run(["--allow-older"]);
+    expect(told.status, told.stdout).toBe(0);
+    expect(told.said).toContain("Updated from 0.1.152 to 0.1.151.");
+
+    // A build of main (`latest`) is labelled with the branch; it says the version of the release it was built after.
+    const main = install();
+    main.setState({ images: [{ ...OLD, version: undefined, label: "main", serves: "0.1.151" }, NEW] });
+    const same = main.run();
+    expect(same.status).toBe(5);
+    expect(same.stdout).toContain("This server runs a build of main that says 0.1.151, and may hold changes made after 0.1.151 was released.");
+    const behind = install();
+    behind.setState({ images: [{ ...OLD, version: undefined, label: "main", serves: "0.1.150" }, NEW] });
+    const moved = behind.run();
+    expect(moved.status, moved.stdout).toBe(0);
+    expect(behind.state().containers.omb.image).toBe(NEW.id);
+  });
+
+  it("does not copy the data until the server has stopped, and drops a copy that does not match", () => {
+    for (const [extra, words] of [
+      [{ failStop: true }, "The server could not be stopped"],
+      [{ corruptCopy: true }, "Copying the data aside failed, or the copy did not match the data"],
+    ] as const) {
+      const box = install({}, extra);
+      const before = tree(box.data);
+      const refused = box.run();
+      expect(refused.status, words).toBe(4);
+      expect(refused.said.at(-1)).toContain(words);
+      expect(refused.said.at(-1)).toContain("Nothing was changed, and the server was started again.");
+      expect(box.state().containers.omb.image).toBe(OLD.id);
+      expect(box.env()).toBe(ENV);
+      expect(box.copies()).toEqual([]);
+      expect(box.journal()).toBe(false);
+      if ("failStop" in extra) expect(box.calls().some((call) => call.includes("--entrypoint cp"))).toBe(false);
+      else expect(tree(box.data)).toEqual({ ...before, "started-by.txt": "0.1.150\n0.1.150\n" });
+    }
+  });
+
+  it("keeps the copy from the update before until the next copy has been checked", () => {
+    const NEWER = { id: id("c"), refs: [`${REPO}@${id("3")}`, `${REPO}:v0.1.152`], version: "0.1.152", local: false, engine: true };
+    const box = install();
+    expect(box.run().status).toBe(0);
+    const [first] = box.copies();
+    box.setState({ images: [...box.state().images, NEWER] });
+    writeFileSync(join(box.root, "stable.json"), stableRecord("0.1.152", NEWER.refs[0]!, ["0.1.151"]));
+    box.setState({ corruptCopy: true });
+    expect(box.run().status).toBe(4);
+    expect(box.copies()).toEqual([first]);
+    expect(box.last()).toBe(true);
+    const done = box.run();
+    expect(done.status, done.stdout).toBe(0);
+    expect(done.said).toContain("Updated from 0.1.151 to 0.1.152.");
+    expect(box.copies()).toHaveLength(1);
+    expect(box.copies()[0]).not.toBe(first);
+  });
+
+  it("takes the newest release until a first version is made stable, and stops on a channel it cannot reach", () => {
+    const box = install();
+    rmSync(join(box.root, "stable.json"));
+    writeFileSync(join(box.root, "newest.json"), JSON.stringify({ tag_name: "v0.1.151", html_url: "https://example.test/release", assets: [{ name: "x", version: "9.9.9" }] }));
+    const done = box.run();
+    expect(done.status, done.stdout).toBe(0);
+    expect(done.said[0]).toBe("No version has been made stable yet, so this takes the newest release, 0.1.151.");
+    expect(box.calls()).toContain(`pull -q ${REPO}:v0.1.151`);
+    expect(box.env()).toBe(`${ENV}OMB_IMAGE=${NEW.refs[0]}\n`);
+
+    const unreachable = install();
+    const refused = unreachable.run([], { env: { OMB_STABLE_URL: "http://127.0.0.1:9/stable.json" } });
+    expect(refused.status).toBe(4);
+    expect(refused.stdout).toContain("Could not read the stable channel");
+    expect(unreachable.calls().some((call) => call.startsWith("pull"))).toBe(false);
+  });
+
+  it.skipIf(process.getuid?.() === 0)("says plainly that the install folder cannot be written, and changes nothing", () => {
+    const box = install();
+    chmodSync(box.deploy, 0o555);
+    try {
+      const refused = box.run();
+      expect(refused.status).toBe(4);
+      expect(refused.stdout).toContain("cannot be written by this user");
+    } finally {
+      chmodSync(box.deploy, 0o755);
+    }
   });
 });

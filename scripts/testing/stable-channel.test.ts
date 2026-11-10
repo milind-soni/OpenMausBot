@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -41,20 +42,29 @@ describe("the stable channel", () => {
     expect(() => checkIndex({ mediaType: "application/vnd.oci.image.manifest.v1+json" }, ["linux/amd64"], "the server image")).toThrow("not a multi-platform image");
   });
 
-  it("records the version with both images by digest, in a shape update.sh reads without a JSON parser", () => {
+  it("records the version with both images by digest, and update.sh reads it from the top level, whatever the history holds", () => {
     const record = stableRecord({ version: "0.1.151", image: IMAGE, cloudHomeImage: HOME, release: release(), current: null, now: NOW });
     expect(record).toEqual({
       channel: "stable", version: "0.1.151", image: IMAGE, cloudHomeImage: HOME, platforms: ["linux/amd64", "linux/arm64"],
       releaseUrl: release().url, releasedAt: release().publishedAt, promotedAt: "2026-11-12T12:00:00.000Z",
       history: [{ version: "0.1.151", promotedAt: "2026-11-12T12:00:00.000Z" }],
     });
-    const text = JSON.stringify(record, null, 2).replace(/\n/g, "");
-    // deploy/update.sh's two sed expressions
-    expect(/.*"image"\s*:\s*"([^"]*)".*/.exec(text)?.[1]).toBe(IMAGE);
-    expect(/.*"version"\s*:\s*"([0-9][0-9.]*)".*/.exec(text)?.[1]).toBe("0.1.151");
-    const script = readFileSync(join(import.meta.dirname, "..", "..", "deploy", "update.sh"), "utf8");
-    expect(script).toContain(String.raw`sed -n 's/.*"image"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'`);
     expect(() => stableRecord({ version: "0.1.151", image: "ghcr.io/milind-soni/openmausbot:v0.1.151", cloudHomeImage: HOME, release: release(), current: null, now: NOW })).toThrow("is not pinned by digest");
+    if (process.platform === "win32") return;
+    // Three promotions: the history then names older versions after the current one, as it does from the second on.
+    let next = record;
+    for (const [version, days] of [["0.1.152", 7], ["0.1.153", 14]] as const) {
+      next = stableRecord({ version, image: IMAGE, cloudHomeImage: HOME, release: release(), current: next, now: NOW + days * 86_400_000 });
+    }
+    expect(next.history.map((entry) => entry.version)).toEqual(["0.1.153", "0.1.152", "0.1.151"]);
+    // deploy/update.sh's own reader, run on the record as the workflow writes it.
+    const script = readFileSync(join(import.meta.dirname, "..", "..", "deploy", "update.sh"), "utf8");
+    const reader = /^json_top\(\) \{\n[\s\S]*?\n\}\n/m.exec(script)?.[0];
+    expect(reader).toBeDefined();
+    const read = (key: string) => spawnSync("bash", ["-c", `${reader}\njson_top "$1"`, "json_top", key], { input: JSON.stringify(next, null, 2), encoding: "utf8" });
+    expect(read("version").stdout.trim()).toBe("0.1.153");
+    expect(read("image").stdout.trim()).toBe(IMAGE);
+    expect(read("promotedAt").stdout.trim()).toBe(next.promotedAt);
   });
 
   it("will not move stable back unless told to, and promoting the same version again keeps its date", () => {

@@ -306,50 +306,88 @@ curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy
 sudo bash update.sh --dir /opt/openmausbot
 ```
 
+Until a first version has been made stable, `./update.sh` takes the newest
+release instead, as **Check for updates** does then.
+
 The data may be a Docker volume or a folder on the server; the copy keeps
 every file's owner and mode either way. The script then:
 
 1. Downloads the stable image, by its digest. If that fails it stops, and
-   nothing has changed.
-2. Checks there is room for a copy of your data, stops the server, and copies
-   everything under `/data` into a Docker volume
-   (`deploy_data-before-update`; `openmausbot_data-before-update` for
-   `/opt/openmausbot`). The server is down from here until step 4;
-   how long depends on how much data there is.
+   nothing has changed. It also stops, changing nothing, when that version is
+   older than the one your server says it runs (see "From `latest` to stable"
+   below).
+2. Checks there is room for a copy of your data where Docker keeps its
+   volumes, stops the server, checks that it has stopped, and copies
+   everything under `/data` into a new Docker volume named for the update
+   (`deploy_data-before-update-20261110T120000Z`;
+   `openmausbot_data-before-update-…` for `/opt/openmausbot`). It then
+   compares the copy with the data, every file by checksum; a copy that does
+   not match is thrown away, the server is started again, and nothing has
+   changed. The copy from the update before is removed only after this one
+   has matched. The server is down from here until step 4; how long depends
+   on how much data there is.
 3. Writes the image into `.env` (`OMB_IMAGE=ghcr.io/milind-soni/openmausbot@sha256:…`)
    and starts it.
 4. Waits, up to five minutes, until the new server answers `/api/health`
    steadily, says it is the new version, can still start a bot if it could
    before (`openmausbot doctor`: an engine is ready), and Caddy runs again.
-5. If any of that fails: puts back `.env`, the data from the copy and the old
+5. If any of that fails: puts back the data from the copy, `.env` and the old
    image, starts the old version, and tells you what went wrong. Your server
-   is as it was before step 1.
+   is as it was before step 1. The copy is put into a new folder inside the
+   data and checked there before it takes the data's place, so a restore that
+   fails (a full disk, say) leaves both the data and the copy as they were:
+   the server stays stopped, the update's journal is kept, and
+   `./update.sh --rollback` tries again once the cause is fixed.
 
-It is safe to interrupt and to run twice. Each step is written to
-`deploy/.update/journal` before it starts, so after Ctrl-C, a closed terminal or
-a reboot, the next `./update.sh` first finishes what was cut short: it keeps
-the new version if that is up and healthy, and otherwise puts the old one
-back. Run again after a finished update, it says there is nothing to do. Two
-runs at once are refused.
+A closed terminal or a dropped SSH session does not stop an update: it carries
+on, and `deploy/.update/update.log` says how it ended. Each step is written to
+`deploy/.update/journal` before it starts. Ctrl-C undoes the update at once:
+before the new version starts, nothing has changed; after, the old version and
+its data are put back. When an update was cut short some other way (a reboot,
+a killed process), the next `./update.sh` keeps the new version if that is up
+and healthy. If it is not, it says which version and data going back would put
+back, and that everything made on the server since that update would be lost,
+and asks: `yes` goes back, `keep` leaves the server as it is (the copy stays
+for `--rollback`), and anything else, or no answer at all, changes nothing.
+Run again after a finished update, it says there is nothing to do. Two runs at
+once are refused.
 
 ```sh
 ./update.sh --check            # what would change; changes nothing
 ./update.sh --version 0.1.151  # one released version instead of the stable one
 ./update.sh --rollback         # the version and the data from before the last update
+./update.sh --allow-older      # go ahead although that version is not newer than the one running
 ```
 
 `--rollback` is for an update that passed its checks and still turned out
 wrong. It asks first, because everything made since the update (chats, files,
-settings) is replaced by the copy. The copy is kept until the next update
-replaces it. The script's own log is `deploy/.update/update.log`.
+settings) is replaced by the copy; `--yes` answers for you. The copy is kept
+until the next update has made and checked its own. The script's own log is
+`deploy/.update/update.log`.
 
 | The script ends with | Meaning |
 | --- | --- |
 | `0` | Updated, or already on that version |
 | `1` | The update failed; the old version and its data are back |
-| `2` | The update failed and the old version did not come back healthy; read the last lines it printed |
+| `2` | The old version or its data could not be brought back; read the last lines it printed, then `./update.sh --rollback` |
 | `3` | Another update is running |
-| `4` | Nothing was changed (could not download, not enough disk, refused) |
+| `4` | Nothing was changed (could not download, not enough disk, the folder cannot be written, a question not answered `yes`, refused) |
+| `5` | Nothing was changed: the version asked for is older than the one running, or one of the two versions cannot be told; `--allow-older` goes ahead |
+| `130` | Interrupted with Ctrl-C before the new version started: nothing was changed, and the server was started again |
+
+### From `latest` to stable
+
+A server started from the `latest` image runs a build of `main`. Its image is
+labelled with the branch, not a version, so `update.sh` goes by the version the
+server itself reports, which is that of the release it was built after, or of
+the next one. Such a build may already hold changes made after that release,
+and may have written data in ways the release does not read. So `update.sh`
+moves it to stable only once the stable version is newer than the version the
+server reports; until then it says so and changes nothing (exit `5`). Nothing
+else is needed: the first `./update.sh` after a newer version is made stable
+moves the server onto it and pins it by digest. To move now anyway, run
+`./update.sh --allow-older`; the data is copied first, and `--rollback` puts
+the `latest` build and its data back.
 
 If you built the image yourself (`docker compose up -d --build`, with
 `ENGINES` baked in), `update.sh` refuses to replace it without being told to:
