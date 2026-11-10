@@ -270,4 +270,21 @@ describe("Mola provider", () => {
       expect(getMolaViewerOrigin({ cliStartup: { access: "public-url", publicUrl: "https://public.example.com///" } } as AppConfig)).toBe("https://public.example.com");
     });
   });
+
+  describe("MCP computer tool routing", () => {
+    it("runCommand routes to Mola for mola provider", async () => {
+      const cfg = testConfig();
+      const result = await runCommand(cfg, "test-machine-id", "echo test", { timeoutMs: 5000 });
+      expect(result).toHaveProperty("ok");
+      expect(result).toHaveProperty("exitCode");
+      expect(result).toHaveProperty("stdout");
+      expect(result).toHaveProperty("stderr");
+    });
+
+    it("screenshotMola accepts machine ID as knownMolaId parameter", async () => {
+      const cfg = testConfig();
+      await expect(screenshotMola(cfg, "", "test-machine-id", { signal: AbortSignal.timeout(100) }))
+        .rejects.toThrow();
+    });
+  });
 });

@@ -13147,9 +13147,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 200, { result });
       }
       // The turn's capability names its Boat; the Boat credential stays here.
-      if (await dispatchRoutes([savedSteps.journalRoutes({ capability: internalCapability, readBody: readInternalBody })], { req, res, url, path, method, auth, json, readBody })) return; if (method === "POST" && path === "/api/internal/computer/mcp") {
+      if (await dispatchRoutes([savedSteps.journalRoutes({ capability: internalCapability, readBody: readInternalBody })], { req, res, url, path, method, auth, json, readBody })) return;       if (method === "POST" && path === "/api/internal/computer/mcp") {
         const body = await readInternalBody();
         if (internalCapability.boxId === undefined) return json(res, 403, { error: "this turn has no cloud computer" });
+        const bot = store.bot(internalCapability.botId);
+        if (!bot) return json(res, 404, { error: "bot not found" });
+        const provider = bot.cloudBackend === "vps" ? "vps" : bot.cloudBackend === "mola" ? "mola" : "box";
         const abort = new AbortController();
         res.once("close", () => { if (!res.writableEnded) abort.abort(); });
         return json(res, 200, { result: await cloudComputerRpc(body, {
@@ -13157,6 +13160,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           boxId: () => internalCapability.boxId ?? claimedBoatId(internalCapability),
           gate: () => computerCallGate(internalCapability, abort.signal),
           assertActive: requireActiveInternalCapability,
+          provider,
         }) });
       }
       // DuckDB runs here on the bot's own database; the agent process holds only the turn's capability.

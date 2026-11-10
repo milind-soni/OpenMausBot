@@ -39,7 +39,7 @@ const rpc = (request: unknown, gate: { held: boolean; reason?: "person"; blocked
   let gated = 0;
   let checks = 0;
   const done = tools.cloudComputerRpc(request as never, {
-    cfg, boxId: () => "bx_23456789", signal,
+    cfg, boxId: () => "bx_23456789", signal, provider: "box",
     gate: async () => { gated++; return gate; },
     assertActive: () => { checks++; },
   });
@@ -110,7 +110,7 @@ describe("cloud computer tools", () => {
     expect(result.content[0].text).toMatch(/input schema|Unknown cloud computer tool/);
     expect(call.gated()).toBe(0);
     expect(calls).toHaveLength(0);
-    await expect(tools.runCloudComputerTool(cfg, "bx_23456789", name, args as never, new AbortController().signal))
+    await expect(tools.runCloudComputerTool(cfg, "bx_23456789", name, args as never, new AbortController().signal, "box"))
       .resolves.toMatchObject({ isError: true });
     expect(calls).toHaveLength(0);
   });
@@ -121,11 +121,11 @@ describe("cloud computer tools", () => {
       const call = rpc({ method: "tools/call", params: { name: "open_url", arguments: { url } } });
       expect(await call.done, url).toEqual({ isError: true, content: [{ type: "text", text: REDDIT_REFUSAL }] });
       expect(call.gated()).toBe(0);
-      await expect(tools.runCloudComputerTool(cfg, "bx_23456789", "open_url", { url }, new AbortController().signal))
+      await expect(tools.runCloudComputerTool(cfg, "bx_23456789", "open_url", { url }, new AbortController().signal, "box"))
         .resolves.toEqual({ isError: true, content: [{ type: "text", text: REDDIT_REFUSAL }] });
     }
     expect(calls).toHaveLength(0);
-    await tools.runCloudComputerTool(cfg, "bx_23456789", "open_url", { url: "https://notreddit.com/" }, new AbortController().signal);
+    await tools.runCloudComputerTool(cfg, "bx_23456789", "open_url", { url: "https://notreddit.com/" }, new AbortController().signal, "box");
     expect(calls[0].body.command).toMatch(/xdg-open .*https:\/\/notreddit\.com\//);
   });
 
@@ -146,7 +146,7 @@ describe("cloud computer tools", () => {
     // it, and only then is there a Boat to act on.
     let started: string | undefined;
     const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "get_screen_size", arguments: {} } }, {
-      cfg, boxId: () => started, signal: new AbortController().signal,
+      cfg, boxId: () => started, signal: new AbortController().signal, provider: "box",
       gate: async () => { started = "bx_3456789a"; return { held: false }; }, assertActive: () => {},
     }) as { isError?: boolean };
     expect(result.isError).not.toBe(true);
@@ -155,7 +155,7 @@ describe("cloud computer tools", () => {
 
   it("performs nothing when the gate let a call through and no Boat landed", async () => {
     const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "true" } } }, {
-      cfg, boxId: () => null, signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: () => {},
+      cfg, boxId: () => null, signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: () => {}, provider: "box",
     }) as { isError?: boolean; content: Array<{ text: string }> };
     expect(result).toEqual({ isError: true, content: [{ type: "text", text: tools.CLOUD_COMPUTER_NOT_READY }] });
     expect(calls).toHaveLength(0);
@@ -164,10 +164,10 @@ describe("cloud computer tools", () => {
   it("stops when the turn's capability is gone, before and after the Boat acts", async () => {
     const expired = () => { throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 }); };
     await expect(tools.cloudComputerRpc({ method: "tools/list" }, {
-      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: expired,
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: expired, provider: "box",
     })).rejects.toThrow("expired");
     await expect(tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "true" } } }, {
-      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: expired,
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, gate: async () => ({ held: false }), assertActive: expired, provider: "box",
     })).rejects.toThrow("expired");
     expect(calls).toHaveLength(0);
     await expect(rpc({ method: "resources/read" }).done).rejects.toMatchObject({ status: 400 });
@@ -177,7 +177,7 @@ describe("cloud computer tools", () => {
     const ended = () => { throw Object.assign(new Error("This bot turn has already ended"), { status: 401 }); };
     const blockedReason = "The cloud computer could not be started: the cloud computer didn't start in time. This call was not performed.";
     const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "screenshot", arguments: {} } }, {
-      cfg, boxId: () => null, signal: new AbortController().signal, gate: async () => ({ held: true, blockedReason }), assertActive: ended,
+      cfg, boxId: () => null, signal: new AbortController().signal, gate: async () => ({ held: true, blockedReason }), assertActive: ended, provider: "box",
     });
     expect(result).toEqual({ isError: true, content: [{ type: "text", text: expect.stringContaining(blockedReason) }] });
     expect(calls).toHaveLength(0);
@@ -200,7 +200,7 @@ describe("cloud computer tools", () => {
     holdCommand = true;
     const started = Date.now();
     const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "sleep 600" } } }, {
-      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, budgetMs: 600, assertActive: () => {},
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, budgetMs: 600, assertActive: () => {}, provider: "box",
       gate: async () => { await new Promise(resolve => setTimeout(resolve, 300)); return { held: false }; },
     });
     expect(result).toEqual({ isError: true, content: [{ type: "text", text: (await import("./cloud-computer-background.ts")).EXEC_LATE }] });
