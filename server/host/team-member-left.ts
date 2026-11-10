@@ -53,7 +53,7 @@ export interface TeamMemberLeftDeps {
   deleteAttachment(name: string): void;
   eraseBrowsers(audience: Audience): Promise<boolean>;
   /** Their own connections, keys and MCP sign-ins (team-connections.ts). */
-  forgetConnections(person: string): void;
+  forgetConnections(person: string): void | Promise<void>;
   /** Every routine: `home` is the person whose private chat it lives in (routine-home.ts), `writer` who last wrote it,
    * `files` the attachments/ names it carries. */
   routines(): ReadonlyArray<{ id: string; name: string; botId: string; home: string | null; writer: string | undefined; files: readonly string[] }>;
@@ -143,7 +143,7 @@ export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) 
     }
     rmSync(join(deps.dataDir, "people", person), { recursive: true, force: true });
     rmSync(audienceHome(deps.dataDir, memberAudience(person)), { recursive: true, force: true });
-    deps.forgetConnections(person);
+    await Promise.resolve(deps.forgetConnections(person)).catch((error: unknown) => { console.warn(`[team] a leaving member's connections were not all removed: ${error instanceof Error ? error.message : String(error)}`); });
     const browsers = await deps.eraseBrowsers(memberAudience(person)).catch(() => false);
     // Counts of shared things only: nothing here says what was theirs alone.
     deps.record({ category: "people", action: "member.left", target: { kind: "person", name: address }, after: { botsHandedBack, routinesHandedOver: written.length } });

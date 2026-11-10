@@ -19,7 +19,9 @@ import { serviceSlugFor } from "../connector-verdict.ts";
 import { type McpOAuthManager, type McpRefreshOutcome, type McpSignInPhase, withMcpSignIn, withoutPendingSignIn } from "../mcp-oauth.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type McpOAuthClientConfig } from "../mcp-registry.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
-import { appLabel, ConnectionScopes, PeopleConnections, personAppOf, SCOPES_FILE, type BrokerAccess } from "../team-connections.ts";
+import { managedComposioBrokerOff } from "../composio-broker-access.ts";
+import { projectApiKey } from "../composio-session.ts";
+import { appLabel, asPerson, ConnectionScopes, isProjectAccess, PeopleConnections, personAppOf, SCOPES_FILE, type PersonAppsAccess } from "../team-connections.ts";
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolsFor } from "../connector-app-tools.ts";
 import type { ConnectorScopes } from "../../shared/connector-scopes.ts";
 
@@ -82,6 +84,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
   const people = new PeopleConnections({
     dataDir: deps.dataDir,
     brokerUrl: deps.brokerUrl,
+    ...(team ? { teamId: team.id, projectKey: () => projectApiKey(deps.cfg()) } : {}),
     clients: (name, url) => { const server = teamServer(name); return server && isRemoteMcpServer(server) && server.url === url ? (server.oauth && deps.oauthClient ? deps.oauthClient(name, server.oauth) : server.oauth) : undefined; },
     isOwnerLive: deps.isOwnerLive,
     ...(deps.onSettled ? { onSettled: deps.onSettled } : {}),
@@ -89,16 +92,19 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     ...(deps.onPersonChanged ? { onChanged: deps.onPersonChanged } : {}),
   });
   const personApps = () => (team ? scopes.person("app") : []);
+  const via = (access?: PersonAppsAccess | null) => asPerson(deps.cfg(), access);
+  /** With the connected-apps service switched off and no key of the team's, nobody can connect an app of their own. */
+  const ownAppsNeedKey = () => Boolean(team) && managedComposioBrokerOff() && !projectApiKey(deps.cfg());
   /** The apps connected for an installation, the team's or a member's own. A turn never waits on a refresh: what is known
    * is used at once, and read again in the background once it is a minute old. Only an installation's first answer is
    * waited for, at most a few seconds, and a failed first read is tried again soon; `primeApps` reads the team's at start. */
   const connectedApps = new Map<string, { at: number; apps: string[] | null; reading: Promise<void> | null }>();
-  const appsConnected = async (as?: BrokerAccess): Promise<string[]> => {
-    const key = as ? createHash("sha256").update(as.url).update("\u0000").update(as.token).digest("hex") : "";
+  const appsConnected = async (as?: PersonAppsAccess): Promise<string[]> => {
+    const key = isProjectAccess(as) ? `project\u0000${as.composio.userId}` : as ? createHash("sha256").update(as.url).update("\u0000").update(as.token).digest("hex") : "";
     const entry = connectedApps.get(key) ?? { at: -Infinity, apps: null, reading: null };
     connectedApps.set(key, entry);
     if (!entry.reading && Date.now() - entry.at >= (entry.apps ? APPS_FRESH_MS : APPS_RETRY_MS)) {
-      entry.reading = deps.composio.connectedServices(deps.cfg(), as).then((services) => {
+      entry.reading = deps.composio.connectedServices(...via(as)).then((services) => {
         entry.apps = Object.entries(services).filter(([, state]) => state.connected).map(([slug]) => slug);
       }, () => {}).finally(() => { entry.at = Date.now(); entry.reading = null; });
     }
@@ -107,7 +113,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     }
     return entry.apps ?? [];
   };
-  const withAppTools = async (bridge: Integration, bot: Bot, names: "dotted" | "plain", as?: BrokerAccess): Promise<Integration> => {
+  const withAppTools = async (bridge: Integration, bot: Bot, names: "dotted" | "plain", as?: PersonAppsAccess): Promise<Integration> => {
     const tools = appToolsFor(bot, await appsConnected(as));
     return tools.length ? { ...bridge, env: { ...bridge.env, [APP_TOOLS_ENV]: JSON.stringify(tools), [APP_TOOL_NAMES_ENV]: names } } : bridge;
   };
@@ -117,7 +123,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
   const ownAppsServices = () => {
     if (!ownAppsRead || Date.now() - ownAppsRead.at >= OWN_APPS_READ_MS) {
       ownAppsRead = { at: Date.now(), read: Promise.all(people.appsPeople().map(async ({ person, email, access }) => ({
-        person, email, services: await deps.composio.connectedServices(deps.cfg(), access).catch(() => null),
+        person, email, services: await deps.composio.connectedServices(...via(access)).catch(() => null),
       }))) };
     }
     return ownAppsRead.read;
@@ -150,9 +156,14 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
 
   const lines = {
     connect: (name: string, person: string) => {
+      if (ownAppsNeedKey()) {
+        return `${name} is connected by each person in ${teamName()}, and that isn't available here until an admin adds the team's Composio key. ${noWorkaround} Reply with this one line and nothing more about it: `
+          + `"${name} can't be connected on ${teamName()} yet. Ask an admin to add the team's Composio key."`;
+      }
       const where = ownPage(person);
-      return `${name} is connected by each person in ${teamName()}, and ${nameOf(person)} hasn't connected theirs. ${noWorkaround} Reply with this one line and nothing more about it: `
-        + (where ? `"Connect your ${name} here: ${where}"` : `"Connect your own ${name} on your team's page in MausBot Cloud."`);
+      const again = people.appsElsewhere(person);
+      return `${name} is connected by each person in ${teamName()}, and ${nameOf(person)} ${again ? `needs to connect theirs again: ${teamName()} changed where its apps connect, and connections don't carry over` : "hasn't connected theirs"}. ${noWorkaround} Reply with this one line and nothing more about it: `
+        + (where ? `"Connect your ${name} ${again ? "again " : ""}here: ${where}"` : `"Connect your own ${name} ${again ? "again " : ""}on your team's page in MausBot Cloud."`);
     },
     /** No one person's own request is behind this work: say so, and how to get it done. */
     nobody: (name: string) => {
@@ -221,6 +232,8 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     link,
     turnPerson,
     nameOf,
+    via,
+    ownAppsNeedKey,
     /** Off a Team Cloud, always; on one, the person this turn acts for is its owner or an admin, as Settings requires. */
     actsForAdmin(threadId: string, generation?: string): boolean {
       if (!team) return true;
@@ -236,6 +249,9 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     /** At start: the team's installation's apps are read now, so the first turn need not wait for them. */
     primeApps(): void {
       if (deps.composio.configured(deps.cfg())) void appsConnected();
+      const left = people.appsLeftOnService();
+      if (left) console.log(`[team connections] ${left} member installation(s) made before the team saved its own Composio key are still on the connected-apps service; nothing is sent there while the key is saved`);
+      void people.finishRemovals();
     },
 
     /** The connected-apps bridges of a turn: the team's, and in a turn that acts for a member their own beside it.
@@ -249,7 +265,8 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       const person = personApps().length ? turnPerson(threadId, generation) : null;
       const access = person ? people.appsAccess(person) : null;
       if (person && access) {
-        const own = await deps.composio.mcpIntegration(cfg, { ...base, as: access, commsToken: deps.mint({ botId: bot.id, threadId, generation, connectorsFor: person }) });
+        const [ownCfg, as] = via(access);
+        const own = await deps.composio.mcpIntegration(ownCfg, { ...base, ...(as ? { as } : {}), commsToken: deps.mint({ botId: bot.id, threadId, generation, connectorsFor: person }) });
         if (own) out.composioOwn = await withAppTools(own, bot, names, access);
       }
       return out;
@@ -257,7 +274,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
 
     /** Whose installation a relayed frame goes to: the team's (none named), or the member's own after checking the turn
      * still acts for them. A refusal is the plain line the bot gets back. */
-    relayActor(capability: { threadId: string; generation: string; connectorsFor?: string }): { access?: BrokerAccess; refusal?: string } {
+    relayActor(capability: { threadId: string; generation: string; connectorsFor?: string }): { access?: PersonAppsAccess; refusal?: string } {
       const own = capability.connectorsFor;
       if (!own) return {};
       if (turnPerson(capability.threadId, capability.generation) !== own) return { refusal: lines.ownOnly(nameOf(own)) };
@@ -408,8 +425,9 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     ownAppsServices,
     /** A person who left the team (host/team-member-left.ts): every connection, key and sign-in of theirs goes. */
     forgetPerson: (person: string) => people.forgetPerson(person),
-    /** For the Admin's signed read: what is `person`, and who has connected each (addresses, never a secret). */
-    async adminExtras(): Promise<{ scopes: { apps: string[]; mcp: string[] }; people: { apps: Record<string, string[]>; mcp: Record<string, string[]> } } | Record<string, never>> {
+    /** For the Admin's signed read: what is `person`, and who has connected each (addresses, never a secret).
+     * `appsLeftOnService`: members' installations made before the team saved its own key, still on the service. */
+    async adminExtras(): Promise<{ scopes: { apps: string[]; mcp: string[] }; people: { apps: Record<string, string[]>; mcp: Record<string, string[]> }; appsLeftOnService?: number } | Record<string, never>> {
       if (!team) return {};
       const apps = personApps(), servers = personMcp();
       const byApp: Record<string, string[]> = Object.fromEntries(apps.map((slug) => [slug, [] as string[]]));
@@ -426,7 +444,8 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
         byServer[name] = [...new Set(who.map((entry) => entry.email).filter(Boolean))].sort();
       }
       for (const slug of apps) byApp[slug]!.sort();
-      return { scopes: { apps, mcp: servers }, people: { apps: byApp, mcp: byServer } };
+      const left = people.appsLeftOnService();
+      return { scopes: { apps, mcp: servers }, people: { apps: byApp, mcp: byServer }, ...(left ? { appsLeftOnService: left } : {}) };
     },
   };
 }
