@@ -27,7 +27,7 @@ let fx: CloudSendFixture, team: CloudTeamFixture;
 let owner = "", admin = "", bob = "", ben = "";
 let scout: Bot, ledger: Bot;
 let bobThread = "", benThread = "", fileName = "";
-let kumquat = "", quince = "", standup = "", tally = "";
+let kumquat = "", quince = "", standup = "", tally = "", digest = "", justMe = "", mausbotRoutine = "";
 
 const dataDir = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
@@ -136,7 +136,8 @@ it("nobody else sees, opens, changes, runs or fetches the file of Bob's private 
     }
     const listed = (await routinesOf(token)).routines;
     expect(listed.map((routine) => routine.id), label("list")).toContain(standup);
-    expect(listed.find((routine) => routine.id === standup), label("the chat it reports to is Bob's")).not.toHaveProperty("resultsThreadId");
+    const shared = listed.find((routine) => routine.id === standup) as { resultsThreadId?: string } | undefined;
+    expect((await team.as(token, "GET", `/api/threads/${shared?.resultsThreadId}/messages`)).status, label("the chat it reports to is the team's")).toBe(200);
     expect((await raw(token, `/api/attachments/${fileName}`)).status, label("file")).toBe(404);
     for (const id of [kumquat, quince]) {
       expect((await team.as(token, "PATCH", `/api/routines/${id}`, { enabled: false })).status, label("PATCH")).toBe(404);
@@ -191,10 +192,50 @@ it("a run of the routine the bot made in Bob's chat works and lands in his audie
   }
 }, hostTimeout(120_000));
 
+it("a member's routine for the shared chat lands where everyone reads it, run by the schedule or by an admin; Just me stays theirs", async () => {
+  const soon = await team.as(bob, "POST", "/api/routines", { name: "Team digest", prompt: "Post the team digest", botId: scout.id, schedule: { type: "once", at: Date.now() + 2_000 }, resultsThreadId: scout.mainThreadId });
+  expect(soon.status, JSON.stringify(soon.body)).toBe(201);
+  digest = soon.body.routine.id;
+  let scheduled: Run | undefined;
+  await until(async () => {
+    scheduled = (await routinesOf(ben)).runs.find((run) => run.routineId === digest && ["completed", "failed"].includes(run.status));
+    return Boolean(scheduled);
+  }, 90_000);
+  expect(scheduled).toMatchObject({ status: "completed", resultsThreadId: scout.mainThreadId });
+  const byAdmin = await runToEnd(admin, digest);
+  expect(byAdmin.status).toBe("completed");
+  for (const run of [scheduled!, byAdmin]) {
+    for (const token of [ben, admin, owner, bob]) {
+      const read = await team.as(token, "GET", `/api/threads/${run.threadId}/messages`);
+      expect(read.status, "its run is the team's to read").toBe(200);
+      expect(JSON.stringify(read.body)).toContain("Post the team digest");
+      expect((await team.as(token, "GET", `/api/threads/${scout.mainThreadId}/messages`)).status).toBe(200);
+    }
+  }
+  // Just me: Bob's own private chat with the bot, and the routine and its run are his alone.
+  const mine = await team.as(bob, "POST", "/api/routines", { name: "Pay rise", prompt: "Draft my pay rise case", botId: scout.id, schedule: LATER, resultsThreadId: "just-me" });
+  expect(mine.status, JSON.stringify(mine.body)).toBe(201);
+  justMe = mine.body.routine.id;
+  expect(mine.body.routine.resultsThreadId).toBe(bobThread);
+  const ran = await runToEnd(bob, justMe);
+  expect((await team.as(bob, "GET", `/api/threads/${ran.threadId}/messages`)).status).toBe(200);
+  for (const token of [ben, admin, owner]) {
+    expect((await routinesOf(token)).routines.map((routine) => routine.id)).not.toContain(justMe);
+    expect((await team.as(token, "GET", `/api/threads/${ran.threadId}/messages`)).status).toBe(404);
+  }
+  // A teammate's own MausBot takes no routine from anyone else, and one Bob sets up for his is his alone.
+  const bobsMausBot = (await botsOf(bob)).find((bot) => bot.name === "MausBot")!;
+  expect((await team.as(owner, "POST", "/api/routines", { name: "Peek", prompt: "x", botId: bobsMausBot.id, schedule: LATER })).status).toBe(404);
+  const own = await team.as(bob, "POST", "/api/routines", { name: "Bee check", prompt: "Check the bees", botId: bobsMausBot.id, schedule: LATER });
+  expect(own.status, JSON.stringify(own.body)).toBe(201);
+  mausbotRoutine = own.body.routine.id;
+  for (const token of [admin, owner]) expect((await routinesOf(token)).routines.map((routine) => routine.id)).not.toContain(mausbotRoutine);
+}, hostTimeout(180_000));
+
 it("when Bob leaves, his private routines go and the shared ones he wrote are handed over and keep running", async () => {
   const left = await team.signed("POST", "/api/cloud/team/member-left", { email: BOB.email });
   expect(left.status, JSON.stringify(left.body)).toBe(200);
-  expect(left.body).toMatchObject({ ok: true, routines: 2, routinesHandedOver: 2 });
+  expect(left.body).toMatchObject({ ok: true, routines: 4, routinesHandedOver: 3 });
   const stored = readFileSync(dataDir("routines.json"), "utf8");
   expect(stored).not.toContain("Kumquat");
   expect(stored).not.toContain("Quince");
@@ -217,7 +258,7 @@ it("when Bob leaves, his private routines go and the shared ones he wrote are ha
     entries = (await team.as(admin, "GET", "/api/admin-activity?what=all")).body.entries as Entry[];
     return entries.filter((entry) => entry.action === "routine.handover").length >= 2;
   }, 10_000);
-  expect(entries.filter((entry) => entry.action === "routine.handover").map((entry) => [entry.target?.name, entry.after?.owner]).sort()).toEqual([["Ledger tally", null], ["Shared standup", OWNER.email]]);
+  expect(entries.filter((entry) => entry.action === "routine.handover").map((entry) => [entry.target?.name, entry.after?.owner]).sort()).toEqual([["Ledger tally", null], ["Shared standup", OWNER.email], ["Team digest", OWNER.email]]);
   const activity = JSON.stringify(entries);
   for (const secret of ["Kumquat", "Quince", "quince", bobThread]) expect(activity).not.toContain(secret);
 }, hostTimeout(240_000));
@@ -234,7 +275,7 @@ it("Bob is off every bot when he leaves, Activity says so in counts, and joining
     return entries.some((entry) => entry.action === "member.left");
   }, 10_000);
   expect(entries.filter((entry) => entry.action === "member.left")).toEqual([
-    expect.objectContaining({ at: expect.any(String), target: { kind: "person", name: BOB.email }, after: { botsHandedBack: 1, routinesHandedOver: 2 } }),
+    expect.objectContaining({ at: expect.any(String), target: { kind: "person", name: BOB.email }, after: { botsHandedBack: 1, routinesHandedOver: 3 } }),
   ]);
   for (const secret of ["Kumquat", "Quince", bobThread]) expect(JSON.stringify(entries)).not.toContain(secret);
   const again = (await team.pair(BOB)).token!;

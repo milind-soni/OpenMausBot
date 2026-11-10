@@ -85,6 +85,7 @@ import {
 import { api, openBotThread, openThread, useStore, type Bot, type Group } from "@/state/store";
 import { RoutineScheduleNote } from "./RoutineScheduleNote";
 import { CalendarEventCard, HOUR_HEIGHT, statusState } from "./routines/CalendarEventCard";
+import { useTeamPeople } from "@/state/team-people";
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const WEEKDAYS = [1, 2, 3, 4, 5];
@@ -301,6 +302,7 @@ export function EventEditor({
   onSavedCall: (call: CalendarCall) => void;
 }) {
   const { state, dispatch } = useStore();
+  const onTeam = useTeamPeople() !== null;
   const existingRoutine = seed.routine;
   const { request: editorRequest } = useBotEditor();
   const existingCall = seed.call;
@@ -810,7 +812,7 @@ export function EventEditor({
           </label>
         );
   const resultsControl = kind === "routine" && !isRoomGoal && <div className={cn(advanced && "ml-8")}>
-            <ResultsDestination bot={bots.find((bot) => bot.id === botIds[0])} value={resultsThreadId} allowCurrent={Boolean(existingRoutine)} onChange={setResultsThreadId} />
+            <ResultsDestination bot={bots.find((bot) => bot.id === botIds[0])} value={resultsThreadId} allowCurrent={Boolean(existingRoutine)} team={onTeam} onChange={setResultsThreadId} />
           </div>;
   const attachmentsRow = (
           <div className="flex items-start gap-4">
@@ -1029,6 +1031,7 @@ export function QuickComposer({
   onSavedCall: (call: CalendarCall) => void;
 }) {
   const { dispatch } = useStore();
+  const onTeam = useTeamPeople() !== null;
   const [kind, setKind] = useState<EventKind>(routinesOnly || seed.limitReset ? "routine" : seed.kind);
   const [name, setName] = useState(seed.name ?? "");
   const [description, setDescription] = useState(seed.description ?? "");
@@ -1148,7 +1151,7 @@ export function QuickComposer({
           <FileText size={16} className="mt-2.5 shrink-0 text-ink-secondary" />
           <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} aria-label={t("routines.editor.descriptionLabel")} placeholder={t(kind === "routine" ? "routines.quick.whatToDo" : "routines.quick.description")} className="min-w-0 flex-1 resize-none rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent" />
         </div>
-        {kind === "routine" && <ResultsDestination bot={bots.find((bot) => bot.id === botIds[0])} value={resultsThreadId} onChange={(threadId) => setResultsThreadId(threadId ?? null)} />}
+        {kind === "routine" && <ResultsDestination bot={bots.find((bot) => bot.id === botIds[0])} value={resultsThreadId} team={onTeam} onChange={(threadId) => setResultsThreadId(threadId ?? null)} />}
         {error && <div className="rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
       </div>
       <div className="flex items-center justify-end gap-2 border-t border-hairline/40 px-4 py-3">

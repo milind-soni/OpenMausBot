@@ -13,7 +13,7 @@ export interface AutomationDestinationDeps {
   cloud: {
     owner: string;
     /** Who a routine's chat counts as opened by. */
-    opener(routineId: string): string;
+    opener(routineId: string, routine?: Routine): string;
     reportFromOthers(line: Message): boolean;
     opened(threadId: string, person: string): void;
     /** This chat holds what an outside event's run reported. */
@@ -45,7 +45,7 @@ export function createAutomationDestinations(deps: AutomationDestinationDeps) {
     },
     routine(routine: Routine, forceNew: boolean): { threadId: string; main?: true } | undefined {
       const bot = store.bot(routine.botId);
-      const opener = cloud?.opener(routine.id);
+      const opener = cloud?.opener(routine.id, routine);
       // A routine outside work wrote reports nowhere a person already works, whatever chat it names.
       const chosen = !forceNew && opener !== CLOUD_OUTSIDE_KEY && routine.resultsThreadId && bot && !bot.hidden ? store.taskByThread(bot.id, routine.resultsThreadId) : undefined;
       const main = bot && !bot.hidden ? deps.mainThread(bot.id) : undefined;

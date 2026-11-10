@@ -394,17 +394,27 @@ changes what those do.
 
 ## Routines
 
-A routine lives where it was made or where it reports (`server/routine-home.ts`). One that names someone's private chat,
-the chat a bot made it in (`sourceThreadId`) or the one it reports into (`resultsThreadId`), is that person's alone, as
-the chat is: no other member and no Admin, the Super admin included, sees it or learns of it, in `GET /api/routines`,
-the `routine` and `routine.run` frames, a bot's overview, the Today counts, a team export or backup, the Owner's
-whole-machine export, or a bot's `trigger_info` and `trigger` tools in any other conversation; naming it by id (to
-change, run or delete it) answers 404 *no such routine*, and a file only such a routine carries is refused as one that
-does not exist. Its runs open their conversations as that person, and its results go to a chat of theirs, so a run
-lands where it always did, in their audience. The chat a routine opened for its own results (the bot's main thread
-chosen on the Automations page, which on a team is a chat of the writer's) does not make it theirs until they write in
-it. Every other routine is its place's: whoever sees the bot, or the group chat, sees it, without the id of a
-conversation they may not read.
+A routine lives where it was made or where it reports (`server/routine-home.ts`). One for a member's own MausBot, or that
+names someone's private chat (the chat a bot made it in, `sourceThreadId`, or the one it reports into,
+`resultsThreadId`), is that person's alone, as the chat is: no other member and no Admin, the Super admin included, sees
+it or learns of it, in `GET /api/routines`, the `routine` and `routine.run` frames, a bot's overview, the Today counts, a
+team export or backup, the Owner's whole-machine export, or a bot's `trigger_info` and `trigger` tools in any other
+conversation; naming it by id (to change, run or delete it) answers 404 *no such routine*, and a file only such a
+routine carries is refused as one that does not exist. Every other routine is its place's (the bot's shared chat, or a
+group chat): whoever sees that place sees it, without the id of a conversation they may not read.
+
+**Its results follow where it lives** (`server/host/team-routines.ts`). A private routine's runs open their
+conversations as its person and report into a chat of theirs. A routine of a shared place opens its runs as the team,
+whoever made it or runs it (the schedule, its writer or an Admin), and reports into the shared chat or into a results
+chat of its own that everyone who reads the place reads; its asks go to whoever looks after the bot, or the Admins. The
+routine form on a team offers two places: **Just me** (`resultsThreadId: "just-me"`, the person's own private chat with
+the bot, or a new one named for the routine) and **Shared chat** (the bot's main chat); anyone who can chat with the bot
+may choose either, and an older app's "The bot's main thread" (`null`) is the shared place's own results chat. A routine
+that reports into a chat whose audience is not its own, such as one made before this for the shared chat whose results
+chat was opened privately for its writer, gets a results chat of its own place at its next run; the old chat stays
+where it is, unchanged. The chat a routine opened for its own results does not make it anyone's until they write in it.
+The routine picker lists only the bots the person can chat with and never a teammate's own MausBot, which takes no
+routine from anyone else (404 *no such bot*).
 
 ## The shared chat's name
 

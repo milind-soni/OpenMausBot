@@ -5436,6 +5436,8 @@
   "routines.results.missing": "A thread that no longer exists",
   "routines.results.main": "The bot's main thread",
   "routines.results.mainHelp": "Each run starts with fresh context. Dated results collect here, in the bot's main thread unless you choose another; full execution details stay in Run logs.",
+  "routines.results.justMe": "Just me",
+  "routines.results.teamHelp": "Just me: only you see what it reports. Shared chat: everyone who can use the bot sees it.",
   "routines.runNow": "Run now",
   "routines.starting": "Starting…",
   "routines.pause": "Pause",

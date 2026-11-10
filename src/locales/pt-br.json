@@ -5166,6 +5166,8 @@
   "routines.results.missing": "Uma conversa que não existe mais",
   "routines.results.main": "A conversa principal do bot",
   "routines.results.mainHelp": "Cada execução começa com contexto novo. Os resultados, com as datas, ficam aqui na conversa principal do bot, a menos que você escolha outra. Os detalhes completos da execução ficam em “Registros”.",
+  "routines.results.justMe": "Só eu",
+  "routines.results.teamHelp": "Só eu: só você vê o que ela relata. Conversa compartilhada: todos que podem usar o bot veem.",
   "routines.runNow": "Rodar agora",
   "routines.starting": "Iniciando…",
   "routines.pause": "Pausar",
