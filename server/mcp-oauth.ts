@@ -37,12 +37,21 @@ export class McpOAuthError extends Error {
 
 export type McpAuthState = "signed-in" | "needs-sign-in" | "none";
 
+/** How a token refresh ended: a new token, refused for good (the sign-in ended), nothing could refresh an expired token, or
+ * no answer from the authorization server. */
+export type McpRefreshOutcome = "refreshed" | "rejected" | "expired" | "unreachable";
+/** A server refused a sign-in's token on a real call: a refresh got a new one, the sign-in has ended, the server refused
+ * a token renewed moments ago (the sign-in lacks something), or nothing could be learned. */
+export type McpTokenRefusal = "refreshed" | "ended" | "again" | "unknown";
+
 /** The owner of a sign-in started from a chat's Sign in card: any device that can see the card may follow it. */
 export const cardOwner = (threadId: string, messageId: string) => `card:${threadId}:${messageId}`;
 
 const DEFAULT_LIFETIME_MS = 5 * 60_000;
 const REFRESH_MARGIN_MS = 2 * 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
+/** A token a server refused is renewed at most this often: one refused right after a renewal is not an expired one. */
+const REFUSED_RENEW_MS = 60_000;
 export const MCP_OAUTH_CALLBACK_PATH = "/mcp-oauth/callback";
 const CALLBACK_PATH = MCP_OAUTH_CALLBACK_PATH;
 const DISCARDED = "discarded";
@@ -192,20 +201,24 @@ export class McpOAuthManager {
   private readonly isOwnerLive: (owner: string) => boolean;
   private readonly flows = new Map<string, Flow>();
   private readonly starting = new Map<string, StartingFlow>();
-  private readonly refreshing = new Map<string, Promise<string | null>>();
+  private readonly refreshing = new Map<string, Promise<{ token: string | null; outcome: McpRefreshOutcome | null }>>();
+  private readonly renewedAfterRefusal = new Map<string, number>();
   private readonly clients: (name: string, url: string) => McpOAuthClientConfig | undefined;
   private readonly onSettled: (name: string, phase: McpSignInPhase, owner: string) => void;
+  private readonly onRefresh: (name: string, outcome: McpRefreshOutcome) => void;
   private disposed = false;
 
   /** `clients` is read when needed: an app's secret is never copied into this store. `onSettled` hears each sign-in end
-   * once, except when the server shuts down. */
+   * once, except when the server shuts down. `onRefresh` hears how each refresh ended. */
   constructor(options: {
     file: string; lifetimeMs?: number; clients?: (name: string, url: string) => McpOAuthClientConfig | undefined; isOwnerLive?: (owner: string) => boolean;
     onSettled?(name: string, phase: McpSignInPhase, owner: string): void;
+    onRefresh?(name: string, outcome: McpRefreshOutcome): void;
   }) {
     this.store = new McpOAuthStore(options.file);
     this.isOwnerLive = options.isOwnerLive ?? (() => true);
     this.onSettled = options.onSettled ?? (() => {});
+    this.onRefresh = options.onRefresh ?? (() => {});
     this.lifetimeMs = options.lifetimeMs ?? DEFAULT_LIFETIME_MS;
     this.clients = options.clients ?? (() => undefined);
   }
@@ -360,11 +373,26 @@ export class McpOAuthManager {
     if (!record || record.state !== "signed-in" || !record.tokens) return Promise.resolve(null);
     const { tokens } = record;
     if (!tokens.expiresAt || tokens.expiresAt > Date.now() + REFRESH_MARGIN_MS) return Promise.resolve(tokens.access);
-    const pending = this.refreshing.get(name);
-    if (pending) return pending;
-    const refreshed = this.refresh(name, record).finally(() => this.refreshing.delete(name));
-    this.refreshing.set(name, refreshed);
-    return refreshed;
+    return this.renew(name, record, false).then((renewed) => renewed.token);
+  }
+
+  /** When this sign-in ends for good: its token's expiry, when nothing can refresh it; null otherwise. */
+  endsAt(name: string, url: string): number | null {
+    const record = this.store.get(name, url);
+    if (!record || record.state !== "signed-in" || !record.tokens?.expiresAt) return null;
+    return this.renewable(name, record) ? null : record.tokens.expiresAt;
+  }
+
+  /** The server refused this sign-in's token on a real call (HTTP 401): it is refreshed now, or, when nothing can refresh
+   * it, the sign-in has ended. A token refused again right after a refresh is left as it is. */
+  async tokenRefused(name: string, url: string): Promise<McpTokenRefusal> {
+    const record = this.store.get(name, url);
+    if (!record || record.state !== "signed-in" || !record.tokens) return record?.state === "needs-sign-in" ? "ended" : "unknown";
+    const renewed = this.renewedAfterRefusal.get(name);
+    if (renewed !== undefined && Date.now() - renewed < REFUSED_RENEW_MS) return "again";
+    this.renewedAfterRefusal.set(name, Date.now());
+    const { outcome } = await this.renew(name, record, true);
+    return outcome === "refreshed" ? "refreshed" : outcome === "rejected" || outcome === "expired" ? "ended" : "unknown";
   }
 
   dispose(): void {
@@ -374,14 +402,33 @@ export class McpOAuthManager {
     this.flows.clear();
   }
 
-  private async refresh(name: string, record: McpOAuthRecord): Promise<string | null> {
+  private renewable(name: string, record: McpOAuthRecord): boolean {
+    return Boolean(record.tokens?.refresh && record.tokenEndpoint && this.recordClient(name, record));
+  }
+
+  /** One refresh at a time per server. `forced`: a server refused the token, so it is renewed whatever its expiry says, and
+   * a token nothing can renew has ended. */
+  private renew(name: string, record: McpOAuthRecord, forced: boolean): Promise<{ token: string | null; outcome: McpRefreshOutcome | null }> {
+    const pending = this.refreshing.get(name);
+    if (pending) return pending;
+    const renewed = this.refresh(name, record, forced).then((result) => {
+      if (result.outcome) {
+        try { this.onRefresh(name, result.outcome); } catch (error) { console.error("mcp sign-in: onRefresh failed", error); }
+      }
+      return result;
+    }).finally(() => this.refreshing.delete(name));
+    this.refreshing.set(name, renewed);
+    return renewed;
+  }
+
+  private async refresh(name: string, record: McpOAuthRecord, forced: boolean): Promise<{ token: string | null; outcome: McpRefreshOutcome | null }> {
     const tokens = record.tokens!;
-    const stillValid = tokens.expiresAt !== undefined && tokens.expiresAt > Date.now();
+    const stillValid = !forced && tokens.expiresAt !== undefined && tokens.expiresAt > Date.now();
     const client = this.recordClient(name, record);
     if (!tokens.refresh || !record.tokenEndpoint || !client) {
-      if (stillValid) return tokens.access;
+      if (stillValid) return { token: tokens.access, outcome: null };
       this.markNeedsSignIn(name, record.url);
-      return null;
+      return { token: null, outcome: "expired" };
     }
     let answer: Awaited<ReturnType<typeof postForm>>;
     try {
@@ -391,20 +438,20 @@ export class McpOAuthManager {
         resource: record.url,
       }, client);
     } catch {
-      return stillValid ? tokens.access : null;
+      return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
     }
     const next = answer.status >= 200 && answer.status < 300 ? tokensFrom(answer.body, tokens) : null;
     if (!next) {
       const dead = (answer.status === 400 || answer.status === 401)
         && (answer.body.error === "invalid_grant" || answer.body.error === "invalid_client");
-      if (!dead) return stillValid ? tokens.access : null;
+      if (!dead) return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
       this.markNeedsSignIn(name, record.url);
-      return null;
+      return { token: null, outcome: "rejected" };
     }
     // the entry may have been removed or re-pointed while this was in flight
-    if (!this.store.get(name, record.url)) return null;
+    if (!this.store.get(name, record.url)) return { token: null, outcome: null };
     this.store.put(name, { ...record, state: "signed-in", tokens: next });
-    return next.access;
+    return { token: next.access, outcome: "refreshed" };
   }
 
   private async challenge(url: string): Promise<string | null> {
