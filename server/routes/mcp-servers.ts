@@ -26,10 +26,12 @@ function botMcpServers(listed: readonly ListedMcpServer[], bot: { id: string; mc
   }));
 }
 
-/** The Vault items a server arriving in a move may read its `vault:<id>` keys from. */
-const vaultKeysOf = (body: unknown): string[] | undefined => {
+/** The Vault items a server arriving in a move may read its `vault:<id>` keys from.
+ * Security: only where whoever may change servers owns every Vault item; on a Team Cloud or a hosted workspace an admin
+ * could otherwise point a server of theirs at a member's saved secret. */
+const vaultKeysOf = (body: unknown, ownsVault: boolean): string[] | undefined => {
   const keys = (body as { vaultKeys?: unknown } | null)?.vaultKeys;
-  return Array.isArray(keys) ? keys.filter(isVaultItemId) : undefined;
+  return ownsVault && Array.isArray(keys) ? keys.filter(isVaultItemId) : undefined;
 };
 
 export interface McpServerRouteDeps extends Pick<McpConfigDeps, "cfg" | "sessions" | "mcpOAuth" | "teamConnections" | "cloudHome" | "fallbackPublicUrl" | "savedCustomDomain" | "appCatalog"> {
@@ -68,6 +70,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
     cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL,
     mcpServerResponse, savedCustomDomain, config,
   } = deps;
+  const ownsVault = () => !CLOUD_HOME?.team && !hostedWorkspaceConfiguration();
   const answer = (res: Parameters<typeof json>[0], send: typeof json, result: McpConfigResult) => "body" in result
     ? send(res, result.status, withServerDetails(result.body))
     : send(res, result.status, { error: result.error, ...userErrorFields(result), ...(result.code ? { code: result.code } : {}) });
@@ -178,7 +181,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       if (!parsed.ok) return json(res, 400, { error: parsed.error });
       const placed = deps.place ? await deps.place(parsed.server, auth) : { ok: true as const, server: parsed.server };
       if (!placed.ok) return json(res, 409, { error: placed.error });
-      const added = config.add(name, placed.server, vaultKeysOf(body));
+      const added = config.add(name, placed.server, vaultKeysOf(body, ownsVault()));
       if (added.status < 300) deps.connectionHealth?.added("mcp", name, auth.kind === "session" ? auth.session.email ?? null : null);
       return answer(res, json, added);
     }
@@ -233,7 +236,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
       const { vaultKeys: _keys, ...fields } = (body ?? {}) as Record<string, unknown>;
       const parsed = parseMcpServerMutation(name, fields, existing.server);
       if (!parsed.ok) return json(res, 400, { error: parsed.error });
-      return answer(res, json, config.replace(name, parsed.server, vaultKeysOf(body)));
+      return answer(res, json, config.replace(name, parsed.server, vaultKeysOf(body, ownsVault())));
     }
     return PASS;
   };

@@ -70,7 +70,7 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
       ...(deps.ownHome ? { ownHome: deps.ownHome } : {}),
       ...(deps.cloudHome?.team ? { personalRefusal: (what: string) => personalConnectionRefusal(deps.cloudHome!.team!, what) } : {}),
       async list() {
-        return { computer, connections: await connections(), engines: await deps.engines().catch((): string[] => []), commands: programs(), vaultKeys: true as const,
+        return { computer, connections: await connections(), engines: await deps.engines().catch((): string[] => []), commands: programs(), ...(deps.cloudHome?.team ? {} : { vaultKeys: true as const }),
           ...(deps.cloudHome === null && !managedService() ? { managedApps: false as const } : {}) };
       },
       adoptShare: adoptComposioShare,
