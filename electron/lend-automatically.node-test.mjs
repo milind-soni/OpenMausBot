@@ -553,6 +553,24 @@ test("the menu-bar item: which Clouds are using this Mac, Pause or Resume, the t
     { line: "A, B and C are using this PC", title: "3 Clouds are using this PC", screen: null });
 });
 
+test("the PC's tray item ends with Quit, paused or not, when the app gives it one", () => {
+  const trays = [];
+  class Tray {
+    constructor() { trays.push(this); }
+    on() {} setToolTip() {} setContextMenu(menu) { this.menu = menu; } isDestroyed() { return false; } destroy() {}
+  }
+  let quits = 0;
+  const indicator = createLendingIndicator({ Tray, Menu: { buildFromTemplate: items => items }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, iconPath: "icon.png",
+    onPause() {}, onResume() {}, onActivity() {}, onTerminal() {}, onQuit: () => quits++, device: "PC" });
+  const labels = () => trays[0].menu.map(item => item.type === "separator" ? "-" : item.label);
+  indicator.update({ clouds: ["Rocky"], using: [], paused: true });
+  assert.deepEqual(labels(), ["Paused: Rocky can't use this PC", "-", "Resume", "See activity", "-", "Quit OpenMaus Bot"]);
+  indicator.update({ clouds: ["Rocky"], using: [], paused: false });
+  assert.deepEqual(labels().slice(-2), ["-", "Quit OpenMaus Bot"]);
+  trays[0].menu.at(-1).click();
+  assert.equal(quits, 1);
+});
+
 test("See activity shows this computer's own record in the app's language: every value escaped, no script, nothing loaded", async () => {
   const entries = [
     { at: Date.UTC(2026, 9, 28, 14, 2), server: "Client <A>", origin: OTHER, action: "read_file", detail: "Notes/<img src=x onerror=alert(1)>.md", ok: true },

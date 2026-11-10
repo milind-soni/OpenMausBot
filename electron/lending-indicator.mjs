@@ -33,7 +33,7 @@ export function indicatorText({ clouds, using, paused, pauseError, screen = null
 /** How long lending has to stay broken before a notification says so: a blip is no news. */
 const NOTICE_AFTER_MS = 10 * 60_000;
 
-export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, onTerminal, onStartScreen = () => {}, device = deviceWord(), t = nativeText.englishText.t, Notification = null, setTimer = setTimeout, clearTimer = clearTimeout }) {
+export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, onTerminal, onStartScreen = () => {}, onQuit = null, device = deviceWord(), t = nativeText.englishText.t, Notification = null, setTimer = setTimeout, clearTimer = clearTimeout }) {
   let tray = null;
   let shown = null;
   /** Each problem now, by what it says, until the notification for it goes out or it clears. */
@@ -77,6 +77,7 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
         // Electron 43 ticks a checkbox on click by itself: the menu keeps the saved choice until the person confirms one.
         click: () => { draw(view); onTerminal(!view.terminal); } }],
       { label: t("native.lendTray.activity"), click: () => onActivity() },
+      ...onQuit ? [{ type: "separator" }, { label: t("native.tray.quit"), click: () => onQuit() }] : [],
     ]));
   };
   return {
