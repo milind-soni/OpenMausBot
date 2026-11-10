@@ -29,7 +29,7 @@ afterEach(async () => {
 
 type Bot = { id: string; mcpServers?: string[] };
 
-async function serve(options: { routeHome?: Parameters<typeof createMcpServerRoutes>[0]["cloudHome"]; keys?: Parameters<typeof createMcpConfig>[0]["keys"]; botsPath?: () => BrokerPath | null; bots?: Bot[]; listed?: Record<string, Record<string, unknown>>; probeAs?: (server: { bot?: string }) => { id?: string; cwd?: string } } = {}) {
+async function serve(options: { ownsVault?: boolean; keys?: Parameters<typeof createMcpConfig>[0]["keys"]; botsPath?: () => BrokerPath | null; bots?: Bot[]; listed?: Record<string, Record<string, unknown>>; probeAs?: (server: { bot?: string }) => { id?: string; cwd?: string } } = {}) {
   const cfg: Pick<AppConfig, "mcpServers"> = { mcpServers: {} };
   const changes: string[] = [];
   let busy = false;
@@ -54,7 +54,8 @@ async function serve(options: { routeHome?: Parameters<typeof createMcpServerRou
   });
   const route = createMcpServerRoutes({
     cfg, bot: (id) => options.bots?.find((bot) => bot.id === id) ?? null, sessions, mcpOAuth, teamConnections,
-    cloudHome: options.routeHome ?? null,
+    cloudHome: null,
+    ownsVault: () => options.ownsVault ?? true,
     fallbackPublicUrl: null,
     mcpServerResponse,
     savedCustomDomain: () => null,
@@ -105,7 +106,7 @@ it("a server arriving from a move is given the Vault items it names, by id only;
 
 it("a Team Cloud takes no vaultKeys: an admin's server can't be given a member's saved secret", async () => {
   const given: Array<[string, readonly string[]]> = [];
-  const { post } = await serve({ routeHome: { team: { name: "Team" } } as never, keys: { grant: (name: string, items: readonly string[]) => given.push([name, items]), warm: async () => {}, forgetServer: () => {}, resolve: (_n: string, server: object) => ({ ok: true, server }), oauthClient: (_n: string, o: object) => o, usedBy: () => [], given: () => [] } as never });
+  const { post } = await serve({ ownsVault: false, keys: { grant: (name: string, items: readonly string[]) => given.push([name, items]), warm: async () => {}, forgetServer: () => {}, resolve: (_n: string, server: object) => ({ ok: true, server }), oauthClient: (_n: string, o: object) => o, usedBy: () => [], given: () => [] } as never });
   const item = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
   const added = await post("/api/mcp/servers", { name: "stripe", command: "npx", args: ["x"], env: { KEY: `vault:${item}` }, vaultKeys: [item] });
   expect(added.status, await added.clone().text()).toBe(201);

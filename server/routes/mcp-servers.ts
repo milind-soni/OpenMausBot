@@ -43,6 +43,9 @@ export interface McpServerRouteDeps extends Pick<McpConfigDeps, "cfg" | "session
   lender?(auth: RequestAuth): string | null;
   /** A server the person adds that needs their own computer, marked as running on the one of theirs lent now. */
   place?(server: StoredMcpServer, auth: RequestAuth): Promise<{ ok: true; server: StoredMcpServer } | { ok: false; error: string }>;
+  /** Whoever may change servers here owns every Vault item (not a Team Cloud or a hosted workspace), so a server arriving
+   * in a move may be given the items its `vault:<id>` keys name. */
+  ownsVault?(): boolean;
   /** Who added a server and what Test found, for the team's connections (server/host/connection-health-host.ts). */
   connectionHealth?: {
     added(kind: "mcp", name: string, email: string | null): void;
@@ -70,7 +73,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
     cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL,
     mcpServerResponse, savedCustomDomain, config,
   } = deps;
-  const ownsVault = () => !CLOUD_HOME?.team && !hostedWorkspaceConfiguration();
+  const ownsVault = () => deps.ownsVault?.() === true;
   const answer = (res: Parameters<typeof json>[0], send: typeof json, result: McpConfigResult) => "body" in result
     ? send(res, result.status, withServerDetails(result.body))
     : send(res, result.status, { error: result.error, ...userErrorFields(result), ...(result.code ? { code: result.code } : {}) });
