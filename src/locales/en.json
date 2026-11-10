@@ -4236,6 +4236,7 @@
   "activity.action.access.allow": "Let someone chat with a bot",
   "activity.action.access.decline": "Turned down a request to chat with a bot",
   "activity.action.owner.update": "Changed who a bot reports to",
+  "activity.action.routine.handover": "Handed a routine over",
   "activity.action.room.audience-reset": "Widened who can see a room",
   "activity.action.webhook.create": "Created a webhook",
   "activity.action.webhook.update": "Changed a webhook",

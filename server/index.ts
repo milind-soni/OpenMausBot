@@ -457,7 +457,7 @@ import { createScreenFrameSource, rememberTurnFrame, type ScreenCapture } from "
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 import { asSchedule, RoutineRequestService } from "./routine-requests.ts"; import { ownerSpokeOnly } from "./cloud-routine-level.ts"; import { routineRunCard, routineRunFallbackText } from "./routine-run-card.ts";
 import { activeRoutinesContext } from "./active-routines-context.ts";
-import { createRefusedHandoffs } from "./host/refused-handoffs.ts"; import { automationContextText, createAutomationReports, newestAutomationLines } from "./automation-reports.ts"; import { createAutomationDestinations } from "./automation-destinations.ts"; import { routineHome } from "./routine-home.ts"; import { createProactive } from "./host/proactive.ts"; import { createFirstHourHooks, startFirstHour, welcomeDonePatch } from "./host/first-hour-host.ts"; import { greetingMessage } from "./host/first-hour.ts"; import { READ_AND_DRAFT_PARTS, READ_AND_DRAFT_REFUSAL, READ_AND_DRAFT_TOOLS, recordsAnswer } from "./read-and-draft.ts"; import { createPresenceRoutes } from "./routes/presence.ts"; import { needsYouNow } from "./today.ts";
+import { createRefusedHandoffs } from "./host/refused-handoffs.ts"; import { automationContextText, createAutomationReports, newestAutomationLines } from "./automation-reports.ts"; import { createAutomationDestinations } from "./automation-destinations.ts"; import { routineHome } from "./routine-home.ts"; import { botOwner } from "../shared/bot-owner.ts"; import { createProactive } from "./host/proactive.ts"; import { createFirstHourHooks, startFirstHour, welcomeDonePatch } from "./host/first-hour-host.ts"; import { greetingMessage } from "./host/first-hour.ts"; import { READ_AND_DRAFT_PARTS, READ_AND_DRAFT_REFUSAL, READ_AND_DRAFT_TOOLS, recordsAnswer } from "./read-and-draft.ts"; import { createPresenceRoutes } from "./routes/presence.ts"; import { needsYouNow } from "./today.ts";
 import { engineLabel, LimitResetClock, nearLimitNote } from "./limit-resets.ts"; import { loadPlanUsage, planAccountsFromInstances } from "./plan-usage.ts"; import { LimitFailovers, limitBackupAllowed } from "./limit-failover.ts"; import { createLimitResetRoutes } from "./routes/limit-resets.ts";
 import { parseTriggerRequest, triggerTarget } from "./trigger-tools.ts"; import { WebhookRequestError, WebhookRequestService } from "./webhook-requests.ts"; import { createAppTriggerHost } from "./app-trigger-host.ts";
 import { appliesNow, directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
@@ -1008,6 +1008,16 @@ function teamRoutineHome(routine: Parameters<typeof routineHome>[0]): string | n
 function routineInTurn(routine: Parameters<typeof routineHome>[0], threadId: string): boolean {
   const home = teamRoutineHome(routine);
   return home === null || home === teamHost.privateTo(threadId);
+}
+
+/** A routine whose writer left a Team Cloud runs as `to`'s (a person key; null: nobody's, whose asks go to the Admins),
+ * and stops reporting into a chat of the person who left. */
+function handTeamRoutine(id: string, left: string, to: string | null): void {
+  const writer = to ?? CLOUD_NOBODY_KEY;
+  cloudRoutineAuthors?.forget(id);
+  cloudRoutineAuthors?.wrote(id, writer);
+  const routine = routines?.listRoutines().find((candidate) => candidate.id === id);
+  if (routine?.resultsThreadId && teamHost.privateTo(routine.resultsThreadId) === left) withRoutineWriter(writer, () => routines!.update(id, { resultsThreadId: null }));
 }
 
 function routineOpener(routineId: string): string {
@@ -12331,7 +12341,10 @@ const taskRoutes = createTaskRoutes({
   revokeInternalCapabilitiesForThread,
   stagedSkillCleanupsForThread,
   rejectDeletedThreadSkillStages,
-}); ROUTES.push(taskRoutes); const leaveTeam = CLOUD_TEAM ? createTeamMemberLeft({ dataDir: DATA_DIR, store, openedBy: (person) => threadStarters.threadsOf(person, 50_000), privateTo: teamHost.privateTo, revokeSessions: (email) => sessions.revokeMember(email), busy: threadBusy, stop: (botId, threadId) => interruptDirectThread(botId, threadId, "The person left the team"), deleteTasks: taskRoutes.deleteTasks, stopBot: (botId) => memberOwnBot.stopWork(botId, "The person left the team"), deleteBot: memberOwnBot.remove, threadsReferencing, deleteAttachment: (name) => deleteAttachment(join(ATTACHMENTS_DIR, name)), eraseBrowsers: eraseAudienceBrowsers, forgetConnections: (person) => { teamConnections.forgetPerson(person); personRooms.reads?.forgetPerson(person); } }) : null;
+}); ROUTES.push(taskRoutes); const leaveTeam = CLOUD_TEAM ? createTeamMemberLeft({ dataDir: DATA_DIR, store, openedBy: (person) => threadStarters.threadsOf(person, 50_000), privateTo: teamHost.privateTo, revokeSessions: (email) => sessions.revokeMember(email), busy: threadBusy, stop: (botId, threadId) => interruptDirectThread(botId, threadId, "The person left the team"), deleteTasks: taskRoutes.deleteTasks, stopBot: (botId) => memberOwnBot.stopWork(botId, "The person left the team"), deleteBot: memberOwnBot.remove, threadsReferencing, deleteAttachment: (name) => deleteAttachment(join(ATTACHMENTS_DIR, name)), eraseBrowsers: eraseAudienceBrowsers, forgetConnections: (person) => { teamConnections.forgetPerson(person); personRooms.reads?.forgetPerson(person); },
+  routines: () => (routines?.listRoutines() ?? []).map((routine) => ({ id: routine.id, name: routine.name, botId: routine.botId, home: teamRoutineHome(routine), writer: cloudRoutineAuthors?.writer(routine.id), files: (routine.attachments ?? []).map((file) => basename(file.path)) })),
+  deleteRoutine: (id) => { if (routines?.removeWithHistory(id)) cloudRoutineAuthors?.remove(id); }, handRoutine: handTeamRoutine,
+  ownerOf: (botId) => { const bot = store.bot(botId); return bot ? botOwner(bot) : null; }, record: (row) => appendAdminAction(DATA_DIR, { ...row, actor: { kind: "session", sessionId: "", label: "MausBot Cloud" } }) }) : null;
 ROUTES.push(createTeamRoutes({
   store,
   cfg,

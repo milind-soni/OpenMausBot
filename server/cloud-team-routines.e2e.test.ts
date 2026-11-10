@@ -5,9 +5,12 @@
 // looks after their bot (the Admins when nobody does), he is taken off every bot's sharing and "Looked after by", and
 // the admins' Activity says so in counts. The engine is the synthetic Claude CLI.
 import { randomBytes } from "node:crypto";
-
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
+import { CLOUD_NOBODY_KEY } from "./cloud-sharing.ts";
+import { personKey } from "./person-key.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
 const OWNER = { email: "olive@acme.test", role: "owner" as const };
@@ -26,6 +29,7 @@ let scout: Bot, ledger: Bot;
 let bobThread = "", benThread = "", fileName = "";
 let kumquat = "", quince = "", standup = "", tally = "";
 
+const dataDir = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 async function until(done: () => Promise<boolean> | boolean, timeoutMs = 60_000): Promise<void> {
   const end = Date.now() + timeoutMs;
@@ -69,6 +73,7 @@ async function runToEnd(token: string, routineId: string): Promise<Run> {
   }, 90_000);
   return run!;
 }
+const writers = () => (JSON.parse(readFileSync(dataDir("lending-routines.json"), "utf8")) as { writers?: Record<string, string> }).writers ?? {};
 
 beforeAll(async () => {
   fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-team-${randomBytes(8).toString("hex")}`, team: { id: "team-acme-1", name: "Acme" } });
@@ -185,3 +190,34 @@ it("a run of the routine the bot made in Bob's chat works and lands in his audie
     expect(JSON.stringify((await routinesOf(token)).runs)).not.toContain(run.id);
   }
 }, hostTimeout(120_000));
+
+it("when Bob leaves, his private routines go and the shared ones he wrote are handed over and keep running", async () => {
+  const left = await team.signed("POST", "/api/cloud/team/member-left", { email: BOB.email });
+  expect(left.status, JSON.stringify(left.body)).toBe(200);
+  expect(left.body).toMatchObject({ ok: true, routines: 2, routinesHandedOver: 2 });
+  const stored = readFileSync(dataDir("routines.json"), "utf8");
+  expect(stored).not.toContain("Kumquat");
+  expect(stored).not.toContain("Quince");
+  expect(existsSync(dataDir("attachments", fileName)), "the file only his routine used goes with it").toBe(false);
+  // The shared ones keep running, now the bot's owner's, or nobody's (the Admins') when he looked after the bot himself.
+  expect((await routinesOf(owner)).routines.map((routine) => routine.id)).toEqual(expect.arrayContaining([standup, tally]));
+  expect(writers()[standup]).toBe(personKey({ id: "", email: OWNER.email }));
+  expect(writers()[tally]).toBe(CLOUD_NOBODY_KEY);
+  const run = await runToEnd(owner, standup);
+  expect(run.status).toBe("completed");
+  expect((await team.as(owner, "GET", `/api/threads/${run.threadId}/messages`)).status, "its run is the owner's now, not a gone person's").toBe(200);
+  expect((await team.as(owner, "GET", `/api/threads/${run.resultsThreadId}/messages`)).status, "and so is the chat it reports into").toBe(200);
+  const tallied = await runToEnd(admin, tally);
+  expect(tallied.status).toBe("completed");
+  expect((await team.as(admin, "GET", `/api/threads/${tallied.threadId}/messages`)).status, "nobody's run: the team's").toBe(200);
+  // Admin activity says each was handed over, and nothing from a private chat.
+  type Entry = { action: string; target?: { kind: string; id?: string; name?: string }; after?: Record<string, unknown> };
+  let entries: Entry[] = [];
+  await until(async () => {
+    entries = (await team.as(admin, "GET", "/api/admin-activity?what=all")).body.entries as Entry[];
+    return entries.filter((entry) => entry.action === "routine.handover").length >= 2;
+  }, 10_000);
+  expect(entries.filter((entry) => entry.action === "routine.handover").map((entry) => [entry.target?.name, entry.after?.owner]).sort()).toEqual([["Ledger tally", null], ["Shared standup", OWNER.email]]);
+  const activity = JSON.stringify(entries);
+  for (const secret of ["Kumquat", "Quince", "quince", bobThread]) expect(activity).not.toContain(secret);
+}, hostTimeout(240_000));
