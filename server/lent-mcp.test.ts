@@ -144,6 +144,7 @@ describe("a server that runs on the person's computer, in a turn", () => {
     expect(lent.mounts({ id: "kiwi" }, TURN)).toEqual({});
     expect(minted).toEqual([]);
     expect(lent.lines({ id: "kiwi" }, TURN).get("local")).toBe("local runs on Ada's Mac. Someone else wrote in this conversation, so it can't use your Mac. Start a new conversation to use it.");
+    expect(lent.given({ id: "kiwi" }).sort(), "still set for the bot, so a change to one reaches it").toEqual(["local", "notes"]);
   });
 
   it("only the bot's own servers: off, another bot's, left out of its list or its tool selection are never mounted", () => {
@@ -151,6 +152,7 @@ describe("a server that runs on the person's computer, in a turn", () => {
     const bot = { id: "kiwi", mcpServers: ["local", "off", "theirs", "here", "unselected"], toolScope: { deny: ["mcp:unselected:*"] } };
     const { lent } = fixture({ servers, online: { terminal: true } });
     expect(Object.keys(lent.mounts(bot, TURN))).toEqual(["local"]);
+    expect(lent.given(bot)).toEqual(["local"]);
   });
 });
 

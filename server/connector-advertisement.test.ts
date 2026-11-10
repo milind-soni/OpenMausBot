@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  advertisedGrants,
   CONNECTOR_ALLOWED_TOOLS_MAX_BYTES,
   connectorToolAdvertised,
   filterToolsListFrame,
@@ -134,5 +135,20 @@ describe("tools/list frame filtering", () => {
     expect(filterToolsListFrame(noTools, grants({ gmail: { tools: "*" } }))).toBe(noTools);
     const nameless = { jsonrpc: "2.0" as const, id: 12, result: { tools: [{ description: "unnamed" }] } };
     expect(filterToolsListFrame(nameless, grants({ gmail: { tools: "*" } }))).toEqual(nameless);
+  });
+});
+
+describe("the apps' sandbox", () => {
+  it("is offered to a bot with app grants only while its turn runs at Full access", () => {
+    const gmail = grants({ gmail: { tools: "*" } });
+    expect(advertisedGrants(gmail, false)).toBe(gmail);
+    expect(advertisedGrants(undefined, true)).toBeUndefined();
+    const full = advertisedGrants(gmail, true)!;
+    expect(gmail).toEqual({ gmail: { tools: "*" } });
+    for (const tool of ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL", "GMAIL_SEND_EMAIL"]) {
+      expect(connectorToolAdvertised(tool, full)).toBe(true);
+      expect(connectorToolAdvertised(tool, gmail)).toBe(tool === "GMAIL_SEND_EMAIL");
+    }
+    expect(connectorToolAdvertised("SLACK_POST_MESSAGE", full)).toBe(false);
   });
 });

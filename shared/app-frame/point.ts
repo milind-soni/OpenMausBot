@@ -121,9 +121,44 @@ export const APP_POINT_SOURCE = `(function () {
     }
     return parts.join(" > ");
   };
+  // state.start is true at a word start (after a space or hyphen: "Foo-Bar"); punctuation before the first letter keeps it, as CSS capitalize does ("(Note)"),
+  // and it carries across inline tags so a word split by them gets one capital.
+  var cased = function (text, transform, state) {
+    if (transform === "uppercase") return text.toUpperCase();
+    if (transform === "lowercase") return text.toLowerCase();
+    return text.replace(/[\\s\\S]/g, function (letter) {
+      if (/\\s/.test(letter) || letter === "-") { state.start = true; return letter; }
+      if (!/[\\p{L}\\p{N}]/u.test(letter)) return letter;
+      var start = state.start;
+      state.start = false;
+      return start && transform === "capitalize" ? letter.toUpperCase() : letter;
+    });
+  };
+  // innerText runs a badge (an inline-block span) into the next word ("CloudRestore"): any box that is not plain inline
+  // is a word break on screen, so it is one here too.
+  var wordsOf = function (node, state) {
+    if (node.nodeType !== 1 || /^(script|style|noscript|template)$/i.test(node.tagName)) return "";
+    var style = window.getComputedStyle(node);
+    var display = style.display;
+    if (display === "none") return "";
+    // A hidden wrapper's own text stays out, but a descendant set visible again is on screen.
+    var hidden = style.visibility === "hidden" || style.visibility === "collapse";
+    var closed = node.tagName === "DETAILS" && !node.open;
+    var summary = closed && Array.prototype.find.call(node.children, function (child) { return child.tagName === "SUMMARY"; });
+    var shown = style.contentVisibility === "hidden" ? [] : closed ? (summary ? [summary] : []) : node.childNodes;
+    var block = !/^(inline|contents)?$/.test(display) || node.tagName === "BR";
+    if (block) state.start = true;
+    var words = Array.prototype.map.call(shown, function (child) {
+      return child.nodeType === 3 ? (hidden ? "" : cased(child.data, style.textTransform, state)) : wordsOf(child, state);
+    }).join("");
+    if (block) state.start = true;
+    return block ? " " + words + " " : words;
+  };
   var describe = function (element) {
     var tag = element.tagName.toLowerCase();
-    var text = element.innerText || element.textContent || element.getAttribute("aria-label") || element.getAttribute("alt") ||
+    // A closed single select shows only its chosen option, not every option.
+    var chosen = tag === "select" && !element.multiple && !(element.size > 1);
+    var text = (chosen ? (element.selectedOptions[0] ? element.selectedOptions[0].text : "") : wordsOf(element, { start: true })).trim() || element.getAttribute("aria-label") || element.getAttribute("alt") ||
       element.getAttribute("placeholder") || element.getAttribute("title") || "";
     return { tag: tag, role: element.getAttribute("role") || ROLES[tag] || "", text: clip(text, 200), selector: clip(selectorOf(element), 300),
       html: clip(element.outerHTML, 600) };
@@ -178,7 +213,8 @@ export const APP_POINT_SOURCE = `(function () {
   window.addEventListener("click", function (event) {
     if (!on) return;
     swallow(event);
-    var element = pickable(event.target) || current;
+    // A hovered part the page has since removed is not on screen any more, so it is not what the person picked.
+    var element = pickable(event.target) || (current && current.isConnected ? current : null);
     if (!element) return;
     post("${POINTED_METHOD}", describe(element));
     set(false);
