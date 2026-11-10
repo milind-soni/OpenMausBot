@@ -24,7 +24,7 @@ const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-dig
 
 /** The update command that fits how the server was installed, pinned to this app's version. */
 export function updateCommand(install: ServerInstall | null, version: string): string {
-  if (install === "docker") return "docker compose pull && docker compose up -d";
+  if (install === "docker") return "git pull && ./update.sh";
   if (install === "global") return `npm install -g openmausbot@${version}`;
   if (install === "source") return "git pull && pnpm install";
   return `npx openmausbot@${version} serve`;

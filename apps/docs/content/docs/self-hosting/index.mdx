@@ -8,7 +8,17 @@ MausBot is local-first by default: the harness listens on loopback, agent CLIs r
 
 If you only want to use a remote Docker desktop while MausBot and its agents stay on your current computer, follow [Your own VPS (BYO)](/docs/computers/byo-vps) instead.
 
-## Typical self-hosted setup
+## On a server, with one command
+
+On a fresh Ubuntu 22.04 or 24.04 server (x86-64) with a domain name pointing at it, the installer checks the server, installs MausBot with Docker under `/opt/openmausbot` and ends with HTTPS on your domain:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
+```
+
+Add `--check` to only check the server; it changes nothing. Run the command again to update or repair, and `--uninstall` to stop the server while keeping your data. [Deploy on a VPS](/docs/self-hosting/deploy-vps#quick-start-one-command-on-your-own-domain) lists every check, the files it writes and how the first admin signs in.
+
+## On your own computer, or by hand
 
 1. Run MausBot on your personal macOS, Windows, or Ubuntu computer.
 2. Install and authenticate the agent CLIs you want to use separately; the npm OpenMausBot package does not include them. Use the same operating-system account for setup and the running server.

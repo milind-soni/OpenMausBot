@@ -1,0 +1,50 @@
+name: Server update e2e
+
+# deploy/update.sh on a stock ubuntu-24.04 runner, as a server's owner runs it: two published server images, an update
+# to a stable record, a rollback on request, a new version that never answers and damages the data (rolled back, every
+# file as it was), and an update killed half-way (deploy/e2e/update.sh), on both install layouts. It talks to no
+# production service and publishes nothing.
+on:
+  pull_request:
+    paths:
+      - deploy/update.sh
+      - deploy/e2e/update.sh
+      - deploy/docker-compose.yml
+      - .github/workflows/server-update-e2e.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-update-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: update, roll back and recover (${{ matrix.layout }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        layout: [installer, checkout]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: shellcheck -S warning deploy/update.sh deploy/e2e/update.sh
+      - name: Update, roll back and recover
+        env:
+          LAYOUT: ${{ matrix.layout }}
+        run: sudo env LAYOUT="$LAYOUT" OUT="$RUNNER_TEMP/evidence" bash deploy/e2e/update.sh
+      - name: Keep what the script said
+        if: always()
+        run: sudo chmod -R a+rX "$RUNNER_TEMP/evidence" || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: server-update-e2e-${{ matrix.layout }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore

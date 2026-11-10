@@ -331,4 +331,23 @@ describe("container images", () => {
       expect(service.shm_size, file).toBe("512m");
     }
   });
+
+  // Caddy in the server's network (network_mode: service:omb) stayed in the old, dead one whenever the server's
+  // container restarted alone, and HTTPS was refused while both looked healthy. It reaches the server over sockets in
+  // a volume both mount instead, and the Caddyfile names the paths the server listens on.
+  it("runs Caddy in its own container, reaching the server's sockets, never in the server's network", () => {
+    for (const [file, caddyfile] of [["../compose.yaml", "../deploy/local/Caddyfile"], ["../deploy/docker-compose.yml", "../deploy/Caddyfile"]]) {
+      const { services, volumes } = parse(readFileSync(new URL(file, import.meta.url), "utf8"));
+      expect(services.caddy.network_mode, file).toBeUndefined();
+      expect(services.omb.ports, file).toBeUndefined();
+      expect(services.caddy.ports.length, file).toBeGreaterThan(0);
+      expect(services.omb.volumes, file).toContain("edge:/run/openmausbot");
+      expect(services.caddy.volumes, file).toContain("edge:/run/openmausbot");
+      expect(volumes.edge.driver_opts.type, file).toBe("tmpfs");
+      const { OMB_TUNNEL_SOCKET: api, OMB_WEBHOOK_SOCKET: hooks } = services.omb.environment;
+      expect([api, hooks], file).toEqual(["/run/openmausbot/http.sock", "/run/openmausbot/hooks.sock"]);
+      const proxied = [...readFileSync(new URL(caddyfile, import.meta.url), "utf8").matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]);
+      expect(proxied, caddyfile).toEqual([`unix/${hooks}`, `unix/${api}`]);
+    }
+  });
 });
