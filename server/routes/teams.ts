@@ -26,7 +26,7 @@ import {
 import { readPublishedLibrary, writePublishedLibrary, type DefaultsPreset } from "../presets.ts";
 import { scoutProject, suggestTeam } from "../project-scout.ts";
 import { readPublishedTeam, writePublishedTeam } from "../published-teams.ts";
-import type { RoutineManager } from "../routines.ts";
+import type { Routine, RoutineManager } from "../routines.ts";
 import { readSectionContext } from "../section-context.ts";
 import { sectionKey, type BotRecord, type GroupRecord, type Store } from "../store.ts";
 import { createTeamBackup, importTeamBackup } from "../team-backup.ts";
@@ -58,9 +58,16 @@ export interface TeamRouteDeps {
     | { ok: false; error: string; available: string[] };
   /** On a Team Cloud: false for someone else's private chat, which a team backup never carries. */
   threadShown?(auth: RequestAuth): (threadId: string) => boolean;
+  /** On a Team Cloud: false for a routine that lives in someone else's private chat, which no export carries. */
+  routineShown?(auth: RequestAuth): (routine: Routine) => boolean;
 }
 
 export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
+  const routinesFor = (auth: RequestAuth): Routine[] => {
+    const all = deps.routines()!.listRoutines();
+    const shown = deps.routineShown?.(auth);
+    return shown ? all.filter(shown) : all;
+  };
   const {
     store, cfg, broadcast, publicBot, publicGroupState, groupWithThread, defaultSelection, defaultsPresetFor,
     packageImportDeps, starterNotes, checkedExportSkillNames, collectExportSkills, collectTeamSkills,
@@ -125,7 +132,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
             authorName: profileName,
             bots: store.bots,
             groups: store.groups,
-            routines: routines!.listRoutines(),
+            routines: routinesFor(auth),
             brief: readSectionContext(team)?.text,
             published: readPublishedTeam(team),
             skillsByBot: skills.skillsByBot,
@@ -160,7 +167,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       if ((body.format === "backup" ? store.bots.length : memberIds.length) === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
       try {
         if (body.format === "backup") {
-          return json(res, 200, createTeamBackup(store, routines!.listRoutines(), name, deps.threadShown?.(auth)));
+          return json(res, 200, createTeamBackup(store, routinesFor(auth), name, deps.threadShown?.(auth)));
         }
         if (body.format === "package") {
           const selectedBots = store.bots.filter((bot) => !bot.hidden);
@@ -171,7 +178,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
             authorName: profileName,
             bots: selectedBots,
             groups: store.groups,
-            routines: routines!.listRoutines(),
+            routines: routinesFor(auth),
             skillsByBot: collectExportSkills(selectedBots, skillNames.names),
           });
           return json(res, 200, {

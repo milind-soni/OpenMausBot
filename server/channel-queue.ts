@@ -98,6 +98,15 @@ export function queuedChannelMessage(
   return entry.items.find((item) => item.sendId === sendId) ?? null;
 }
 
+/** The waiting line under that id, and the conversation it waits in. */
+export function channelQueueItem(groupId: string, queueId: string): { threadId: string; item: ChannelQueueItem } | null {
+  for (const [threadId, entry] of queues) {
+    const item = entry.groupId === groupId ? entry.items.find((candidate) => candidate.id === queueId) : undefined;
+    if (item) return { threadId, item };
+  }
+  return null;
+}
+
 export function cancelChannelMessage(groupId: string, queueId: string): boolean {
   for (const [threadId, entry] of queues) {
     if (entry.groupId !== groupId) continue;

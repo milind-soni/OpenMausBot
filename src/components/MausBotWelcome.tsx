@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
+import { teamWelcomeShownThisLaunch } from "@/lib/team-welcome";
 import { createPortal } from "react-dom";
 import { BookOpen, Crown, Pencil, Sparkles, Wand2 } from "lucide-react";
 
@@ -44,6 +45,10 @@ export function mausBotWelcomeDue(input: { bot: Pick<Bot, "welcomed" | "hidden">
   return Boolean(input.bot && !input.bot.welcomed && !input.bot.hidden && !input.onboardingDue && !input.welcomeOpen && !input.tourOpen);
 }
 
+/** On a team the team's welcome introduced things, and a run under way is never interrupted by the card. */
+export const teamQuiet = (state: { config?: { team?: unknown } | null; bots: ReadonlyArray<{ busy?: boolean }> }): boolean =>
+  Boolean(state.config?.team) && (teamWelcomeShownThisLaunch() || state.bots.some((candidate) => candidate.busy));
+
 /** MausBot's first-launch card is due now (mausBotWelcomeDue), and, like the Cloud Pro popup and the product-updates
  * question, waits for the first reply (unknown until the bots load), for a launch after the one whose welcome finished, and
  * for a launch the notices queue has not already used. The notices queue asks this too, so the card goes first. */
@@ -57,7 +62,7 @@ export function useMausBotWelcomeDue(viewer: WelcomeViewer | null): { bot: Bot |
     hosted: viewer.hosted, canSave: viewer.canSave, cloudHome: viewer.cloudHome,
   });
   const due = Boolean(state.config) && mausBotWelcomeDue({ bot, onboardingDue, welcomeOpen: state.welcomeOpen, tourOpen: touring })
-    && firstReplyPending(state) === false && !welcomeFinishedThisLaunch() && launchDialogShown() !== "notices";
+    && firstReplyPending(state) === false && !welcomeFinishedThisLaunch() && launchDialogShown() !== "notices" && !teamQuiet(state);
   return { bot, due };
 }
 
