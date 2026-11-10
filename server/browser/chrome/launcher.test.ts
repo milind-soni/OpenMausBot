@@ -77,6 +77,28 @@ describe("the Chrome launcher", () => {
     expect(calibrate).toHaveBeenCalledOnce();
   });
 
+  it("refreshes the launcher language if the app language changes while its check is pending", async () => {
+    const machine = mac({ env: { LANG: "en_US.UTF-8" } });
+    let appLanguage = "en";
+    let beginCheck!: () => void;
+    let finishCheck!: () => void;
+    const checking = new Promise<void>((resolve) => { beginCheck = resolve; });
+    const check = new Promise<void>((resolve) => { finishCheck = resolve; });
+    const chrome = launcher(machine, {
+      language: () => appLanguage,
+      checkLauncher: async () => { beginCheck(); await check; },
+    });
+
+    const ready = chrome.ready(headless(chrome.path));
+    await checking;
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=en'");
+    appLanguage = "ko";
+    finishCheck();
+    await ready;
+
+    expect(readFileSync(chrome.path, "utf8")).toContain("'--lang=ko-KR'");
+  });
+
   it("reads the identity again after Chrome updated itself in place", async () => {
     const machine = mac();
     const calibrate = vi.fn(async () => identity("155"));

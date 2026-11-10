@@ -177,6 +177,7 @@ export class ChromeLauncher implements BrowserLaunch {
     if (!previous) this.state = { kind: "preparing" };
     this.preparing = this.prepareFor(plan).then((ready) => {
       this.state = ready;
+      this.followLanguage();
       this.log(`browser: ${this.describe()}`);
     }, (error: unknown) => {
       // A launcher that already works is kept as it is: switching browsers under a running session would lose its pages.
