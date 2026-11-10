@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { t } from "@/lib/i18n";
 import { Loader2, ShieldCheck } from "lucide-react";
 import type { CompanionAccountState } from "../types/ogb";
@@ -229,8 +230,31 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
     setStep("pairing");
     c.useLocal();
   };
-  return (
-    <div role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
+  const close = step === "consent" ? onClose : () => { c.cancel(); onClose(); };
+  const root = useRef<HTMLDivElement>(null);
+  // Out of Settings' tree, Settings no longer steps aside for this dialog: take Escape and Tab first, so Escape closes
+  // only this dialog and Tab cycles through its controls instead of Settings'.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const box = root.current;
+      if (!box || event.defaultPrevented || event.isComposing || (event.key !== "Escape" && event.key !== "Tab")) return;
+      event.preventDefault();
+      if (event.key === "Escape") { close(); return; }
+      const controls = [...box.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )].filter((control) => control.getClientRects().length);
+      if (!controls.length) return;
+      const at = controls.indexOf(document.activeElement as HTMLElement);
+      const next = at < 0 ? (event.shiftKey ? -1 : 0) : at + (event.shiftKey ? -1 : 1);
+      controls.at(next % controls.length)!.focus();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [close]);
+  // Portalled to the body: inside Settings, the glass pane's backdrop-filter makes it the box `fixed` is measured
+  // against, so the dialog was squeezed into that pane, see-through, and the QR was cut off when it scrolled.
+  const dialog = (
+    <div ref={root} role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step}>
       <div className="flex max-h-full w-full max-w-[460px] flex-col gap-4 overflow-y-auto rounded-2xl bg-card p-5 shadow-xl">
         <div className="text-[15px] font-semibold text-ink">{step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}</div>
@@ -251,7 +275,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
               {chosen.length === 0 && <div role="alert" className="text-[12px] text-danger">{t("devices.pair.pickOne")}</div>}
             </div>
             <div className="flex justify-end gap-2">
-              <button type="button" className={button} onClick={onClose}>{t("common.cancel")}</button>
+              <button type="button" className={button} onClick={close}>{t("common.cancel")}</button>
               <button type="button" disabled={chosen.length === 0 || c.busy} onClick={() => void begin()}
                 className="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40">{t("devices.route.turnOn")}</button>
             </div>
@@ -261,13 +285,14 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
             <PhoneSetupFlowView controller={c} />
             <div className="text-[12px] leading-relaxed text-ink-secondary">{reachLine(state)}</div>
             <div className="flex justify-end">
-              <button type="button" className={button} onClick={() => { c.cancel(); onClose(); }}>{t("devices.pair.done")}</button>
+              <button type="button" className={button} onClick={close}>{t("devices.pair.done")}</button>
             </div>
           </>
         )}
       </div>
     </div>
   );
+  return typeof document === "undefined" ? dialog : createPortal(dialog, document.body);
 }
 
 /** A pairing code still open: anyone holding it can pair until it runs out, so it can be revoked here. */
