@@ -3938,6 +3938,8 @@
   "usage.history.owner": "Este computador",
   "usage.history.botToBot": "Entre bots",
   "usage.history.routine": "Rotina: {name}",
+  "usage.history.privateRoutine": "Rotina privada",
+  "usage.history.privateBot": "Bot privado",
   "usage.budget.title": "Limite mensal de gastos",
   "usage.budget.subtitle": "Quando o custo do mês chega ao limite, nenhum bot desta instalação inicia uma sessão até um admin aumentar o limite. A cada mês, os admins recebem um aviso quando o custo atinge o nível de alerta e outro quando chega ao limite.",
   "usage.budget.none": "Nenhum limite definido. Os bots gastam livremente.",
