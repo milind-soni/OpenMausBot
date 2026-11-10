@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { SkillsLibrarySkillWire } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
 import { setImportedSkillEnabled } from "../imported-skills.ts";
+import { setNativeSkillEnabled } from "../native-skill-choices.ts";
 import { botSkillTemplateSchema } from "../new-bot-defaults.ts";
 import { fetchSkillFromSource } from "../skill-fetch.ts";
 import { skillImportSummary } from "../skill-folder.ts";
@@ -94,6 +95,13 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
         const result = setImportedSkillEnabled(bot.id, m[2]!, parsed.data.enabled);
         if ("error" in result) return json(res, 409, { error: result.error });
         return json(res, 200, { skill: result });
+      }
+      if (bot && listBotSkills(bot).some((skill) => skill.name === m![2] && (skill as { origin?: string }).origin === "native")) {
+        const result = setNativeSkillEnabled(bot.id, m[2]!, parsed.data.enabled);
+        if ("error" in result) return json(res, 409, { error: result.error });
+        const skill = listBotSkills(bot).find((entry) => entry.name === m![2]);
+        if (!skill) return json(res, 404, { error: "no such skill" });
+        return json(res, 200, { skill });
       }
       const result = setSkillEnabled(m[1]!, m[2]!, parsed.data.enabled);
       if ("error" in result) return json(res, 404, { error: result.error });
