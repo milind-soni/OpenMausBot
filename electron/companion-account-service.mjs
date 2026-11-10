@@ -32,6 +32,10 @@ export const COMPANION_ENDPOINT_RELEASE_PENDING_FIELD = "companionEndpointReleas
 export const COMPANION_ENDPOINT_PAUSED_FIELD = "companionEndpointPaused";
 /** The control plane ended this computer's secure address for old phone apps: phones connect through the relay only. */
 export const COMPANION_TUNNEL_RETIRED_FIELD = "companionTunnelRetired";
+/** The control plane holds no address for this computer although an old phone would use one (ended for old phone
+ * apps, or every account full): the watchdog keeps asking, so the address returns when the relay is switched off
+ * or room frees up. */
+export const COMPANION_TUNNEL_WAITING_FIELD = "companionTunnelWaiting";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INSTALLATION_ID = UUID;
@@ -121,6 +125,7 @@ function withoutCompanionAccount(credentials) {
     COMPANION_ENDPOINT_RELEASE_PENDING_FIELD,
     COMPANION_ENDPOINT_PAUSED_FIELD,
     COMPANION_TUNNEL_RETIRED_FIELD,
+    COMPANION_TUNNEL_WAITING_FIELD,
   ]) {
     delete next[field];
   }
@@ -153,6 +158,7 @@ function withProvisionedAccount(credentials, { accountToken, user, installation,
   delete next[COMPANION_ENDPOINT_RELEASE_PENDING_FIELD];
   delete next[COMPANION_ENDPOINT_PAUSED_FIELD];
   delete next[COMPANION_TUNNEL_RETIRED_FIELD];
+  delete next[COMPANION_TUNNEL_WAITING_FIELD];
   return next;
 }
 
@@ -543,6 +549,9 @@ export function createCompanionAccountService({
         const next = { ...document };
         if (relayOnly === "retired") next[COMPANION_TUNNEL_RETIRED_FIELD] = true;
         else delete next[COMPANION_TUNNEL_RETIRED_FIELD];
+        // With the address forgotten nothing else would ask again: this keeps the watchdog asking.
+        if (relayOnly === "retired" || relayOnly === "full") next[COMPANION_TUNNEL_WAITING_FIELD] = true;
+        else delete next[COMPANION_TUNNEL_WAITING_FIELD];
         return next;
       });
       return withoutTunnel();
@@ -840,7 +849,10 @@ export function createCompanionAccountService({
     const document = credentials();
     if (!storedAccount(document) || companionAccountCleanupPending(document)) return null;
     if (!managedCompanionTunnelAccess(document)) {
-      if (!savedAddress(document) || autoRetryTimer !== null) return null;
+      // Waiting: the control plane ended the address or had no room. Asked again on every watchdog tick while an
+      // old phone still needs it, as a desktop that kept its address does.
+      const waiting = document[COMPANION_TUNNEL_WAITING_FIELD] === true;
+      if ((!savedAddress(document) && !waiting) || autoRetryTimer !== null) return null;
       return (await currentNeed()) === true ? retryWork() : null;
     }
     const need = await currentNeed();

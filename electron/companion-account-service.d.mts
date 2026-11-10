@@ -13,6 +13,7 @@ export declare const COMPANION_INSTALLATION_EXPIRY_FIELD: string;
 export declare const COMPANION_ACCOUNT_CLEANUP_PENDING_FIELD: string;
 export declare const COMPANION_ENDPOINT_PAUSED_FIELD: string;
 export declare const COMPANION_TUNNEL_RETIRED_FIELD: string;
+export declare const COMPANION_TUNNEL_WAITING_FIELD: string;
 export declare const PHONE_UNUSED_RELEASE_MS: number;
 
 export type CredentialDocument = Record<string, unknown>;

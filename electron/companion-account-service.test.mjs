@@ -9,6 +9,7 @@ import {
   COMPANION_CLIENT_INSTANCE_FIELD,
   COMPANION_ENDPOINT_PAUSED_FIELD,
   COMPANION_TUNNEL_RETIRED_FIELD,
+  COMPANION_TUNNEL_WAITING_FIELD,
   COMPANION_ENDPOINT_RELEASE_PENDING_FIELD,
   COMPANION_INSTALLATION_CREDENTIAL_FIELD,
   COMPANION_INSTALLATION_EXPIRY_FIELD,
@@ -1442,28 +1443,75 @@ describe("Companion account on demand", () => {
     expect(client.ensureEndpoint).toHaveBeenCalledWith(expect.any(String), { appVersion: "1.2.3", legacyDevices: 1 });
     expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com", tunnelRetired: true });
     expect(f.store.read()[COMPANION_TUNNEL_RETIRED_FIELD]).toBe(true);
+    expect(f.store.read()[COMPANION_TUNNEL_WAITING_FIELD]).toBe(true);
     expect(f.store.read()).not.toHaveProperty(MANAGED_COMPANION_ENDPOINT_FIELD);
     expect(f.stopManagedEndpoint).toHaveBeenCalled();
-
-    // The relay fails later and the control plane hands the address back: the notice goes with it.
-    client.ensureEndpoint.mockImplementation(async () => ({ endpoint: { url: ENDPOINT }, connectorToken: CONNECTOR_TOKEN }));
-    const back = await f.service.retry();
-    expect(back).not.toHaveProperty("tunnelRetired");
-    expect(f.store.read()).not.toHaveProperty(COMPANION_TUNNEL_RETIRED_FIELD);
     f.service.dispose();
   });
 
-  it("carries on over the relay with no notice when the accounts are full or no old phone is paired", async () => {
-    for (const tunnel of ["full", null]) {
+  it("keeps asking on the watchdog after the address ended or the accounts were full, so a relay outage hands it back", async () => {
+    for (const tunnel of ["retired", "full"]) {
       const refused = new ControlPlaneError("relay_capable", 409, "", 0, tunnel);
       const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(refused)) });
       const f = onDemandFixture({ client, relay: { capable: () => true, legacyDevices: async () => 1 } });
       f.companion.need = true;
-      await expect(f.service.retry()).resolves.toEqual({ available: true, status: "ready", email: "ada@example.com" });
+      await f.service.restore();
+      await f.service.retry();
+      expect(client.ensureEndpoint).toHaveBeenCalledTimes(1);
+      expect(f.store.read()[COMPANION_TUNNEL_WAITING_FIELD]).toBe(true);
       expect(f.store.read()).not.toHaveProperty(MANAGED_COMPANION_ENDPOINT_FIELD);
+
+      // Nobody opens Phone & devices: each watchdog tick asks again, and after the hour a manual Retry counts for.
+      for (let tick = 2; tick <= 5; tick += 1) {
+        f.clock.now += HOUR_MS;
+        await f.watchdog();
+        expect(client.ensureEndpoint, `${tunnel} tick ${tick}`).toHaveBeenCalledTimes(tick);
+      }
+      expect(await f.service.state()).toEqual({
+        available: true, status: "ready", email: "ada@example.com", ...(tunnel === "retired" ? { tunnelRetired: true } : {}),
+      });
+
+      // The relay is switched off (or room frees up): the next tick gets the address back and the notice goes.
+      client.ensureEndpoint.mockImplementation(async () => ({ endpoint: { url: ENDPOINT }, connectorToken: CONNECTOR_TOKEN }));
+      f.clock.now += HOUR_MS;
+      await f.watchdog();
+      expect(f.store.read()[MANAGED_COMPANION_ENDPOINT_FIELD]).toBe(ENDPOINT);
       expect(f.store.read()).not.toHaveProperty(COMPANION_TUNNEL_RETIRED_FIELD);
+      expect(f.store.read()).not.toHaveProperty(COMPANION_TUNNEL_WAITING_FIELD);
+      expect(await f.service.state()).not.toHaveProperty("tunnelRetired");
       f.service.dispose();
     }
+  });
+
+  it("stops asking once no old phone needs an address, and after a plain relay_capable", async () => {
+    const refused = new ControlPlaneError("relay_capable", 409, "", 0, "retired");
+    const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(refused)) });
+    const f = onDemandFixture({ client, relay: { capable: () => true, legacyDevices: async () => 1 } });
+    f.companion.need = true;
+    await f.service.restore();
+    await f.service.retry();
+    // The old phone was paired again on the encrypted connection: nothing needs the address.
+    f.companion.need = false;
+    for (let tick = 0; tick < 3; tick += 1) {
+      f.clock.now += HOUR_MS;
+      await f.watchdog();
+    }
+    expect(client.ensureEndpoint).toHaveBeenCalledTimes(1);
+    f.service.dispose();
+
+    const plain = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(new ControlPlaneError("relay_capable", 409))) });
+    const g = onDemandFixture({ client: plain, relay: { capable: () => true, legacyDevices: async () => 1 } });
+    g.companion.need = true;
+    await g.service.restore();
+    await expect(g.service.retry()).resolves.toEqual({ available: true, status: "ready", email: "ada@example.com" });
+    expect(g.store.read()).not.toHaveProperty(COMPANION_TUNNEL_WAITING_FIELD);
+    expect(g.store.read()).not.toHaveProperty(COMPANION_TUNNEL_RETIRED_FIELD);
+    for (let tick = 0; tick < 3; tick += 1) {
+      g.clock.now += HOUR_MS;
+      await g.watchdog();
+    }
+    expect(plain.ensureEndpoint).toHaveBeenCalledTimes(1);
+    g.service.dispose();
   });
 
   it("tells a desktop below the minimum version to update", async () => {
