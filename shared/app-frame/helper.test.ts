@@ -32,10 +32,17 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
   const loads = new Set<() => void>();
   const observers = new Set<() => void>();
   let bridge: AppBridge;
+  // Every hop between the page and its host is a task of this fake frame's, counted until it has run, so a test can wait
+  // for the frame to go quiet instead of for a time: a timer's wait is about 16 ms on Windows, and a report takes three.
+  let pending = 0;
+  const task = (run: () => void) => {
+    pending += 1;
+    setTimeout(() => { try { run(); } finally { pending -= 1; } }, 0);
+  };
   const parent = {
     postMessage(data: unknown) {
       const copy = structuredClone(data);
-      setTimeout(() => bridge.handleMessage({ source: frame, data: copy }), 0);
+      task(() => bridge.handleMessage({ source: frame, data: copy }));
     },
   };
   const positions = new Map<unknown, string>();
@@ -49,7 +56,7 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
     },
     postMessage(data: unknown) {
       const copy = structuredClone(data);
-      setTimeout(() => { for (const listener of listeners) listener({ source: parent, data: copy }); }, 0);
+      task(() => { for (const listener of listeners) listener({ source: parent, data: copy }); });
     },
     getComputedStyle: (element: unknown) => ({ position: positions.get(element) ?? "static" }),
   };
@@ -90,7 +97,7 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
       resize: (height) => {
         seen.heights.push(height);
         frame.innerHeight = height;
-        for (const observed of observers) setTimeout(observed, 0);
+        for (const observed of observers) task(observed);
       },
       engaged: () => engaged,
       teardownRequested: () => {},
@@ -103,11 +110,18 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
   }
   // The helper's free names, bound to this fake frame: it runs exactly as written.
   const run = new Function("window", "document", "ResizeObserver", "requestAnimationFrame", room ? APP_ROOM_HELPER_SOURCE : APP_HELPER_SOURCE);
-  run(frame, document, scene ? FakeResizeObserver : undefined, (callback: () => void) => setTimeout(callback, 0));
+  run(frame, document, scene ? FakeResizeObserver : undefined, (callback: () => void) => task(callback));
   return {
     bridge, seen, frame, root,
     load: () => { options.loaded = true; for (const listener of loads) listener(); },
-    reflow: () => { for (const observed of observers) setTimeout(observed, 0); },
+    reflow: () => { for (const observed of observers) task(observed); },
+    /** Resolves once no task of the frame's is waiting to run: what a reflow started has reached the host, or come to nothing. */
+    quiet: async () => {
+      for (const deadline = Date.now() + 5_000; pending > 0;) {
+        if (Date.now() > deadline) throw new Error(`the frame still had ${pending} task(s) waiting after 5 s`);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    },
     mausbot: () => frame.mausbot as {
       send(text: string): Promise<void>; open(url: string): Promise<void>; setContext(text: string): Promise<void>; theme: string; room: boolean;
     },
@@ -117,8 +131,8 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
 const macrotask = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** Heights once a reflow has been reported. The helper queues the measure, its postMessage and the resize's
- * next report as timers, each from the timer before it. One delay can expire first when a timer slot is coarse,
- * and the height is then missing. */
+ * next report as timers, each from the timer before it. Drain those turns, then wait until the frame has no task
+ * left: one delay can expire first when a timer slot is coarse, and the height is then missing. */
 async function settled(page: ReturnType<typeof boot>) {
   await expect.poll(() => page.seen.heights.length).toBeGreaterThan(0);
   let count = -1;
@@ -126,6 +140,7 @@ async function settled(page: ReturnType<typeof boot>) {
     count = page.seen.heights.length;
     page.reflow();
     for (let step = 0; step < 6; step++) await macrotask();
+    await page.quiet();
   }
   return page.seen.heights;
 }

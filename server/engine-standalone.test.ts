@@ -357,8 +357,12 @@ describe.skipIf(process.platform === "win32")("installing a standalone engine", 
 
   it("lets a slow download finish while bytes keep arriving", async () => {
     const release = await served("raw");
-    server.routes.set("assets.example.test/blob/fake", { body: Buffer.from(script()), trickle: { bytes: 16, everyMs: 120 } });
-    await expect(install(release, { stallMs: 400 })).resolves.toMatchObject({ version: VERSION });
+    // Pieces 60 ms apart against a 1 s stall limit: a busy runner once held one 120 ms piece past a 400 ms limit.
+    server.routes.set("assets.example.test/blob/fake", { body: Buffer.from(script()), trickle: { bytes: 8, everyMs: 60 } });
+    const started = performance.now();
+    await expect(install(release, { stallMs: 1_000 })).resolves.toMatchObject({ version: VERSION });
+    // The whole download outlasted the limit, so it is the arriving bytes that kept it alive.
+    expect(performance.now() - started).toBeGreaterThan(1_000);
   });
 
   it("refuses a redirect to a host it does not trust, without contacting that host", async () => {

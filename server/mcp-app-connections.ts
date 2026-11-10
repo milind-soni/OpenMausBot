@@ -51,7 +51,7 @@ class StdioAppClient implements AppClient {
     this.child = spawnCli(server.command, server.args, {
       ...(botBox.enabled() ? (as.cwd ? { cwd: as.cwd } : {}) : { cwd: process.cwd() }),
       env: probeEnvironment(server), stdio: ["pipe", "pipe", "pipe"],
-      box: { ...(as.id ? { botId: as.id } : {}), allowEnv: Object.keys(server.env) },
+      box: { ...(as.id ? { botId: as.id } : {}), allowEnv: Object.keys(server.env), configured: true },
     });
     const splitter = createLineSplitter((line) => this.onLine(line, hooks));
     this.child.stdout.on("data", (chunk: Buffer) => {
