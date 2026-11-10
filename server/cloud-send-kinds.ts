@@ -266,7 +266,7 @@ const librarySkillSchema = z.object({ text: z.string().max(512 * 1024), entry: z
 
 /** My Cloud sets a bot's move-only fields as they are on this computer: absent ones it clears, its own projects it keeps
  * beside the ones that arrive, and an engine, team or library skill it lacks it leaves out. */
-function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown, computer?: string): void {
+function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown, source: ArrivingSource = {}): void {
   const bot = deps.store.bot(id) ?? refuse(409, "This bot is not on My Cloud yet.");
   const parsed = botFieldsSchema.safeParse(raw);
   if (!parsed.success) refuse(400, "send the bot's fields as this computer holds them");
@@ -293,12 +293,13 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown, computer?
   if (Object.hasOwn(fields, "chiefOfStaff") && fields.chiefOfStaff !== true) patch.chiefOfStaff = fields.chiefOfStaff ?? undefined;
   if (fields.chiefOfStaff === true) delete patch.hidden;
   deps.store.patchBot(id, patch);
-  // A MausBot arriving where the person's own MausBot stays (takeArrivingDefaultBot) doesn't take that one's crown.
-  if (fields.chiefOfStaff === true && !(fields.defaultBot && keptDefaultBot(deps.store, id)?.chiefOfStaff)) {
+  // A MausBot arriving where the person's own MausBot stays (takeArrivingDefaultBot) doesn't take that one's crown, also
+  // when a later pass sends its Chief fields without its MausBot mark (`source.defaultBot`).
+  if (fields.chiefOfStaff === true && !((fields.defaultBot || source.defaultBot) && keptDefaultBot(deps.store, id)?.chiefOfStaff)) {
     deps.store.setChiefOfStaff(id);
     if (patch.managedSections) deps.store.patchBot(id, { managedSections: patch.managedSections });
   }
-  if (fields.defaultBot) takeArrivingDefaultBot(deps.store, id, computer);
+  if (fields.defaultBot) takeArrivingDefaultBot(deps.store, id, source.computer);
   retireUnusedStarter(deps.store, deps.dataDir);
 }
 
@@ -328,10 +329,10 @@ function adoptRoutine(deps: MoveKindsDeps, raw: unknown, runs: unknown, from: st
   deps.arrived?.();
 }
 
-async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, runs: unknown, from: string, owner: CloudOwner, computer?: string): Promise<void> {
+async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, runs: unknown, from: string, owner: CloudOwner, source: ArrivingSource = {}): Promise<void> {
   if (!record(raw) && kind !== "bot") refuse(400, "send the item's record");
   const same = (value: unknown) => record(value) && (value.id === undefined || value.id === id);
-  if (kind === "bot") return applyBotFields(deps, id, raw, computer);
+  if (kind === "bot") return applyBotFields(deps, id, raw, source);
   if (kind === "routine") return adoptRoutine(deps, raw, runs, from, owner);
   if (!same(raw) && kind !== "imported-skill" && kind !== "library-skill") refuse(400, "the record names another item");
   if (kind === "call") {
@@ -379,7 +380,10 @@ async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, 
 }
 
 const putSchema = z.object({ v: z.literal(1), key: z.string().max(200), dataDir: z.string().min(1).max(4096), record: z.unknown(), runs: z.array(z.unknown()).max(2_000).optional(),
-  computer: z.string().max(120).optional() });
+  computer: z.string().max(120).optional(), sourceDefault: z.boolean().optional() });
+
+/** What the computer a bot comes from says of it: its name, and whether the bot is the MausBot there. */
+type ArrivingSource = { computer?: string; defaultBot?: boolean };
 
 /** This computer's name as a person knows it, which a MausBot that moves away is named for when the place it goes keeps its own. */
 function thisComputerName(): string {
@@ -404,7 +408,7 @@ export async function moveKindsRoute(deps: MoveKindsDeps, { req, res, path, meth
       const body = putSchema.safeParse(await readBody(req, KIND_BODY_MAX));
       const key = body.success ? parseKey(body.data.key) : null;
       if (!body.success || !key) { json(res, 400, { error: "send { v: 1, key, dataDir, record }" }); return true; }
-      await adopt(deps, key.kind, key.id, body.data.record, body.data.runs, body.data.dataDir, owner, body.data.computer);
+      await adopt(deps, key.kind, key.id, body.data.record, body.data.runs, body.data.dataDir, owner, { computer: body.data.computer, defaultBot: body.data.sourceDefault });
       json(res, 200, { v: 1, ok: true });
       return true;
     }
