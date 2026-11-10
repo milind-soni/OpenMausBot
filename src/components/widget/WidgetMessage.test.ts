@@ -583,6 +583,83 @@ describe("pressing", () => {
     ]);
   });
 
+  it("asks the server for a brief routine's conversation this device cannot resolve, and opens the answer", async () => {
+    fetchMock.mockImplementation(async () => reply(202, { ok: true, threadId: "t1", openThread: { botId: "other", threadId: "t-routine" } }));
+    const dispatch = vi.fn();
+    const withStranger = { ...store, dispatch, state: { selectedId: "scout", bots: [{ id: "other", name: "Other", threadId: "t-other", tasks: [{ threadId: "t-routine" }] }], groups: [], config: { features: {}, browserEngine: { kind: "engine" } } } } as unknown as ReturnType<typeof useStore>;
+    const parsed = parseWidgetInput({
+      type: "Card", title: "Your brief",
+      children: [
+        { type: "Title", value: "Routines" },
+        { type: "Row", gap: 3, align: "center", children: [
+          { type: "Col", flex: 1, children: [{ type: "Text", value: "Standup", weight: "medium" }] },
+          { type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: "scout", threadId: "t-routine" } } },
+        ] },
+      ],
+    });
+    if (!parsed.ok) throw new Error(parsed.error);
+    act(() => root.render(createElement(BotEditorStore, { value: withStranger, children: createElement(WidgetMessage, { botId: "scout", threadId: "t1", message: row(parsed.value) }) })));
+    await press(button("Open")!);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const open = widgetActions(parsed.value).find((entry) => entry.label === "Open")!;
+    expect(posted().body.widgetAction).toEqual({ messageId: "w1", ref: open.ref, rev: 0, values: {} });
+    expect(dispatch.mock.calls).toEqual([
+      [{ type: "switchTask", botId: "other", threadId: "t-routine" }],
+      [{ type: "revealThread", threadId: "t-routine" }],
+    ]);
+    expect(find('[data-widget="w1"]')!.getAttribute("data-widget-state")).toBe("live");
+  });
+
+  it("opens a room's conversation from the server's answer when this device cannot resolve it", async () => {
+    fetchMock.mockImplementation(async () => reply(202, { ok: true, threadId: "t1", openThread: { groupId: "g1", threadId: "t-room" } }));
+    const dispatch = vi.fn();
+    const withRoom = { ...store, dispatch, state: { selectedId: "scout", bots: [{ id: "scout", name: "Scout", threadId: "t-scout", tasks: [{ threadId: "t-room" }] }], groups: [{ id: "g1", name: "Room", threadId: "t-other", tasks: [{ threadId: "t-room" }] }], config: { features: {}, browserEngine: { kind: "engine" } } } } as unknown as ReturnType<typeof useStore>;
+    const parsed = parseWidgetInput({
+      type: "Card", title: "Your brief",
+      children: [
+        { type: "Title", value: "Routines" },
+        { type: "Row", gap: 3, align: "center", children: [
+          { type: "Col", flex: 1, children: [{ type: "Text", value: "Standup", weight: "medium" }] },
+          { type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { groupId: "g1", threadId: "t-room" } } },
+        ] },
+      ],
+    });
+    if (!parsed.ok) throw new Error(parsed.error);
+    act(() => root.render(createElement(BotEditorStore, { value: withRoom, children: createElement(WidgetMessage, { botId: "scout", threadId: "t1", message: row(parsed.value) }) })));
+    await press(button("Open")!);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(dispatch.mock.calls).toEqual([
+      [{ type: "select", id: "g1" }],
+      [{ type: "switchGroupTask", groupId: "g1", threadId: "t-room" }],
+      [{ type: "revealThread", threadId: "t-room" }],
+    ]);
+  });
+
+  it("shows the server's sentence when the routine's conversation is gone, and stays live", async () => {
+    fetchMock.mockImplementation(async () => reply(404, { error: "That conversation is no longer here." }));
+    const dispatch = vi.fn();
+    const withStranger = { ...store, dispatch, state: { selectedId: "scout", bots: [{ id: "other", name: "Other", threadId: "t-other", tasks: [{ threadId: "t-routine" }] }], groups: [], config: { features: {}, browserEngine: { kind: "engine" } } } } as unknown as ReturnType<typeof useStore>;
+    const parsed = parseWidgetInput({
+      type: "Card", title: "Your brief",
+      children: [
+        { type: "Title", value: "Routines" },
+        { type: "Row", gap: 3, align: "center", children: [
+          { type: "Col", flex: 1, children: [{ type: "Text", value: "Standup", weight: "medium" }] },
+          { type: "Button", label: "Open", onClickAction: { type: "open_thread", payload: { botId: "scout", threadId: "t-routine" } } },
+        ] },
+      ],
+    });
+    if (!parsed.ok) throw new Error(parsed.error);
+    act(() => root.render(createElement(BotEditorStore, { value: withStranger, children: createElement(WidgetMessage, { botId: "scout", threadId: "t1", message: row(parsed.value) }) })));
+    await press(button("Open")!);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(dispatch).not.toHaveBeenCalled();
+    const alert = find('[data-widget="w1"] [role="alert"]')!;
+    expect(alert.textContent).toBe("That conversation is no longer here.");
+    expect(find('[data-widget="w1"]')!.getAttribute("data-widget-state")).toBe("live");
+    expect(button("Open")!.disabled).toBe(false);
+  });
+
   it("shows the server's sentence in the card when a press is refused, and stays live", async () => {
     fetchMock.mockImplementation(async () => reply(409, { error: "This was already answered." }));
     mount(row(sample("routineForm")));
