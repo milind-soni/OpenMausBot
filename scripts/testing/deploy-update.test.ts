@@ -13,6 +13,9 @@ const id = (letter: string) => `sha256:${letter.repeat(64)}`;
 const OLD = { id: id("a"), refs: [`${REPO}:latest`, `${REPO}@${id("1")}`], version: "0.1.150", local: true, engine: true };
 const NEW = { id: id("b"), refs: [`${REPO}@${id("2")}`, `${REPO}:v0.1.151`], version: "0.1.151", local: false, engine: true };
 const ENV = "DOMAIN=maus.example.test\nOMB_SIGNIN_EMAILS=owner@example.test\n";
+/** .env after a rollback: as it was, with the version that ran before pinned by its digest, so a tag that moved since
+ * (the installer's `stable`) cannot bring the undone version back on a later run of the installer. */
+const ROLLED_BACK = `${ENV}OMB_IMAGE=${OLD.refs[1]}\n`;
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -70,7 +73,7 @@ function install(target: Record<string, unknown> = {}, extra: Record<string, unk
         // sbin: sha256sum is /sbin/sha256sum on macOS.
         PATH: `${join(root, "bin")}:/usr/bin:/bin:/usr/sbin:/sbin`, HOME: root, FAKE_DOCKER_DIR: fake,
         OMB_STABLE_URL: `file://${join(root, "stable.json")}`, OMB_NEWEST_URL: `file://${join(root, "newest.json")}`,
-        OMB_UPDATE_POLL_S: "0", OMB_UPDATE_WAIT_S: "120", ...wait, ...options.env,
+        OMB_UPDATE_POLL_S: "0", OMB_UPDATE_WAIT_S: "120", OMB_UPDATE_ENGINE_WAIT_S: "1", ...wait, ...options.env,
       },
     });
     return { ...result, said: result.stdout.trim().split("\n") };
@@ -153,7 +156,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
       "Putting back the version and the data from before the update…",
       "Your server runs 0.1.150 again, with its data as it was before the update.",
     ]);
-    expect(box.env()).toBe(ENV);
+    expect(box.env()).toBe(ROLLED_BACK);
     expect(tree(box.data)).toEqual({ ...before, "started-by.txt": "0.1.150\n0.1.150\n" });
     expect(box.state().containers.omb).toMatchObject({ image: OLD.id, status: "running" });
     expect(box.state().containers.caddy.status).toBe("running");
@@ -179,7 +182,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(failed.status, failed.stdout).toBe(1);
     expect(failed.stdout).toContain(`The update to 0.1.151 did not work: ${why}.`);
     expect(box.state().containers.omb.image).toBe(OLD.id);
-    expect(box.env()).toBe(ENV);
+    expect(box.env()).toBe(ROLLED_BACK);
   });
 
   it("does not hold a missing engine against the new version when none worked before", () => {
@@ -273,13 +276,13 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
       "Your server runs 0.1.150 again, with its data as it was before the update.",
     ]);
     expect(repaired.status).toBe(1);
-    expect(box.env()).toBe(ENV);
+    expect(box.env()).toBe(ROLLED_BACK);
     expect(tree(box.data)).toEqual({ ...before, "started-by.txt": "0.1.150\n0.1.150\n" });
     expect(box.state().containers.omb.image).toBe(OLD.id);
   });
 
   it("keeps a new version that turned out healthy when the update was killed while waiting for it", () => {
-    const box = install({}, { signalOn: { match: "/api/health", signal: "SIGKILL" } });
+    const box = install({}, { signalOn: { match: "/api/health\"", signal: "SIGKILL" } });
     expect(box.run().signal).toBe("SIGKILL");
     const next = box.run();
     expect(next.status).toBe(0);
@@ -297,12 +300,12 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(copying.env()).toBe(ENV);
     expect(copying.journal()).toBe(false);
 
-    const waiting = install({}, { signalOn: { match: "/api/health", signal: "SIGTERM" } });
+    const waiting = install({}, { signalOn: { match: "/api/health\"", signal: "SIGTERM" } });
     const before = tree(waiting.data);
     const back = waiting.run();
     expect(back.status).toBe(1);
     expect(back.said.at(-1)).toBe("Your server runs 0.1.150 again, with its data as it was before the update.");
-    expect(waiting.env()).toBe(ENV);
+    expect(waiting.env()).toBe(ROLLED_BACK);
     expect(tree(waiting.data)).toEqual({ ...before, "started-by.txt": "0.1.150\n0.1.150\n" });
   });
 
@@ -318,8 +321,61 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(back.status, back.stdout).toBe(0);
     expect(back.said.at(-1)).toBe("Your server runs 0.1.150 again, with its data as it was before the update.");
     expect(tree(box.data)).toEqual({ ...before, "started-by.txt": "0.1.150\n0.1.150\n" });
-    expect(box.env()).toBe(ENV);
+    expect(box.env()).toBe(ROLLED_BACK);
     expect(box.run(["--rollback", "--yes"]).stdout).toContain("There is no earlier update to go back from.");
+  });
+
+  // A hardened server answers `openmausbot doctor` without a session with a refusal, so before the server's own count
+  // the check that a bot can still start never ran there.
+  it("checks a hardened version's engines with the server's own count, where doctor is refused", () => {
+    const hardened = { counts: true, doctor: false };
+    const lost = install({ ...hardened, engine: false });
+    lost.setState({ images: [{ ...OLD, ...hardened }, { ...NEW, ...hardened, engine: false }] });
+    const failed = lost.run();
+    expect(failed.status, failed.stdout).toBe(1);
+    expect(failed.stdout).toContain("The update to 0.1.151 did not work: no engine can start a bot on it, and one could before.");
+    const kept = install(hardened);
+    kept.setState({ images: [{ ...OLD, ...hardened }, { ...NEW, ...hardened }] });
+    expect(kept.run().status).toBe(0);
+    expect(kept.state().containers.omb.image).toBe(NEW.id);
+  });
+
+  it("moves an install the installer made with Caddy in the server's network to the current files, and back on rollback", () => {
+    const box = install();
+    const oldCompose = `# Written by MausBot's installer (deploy/install.sh), and written again each time it runs.
+name: openmausbot
+services:
+  omb:
+    image: \${OMB_IMAGE:?run the installer again}
+  caddy:
+    image: caddy:2
+    network_mode: "service:omb"
+`;
+    const oldCaddyfile = "{$DOMAIN} {\n\treverse_proxy 127.0.0.1:8799\n}\n";
+    writeFileSync(join(box.deploy, "compose.yaml"), oldCompose);
+    writeFileSync(join(box.deploy, "Caddyfile"), oldCaddyfile);
+    expect(box.run(["--check"]).stdout).toContain("It would also move Caddy to its own container");
+    const done = box.run();
+    expect(done.status, done.stdout).toBe(0);
+    expect(done.said).toContain("Caddy moves to its own container, so HTTPS stays up whenever the server restarts on its own.");
+    const compose = readFileSync(join(box.deploy, "compose.yaml"), "utf8");
+    expect(compose).not.toContain("network_mode");
+    expect(compose).toContain("- edge:/run/openmausbot");
+    expect(readFileSync(join(box.deploy, "Caddyfile"), "utf8")).toContain("reverse_proxy unix//run/openmausbot/http.sock");
+    expect(box.run(["--rollback", "--yes"]).status).toBe(0);
+    expect(readFileSync(join(box.deploy, "compose.yaml"), "utf8")).toBe(oldCompose);
+    expect(readFileSync(join(box.deploy, "Caddyfile"), "utf8")).toBe(oldCaddyfile);
+    expect(box.env()).toBe(ROLLED_BACK);
+  });
+
+  it("says how to move this repository's docker-compose.yml when it still has Caddy in the server's network", () => {
+    const box = install();
+    writeFileSync(join(box.deploy, "docker-compose.yml"), 'services:\n  caddy:\n    network_mode: "service:omb"\n');
+    expect(box.run(["--check"]).stdout).toContain("git pull brings the current one");
+    const done = box.run();
+    expect(done.status).toBe(0);
+    expect(done.stdout).toContain("Note: this docker-compose.yml runs Caddy in the server's network");
+    expect(readFileSync(join(box.deploy, "docker-compose.yml"), "utf8")).toContain("network_mode");
   });
 
   it("puts the old version back when Docker cannot start the new one at all", () => {
@@ -329,7 +385,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(failed.stdout).toContain("Docker could not start 0.1.151");
     expect(failed.said.at(-1)).toBe("Your server runs 0.1.150 again, with its data as it was before the update.");
     expect(box.state().containers.omb).toMatchObject({ image: OLD.id, status: "running" });
-    expect(box.env()).toBe(ENV);
+    expect(box.env()).toBe(ROLLED_BACK);
   });
 
   it("when the data cannot be put back: leaves the data and the copy as they are, keeps the journal, and tries again only when asked", () => {
@@ -360,7 +416,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(back.status, back.stdout).toBe(0);
     expect(back.said.at(-1)).toBe("Your server runs 0.1.150 again, with its data as it was before the update.");
     expect(tree(box.data)).toEqual({ ...before, "started-by.txt": "0.1.150\n0.1.150\n" });
-    expect(box.env()).toBe(ENV);
+    expect(box.env()).toBe(ROLLED_BACK);
     expect(box.journal()).toBe(false);
   });
 
@@ -395,7 +451,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
   });
 
   it("carries on when the terminal closes in the middle of an update", () => {
-    const box = install({}, { signalOn: { match: "/api/health", signal: "SIGHUP" } });
+    const box = install({}, { signalOn: { match: "/api/health\"", signal: "SIGHUP" } });
     const done = box.run();
     expect(done.signal).toBe(null);
     expect(done.status, done.stdout).toBe(0);
@@ -418,7 +474,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
   });
 
   it("keeps the server as it is when an earlier update is left unfinished and the owner says keep", () => {
-    const box = install({ behaviour: "silent" }, { signalOn: { match: "/api/health", signal: "SIGKILL" } });
+    const box = install({ behaviour: "silent" }, { signalOn: { match: "/api/health\"", signal: "SIGKILL" } });
     expect(box.run().signal).toBe("SIGKILL");
     const kept = box.run([], { input: "keep\n" });
     expect(kept.status, kept.stdout).toBe(0);

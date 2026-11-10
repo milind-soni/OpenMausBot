@@ -38,6 +38,7 @@ STABLE_URL=${OMB_STABLE_URL:-https://raw.githubusercontent.com/milind-soni/OpenM
 NEWEST_URL=${OMB_NEWEST_URL:-https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest}
 SERVICE=${OMB_UPDATE_SERVICE:-omb}
 WAIT_S=${OMB_UPDATE_WAIT_S:-300}
+ENGINE_WAIT_S=${OMB_UPDATE_ENGINE_WAIT_S:-120}
 POLL_S=${OMB_UPDATE_POLL_S:-5}
 KEEP_TAG="openmausbot-before-update:local"
 BACKUP_ROLE="com.mausbot.role=update-backup"
@@ -271,18 +272,136 @@ room_for_copy() { # data backup image → 0 when there is room where the copy go
   [ "$FREE_MB" -ge "$NEEDED_MB" ]
 }
 
+# After a rollback the version that ran before stays pinned by its digest. A tag .env named before (the installer's
+# `stable`) may have moved since, and a later run of the installer or `docker compose pull` would follow it and undo
+# the rollback. A version built on this machine has no digest to pin.
+pin_previous() {
+  case "$J_previous" in "$REPO@sha256:"*) pin_image "$J_previous" ;; esac
+}
 pin_image() { # writes OMB_IMAGE=<ref> into .env, keeping every other line and the file's mode
   local tmp="$DIR/.env.update.tmp"
   if [ -f .env ]; then cp -p .env "$tmp" && grep -v '^OMB_IMAGE=' .env >"$tmp"; else : >"$tmp" && chmod 600 "$tmp"; fi
   printf 'OMB_IMAGE=%s\n' "$1" >>"$tmp" && mv "$tmp" .env
 }
 keep_env() {
-  rm -f "$STATE/env.before" "$STATE/env.absent"
+  rm -f "$STATE/env.before" "$STATE/env.absent" "$STATE/compose.yaml.before" "$STATE/Caddyfile.before"
   if [ -f .env ]; then cp -p .env "$STATE/env.before" && chmod 600 "$STATE/env.before"; else : >"$STATE/env.absent"; fi
 }
+# The settings go back with the data, and with them the installer's files when this update moved them.
 restore_env() {
   if [ -f "$STATE/env.before" ]; then cp -p "$STATE/env.before" "$DIR/.env.update.tmp" && mv "$DIR/.env.update.tmp" .env
   elif [ -f "$STATE/env.absent" ]; then rm -f .env; fi
+  local file
+  for file in compose.yaml Caddyfile; do
+    if [ -f "$STATE/$file.before" ]; then cp -p "$STATE/$file.before" "$DIR/$file.update.tmp" && mv "$DIR/$file.update.tmp" "$file"; fi
+  done
+}
+
+# An install the installer (deploy/install.sh) made before Caddy got its own container. Caddy shared the server's
+# network then, and stayed in the old, dead one whenever the server restarted without it: HTTPS refused while both
+# containers looked healthy. The installer rewrites its own two files at every run; an update does the same, with the
+# copies below, which are the installer's own (scripts/server-installer.test.ts keeps them equal).
+INSTALLER_MARK="# Written by MausBot's installer (deploy/install.sh)"
+old_installer_layout() { [ -f compose.yaml ] && grep -qF "$INSTALLER_MARK" compose.yaml && grep -q '^ *network_mode: "service:omb"' compose.yaml; }
+# A Compose file of this repository's (path B) with Caddy in the server's network: `git pull` brings the current one.
+old_repository_layout() { [ -f docker-compose.yml ] && grep -q '^ *network_mode: "service:omb"' docker-compose.yml; }
+move_installer_layout() {
+  cp -p compose.yaml "$STATE/compose.yaml.before" && cp -p Caddyfile "$STATE/Caddyfile.before" || return 1
+  installer_compose >compose.yaml.update.tmp && mv compose.yaml.update.tmp compose.yaml &&
+    installer_caddyfile >Caddyfile.update.tmp && mv Caddyfile.update.tmp Caddyfile
+}
+installer_compose() {
+  cat <<'COMPOSE'
+# Written by MausBot's installer (deploy/install.sh), and written again each time it runs: put your own settings in
+# .env beside this file, which the installer keeps. The server only listens on loopback inside its container, and on
+# two Unix sockets in the `edge` volume, which Caddy, in its own container, reaches it through. A request on a socket is
+# always a remote one to the server. Caddy does not share the server's network: a server that restarted on its own came
+# back in a new one, and left Caddy refusing HTTPS in the old one.
+name: openmausbot
+services:
+  omb:
+    image: ${OMB_IMAGE:?run the installer again}
+    restart: unless-stopped
+    init: true
+    shm_size: 512m
+    volumes:
+      - ./data:/data
+      - edge:/run/openmausbot
+    environment:
+      OMB_PORT: "8799"
+      OMB_WEBHOOK_PORT: "8800"
+      OMB_TUNNEL_SOCKET: /run/openmausbot/http.sock
+      OMB_WEBHOOK_SOCKET: /run/openmausbot/hooks.sock
+      OMB_WEBHOOK_PUBLIC_URL: https://${DOMAIN}
+      OMB_PUBLIC_URL: https://${DOMAIN}
+      OMB_SERVER_NAME: ${OMB_SERVER_NAME:-${DOMAIN}}
+      # Passed only when .env sets them: an empty one would still be set, and Settings' own lists are used when not.
+      OMB_SIGNIN_EMAILS:
+      OMB_SIGNIN_MEMBER_EMAILS:
+      OMB_SIGNIN_SMTP_URL:
+      OMB_SIGNIN_SMTP_FROM:
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      omb:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - edge:/run/openmausbot
+      - ./caddy/data:/data
+      - ./caddy/config:/config
+
+volumes:
+  # The two sockets: in memory, made afresh by the server at each start. Not under /data, which every bot's sandbox
+  # sees; the sandbox has its own /run.
+  edge:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: mode=1777,size=1m
+COMPOSE
+}
+installer_caddyfile() {
+  cat <<'CADDY'
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Webhook ingress is designed to be reachable by third parties (it has its
+	# own per-hook secrets), so it sits outside any login. The path is passed
+	# through unchanged: the receiver routes on /hooks/<id>.
+	handle /hooks/* {
+		reverse_proxy unix//run/openmausbot/hooks.sock
+	}
+
+	handle {
+		# Optional second wall in front of pairing (a shared password):
+		#   basic_auth {
+		#     {$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+		#   }
+		# and set both variables in .env (hash with `caddy hash-password`,
+		# every `$` doubled for Compose).
+		reverse_proxy unix//run/openmausbot/http.sock {
+			# SSE: stream events as they arrive
+			flush_interval -1
+			# Compression is `encode`'s job above; the server would gzip its
+			# JSON on its socket otherwise, as for the phone tunnel.
+			header_up -Accept-Encoding
+		}
+	}
+}
+CADDY
 }
 
 # Stops the whole project and checks that the server's container is no longer running: no copy is taken of live data.
@@ -297,8 +416,27 @@ answers() { compose exec -T "$SERVICE" sh -c 'curl -sf --max-time 5 "http://127.
 reported_version() {
   compose exec -T "$SERVICE" sh -c 'curl -sf --max-time 5 "http://127.0.0.1:${OMB_PORT:-8799}/.well-known/openmausbot/environment"' 2>/dev/null | json_top version
 }
-# `openmausbot doctor`: the server answers and at least one engine can start a bot.
-engine_ready() { compose exec -T "$SERVICE" openmausbot doctor ${1:+--wait "$1"} >/dev/null 2>&1; }
+# How many engines can start a bot, as the server counts them (GET /api/health/engines, which a hardened server answers
+# a local caller without a session); nothing from a version without that count.
+engine_count() {
+  compose exec -T "$SERVICE" sh -c 'curl -sf --max-time 10 "http://127.0.0.1:${OMB_PORT:-8799}/api/health/engines"' 2>/dev/null |
+    sed -n 's/.*"engines":\([0-9][0-9]*\).*/\1/p' | head -n 1
+}
+# At least one engine can start a bot, within $1 seconds: the server's count, or `openmausbot doctor` on a version that
+# has no count (it needs the owner's trust, so on a hardened version without the count this cannot tell).
+engine_ready() {
+  local deadline=$(($(date +%s) + ${1:-0})) count
+  while :; do
+    count=$(engine_count)
+    if [ -n "$count" ]; then
+      [ "$count" -gt 0 ] && return 0
+    elif compose exec -T "$SERVICE" openmausbot doctor >/dev/null 2>&1; then
+      return 0
+    fi
+    [ "$(date +%s)" -lt "$deadline" ] || return 1
+    sleep "$POLL_S"
+  done
+}
 caddy_runs() { compose ps --status running --services 2>/dev/null | grep -qx caddy; }
 last_words() { compose logs --no-color --no-log-prefix --tail 40 "$SERVICE" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 1 | cut -c 1-300; }
 
@@ -331,7 +469,7 @@ wait_healthy() {
 # What worked before the update still works: an engine that could start a bot, and Caddy in front.
 wait_whole() {
   local tries=0
-  if [ "$J_engine" = ready ] && ! engine_ready 2m; then WHY="no engine can start a bot on it, and one could before"; return 1; fi
+  if [ "$J_engine" = ready ] && ! engine_ready "$ENGINE_WAIT_S"; then WHY="no engine can start a bot on it, and one could before"; return 1; fi
   if [ "$J_caddy" = running ]; then
     until caddy_runs; do
       tries=$((tries + 1))
@@ -345,6 +483,9 @@ finish() {
   cp "$JOURNAL" "$LAST.tmp" && mv "$LAST.tmp" "$LAST"
   rm -f "$JOURNAL"
   say "Updated from $(old_name) to $(new_name)."
+  if old_repository_layout; then
+    say "Note: this docker-compose.yml runs Caddy in the server's network, so HTTPS goes down whenever the server restarts without Caddy (a crash, docker compose restart). git pull brings the current one, then: docker compose up -d"
+  fi
   say "The data from before the update is kept in the Docker volume $J_backup until the next update."
   say "To go back to it: ./update.sh --rollback"
 }
@@ -363,6 +504,7 @@ roll_back() { # why, exit code when the old version is back
   fi
   if ! docker volume inspect "$J_backup" >/dev/null 2>&1; then
     restore_env
+    pin_previous
     compose up -d --no-build >>"$LOG" 2>&1
     rm -f "$JOURNAL" "$LAST"
     say "The copy of the data from before the update ($J_backup) is missing, so the data was left as it is. The server runs $(old_name) again."
@@ -375,6 +517,7 @@ roll_back() { # why, exit code when the old version is back
     exit 2
   fi
   restore_env
+  pin_previous
   compose up -d --no-build >>"$LOG" 2>&1
   if [ "$(inspect '{{.Image}}' "$(container)")" != "$J_previous_id" ]; then
     # .env named a tag that has moved since: the image kept aside at the swap is the one that ran.
@@ -570,6 +713,8 @@ if [ "$MODE" = check ]; then
   if [ -n "$J_previous" ] && [ "$J_previous" = "$J_target" ]; then printf '%s\n' "That is the version asked for. Nothing to do."
   elif [ "$ALLOW_OLDER" != yes ] && [ -n "$(older_reason)" ]; then printf '%s\n' "$(older_reason)" "./update.sh would change nothing without --allow-older."
   else printf '%s\n' "./update.sh would update it to $(new_name)."; fi
+  if old_installer_layout; then printf '%s\n' "It would also move Caddy to its own container: in the server's network, HTTPS goes down whenever the server restarts without it."
+  elif old_repository_layout; then printf '%s\n' "This docker-compose.yml runs Caddy in the server's network, where HTTPS goes down whenever the server restarts without it: git pull brings the current one."; fi
   exit 0
 fi
 
@@ -652,6 +797,10 @@ phase swap
 rm -f "$LAST"
 drop_older_copies
 say "Starting $(new_name)…"
+if old_installer_layout; then
+  if move_installer_layout; then say "Caddy moves to its own container, so HTTPS stays up whenever the server restarts on its own."
+  else roll_back "The installer's compose.yaml and Caddyfile could not be rewritten (see $LOG)." 1; fi
+fi
 pin_image "$J_target"
 # Where Caddy waits for a healthy server, `up` itself fails when the new version never gets there; the wait below
 # then says why.

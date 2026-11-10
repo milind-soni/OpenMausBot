@@ -64,8 +64,11 @@ function compose(rest) {
   if (verb === "exec") {
     const serving = image(omb?.image);
     if (omb?.status !== "running" || !serving) fail("service omb is not running");
-    if (more.includes("openmausbot")) return serving.engine ? out("ready") : fail("no engine is available", 5);
+    // `doctor: false`: a hardened version, where doctor without a session is refused whatever its engines.
+    if (more.includes("openmausbot")) return serving.engine && serving.doctor !== false ? out("ready") : fail("no engine is available", 5);
     if (serving.behaviour === "silent") fail("", 7);
+    // A version with the count (`counts`) answers how many engines can start a bot; an older one has no such route.
+    if (line.includes("/api/health/engines")) return serving.counts ? out(JSON.stringify({ app: "openmausbot", engines: serving.engine ? 1 : 0 })) : fail("", 22);
     if (line.includes("/api/health")) return out('{"app":"openmausbot"}');
     if (line.includes("/environment")) return out(JSON.stringify({ environmentId: "e", version: serving.serves ?? serving.version }));
   }
