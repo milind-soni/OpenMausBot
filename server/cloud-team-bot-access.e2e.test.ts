@@ -117,6 +117,7 @@ describe("a team bot shared with a level per person", () => {
     ["POST", `/api/bots/${payroll.id}/tasks`, { title: "Mine" }],
     ["POST", `/api/bots/${payroll.id}/interrupt`, { threadId: payroll.threadId }],
     ["POST", `/api/bots/${payroll.id}/compact`, { threadId: payroll.threadId }],
+    ["POST", `/api/bots/${payroll.id}/start-fresh`, { threadId: payroll.threadId }],
     ["POST", `/api/bots/${payroll.id}/respond`, { requestId: "x", behavior: "deny", threadId: payroll.threadId }],
     ["POST", `/api/bots/${payroll.id}/messages/${lastLine}/edit`, { text: "Edited", threadId: payroll.threadId }],
     ["POST", `/api/bots/${payroll.id}/always-allow`, { threadId: payroll.threadId, requestId: "x" }],

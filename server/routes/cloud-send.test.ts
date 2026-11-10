@@ -6,7 +6,7 @@ const handler = (messages: Array<{ role: string; text?: string }>, hasMore = fal
   bots: () => [{ id: "bot-00000001", threadId: "thread-0001", name: "Yuki", title: "", description: "", soul: "", tasks: [{ threadId: "thread-0001" }] } as never],
   messagesTail: () => ({ messages, hasMore }),
   skills: () => [],
-  logins: { changes: () => [], get: () => null, onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordToken: () => null },
+  logins: { listSecrets: () => [], secret: () => null, changes: () => [], get: () => null, onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordToken: () => null },
   config: () => ({}),
 });
 async function bots(route: ReturnType<typeof createCloudSendRoutes>): Promise<string[]> {
@@ -38,7 +38,7 @@ describe("what a move asks of a server", () => {
     appVersion: "0.1.120",
     bots: () => [{ id: "bot-00000001", threadId: "thread-0001", name: "Yuki", soul: "Be brief." } as never, { id: "bot-00000002", threadId: "thread-0002", name: "Kit", soul: "Plan." } as never],
     messagesTail: () => ({ messages: [], hasMore: false }), skills: () => [],
-    logins: { changes: () => [stored], get: (id) => (id === "l1" ? stored as never : null), onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordToken: () => null },
+    logins: { listSecrets: () => [], secret: () => null, changes: () => [stored], get: (id) => (id === "l1" ? stored as never : null), onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordToken: () => null },
     config: () => ({}), cloudHome, connectionFingerprints: () => ({ "key:openrouter": "f".repeat(64) }),
   });
 
@@ -52,7 +52,7 @@ describe("what a move asks of a server", () => {
     const routine = { id: "r1", name: "Morning", prompt: "Report.", target: "bot", botId: "bot-00000001", runOn: "maus", enabled: true, schedule: { type: "daily", time: "09:00", weekdays: [1] },
       durationMinutes: 15, nextRunAt: null, createdAt: 1, updatedAt: 1 };
     const route = createCloudSendRoutes({ appVersion: "0.1.120", bots: () => [{ id: "bot-00000001", threadId: "thread-0001", name: "Yuki", soul: "Be brief.", pinned: true } as never],
-      messagesTail: () => ({ messages: [], hasMore: false }), skills: () => [], logins: { changes: () => [], get: () => null, onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordToken: () => null },
+      messagesTail: () => ({ messages: [], hasMore: false }), skills: () => [], logins: { listSecrets: () => [], secret: () => null, changes: () => [], get: () => null, onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordToken: () => null },
       config: () => ({}), move: { dataDir: "/data", store: { bots: [], bot: () => undefined } as never, routines: () => ({ listRoutines: () => [routine], listRuns: () => [], adopt() {} }) as never,
         calls: () => null, webhooks: () => null, appEvents: () => null, claudeCodeSkills: () => [], instanceExists: () => true, owner: () => null,
         teamMemory: { list: () => [], adopt: () => 0 } as never, aboutMe: () => "", saveAboutMe() {} } });

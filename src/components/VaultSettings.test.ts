@@ -150,7 +150,7 @@ describe("Settings → Vault: logins", () => {
     await click("Connect 1Password");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/1password", { method: "POST", body: JSON.stringify({ token: "ops_fake-typed-token" }) });
-    expect(host.querySelector("[data-onepassword]")!.textContent).toContain("Connected to Shared with OMB · 1 logins with a website");
+    expect(host.querySelector("[data-onepassword]")!.textContent).toContain("Connected to Shared with OMB · 1 logins, keys and secrets");
     expect(host.innerHTML).not.toContain("ops_fake-typed-token");
     const row = host.querySelector('[data-login-row="example.com"]')!;
     expect(row.textContent).toContain("From 1Password · All bots");
@@ -265,6 +265,14 @@ describe("Settings → Vault: keys and secrets", () => {
     expect(fixture.api).toHaveBeenCalledTimes(3);
     await click("Delete for good");
     expect(fixture.api).toHaveBeenNthCalledWith(4, "/api/vault/secrets/s1", { method: "DELETE" });
+  });
+
+  it("says which MCP servers lost their key when a secret is deleted", async () => {
+    fixture.api.mockResolvedValueOnce(listed()).mockResolvedValueOnce({ ok: true, keysOff: ["stripe", "notion"] }).mockResolvedValueOnce(listed([LINKED]));
+    await render();
+    await click("Delete Stripe secret key");
+    await click("Delete for good");
+    expect(host.querySelector("[data-vault-keys-off]")?.textContent).toContain("stripe, notion");
   });
 
   it("imports a pasted .env file as one secret per line", async () => {

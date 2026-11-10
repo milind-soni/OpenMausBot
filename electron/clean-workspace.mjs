@@ -132,6 +132,8 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
       return swapTo(dir);
     }),
     leave,
+    /** Settles once the swaps asked for so far are done. */
+    settled: () => queue,
     /** Runs `work` on this computer's own copy, its server back first, and nothing opens the clean workspace meanwhile. */
     async holding(work) {
       held++;

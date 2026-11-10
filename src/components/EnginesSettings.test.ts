@@ -478,6 +478,33 @@ describe("Settings → Engines → custom Claude endpoints", () => {
       snapshot: { state: "available", authenticated: true }, models: { default: "model", options: [] },
     }];
     fixture.bots = [];
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("data-claude-endpoints");
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html).toContain("data-claude-endpoints");
+    expect(html).toContain("data-claude-bedrock-endpoints");
+  });
+
+  it("leaves the Bedrock section out of a hosted workspace too", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.instances = [hostedClaude()];
+    fixture.bots = [];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("data-claude-bedrock-endpoints");
+  });
+
+  it("lists a Bedrock engine as its own row alongside a signed-in Claude account", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.instances = [
+      { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", snapshot: { state: "available", authenticated: true }, models: { default: "claude-sonnet-5", options: [] } },
+      {
+        instanceId: "claude-bedrock-1", driverKind: "claudeAgent", displayName: "Claude on Bedrock", access: "custom",
+        snapshot: { state: "available" }, models: { default: "", options: [] },
+        claudeBedrock: { awsProfile: "default", awsRegion: "us-east-1", model: "global.anthropic.claude-sonnet-5-5", models: ["global.anthropic.claude-sonnet-5-5"], opusModel: "", sonnetModel: "", haikuModel: "", smallFastModel: "" },
+      },
+    ];
+    fixture.bots = [];
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html).toContain("data-claude-bedrock-endpoints");
+    expect(html).toContain('data-claude-bedrock="claude-bedrock-1"');
   });
 });

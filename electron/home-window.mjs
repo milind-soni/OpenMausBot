@@ -330,6 +330,8 @@ export function createHomeWindow(deps) {
     try { const at = new URL(win.webContents.getURL()); return at.origin === localOrigin() && at.pathname === HOME_SCREEN_PATH; } catch { return false; }
   };
   const clearRetry = () => { if (retry) timers.clear(retry); retry = null; };
+  /** Whatever was being opened for an earlier click stops; the window still shows what it showed. */
+  function stopOpening() { opens++; recovering = null; clearRetry(); screen = null; status = null; }
 
   function goScreen() {
     tell();
@@ -487,7 +489,7 @@ export function createHomeWindow(deps) {
         const look = await answers(origin);
         if (look === "no") return unreachable(place, token);
         if (look === "asleep" && otherPlace(place)) return offline(token);
-        if (look === "asleep") { power.hold(); asleep = true; say("waking"); }
+        if (look === "asleep") { power.hold(); asleep = true; if (wanted(token)) say("waking"); }
       }
       let session = null;
       const signedIn = asleep
@@ -817,7 +819,10 @@ export function createHomeWindow(deps) {
     },
     /** Signs the team on screen in again now, without moving the page (the timer's own step; also for tests). */
     renew: () => renew(),
-    cancel() { opens++; recovering = null; clearRetry(); screen = null; status = null; shown = null; away = false; },
+    cancel() { stopOpening(); shown = null; away = false; },
+    stopOpening,
+    /** The person chose the place on screen again before the one they'd asked for opened: it stays as it is. */
+    stay() { stopOpening(); profileShown = null; },
     close() { opens++; clearRetry(); clearRenewal(); timers.clear(watcher); },
   };
 }
