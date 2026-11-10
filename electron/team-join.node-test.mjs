@@ -169,3 +169,26 @@ test("main's wiring: a team URL or command line is taken, anything else is left 
   state = connected([{ id: ACME, name: "Acme", role: "member" }]);
   assert.equal(links.fromUrl(LINK), true);
 });
+
+test("main makes the team link's wiring before most of main exists: nothing it is given is read until later, so the app starts", async () => {
+  const { readFileSync } = await import("node:fs");
+  const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  const at = main.indexOf("installTeamJoin({");
+  assert.ok(at > 0);
+  // The call's own arguments, to its closing brace.
+  let depth = 0, end = at + "installTeamJoin(".length;
+  for (; end < main.length; end++) { const c = main[end]; if ("({[".includes(c)) depth++; else if (")}]".includes(c) && --depth === 0) break; }
+  const args = main.slice(at + "installTeamJoin({".length, end);
+  // Split into its top-level `key: value` pairs.
+  const pairs = []; let start = 0; depth = 0;
+  for (let i = 0; i <= args.length; i++) { const c = args[i]; if (c && "({[".includes(c)) depth++; else if (c && ")}]".includes(c)) depth--; else if ((c === "," && depth === 0) || i === args.length) { pairs.push(args.slice(start, i).trim()); start = i + 1; } }
+  const imported = new Set([...main.matchAll(/^import \{([^}]*)\}/gm)].flatMap((match) => match[1].split(",").map((name) => name.trim().split(/\s+as\s+/).pop())));
+  const before = main.slice(0, at);
+  for (const pair of pairs.filter(Boolean)) {
+    const value = pair.slice(pair.indexOf(":") + 1).trim();
+    if (/^(async\s+)?(\([^)]*\)|[\w$]+)\s*=>/.test(value)) continue;
+    const head = /^([A-Za-z_$][\w$]*)/.exec(value)?.[1];
+    if (!head || ["process", "path", "app"].includes(head)) continue;
+    assert.ok(imported.has(head) || new RegExp(`(?:const|let|var|function)\\s+${head}\\b`).test(before), `${pair.split(":")[0]}: ${head} is read before main declares it`);
+  }
+});
