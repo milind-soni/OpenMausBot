@@ -46,7 +46,7 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   const title = bot.tasks?.find((task) => task.threadId === bot.threadId)?.title;
   // Simple mode calls an untitled conversation what it is, never a "thread".
   const conversation = !awayFromMainThread(bot, false) ? (privacy?.kind === "shared" ? t("task.sharedChat") : null)
-    : !title || title === UNTITLED ? t("task.untitledConversation") : localizedTaskTitle(title);
+    : !title || title === UNTITLED ? t("task.untitledChat") : localizedTaskTitle(title);
   const label = t("chat.openProfileAria", { name: bot.name });
   return (
     <button
@@ -54,7 +54,7 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
       data-chathead-pill
       data-tour="bot-pill"
       onClick={onToggle}
-      title={t("chat.openProfile")}
+      title={t("chat.openBotPanel")}
       aria-label={conversation ? `${label}, ${conversation}` : label}
       aria-expanded={open}
       aria-controls={open ? BOT_PANEL_ID : undefined}
@@ -78,8 +78,8 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
         <span role="img" data-chathead-elsewhere aria-label={t("task.otherActivity", { count: elsewhere })} className="size-1.5 shrink-0 rounded-full bg-accent" />
       )}
       {!open && !conversation && (
-        <span aria-hidden="true" data-chathead-chevron className={cn("-ml-2 flex w-0 shrink-0 overflow-hidden opacity-0 transition-[width,margin,opacity] group-hover:ml-0 group-hover:w-2 group-hover:opacity-100 group-focus-visible:ml-0 group-focus-visible:w-2 group-focus-visible:opacity-100", CHEVRON_MOTION)}>
-          <ChevronRight size={12} className={cn("-ml-0.5 shrink-0 -translate-x-1.5 text-ink-tertiary transition-transform group-hover:translate-x-0 group-focus-visible:translate-x-0", CHEVRON_MOTION)} />
+        <span aria-hidden="true" data-chathead-chevron className="-ml-0.5 flex shrink-0">
+          <ChevronRight size={12} className={cn("shrink-0 text-ink-tertiary transition-transform group-hover:translate-x-0.5 group-focus-visible:translate-x-0.5", CHEVRON_MOTION)} />
         </span>
       )}
     </button>

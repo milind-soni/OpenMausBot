@@ -8,6 +8,8 @@ import {
   COMPANION_ACCOUNT_USER_ID_FIELD,
   COMPANION_CLIENT_INSTANCE_FIELD,
   COMPANION_ENDPOINT_PAUSED_FIELD,
+  COMPANION_TUNNEL_RETIRED_FIELD,
+  COMPANION_TUNNEL_WAITING_FIELD,
   COMPANION_ENDPOINT_RELEASE_PENDING_FIELD,
   COMPANION_INSTALLATION_CREDENTIAL_FIELD,
   COMPANION_INSTALLATION_EXPIRY_FIELD,
@@ -1402,6 +1404,135 @@ describe("Companion account on demand", () => {
       answer({ devices: undefined }),
     ]) {
       expect(managedEndpointNeed(unclear)).toBeNull();
+    }
+  });
+
+  it("needs a tunnel only for an old phone seen this month once the encrypted connection is on", () => {
+    const now = LAUNCH_AT;
+    const on = (devices, extra = {}) => ({ enabled: true, devices, pairing: null, e2e: { enabled: true }, ...extra });
+    const pairing = { code: "123456", token: `omb_pair_${"a".repeat(43)}`, expiresAt: now };
+    expect(managedEndpointNeed(on([{ id: "old", lastSeenAt: now - HOUR_MS }]), now)).toBe(true);
+    expect(managedEndpointNeed(on([{ id: "new", lastSeenAt: now, e2eAt: now - HOUR_MS }]), now)).toBe(false);
+    expect(managedEndpointNeed(on([{ id: "stale", lastSeenAt: now - 31 * 24 * HOUR_MS }]), now)).toBe("unused");
+    expect(managedEndpointNeed(on([{ id: "new", lastSeenAt: now, e2eAt: now }, { id: "stale", lastSeenAt: now - 31 * 24 * HOUR_MS }]), now)).toBe("unused");
+    expect(managedEndpointNeed(on([], { pairing }), now)).toBe(false);
+    expect(managedEndpointNeed({ ...on([], { pairing }), e2e: { enabled: false } }, now)).toBe(true);
+  });
+
+  it("reports the old phones with a tunnel request, and takes 409 relay_capable as no tunnel needed", async () => {
+    const refused = Object.assign(new Error("relay capable"), { code: "relay_capable", status: 409 });
+    const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(refused)) });
+    const f = onDemandFixture({ initial: {}, client, relay: { capable: () => false, legacyDevices: async () => 0 } });
+    f.companion.need = true;
+    await f.service.requestCode("ada@example.com");
+    const state = await f.service.verifyCode("ada@example.com", "12345678");
+    expect(client.ensureEndpoint).toHaveBeenCalledWith(expect.any(String), { appVersion: "1.2.3", legacyDevices: 0 });
+    expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com" });
+    f.service.dispose();
+  });
+
+  it("stops the connector, forgets the address and says so when old phone apps no longer get a tunnel", async () => {
+    const retired = new ControlPlaneError("relay_capable", 409, "", 0, "retired");
+    expect(retired.tunnel).toBe("retired");
+    expect(new ControlPlaneError("relay_capable", 409, "", 0, "anything").tunnel).toBeNull();
+    expect(new ControlPlaneError("endpoint_capacity", 503, "", 0, "retired").tunnel).toBeNull();
+    const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(retired)) });
+    const f = onDemandFixture({ client, relay: { capable: () => true, legacyDevices: async () => 1 } });
+    f.companion.need = true;
+    const state = await f.service.retry();
+    expect(client.ensureEndpoint).toHaveBeenCalledWith(expect.any(String), { appVersion: "1.2.3", legacyDevices: 1 });
+    expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com", tunnelRetired: true });
+    expect(f.store.read()[COMPANION_TUNNEL_RETIRED_FIELD]).toBe(true);
+    expect(f.store.read()[COMPANION_TUNNEL_WAITING_FIELD]).toBe(true);
+    expect(f.store.read()).not.toHaveProperty(MANAGED_COMPANION_ENDPOINT_FIELD);
+    expect(f.stopManagedEndpoint).toHaveBeenCalled();
+    f.service.dispose();
+  });
+
+  it("keeps asking on the watchdog after the address ended or the accounts were full, so a relay outage hands it back", async () => {
+    for (const tunnel of ["retired", "full"]) {
+      const refused = new ControlPlaneError("relay_capable", 409, "", 0, tunnel);
+      const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(refused)) });
+      const f = onDemandFixture({ client, relay: { capable: () => true, legacyDevices: async () => 1 } });
+      f.companion.need = true;
+      await f.service.restore();
+      await f.service.retry();
+      expect(client.ensureEndpoint).toHaveBeenCalledTimes(1);
+      expect(f.store.read()[COMPANION_TUNNEL_WAITING_FIELD]).toBe(true);
+      expect(f.store.read()).not.toHaveProperty(MANAGED_COMPANION_ENDPOINT_FIELD);
+
+      // Nobody opens Phone & devices: each watchdog tick asks again, and after the hour a manual Retry counts for.
+      for (let tick = 2; tick <= 5; tick += 1) {
+        f.clock.now += HOUR_MS;
+        await f.watchdog();
+        expect(client.ensureEndpoint, `${tunnel} tick ${tick}`).toHaveBeenCalledTimes(tick);
+      }
+      expect(await f.service.state()).toEqual({
+        available: true, status: "ready", email: "ada@example.com", ...(tunnel === "retired" ? { tunnelRetired: true } : {}),
+      });
+
+      // The relay is switched off (or room frees up): the next tick gets the address back and the notice goes.
+      client.ensureEndpoint.mockImplementation(async () => ({ endpoint: { url: ENDPOINT }, connectorToken: CONNECTOR_TOKEN }));
+      f.clock.now += HOUR_MS;
+      await f.watchdog();
+      expect(f.store.read()[MANAGED_COMPANION_ENDPOINT_FIELD]).toBe(ENDPOINT);
+      expect(f.store.read()).not.toHaveProperty(COMPANION_TUNNEL_RETIRED_FIELD);
+      expect(f.store.read()).not.toHaveProperty(COMPANION_TUNNEL_WAITING_FIELD);
+      expect(await f.service.state()).not.toHaveProperty("tunnelRetired");
+      f.service.dispose();
+    }
+  });
+
+  it("stops asking once no old phone needs an address, and after a plain relay_capable", async () => {
+    const refused = new ControlPlaneError("relay_capable", 409, "", 0, "retired");
+    const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(refused)) });
+    const f = onDemandFixture({ client, relay: { capable: () => true, legacyDevices: async () => 1 } });
+    f.companion.need = true;
+    await f.service.restore();
+    await f.service.retry();
+    // The old phone was paired again on the encrypted connection: nothing needs the address.
+    f.companion.need = false;
+    for (let tick = 0; tick < 3; tick += 1) {
+      f.clock.now += HOUR_MS;
+      await f.watchdog();
+    }
+    expect(client.ensureEndpoint).toHaveBeenCalledTimes(1);
+    f.service.dispose();
+
+    const plain = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(new ControlPlaneError("relay_capable", 409))) });
+    const g = onDemandFixture({ client: plain, relay: { capable: () => true, legacyDevices: async () => 1 } });
+    g.companion.need = true;
+    await g.service.restore();
+    await expect(g.service.retry()).resolves.toEqual({ available: true, status: "ready", email: "ada@example.com" });
+    expect(g.store.read()).not.toHaveProperty(COMPANION_TUNNEL_WAITING_FIELD);
+    expect(g.store.read()).not.toHaveProperty(COMPANION_TUNNEL_RETIRED_FIELD);
+    for (let tick = 0; tick < 3; tick += 1) {
+      g.clock.now += HOUR_MS;
+      await g.watchdog();
+    }
+    expect(plain.ensureEndpoint).toHaveBeenCalledTimes(1);
+    g.service.dispose();
+  });
+
+  it("tells a desktop below the minimum version to update", async () => {
+    const message = friendlyCompanionAccountError(new ControlPlaneError("update_required", 426));
+    expect(message).toBe("This version of MausBot can no longer make secure links. Update MausBot, then try again. Local Wi-Fi and Tailscale pairing still work.");
+  });
+
+  it("signs a relay-capable computer in without a tunnel when no phone needs one", async () => {
+    for (const relayCapable of [true, false]) {
+      const f = onDemandFixture({ initial: {}, relay: { capable: () => relayCapable, legacyDevices: async () => 0 } });
+      f.companion.need = false;
+      await f.service.requestCode("ada@example.com");
+      const state = await f.service.verifyCode("ada@example.com", "12345678");
+      expect(f.client.ensureInstallation).toHaveBeenCalledOnce();
+      if (relayCapable) {
+        expect(f.client.ensureEndpoint).not.toHaveBeenCalled();
+        expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com" });
+      } else {
+        expect(f.client.ensureEndpoint).toHaveBeenCalledOnce();
+      }
+      f.service.dispose();
     }
   });
 

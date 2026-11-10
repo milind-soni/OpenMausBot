@@ -18,7 +18,7 @@ import { cloudSendSummary, partHash, type CloudSendSources } from "../cloud-send
 import { cloudSendChatsRoute, type CloudSendChatsDeps } from "../cloud-send-chats.ts";
 import { loginFingerprints, VERIFY_NONCE } from "../cloud-send-verify.ts";
 import type { AppConfig } from "../config.ts";
-import type { LoginStore } from "../login-store.ts";
+import type { VaultStore } from "../vault-store.ts";
 import type { MoveAutomations } from "../move-freeze.ts";
 import { threadHeads } from "../message-db.ts";
 import type { LineLanguage } from "../server-lines.ts";
@@ -29,7 +29,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 
 export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" | "bots" | "skills"> {
   messagesTail(threadId: string, limit: number): { messages: ReadonlyArray<{ role: string; text?: string }>; hasMore: boolean };
-  logins: Pick<LoginStore, "changes" | "get" | "onePasswordConnectedAt" | "onePasswordGrants" | "onePasswordToken">;
+  logins: Pick<VaultStore, "changes" | "get" | "listSecrets" | "secret" | "onePasswordConnectedAt" | "onePasswordGrants" | "onePasswordToken">;
   config(): Pick<AppConfig, "profile" | "language">;
   lineLanguage?: LineLanguage;
   chats?: CloudSendChatsDeps;
@@ -66,6 +66,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     skills: deps.skills,
     picture: (avatarUrl) => botAvatarUrlSchema.safeParse(avatarUrl).success ? readAttachment(avatarUrl.slice("/api/attachments/".length))?.bytes ?? null : null,
     logins: () => deps.logins.changes(),
+    secrets: () => deps.logins.listSecrets(),
     onePassword: () => {
       const connectedAt = deps.logins.onePasswordConnectedAt();
       return connectedAt === null ? null : { connectedAt, grants: deps.logins.onePasswordGrants() };
@@ -93,8 +94,8 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
       if (!deps.chats) return json(res, 404, { error: "not found" });
       res.setHeader("cache-control", "no-store");
-      return json(res, 200, await cloudSendManifest({ summary: () => cloudSendSummary(sources, { move: true, ...(bot ? { bot } : {}) }), store: deps.chats.store, dataDir: deps.chats.dataDir,
-        connections: deps.connections ?? (async () => []), heads: threadHeads, ...(move ? { kinds: move, teamMemory: move.teamMemory } : {}), ...(bot ? { bot } : {}) }));
+      return json(res, 200, { vault: 1, ...await cloudSendManifest({ summary: () => cloudSendSummary(sources, { move: true, ...(bot ? { bot } : {}) }), store: deps.chats.store, dataDir: deps.chats.dataDir,
+        connections: deps.connections ?? (async () => []), heads: threadHeads, ...(move ? { kinds: move, teamMemory: move.teamMemory } : {}), ...(bot ? { bot } : {}) }) });
     }
     if (path === "/api/cloud-send/verify-secrets") {
       if (!home || !deps.connectionFingerprints) return json(res, 404, { error: "not found" });
@@ -102,7 +103,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
       const asked = z.object({ nonce: z.string().regex(VERIFY_NONCE) }).safeParse(await readBody(req, 4096));
       if (!asked.success) return json(res, 400, { error: "send { nonce }: at least 32 random bytes, base64url" });
       res.setHeader("cache-control", "no-store");
-      return json(res, 200, { v: 1, secrets: { ...loginFingerprints(asked.data.nonce, deps.logins), ...deps.connectionFingerprints(asked.data.nonce) } });
+      return json(res, 200, { v: 1, vault: 1, secrets: { ...loginFingerprints(asked.data.nonce, deps.logins), ...deps.connectionFingerprints(asked.data.nonce) } });
     }
     if (path !== "/api/cloud-send") return PASS;
     if (method !== "GET") return json(res, 405, { error: "method not allowed" });
@@ -110,7 +111,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     const summary = cloudSendSummary(sources, { move: url.searchParams.get("move") === "1", ...(bot ? { bot } : {}) });
     const item = url.searchParams.get("item");
     const items = item === null ? summary.items : summary.items.filter((entry) => entry.key === item || (entry.kind === "skill" && item === `bot:${entry.bot}`));
-    // `chats: 1`: this server takes chats by row.
-    return json(res, 200, { ...summary, items, ...(deps.chats ? { chats: 1 } : {}) });
+    // `chats: 1`: this server takes chats by row. `vault: 1`: it keeps saved Vault secrets under the id they are sent with.
+    return json(res, 200, { ...summary, items, vault: 1, ...(deps.chats ? { chats: 1 } : {}) });
   };
 }

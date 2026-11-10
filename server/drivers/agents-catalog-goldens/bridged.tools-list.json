@@ -158,7 +158,7 @@
     },
     {
       "name": "attach_file",
-      "description": "Attach a finished file to the chat so the user can preview and download it: an image, video, audio clip, PDF, spreadsheet, slide deck or other document you made. Pass its path: a path inside your computer's /home/cua/workspace (for example /home/cua/workspace/report.pdf), or a file in your working folder. Do this instead of pasting a VM path as a link; a path inside a VM cannot be opened from chat. Supported: images (png, jpg, gif, webp), video (mp4, webm, mov), audio (mp3, m4a, aac, wav, ogg, opus, flac), pdf, Word/Excel/PowerPoint and OpenDocument files, and csv, tsv, txt, md, json, rtf. Up to 25 MB (images 10 MB). Finish writing the file first, then call this directly: it reports an error if the file is missing, so you do not need to list or open the folder to check.",
+      "description": "Attach a finished file to the chat so the user can preview and download it: an image, video, audio clip, PDF, spreadsheet, slide deck or other document you made. Pass its path: a path inside your computer's /home/cua/workspace (for example /home/cua/workspace/report.pdf), or a file in your working folder. Do this instead of pasting a VM path as a link; a path inside a VM cannot be opened from chat. Supported: images (png, jpg, gif, webp), video (mp4, webm, mov), audio (mp3, m4a, aac, wav, ogg, opus, flac), pdf, Word/Excel/PowerPoint and OpenDocument files, and csv, tsv, txt, md, json, rtf. Up to 100 MB (images 10 MB). Finish writing the file first, then call this directly: it reports an error if the file is missing, so you do not need to list or open the folder to check.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -179,7 +179,7 @@
     },
     {
       "name": "publish_page",
-      "description": "Publish a page you made to a public link, only when the person asks to share or publish it: an .html file, or a folder with an index.html (static files, csv and parquet data too, up to 5 MB). Publishing the same path again, or passing page_id, updates the same link. Never publish secrets or personal details the person didn't ask to share. For a data dashboard, follow the data-dashboards skill.",
+      "description": "Publish a page you made to a public link, only when the person asks to share or publish it: an .html file, or a folder with an index.html (static files and data too, up to 5 MB). Publishing the same path again, or passing page_id, updates the same link. Never publish secrets or personal details the person didn't ask to share. For a data dashboard, follow the data-dashboards skill.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -196,6 +196,10 @@
             "type": "string",
             "pattern": "^[a-z0-9]{20,63}$",
             "description": "The page's id, the first part of its link."
+          },
+          "live": {
+            "type": "boolean",
+            "description": "True republishes it when its folder changes; open copies reload."
           }
         },
         "required": [
@@ -239,7 +243,7 @@
     },
     {
       "name": "request_credential",
-      "description": "Ask the person for a secret on a secure card in the app or a QR-paired phone, never in chat. credential_id: a key OpenMausBot keeps (onePasswordToken: a 1Password service account token; email: a mailbox on any mail host, one card for its address and password). Other secrets: label, reason, delivery. You never see the value; end the turn, and you resume when they save or decline.",
+      "description": "Ask the person for a secret on a secure card in the app or a QR-paired phone, never in chat. credential_id: a key OpenMausBot keeps (onePasswordToken: a 1Password service account token; email: a mailbox on any mail host, one card for its address and password, or for its outgoing server when it is connected but can't send). Other secrets: label, reason, delivery (a saved one returns at once). You never see the value; end the turn, and you resume when they save or decline.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -262,6 +266,7 @@
               "cerebrasApiKey",
               "groqApiKey",
               "greenferenceApiKey",
+              "modelgoApiKey",
               "metaApiKey",
               "deepseekApiKey",
               "email"
@@ -289,6 +294,10 @@
               "file"
             ],
             "description": "ref: a one-use secretRef for mcp_server. file: a private file your commands read."
+          },
+          "replace": {
+            "type": "boolean",
+            "description": "true if the saved one is wrong: asks again."
           }
         }
       }
@@ -316,7 +325,7 @@
     },
     {
       "name": "fill_login",
-      "description": "Sign in with a login the person saved in OpenMausBot or in their connected 1Password. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself, submits each step, and says where the page went; you never see the password. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed (a code sent to their own email, which you read and type in, is one), or call request_sign_in.",
+      "description": "Sign in with a login the person saved in OpenMausBot or in their connected 1Password. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself (also one emailed to a connected mailbox), submits each step, and says where the page went; you never see them. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed, or call request_sign_in.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -324,6 +333,9 @@
           "username": {
             "type": "string",
             "description": "Which saved login to use when the site has more than one."
+          },
+          "email": {
+            "type": "string"
           },
           "submit": {
             "type": "boolean",
@@ -409,7 +421,7 @@
     },
     {
       "name": "find_tool",
-      "description": "Find an OpenMausBot tool that is not in your tool list. Say what you want to do in a few words, or give the tool's name. Each match comes back with its description and exact input schema; run one with use_tool. Tools reached this way: list_shared_computers, shared_computer, assignment_status, raise_escalation, usage_limits, list_threads, close_thread, start_thread, vm_exec, show_widget, show_html, unpublish_page, create_bot, list_team_setup, list_team_library, propose_team_setup, propose_bot_deletion, manage_room, x_search, research_search, research_endpoint, research_call, decide, extract, generate_image, report_bug, retry_thread, memory_log, session_search, trigger_info, trigger, delete_trigger, wait_until, list_waits, cancel_wait, propose_profile, propose_model, propose_team_memory, skills_list, skill_manage, mcp_server.",
+      "description": "Find an OpenMausBot tool that is not in your tool list. Say what you want to do in a few words, or give the tool's name. Each match comes back with its description and exact input schema; run one with use_tool. Tools reached this way: list_shared_computers, shared_computer, assignment_status, usage_limits, list_threads, close_thread, start_thread, list_models, vm_exec, show_widget, show_html, unpublish_page, create_bot, list_team_setup, list_team_library, propose_team_setup, propose_bot_deletion, manage_room, x_search, research_search, research_endpoint, research_call, decide, extract, generate_image, report_bug, retry_thread, memory_log, session_search, trigger_info, trigger, delete_trigger, wait_until, list_waits, cancel_wait, propose_profile, propose_model, propose_team_memory, skills_list, skill_manage, mcp_server.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

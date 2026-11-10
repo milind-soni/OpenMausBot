@@ -17,7 +17,7 @@ export const PAGE_TOOL_DEFINITIONS = [
   {
     name: "publish_page",
     description:
-      "Publish a page you made to a public link, only when the person asks to share or publish it: an .html file, or a folder with an index.html (static files, csv and parquet data too, up to 5 MB). Publishing the same path again, or passing page_id, updates the same link. Never publish secrets or personal details the person didn't ask to share. For a data dashboard, follow the data-dashboards skill.",
+      "Publish a page you made to a public link, only when the person asks to share or publish it: an .html file, or a folder with an index.html (static files and data too, up to 5 MB). Publishing the same path again, or passing page_id, updates the same link. Never publish secrets or personal details the person didn't ask to share. For a data dashboard, follow the data-dashboards skill.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -25,6 +25,7 @@ export const PAGE_TOOL_DEFINITIONS = [
         path: { type: "string", description: "The file or folder, in your working folder." },
         title: { type: "string", maxLength: 200, description: "A short name for the page." },
         page_id: PAGE_ID,
+        live: { type: "boolean", description: "True republishes it when its folder changes; open copies reload." },
       },
       required: ["path", "title"],
     },

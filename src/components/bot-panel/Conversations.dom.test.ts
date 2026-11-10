@@ -131,12 +131,12 @@ describe("a bot's conversations in its panel", () => {
     expect(list).toEqual(expect.arrayContaining(["[&_.font-semibold]:font-medium", "[&_time]:text-[12px]", "[&_time]:text-ink-tertiary", "[&_span.bg-accent]:size-2"]));
   });
 
-  it("puts New conversation first, as a labelled button beside search", () => {
+  it("puts New conversation first, as a labelled button, with search on the section's label line", () => {
     render(research());
     const add = host.querySelector("[data-conversations-new]")!;
     expect(add.textContent).toBe("New conversation");
     expect(add.compareDocumentPosition(host.querySelector("[data-conversation]")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(add.nextElementSibling).toBe(host.querySelector("[data-conversations-search]"));
+    expect(host.querySelector("[data-conversations-search]")!.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows no Show more when every conversation fits", () => {

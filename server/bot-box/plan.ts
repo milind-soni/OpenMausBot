@@ -1,5 +1,4 @@
-// The bot box's plan: what one boxed process sees, as a list of mounts and the bubblewrap argv that makes it. Pure, so
-// tests can check the list itself (and that removing a line opens exactly the hole it guards).
+// The bot box's plan: what one boxed process sees, as a list of mounts and the bubblewrap argv that makes it.
 //
 // What the box sees:
 //   - the image's code read-only: /usr (with /bin, /lib, /lib64 and /sbin as the links a merged-/usr Debian has), /etc,
@@ -16,7 +15,9 @@
 //   - of /sys, only the machine's CPU list, read-only;
 //   - a network namespace with loopback only. Two loopback ports inside are bridged to unix sockets bound in from outside:
 //     the egress gate (every connection to the internet goes through it) and the harness gate (only /api/internal/
-//     routes of this server). Nothing else on the server's loopback is reachable.
+//     routes of this server). Nothing else on the server's loopback is reachable. A box that waits for a sign-in callback
+//     also dials out to one more socket, through which the server reaches the box's own loopback, never the other way.
+import { statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export type BoxNet = "isolated" | "shared";
@@ -67,10 +68,20 @@ export interface BoxRequest {
   net?: BoxNet;
   /** The bot whose own folder (workspaces/<bot>) is put back; derived from a task-workspace cwd when absent. */
   botId?: string;
+  /** One process serves every conversation of the bot (a shared OpenCode process): all of the bot's conversation folders
+   * are read-write and all of their uploads read-only, in place of only the starting conversation's. */
+  botThreads?: boolean;
   /** A Team Cloud audience's engine home, bound read-write in place of the server's HOME, none of which the box then has. */
   home?: string;
   /** Files bound read-write over their names in `home`: the team's engine sign-ins. */
   shared?: ReadonlyArray<{ source: string; target: string }>;
+  /** The command, its arguments and its environment are a server someone configured (an MCP server a bot may have
+   * added), not ones OpenMausBot built. Security: none of them puts anything of the data folder in the box but the
+   * bot's own folders, so an environment value naming a folder there is not made writable. */
+  configured?: boolean;
+  /** A host unix socket the box dials out to, so the server can reach a port the engine listens on inside the box's own
+   * network, such as a sign-in's callback. Only an isolated box has one. */
+  relay?: string;
 }
 
 export interface BoxPlan {
@@ -84,6 +95,7 @@ export interface BoxPlan {
 }
 
 export const IN_BOX_SOCKET_DIR = "/run/omb";
+export const RELAY_SOCKET_NAME = "relay";
 export const BOX_HOSTNAME = "omb-box";
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -125,6 +137,17 @@ export const CPU_LIST_FILES = ["/sys/devices/system/cpu/possible", "/sys/devices
 
 /** Folders the box always has its own copy of, so no setting may put the host's back. */
 const PRIVATE_INSIDE = ["/tmp", "/var/tmp", "/run", "/dev", "/proc"];
+
+function assertReadOnlySource(source: string): void {
+  try {
+    const stat = statSync(source);
+    if (stat.isFile() && stat.nlink > 1) {
+      throw new Error(`The bot box refuses a multiply-linked read-only file: ${source}; grant a separate single-link copy instead.`);
+    }
+  } catch (error) {
+    if (!["ENOENT", "EACCES", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+  }
+}
 
 export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   const mutate = setup.mutate ?? new Set<BoxMutation>();
@@ -174,11 +197,14 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   const cwd = request.cwd ? resolve(request.cwd) : null;
   const ids = cwd ? taskWorkspaceIds(cwd, dataDir) : null;
   const botId = request.botId ?? ids?.botId ?? null;
+  const threads = request.botThreads && ids ? ids.botId : null;
+  if (threads) rw(join(dataDir, "task-workspaces", threads));
   if (cwd && !covered(cwd)) rw(cwd);
   if (botId && ID.test(botId)) {
     const own = join(dataDir, "workspaces", botId);
     if (!covered(own)) rw(own);
   }
+  const ownFolders = botId && ID.test(botId) ? [join(dataDir, "workspaces", botId), join(dataDir, "task-workspaces", botId)] : [];
   if (mutate.has("bind-otherws")) {
     rw(join(dataDir, "workspaces"));
     rw(join(dataDir, "task-workspaces"));
@@ -186,7 +212,9 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   for (const name of PATH_ENV_NAMES) {
     const value = request.env[name];
     // A temp folder stays the box's own private one; anything else the engine writes is put back.
-    if (value && isAbsolute(value) && !covered(resolve(value)) && !PRIVATE_INSIDE.some((base) => under(resolve(value), base))) rw(resolve(value));
+    if (!value || !isAbsolute(value) || covered(resolve(value)) || PRIVATE_INSIDE.some((base) => under(resolve(value), base))) continue;
+    if (request.configured && (under(resolve(value), dataDir) || under(dataDir, resolve(value))) && !ownFolders.some((folder) => under(resolve(value), folder))) continue;
+    rw(resolve(value));
   }
   for (const path of request.rw ?? []) if (!covered(resolve(path))) rw(resolve(path));
   if (ownHome) {
@@ -201,12 +229,23 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   }
   // The person's uploads for this conversation, after every read-write line: readable, but never writable or swappable.
   if (ids) {
-    const shown = boxUploadsDir(dataDir, ids.botId, ids.threadId);
+    const shown = threads ? join(dataDir, "box-uploads", threads) : boxUploadsDir(dataDir, ids.botId, ids.threadId);
     mounts.push({ kind: "ro", source: shown, target: shown, optional: true });
   }
   const readOnly = new Set<string>();
+  const inBotFolder = (path: string) => ["workspaces", "task-workspaces"].some((kind) => {
+    const [owner, ...rest] = relative(join(dataDir, kind), path).split(sep);
+    return owner !== undefined && ID.test(owner) && !rest.includes("..") && (botId ? owner === botId : true);
+  });
+  const named = new Set((request.ro ?? []).map((path) => resolve(path)));
+  if (botId && ID.test(botId)) named.add(join(dataDir, "bots", botId, "SOUL.md"));
   for (const path of [...(request.ro ?? []), ...argvPaths(request.args), ...(botId && ID.test(botId) ? [join(dataDir, "bots", botId, "SOUL.md")] : [])]) {
     const full = resolve(path);
+    if (request.ro?.includes(path)) assertReadOnlySource(full);
+    // Security: a command line is not a grant. A path on one that is in the data folder, or holds it, is shown only
+    // when the caller named it in `ro`, or when it is in a bot's folder: this box's bot's, or any bot's where the caller
+    // gave no bot (a configured server's program lives in the folder of the bot that added it).
+    if (!named.has(full) && (under(full, dataDir) || under(dataDir, full)) && !covered(full) && !inBotFolder(full)) continue;
     // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
     if (covered(full) || readOnly.has(full)) continue;
     if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
@@ -221,6 +260,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     options.push("--unshare-net");
     mounts.push({ kind: "dir", target: IN_BOX_SOCKET_DIR });
     for (const bridge of setup.bridges) mounts.push({ kind: "bind", source: bridge.socket, target: join(IN_BOX_SOCKET_DIR, `${bridge.name}.sock`) });
+    if (request.relay) mounts.push({ kind: "bind", source: resolve(request.relay), target: inBoxSocket(RELAY_SOCKET_NAME) });
   }
   if (cwd) options.push("--chdir", cwd);
   return { mounts, options, net, writable, botId };
@@ -231,7 +271,7 @@ export function bwrapArgs(plan: BoxPlan): string[] {
   const args: string[] = [];
   for (const mount of plan.mounts) {
     switch (mount.kind) {
-      case "ro": args.push(mount.optional ? "--ro-bind-try" : "--ro-bind", mount.source, mount.target); break;
+      case "ro": assertReadOnlySource(mount.source); args.push(mount.optional ? "--ro-bind-try" : "--ro-bind", mount.source, mount.target); break;
       case "bind": args.push(mount.optional ? "--bind-try" : "--bind", mount.source, mount.target); break;
       case "tmpfs": args.push("--tmpfs", mount.target); break;
       case "proc": args.push("--proc", mount.target); break;

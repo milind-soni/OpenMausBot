@@ -18,16 +18,22 @@ export interface AgentCardStore {
 }
 
 export type AgentCardResult =
-  /** `masked`: something in the widget read as a secret and was stored masked. */
-  | { ok: true; messageId: string; masked?: true }
+  /** `masked`: something in the widget read as a secret and was stored masked. `leftOut`: a folder page's sentence naming
+   * the files it left out. */
+  | { ok: true; messageId: string; masked?: true; leftOut?: string }
   | { ok: false; status: 400 | 403 | 404 | 409; error: string };
 
-const ROOM_REFUSAL = "Widgets are not available in rooms yet. Answer in text.";
 const NO_SUCH_WIDGET = "No widget with that id in this conversation.";
 const EMPTY_FALLBACK = "[widget]";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/** A room's row names the bot that wrote it. A direct thread's never does: there a bot-authored row carrying `from` is
+ * replayed as another bot's line. */
+export function speakerIn(store: Pick<AgentCardStore, "groupByThread">, threadId: string, bot: { id: string; name: string; color: MausColor }): Pick<Message, "from"> {
+  return store.groupByThread(threadId) ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {};
 }
 
 /** Every string loses its secrets. Under an action's `payload` and a chart's `data` rows the keys are the bot's, so they are
@@ -129,13 +135,11 @@ export function createAgentCard(args: AgentCardArgs): AgentCardResult | Promise<
   if (input.tool !== "show_widget" && input.tool !== "update_widget") {
     return { ok: false, status: 400, error: "tool: must be show_widget or update_widget." };
   }
-  if (store.groupByThread(threadId)) return { ok: false, status: 409, error: ROOM_REFUSAL };
 
   if (input.tool === "show_widget") {
     const widget = canonicalWidget(input);
     if (!widget.ok) return widget;
-    // No `from`: in a direct thread a bot-authored row carrying one is replayed as another bot's line.
-    const message = store.appendMessage(threadId, { role: "bot", kind: "widget", text: widget.text, widget: { v: 1, root: widget.root }, ...(args.serverCard ? { serverCard: true as const } : {}) });
+    const message = store.appendMessage(threadId, { role: "bot", kind: "widget", text: widget.text, widget: { v: 1, root: widget.root }, ...speakerIn(store, threadId, bot), ...(args.serverCard ? { serverCard: true as const } : {}) });
     args.authored?.(message.id);
     return { ok: true, messageId: message.id, ...(widget.masked ? { masked: true as const } : {}) };
   }

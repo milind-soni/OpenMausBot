@@ -53,6 +53,14 @@ describe("Grok device prompt", () => {
   });
 });
 
+describe("Grok sign-out from the server", () => {
+  it("declares the CLI's logout command with the stored sign-in as its check", () => {
+    expect(GROK_DEVICE_SIGN_IN.logoutArgs).toEqual(["logout"]);
+    expect(GROK_DEVICE_SIGN_IN.signedIn).toBeTypeOf("function");
+    expect(GROK_DEVICE_SIGN_IN.signInState).toBeTypeOf("function");
+  });
+});
+
 describe.skipIf(process.platform === "win32")("Grok Build sign-in with a device code", () => {
   let home: string;
   let instances: ProviderInstance[];
@@ -205,5 +213,17 @@ describe.skipIf(process.platform === "win32")("Grok Build sign-in with a device 
     expect((await instance.getAuthentication!(start.flowId!)).phase).toBe("waiting");
     writeFileSync(join(home, ".omb-fake-grok-approved"), "approve fixture only\n");
     await expect.poll(async () => (await instance.getAuthentication!(start.flowId!)).phase, { timeout: 5_000 }).toBe("succeeded");
+  });
+
+  it("signs the stored login out through the CLI's logout", async () => {
+    const instance = await grok("success");
+    const start = await instance.startAuthentication!();
+    await expect.poll(async () => (await instance.getAuthentication!(start.flowId!)).phase, { timeout: 5_000 }).toBe("succeeded");
+    expect(existsSync(join(home, ".grok", "auth.json"))).toBe(true);
+    await instance.signOut!();
+    expect(existsSync(join(home, ".grok", "auth.json"))).toBe(false);
+    expect(calls().filter((call) => call.args[0] === "logout")).toEqual([
+      { args: ["logout"], home, grokHome: join(home, ".grok"), xaiKey: null },
+    ]);
   });
 });

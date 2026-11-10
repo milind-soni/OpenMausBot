@@ -28,9 +28,10 @@ export function contextText(m: Pick<Message, "text" | "attachments" | "peerPost"
   return spoken.length ? [m.text?.trim(), ...spoken].filter(Boolean).join("\n\n") : m.text ?? "";
 }
 
-/** A Live call's row (kind "call") is a record for people, never context. */
-export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "roomRequest" | "attachments" | "peerPost" | "webhookPost">): boolean {
-  return Boolean(((m.kind === "text" || m.kind === "widget" || m.kind === "app") && contextText(m)) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result");
+/** A Live call's row (kind "call") and an engine's own compaction marker (kind "compaction", engineCompaction) are
+ * records for people, never context. */
+export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "engineCompaction" | "roomRequest" | "attachments" | "peerPost" | "webhookPost">): boolean {
+  return Boolean(((m.kind === "text" || m.kind === "widget" || m.kind === "app") && contextText(m)) || (m.kind === "digest" && m.digest) || (m.kind === "compaction" && !m.engineCompaction) || m.roomRequest?.phase === "result");
 }
 
 export interface HandedState {

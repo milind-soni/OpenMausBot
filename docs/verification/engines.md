@@ -87,6 +87,21 @@ Groq model in the bot's picker, send a fixture turn, then clear the key and
 confirm the engine is unavailable. Never use the live app or a real key for
 this recipe.
 
+## ModelGo API setup
+
+```sh
+pnpm exec vitest run server/drivers/modelgo.test.ts server/provider-key-check.test.ts server/credential-request.test.ts src/components/keys/key-catalog.test.ts
+```
+
+These use a local stand-in for `https://api.modelgo.ai/v1`. They check the
+preset endpoint, that the server's key never goes to another host, the live
+model list, streaming and tool calls over chat completions, the plain sentences
+for HTTP 402 `billing_insufficient` and 403 `first_recharge_required`, and that
+a refused key never shows in events. They never call ModelGo. A chat and a tool
+call through this driver against the real API have not been run; use a real key
+before relying on them. `/models` has no field for tool support, so the picker
+keeps every model whose `output_modalities` includes text.
+
 ## Greenference API setup
 
 ```sh
@@ -125,3 +140,24 @@ OMB_LIVE_MUSE=1 pnpm exec vitest run server/drivers/muse-code.live.test.ts
 It lists the account's models (Muse Wonder 1.0), answers on Muse Wonder, runs
 a shell command as a tool step, and resumes the session on a fresh instance
 after the first one is gone, the way an app restart does.
+
+## Direct API endpoints for native agents
+
+```sh
+pnpm exec vitest run server/claude-account-api.test.ts server/claude-endpoints.test.ts server/codex-endpoints.test.ts server/drivers/codex.test.ts server/drivers/codex-background-text.test.ts src/components/AgentEndpoints.dom.test.ts src/components/ClaudeEndpoints.test.ts server/agent-endpoint-models.test.ts
+```
+
+The API fixture launches a disposable server and synthetic CLIs. It checks
+Codex endpoint creation, persistence, updates, removal guards, admin-only
+mutations and write-only keys. Driver fixtures check direct routing across
+native thread restarts, background calls, missing-key refusal, and exclusion
+of the key from shell environments and command arguments. Renderer tests
+check that both forms start empty (the official URL is only a placeholder;
+an empty Codex URL saves OpenAI), send a typed model, and save a custom
+gateway URL. Discovery tests check that the key never goes to a plain-HTTP
+host off this computer.
+
+These fixtures do not prove a real gateway's Responses or Messages protocol,
+streaming, tool execution, TLS, DNS, or account authentication. Verify those
+against a separately provisioned test gateway before marking the draft ready.
+Never use the person's live workspace or credentials for fixture verification.

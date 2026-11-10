@@ -1,12 +1,15 @@
 import type { HandoffView, RoomAddress } from "../coordinator.ts";
 import { peerAllowed, reachRefusal, type LookedAfterBy } from "../peer-roster.ts";
-import type { GroupRecord, Store } from "../store.ts";
+import type { BotRecord, GroupRecord, Store } from "../store.ts";
+import type { PersonalReach } from "./personal-reach.ts";
 
 export interface RoomAccessDeps {
   store: Store;
   /** The person a conversation is private to on a Team Cloud; null elsewhere. */
   privateTo?(threadId: string): string | null;
   lookedAfterBy?: LookedAfterBy;
+  /** A person's own MausBot reaching the bots they may chat with (personal-reach.ts). */
+  personalReach?(): Pick<PersonalReach, "carries" | "refusal">;
 }
 
 /** Security: what is said in a Team Cloud member's private chat never reaches a room. */
@@ -24,7 +27,13 @@ export type RoomTalksVerdict =
 const NOT_A_MEMBER = "The addressed agent isn't a member of this room; work sent to it again goes to it directly, in a thread of its own";
 const LEFT_THE_ROOM = "The addressed agent is no longer a member of this room, so its room job stopped; work sent to it again goes to it directly, in a thread of its own";
 
-export function createRoomAccess({ store, privateTo = () => null, lookedAfterBy }: RoomAccessDeps) {
+export function createRoomAccess({ store, privateTo = () => null, lookedAfterBy, personalReach }: RoomAccessDeps) {
+  function reachProblem(from: BotRecord, bot: BotRecord, parent: Pick<HandoffView, "threadId">, node: Pick<HandoffView, "threadId"> & Partial<Pick<HandoffView, "id" | "origin">>): string | undefined {
+    if (peerAllowed(from, bot)) return undefined;
+    const personal = personalReach?.();
+    if (personal?.carries(from, bot, parent.threadId, node)) return undefined;
+    return personal?.refusal(from, bot, parent.threadId) ?? reachRefusal(from, bot, lookedAfterBy)!;
+  }
   function roomRootProblem(node: Pick<HandoffView, "groupId" | "threadId" | "botId">): string | undefined {
     const group = node.groupId ? store.group(node.groupId) : undefined;
     const bot = store.bot(node.botId);
@@ -33,7 +42,7 @@ export function createRoomAccess({ store, privateTo = () => null, lookedAfterBy 
     if (!group.memberIds.includes(bot.id)) return "The addressed agent is no longer a member of this room";
     return undefined;
   }
-  function roomHandoffProblem(node: Pick<HandoffView, "groupId" | "threadId" | "botId"> & Partial<Pick<HandoffView, "kind">>, parent?: Pick<HandoffView, "groupId" | "threadId" | "botId">): string | undefined {
+  function roomHandoffProblem(node: Pick<HandoffView, "groupId" | "threadId" | "botId"> & Partial<Pick<HandoffView, "kind" | "id" | "origin">>, parent?: Pick<HandoffView, "groupId" | "threadId" | "botId">): string | undefined {
     const group = node.groupId ? store.group(node.groupId) : undefined;
     const bot = store.bot(node.botId);
     if (!bot || bot.hidden) return "The addressed agent no longer exists";
@@ -51,7 +60,11 @@ export function createRoomAccess({ store, privateTo = () => null, lookedAfterBy 
       const source = parent.groupId ? store.group(parent.groupId) : undefined;
       if (!from || from.hidden || (parent.groupId ? !source || !source.memberIds.includes(from.id) || !store.groupTaskByThread(source.id, parent.threadId) : !store.taskByThread(from.id, parent.threadId))) return "Source membership or task was removed";
       if (source && group && source.id === group.id && parent.threadId !== node.threadId) return "Same-room work must stay in the originating conversation";
-      if (!peerAllowed(from, bot)) return reachRefusal(from, bot, lookedAfterBy)!;
+      // A bot's own thread (start_thread's report_back) is no teammate: its teammate list never names itself.
+      if (!(from.id === bot.id && !node.groupId)) {
+        const refused = reachProblem(from, bot, parent, node);
+        if (refused) return refused;
+      }
     }
   }
 

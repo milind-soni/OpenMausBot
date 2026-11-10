@@ -36,7 +36,7 @@ export function PlaceLookRows() {
           disabled={locked} offset="menu" none />
       </SettingRow>
     </div>}
-    <PlacePicture banner={state.config?.workspaceBanner ?? null} canChange={admin} subtitle={t(computer ? "placeLook.sidebarPictureSub" : "placeLook.pictureSub")} />
+    <PlacePicture banner={state.config?.workspaceBanner ?? null} canChange={admin} subtitle={t(computer ? "placeLook.sidebarPictureSub" : "placeLook.sharedPictureSub")} />
   </>;
 }
 

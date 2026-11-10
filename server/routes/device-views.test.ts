@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { describe, expect, it } from "vitest";
 
 import type { RequestAuth } from "../request-auth.ts";
-import { createDeviceViewRoutes, pairingView, snapshotsAfterViewChanges, TEAM_VIEW_REFUSAL, type DeviceViewRouteDeps } from "./device-views.ts";
+import { createDeviceViewRoutes, openDevicePairing, pairingView, snapshotsAfterViewChanges, TEAM_VIEW_REFUSAL, type DeviceViewRouteDeps } from "./device-views.ts";
 
 const VIEW = { sections: ["Ops"], bots: [], groups: [] };
 
@@ -33,6 +33,28 @@ describe("the view a new pairing code grants", () => {
     expect(pairingView(VIEW, store, false)).toEqual({ ok: true, view: VIEW });
     expect(pairingView(VIEW, store, true)).toEqual({ ok: false, status: 409, error: TEAM_VIEW_REFUSAL });
     expect(pairingView({ sections: [], bots: [], groups: ["g"] }, store, false)).toEqual({ ok: false, status: 400, error: "no such channel" });
+  });
+});
+
+describe("POST /api/auth/pairing with a view", () => {
+  const store = { bot: () => ({}) as never, group: () => undefined, sections: ["Ops"] };
+  const opening = () => {
+    const asked: unknown[] = [];
+    const sessions = { openPairing: (input: unknown) => { asked.push(input); return { id: "p1", code: "ABCDEFGH", credential: "c", expiresAt: 0 }; } };
+    return { asked, sessions: sessions as unknown as Parameters<typeof openDevicePairing>[1] };
+  };
+
+  it("keeps how long the code and an access token last, beside the view", () => {
+    const { asked, sessions } = opening();
+    const view = { sections: ["Ops"], bots: [], groups: [] };
+    expect(openDevicePairing({ label: "CI", scopes: ["client"], ttlMs: 120_000, tokenTtlMs: 3_600_000, view }, sessions, store, false)).toMatchObject({ ok: true });
+    expect(asked).toEqual([{ label: "CI", scopes: ["client"], ttlMs: 120_000, tokenTtlMs: 3_600_000, view }]);
+  });
+
+  it("refuses a lifetime out of range before any code is opened", () => {
+    const { asked, sessions } = opening();
+    expect(openDevicePairing({ ttlMs: 59_999 }, sessions, store, false)).toMatchObject({ ok: false, status: 400, error: expect.stringContaining("24 hours") });
+    expect(asked).toEqual([]);
   });
 });
 

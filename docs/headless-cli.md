@@ -20,8 +20,9 @@ files it links, and writes everything to `./rehearsal`.
 
 ## Which workspace, and as whom
 
-- `--url URL` or `OPENMAUSBOT_URL`: a workspace somewhere else. Use `https://`
-  unless it is this computer (`ALLOW_INSECURE_HTTP=true` allows plain `http://`).
+- `--url URL` or `OPENMAUSBOT_URL`: a workspace somewhere else. `https://`
+  works anywhere; plain `http://` works only on this computer or a private
+  network (a LAN address, Tailscale's 100.x or `*.ts.net`, `*.local`).
 - `--port N` or `OMB_PORT`: this computer, on that port.
 - Otherwise the command looks on this computer's usual ports (8799, 18799,
   28799), as the desktop app uses them.
@@ -30,11 +31,15 @@ On this computer a headless server treats you as its owner, and no token is
 needed. Anywhere else you need a token:
 
 ```sh
-openmausbot connect https://maus.example.com --code ABCD1234 --out ~/.openmausbot-token
+openmausbot connect https://maus.example.com --code 7KQ2-M9XD-H4TP --out ~/.openmausbot-token
 openmausbot doctor --url https://maus.example.com --token-file ~/.openmausbot-token
 ```
 
-Get the code in the app under **Settings → Phone → Set up a phone**. On this
+`connect` also takes the whole link the server printed
+(`https://maus.example.com/pair#code=…`), so `--code` can be left out then.
+Make the pairing code on the server with `openmausbot pair` (add
+`--client --ttl 24h` for a chat-only code that stays open up to a day; a code
+works once). On this
 computer's own server, `connect` makes the code itself (`--client` gives a
 token that can chat but not change settings). The token goes to a file only
 you can read, and is never printed. Pass it with `--token-file FILE` or
@@ -42,13 +47,28 @@ you can read, and is never printed. Pass it with `--token-file FILE` or
 read by other programs. A token is never sent while the command is still
 looking for a server: with a token, name the server.
 
+For CI, make an access token that ends on a date you choose:
+
+```sh
+openmausbot token create "Nightly CI" --scope client --expires 90d --out ci-token   # on the server, or with an admin token
+openmausbot token list                     # name, scope, end date, last used (never the token)
+openmausbot token revoke ID                # it stops working at once
+```
+
+A `connect` session renews itself while it is used, up to 180 days; an access
+token never renews and ends on its date. `--expires` is at most the server's
+session limit (180 days unless `OMB_SESSION_MAX_DAYS` says otherwise), and
+`--scope client`, the default, can chat and answer approvals but not change
+settings. Tokens are listed and revoked like any session (`openmausbot
+sessions`, and Settings), and the token itself is written only to `--out`.
+
 ## Output and exit codes
 
 Without `--json` you get plain lines. With `--json` you get exactly one JSON
 document on stdout, a failure included (`{ "ok": false, "error", "hint",
 "exitCode" }`). Progress goes to stderr as one JSON object per line; `--quiet`
 drops it. Everything printed, either way, has secrets removed (the same
-redaction the transcript uses). Durations are written `90`, `90s`, `5m` or `2h`.
+redaction the transcript uses). Durations are written `90`, `90s`, `5m`, `2h` or `30d`.
 
 | Exit code | Meaning |
 |---|---|
@@ -59,6 +79,7 @@ redaction the transcript uses). Durations are written `90`, `90s`, `5m` or `2h`.
 | 4 | Timed out (the work keeps running) |
 | 5 | Cannot reach the server, not allowed, or the server is too old |
 | 6 | `team apply --check` found changes |
+| 7 | `doctor --host`: this machine is missing something the server needs |
 | 130 | Ctrl-C (the work keeps running) |
 
 ## Commands
@@ -70,9 +91,10 @@ one of its conversations.
 | Command | What it does |
 |---|---|
 | `doctor [--wait 2m]` | Checks the server answers, is new enough, who you are to it (and when your session expires), that an engine is ready, and whether bots have a browser. |
+| `doctor --host` | Checks this Linux machine can run the server and the bots' sandbox (below). |
 | `bots`, `channels`, `models` | Your bots and what each is doing, your rooms, the engines and the models each offers. |
 | `messages TARGET [--limit 30]` | The latest messages of a conversation. |
-| `send TARGET TEXT` | Sends one message and returns at once. `--send-id ID` makes a retry safe: the same id never sends twice. |
+| `send TARGET TEXT` | Sends one message and returns at once, to the conversation the bot or room has open. `--task new` starts a new conversation for it (`--title` names it, else the message's first line), and `--task ID` picks one. It says which conversation it went to. `--send-id ID` makes a retry safe: the same id never sends twice. |
 | `run TARGET TEXT` | Gives a bot or room one job and waits until it is done (below). |
 | `wait TARGET` | Waits on work already running. |
 | `interrupt TARGET [--tree]` | Presses Stop. `--tree` also stops every teammate still working on its job, in that teammate's own conversation. |
@@ -81,11 +103,58 @@ one of its conversations.
 | `team apply FILE`, `team export --out FILE` | Makes the workspace match a team file, or writes one (below). |
 | `engine set KIND`, `engine list` | Gives the workspace an engine key without a screen (below). |
 | `connect [URL]` | Gets a token for a workspace elsewhere. |
+| `token create NAME`, `token list`, `token revoke ID` | Access tokens for CI that end on their date (above). |
 | `new-bot`, `new-channel`, `set-model`, `edit` | Make a bot or a room, change a bot's model, rewrite an earlier message. |
 | `mcp` | The OpenMausBot MCP server on stdin and stdout ([docs/mcp-server.md](mcp-server.md)). |
 
 The message for `send` and `run` can be the next word, `--text TEXT`,
 `--message-file FILE`, or `-` to read it from stdin.
+
+## doctor --host
+
+Before you install a server, check the machine it will run on:
+
+```text
+$ sudo openmausbot doctor --host --data-dir /srv/mausbot
+ok    Ubuntu 24.04.1 LTS, kernel 6.8.0-45-generic
+ok    x86_64
+ok    Docker 27.3.1
+FAIL  Bot sandbox: AppArmor blocks unprivileged user namespaces
+      fix: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0   (and put it in /etc/sysctl.d/ to keep it after a reboot)
+ok    seccomp is available
+ok    cgroup v2
+ok    412 GB free for /srv/mausbot
+warn  /srv/mausbot is not on an encrypted disk
+      fix: use LUKS full-disk encryption, unless your provider encrypts the disk at rest
+ok    8 CPUs, 31 GB memory (a team of 20 needs 8 CPUs and 16 GB)
+ok    Port 8799 is free for the server
+ok    Ports 80 and 443 are free
+ok    Clock is within 1 s of network time (signed requests allow 300 s)
+1 problem, 1 warning.
+```
+
+It checks the system (Ubuntu 24.04 or 22.04, or Debian 12, are the ones we
+test), the processor (x86_64; arm64 runs a server but not a self-hosted Team
+server), Docker or Podman, that unprivileged user namespaces are allowed (the
+AppArmor and Debian switches), seccomp, cgroup v2, free disk for the data
+folder (`--data-dir`, else `OMB_DATA_DIR` or `~/.openmausbot`: at least 10 GB,
+and 100 GB for a Team server), disk encryption, CPUs and memory (a Team needs
+4 CPUs and 8 GB), the server's port (`--port`, else 8799), ports 80 and 443
+(required with `--domain HOST`, else only a warning), and the clock against
+network time (signed requests allow 300 seconds). It changes nothing.
+
+On a server that runs MausBot's own connector (a team on its own server), it
+also asks the connector for its checks (`mausbot-connector probe --json`,
+which starts the bots' box once under the home's own security settings) and
+lists any that fail. There the home runs under its own AppArmor profile, so
+AppArmor's server-wide switch can stay on: the user-namespace check passes
+when the connector's box check does, and otherwise says to run the install
+command again.
+
+A problem fails the check (exit 7) and says its fix on the next line; a
+warning does not. `--json` prints `{ ok, problems, warnings, checks: [{ id,
+status, message, fix }] }`. On macOS and Windows it says it checks Linux
+servers, and exits 7.
 
 ## run and wait
 
@@ -198,7 +267,7 @@ openmausbot engine list
 ```
 
 KIND is `claude`, `openai`, `openrouter`, `openai-compatible` (needs
-`--base-url`), `xai`, `groq`, `greenference`, `mistral` or `cerebras`. The key comes from an
+`--base-url`), `xai`, `groq`, `greenference`, `modelgo`, `mistral` or `cerebras`. The key comes from an
 environment variable (`--key-env`) or a file (`--key-file`), is written once
 through the same setting the Settings screen uses, and is never printed or
 read back. An engine that already has a key is left alone unless `--rotate`,
@@ -257,7 +326,7 @@ is the confirmation.
 version: 1                                  # required
 engines:                                    # optional; needs full access
   claude: { key: SECRET, baseUrl: URL | SECRET, everyClaudeBot: true, install: false }
-  openai | openrouter | xai | groq | greenference | mistral | cerebras: { key: SECRET }
+  openai | openrouter | xai | groq | greenference | modelgo | mistral | cerebras: { key: SECRET }
   openaiCompatible: { key: SECRET, baseUrl: URL | SECRET }
   # SECRET is { env: NAME } or { file: PATH }. A key written in the file is refused.
 defaults: BOT FIELDS                        # every bot gets these unless it sets its own

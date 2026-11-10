@@ -39,7 +39,7 @@ function world(options: { live?: string[]; privateTo?: string; steers?: boolean;
   const nodes = new Map<string, HandoffView>();
   const node = (over: Partial<HandoffView>): HandoffView => {
     const made = { id: "as_1", rootId: "root", parentId: "root", threadId: "work", botId: "dachs", key: "dachs", text: "Fix it", createdAt: 1_000,
-      status: "waiting", result: "", reported: false, executions: 1, approvalGranted: false, kind: "work", restarts: 0, mode: "work", reply: "resume", ...over } as HandoffView;
+      status: "waiting", result: "", reported: false, executions: 1, kind: "work", restarts: 0, mode: "work", reply: "resume", ...over } as HandoffView;
     nodes.set(made.id, made);
     return made;
   };
@@ -49,7 +49,7 @@ function world(options: { live?: string[]; privateTo?: string; steers?: boolean;
   const settled: string[] = [];
   const steered: Array<{ threadId: string; text: string }> = [];
   const deps: QuestionRoutingDeps = {
-    store: store as unknown as QuestionRoutingDeps["store"],
+    handedInUnproven: () => {}, store: store as unknown as QuestionRoutingDeps["store"],
     active: () => [...nodes.values()],
     node: (id) => nodes.get(id),
     parkedFor: (botId) => [...nodes.values()].filter((one) => one.botId === botId && one.status === "waiting" && one.question !== undefined),

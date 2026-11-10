@@ -83,8 +83,11 @@ export interface CloudSendFixture {
   /** What main asked for besides: lending, the phone link, which home the window opened, and an app relaunch. */
   spies: { lent: string[][]; phoneStops: number; phoneStarts: number; opened: string[]; relaunches: number };
   /** The app quits or is killed: its main wiring stops, this computer's server is killed, and both start again on the
-   * same data. With `cloud`, My Cloud's server is started again too, with more of its environment. */
-  relaunch(options?: { kill?: boolean; cloud?: NodeJS.ProcessEnv }): Promise<void>;
+   * same data. With `cloud`, My Cloud's server is started again too, with more of its environment. With `dataDir`, this
+   * computer's server starts on that folder instead, at the same address, as main's swap to a profile does. */
+  relaunch(options?: { kill?: boolean; cloud?: NodeJS.ProcessEnv; dataDir?: string }): Promise<void>;
+  /** This computer's own data folder: the copy the move freezes. */
+  desktopDataDir: string;
   /** The Team Cloud started with `team` (docs/team-cloud.md), paired the way the Admin pairs it: a signed body with
    * the member claim, redeemed at /api/auth/pair. Null without `team`. */
   team: CloudTeamFixture | null;
@@ -157,8 +160,8 @@ exports.createClient = async ({ auth }) => {
  * refuse this computer's token on My Cloud. `toolCalls`: each turn on this computer makes that many tool calls first, so a
  * few turns make a conversation of several pages. `broker`: the connected-apps service both servers use, this computer
  * with an installation of its own as the desktop app registers one, My Cloud registering itself as a Cloud home does.
- * `env`: more of both servers' environment (a fake HighLevel and its relay). `cloudEngine`: lines run at the start of My
- * Cloud's synthetic Claude CLI, to script its turns (fake-claude-cli.ts). */
+ * `env`: more of both servers' environment. `cloudEngine`: lines run at the start of My Cloud's synthetic Claude CLI, to
+ * script its turns (fake-claude-cli.ts). */
 export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space, cloudSignedIn = true, team }: {
   onePasswordToken: string; cloudOnePasswordToken?: string; toolCalls?: number;
   /** A Team Cloud too (OMB_CLOUD_ROLE=team), with its own environment and synthetic Claude CLI lines. */
@@ -234,8 +237,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const desktopPort = await freePortBlock([0, 1]);
   const desktopBase = `http://127.0.0.1:${desktopPort}`;
   const desktopInstallation = broker ? await broker.install() : null;
-  const startDesktop = async () => {
-    const child = await start("desktop", { OMB_DESKTOP_PARENT: "1",
+  const startDesktop = async (dataDir?: string) => {
+    const child = await start("desktop", { OMB_DESKTOP_PARENT: "1", ...(dataDir ? { OMB_DATA_DIR: dataDir } : {}),
       ...(broker && desktopInstallation ? { OMB_COMPOSIO_BROKER_URL: broker.url, OMB_COMPOSIO_BROKER_TOKEN: desktopInstallation.token } : {}) }, desktopPort, ["--import", parentPort], true, onePasswordToken, toolCalls, desktopEngine);
     child.send({ type: "openmausbot:desktop-mutation-token", token: ownerCapability });
     return child;
@@ -538,7 +541,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     get intercept() { return fixture.intercept; },
     set intercept(hook) { fixture.intercept = hook; },
     oneHome: { kick: () => main.kick(), view: () => main.view(), away: () => main.away() },
-    async relaunch({ kill = true, cloud: cloudMore } = {}) {
+    desktopDataDir: join(root, "desktop", ".openmausbot"),
+    async relaunch({ kill = true, cloud: cloudMore, dataDir } = {}) {
       main.close();
       await waitForExit(desktop, { signal: kill ? "SIGKILL" : "SIGTERM" });
       if (cloudMore) {
@@ -546,7 +550,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
         cloud = await startCloud(cloudMore);
         owner = await pairOwner();
       }
-      desktop = await startDesktop();
+      desktop = await startDesktop(dataDir);
       for (let tries = 0; (await local("GET", "/api/bots")).status !== 200 && tries < 50; tries++) await new Promise((resolve) => setTimeout(resolve, 100));
       main = wire();
       listen();

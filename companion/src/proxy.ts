@@ -2,9 +2,14 @@
 // (a DNS-rebinding defence), so a device's request is replayed to 127.0.0.1
 // as this process, never with the device's Host or Origin.
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
-import type { Duplex } from "node:stream";
+import type { Duplex, Readable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
+import { createGzip, type Gzip } from "node:zlib";
 
 import { bearerToken } from "./devices.ts";
+import type { E2EDescriptor } from "./e2e/descriptor.ts";
+import { e2eContextOf } from "./e2e/origin.ts";
+import type { E2EContext } from "./e2e/registry.ts";
 import {
   COMPANION_ENDPOINT_KINDS,
   MAX_COMPANION_ENDPOINTS,
@@ -16,7 +21,8 @@ import {
   isCloudDesktopAccess,
   isMessageFileDownload,
 } from "./routes.ts";
-import { sendTunnelJson } from "./tunnel-gzip.ts";
+import { createJsonScrubber } from "./json-scrub.ts";
+import { acceptsGzip, gzipCandidate, sendTunnelJson, varyOnEncoding } from "./tunnel-gzip.ts";
 import { CompanionViewerRelay, requestTarget } from "./viewer-relay.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
@@ -26,7 +32,7 @@ export interface ProxyOptions {
   mutationToken?: () => string | null;
   authenticate: (
     token: string | undefined,
-  ) => { id?: string; cloudDesktopAccess: boolean; browserControlAccess: boolean } | null;
+  ) => { id?: string; cloudDesktopAccess: boolean; browserControlAccess: boolean; e2eAt?: number } | null;
   /** Pairing is handled here and never forwarded: the harness has no such route. */
   redeem: (
     code: string,
@@ -43,6 +49,27 @@ export interface ProxyOptions {
    * it synchronously on revoke; the returned disposer is called exactly once. */
   connected?: (deviceId: string, disconnect: () => void) => () => void;
   headersTimeoutMs?: number;
+  /** Tests only: a lower whole-body ceiling, so a reply past it need not be tens of MiB. */
+  wholeJsonBodyBytes?: number;
+  /** The `e2e` descriptor for one device (null: the phone pairing now); null when end-to-end is off. */
+  e2eDescriptor?: (deviceId: string | null) => E2EDescriptor | null;
+  /** A phone paired through an encrypted session keyed by the pairing token: the session is now that device's. */
+  e2ePaired?: (context: E2EContext, deviceId: string) => void;
+}
+
+/** Which listener a request reached. Only `lan` (port 8810, plain HTTP) refuses a device that has gone end-to-end;
+ * requests arriving through an encrypted stream are recognised by their socket, whatever this says. */
+export type ProxyListener = "lan" | "origin";
+
+/** §11 rule 4 of the wire spec: a phone that has used the encrypted connection never goes back to plain HTTP. */
+const UPDATE_APP = { error: "update_app" } as const;
+
+const PAIRING_SESSION_PATHS = new Set(["POST /api/pair", "GET /api/health"]);
+
+/** A token presented inside a session must belong to the device whose psk opened it. */
+function e2eRefusal(context: E2EContext, method: string, path: string, deviceId: string | undefined): string | null {
+  if (context.peer.kind === "pairing") return PAIRING_SESSION_PATHS.has(`${method} ${path}`) ? null : "pair this phone first";
+  return deviceId && deviceId !== context.peer.id ? "this connection belongs to another device" : null;
 }
 
 export interface CompanionEndpointSnapshot {
@@ -63,7 +90,10 @@ export function proxyHeadersTimeoutMs(url: string, override?: number): number {
     ?? (PHONE_SECRET_PROVIDE_PATH.test(url) ? PHONE_SECRET_HEADERS_TIMEOUT_MS : HEADERS_TIMEOUT_MS);
 }
 
-const MAX_JSON_BODY_BYTES = 32 * 1024 * 1024;
+/** A JSON reply up to this size is scrubbed whole; past it, it is scrubbed as it streams, so a long history reaches a
+ * paired device as it reaches the desktop. Whole, the companion briefly holds several times the body (bytes, text,
+ * parsed objects, the re-serialised copy). */
+const WHOLE_JSON_BODY_BYTES = 32 * 1024 * 1024;
 
 /** Bounded: an unbounded read on an unauthenticated route is a
  * memory-exhaustion vector. */
@@ -122,6 +152,92 @@ const sendJson = (res: ServerResponse, status: number, body: unknown): void => {
   res.writeHead(status, { ...headers, "content-length": Buffer.byteLength(text) });
   res.end(text);
 };
+
+/** Writes to a device and holds `source` back until that write has reached the socket. Paced by the write's own
+ * callback, not the response's 'drain': on Node 24 on Linux a chunked response that wrote a large piece can finish
+ * flushing with `writableNeedDrain` still set and never emit 'drain', which left the reply stalled for good. */
+function toDevice(res: ServerResponse, data: string | Buffer, source: Readable): void {
+  let held = false;
+  held = !res.write(data, () => {
+    if (held) source.resume();
+  });
+  if (held) source.pause();
+}
+
+/** A JSON reply past the whole-body ceiling, scrubbed as it streams. Bytes that were never JSON go on verbatim, as a
+ * small body's do; a body that stops being JSON after its start is out can only be cut off. */
+function streamScrubbedJson(harness: IncomingMessage, res: ServerResponse, held: Buffer[]): void {
+  const status = harness.statusCode ?? 200;
+  const scrubber = createJsonScrubber();
+  const decoder = new StringDecoder("utf8");
+  const head = Buffer.concat(held);
+  let first: string;
+  try {
+    first = scrubber.write(decoder.write(head));
+  } catch {
+    res.writeHead(status, privateHeaders(harness.headers));
+    toDevice(res, head, harness);
+    harness.on("data", (chunk: Buffer) => toDevice(res, chunk, harness));
+    harness.on("end", () => res.end());
+    return;
+  }
+  const headers = { ...harness.headers };
+  delete headers["content-length"];
+  delete headers["content-encoding"];
+  delete headers["transfer-encoding"];
+  const reply = privateHeaders(headers);
+  let zip: Gzip | null = null;
+  // A phone tunnel gzips a whole JSON reply; this one is gzipped as it goes.
+  if (gzipCandidate(res, status, reply, first)) {
+    const vary = varyOnEncoding(reply.vary ?? res.getHeader("vary"));
+    if (acceptsGzip(res.req.headers["accept-encoding"])) {
+      res.writeHead(status, { ...reply, vary, "content-encoding": "gzip" });
+      zip = createGzip();
+      const gzipped = zip;
+      gzipped.on("data", (chunk: Buffer) => toDevice(res, chunk, gzipped));
+      gzipped.on("end", () => res.end());
+      gzipped.on("error", () => res.destroy());
+      // zlib's own 'drain' is an ordinary stream's, and it holds the harness back while it compresses.
+      gzipped.on("drain", () => harness.resume());
+    } else {
+      res.writeHead(status, { ...reply, vary });
+    }
+  } else {
+    res.writeHead(status, reply);
+  }
+  const send = (text: string): void => {
+    if (!zip) toDevice(res, text, harness);
+    else if (!zip.write(text)) harness.pause();
+  };
+  const finish = (text: string): void => {
+    if (zip) zip.end(text);
+    else res.end(text);
+  };
+  const cut = (): void => {
+    harness.destroy();
+    zip?.destroy();
+    res.destroy();
+  };
+  send(first);
+  harness.on("data", (chunk: Buffer) => {
+    let text: string;
+    try {
+      text = scrubber.write(decoder.write(chunk));
+    } catch {
+      return cut();
+    }
+    if (text) send(text);
+  });
+  harness.on("end", () => {
+    let rest: string;
+    try {
+      rest = scrubber.write(decoder.end()) + scrubber.end();
+    } catch {
+      return cut();
+    }
+    finish(rest);
+  });
+}
 
 /** Validated and capped at the network boundary so no producer can publish an
  * extra field, a path-bearing URL or an unbounded list. */
@@ -264,7 +380,13 @@ function harnessControlCheck(options: ProxyOptions) {
 export function createProxyHandler(options: ProxyOptions) {
   const viewers = new CompanionViewerRelay({ checkControl: harnessControlCheck(options) });
   const capabilityStreams = new Map<string, Set<() => void>>();
-  const handle = function handle(req: IncomingMessage, res: ServerResponse): void {
+  /** Each device's open `/api/events` streams, for the events the sidecar itself sends. */
+  const eventStreams = new Map<string, Set<(event: string) => void>>();
+  const endpointsFor = (deviceId: string | null) => {
+    const descriptor = options.e2eDescriptor?.(deviceId) ?? null;
+    return { ...endpointSnapshot(options), ...(descriptor ? { e2e: descriptor } : {}) };
+  };
+  const handle = function handle(req: IncomingMessage, res: ServerResponse, listener: ProxyListener = "lan"): void {
     const target = requestTarget(req.url);
     if (!target) return sendJson(res, 400, { error: "invalid request target" });
     const path = (req.url ?? "/").split("?")[0];
@@ -278,6 +400,10 @@ export function createProxyHandler(options: ProxyOptions) {
 
     const token = bearerToken(req.headers.authorization);
     const device = options.authenticate(token);
+    const e2e = e2eContextOf(req.socket);
+    if (!e2e && listener === "lan" && device?.e2eAt && path !== "/api/health") return sendJson(res, 426, UPDATE_APP);
+    const e2eDenial = e2e ? e2eRefusal(e2e, method, path, device?.id) : null;
+    if (e2eDenial) return sendJson(res, 401, { error: e2eDenial });
     const browserRequest = isBrowserControlAccess(method, path);
     const browserRefusal = () => {
       if (!browserRequest) return null;
@@ -332,18 +458,23 @@ export function createProxyHandler(options: ProxyOptions) {
             body.pairRequestId,
           );
           if ("error" in result) return sendJson(res, 401, { error: result.error });
+          const pairedId = (result.device as { id?: unknown } | null)?.id;
+          if (e2e && typeof pairedId === "string") options.e2ePaired?.(e2e, pairedId);
           const hosts = options.hosts?.() ?? [];
           const endpoints = options.endpoints?.() ?? [];
+          const descriptor = options.e2eDescriptor?.(typeof pairedId === "string" ? pairedId : null) ?? null;
           const response: typeof result & {
             serverName: string;
             hosts?: string[];
             endpoints?: CompanionEndpoint[];
+            e2e?: E2EDescriptor;
           } = {
             ...result,
             serverName: options.serverName(),
           };
           if (hosts.length) response.hosts = hosts;
           if (endpoints.length) response.endpoints = endpoints;
+          if (descriptor) response.e2e = descriptor;
           return sendJson(res, 201, response);
         },
         (error: Error) => sendJson(res, 400, { error: error.message }),
@@ -357,7 +488,7 @@ export function createProxyHandler(options: ProxyOptions) {
     // Sidecar-owned state: answered here after the bearer and default-deny
     // checks, never sent to the harness.
     if (method === "GET" && path === "/api/companion/endpoints") {
-      return sendJson(res, 200, endpointSnapshot(options));
+      return sendJson(res, 200, endpointsFor(device?.id ?? null));
     }
 
     const mutationToken = device ? options.mutationToken?.() : undefined;
@@ -459,9 +590,24 @@ export function createProxyHandler(options: ProxyOptions) {
             open.add(disconnect);
             capabilityStreams.set(capabilityOwner, open);
           }
+          // The scrubber hands on whole events only, so an event written here never splits one of the harness's.
+          const pushTo = tracksDeviceConnection && currentDevice?.id ? currentDevice.id : undefined;
+          const push = (event: string) => {
+            if (!res.destroyed && !res.writableEnded) res.write(event);
+          };
+          if (pushTo) {
+            const open = eventStreams.get(pushTo) ?? new Set<(event: string) => void>();
+            open.add(push);
+            eventStreams.set(pushTo, open);
+          }
           const release = () => {
             releaseConnection?.();
             releaseConnection = null;
+            if (pushTo) {
+              const open = eventStreams.get(pushTo);
+              open?.delete(push);
+              if (open && open.size === 0) eventStreams.delete(pushTo);
+            }
             if (capabilityOwner) {
               const open = capabilityStreams.get(capabilityOwner);
               open?.delete(disconnect);
@@ -538,18 +684,23 @@ export function createProxyHandler(options: ProxyOptions) {
 
         const chunks: Buffer[] = [];
         let size = 0;
-        harness.on("data", (chunk: Buffer) => {
+        const hold = (chunk: Buffer) => {
           size += chunk.length;
-          if (size > MAX_JSON_BODY_BYTES) {
+          chunks.push(chunk);
+          if (size <= (options.wholeJsonBodyBytes ?? WHOLE_JSON_BODY_BYTES)) return;
+          harness.off("data", hold);
+          harness.off("end", finish);
+          // These two are rewritten or withdrawn whole, so neither can start before its end.
+          if (browserRequest || viewers.rewritesJoin(path)) {
             harness.destroy();
-            if (res.headersSent) res.destroy();
-            else sendJson(res, 502, { error: "the response from OpenMausBot was too large" });
+            sendJson(res, 502, { error: "the response from OpenMausBot was too large" });
             return;
           }
-          chunks.push(chunk);
-        });
+          streamScrubbedJson(harness, res, chunks);
+        };
+        harness.on("data", hold);
         harness.on("error", () => res.destroy());
-        harness.on("end", () => {
+        const finish = (): void => {
           const refusal = browserRefusal();
           if (refusal) return sendJson(res, refusal.status, { error: refusal.error });
           const body = Buffer.concat(chunks).toString("utf8");
@@ -581,7 +732,8 @@ export function createProxyHandler(options: ProxyOptions) {
             return;
           }
           forward(text, harness.headers, harness.statusCode ?? 200);
-        });
+        };
+        harness.on("end", finish);
 
         /** The body was re-serialised, so the harness's framing headers are
          * dropped: Node's parser rejects transfer-encoding alongside
@@ -634,16 +786,34 @@ export function createProxyHandler(options: ProxyOptions) {
     req.pipe(upstream);
   };
 
-  handle.upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
+  handle.upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer, listener: ProxyListener = "lan"): void => {
     if (req.headers.origin) {
       socket.destroy();
       return;
     }
     const token = bearerToken(req.headers.authorization);
     const device = options.authenticate(token);
+    const e2e = e2eContextOf(req.socket);
+    if (!e2e && listener === "lan" && device?.e2eAt) {
+      socket.end("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
+    if (e2e && e2eRefusal(e2e, req.method ?? "GET", (req.url ?? "/").split("?")[0], device?.id)) {
+      socket.destroy();
+      return;
+    }
     viewers.handleUpgrade(req, socket, head, device);
   };
   handle.closeViewers = (): void => viewers.closeAll();
+  /** The endpoint list again, as an event on every event stream the device holds: a phone hears a change of where it
+   * may connect from inside its session, before the relay acts on it. No `id:`, so the replay cursor stays put. */
+  handle.sendEndpoints = (deviceId: string): number => {
+    const open = eventStreams.get(deviceId);
+    if (!open) return 0;
+    const event = `data: ${JSON.stringify({ kind: "companion.endpoints", ...endpointsFor(deviceId) })}\n\n`;
+    for (const push of open) push(event);
+    return open.size;
+  };
   handle.disconnectDevice = (deviceId: string): void => {
     viewers.closeDevice(deviceId);
     // Revoking a capability closes the streams it already granted.

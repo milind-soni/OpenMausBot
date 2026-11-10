@@ -4,9 +4,9 @@ description: Choose the right desktop or isolated environment for a task.
 icon: Monitor
 ---
 
-A bot can work without a computer, use the computer running OpenMausBot, or work inside an isolated desktop.
+A bot can work without a computer, use the computer running MausBot, or work inside an isolated desktop.
 
-<ProductScreenshot name="docs-computer-panel" alt="OpenMausBot computer panel offering cloud, local VM, host computer, and off modes" caption="Computer placement is explicit per bot and can be changed without changing its model." />
+<ProductScreenshot name="docs-computer-panel" alt="MausBot computer panel offering cloud, local VM, host computer, and off modes" caption="Computer placement is explicit per bot and can be changed without changing its model." />
 
 | Backend | Isolation | Best for |
 |---|---|---|
@@ -21,11 +21,11 @@ Computer selection is explicit per bot. Auto may reuse a ready, verified backend
 
 ## Preview and takeover
 
-The Screen panel can show live frames while an agent works. Supported cloud desktops also provide an interactive viewer. OpenMausBot opens that viewer in the app when possible, with a browser fallback for external join flows.
+The Screen panel can show live frames while an agent works. Supported cloud desktops also provide an interactive viewer. MausBot opens that viewer in the app when possible, with a browser fallback for external join flows.
 
 When a bot needs you to sign in to a website, it asks with a **Sign in needed** card instead of asking for a password in chat. **Open** goes to the computer or browser the bot is working in, with **Take control**; **Done** hands it back and resumes the bot. See [Website sign-in](/docs/security/permissions-and-secrets#website-sign-in).
 
-In the built-in browser (and in My Chrome) a bot can also sign in with a login you saved, from the card's **Save a login** or **Settings → Logins**, or with one from a connected 1Password vault: it calls `fill_login` on the site's login page, and OpenMausBot types the username, password and any one-time code into the page itself and submits the form, only on that login's own site. The bot never sees the password. See [Saved logins](/docs/security/permissions-and-secrets#saved-logins), including what a screenshot can still show.
+In the built-in browser (and in My Chrome) a bot can also sign in with a login you saved, from the card's **Save a login** or **Settings → Vault**, or with one from a connected 1Password vault: it calls `fill_login` on the site's login page, and MausBot types the username, password and any one-time code into the page itself and submits the form, only on that login's own site. The bot never sees the password. See [Saved logins](/docs/security/permissions-and-secrets#saved-logins), including what a screenshot can still show.
 
 <Callout type="warn" title="Preview is not permission">
   Starting a screen preview does not grant the bot control. Local input requires a separate opt-in and remains subject to the computer-use safety boundary.

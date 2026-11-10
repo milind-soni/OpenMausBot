@@ -39,6 +39,10 @@ export interface OneHomeCloud {
   signIn?: string;
   /** The Admin answered this sign-in just now (connected), so its word on the person's Clouds counts. */
   verified?: boolean;
+  /** Its id in the session's list of Clouds, which the journal keeps, so the Cloud is known again at a new address. */
+  id?: string;
+  /** The addresses it answered at before it moved to another provider: a journal kept at one of them is this Cloud's. */
+  formerOrigins?: string[];
 }
 type Answer = { ok: boolean; status: number; body: any };
 
@@ -52,6 +56,8 @@ export function parseJournal(value: unknown): Record<string, any> | null;
 export function rateLimited(error: unknown): boolean;
 /** Home is My Cloud by this journal. */
 export function awayIn(journal: Record<string, any> | null | undefined): boolean;
+/** `cloud` is the Cloud kept as `kept`: the same address, the same id, or one of its former addresses. */
+export function sameCloud(cloud: { origin: string | null; id?: string | null; formerOrigins?: string[] }, kept: { origin: string; id?: string }): boolean;
 export function parseKeep(value: unknown): { on: boolean };
 /** This computer's bots are on their way home and past turning back. */
 export function underWay(journal: Record<string, any> | null | undefined): boolean;
@@ -86,7 +92,8 @@ export function createOneHome(deps: {
   openHome?(): void;
   openLocal?(): void;
   lastInput?(): number;
-  /** Whether this computer's own copy is the server answering now. */
+  /** Whether this computer's own copy, the server on its own data folder, is the one answering now: while it isn't, no first
+   * move starts and no top-up goes. */
   ownCopy?(): boolean;
   again?: { bring(): Promise<{ restored: string; switches: Record<string, boolean> } | { deleted: true } | { later: number }> };
   /** The person's choice to keep this computer's bots here. */

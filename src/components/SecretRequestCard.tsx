@@ -1,16 +1,19 @@
 import { useState, type FormEvent } from "react";
 import { ExternalLink, KeyRound, Loader2, LockKeyhole, RefreshCw, X } from "lucide-react";
 
-import { CUSTOM_SECRET_TARGET, credentialResumeOutcome, credentialSaveRequest, desktopCredentialSlot, isConfigCredentialTarget } from "../../shared/credential-request";
+import { CUSTOM_SECRET_TARGET, credentialResumeOutcome, credentialSaveRequest, desktopCredentialSlot, isConfigCredentialTarget, isProviderCredentialTarget } from "../../shared/credential-request";
 import { credentialProvider } from "@/lib/analytics-allowlist";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import { keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
 import { api, useStore, type Bot, type ConfigStatus, type Message } from "@/state/store";
 import { ASK_FIELD, askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
-import { EmailServerInputs } from "./EmailCard";
-import type { EmailServerFields } from "../../shared/email";
+import { EmailConnectForm, type EmailConnectRefusal } from "./EmailCard";
+import { EmailOutgoingRequestForm, EmailRequestSettled } from "./EmailRequestCard";
+import type { EmailConnectRequest, EmailOutgoingFields } from "../../shared/email";
 import { productName } from "@/lib/brand";
+import { VaultChoices } from "./VaultChoices";
+import { desktopStore } from "./keys/key-save";
 
 // Security: the value goes straight to the host's settings, never into the chat.
 
@@ -31,9 +34,10 @@ export function SecretRequestCard({
   const secret = message.secret!;
   const localize = activeLocale() !== "en";
   const greenference = localize && secret.target === "greenferenceApiKey";
+  const modelgo = localize && secret.target === "modelgoApiKey";
   const gemini = localize && secret.target === "geminiTtsKey";
-  const label = greenference ? t("keys.greenference.label") : gemini ? t("keys.label.geminiTts") : secret.label;
-  const placeholder = greenference ? t("keys.greenference.placeholder") : gemini ? t("voice.gemini.keyPlaceholder") : secret.placeholder;
+  const label = greenference ? t("keys.greenference.label") : modelgo ? t("keys.modelgo.label") : gemini ? t("keys.label.geminiTts") : secret.label;
+  const placeholder = greenference ? t("keys.greenference.placeholder") : modelgo ? t("keys.modelgo.placeholder") : gemini ? t("voice.gemini.keyPlaceholder") : secret.placeholder;
   const parts = secret.descriptionParts;
   const suppliedDescription = localize && parts
     ? [t(parts.baseCode), parts.reason, t("server.connect.secretNeverRead", { bot: parts.bot })].filter(Boolean).join(" ")
@@ -43,15 +47,12 @@ export function SecretRequestCard({
   const [savedLocally, setSavedLocally] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const email = secret.delivery === "email";
-  const [address, setAddress] = useState(secret.address ?? "");
-  const [server, setServer] = useState<EmailServerFields>({});
-  const [needsServer, setNeedsServer] = useState(false);
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/secret-cards/${encodeURIComponent(message.id)}`;
   const error = localError ?? secret.error;
   const custom = secret.target === CUSTOM_SECRET_TARGET;
   // A page reached through a desktop paired to another computer: a key that computer keeps in its own encrypted store can
   // only be typed there. Anything its server keeps, a custom secret or a provider key, is typed here like on any page.
-  const onlyOnHost = window.ogb?.remoteClient?.active === true && secret.target !== CUSTOM_SECRET_TARGET && desktopCredentialSlot(secret.target) !== null;
+  const onlyOnHost = window.ogb?.remoteClient?.active === true && secret.target !== CUSTOM_SECRET_TARGET && desktopCredentialSlot(secret.target) !== null && !isProviderCredentialTarget(secret.target);
   const outcome = credentialResumeOutcome(secret);
   const provided = outcome === "provided";
   const declined = outcome === "dismissed";
@@ -112,15 +113,34 @@ export function SecretRequestCard({
     setSaving(true);
     setLocalError(null);
     try {
-      // A password goes as typed: a mailbox's can begin or end with a space.
-      await api(`${endpoint}/save`, { method: "POST", body: JSON.stringify(email ? { threadId, value, address: address.trim(), ...server } : { threadId, value: value.trim() }) });
+      await api(`${endpoint}/save`, { method: "POST", body: JSON.stringify({ threadId, value: value.trim() }) });
       setValue("");
       returnFocusToComposer();
     } catch (error) {
-      if ((error as { body?: { needsServer?: unknown } }).body?.needsServer === true) setNeedsServer(true);
       setLocalError(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveEmail = async ({ password, ...fields }: EmailConnectRequest): Promise<EmailConnectRefusal | null> => {
+    try {
+      await api(`${endpoint}/save`, { method: "POST", body: JSON.stringify({ threadId, value: password, ...fields }) });
+      returnFocusToComposer();
+      return null;
+    } catch (error) {
+      const body = (error as { body?: Partial<EmailConnectRefusal> }).body;
+      return { error: error instanceof Error ? error.message : String(error), ...(body?.needsServer === true ? { needsServer: true } : {}), ...(body?.signIn ? { signIn: body.signIn } : {}) };
+    }
+  };
+
+  const saveOutgoing = async (fields: EmailOutgoingFields): Promise<string | null> => {
+    try {
+      await api(`${endpoint}/save`, { method: "POST", body: JSON.stringify({ threadId, ...fields }) });
+      returnFocusToComposer();
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
     }
   };
 
@@ -138,10 +158,10 @@ export function SecretRequestCard({
         const target = secret.target;
         // The 1Password token goes to this server's Logins, which checks it with 1Password first, never the settings file.
         const request = credentialSaveRequest(target, next);
-        const slot = desktopCredentialSlot(target);
+        const store = desktopStore(desktopCredentialSlot(target));
         if (isConfigCredentialTarget(target)) {
-          const status: ConfigStatus = slot && window.ogb?.setCredential
-            ? await window.ogb.setCredential(slot, next)
+          const status: ConfigStatus = store
+            ? await store(next, target === "anthropicApiKey" ? { everyClaudeBot: false } : undefined)
             : await api(request.path, { method: request.method, body: JSON.stringify(request.body) });
           dispatch({ type: "configStatus", config: status });
         } else await api(request.path, { method: request.method, body: JSON.stringify(request.body) });
@@ -192,7 +212,7 @@ export function SecretRequestCard({
         {t("common.tryAgain")}
       </button>
     ) : undefined;
-    return (
+    const line = (
       <AskSettledLine
         ariaLabel={label}
         icon={secret.resumed || stopped
@@ -209,6 +229,8 @@ export function SecretRequestCard({
         <span className={declined ? "text-danger" : undefined}> · {footerLabel}</span>
       </AskSettledLine>
     );
+    if (email && provided && secret.address && !retry) return <EmailRequestSettled address={secret.address} label={label} settled={line} />;
+    return line;
   }
 
   return (
@@ -225,14 +247,28 @@ export function SecretRequestCard({
         <div className="text-[13px] leading-relaxed text-ink-secondary">
           {t("chat.secret.remoteClient")}
         </div>
-      ) : (
+      ) : email && secret.emailOutgoing && secret.address ? (
+        <EmailOutgoingRequestForm
+          address={secret.address}
+          initial={secret.emailOutgoing}
+          submit={saveOutgoing}
+          fieldClassName={cn(ASK_FIELD, "w-full")}
+          submitClassName={askPrimary(color).className}
+          submitStyle={askPrimary(color).style}
+        />
+      ) : email ? (
+        <EmailConnectForm
+          initialAddress={secret.address ?? ""}
+          reading={secret.emailReading}
+          submit={saveEmail}
+          fieldClassName={cn(ASK_FIELD, "w-full")}
+          submitClassName={askPrimary(color).className}
+          submitStyle={askPrimary(color).style}
+          footer={<span className="flex items-center gap-1 text-[12px] text-ink-tertiary"><LockKeyhole size={11} /> {t("secretCard.email")}</span>}
+        />
+      ) : (<>
+        {custom && <VaultChoices kind="secret" botId={botId} botName={authorName} threadId={threadId} messageId={message.id} />}
         <form onSubmit={(event) => void save(event)}>
-          {email && (
-            <div className="mb-2 flex flex-col gap-2">
-              <input type="email" autoComplete="off" spellCheck={false} dir="ltr" value={address} onChange={(event) => setAddress(event.target.value)} placeholder={t("email.address")} disabled={saving} aria-label={t("email.address")} className={cn(ASK_FIELD, "w-full")} />
-              {needsServer && <EmailServerInputs value={server} onChange={setServer} className={cn(ASK_FIELD, "w-full")} />}
-            </div>
-          )}
           <div className="flex flex-wrap gap-2">
             <input
               type="password"
@@ -246,7 +282,7 @@ export function SecretRequestCard({
               aria-label={label}
               className={cn(ASK_FIELD, "min-w-[10rem] flex-1")}
             />
-            <button type="submit" disabled={saving || (!value.trim() && !savedLocally) || (email && !address.trim())} {...askPrimary(color)}>
+            <button type="submit" disabled={saving || (!value.trim() && !savedLocally)} {...askPrimary(color)}>
               {saving ? <Loader2 size={14} className="animate-spin" /> : <LockKeyhole size={14} />}
               {t(savedLocally ? "chat.secret.continue" : "chat.secret.save")}
             </button>
@@ -254,7 +290,7 @@ export function SecretRequestCard({
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-tertiary">
             <span className="flex items-center gap-1">
               <LockKeyhole size={11} />{" "}
-              {!custom ? t("chat.secret.storedHint", { app: productName() }) : email ? t("secretCard.email") : secret.delivery === "file" ? t("secretCard.file") : t("secretCard.ref")}
+              {!custom ? t("chat.secret.storedHint", { app: productName() }) : secret.delivery === "file" ? t("secretCard.file") : t("secretCard.ref")}
             </span>
             {secret.helpUrl && (
               <a
@@ -268,7 +304,7 @@ export function SecretRequestCard({
             )}
           </div>
         </form>
-      )}
+      </>)}
       {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
     </AskCard>
   );

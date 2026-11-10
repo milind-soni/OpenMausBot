@@ -42,6 +42,7 @@ export function localComputerDisabledReason({
   if (capabilities.host.platform === "linux") {
     if (capabilities.localComputer.reasonCode === "linux-wayland-seat-safety-blocked") return t("computer.problem.localWaylandBlocked");
     if (capabilities.localComputer.reasonCode === "wayland-compositor-unsupported") return t("computer.problem.localWaylandDesktop");
+    if (capabilities.localComputer.reasonCode === "linux-hyprland-plugin-required") return t("computer.problem.localHyprlandPlugin");
     if (!capabilities.localComputer.enabled) return t("computer.problem.localTurnOn");
     return capabilities.localComputer.message ?? t("computer.problem.localNotReady");
   }

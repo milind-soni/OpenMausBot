@@ -21,6 +21,7 @@ import { versionAtLeast, type BugReportStatus } from "../../shared/devs-report-s
 import { failedTurnCause } from "../../shared/failed-turn.ts";
 import type { ResolvedSender } from "../../shared/wire.ts";
 import { splitTranscriptCitations } from "../../src/lib/citations.ts";
+import { PASTED_TEXT_CLOSE, PASTED_TEXT_OPEN } from "../../src/lib/composer-attachments.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import { startDueTimer } from "../due-timer.ts";
 import type { ProviderSnapshot } from "../contracts.ts";
@@ -145,6 +146,23 @@ const FAILED_MARKER = "MausBot";
 function ownWords(message: string): string[] {
   const { display, citations } = splitTranscriptCitations(message);
   return [display, ...citations.map((citation) => citation.comment ?? "")];
+}
+
+/** The message without the blocks the composer wraps around text the person pasted in (composeMessage): like a
+ * quote, a @devs inside a paste is theirs to read, not a tag they typed. One pass over the lines; a block ends at its
+ * first closing line, as the transcript reads it, and an opening line with no closing line after it stays as text. */
+function withoutPastes(message: string): string {
+  const lines = message.split("\n");
+  const kept: string[] = [];
+  let open = -1;
+  lines.forEach((line, index) => {
+    const bare = line.endsWith("\r") ? line.slice(0, -1) : line;
+    if (open < 0) {
+      if (PASTED_TEXT_OPEN.test(bare)) open = index;
+      else kept.push(line);
+    } else if (PASTED_TEXT_CLOSE.test(bare)) open = -1;
+  });
+  return (open >= 0 ? kept.concat(lines.slice(open)) : kept).join("\n");
 }
 
 /** Rides on the turn that answers a @devs message. */
@@ -445,10 +463,11 @@ export function createDevsReports(deps: DevsReportsDeps) {
   function personWrote(threadId: string, line: Message): void {
     if (seen.has(line.id) || !line.text || now() - line.at > FRESH_MS) return;
     if (!line.sendId && deps.automated(threadId)) return;
-    const own = ownWords(line.text);
-    if (!own.some((part) => tagsDevs(part))) return;
+    const typed = ownWords(withoutPastes(line.text));
+    if (!typed.some((part) => tagsDevs(part))) return;
     const names = namesBeforeDevs();
-    if (!own.some((part) => tagsDevs(part, names))) return;
+    if (!typed.some((part) => tagsDevs(part, names))) return;
+    const own = ownWords(line.text);
     seen.add(line.id);
     if (seen.size > 1_000) seen.delete(seen.values().next().value!);
     if (waiting.length >= MAX_WAITING) return notice(threadId, { ok: false, line: fullLine(MAX_OUTBOX, languageFor(line.sender?.id)), marker: "" });

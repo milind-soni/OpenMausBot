@@ -1,6 +1,6 @@
 // No answer ever carries a password, a 2FA key or the token: a saved secret is only ever replaced.
 import { LOGIN_FIELD_MAX, loginPlace, normalizeLoginHost, type LoginBots, type LoginSummary, type OnePasswordStatus } from "../../shared/logins.ts";
-import type { LoginPatch, NewLogin } from "../login-store.ts";
+import type { LoginPatch, NewLogin } from "../vault-store.ts";
 import { parseTotpKey, type TotpKey } from "../totp.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -59,7 +59,7 @@ export function parseLoginFields(body: Record<string, unknown>, options: { passw
   return { ok: true, value: { ...(username === undefined ? {} : { username: username.trim() }), ...(password === undefined ? {} : { password }) } };
 }
 
-function parseBots(value: unknown, exists: (id: string) => boolean): Parsed<LoginBots | undefined> {
+export function parseBots(value: unknown, exists: (id: string) => boolean): Parsed<LoginBots | undefined> {
   if (value === undefined) return { ok: true, value: undefined };
   if (value === "all") return { ok: true, value: "all" };
   if (!Array.isArray(value) || value.length > 500 || !value.every((id) => typeof id === "string" && ID.test(id) && exists(id))) {
@@ -68,7 +68,7 @@ function parseBots(value: unknown, exists: (id: string) => boolean): Parsed<Logi
   return { ok: true, value: [...new Set(value as string[])] };
 }
 
-function isJson(req: { headers: Record<string, string | string[] | undefined> }): boolean {
+export function isJson(req: { headers: Record<string, string | string[] | undefined> }): boolean {
   return String(req.headers["content-type"] ?? "").split(";", 1)[0]!.trim().toLowerCase() === "application/json";
 }
 

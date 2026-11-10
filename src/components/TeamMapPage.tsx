@@ -75,7 +75,7 @@ interface SectionContextResponse {
   maxBytes: number;
 }
 
-function SectionContextDialog({ section, label, onClose }: { section: string; label: string; onClose: () => void }) {
+export function SectionContextDialog({ section, label, onClose }: { section: string; label: string; onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const onCloseRef = useRef(onClose);
@@ -182,8 +182,10 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
   };
 
   return createPortal(
+    // No backdrop blur: blurring the whole team map behind the dialog on every repaint is costly without GPU
+    // compositing (common on Linux).
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px] sm:p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 sm:p-6"
       onMouseDown={(event) => event.target === event.currentTarget && requestClose()}
     >
       <div

@@ -1,8 +1,9 @@
 import { createServer, request, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createConnection } from "node:net";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BROKER_PROCESS_TTL_MS, BROKER_THREAD_TTL_MS, BROKER_TOKEN_PREFIX, brokerUrl, openCredentialBroker, upstreamUrl, type CredentialBroker } from "./broker.ts";
 
@@ -17,6 +18,15 @@ function call(socketPath: string, method: string, path: string, headers: Record<
     });
     req.on("error", reject);
     req.end(body);
+  });
+}
+
+function upgradeAndHangUp(socketPath: string): Promise<void> {
+  return new Promise((resolve) => {
+    const client = createConnection(socketPath);
+    client.on("error", () => {});
+    client.once("connect", () => { client.write("GET / HTTP/1.1\r\nHost: box\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n", () => client.destroy()); });
+    client.once("close", () => resolve());
   });
 }
 
@@ -98,6 +108,13 @@ linuxBox("the credential broker", () => {
     expect((await call(broker.socketPath, "GET", "/other")).status).toBe(404);
     expect(seen).toHaveLength(3);
     expect(broker.stats().refused).toBe(7);
+  });
+
+  it("survives clients that hang up before their upgrade is refused", async () => {
+    await start();
+    for (let i = 0; i < 5; i++) await upgradeAndHangUp(broker.socketPath);
+    await vi.waitFor(() => expect(broker.stats().refused).toBe(5));
+    expect((await call(broker.socketPath, "GET", "/other")).status).toBe(404);
   });
 
   it("a thread-bound token slides with each turn and a process-bound one does not", async () => {

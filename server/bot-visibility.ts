@@ -18,7 +18,13 @@ export type { BotVisibility };
 export interface ThreadAudiences {
   of(threadId: string): Audience | undefined;
   person: string | null;
+  /** A bot's conversation as this person has read it: its unread mark and read line their own (host/room-reads.ts). */
+  ownTask?<T extends { threadId: string; unread?: boolean; lastReadMessageId?: string }>(task: T): T;
+  /** The person whose private chat a routine lives in (routine-home.ts), else null. */
+  routineHome?(routine: RoutineRef): string | null;
 }
+
+export type RoutineRef = { botId?: unknown; groupId?: unknown; name?: unknown; sourceThreadId?: unknown; resultsThreadId?: unknown };
 
 /** `all`: every bot and room. On a Team Cloud an admin session is `all` with its address, and still sees only the
  * conversations its person may (audience.ts): its own private chats, never another person's. */
@@ -276,6 +282,12 @@ export class VisibleSet {
     }));
   }
 
+  /** A conversation's unread mark and read line as this viewer read it; the task as it is where everyone reads alike. */
+  ownTask<T extends { threadId: string; unread?: boolean; lastReadMessageId?: string }>(task: T): T {
+    return this.audiences?.ownTask ? this.audiences.ownTask(task) : task;
+  }
+
+  /** Conversations have audiences of their own (a Team Cloud): a bot's tasks are then filtered one by one. */
   get filtersThreads(): boolean {
     return this.audiences !== null || this.roomOnly;
   }
@@ -324,6 +336,12 @@ export class VisibleSet {
     for (const bot of this.bots.values()) if (this.reaches(bot.id)) shown.add(sectionKey(bot.section));
     for (const group of this.groups.values()) if (this.group(group.id)) shown.add(sectionKey(group.section));
     return all.filter((section) => shown.has(sectionKey(section)));
+  }
+
+  /** A routine that lives in someone's private chat is theirs alone on a Team Cloud: no other member and no admin. */
+  routineShown(routine: RoutineRef): boolean {
+    const home = this.audiences?.routineHome?.(routine) ?? null;
+    return home === null || home === this.audiences!.person;
   }
 
   /** Refused only when everything referencing it is hidden; an unreferenced one (a member's own upload) is served, its name is random. */
@@ -426,12 +444,11 @@ export function memberBot<T extends object>(bot: T, visible: VisibleSet): T {
   if (visible.everything) return visible.member ? withoutServerAlias(bot) : bot;
   const shown = visible.filtersThreads ? withLevel(shownConversations(bot, visible), visible) : bot;
   if (!visible.member) return shown;
-  const { visibility: _visibility, vpsAlias: _vpsAlias, ...rest } = shown as T & { visibility?: unknown; peers?: unknown; vpsAlias?: unknown };
-  const peers = Array.isArray(rest.peers) ? (rest.peers as unknown[]).filter((id): id is string => typeof id === "string" && visible.bot(id)) : undefined;
+  const { visibility: _visibility, vpsAlias: _vpsAlias, ...rest } = shown as T & { visibility?: unknown; vpsAlias?: unknown };
   // Sent either way while the view lists a room, so a later frame clears an earlier mark.
   const id = (bot as { id?: unknown }).id;
   const roomOnly = visible.roomOnly && typeof id === "string" ? { roomOnly: !visible.reaches(id) } : {};
-  return { ...rest, ...(peers ? { peers } : {}), ...roomOnly } as T;
+  return { ...rest, ...roomOnly } as T;
 }
 
 /** On a Team Cloud each person's copy says what they may do with the bot; whoever can edit it also gets its sharing
@@ -456,10 +473,11 @@ function shownConversations<T extends object>(bot: T, visible: VisibleSet): T {
   const record = bot as T & Record<string, unknown>;
   let out: Record<string, unknown> = record;
   const tasks = Array.isArray(record.tasks) ? record.tasks as unknown[] : [];
-  const kept = tasks.filter((task) => !task || typeof task !== "object" || typeof (task as { threadId?: unknown }).threadId !== "string" || visible.thread((task as { threadId: string }).threadId));
-  if (kept.length !== tasks.length) {
+  const isTask = (task: unknown): task is { threadId: string; unread?: boolean; routineRunId?: unknown } => Boolean(task) && typeof task === "object" && typeof (task as { threadId?: unknown }).threadId === "string";
+  const kept = tasks.filter((task) => !isTask(task) || visible.thread(task.threadId)).map((task) => (isTask(task) ? visible.ownTask(task) : task));
+  if (kept.length !== tasks.length || kept.some((task, index) => task !== tasks[index])) {
     out = { ...record, tasks: kept };
-    if (typeof record.unread === "boolean") out.unread = kept.some((task) => (task as { unread?: unknown } | null)?.unread === true);
+    if (typeof record.unread === "boolean") out.unread = kept.some((task) => isTask(task) && task.unread === true && !task.routineRunId);
   }
   const main = typeof record.mainThreadId === "string" && visible.thread(record.mainThreadId) ? record.mainThreadId : teamConversation(kept);
   if (typeof record.mainThreadId === "string" && record.mainThreadId !== main) {
@@ -597,7 +615,9 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
     }
     case "routine": {
       const routine = field("routine");
-      return routineVisible(routine, visible) ? payload : undefined;
+      if (!routineVisible(routine, visible)) return undefined;
+      const shown = routineForViewer(routine, visible);
+      return shown === routine ? payload : { ...payload, routine: shown };
     }
     case "routine.run": {
       const run = field("run");
@@ -663,10 +683,22 @@ export function webhookVisible(value: { botId?: unknown; groupId?: unknown }, vi
   return typeof value.groupId !== "string" || !value.groupId || visible.group(value.groupId);
 }
 
-export function routineVisible(value: { botId?: unknown; groupId?: unknown }, visible: VisibleSet): boolean {
+export function routineVisible(value: RoutineRef, visible: VisibleSet): boolean {
   if (visible.everything) return true;
+  if (!visible.routineShown(value)) return false;
   if (typeof value.groupId === "string" && value.groupId) return visible.group(value.groupId);
   return typeof value.botId === "string" && visible.reaches(value.botId);
+}
+
+/** A routine as one person is sent it: without the id of a conversation they may not read (the chat a teammate's
+ * routine opened for its results). The same object when nothing is left out. */
+export function routineForViewer<T extends { sourceThreadId?: unknown; resultsThreadId?: unknown }>(routine: T, visible: VisibleSet): T {
+  if (!visible.filtersThreads) return routine;
+  const hidden = (["sourceThreadId", "resultsThreadId"] as const).filter((key) => typeof routine[key] === "string" && visible.hides(routine[key] as string));
+  if (!hidden.length) return routine;
+  const shown = { ...routine };
+  for (const key of hidden) delete shown[key];
+  return shown;
 }
 
 /** A run's prompt and output are its conversation's words: on a Team Cloud a run that went into someone's private chat

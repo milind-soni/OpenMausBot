@@ -246,6 +246,7 @@ function v5() {
     ["go_away_0", goAwayFrame(0), "GoAway normal"],
     ["go_away_1", goAwayFrame(1), "GoAway protocol error"],
     ["go_away_2", goAwayFrame(2), "GoAway internal error"],
+    ["go_away_3", goAwayFrame(3), "GoAway removed: only from the computer, before it closes with 4001"],
     ["stream_3", openFrame(3), "the next stream the phone opens"],
   ];
   return frames.map(([name, frame, about]) => {
@@ -475,6 +476,7 @@ function v6Sessions() {
       steps: [{ in: openFrame(1) }, ...fill(1, 1024 * 1024), { consume: { stream: 1, bytes: 1024 * 1024 - 1 } }, { consume: { stream: 1, bytes: 1 } }],
     },
     { name: "phone_open_ids", about: "the phone opens 1, 3, 5", role: "phone", steps: [{ open: true }, { open: true }, { open: true }] },
+    { name: "phone_hears_removed", about: "GoAway removed is no protocol error at the phone; it sends nothing back", role: "phone", steps: [{ open: true }, { in: goAwayFrame(3) }] },
   ];
   return scripts.map((script) => {
     const result = runScript(script);
@@ -522,6 +524,7 @@ function v7() {
     { name: "routes_local", value: encodeDescriptor({ v: 1, k, routes: "local" }) },
     { name: "routes_any_with_relay", value: encodeDescriptor({ v: 1, k, h, r, routes: "any" }) },
     { name: "routes_any_without_relay", value: raw({ v: 1, k, routes: "any" }) },
+    { name: "routes_local_with_relay", value: encodeDescriptor({ v: 1, k, h, r, routes: "local" }) },
   ];
   const offCurve = b64u(flip(T.publicKey, 64));
   const invalid = [
@@ -549,7 +552,6 @@ function v7() {
     { name: "json_array", value: raw([1]) },
     { name: "routes_unknown", value: raw({ v: 1, k, routes: "wifi" }) },
     { name: "routes_not_a_string", value: raw({ v: 1, k, routes: 1 }) },
-    { name: "routes_local_with_relay", value: raw({ v: 1, k, h, r, routes: "local" }) },
     { name: "v2", value: raw({ v: 2, k }) },
     { name: "v2_unknown_shape", value: raw({ v: 2, keys: [1, 2, 3] }) },
   ];

@@ -45,7 +45,7 @@ afterEach(() => {
 describe("the setup card while its answers are written", () => {
   it("keeps a quiet frame with the title and the close button, takes no letter, and closes", () => {
     show(greeting({ setupChoicesPending: true }));
-    expect(card()!.textContent).toContain("What should I help you with first?");
+    expect(card()!.textContent).toContain("Pick a starting point");
     expect(card()!.getAttribute("aria-busy")).toBe("true");
     expect(container.querySelectorAll("[data-setup-waiting] > div")).toHaveLength(6);
     expect(container.querySelectorAll("kbd")).toHaveLength(0);

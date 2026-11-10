@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_MANAGED_COMPOSIO_BROKER_URL,
   ensureManagedComposioCredentials,
@@ -6,6 +6,8 @@ import {
   managedComposioBrokerUrl,
   managedComposioChildEnvironment,
   normalizeManagedComposioBrokerUrl,
+  ownComposioKey,
+  registerManagedComposio,
 } from "./managed-composio.mjs";
 
 const TOKEN = "a".repeat(64);
@@ -150,5 +152,60 @@ describe("managed Composio desktop registration", () => {
       composioInstallationId: "installation-test",
     });
     expect(saveCredentials).not.toHaveBeenCalled();
+  });
+});
+
+afterEach(() => vi.unstubAllEnvs());
+
+describe("keeping the desktop app off the managed service", () => {
+  const launch = async (credentials) => {
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 }));
+    await registerManagedComposio({
+      brokerUrl: "https://broker.example",
+      fetchImpl,
+      updateCredentials: async (derive) => derive(credentials),
+    });
+    return fetchImpl;
+  };
+
+  it("with no key and no switch, checks in as before", async () => {
+    vi.stubEnv("COMPOSIO_API_KEY", "");
+    const fetchImpl = await launch({ composioBrokerToken: TOKEN });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(String(fetchImpl.mock.calls[0][0])).toBe("https://broker.example/v1/me");
+  });
+
+  it("sends nothing while the person's own project key is saved or set in the environment", async () => {
+    expect(await launch({ composioApiKey: "ak_owner", composioBrokerToken: TOKEN })).not.toHaveBeenCalled();
+    expect(await launch({ composioApiKey: "ak_owner" })).not.toHaveBeenCalled();
+    vi.stubEnv("COMPOSIO_API_KEY", "ak_from_env");
+    expect(await launch({ composioBrokerToken: TOKEN })).not.toHaveBeenCalled();
+  });
+
+  it("treats a blank key as no key", () => {
+    vi.stubEnv("COMPOSIO_API_KEY", " ");
+    expect(ownComposioKey({ composioApiKey: "  " })).toBe(false);
+    expect(ownComposioKey({ composioApiKey: "ak_owner" })).toBe(true);
+  });
+
+  it("OMB_COMPOSIO_BROKER=off stops registration, check-in and the token handed to the server, with or without a key", async () => {
+    vi.stubEnv("OMB_COMPOSIO_BROKER", " Off ");
+    vi.stubEnv("COMPOSIO_API_KEY", "");
+    expect(managedComposioBrokerUrl(undefined, true)).toBe("");
+    expect(managedComposioBrokerUrl("https://broker.example", true)).toBe("");
+    expect(managedComposioAccess("https://broker.example", { composioBrokerToken: TOKEN })).toBeNull();
+    expect(managedComposioChildEnvironment("https://broker.example", { composioBrokerToken: TOKEN }, {
+      PATH: "/usr/bin", OMB_COMPOSIO_BROKER: "off", OMB_COMPOSIO_BROKER_URL: "https://broker.example", OMB_COMPOSIO_BROKER_TOKEN: TOKEN,
+    })).toEqual({ PATH: "/usr/bin", OMB_COMPOSIO_BROKER: "off" });
+
+    expect(await launch({ composioBrokerToken: TOKEN })).not.toHaveBeenCalled();
+    expect(await launch({})).not.toHaveBeenCalled();
+    expect(await launch({ composioApiKey: "ak_owner" })).not.toHaveBeenCalled();
+    await expect(registerManagedComposio({ brokerUrl: managedComposioBrokerUrl(undefined, true), updateCredentials: vi.fn() })).resolves.toBeUndefined();
+  });
+
+  it("any other value of the switch leaves the service on", () => {
+    vi.stubEnv("OMB_COMPOSIO_BROKER", "on");
+    expect(managedComposioBrokerUrl(undefined, true)).toBe(DEFAULT_MANAGED_COMPOSIO_BROKER_URL);
   });
 });

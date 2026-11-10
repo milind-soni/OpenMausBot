@@ -70,12 +70,12 @@ describe("the setup card under a new bot's greeting", () => {
 
   it("asks what to help with first, with the greeting's own answers lettered in order, then Something else", () => {
     const view = renderOffer(offered);
-    expect(view.html).toContain("What should I help you with first?");
-    expect(view.choices.map(label)).toEqual(["A|Plan my trips", "B|Watch the news", "C|Something else"]);
+    expect(view.html).toContain("Pick a starting point");
+    expect(view.choices.map(label)).toEqual(["Plan my trips|A", "Watch the news|B", "Something else|C"]);
   });
 
   it("offers its own answers on an older greeting that carries none", () => {
-    expect(renderOffer(greeting).choices.map((node) => label(node).split("|")[1])).toEqual(["Research and digging into topics", "Keeping an eye on things for me", "Email, calendar and messages", "Bookings, shopping and errands", "Data, spreadsheets and reports", "Something else"]);
+    expect(renderOffer(greeting).choices.map((node) => label(node).split("|")[0])).toEqual(["Research and digging into topics", "Keeping an eye on things for me", "Email, calendar and messages", "Bookings, shopping and errands", "Data, spreadsheets and reports", "Something else"]);
   });
 
   it("is not shown for a bot given a role or instructions, when the AI cannot set the bot up, or once closed", () => {
@@ -134,7 +134,7 @@ describe("the setup card under a new bot's greeting", () => {
   it("settles quietly, with no answer, when the person writes something else first", () => {
     for (const text of ["What's the weather in Paris?", "/learn the inbox"]) {
       const view = renderOffer(offered, [offered, { id: "u1", role: "user", kind: "text", at: 2, text } as Message]);
-      expect(view.html).toContain("What should I help you with first?");
+      expect(view.html).toContain("Pick a starting point");
       expect(view.html).not.toContain("Your answer");
       expect(view.choices.every((node) => node.props.disabled === true)).toBe(true);
     }

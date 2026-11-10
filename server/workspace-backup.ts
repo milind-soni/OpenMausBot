@@ -15,7 +15,7 @@ import { userErrorFields, userErrorThrown } from "./user-errors.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backup-paths.ts";
 import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
-import { omittedAsTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
+import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
 import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
@@ -389,10 +389,11 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
           walk(source, path, [...chain, source]);
         } else if (stat.isFile()) {
           let copied: { size: number; mode: number; sha256: string };
-          if (path === "config.json" || path === "webhooks.json" || (privacy && path === "bots.json")) {
+          if (path === "config.json" || path === "webhooks.json" || (privacy && (path === "bots.json" || path === "routines.json"))) {
             const value = privateJson(source);
             if (path === "config.json") writeJson(destination, portableWorkspaceConfig(value));
             else if (path === "bots.json") writeJson(destination, withoutTeamPrivate(value, privacy!));
+            else if (path === "routines.json") writeJson(destination, routinesWithoutTeamPrivate(value, privateJson(join(root, "bots.json")), privacy!));
             else {
               if (!record(value)) throw new Error("Invalid webhook definitions in workspace backup.");
               if (Array.isArray(value.webhooks)) for (const webhook of value.webhooks) if (record(webhook)) { delete webhook.secretHash; delete webhook.sealedSecret; }
@@ -907,11 +908,20 @@ export function applyPendingWorkspaceRestore(dataDir: string): WorkspaceRestoreR
   }
   const pending = readPendingWorkspaceRestoreMetadata(dataDir);
   if (!pending) return { restored: false };
+  const safetyCopyPath = join(root, `safety-${pending.id}`);
+  if (entryExists(safetyCopyPath)) {
+    const saved = join(safetyCopyPath, "data");
+    // Moves start only after the journal is durable; an empty safety tree is an interrupted preparation.
+    if (!lstatSync(safetyCopyPath).isDirectory() || (entryExists(saved) &&
+      (!lstatSync(saved).isDirectory() || readdirSync(saved).length !== 0))) {
+      throw new Error("A safety copy already exists for this restore. Original files have not been changed.");
+    }
+    rmSync(pendingFile, { force: true });
+    return { restored: false, rolledBack: true, id: pending.id, safetyCopyPath };
+  }
   const staged = join(jobPath(dataDir, pending.id), "staged");
   const manifest = validateStaged(staged);
   const prepared = prepareRestore(dataDir, pending.id, manifest);
-  const safetyCopyPath = join(root, `safety-${pending.id}`);
-  if (existsSync(safetyCopyPath)) throw new Error("A safety copy already exists for this restore. Original files have not been changed.");
   folder(join(safetyCopyPath, "data"));
   const journal: RestoreJournal = {
     id: pending.id, phase: "applying",

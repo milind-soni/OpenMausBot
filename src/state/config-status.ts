@@ -20,6 +20,7 @@ export interface ConfigStatus {
   cerebras?: SavedKey;
   groq?: SavedKey;
   greenference?: SavedKey;
+  modelgo?: SavedKey;
   deepseek?: SavedKey;
   meta?: SavedKey;
   /** X research comes with MausBot Cloud plans: `included` while this server holds the plan's relay credential;
@@ -58,10 +59,16 @@ export interface ConfigStatus {
   newBots?: { effort?: EffortLevel };
   /** This Cloud is on the Starter plan, as the Admin last said; absent or false otherwise. */
   cloudStarter?: boolean;
-  /** The most bots this Cloud's plan makes, its MausBot aside; absent when its plan has no such limit. */
+  /** The most bots this Cloud's plan makes, its MausBot aside. Sent only by servers that capped Starter's bots; absent otherwise. */
   botLimit?: number;
   /** A task on this Cloud is waiting for memory right now. */
   waitingForRoom?: boolean;
+  /** On Starter: the turns it runs at once and the hand-offs it holds waiting, and when work was last refused for a limit. */
+  planTurns?: { running: number; waiting: number; refusedAt?: number; refused?: "tasks" | "paused" };
+  /** On Starter: how many bots stay awake; absent when every bot does. */
+  awakeLimit?: number;
+  /** Bots paused for the plan's limit: kept, but taking no turns. */
+  pausedBots?: string[];
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
@@ -133,6 +140,8 @@ export interface ConfigStatus {
   };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string; aboutMe?: string; avatarUrl?: string };
+  /** Rules every bot follows, ahead of its department's context and its own instructions; sent to admins only. */
+  everyBotRules?: string;
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** What a paired phone calls this computer; "" uses the default. */

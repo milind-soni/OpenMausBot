@@ -57,13 +57,15 @@ reveals nothing about `psk`: the two are separate HMAC outputs under different l
 - **Field rules:**
   - `v` MUST be 1.
   - `k` is required.
-  - `h` and `r` are present only when the computer has a relay token (signed in, relay enabled, and the device isn't restricted to "Wi-Fi and
-    Tailscale only").
+  - `h` and `r` are present only when the computer has a relay token (signed in, relay enabled). A device restricted to "Wi-Fi and
+    Tailscale only" still gets them: they admit nothing by themselves, and they let a restricted phone away from home probe the relay
+    now and then (4404 until it is allowed again).
   - `r` lists 1 to 4 hostnames in the order to try. Each MUST match `^relay[1-9][0-9]?\.openmausbot\.com$`.
   - `routes` is optional, `"any"` or `"local"`. `"local"` means the computer restricted this device to Wi-Fi and
-    Tailscale; it never comes with `h` or `r`. Absent means `"any"`, so a descriptor without `h` and `r` and without
-    `"local"` only says the computer has no relay right now (signed out, or outside the rollout). The QR never carries
-    `"local"`: a restriction is set per phone after pairing, and reaches it through the endpoint list.
+    Tailscale; it may come with `h` and `r` (an older computer sends it without them). Absent means `"any"`, so a
+    descriptor without `h` and `r` and without `"local"` only says the computer has no relay right now (signed out, or
+    outside the rollout). The QR never carries `"local"`: a restriction is set per phone after pairing, and reaches it
+    through the endpoint list and the `companion.endpoints` event.
   - The encoded value is at most 1,024 bytes.
 - **Phone parsing rules:**
   - A malformed `e2e` rejects the whole invite. That includes bad base64, bad JSON, a bad point, `h` without `r` or `r` without `h`, and a host
@@ -74,7 +76,12 @@ reveals nothing about `psk`: the two are separate HMAC outputs under different l
   `http://H:P` into `ws://H:P/v1/e2e`. A `hosted` URL is never used for E2E.
 - **Pair response.** `POST /api/pair` returns 200 with `{token, device, serverName, hosts?, endpoints?}` plus `"e2e": {…same object…}`.
 - **Endpoint list.** `GET /api/companion/endpoints` returns `{serverName, hosts?, endpoints[]}` plus `"e2e": {…}`. The response is built for
-  the device that asks: `h` and `r` are left out if that device is restricted.
+  the device that asks: a restricted device's `e2e` says `"routes":"local"`.
+- **Endpoint event.** When a device's routes change, the sidecar writes the same body plus `"kind":"companion.endpoints"` as one event
+  (`data:` only, no `id:` and no `seq`, never replayed) on every `/api/events` stream that device holds, so the phone hears it inside its
+  session. Narrowing to `"local"`: the event first, then the relay keeps the device admitted 300 ms more so the event lands, then the
+  set shrinks (the relay closes its relay sessions with 4404) and the computer closes its own; direct sessions stay. Widening to
+  `"any"`: admitted first, then the event.
 - **Pinning:**
   - A phone that holds a QR-pinned `k` MUST NEVER replace it from a network response.
   - A phone paired before this feature (no `k`) accepts `k` once from `/api/companion/endpoints`, over the route it already trusts (trust on
@@ -179,7 +186,7 @@ This uses the yamux wire format (`hashicorp/yamux` spec): a 12-byte header of `v
 | Concurrent streams per session | 64, counting un-ACKed opens. The 65th is answered with RST |
 | Half close | FIN on Data or WindowUpdate. A stream ends when both FINs are seen, or on RST |
 | Keepalive | Each side sends Ping {SYN, length = opaque u32} every 20 s. The peer answers Ping {ACK, same value}. No answer within 10 s closes the session (1001) |
-| GoAway | StreamId 0, `length` = 0 normal, 1 protocol error, 2 internal error. Sent before a planned close (quit, sleep, restart) |
+| GoAway | StreamId 0, `length` = 0 normal, 1 protocol error, 2 internal error, 3 removed. 0 is sent before a planned close (quit, sleep, restart). 3 goes only from the computer to the phone, when the person removed this device, right before the 4001 close |
 | Session flow | No session-wide window. Backpressure comes from the WebSocket: a sender stops writing records while the socket's buffered amount is above 1 MiB |
 | Stream ID ceiling | At `streamId > 2^31 − 1` the phone opens a new session |
 
@@ -249,7 +256,7 @@ own the `sid`, and a `sid` is single-use with a 10 s life. The relay then splice
 | 4429 | relay | Rate, size or byte limit | Back off, at least 30 s |
 | 4503 | relay | Restarting or full. Reason is JSON `{"retryInMs":N}` | Wait N plus jitter, then try the next node |
 | 4000 | either end | E2E protocol error (AEAD, framing, window) | Hard stop for this session; reconnect with backoff |
-| 4001 | computer | Handshake rejected (no psk matched) | Phone: "This phone was removed from your computer. Pair again." Stop retrying the relay |
+| 4001 | computer | Handshake rejected (no psk matched), or the device was removed (after GoAway(3)) | Phone: on a direct route, or after GoAway(3), "This phone was removed from your computer. Pair again." Through the relay without GoAway(3), the relay may have written it: retry with backoff |
 | 4002 | either end | Handshake deadline passed | Retry with backoff |
 
 **Relay token** (minted by the control plane, checked by the relay offline):
@@ -310,7 +317,8 @@ own the `sid`, and a `sid` is single-use with a 10 s life. The relay then splice
 | Direct routes failed and the relay couldn't be reached | "Can't reach MausBot Relay right now. Trying again…" |
 | Restricted device, not on the home Wi-Fi or the tailnet | "This phone is set to Wi-Fi and Tailscale only." |
 | Message 2 failed / pin mismatch | "Couldn't verify your computer. Pair again from your computer's Settings." |
-| 4001 | "This phone was removed from your computer. Pair again." |
+| GoAway(3) inside the session, or close 4001 on a direct route | "This phone was removed from your computer. Pair again." |
+| Close 4001 through the relay with no GoAway(3) before it | Nothing yet: a relay can forge close codes, so keep retrying with backoff. It reads as "removed" only if a direct route also answers 4001 |
 | `e2e.v > 1` or 426 | "Update the MausBot app to connect to this computer." |
 | 4429 / 4503 lasting more than 30 s | "MausBot Relay is busy. Trying again…" |
 
@@ -352,7 +360,16 @@ These make the sections above exact where an implementation could otherwise choo
 - `v` must be an integer. `v > 1` means "update the app" whatever the other fields hold; `v < 1`, a string, or a missing
   `v` rejects.
 - Unknown fields are ignored. Field order is free.
-- `routes`, when present, must be the string `"any"` or `"local"`, and `"local"` with `h` or `r` rejects.
+- `routes`, when present, must be the string `"any"` or `"local"`. `"local"` may carry `h` and `r` (vector
+  `routes_local_with_relay`); a restricted phone dials only its direct routes, and probes the relay on a slow backoff only
+  when they fail.
+
+**Removal**
+- A close code travels outside the encryption, and over the relay the relay writes it. When a device is removed, the
+  computer first sends GoAway with `length` 3 inside the session, then closes with 4001. The phone treats only that
+  GoAway(3), or a 4001 on a direct route, as removed. A 4001 from the relay without it (including at the handshake, where
+  no session exists yet) means "couldn't confirm": retry with backoff and try a direct route. The computer refuses a
+  GoAway(3) from the phone as a protocol error.
 - base64url is strict everywhere (descriptor, keys, `h`, `conn`, tokens): the URL-safe alphabet only, no padding, and
   canonical (unused low bits of the last character are zero). Decode, re-encode and compare is enough.
 

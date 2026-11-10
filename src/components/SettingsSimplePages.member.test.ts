@@ -7,6 +7,7 @@ import type { Disclose } from "./SettingsSimplePages";
 const fixture = vi.hoisted(() => ({ admin: false as boolean | null }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("./EnginesSettings", () => ({ EnginesSettings: () => "AI ACCOUNTS" }));
+vi.mock("./NewBotDialog", () => ({ DefaultBotSettings: () => "NEW BOT DEFAULTS" }));
 vi.mock("./LocalComputerSection", () => ({ LocalComputerSection: () => "CLOUD DESKTOPS" }));
 vi.mock("./UsageSection", () => ({ UsageSection: () => "USAGE TABLE" }));
 vi.mock("./PlanUsage", () => ({ PlanUsageSummary: () => "PLAN USAGE" }));
@@ -14,7 +15,7 @@ vi.mock("./CloudUsageMeter", () => ({ useCloudUsageSettings: () => ({ usage: nul
 vi.mock("./ProIntroduction", () => ({ useCloudPlan: () => null, CloudPlanRow: () => null, CloudPlanFootnote: () => null }));
 vi.mock("./BrowserSettingsRows", () => ({ BuiltInBrowserRow: () => null, ServerSitesRow: () => null }));
 vi.mock("./AppSettingsRows", async (original) => ({ ...await original<object>(), BrowserProfilesRow: () => null }));
-vi.mock("./LoginsSettings", () => ({ LoginsSettings: () => null }));
+vi.mock("./VaultSettings", () => ({ VaultSettings: () => null }));
 
 const { SimpleAiPage, SimpleBillingPage, SimpleComputerPage } = await import("./SettingsSimplePages");
 
@@ -31,7 +32,7 @@ beforeEach(() => { fixture.admin = false; });
 
 it("shows a session without the admin scope a plain sentence instead of the installation's AI, computers and usage", () => {
   const html = pages();
-  for (const hidden of ["AI ACCOUNTS", "KEYS", "CLOUD DESKTOPS", "USAGE TABLE", "PLAN USAGE"]) expect(html).not.toContain(hidden);
+  for (const hidden of ["AI ACCOUNTS", "NEW BOT DEFAULTS", "KEYS", "CLOUD DESKTOPS", "USAGE TABLE", "PLAN USAGE"]) expect(html).not.toContain(hidden);
   expect(html).toContain("Only an admin of this installation can change this.");
   expect(html).toContain("Only an admin of this installation can see usage.");
 });
@@ -39,5 +40,5 @@ it("shows a session without the admin scope a plain sentence instead of the inst
 it("keeps them for an admin", () => {
   fixture.admin = true;
   const html = pages();
-  for (const shown of ["AI ACCOUNTS", "KEYS", "CLOUD DESKTOPS", "USAGE TABLE", "PLAN USAGE"]) expect(html).toContain(shown);
+  for (const shown of ["AI ACCOUNTS", "NEW BOT DEFAULTS", "KEYS", "CLOUD DESKTOPS", "USAGE TABLE", "PLAN USAGE"]) expect(html).toContain(shown);
 });

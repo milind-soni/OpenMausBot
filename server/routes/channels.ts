@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { routeRunOwners, type Actor, type RunOwners } from "../host/run-owner.ts";
 import type { ResolvedSender, WireGroup } from "../../shared/wire.ts";
 import { admit } from "../admission.ts";
 import {
   cancelChannelMessage,
+  channelQueueItem,
   headChannelGroup,
   holdChannelQueue,
   queueChannelMessage,
@@ -34,11 +36,14 @@ import { conversationLanguage } from "../server-lines.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
-import { readThreadNotifications } from "./notifications.ts";
+import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
 
 export type MessagePage = { messages: Array<Message | Record<string, unknown>>; hasMore?: boolean; activeLeafId: string | null };
 
 export interface ChannelRouteDeps {
+  /** Whoever asked owns the run, where several people write. */
+  runOwners?: Pick<RunOwners, "stopRefusal" | "removeRefusal" | "joinRefusal">;
+  runActor?(auth: RequestAuth): Actor;
   store: Pick<Store,
     | "group" | "groupTaskByThread" | "bot" | "switchGroupTask" | "patchGroupTask" | "patchGroup" | "messagesFor" | "groupTasks" | "deleteGroupTasks" | "deleteGroup"
     | "createGroupTask" | "appendMessage">;
@@ -49,6 +54,7 @@ export interface ChannelRouteDeps {
   desktopManaged: boolean;
   routines(): Pick<RoutineManager, "disableForGroup"> | null;
   broadcast(payload: Record<string, unknown>): void;
+  notificationListed: NotificationListed;
   actorKey(auth: RequestAuth & { kind: "session" }): string;
   threadStarters: Pick<ThreadStarters, "set">;
   phoneSecretSubmissions: Pick<PhoneSecretSubmissionRegistry, "hasGroup" | "hasThread">;
@@ -102,13 +108,13 @@ const createGroupTaskRequestSchema = z.object({ title: z.string().optional() });
 
 export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
   const {
-    store, cfg, broadcast, actorKey, threadStarters, phoneSecretSubmissions, sendSequencer, roomMemberContexts, skillReview,
+    store, cfg, broadcast, notificationListed, actorKey, threadStarters, phoneSecretSubmissions, sendSequencer, roomMemberContexts, skillReview,
     groupSpeakers, groupTurnOperations, lastReply, cloudThreadRefusal, messageSender, usageTriggerFor, publicGroupState,
     groupWithThread, updateChannel, groupIsWorking, groupThreadIsWorking, readCursor, pageSize, messagePage,
     resolveReplyTarget, runningTurnInstance, startGroupTurn, engineSteersImages, applyRoomHoldsFromMessage, cancelGroupTurnOperations,
     drainQueuedChannelSends, clearTurnDigestState, closeOpenApprovals, revokeInternalCapabilitiesForThread,
     stagedSkillCleanupsForThread, rejectDeletedThreadSkillStages,
-  } = deps;
+  } = deps; const owners = routeRunOwners(deps.runOwners, deps.runActor);
   const DESKTOP_MANAGED = deps.desktopManaged;
   const deleteRefusal = (auth: RequestAuth, groupId: string, threadId: string): { status: 403 | 404 | 409; error: string } | null => {
     if (phoneSecretSubmissions.hasThread(threadId)) {
@@ -192,7 +198,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const switched = store.switchGroupTask(group.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such channel task" });
       deps.threadRead?.(auth, switched.threadId);
-      readThreadNotifications(switched.threadId, broadcast, auth);
+      readThreadNotifications(switched.threadId, broadcast, notificationListed(auth));
       const switchedSettings = own(publicGroupState(switched));
       // "0": settings only (no `messages` key); a positive page: that tail; omitted: the whole transcript.
       const responseGroup = requestedMessages === "0"
@@ -281,11 +287,11 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       deps.threadRead?.(auth, room.threadId);
       const personal = deps.personMarkRoom?.(auth, room, false);
       if (personal) {
-        readThreadNotifications(room.threadId, broadcast, auth);
+        readThreadNotifications(room.threadId, broadcast, notificationListed(auth));
         return json(res, 200, { group: personal });
       }
       const group = store.patchGroup(room.id, { unread: false, ...readCursor(room.threadId) })!;
-      readThreadNotifications(room.threadId, broadcast, auth);
+      readThreadNotifications(room.threadId, broadcast, notificationListed(auth));
       broadcast({ kind: "group", group: publicGroupState(group) });
       return json(res, 200, { group: own(publicGroupState(group)) });
     }
@@ -399,7 +405,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
             ? sameNameRefusalForBots(text, members, mentions, current.name, "sent")
             : sameNameRefusal(text, members, mentions, conversationLanguage(threadId));
           if (sameName) throw Object.assign(new Error(sameName), { status: 409 });
-          if (channelMode === "chat") applyRoomHoldsFromMessage(current.id, text, mentions);
+          if (channelMode === "chat" && !owners.stopRefusal(auth, threadId)) applyRoomHoldsFromMessage(current.id, text, mentions);
           const threadWorking = groupThreadIsWorking(current.id, threadId);
           const decision = admit("room", {}, { roomWorking: threadWorking, threadWorking });
           if (decision.action === "queue") {
@@ -424,6 +430,9 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
     if (m && method === "DELETE") {
       const group = store.group(m[1]);
       if (!group) return json(res, 404, { error: "no such group" });
+      const waiting = channelQueueItem(group.id, m[2]);
+      const notYours = waiting && owners.removeRefusal(auth, waiting.threadId, waiting.item.sender);
+      if (notYours) return json(res, 403, { error: notYours, code: "queued_not_yours" });
       if (!cancelChannelMessage(group.id, m[2])) {
         return json(res, 404, { error: "no such queued message" });
       }
@@ -462,6 +471,11 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!held) return json(res, 404, { error: "no such queued message" });
       const headGroup = headChannelGroup(held.items);
       const [head] = headGroup;
+      const waitsItsTurn = owners.joinRefusal(auth, targetThreadId, headGroup.map((item) => item.sender));
+      if (waitsItsTurn) {
+        restoreHeldChannelQueue(held);
+        return json(res, 403, { error: waitsItsTurn, code: "waits_its_turn" });
+      }
       const steerInput = extractSteerImages(headGroup.map((item) => item.text));
       const decision = admit("room-steer", {
         speakerPresent: Boolean(speaker),
@@ -602,6 +616,8 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
           instance: busy ? runningTurnInstance(busy, threadId) : undefined,
         };
       });
+      const refusal = targetThreadIds.map((threadId) => owners.stopRefusal(auth, threadId)).find(Boolean);
+      if (refusal) return json(res, 403, { error: refusal, code: "stop_not_yours" });
       // Abort every queued operation before the first provider round trip, so none begins while Stop awaits.
       for (const { threadId } of interruptTargets) cancelGroupTurnOperations(group.id, threadId);
       for (const { threadId, instance } of interruptTargets) {

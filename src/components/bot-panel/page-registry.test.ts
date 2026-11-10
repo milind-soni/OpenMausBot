@@ -31,10 +31,10 @@ describe("the bot panel's page registry", () => {
   });
 
   it("draws the Simple pages on their tabs: settings on Details, what it keeps on Library, where it works on Computer", () => {
-    expect(SIMPLE_PAGES).toEqual(["settings", "apps", "routines", "memory", "skills", "folder", "browser", "where"]);
+    expect(SIMPLE_PAGES).toEqual(["settings", "apps", "routines", "visibility", "memory", "skills", "folder", "browser", "where"]);
     const home = Object.fromEntries(SIMPLE_PAGES.map((page) => [page, PAGES[page].home]));
     expect(home).toEqual({
-      settings: "details", apps: "details", routines: "details",
+      settings: "details", apps: "details", routines: "details", visibility: "details",
       memory: "library", skills: "library", folder: "library",
       browser: "computer", where: "computer",
     });

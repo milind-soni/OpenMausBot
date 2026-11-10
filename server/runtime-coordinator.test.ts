@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
-import type { BeginTurnRequest, ComposedTurn, CoordinatorHost, HandoffOpener, HandoffOptions, HandoffView, HostTurnResult } from "./coordinator.ts";
+import type { BeginTurnRequest, ComposedTurn, CoordinatorHost, HandoffLimit, HandoffOpener, HandoffOptions, HandoffView, HostTurnResult } from "./coordinator.ts";
 import type { RoomAddress } from "./coordinator.ts";
 import { needsInputQuestion, RuntimeCoordinator, view } from "./runtime-coordinator.ts";
 import { ENVELOPE_MARK } from "./runtime/envelope.ts";
@@ -70,10 +70,10 @@ function fakeHost(script: Script = () => undefined): Host {
 }
 
 interface World { host: Host; coordinator: RuntimeCoordinator; logs: string[] }
-function world(script?: Script, runtimeLimits: Partial<Limits> = {}, dataDir = ":memory:"): World {
+function world(script?: Script, runtimeLimits: Partial<Limits> = {}, dataDir = ":memory:", handoffLimit?: HandoffLimit): World {
   const host = fakeHost(script);
   const logs: string[] = [];
-  const coordinator = new RuntimeCoordinator({ dataDir, host, runtimeLimits, log: line => logs.push(line) });
+  const coordinator = new RuntimeCoordinator({ dataDir, host, runtimeLimits, log: line => logs.push(line), ...(handoffLimit ? { handoffLimit } : {}) });
   return { host, coordinator, logs };
 }
 
@@ -91,9 +91,9 @@ const begun = (w: World, source: RoomAddress, generation: string, sourceText = "
 };
 
 const send = (w: World, source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,
-  opts: { approved?: boolean; rework?: boolean; batchKey?: string; sourceText?: string } = {}) => {
+  opts: { rework?: boolean; batchKey?: string; sourceText?: string } = {}) => {
   if (!parentId) begun(w, source, generation, opts.sourceText);
-  return w.coordinator.enqueue(source, generation, parentId, target, text, { approvalGranted: opts.approved ?? false, rework: opts.rework ?? false,
+  return w.coordinator.enqueue(source, generation, parentId, target, text, { rework: opts.rework ?? false,
     requestBatchKey: opts.batchKey });
 };
 
@@ -113,14 +113,14 @@ const roomRow = (patch: Partial<Assignment> = {}): Assignment => row({ assignee:
 
 describe("view: an Assignment as the legacy node", () => {
   it("projects the plain fields: ids, address, key = bot, text = brief, times, counts", () => {
-    expect(view(row({ startedAt: 1_500, executions: 2, restarts: 1, restart: "rerun", result: "half done", reportedAt: 3_000, approved: true, batchKey: "b1" }))).toEqual({
+    expect(view(row({ startedAt: 1_500, executions: 2, restarts: 1, restart: "rerun", result: "half done", reportedAt: 3_000, batchKey: "b1" }))).toEqual({
       id: "as_1", rootId: "gen-1", parentId: "gen-1", threadId: "builder-work", botId: "builder", key: "builder", text: "Build it",
       createdAt: 1_000, status: "queued", result: "half done", reported: true, executions: 2, startedAt: 1_500, lastProgressAt: 2_000,
-      approvalGranted: true, kind: "work", origin: { kind: "user", request: "Ship the CSV export" }, restarts: 1, restart: "rerun", requestBatchKey: "b1",
+      kind: "work", origin: { kind: "user", request: "Ship the CSV export" }, restarts: 1, restart: "rerun", requestBatchKey: "b1",
       mode: "work", reply: "resume",
     });
     const plain = view(base);
-    expect(plain).toMatchObject({ reported: false, approvalGranted: false, restarts: 0, lastProgressAt: 2_000 });
+    expect(plain).toMatchObject({ reported: false, restarts: 0, lastProgressAt: 2_000 });
     for (const absent of ["startedAt", "restart", "requestBatchKey", "groupId"]) expect(absent in plain).toBe(false);
   });
 
@@ -190,10 +190,10 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     const w = world((node) => node.botId === "builder" ? { ok: true, text: "Built it on branch csv-export." } : undefined);
     w.host.levels.builder = { level: "edits", driverKind: "claudeAgent" };
     w.host.chiefs.add("chief-chat");
-    const { node, duplicate } = send(w, chief, "gen-1", undefined, builder, "Build it", { approved: true });
+    const { node, duplicate } = send(w, chief, "gen-1", undefined, builder, "Build it");
     expect(duplicate).toBe(false);
     expect(node).toMatchObject({ status: "queued", rootId: "gen-1", parentId: "gen-1", botId: "builder", threadId: "builder-work", key: "builder",
-      text: "Build it", kind: "work", approvalGranted: true, reported: false, executions: 0, origin: userOrigin });
+      text: "Build it", kind: "work", reported: false, executions: 0, origin: userOrigin });
     expect(w.coordinator.has("gen-1")).toBe(true);
     expect(w.coordinator.node("gen-1")).toMatchObject({ id: "gen-1", rootId: "gen-1", status: "source", botId: "chief", threadId: "chief-chat",
       text: "Ship the CSV export", kind: "work", origin: userOrigin, executions: 1 });
@@ -256,6 +256,50 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     w.coordinator.tick(); await flush();
     expect(w.coordinator.all()).toHaveLength(2);
     expect(w.coordinator.active()).toEqual([]);
+  });
+
+  it("refuses a hand-off a plan's limit refuses, counting the hand-offs still open, and hands out nothing", () => {
+    const counted: number[] = [];
+    const w = world(hold, {}, ":memory:", { refusal: (botId, open) => { counted.push(open()); return botId === "tester" || open() >= 2 ? `no room for ${botId}` : null; } });
+    send(w, chief, "gen-1", undefined, builder, "Build it");
+    expect(() => send(w, chief, "gen-1", undefined, tester, "Test it")).toThrow("no room for tester");
+    send(w, chief, "gen-1", undefined, inRoom("helper", "g1", "helper-work"), "Help");
+    expect(() => send(w, chief, "gen-1", undefined, { botId: "writer", threadId: "writer-work" }, "Write it")).toThrow("no room for writer");
+    expect(counted.slice(-1)).toEqual([2]);
+    expect(w.coordinator.active().filter(n => n.parentId).map(n => n.botId)).toEqual(["builder", "helper"]);
+  });
+
+  it("runningIn() is active()'s running nodes in that thread", async () => {
+    const w = world(hold);
+    const same = () => { for (const threadId of ["chief-chat", node.threadId, "nobody"]) expect(w.coordinator.runningIn(threadId)).toEqual(w.coordinator.active().filter(n => n.threadId === threadId && n.status === "running")); };
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    same();
+    w.coordinator.tick(); await flush();
+    same(); expect(w.coordinator.runningIn(node.threadId).map(n => n.id)).toContain(node.id);
+    ended(w, "gen-1"); w.coordinator.tick(); await flush();
+    same();
+    w.coordinator.tick(); await flush();
+    same();
+  });
+
+  it("runningIn() and outstandingFor() read only the thread's own rows, however many other assignments are open", () => {
+    const w = world(hold);
+    for (let at = 0; at < 25; at++) send(w, chief, `gen-${at}`, undefined, builder, `Job ${at}`);
+    const store = (w.coordinator as unknown as { store: Record<"all" | "get" | "children", (...args: unknown[]) => unknown> }).store;
+    let read = 0;
+    for (const name of ["all", "get", "children"] as const) {
+      const real = store[name]!.bind(store);
+      store[name] = (...args: unknown[]) => { const rows = real(...args); read += Array.isArray(rows) ? rows.length : rows ? 1 : 0; return rows; };
+    }
+    const reads = (ask: () => unknown) => { read = 0; ask(); return read; };
+    expect(reads(() => w.coordinator.active()), "the whole tree, for comparison").toBeGreaterThanOrEqual(50);
+    expect(reads(() => w.coordinator.runningIn("tester-work"))).toBe(0);
+    expect(reads(() => w.coordinator.outstandingFor("tester-work"))).toBe(0);
+    expect(reads(() => w.coordinator.runningIn("builder-work"))).toBeLessThanOrEqual(50);
+    const live = w.coordinator.active();
+    const mine = new Set(live.filter(n => n.threadId === "chief-chat").map(n => n.id));
+    expect(w.coordinator.outstandingFor("chief-chat").map(n => n.id))
+      .toEqual(live.filter(n => n.parentId !== undefined && mine.has(n.parentId)).map(n => n.id));
   });
 
   it("active() never reads an ended row: one that no longer parses stops all(), not active() (#2765)", async () => {
@@ -356,6 +400,29 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
     expect(() => w.coordinator.enqueue(builder, "gen-2", awaited.node.id, chief, "Done", { mode: "notify", reply: "none" })).toThrow(/back to an ancestor/);
     expect(w.coordinator.answersTo(awaited.node.id)).toBeUndefined();
     await w.host.release(awaited.node.id, { ok: true, text: "done" });
+  });
+
+  it("lets a bot hand work to a new thread of its own only as an own thread, and every other way back stays refused", async () => {
+    const helping: Script = (node) => node.threadId.startsWith("chief-helper") || node.botId === "builder" ? "hold" : undefined;
+    const w = world(helping);
+    const helper: RoomAddress = { botId: "chief", threadId: "chief-helper-1" };
+    const own = (source: RoomAddress, parentId: string | undefined, target: RoomAddress, text = "Review the diff") => {
+      if (!parentId) begun(w, source, "gen-1");
+      return w.coordinator.enqueue(source, "gen-1", parentId, target, text, { ownThread: true });
+    };
+    expect(() => send(w, chief, "gen-1", undefined, helper, "Review the diff")).toThrow("Cannot assign work back to an ancestor; results return automatically");
+    expect(() => own(chief, undefined, chief)).toThrow(/back to an ancestor/);
+    expect(() => own(chief, undefined, inRoom("chief"))).toThrow(/back to an ancestor/);
+    send(w, chief, "gen-1", undefined, builder, "Build it");
+    const first = own(chief, undefined, helper);
+    expect(first).toMatchObject({ duplicate: false, node: { botId: "chief", threadId: "chief-helper-1", parentId: "gen-1", status: "queued" } });
+    expect(own(chief, undefined, { botId: "chief", threadId: "chief-helper-2" }).duplicate).toBe(false);
+    w.coordinator.tick();
+    expect(() => own(helper, first.node.id, { botId: "chief", threadId: "chief-helper-3" })).toThrow(/back to an ancestor/);
+    const work = w.coordinator.children("gen-1").find(child => child.botId === "builder")!;
+    expect(() => own(builder, work.id, { botId: "chief", threadId: "chief-helper-4" })).toThrow(/back to an ancestor/);
+    await w.host.release(first.node.id, { ok: true, text: "Looks right" });
+    expect(own(chief, undefined, { botId: "chief", threadId: "chief-helper-5" }).duplicate).toBe(false);
   });
 
   it("refuses a second assignment to a teammate that completed one, unless it is rework", async () => {

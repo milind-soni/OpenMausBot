@@ -18,6 +18,8 @@ import type { LocaleKey } from "@/locales";
 import type { CloudSendNotice } from "../../../electron/cloud-send.mjs";
 import { openBot, useStore } from "@/state/store";
 import { useCloudName } from "./parts";
+import { teamPeoplePage } from "@/components/SidebarPeople";
+import { useTeamPeople } from "@/state/team-people";
 import { WelcomeBring, type BringOutcome } from "./WelcomeBring";
 import { WelcomeDone, WelcomeEngine, WelcomeFiles } from "./WelcomeSteps";
 
@@ -63,6 +65,7 @@ export function CloudWelcome() {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const welcome = useCloudWelcome();
+  const people = useTeamPeople();
   const record = withEarlyHints(state.config?.onboarding, welcome.early);
   const name = useCloudName();
   const [view, setView] = useState<WelcomeView>(() => requestedView(takeWelcomeRequest()) ?? welcomeView(record));
@@ -160,7 +163,7 @@ export function CloudWelcome() {
       onFinish={finishBring} />;
   } else if (view === "engine") content = <WelcomeEngine name={name} headingRef={heading} onFinish={() => finish("engine")} />;
   else if (view === "files") content = <WelcomeFiles name={name} headingRef={heading} onFinish={() => finish("files")} />;
-  else content = <WelcomeDone name={name} bot={bot} headingRef={heading} onSayHi={sayHi} onJob={giveJob} />;
+  else content = <WelcomeDone name={name} bot={bot} headingRef={heading} onSayHi={sayHi} onJob={giveJob} invite={people?.me?.role === "owner" ? teamPeoplePage(state.config?.team) : null} />;
 
   return <main data-cloud-welcome={view} className="@container/welcome relative flex h-full min-w-0 flex-1 flex-col bg-app">
     <WindowDragStrip />
@@ -176,7 +179,7 @@ export function CloudWelcome() {
               const current = view === step;
               return <li key={step} className="min-w-0">
                 <button type="button" data-welcome-rail={step} data-finished={finished || undefined} data-bringing={bringing || undefined} data-skipped={skipped || undefined} aria-current={current ? "step" : undefined} onClick={() => go(step)}
-                  className={cn("flex w-full min-w-0 items-center gap-2 rounded-full text-left transition-colors duration-150 motion-reduce:transition-none @2xl/welcome:items-start @2xl/welcome:gap-2.5 @2xl/welcome:rounded-[10px] @2xl/welcome:p-2.5",
+                  className={cn("flex w-full min-w-0 items-center gap-2 rounded-full text-left transition-colors duration-150 motion-reduce:transition-none @2xl/welcome:items-start @2xl/welcome:gap-2.5 @2xl/welcome:rounded-[8px] @2xl/welcome:p-2.5",
                     current ? "bg-raised py-1.5 pl-1.5 pr-3" : "p-1.5 hover:bg-raised/60")}>
                   <span aria-hidden="true" className={cn("flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] text-[12px] font-semibold tabular-nums",
                     finished ? "check-in border-success bg-success" : current ? "border-accent text-accent-text" : "border-ink-secondary/40 text-ink-secondary")}>

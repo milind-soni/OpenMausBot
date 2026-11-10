@@ -292,8 +292,8 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
     const startHost = async (args: string[], cwd: string, key: string, requestMcp: boolean, owner: CliOwner): Promise<Host> => {
       const { command, args: argv } = launch(args);
       const env = childEnv();
-      const child = spawnCli(command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"],
-        ...(owner === "bot" ? { box: { allowEnv: instanceEnvNames(input.environment, env) } } : {}) }, owner);
+      // Security: the model list runs in the bot box too while it is on: Muse reads its settings from a HOME a bot can write.
+      const child = spawnCli(command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env) } }, owner);
       let spawnError: NodeJS.ErrnoException | undefined;
       child.once("error", (error) => { spawnError = error; });
       const exited = new Promise<void>((resolve) => child.once("close", () => resolve()));
@@ -650,7 +650,7 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
         composioMcp: true,
         browserMcp: true,
         dataMcp: true,
-        highlevelMcp: true, deviceMcp: true,
+        emailMcp: true, deviceMcp: true,
         images: true,
         nativeImageInput: true,
         effortLevels: EFFORT_LEVELS,

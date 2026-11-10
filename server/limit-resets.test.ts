@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { codexLimitResetsAt } from "./drivers/codex-errors.ts";
 import { engineLimitFromUsage, LimitResetClock, nearLimitNote, UNNAMED_LIMIT_MS } from "./limit-resets.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
-import { parseClaudeUsage, parseCodexUsage, type PlanProviderRow, type PlanUsageReport, type PlanWindows } from "./plan-usage.ts";
+import { parseClaudeUsage, parseCodexUsage, parseOpenCodeUsage, type PlanProviderRow, type PlanUsageReport, type PlanWindows } from "./plan-usage.ts";
 
 const NOW = Date.parse("2026-10-19T10:00:00Z");
 const HOUR = 3_600_000;
@@ -14,8 +14,10 @@ const HOUR = 3_600_000;
 const REFUSAL_GRACE_FOR_TEST = 10 * 60_000 + 1;
 const iso = (at: number) => new Date(at).toISOString();
 
-function row(id: string, driver: "claude" | "codex", windows: PlanWindows): PlanProviderRow {
-  return { id, name: driver === "claude" ? "Claude" : "Codex", driver, ok: true, error: null, ...windows };
+/** A plan-usage row for one driver, named as the usage panel names it. */
+function row(id: string, driver: PlanProviderRow["driver"], windows: PlanWindows): PlanProviderRow {
+  const name = driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : driver === "opencode" ? "OpenCode" : "Grok";
+  return { id, name, driver, ok: true, error: null, ...windows };
 }
 /** As the Claude usage endpoint answers (utilization, resets_at). */
 const claude = (fiveHour: [number, number | null], weekly: [number, number | null]) => row("claude", "claude", parseClaudeUsage({
@@ -32,6 +34,24 @@ const codex = (primary: [number, number], secondary: [number, number]) => row("c
 }));
 const report = (...providers: PlanProviderRow[]): PlanUsageReport => ({ fetchedAt: iso(NOW), providers });
 
+describe("a Claude account whose usage is not read", () => {
+  it("stops a full reading from holding it, even one saved before an update stopped reading it, and keeps a refusal's hold", () => {
+    const account = { id: "claude", name: "Claude", driver: "claude" as const, environment: {} };
+    let accounts: Array<typeof account & { noUsage?: true }> = [account];
+    const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
+    const full = report(claude([100, NOW + 2 * HOUR], [40, NOW + 50 * HOUR]));
+    instance.noteUsage(full);
+    expect(instance.blockedUntil("claude")).toBe(NOW + 2 * HOUR);
+    accounts = [{ ...account, noUsage: true }];
+    expect(instance.blockedUntil("claude")).toBeNull();
+    instance.noteUsage(full);
+    expect(instance.blockedUntil("claude")).toBeNull();
+    expect(instance.report().engines).toEqual([]);
+    instance.noteRefusal("claude", NOW + HOUR);
+    expect(instance.blockedUntil("claude")).toBe(NOW + HOUR);
+  });
+});
+
 describe("engineLimitFromUsage", () => {
   it("takes Claude's fullest window and its reset when nothing is at the limit", () => {
     expect(engineLimitFromUsage(claude([92, NOW + 2 * HOUR], [40, NOW + 50 * HOUR]))).toEqual({
@@ -39,6 +59,20 @@ describe("engineLimitFromUsage", () => {
       windows: [{ window: "5-hour", usedPercent: 92, resetsAt: NOW + 2 * HOUR }, { window: "weekly", usedPercent: 40, resetsAt: NOW + 50 * HOUR }],
     });
     expect(engineLimitFromUsage(claude([10, NOW + 2 * HOUR], [95, NOW + 50 * HOUR]))).toMatchObject({ window: "weekly", usedPercent: 95, resetsAt: NOW + 50 * HOUR });
+  });
+
+  it("reads OpenCode Go's rolling and weekly allowance for its marker", () => {
+    const opencode = row("opencodeGo", "opencode", parseOpenCodeUsage({
+      usage: {
+        rolling: { percent: 30, resetsAt: iso(NOW + 3 * HOUR) },
+        weekly: { percent: 55, resetsAt: iso(NOW + 4 * 24 * HOUR) },
+        monthly: { percent: 20, resetsAt: iso(NOW + 20 * 24 * HOUR) },
+      },
+    }));
+    expect(engineLimitFromUsage(opencode)).toMatchObject({
+      engine: "opencodeGo", name: "OpenCode", driver: "opencode", window: "weekly", usedPercent: 55, resetsAt: NOW + 4 * 24 * HOUR, blocked: false,
+    });
+    expect(engineLimitFromUsage(opencode)?.windows?.map((window) => window.window)).toEqual(["5-hour", "weekly"]);
   });
 
   it("waits for the latest reset of every window at its limit, and knows no time when one has none", () => {
@@ -372,6 +406,33 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("codex"), "a read from before the refusal").toBe(NOW + 23 * HOUR);
     instance.noteUsage({ fetchedAt: iso(NOW), providers: [room] });
     expect(instance.blockedUntil("codex"), "a read from after it").toBeNull();
+  });
+
+  it("still ignores a usage read from before the refusal after a restart, including a hold saved without its start", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-limit-held-at-"));
+    try {
+      const file = join(dir, "limit-holds.json");
+      let now = NOW;
+      const codexAccounts = () => [{ id: "codex", name: "Codex", driver: "codex" as const, environment: {} }];
+      const boot = () => new LimitResetClock({ accounts: codexAccounts, now: () => now, file });
+      boot().noteRefusal("codex", NOW + 23 * HOUR);
+      now = NOW + 5 * 60_000;
+      const restarted = boot();
+      const room = codex([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR]);
+      restarted.noteUsage({ fetchedAt: iso(NOW - 30_000), providers: [room] });
+      expect(restarted.blockedUntil("codex"), "a cached read from before the refusal").toBe(NOW + 23 * HOUR);
+      restarted.noteUsage({ fetchedAt: iso(NOW + 30_000), providers: [room] });
+      expect(restarted.blockedUntil("codex"), "a read from after it").toBeNull();
+      // A file an earlier version wrote names no start: the hold counts from this start.
+      writeFileSync(file, JSON.stringify({ codex: { until: NOW + 23 * HOUR, guessed: false } }));
+      const legacy = boot();
+      legacy.noteUsage({ fetchedAt: iso(NOW + 60_000), providers: [room] });
+      expect(legacy.blockedUntil("codex"), "a read from before this start").toBe(NOW + 23 * HOUR);
+      legacy.noteUsage({ fetchedAt: iso(now), providers: [room] });
+      expect(legacy.blockedUntil("codex")).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("counts a Codex hold from its latest refusal, so a read between two refusals with the same reset does not end it", () => {

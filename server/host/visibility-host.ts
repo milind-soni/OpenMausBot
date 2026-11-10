@@ -2,6 +2,8 @@
 // room or conversation change), the one check every request naming a bot, conversation, room, routine or file passes, and
 // the per-conversation filter a list uses. On a Team Cloud an admin is a viewer with a person too: every bot and room, but
 // only their own private chats (audience.ts).
+import { basename } from "node:path";
+
 import { audienceEquals, narrowestAudience, roomFeeds, routineRunVisible, routineVisible, SEES_EVERYTHING, VisibleSet, type PathSubject, type ThreadAudiences, type ThreadOwner, type Viewer } from "../bot-visibility.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
@@ -74,6 +76,14 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
     return threads;
   }
 
+  /** On a Team Cloud a file a routine carries is refused when only routines hidden from the viewer use it and no
+   * conversation they read does. */
+  function routineFileShown(name: string, visible: VisibleSet): boolean {
+    if (!visible.filtersThreads) return true;
+    const users = (deps.routines()?.listRoutines() ?? []).filter((routine) => routine.attachments?.some((file) => basename(file.path) === name));
+    return !users.length || users.some((routine) => routineVisible(routine, visible)) || threadsUsingAttachment(name).some((threadId) => visible.thread(threadId));
+  }
+
   /** The one visibility check every member request naming a subject passes through (a team's admin's too). */
   function subjectVisible(subject: PathSubject, visible: VisibleSet): boolean {
     switch (subject.kind) {
@@ -92,7 +102,7 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
         return !run || routineRunVisible(run, visible);
       }
       case "attachment":
-        return visible.attachment(subject.name, threadsUsingAttachment);
+        return visible.attachment(subject.name, threadsUsingAttachment) && routineFileShown(subject.name, visible);
     }
   }
 

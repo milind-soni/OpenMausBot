@@ -19,6 +19,20 @@ const manifest = (extra = {}) => ({
   ...extra,
 });
 
+test("a saved secret's check: a Cloud that can't keep secrets by id is never held to them, and a Cloud that can is", async () => {
+  const secret = { key: "secret:s1", kind: "secret", label: "Stripe", id: "s1", parts: { saved: "1" } };
+  const here = manifest({ items: [...manifest().items, secret] });
+  const there = manifest();
+  assert.equal(noGaps(manifestGaps(here, there)), true, "an older Cloud without saved secrets is not short");
+  assert.deepEqual(manifestGaps(here, { ...there, vault: 1 }).items, [{ key: "secret:s1", kind: "secret", label: "Stripe" }]);
+  assert.equal(noGaps(manifestGaps(here, { ...there, vault: 1, items: [...there.items, { ...secret, parts: { saved: "9" } }] })), true, "compared by fingerprint, not by when it changed");
+
+  const answerFrom = (secrets, vault) => ({ handoff: async () => ({ secrets: { "secret:s1": "f1" } }), session: { call: async () => ({ ok: true, body: { secrets, ...(vault ? { vault: 1 } : {}) } }) } });
+  assert.deepEqual(await checkSecrets(answerFrom({}, false)), { equal: [], differs: [], missing: [] });
+  assert.deepEqual(await checkSecrets(answerFrom({}, true)), { equal: [], differs: [], missing: ["secret:s1"] });
+  assert.deepEqual(await checkSecrets(answerFrom({ "secret:s1": "f1" }, true)), { equal: ["secret:s1"], differs: [], missing: [] });
+});
+
 test("a move's check finds nothing missing when My Cloud holds all this computer sent, its own way of holding a part included", () => {
   const here = manifest();
   const there = manifest({ items: here.items.map((item) => item.key === "bot:ember" ? { ...item, parts: { soul: "s1", team: "t9" } }

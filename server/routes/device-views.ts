@@ -1,7 +1,7 @@
 import { parseDeviceView, type DeviceView } from "../../shared/device-view.ts";
 import { roomMemberMissing, type StreamSeen, type VisibleSet } from "../bot-visibility.ts";
 import type { RequestAuth } from "../request-auth.ts";
-import type { Scope, SessionRegistry } from "../sessions.ts";
+import { pairingRequest as sessionPairingRequest, type PairingRequest, type SessionRegistry } from "../sessions.ts";
 import type { Store } from "../store.ts";
 import { userErrorFields } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -81,13 +81,14 @@ export function checkedDeviceView(value: unknown, store: DeviceViewRouteDeps["st
 }
 
 /** The view a new pairing code grants (none when the body names none); a Team Cloud refuses one. */
-/** POST /api/auth/pairing's body as openPairing takes it: the scopes it names and the view it limits the device to. */
-export function pairingRequest(body: { label?: unknown; scopes?: unknown; view?: unknown } | null | undefined, store: DeviceViewRouteDeps["store"], team: boolean):
-  { ok: true; pairing: { label?: string; scopes?: Scope[]; view?: DeviceView } } | { ok: false; status: number; error: string } {
-  const scopes = Array.isArray(body?.scopes) ? body.scopes.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
-  const view = pairingView(body?.view, store, team);
+/** POST /api/auth/pairing's body as openPairing takes it: what sessions.ts reads of it, and the view it limits the device to. */
+export function pairingRequest(body: unknown, store: DeviceViewRouteDeps["store"], team: boolean):
+  { ok: true; pairing: PairingRequest & { view?: DeviceView } } | { ok: false; status: number; error: string } {
+  const requested = sessionPairingRequest(body);
+  if ("error" in requested) return { ok: false, status: 400, error: requested.error };
+  const view = pairingView(body && typeof body === "object" ? (body as { view?: unknown }).view : undefined, store, team);
   if (!view.ok) return view;
-  return { ok: true, pairing: { label: typeof body?.label === "string" ? body.label : undefined, scopes, ...(view.view ? { view: view.view } : {}) } };
+  return { ok: true, pairing: { ...requested, ...(view.view ? { view: view.view } : {}) } };
 }
 
 /** POST /api/auth/pairing: the request read, then the pairing opened. A personal Cloud home refuses to pair a device. */

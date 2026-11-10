@@ -1,4 +1,4 @@
-// Pairing codes (60-bit, single use, 5 min), sessions (256-bit, only the sha256 stored) and stream tickets (EventSource cannot set headers).
+// Pairing codes (60-bit, single use, 10 min unless asked for up to a day), sessions (256-bit, only the sha256 stored) and stream tickets (EventSource cannot set headers).
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
@@ -6,14 +6,23 @@ import { z } from "zod";
 import { storedDeviceView, type DeviceView } from "../shared/device-view.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { teamSessionExpiresAt, type TeamMember, type TeamRole } from "./cloud-team.ts";
+import {
+  formatPairingCode,
+  normalizePairingCode,
+  PAIRING_CODE_ALPHABET,
+  PAIRING_CODE_LENGTH,
+  PAIRING_CREDENTIAL_PREFIX,
+  PAIRING_INPUT_PROBLEM_KEY,
+  readPairingInput,
+} from "../shared/pairing-code.ts";
 import { userError, type UserError } from "./user-errors.ts";
 
 export type Scope = "admin" | "client";
 export const SCOPES: readonly Scope[] = ["admin", "client"];
 
-export const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-export const PAIRING_CODE_LENGTH = 12;
-export const PAIRING_CODE_TTL_MS = 5 * 60_000;
+export { formatPairingCode, normalizePairingCode, PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH, PAIRING_CREDENTIAL_PREFIX };
+export const PAIRING_CODE_TTL_MS = 10 * 60_000;
+export const PAIRING_CODE_MAX_TTL_MS = 24 * 3_600_000;
 /** Not clamped: an invalid value falls back to the default, so a typo never becomes a policy. */
 export function daysMs(value: string | undefined, fallbackDays: number): number {
   const days = Number(value);
@@ -25,13 +34,25 @@ export const SESSION_TTL_MS = daysMs(process.env.OMB_SESSION_TTL_DAYS, 30);
 /** OMB_SESSION_MAX_DAYS (default 180): renewal never passes this, so a stolen cookie has a bounded life. */
 export const SESSION_MAX_AGE_MS = daysMs(process.env.OMB_SESSION_MAX_DAYS, 180);
 export const SESSION_RENEW_WHEN_LEFT_MS = SESSION_TTL_MS / 2;
+/** A team session the roster check keeps alive was used within this long. */
+const TEAM_ACTIVE_MS = 60 * 60_000;
 
 export function cookieMaxAgeSeconds(session: { expiresAt: number }, now = Date.now()): number {
   return Math.max(1, Math.floor((session.expiresAt - now) / 1000));
 }
 export const STREAM_TICKET_TTL_MS = 5 * 60_000;
-/** Slow-down only: a 60-bit code cannot be guessed online in five minutes, and sources are shared (NAT), so the lock stays short. */
-export const LOCKOUT = { failures: 10, windowMs: 60_000, lockMs: 60_000 } as const;
+type Lockout = { readonly failures: number; readonly windowMs: number; readonly lockMs: number };
+/** Slow-down only: a 60-bit code cannot be guessed online in a day, and sources are shared (NAT), so the lock stays short. */
+export const PAIRING_LOCKOUT: Lockout = { failures: 5, windowMs: 5 * 60_000, lockMs: 5 * 60_000 };
+/** Everything else a source can get wrong here: an email sign-in, a Cloud home's request signature. */
+export const LOCKOUT: Lockout = { failures: 10, windowMs: 60_000, lockMs: 60_000 };
+type Failures = Map<string, { count: number; windowStart: number; lockedUntil: number }>;
+/** Behind a proxy that names no client, every visitor arrives as loopback (or over IPC, "unknown"). Locking that address
+ * would let a stranger lock the owner out, so their wrong codes burn the open codes instead and a new one is made. */
+const UNNAMED_SOURCES = "unnamed sources";
+function unnamedSource(source: string): boolean {
+  return source === "unknown" || source === "::1" || /^(?:::ffff:)?127\./.test(source);
+}
 /** A consumed code re-presented with the same client-made attempt id gets the same answer; sharing an address is not enough. */
 export const EXCHANGE_REPLAY_MS = 60_000;
 export const MAX_STREAM_TICKETS_PER_SESSION = 5;
@@ -57,11 +78,16 @@ const sessionSchema = z.object({
   /** A team session opened with a code its member made (their phone): when the Admin last vouched for that member. The
    * session ends within the hour of it; each new Admin-signed pairing of the same member, in the same role, moves it. */
   memberCheckedAt: z.number().optional(),
+  /** A team session the Admin's roster check (cloud-team-roster.ts) last found its member in the team, at this role: it ends
+   * within the hour of that, so a browser or app in use stays signed in with no new pairing. */
+  vouchedAt: z.number().optional(),
   /** A browser sign-in (PairingCode `browser`): accepted only as its browser's cookie, never as a bearer token. */
   cookieOnly: z.literal(true).optional(),
   owner: z.string().max(254).optional(),
   /** A Team Cloud's sign-in for moving one bot in (server/team-move-in.ts): it reaches that bot's move routes only. */
   moveIn: z.string().regex(/^[\w-]{1,128}$/).optional(),
+  /** An access token for a script (`openmausbot token create`): it ends at expiresAt and never renews. */
+  token: z.literal(true).optional(),
   /** What this device is limited to. A damaged value shows nothing, and a device with a view is never an admin, whatever
    * the file says. */
   view: z.unknown().optional().transform(storedDeviceView),
@@ -82,6 +108,7 @@ export interface PublicSession {
   email?: string;
   owner?: string;
   teamRole?: TeamRole;
+  token?: true;
   view?: DeviceView;
 }
 
@@ -100,6 +127,8 @@ export interface PairingCode {
   member?: TeamMember;
   /** A code a member made from their own session: when the Admin last vouched for them. Absent on the Admin's own. */
   memberCheckedAt?: number;
+  /** The session it opens is an access token that lasts exactly this long. */
+  tokenTtlMs?: number;
   view?: DeviceView;
 }
 
@@ -114,9 +143,11 @@ export interface PublicPairing {
 
 export type ExchangeResult =
   | { ok: true; token: string; session: PublicSession }
-  | ({ ok: false; status: 401 | 403 | 429 } & UserError);
+  | ({ ok: false; status: 400 | 401 | 403 | 429 } & UserError);
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+/** The English fallback's clock; a client words `until` in its own time zone. */
+const utcClock = (at: number) => `${new Date(at).toISOString().slice(11, 16)} UTC`;
 
 function deviceLabel(value: string | undefined): string {
   return (value ?? "").replace(/[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, "").trim();
@@ -142,9 +173,6 @@ export function generatePairingCode(): string {
   return code;
 }
 
-/** A credential is matched byte for byte; only a typed code is normalized. */
-export const PAIRING_CREDENTIAL_PREFIX = "omb_pair_";
-
 /** 9 + 43 characters: the Android companion checks that length exactly. */
 export function generatePairingCredential(): string {
   return `${PAIRING_CREDENTIAL_PREFIX}${randomBytes(32).toString("base64url")}`;
@@ -152,18 +180,6 @@ export function generatePairingCredential(): string {
 
 export function isPairingCredential(value: string): boolean {
   return value.startsWith(PAIRING_CREDENTIAL_PREFIX);
-}
-
-export function normalizePairingCode(input: string): string {
-  return input
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
-    .replace(/0/g, "O")
-    .replace(/1/g, "I");
-}
-
-export function formatPairingCode(code: string): string {
-  return code.match(/.{1,4}/g)?.join("-") ?? code;
 }
 
 function publicSession(record: SessionRecord): PublicSession {
@@ -178,8 +194,35 @@ function publicSession(record: SessionRecord): PublicSession {
   if (record.email) view.email = record.email;
   if (record.owner) view.owner = record.owner;
   if (record.teamRole) view.teamRole = record.teamRole;
+  if (record.token) view.token = true;
   if (record.view) view.view = record.view;
   return view;
+}
+
+export interface PairingRequest {
+  label?: string;
+  scopes?: Scope[];
+  ttlMs?: number;
+  tokenTtlMs?: number;
+}
+
+const DAY_MS = 24 * 3_600_000;
+const within = (value: unknown, min: number, max: number): number | null | undefined =>
+  value === undefined ? undefined : typeof value === "number" && Number.isInteger(value) && value >= min && value <= max ? value : null;
+
+/** POST /api/auth/pairing's body: `ttlMs` keeps the code open up to a day; `tokenTtlMs` makes the session it opens an
+ * access token, bounded by OMB_SESSION_MAX_DAYS like every session. */
+export function pairingRequest(body: unknown): PairingRequest | { error: string } {
+  const record: Record<string, unknown> = body && typeof body === "object" && !Array.isArray(body) ? Object(body) : {};
+  const ttlMs = within(record.ttlMs, 60_000, PAIRING_CODE_MAX_TTL_MS);
+  if (ttlMs === null) return { error: "ttlMs must be a whole number of milliseconds, from one minute to 24 hours" };
+  const tokenTtlMs = within(record.tokenTtlMs, 60_000, SESSION_MAX_AGE_MS);
+  if (tokenTtlMs === null) return { error: `a token lasts from one minute to ${Math.floor(SESSION_MAX_AGE_MS / DAY_MS)} days on this server (OMB_SESSION_MAX_DAYS)` };
+  const scopes = Array.isArray(record.scopes) ? record.scopes.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
+  return {
+    ...(typeof record.label === "string" ? { label: record.label } : {}), ...(scopes ? { scopes } : {}),
+    ...(ttlMs !== undefined ? { ttlMs } : {}), ...(tokenTtlMs !== undefined ? { tokenTtlMs } : {}),
+  };
 }
 
 export type EmailScopesResolver = (email: string) => readonly Scope[] | null;
@@ -198,7 +241,8 @@ export class SessionRegistry {
   private sessions: SessionRecord[] = [];
   private pairings: PairingCode[] = [];
   private tickets = new Map<string, { sessionId: string; expiresAt: number }>();
-  private failures = new Map<string, { count: number; windowStart: number; lockedUntil: number }>();
+  private failures: Failures = new Map();
+  private codeFailures: Failures = new Map();
   private replays: Array<{ codeHash: string; attemptId: string; browser: boolean; result: ExchangeResult; expiresAt: number }> = [];
   private readonly onRevoked = new Set<(sessionId: string) => void>();
   private readonly onChanged = new Set<(sessionId: string) => void>();
@@ -276,8 +320,10 @@ export class SessionRegistry {
     this.pairings = this.pairings.filter((p) => p.expiresAt > now);
     this.replays = this.replays.filter((r) => r.expiresAt > now);
     for (const [hash, ticket] of this.tickets) if (ticket.expiresAt <= now) this.tickets.delete(hash);
-    for (const [source, entry] of this.failures) {
-      if (entry.lockedUntil <= now && now - entry.windowStart > LOCKOUT.windowMs) this.failures.delete(source);
+    for (const [failures, policy] of [[this.failures, LOCKOUT], [this.codeFailures, PAIRING_LOCKOUT]] as const) {
+      for (const [source, entry] of failures) {
+        if (entry.lockedUntil <= now && now - entry.windowStart > policy.windowMs) failures.delete(source);
+      }
     }
     const expired = this.sessions.filter((s) => s.expiresAt <= now);
     if (expired.length) {
@@ -330,7 +376,7 @@ export class SessionRegistry {
     }
   }
 
-  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number; browser?: boolean; owner?: string; member?: TeamMember; memberCheckedAt?: number; view?: DeviceView } = {}): { id: string; code: string; credential: string; expiresAt: number } {
+  openPairing(input: { scopes?: Scope[]; label?: string; ttlMs?: number; tokenTtlMs?: number; browser?: boolean; owner?: string; member?: TeamMember; memberCheckedAt?: number; view?: DeviceView } = {}): { id: string; code: string; credential: string; expiresAt: number } {
     this.prune();
     const now = this.now();
     const code = generatePairingCode();
@@ -347,6 +393,7 @@ export class SessionRegistry {
       expiresAt: now + (input.ttlMs ?? PAIRING_CODE_TTL_MS),
       ...(input.browser ? { browser: true as const, ...(input.owner ? { owner: input.owner } : {}) } : {}),
       ...(input.member ? { member: input.member, ...(input.memberCheckedAt !== undefined ? { memberCheckedAt: input.memberCheckedAt } : {}) } : {}),
+      ...(input.tokenTtlMs !== undefined && !input.browser && !input.member ? { tokenTtlMs: input.tokenTtlMs } : {}),
       ...(input.view ? { view: input.view } : {}),
     };
     this.pairings.push(pairing);
@@ -375,57 +422,67 @@ export class SessionRegistry {
 
   failureSources(): string[] {
     this.prune();
-    return [...this.failures.keys()];
+    return [...new Set([...this.failures.keys(), ...this.codeFailures.keys()])];
   }
 
-  private lockState(source: string): { locked: boolean; retryAfterMs: number } {
-    const entry = this.failures.get(source);
+  private lockState(failures: Failures, source: string): { locked: boolean; retryAfterMs: number } {
+    const entry = failures.get(source);
     if (!entry) return { locked: false, retryAfterMs: 0 };
     const now = this.now();
     if (entry.lockedUntil > now) return { locked: true, retryAfterMs: entry.lockedUntil - now };
     return { locked: false, retryAfterMs: 0 };
   }
 
-  private recordFailure(source: string): void {
+  private recordFailure(failures: Failures, policy: Lockout, source: string): void {
     const now = this.now();
-    const entry = this.failures.get(source) ?? { count: 0, windowStart: now, lockedUntil: 0 };
-    if (now - entry.windowStart > LOCKOUT.windowMs) {
+    const entry = failures.get(source) ?? { count: 0, windowStart: now, lockedUntil: 0 };
+    if (now - entry.windowStart > policy.windowMs) {
       entry.count = 0;
       entry.windowStart = now;
     }
     entry.count += 1;
-    if (entry.count >= LOCKOUT.failures) {
-      entry.lockedUntil = now + LOCKOUT.lockMs;
+    if (entry.count >= policy.failures) {
+      entry.lockedUntil = now + policy.lockMs;
       entry.count = 0;
       entry.windowStart = now;
     }
-    this.failures.set(source, entry);
+    failures.set(source, entry);
+  }
+
+  private wrongFromUnnamed(): void {
+    this.recordFailure(this.codeFailures, PAIRING_LOCKOUT, UNNAMED_SOURCES);
+    const entry = this.codeFailures.get(UNNAMED_SOURCES);
+    if (!entry || entry.lockedUntil <= this.now()) return;
+    this.pairings = this.pairings.filter((p) => p.browser === true);
+    this.codeFailures.delete(UNNAMED_SOURCES);
   }
 
   exchange(input: { code: string; label: string; source: string; fallbackLabel?: string; attemptId?: string; browser?: boolean }): ExchangeResult {
     this.prune();
     const now = this.now();
-    // Hashed as presented: normalizePairingCode folds 0 to O and 1 to I, which would merge distinct secrets.
-    const presented = isPairingCredential(input.code)
-      ? sha256(input.code)
-      : sha256(normalizePairingCode(input.code));
+    const read = readPairingInput(input.code);
+    if (read.kind === "wrong" && read.problem !== "notACode") return { ok: false, status: 400, ...userError(PAIRING_INPUT_PROBLEM_KEY[read.problem]) };
+    // A credential is hashed as presented: normalizePairingCode folds 0 to O and 1 to I, which would merge distinct secrets.
+    const presented = sha256(read.kind === "credential" ? read.credential : read.kind === "code" ? read.code : normalizePairingCode(input.code));
     const browser = input.browser === true;
     const attemptId = typeof input.attemptId === "string" && /^[\w-]{8,64}$/.test(input.attemptId) ? input.attemptId : null;
     const replay = attemptId ? this.replays.find((r) => r.attemptId === attemptId && r.browser === browser && sameDigest(r.codeHash, presented)) : undefined;
     if (replay) return replay.result;
-    const lock = this.lockState(input.source);
+    const unnamed = unnamedSource(input.source);
+    const lock = unnamed ? { locked: false, retryAfterMs: 0 } : this.lockState(this.codeFailures, input.source);
     if (lock.locked) {
-      const seconds = Math.ceil(lock.retryAfterMs / 1000);
-      return { ok: false, status: 429, ...userError("serverError.pair.tooMany", { seconds }) };
+      const until = now + lock.retryAfterMs;
+      return { ok: false, status: 429, ...userError("serverError.pair.tooMany", { seconds: Math.ceil(lock.retryAfterMs / 1000), until, time: utcClock(until) }) };
     }
     const index = this.pairings.findIndex((p) => (p.browser === true) === browser &&
       (sameDigest(p.credentialHash, presented) || (!p.browser && sameDigest(p.codeHash, presented))));
     if (index < 0) {
-      this.recordFailure(input.source);
+      if (unnamed) this.wrongFromUnnamed();
+      else this.recordFailure(this.codeFailures, PAIRING_LOCKOUT, input.source);
       return { ok: false, status: 401, ...userError("serverError.pair.codeWrong") };
     }
     const [pairing] = this.pairings.splice(index, 1);
-    this.failures.delete(input.source);
+    this.codeFailures.delete(input.source);
     if (this.personal(pairing.scopes)) return { ok: false, status: 403, ...this.adminOnly! };
     const token = `omb_sess_${randomBytes(32).toString("base64url")}`;
     const checkedAt = pairing.memberCheckedAt ?? now;
@@ -436,7 +493,8 @@ export class SessionRegistry {
       scopes: [...pairing.scopes],
       createdAt: now,
       lastSeenAt: now,
-      expiresAt: pairing.member ? teamSessionExpiresAt(checkedAt, now + SESSION_TTL_MS) : now + Math.min(SESSION_TTL_MS, SESSION_MAX_AGE_MS),
+      expiresAt: pairing.member ? teamSessionExpiresAt(checkedAt, now + SESSION_TTL_MS) : now + Math.min(pairing.tokenTtlMs ?? SESSION_TTL_MS, SESSION_MAX_AGE_MS),
+      ...(pairing.tokenTtlMs !== undefined ? { token: true as const } : {}),
       ...(pairing.browser ? { cookieOnly: true as const, ...(pairing.owner ? { owner: pairing.owner } : {}) } : {}),
       ...(pairing.member ? { email: pairing.member.email, teamRole: pairing.member.role, membershipAuthority: "team" as const } : {}),
       ...(pairing.member && pairing.memberCheckedAt !== undefined ? { memberCheckedAt: pairing.memberCheckedAt } : {}),
@@ -460,6 +518,41 @@ export class SessionRegistry {
       session.memberCheckedAt = now;
       session.expiresAt = Math.max(session.expiresAt, teamSessionExpiresAt(now, Math.min(now + SESSION_TTL_MS, session.createdAt + SESSION_MAX_AGE_MS)));
     }
+  }
+
+  /** The team members the roster check asks about: those with a session used within the last hour (never a script's token
+   * or a move-in sign-in, which end as they were made to). At most `max` people, the soonest to end first. */
+  membersToVouch(max: number): string[] {
+    this.prune();
+    const now = this.now(), soonest = new Map<string, number>();
+    for (const session of this.sessions) {
+      if (!this.vouchable(session, now)) continue;
+      soonest.set(session.email!, Math.min(soonest.get(session.email!) ?? Infinity, session.expiresAt));
+    }
+    return [...soonest].sort((a, b) => a[1] - b[1]).slice(0, max).map(([email]) => email);
+  }
+
+  /** A team session the roster check may keep: live, used within the last hour, and not a token or a move-in sign-in. */
+  private vouchable(session: SessionRecord, now: number): boolean {
+    return session.membershipAuthority === "team" && Boolean(session.email) && !session.token && !session.moveIn
+      && session.expiresAt > now && now - session.lastSeenAt <= TEAM_ACTIVE_MS;
+  }
+
+  /** The Admin's roster check found this member in the team at `role` just now. Their sessions at another role end (a role
+   * change the Admin's own pairing didn't reach; never an upgrade). Each of their sessions at that role that was used within
+   * the hour, phones included, ends no later than an hour after its last use: an idle one, left on another computer, still
+   * ends on schedule however much the person uses another device. */
+  vouchMember(email: string, role: TeamRole): void {
+    const address = email.trim().toLowerCase(), now = this.now();
+    this.revokeMember(address, role);
+    let changed = false;
+    for (const session of this.sessions) {
+      if (session.email !== address || session.teamRole !== role || !this.vouchable(session, now)) continue;
+      if (session.memberCheckedAt !== undefined) session.memberCheckedAt = now; else session.vouchedAt = now;
+      const next = Math.min(teamSessionExpiresAt(now, Math.min(now + SESSION_TTL_MS, session.createdAt + SESSION_MAX_AGE_MS)), session.lastSeenAt + TEAM_ACTIVE_MS);
+      if (next > session.expiresAt) { session.expiresAt = next; changed = true; }
+    }
+    if (changed) this.persist();
   }
 
   issue(input: { label: string; scopes: Scope[]; userId?: string; email?: string }): { token: string; session: PublicSession } {
@@ -525,12 +618,12 @@ export class SessionRegistry {
   }
 
   attemptAllowed(source: string): { ok: true } | { ok: false; retryAfterMs: number } {
-    const lock = this.lockState(source);
+    const lock = this.lockState(this.failures, source);
     return lock.locked ? { ok: false, retryAfterMs: lock.retryAfterMs } : { ok: true };
   }
 
   noteFailure(source: string): void {
-    this.recordFailure(source);
+    this.recordFailure(this.failures, LOCKOUT, source);
   }
 
   clearFailures(source: string): void {
@@ -602,10 +695,10 @@ export class SessionRegistry {
     this.recheckMembership();
     const record = this.sessions.find((s) => s.id === sessionId);
     const now = this.now();
-    if (!record || record.expiresAt <= now) return false;
+    if (!record || record.expiresAt <= now || record.token) return false;
     if (record.expiresAt - now > SESSION_RENEW_WHEN_LEFT_MS) return false;
     const proposed = Math.min(now + SESSION_TTL_MS, record.createdAt + SESSION_MAX_AGE_MS);
-    const next = record.membershipAuthority === "team" ? teamSessionExpiresAt(record.memberCheckedAt ?? record.createdAt, proposed) : proposed;
+    const next = record.membershipAuthority === "team" ? teamSessionExpiresAt(Math.max(record.memberCheckedAt ?? record.createdAt, record.vouchedAt ?? 0), proposed) : proposed;
     if (next <= record.expiresAt) return false;
     record.expiresAt = next;
     record.lastSeenAt = now;
@@ -636,11 +729,35 @@ export class SessionRegistry {
     return this.memberPhones().filter((phone) => this.revoke(phone.id)).length;
   }
 
+  /** The credentials of a person no longer in the team, for a day, by digest only (memory, never stored): their page can say
+   * why it was signed out. */
+  private readonly left = new Map<string, number>();
+  private noteLeft(address: string): void {
+    const now = this.now();
+    for (const [hash, until] of this.left) if (until <= now) this.left.delete(hash);
+    for (const session of this.sessions) {
+      if (session.membershipAuthority === "team" && session.email?.toLowerCase() === address && this.left.size < 5_000) this.left.set(session.tokenHash, now + 86_400_000);
+    }
+  }
+  /** Whether this credential's session ended because its person is no longer in the team. */
+  leftTeam(token: string): boolean {
+    const until = this.left.get(sha256(token));
+    return until !== undefined && until > this.now();
+  }
+
+  /** Remote access turned off on a Team Cloud: every User's browser sign-in signs out. An Owner's and an Admin's stay. */
+  closeMemberBrowsers(): number {
+    this.prune();
+    return this.sessions.filter((session) => session.membershipAuthority === "team" && session.cookieOnly && session.teamRole === "member").map((session) => session.id)
+      .filter((id) => this.revoke(id)).length;
+  }
+
   /** A person who left a Team Cloud: every session of theirs (app windows, phones) ends now, and no open code of theirs
    * can open another. With `keepRole` (the Admin vouched for them at that role), only those at another role end. Returns
    * how many sessions ended. */
   revokeMember(email: string, keepRole?: TeamRole): number {
     const address = email.trim().toLowerCase();
+    if (keepRole === undefined) this.noteLeft(address);
     this.pairings = this.pairings.filter((pairing) => pairing.member?.email.toLowerCase() !== address || pairing.member.role === keepRole);
     const ended = this.sessions.filter((session) => session.membershipAuthority === "team" && session.email?.toLowerCase() === address && (keepRole === undefined || session.teamRole !== keepRole));
     for (const session of ended) this.revoke(session.id);

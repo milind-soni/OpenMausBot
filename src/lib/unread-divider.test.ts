@@ -120,6 +120,46 @@ describe("the divider in the store", () => {
     expect(reducer(read, { type: "select", id: "room" }).unreadDivider).toEqual({ threadId: "room-t", messageId: "b3" });
   });
 
+  it("waits above a short switch page until scrollback reaches the boundary", () => {
+    const tail = [line("b4", "bot"), line("b5", "bot")];
+    const short = { ...base, bots: [bot("other"), bot("pepper", { unread: true, hasMore: true, messages: tail,
+      tasks: [{ threadId: "pepper-a", title: "A", createdAt: 1, unread: true, lastReadMessageId: "b1" }] })],
+    groups: [{ ...room, hasMore: true, messages: tail, lastReadMessageId: "b1" }] };
+    for (const [id, threadId] of [["pepper", "pepper-a"], ["room", "room-t"]] as const) {
+      const opened = reducer(short, { type: "select", id });
+      expect(opened.unreadDivider?.messageId ?? null).toBeNull();
+      const partial = reducer(opened, { type: "olderMessages", threadId, generation: 0, messages: [line("b3", "bot")], hasMore: true });
+      expect(partial.unreadDivider?.messageId ?? null).toBeNull();
+      const reached = reducer(partial, { type: "olderMessages", threadId, generation: 0, messages: [line("b1", "bot"), line("b2", "bot")], hasMore: false });
+      expect(reached.unreadDivider).toEqual({ threadId, messageId: "b2" });
+    }
+  });
+
+  it("places a waiting divider when a reload or reselect brings the boundary in", () => {
+    const full = ["b1", "b2", "b3", "b4", "b5"].map((id) => line(id, "bot"));
+    const tasks = [{ threadId: "pepper-a", title: "A", createdAt: 1, lastReadMessageId: "b1" }];
+    const short = { ...base, bots: [bot("other"), bot("pepper", { unread: true, hasMore: true, messages: full.slice(3), tasks: [{ ...tasks[0]!, unread: true }] })] };
+    const opened = reducer(short, { type: "select", id: "pepper" });
+    expect(opened.unreadDivider?.messageId ?? null).toBeNull();
+    const read = bot("pepper", { messages: full, tasks });
+    expect(reducer(opened, { type: "hydrate", bots: [bot("other"), read], groups: [], computerControl: {} }).unreadDivider).toEqual({ threadId: "pepper-a", messageId: "b2" });
+    expect(reducer({ ...opened, bots: [bot("other"), read] }, { type: "select", id: "pepper" }).unreadDivider).toEqual({ threadId: "pepper-a", messageId: "b2" });
+  });
+
+  it("places a waiting room divider when a new room transcript brings the boundary in", () => {
+    const tail = [line("b4", "bot"), line("b5", "bot")];
+    const short = { ...base, groups: [{ ...room, hasMore: true, messages: tail, lastReadMessageId: "b1" }] };
+    const opened = reducer(short, { type: "select", id: "room" });
+    expect(opened.unreadDivider?.messageId ?? null).toBeNull();
+    expect(reducer(opened, { type: "groupPatched", group: { id: "room", messages: transcript, hasMore: false } }).unreadDivider).toEqual({ threadId: "room-t", messageId: "b2" });
+    expect(reducer(opened, { type: "groupPatched", group: { id: "room", name: "Renamed" } }).unreadDivider).toEqual(opened.unreadDivider);
+  });
+
+  it("leaves no divider alone when a snapshot has a conversation without a thread", () => {
+    const loose = bot("loose", { threadId: undefined as unknown as string });
+    expect(reducer(base, { type: "hydrate", bots: [bot("other"), loose], groups: [], computerControl: {} }).unreadDivider).toBeNull();
+  });
+
   it("is dropped once done, only for its own conversation", () => {
     const opened = reducer(base, { type: "select", id: "pepper" });
     expect(reducer(opened, { type: "unreadDividerDone", threadId: "elsewhere" })).toBe(opened);

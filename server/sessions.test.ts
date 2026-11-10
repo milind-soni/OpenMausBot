@@ -11,9 +11,12 @@ import {
   generatePairingCredential,
   isPairingCredential,
   LOCKOUT,
+  PAIRING_LOCKOUT,
   normalizePairingCode,
   PAIRING_CODE_ALPHABET,
+  PAIRING_CODE_MAX_TTL_MS,
   PAIRING_CODE_TTL_MS,
+  pairingRequest,
   SESSION_TTL_MS,
   SessionRegistry,
   STREAM_TICKET_TTL_MS,
@@ -75,7 +78,7 @@ describe("the native-app encoding of a pairing window", () => {
     clock += PAIRING_CODE_TTL_MS + 1;
     expect(registry.exchange({ code: credential, label: "", source: "b" }).ok).toBe(false);
 
-    for (let attempt = 0; attempt < LOCKOUT.failures; attempt += 1) {
+    for (let attempt = 0; attempt < PAIRING_LOCKOUT.failures; attempt += 1) {
       registry.exchange({ code: generatePairingCredential(), label: "", source: "attacker" });
     }
     const locked = registry.exchange({ code: registry.openPairing().credential, label: "", source: "attacker" });
@@ -180,8 +183,27 @@ describe("pairing codes", () => {
     expect(registry.openPairings()).toEqual([]);
   });
 
+  it("stay open as long as asked, up to a day, and still work once", () => {
+    const { code, expiresAt } = registry.openPairing({ label: "server", ttlMs: PAIRING_CODE_MAX_TTL_MS });
+    expect(expiresAt).toBe(clock + 24 * 3_600_000);
+    clock += 23 * 3_600_000;
+    expect(registry.exchange({ code, label: "", source: "a" }).ok).toBe(true);
+    expect(registry.exchange({ code, label: "", source: "a" }).ok).toBe(false);
+    const { code: late } = registry.openPairing({ ttlMs: PAIRING_CODE_MAX_TTL_MS });
+    clock += PAIRING_CODE_MAX_TTL_MS + 1;
+    expect(registry.exchange({ code: late, label: "", source: "b" }).ok).toBe(false);
+  });
+
+  it("takes a code's term and a token's from the request, and refuses either out of bounds", () => {
+    expect(pairingRequest({ label: "CI", scopes: ["client", "root"], ttlMs: 86_400_000 })).toEqual({ label: "CI", scopes: ["client"], ttlMs: 86_400_000 });
+    expect(pairingRequest({ tokenTtlMs: SESSION_MAX_AGE_MS })).toEqual({ tokenTtlMs: SESSION_MAX_AGE_MS });
+    expect(pairingRequest(null)).toEqual({});
+    for (const ttlMs of [86_400_001, 59_999, 1.5e6 + 0.5, "24h"]) expect(pairingRequest({ ttlMs }), String(ttlMs)).toMatchObject({ error: expect.stringContaining("24 hours") });
+    expect(pairingRequest({ tokenTtlMs: SESSION_MAX_AGE_MS + 1 })).toMatchObject({ error: expect.stringContaining("OMB_SESSION_MAX_DAYS") });
+  });
+
   it("locks a source out after repeated failures, and forgets on success", () => {
-    for (let i = 0; i < LOCKOUT.failures; i++) {
+    for (let i = 0; i < PAIRING_LOCKOUT.failures; i++) {
       expect(registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "attacker" }).ok).toBe(false);
     }
     const { code } = registry.openPairing();
@@ -189,13 +211,64 @@ describe("pairing codes", () => {
     expect(locked.ok).toBe(false);
     if (!locked.ok) {
       expect(locked.status).toBe(429);
-      expect(locked.error).toMatch(/from your address; try again in 60s/);
-      expect(locked).toMatchObject({ errorKey: "serverError.pair.tooMany", errorParams: { seconds: 60 } });
+      expect(locked.error).toMatch(/^Too many wrong codes\. Try again at \d{2}:\d{2} UTC\.$/);
+      expect(locked).toMatchObject({ errorKey: "serverError.pair.tooMany", errorParams: { seconds: 300, until: clock + 300_000 } });
     }
     expect(registry.exchange({ code, label: "", source: "friend" }).ok).toBe(true);
-    clock += LOCKOUT.lockMs + 1;
+    clock += PAIRING_LOCKOUT.lockMs + 1;
     const { code: fresh } = registry.openPairing();
     expect(registry.exchange({ code: fresh, label: "", source: "attacker" }).ok).toBe(true);
+  });
+
+  it("five wrong codes in five minutes lock that address for five minutes; a code lives ten minutes", () => {
+    expect(PAIRING_LOCKOUT).toEqual({ failures: 5, windowMs: 300_000, lockMs: 300_000 });
+    expect(PAIRING_CODE_TTL_MS).toBe(600_000);
+    for (let i = 0; i < 4; i++) registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "slow" });
+    clock += 299_000;
+    const fifth = registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "slow" });
+    expect(fifth.ok === false && fifth.status).toBe(401);
+    const { code } = registry.openPairing();
+    const locked = registry.exchange({ code, label: "", source: "slow" });
+    expect(locked.ok === false && locked.status).toBe(429);
+  });
+
+  it("never locks out the address a proxy that names no client gives everyone; wrong codes from it burn the open codes", () => {
+    const owners = registry.openPairing();
+    for (let i = 0; i < PAIRING_LOCKOUT.failures; i++) {
+      expect(registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "127.0.0.1" })).toMatchObject({ ok: false, status: 401 });
+    }
+    expect(registry.exchange({ code: owners.code, label: "", source: "127.0.0.1" })).toMatchObject({ ok: false, status: 401 });
+    const fresh = registry.openPairing();
+    expect(registry.exchange({ code: fresh.code, label: "", source: "127.0.0.1" }).ok).toBe(true);
+    for (const source of ["::1", "::ffff:127.0.0.1", "unknown"]) {
+      for (let i = 0; i < PAIRING_LOCKOUT.failures + 1; i++) registry.exchange({ code: "AAAAAAAAAAAA", label: "", source });
+      expect(registry.exchange({ code: registry.openPairing().code, label: "", source }).ok, source).toBe(true);
+    }
+  });
+
+  it("an email sign-in or a bad signature keeps its own, looser count", () => {
+    for (let i = 0; i < PAIRING_LOCKOUT.failures; i++) registry.noteFailure("mail");
+    expect(registry.attemptAllowed("mail")).toEqual({ ok: true });
+    for (let i = PAIRING_LOCKOUT.failures; i < LOCKOUT.failures; i++) registry.noteFailure("mail");
+    expect(registry.attemptAllowed("mail").ok).toBe(false);
+    expect(registry.exchange({ code: registry.openPairing().code, label: "", source: "mail" }).ok).toBe(true);
+  });
+
+  it("explains a code of the wrong kind and does not count it as a guess", () => {
+    for (const [input, key] of [["1234 5678", "serverError.pair.emailCode"], ["123456", "serverError.pair.oldCode"], [`omb_sess_${"a".repeat(43)}`, "serverError.pair.scriptKey"]] as const) {
+      for (let i = 0; i < PAIRING_LOCKOUT.failures + 1; i++) {
+        const refused = registry.exchange({ code: input, label: "", source: "mixed-up" });
+        expect(refused).toMatchObject({ ok: false, status: 400, errorKey: key });
+      }
+    }
+    expect(registry.failureSources()).not.toContain("mixed-up");
+  });
+
+  it("takes the code or the credential out of a pasted link", () => {
+    const a = registry.openPairing();
+    expect(registry.exchange({ code: `https://maus.example.com/pair#code=${formatPairingCode(a.code)}`, label: "", source: "s" }).ok).toBe(true);
+    const b = registry.openPairing();
+    expect(registry.exchange({ code: `openmausbot://pair?address=https%3A%2F%2Fmaus.example.com&token=${b.credential}`, label: "", source: "s" }).ok).toBe(true);
   });
 
   it("answers a lost-response retry with the same session for a minute, keyed on the client's attempt id", () => {
@@ -216,7 +289,7 @@ describe("pairing codes", () => {
   it("forgets a source's failures once its window and lock have passed", () => {
     registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "flaky" });
     expect(registry.failureSources()).toContain("flaky");
-    clock += LOCKOUT.windowMs + 1;
+    clock += PAIRING_LOCKOUT.windowMs + 1;
     registry.openPairing();
     expect(registry.failureSources()).not.toContain("flaky");
   });
@@ -521,6 +594,29 @@ describe("sessions", () => {
     registry.authenticate(token);
     expect(registry.list()[0]?.lastSeenAt).toBe(clock);
     expect(statSync(file()).mtimeMs).toBeGreaterThanOrEqual(before);
+  });
+
+  it("opens an access token that lasts exactly its term, never renews, and stays one after a restart", () => {
+    const term = 90 * 24 * 3_600_000;
+    const { code } = registry.openPairing({ label: "Nightly CI", scopes: ["client"], tokenTtlMs: term });
+    const paired = registry.exchange({ code, label: "", source: "ci" });
+    if (!paired.ok) throw new Error(paired.error);
+    expect(paired.session).toMatchObject({ label: "Nightly CI", scopes: ["client"], token: true, expiresAt: clock + term });
+    clock += term - 60_000;
+    expect(registry.authenticate(paired.token)?.id).toBe(paired.session.id);
+    expect(registry.renew(paired.session.id)).toBe(false);
+    expect(new SessionRegistry({ file: file(), now: () => clock }).list()).toMatchObject([{ id: paired.session.id, token: true, expiresAt: paired.session.expiresAt }]);
+    clock += 60_001;
+    expect(registry.authenticate(paired.token)).toBeNull();
+  });
+
+  it("never makes a token of a browser sign-in, and caps a token at the longest session", () => {
+    const browser = registry.openPairing({ browser: true, tokenTtlMs: 3_600_000 });
+    const signedIn = registry.exchange({ code: browser.credential, label: "", source: "b", browser: true });
+    expect(signedIn.ok && signedIn.session.token).toBeFalsy();
+    const { code } = registry.openPairing({ tokenTtlMs: SESSION_MAX_AGE_MS * 2 });
+    const long = registry.exchange({ code, label: "", source: "c" });
+    expect(long.ok && long.session.expiresAt).toBe(clock + SESSION_MAX_AGE_MS);
   });
 
   it("renews a session with half its term or less left, and never revives an expired one", () => {

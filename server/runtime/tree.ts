@@ -1,6 +1,6 @@
 // "Since this turn began" is read from event ids (one global order), never timestamps: a clock can step back.
 import type { RuntimeStore } from "./store.ts";
-import { terminal, type Assignment, type Mode, type Owner, type TurnEvidence } from "./types.ts";
+import { terminal, type Assignee, type Assignment, type Mode, type Owner, type TurnEvidence } from "./types.ts";
 
 export const CUT_TWICE = "Interrupted by another OpenMausBot restart after resuming once; not resumed again. Some of its steps may already have taken effect.";
 
@@ -80,6 +80,15 @@ export const asking = (a: Assignment): boolean => a.status === "needs_input" && 
 export const answersSender = (parent: Assignment | undefined, mode: Mode, target: { botId: string; threadId: string; groupId?: string | undefined }): boolean =>
   mode === "notify" && parent?.reply === "none" && parent.requester.botId === target.botId && parent.requester.threadId === target.threadId
   && parent.assignee.destination.groupId === undefined && target.groupId === undefined;
+
+/** A bot's own new thread: the one hand-off that may reach its requester's bot again. Only for a direct thread no
+ * conversation in the chain is in, asked from a direct conversation; the requesting turn is then the one ancestor passed over. */
+export function ownThread(lineage: readonly Assignment[], target: Assignee, asked: boolean | undefined): boolean {
+  const requester = lineage.at(-1);
+  return asked === true && requester !== undefined && requester.assignee.botId === target.botId
+    && requester.assignee.destination.groupId === undefined && target.destination.groupId === undefined
+    && target.destination.kind === "work_thread" && !lineage.some(a => a.assignee.destination.threadId === target.destination.threadId);
+}
 
 export function path(store: RuntimeStore, n: Assignment): Assignment[] {
   const out: Assignment[] = [];

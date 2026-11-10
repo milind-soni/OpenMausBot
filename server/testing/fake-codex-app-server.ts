@@ -5,7 +5,7 @@
 //     mcp-app-approval | mcp-form | permissions-approval | question | multi-question | mixed-question |
 //     empty-question | malformed-question | config-profile | config-profile-unsupported | config-read-error |
 //     image | logged-in-stdout | logged-out | unauthorized | late-request | retry-then-complete | signin-refused |
-//     auth-recovery | mcp-401 | legacy-error | key-401 | recovered-403 | recovered-401 | recovering-403 | usage-limit
+//     auth-recovery | mcp-401 | mcp-image | legacy-error | key-401 | recovered-403 | recovered-401 | recovering-403 | usage-limit
 //     | async-question (an agentMessage with delivery async and questions, as codex 0.160 sends request_user_input_async)
 //   FAKE_CODEX_MISSING_BEARER  the first N launches fail their turn as codex-cli 0.160.1 holding no login does (count in FAKE_CODEX_STATE)
 //   FAKE_CODEX_LAUNCH_CRASHES  the first N launches die pre-ack at turn/start, transient stderr, exit 1 (count in FAKE_CODEX_STATE)
@@ -49,6 +49,7 @@
 //   FAKE_CODEX_TEXT_LOG  `codex exec`: append {argv, cwd, prompt, env} per call
 //   FAKE_CODEX_TEXT_MODE  `codex exec`: ok (default) | fail | exit | hang | tool | noisy
 //   FAKE_CODEX_TEXT_REFUSE  `codex exec`: comma-separated models answered with the 400 a ChatGPT account gets for gpt-5.4-mini
+//   FAKE_CODEX_TEXT_BLOCK  `codex exec`: comma-separated models answered with the 403 OpenAI sends a region it does not serve
 //   FAKE_CODEX_LUNA  "1": model/list also offers gpt-6-luna
 //   FAKE_CODEX_UPDATED_FILE  while this file exists, the CLI was updated in place: --version answers codex-cli 0.162.1
 //     and model/list also offers gpt-6.1-sol
@@ -61,6 +62,7 @@
 //     namespace-less function_call for retry_thread and codex's "unsupported call: retry_thread" output to it
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
 
@@ -140,6 +142,12 @@ if (process.argv[2] === "exec") {
     event({ type: "turn.failed", error: { message } });
     process.exit(1);
   }
+  if (process.env.FAKE_CODEX_TEXT_BLOCK?.split(",").includes(model)) {
+    const message = 'unexpected status 403 Forbidden: {"error":{"code":"unsupported_country_region_territory","message":"Country, region, or territory not supported","param":null,"type":"request_forbidden"}}';
+    event({ type: "error", message });
+    event({ type: "turn.failed", error: { message } });
+    process.exit(1);
+  }
   if (textMode === "fail") {
     event({ type: "error", message: "unexpected status 401 Unauthorized" });
     event({ type: "turn.failed", error: { message: "unexpected status 401 Unauthorized" } });
@@ -168,6 +176,12 @@ if (process.argv[2] === "exec") {
 const calls: Array<{ method: string; params: unknown }> = [];
 const mcpOverrides: Record<string, Record<string, unknown>> = {};
 for (let index = 0; process.env.FAKE_CODEX_MCP_OVERRIDES === "1" && index < process.argv.length; index++) {
+  if (process.argv[index - 1] === "-c" && process.argv[index]!.startsWith("mcp_servers=")) {
+    // The real CLI replaces its accumulated override table before later dotted-path fields apply.
+    for (const name of Object.keys(mcpOverrides)) delete mcpOverrides[name];
+    for (const [, key] of process.argv[index]!.matchAll(/("(?:[^"\\]|\\.)*") = \{ enabled = false \}/g)) mcpOverrides[JSON.parse(key!) as string] = { enabled: false };
+    continue;
+  }
   const match = process.argv[index - 1] === "-c" ? /^mcp_servers\.([^.]+)\.([^.]+)=(.*)$/.exec(process.argv[index]!) : null;
   if (match) (mcpOverrides[match[1]!] ??= {})[match[2]!] = JSON.parse(match[3]!);
 }
@@ -744,6 +758,12 @@ process.stdin.on("data", (chunk) => {
         if (mode === "mcp-401") {
           out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
           notify("item/completed", { item: { id: "t1", type: "mcpToolCall", tool: "fetch", status: "failed", error: { message: "HTTP 401 Unauthorized: Please sign in again" } } });
+          finishTurn();
+          break;
+        }
+        if (mode === "mcp-image") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          notify("item/completed", { item: { id: "t1", type: "mcpToolCall", tool: "screenshot", status: "completed", result: { content: [{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }] } } });
           finishTurn();
           break;
         }

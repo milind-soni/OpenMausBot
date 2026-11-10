@@ -27,9 +27,9 @@ describe("the Connect apps faces", () => {
     expect(html).toMatch(/class="group\/apps flex h-9 min-w-0 flex-1 items-center justify-center gap-1\.5 rounded-full pl-4 pr-3 text-\[14px\] font-medium leading-5 text-ink /);
     const faces = [...html.matchAll(/data-app-face="[^"]+" class="([^"]*)"/g)].map(([, classes]) => classes!);
     expect(faces).toHaveLength(3);
-    for (const face of faces) expect(face).toContain("size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md bg-white p-px");
+    for (const face of faces) expect(face).toContain("size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md p-px");
     expect(faces[0]).toContain("motion-safe:group-hover/apps:-rotate-[8deg]");
-    expect(faces[1]).toContain("-ms-1.5");
+    expect(faces[1]).not.toContain("-ms-1.5");
     expect(faces[1]).not.toContain("rotate");
     expect(faces[2]).toContain("motion-safe:group-hover/apps:translate-x-[3px] motion-safe:group-hover/apps:rotate-[8deg]");
   });

@@ -91,3 +91,12 @@ The iOS companion app bundles a prebuilt WebRTC library for Live calls
 (stasel/WebRTC), built from the WebRTC project, Copyright (c) 2011, The WebRTC
 project authors, used under the BSD 3-Clause License. WebRTC includes
 third-party components under their own licenses, listed with the library.
+
+The meeting bot (server/meetings/meetbot.ts) adapts parts of the Google Meet and
+Microsoft Teams page handling of Vexa, https://github.com/vexa-ai/vexa (its
+meeting join, Google Meet capture and Teams capture modules): lobby, refusal
+and removal wording, chat panel and message selectors, speaking indicators and
+Teams' display-name rule. Copyright 2025-2026 Vexa.ai Inc. and the Vexa
+contributors, used under the Apache License, Version 2.0
+(third_party/vexa/LICENSE). The adapted parts were rewritten in our own code;
+no Vexa file is included unmodified.

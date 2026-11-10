@@ -4,7 +4,8 @@ import { createHash } from "node:crypto";
 import { createSocket } from "node:dgram";
 import { hostname, networkInterfaces } from "node:os";
 
-import { lanAddresses } from "./listener.ts";
+import { lanInterfaces } from "./listener.ts";
+import { directRoutes, isPrivateLanAddress, isTailnetAddress, tailnetInterfaceAddresses } from "./direct-routes.ts";
 
 const MDNS_ADDRESS = "224.0.0.251";
 const MDNS_PORT = 5353;
@@ -357,8 +358,20 @@ export function defaultHostName(machine = hostname()): string {
   return `openmausbot-${digest}.local`;
 }
 
-export function advertisableAddresses(): string[] {
-  return lanAddresses();
+/** macOS point-to-point tunnels: utun (every VPN, Tailscale, tun2socks),
+ * ipsec, ppp. Multicast cannot cross them, and on macOS 27 closing a socket
+ * that held memberships on a utun that came or went hung the kernel and
+ * panicked the Mac. Typed-address and tailnet pairing do not use mDNS. */
+const MAC_TUNNEL_INTERFACE = /^(utun|ipsec|ppp)\d*$/i;
+
+/** Bonjour is part of Same Wi-Fi: nothing is advertised while it is off, never the tailnet address, and never a Mac's tunnel. */
+export function advertisableAddresses(interfaces = networkInterfaces(), platform = process.platform): string[] {
+  if (!directRoutes().wifi) return [];
+  const tailnet = tailnetInterfaceAddresses();
+  return lanInterfaces(interfaces)
+    .filter((entry) => platform !== "darwin" || !MAC_TUNNEL_INTERFACE.test(entry.name))
+    .map((entry) => entry.address)
+    .filter((address) => !isTailnetAddress(address, tailnet) && isPrivateLanAddress(address));
 }
 
 
@@ -379,6 +392,7 @@ export interface ResponderOptions {
   port?: number;
   multicast?: boolean;
   socketFactory?: () => ResponderSocket;
+  platform?: NodeJS.Platform;
 }
 
 export class MdnsResponder {
@@ -391,11 +405,13 @@ export class MdnsResponder {
   private readonly port: number;
   private readonly multicast: boolean;
   private readonly socketFactory: () => ResponderSocket;
+  private readonly platform: NodeJS.Platform;
 
   constructor(options: ResponderOptions = {}) {
     this.port = options.port ?? MDNS_PORT;
     this.multicast = options.multicast ?? true;
     this.socketFactory = options.socketFactory ?? (() => createSocket({ type: "udp4", reuseAddr: true }));
+    this.platform = options.platform ?? process.platform;
   }
 
   get advertising(): boolean {
@@ -460,6 +476,15 @@ export class MdnsResponder {
         }
       }
       if (!joined) {
+        // On a Mac the default route may be a VPN tunnel (see MAC_TUNNEL_INTERFACE),
+        // so there is no fallback: with no group joined, discovery is not running.
+        if (this.platform === "darwin") {
+          try {
+            socket.close();
+          } catch {
+          }
+          return false;
+        }
         try {
           socket.addMembership(MDNS_ADDRESS);
         } catch {

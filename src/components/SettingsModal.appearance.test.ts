@@ -306,6 +306,19 @@ describe("Settings → Appearance", () => {
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
+  it("renders, and search finds, every display setting Simple has no row for, in Advanced", () => {
+    const appearance = render();
+    for (const label of ["Interface font", "Chat width", "Choose tools layout", "Show threads", "Pinned bots as circles", "Universal pins",
+      "Show the run card"]) expect(appearance, label).toContain(`aria-label="${label}"`);
+    fixture.section = "general";
+    expect(render()).toContain(">Pinned panels<");
+    const section = (id: string) => SECTIONS.find((entry) => entry.id === id)!;
+    for (const query of ["font", "chat width", "toolbar", "show threads", "circles", "universal", "run card"]) {
+      expect(sectionMatches(section("appearance"), query), query).toBe(true);
+    }
+    expect(sectionMatches(section("general"), "web panel")).toBe(true);
+  });
+
   it("finds chat width and message colors in Appearance", () => {
     const appearance = SECTIONS.find((section) => section.id === "appearance")!;
     for (const query of ["width", "wide", "full width", "bubble", "color"]) {
@@ -353,7 +366,7 @@ describe("Settings → Appearance", () => {
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     const html = render();
     expect(html).toContain('<option value="appearance" selected="">Appearance</option>');
-    expect(html).toContain('<option value="companion">Remote access</option>');
+    expect(html).toContain('<option value="companion">This server</option>');
     expect(html).not.toContain('<option value="general">');
     expect(html).not.toContain('<option value="connections">');
     expect(html).not.toContain('<option value="engines">');
@@ -413,10 +426,9 @@ describe("Settings → Appearance", () => {
     vi.stubGlobal("window", { ogb: { environments: {} } });
     const local = render();
     expect(local).toContain('<option value="desktopWorkspaces" selected="">Servers</option>');
-    expect(local).toContain("Server address or pairing link");
-    expect(local).toContain("Name (optional)");
     expect(local).toContain("Your servers");
-    expect(local).toContain("npx openmausbot pair --label");
+    expect(local).toContain("Loading servers…");
+    expect(local, "connecting is the same sheet as ＋, not a form of its own").not.toContain("Name (optional)");
     fixture.section = "general";
     vi.stubGlobal("window", { ogb: { workspaces: {} } });
     expect(render()).not.toContain('<option value="desktopWorkspaces"');

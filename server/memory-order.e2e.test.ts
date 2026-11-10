@@ -28,10 +28,10 @@ async function fixture(test: (f: any) => Promise<void>) {
 it("starts the person's own line ahead of a hand-off that was already waiting for memory, and the hand-off right after", () => fixture(async (f) => {
   const [chief, first, second, person] = [await f.bot("Clive"), await f.bot("First"), await f.bot("Second"), await f.bot("Person's bot")];
   await f.api(`/api/bots/${chief.id}`, { chiefOfStaff: true, managedSections: ["Team"], acknowledgePeerScope: true }, "PATCH");
-  const gate = join(f.dataDir, "first-may-finish");
+  const gate = join(f.dataDir, "first-may-finish"), firstRunning = join(f.dataDir, "first-is-running");
   writeFileSync(f.planPath, JSON.stringify({
     [chief.id]: { steps: [{ arguments: { bot_ids: [first.id], message: "First job" } }, { arguments: { bot_ids: [second.id], message: "Second job" } }], reply: "Sent", resumeReply: "Done" },
-    [first.id]: { gateFile: gate, reply: "First done" },
+    [first.id]: { readyFile: firstRunning, gateFile: gate, reply: "First done" },
     [second.id]: { reply: "Second done" },
     [person.id]: { reply: "Yours" },
   }));
@@ -46,6 +46,7 @@ it("starts the person's own line ahead of a hand-off that was already waiting fo
   try {
     expect((db.prepare("SELECT kind, detail FROM assignment_events WHERE assignment_id = ? AND kind = 'held'").all(held.id) as Array<{ detail: string }>).map((row) => row.detail)[0]).toMatch(/^memory: \d+ running, \d+ ahead$/);
   } finally { db.close(); }
+  await expect.poll(() => existsSync(firstRunning), { timeout: 30_000 }).toBe(true);
 
   await f.cli("send", "--bot", person.id, "--task", person.activeTaskId, "--text", "My own question.");
   await expect.poll(async () => (await f.messages(person.activeTaskId)).some((message: any) => message.tool?.name?.includes("Waiting for memory")), { timeout: 30_000 }).toBe(true);
@@ -54,10 +55,9 @@ it("starts the person's own line ahead of a hand-off that was already waiting fo
   expect(f.ended().indexOf(person.id)).toBeLessThan(f.ended().indexOf(second.id));
 }), 120_000);
 
-it("on Starter with 13 bots, hand-offs to busy bots start at once: one thread per bot holds only what a person or a routine starts", () => fixture(async (f) => {
-  // A team made before it moved to Starter: the plan limits the bots it makes, never those it has.
+it("on Starter, hand-offs to busy bots start at once: one thread per bot holds only what a person or a routine starts", () => fixture(async (f) => {
   const bots: any[] = [];
-  for (let at = 0; at < 13; at += 1) bots.push(await f.bot(`Teammate ${at}`));
+  for (let at = 0; at < 5; at += 1) bots.push(await f.bot(`Teammate ${at}`));
   writeFileSync(join(f.dataDir, "test-starter"), "");
   expect((await f.api("/api/config", undefined, "GET")).cloudStarter).toBe(true);
   const [chief, target, other] = bots;

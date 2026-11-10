@@ -15,7 +15,7 @@ import type { WorkspaceAccess } from "../enterprise.ts";
 import type { GroupUsageReader } from "../group-thread-usage.ts";
 import { readMessage, searchMessagesAsync } from "../message-db.ts";
 import {
-  listMessageFolder, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName,
+  listMessageFolder, MESSAGE_FILE_DOWNLOAD_MAX_BYTES, MESSAGE_FILE_MAX_BYTES, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName,
   messageImageTargetAt, messageReferencesFile, openMessageFile, openMessageFolderEntry, referencedFileName,
 } from "../message-file.ts";
 import { resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../request-auth.ts";
@@ -58,6 +58,8 @@ export interface ThreadRouteDeps {
   viewerFor(auth: RequestAuth): Viewer;
   /** A room's unread mark as this person has read it (a Team Cloud); the room as it is anywhere else. */
   groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
+  /** The bots in this person's own order (a Team Cloud's User); the team's order anywhere else. */
+  botOrderFor?(auth: RequestAuth, bots: readonly BotRecord[]): readonly BotRecord[];
   visibleTo(viewer: Viewer): VisibleSet;
   /** A Team Cloud: gives a member their own MausBot once, before their first list of bots. */
   memberDefaultBot?(email: string): unknown;
@@ -90,7 +92,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       // tasks stays explicit: clients expect [] where wireBot() would omit the key.
-      const shownBots = store.bots.filter((bot) => visible.bot(bot.id));
+      const shownBots = (deps.botOrderFor?.(auth, store.bots) ?? store.bots).filter((bot) => visible.bot(bot.id));
       const queued = publicBotQueuedMessages();
       return json(res, 200, {
         bots: shownBots.map((bot) => {
@@ -227,11 +229,13 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         ? messageFolderEntryName(body.entry)
         : undefined;
       if (folderEntry === null) return json(res, 400, { error: "entry must be one file name" });
+      // An inline image is read whole by the browser; a saved file is streamed below, so it may be larger.
+      const maxBytes = streamsMessageImage ? MESSAGE_FILE_MAX_BYTES : MESSAGE_FILE_DOWNLOAD_MAX_BYTES;
       let file: Awaited<ReturnType<typeof openMessageFile>>;
       try {
         file = folderEntry
-          ? await openMessageFolderEntry(href, folderEntry, roots)
-          : await openMessageFile(href, roots);
+          ? await openMessageFolderEntry(href, folderEntry, roots, maxBytes)
+          : await openMessageFile(href, roots, maxBytes);
       } catch (error) {
         const code = (error as { code?: unknown } | null)?.code;
         const status = (error as { status?: unknown } | null)?.status;
@@ -240,7 +244,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
           : null;
         const copy = name ? deliveredCopy(store.messagesFor(threadId), message, name) : null;
         if (copy) {
-          file = await openMessageFile(copy.path, [ATTACHMENTS_DIR]);
+          file = await openMessageFile(copy.path, [ATTACHMENTS_DIR], maxBytes);
           downloadName = copy.name;
         } else {
           // Only a client that asks for listings gets one; older clients keep the 400.

@@ -10,8 +10,9 @@ import { isIP } from "node:net";
 import type { EmailAccount, EmailServer } from "./store.ts";
 
 export class EmailError extends Error {
-  /** `password`: the server refused the sign-in. `network`: no answer, or no valid TLS. `server`: it answered no. */
-  readonly code: "password" | "network" | "server" | "refused" | "not-found" | "too-big";
+  /** `password`: the server refused the sign-in. `network`: no answer, or no valid TLS. `server`: it answered no.
+   * `sending`: the outgoing server, which says why in a SendingError. */
+  readonly code: "password" | "network" | "server" | "refused" | "not-found" | "too-big" | "sending";
   constructor(code: EmailError["code"], message: string) {
     super(message);
     this.name = "EmailError";
@@ -112,21 +113,110 @@ export async function testMailbox(account: Pick<EmailAccount, "username" | "pass
   });
 }
 
-/** Whether this server sends with this password; nothing is sent. */
-export async function testSending(account: Pick<EmailAccount, "username" | "password">, server: EmailServer, guard: EmailGuard): Promise<void> {
-  const transport = await smtpTransport(account, server, guard);
-  try { await transport.verify(); } catch (error) { throw failure(error); } finally { transport.close(); }
+/** Why an outgoing server can't send: `missing` no such name; `no-answer` nothing answered on that port; `wrong-security`
+ * it speaks TLS the other way on that port (from the first byte, or upgraded with STARTTLS); `certificate` its
+ * certificate isn't valid for the name; `no-tls` no secure connection on offer; `no-sign-in` no sign-in on offer;
+ * `password` it refused the sign-in; `refused` not a place this host may reach; `rejected` it refused a message's
+ * sender or recipients; `server` any other no. */
+export type SendingFault = "missing" | "no-answer" | "wrong-security" | "certificate" | "no-tls" | "no-sign-in" | "password" | "refused" | "rejected" | "server";
+
+/** Faults that stay until the person changes something; the others may pass on their own. */
+export const LASTING_SENDING_FAULTS: ReadonlySet<SendingFault> = new Set(["missing", "wrong-security", "certificate", "no-tls", "no-sign-in", "password", "refused"]);
+
+const where = (server: EmailServer) => `${server.host}:${server.port}`;
+
+/** One plain sentence that names the server. */
+export function sendingSentence(fault: SendingFault, server: EmailServer, responseCode?: number): string {
+  switch (fault) {
+    case "missing": return `There is no mail server called ${server.host}.`;
+    case "no-answer": return `${server.host} didn't answer on port ${server.port}.`;
+    case "wrong-security": return server.secure
+      ? `${where(server)} starts without TLS and upgrades with STARTTLS; choose STARTTLS for it, not SSL/TLS.`
+      : `${where(server)} expects SSL/TLS from the first byte; choose SSL/TLS for it, not STARTTLS.`;
+    case "certificate": return `The certificate of ${server.host} isn't valid for that name, so the password wasn't sent there.`;
+    case "no-tls": return `${where(server)} doesn't offer a secure connection, so the password wasn't sent there.`;
+    case "no-sign-in": return `${where(server)} doesn't offer a sign-in for sending.`;
+    case "password": return `The outgoing server ${where(server)} refused the password.`;
+    case "refused": return "My Cloud can only reach mail servers on the public internet.";
+    case "rejected": return `The outgoing server ${where(server)} refused this message's sender or recipients${responseCode ? ` (${responseCode})` : ""}.`;
+    case "server": return `The outgoing server ${where(server)} said no${responseCode ? ` (${responseCode})` : ""}.`;
+  }
 }
 
-async function smtpTransport(account: Pick<EmailAccount, "username" | "password">, server: EmailServer, guard: EmailGuard) {
-  const { createTransport } = await import("nodemailer");
-  const at = await guard(server);
-  return createTransport({
-    host: at.host, port: server.port, secure: server.secure, requireTLS: !server.secure,
-    auth: { user: account.username, pass: account.password },
+/** An outgoing server's no, with the server it came from. Its message is ours, never the server's words. */
+export class SendingError extends EmailError {
+  readonly fault: SendingFault;
+  readonly server: EmailServer;
+  constructor(fault: SendingFault, server: EmailServer, responseCode?: number) {
+    super("sending", sendingSentence(fault, server, responseCode));
+    this.name = "SendingError";
+    this.fault = fault;
+    this.server = server;
+  }
+}
+
+/** What a Nodemailer failure means, from its codes: the server's own text is never kept. */
+export function sendingError(error: unknown, server: EmailServer): SendingError {
+  if (error instanceof SendingError) return error;
+  if (error instanceof EmailError) return new SendingError(error.code === "refused" ? "refused" : "missing", server);
+  const known = (error ?? {}) as { code?: string; originalCode?: string; responseCode?: number; message?: string };
+  const code = `${known.code ?? ""} ${known.originalCode ?? ""}`;
+  const message = known.message ?? "";
+  const answered = typeof known.responseCode === "number" ? known.responseCode : undefined;
+  if (/ENOTFOUND|EAI_AGAIN|EDNS|ENODATA/u.test(code)) return new SendingError("missing", server);
+  if (/CERT|ALTNAME|SELF_SIGNED|UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER|DEPTH_ZERO/u.test(code) || /certificate|altnames/iu.test(message)) return new SendingError("certificate", server);
+  // Nodemailer's words for the two mix-ups: STARTTLS on a port that starts in TLS waits for a greeting that never comes,
+  // and TLS on a port that starts in the clear reads its plain greeting as a broken TLS record.
+  if (!server.secure && /greeting never received/iu.test(message)) return new SendingError("wrong-security", server);
+  if (server.secure && (/WRONG_VERSION_NUMBER|PACKET_LENGTH_TOO_LONG|RECORD_LAYER/u.test(code) || /wrong version number|packet length too long|record layer failure/iu.test(message))) return new SendingError("wrong-security", server);
+  if (known.code === "EAUTH") {
+    if (answered && answered >= 500 && answered <= 504) return new SendingError("no-sign-in", server);
+    return answered && answered >= 530 ? new SendingError("password", server) : new SendingError("server", server, answered);
+  }
+  if (known.code === "ETLS") return new SendingError("no-tls", server);
+  if (known.code === "EENVELOPE" || known.code === "EMESSAGE") return new SendingError("rejected", server, answered);
+  if (answered) return new SendingError("server", server, answered);
+  return new SendingError("no-answer", server);
+}
+
+function smtpOptions(server: EmailServer, at: { host: string; servername?: string }) {
+  return {
+    host: at.host, port: server.port, secure: server.secure,
+    // Never in the clear: on a port that upgrades, no STARTTLS means nothing more is sent.
+    requireTLS: !server.secure,
     tls: { ...TLS, ...(at.servername ? { servername: at.servername } : {}) },
     connectionTimeout: CONNECT_MS, greetingTimeout: CONNECT_MS, socketTimeout: COMMAND_MS,
-  });
+  };
+}
+
+/** Whether this outgoing server answers over TLS with a valid certificate and offers a sign-in, and, given a login, takes
+ * it. Nothing is sent, and without a login no password either. */
+export async function testSending(login: { username: string; password: string } | null, server: EmailServer, guard: EmailGuard): Promise<void> {
+  const { default: SMTPConnection } = await import("nodemailer/lib/smtp-connection");
+  let at: { host: string; servername?: string };
+  try { at = await guard(server); } catch (error) { throw sendingError(error, server); }
+  const connection = new SMTPConnection(smtpOptions(server, at));
+  // A failure after the answer below reports here too; the awaited step carries it.
+  connection.on("error", () => {});
+  try {
+    await new Promise<void>((resolve, reject) => { connection.once("error", reject); connection.connect(() => { connection.removeListener("error", reject); resolve(); }); });
+    if (!connection.secure) throw new SendingError("no-tls", server);
+    if (!connection.allowsAuth) throw new SendingError("no-sign-in", server);
+    if (login) await new Promise<void>((resolve, reject) => connection.login({ user: login.username, pass: login.password }, (error) => (error ? reject(error) : resolve())));
+  } catch (error) {
+    throw sendingError(error, server);
+  } finally { connection.close(); }
+}
+
+/** The sign-in an account sends with: the outgoing server's own, else the incoming one's. */
+export const sendingLogin = (account: Pick<EmailAccount, "username" | "password" | "smtpUsername" | "smtpPassword">) =>
+  ({ username: account.smtpUsername ?? account.username, password: account.smtpPassword ?? account.password });
+
+async function smtpTransport(account: Pick<EmailAccount, "username" | "password" | "smtpUsername" | "smtpPassword">, server: EmailServer, guard: EmailGuard) {
+  const { createTransport } = await import("nodemailer");
+  const at = await guard(server);
+  const login = sendingLogin(account);
+  return createTransport({ ...smtpOptions(server, at), auth: { user: login.username, pass: login.password } });
 }
 
 export async function listMailboxes(account: EmailAccount, guard: EmailGuard): Promise<Array<{ path: string; role?: string }>> {
@@ -164,6 +254,31 @@ export async function searchMessages(account: EmailAccount, guard: EmailGuard, i
       const out: MessageSummary[] = [];
       if (uids.length) for await (const message of client.fetch(uids.slice(-input.limit), QUERY, { uid: true })) out.push(summary(message));
       return { found: uids.length, messages: out.sort((a, b) => b.uid - a.uid) };
+    } finally { lock.release(); }
+  });
+}
+
+export interface InboxEntry { uid: number; at: number; from: string; subject: string }
+
+/** When the server received a message, which a sender can't write. A message naming anything but one sender has from "". */
+export function inboxEntry(message: { uid: number; internalDate?: unknown; envelope?: { from?: Address[]; subject?: string } }): InboxEntry {
+  const received = message.internalDate instanceof Date ? message.internalDate.getTime() : Number.NaN;
+  const senders = message.envelope?.from ?? [];
+  return { uid: message.uid, at: Number.isFinite(received) ? received : 0, from: senders.length === 1 ? senders[0]!.address ?? "" : "", subject: message.envelope?.subject ?? "" };
+}
+
+const DAY_MS = 86_400_000;
+
+/** The newest inbox messages received around `sinceMs` or later; the caller keeps the exact window. Never marks one read. */
+export async function recentInbox(account: EmailAccount, guard: EmailGuard, input: { sinceMs: number; limit: number }): Promise<InboxEntry[]> {
+  return imapSession(account, guard, async (client) => {
+    const lock = await client.getMailboxLock("INBOX", { readOnly: true });
+    try {
+      // IMAP SINCE compares whole dates in the server's own time zone (RFC 9051), so a day's margin keeps a message from being missed.
+      const uids = (await client.search({ since: new Date(input.sinceMs - DAY_MS) }, { uid: true })) || [];
+      const out: InboxEntry[] = [];
+      if (uids.length) for await (const message of client.fetch(uids.slice(-input.limit), QUERY, { uid: true })) out.push(inboxEntry(message));
+      return out.sort((a, b) => b.at - a.at);
     } finally { lock.release(); }
   });
 }
@@ -241,7 +356,8 @@ export interface SendInput { to: string[]; cc?: string[]; bcc?: string[]; subjec
 
 /** Sends as the mailbox's own address and files a copy in its Sent folder when it has one. */
 export async function sendMessage(account: EmailAccount, guard: EmailGuard, input: SendInput): Promise<{ messageId: string; accepted: string[]; rejected: string[]; filed: boolean }> {
-  if (!account.smtp) throw new EmailError("refused", `No server that sends was found for ${account.address}. Reconnect it under Connected apps and enter its outgoing server.`);
+  const server = account.smtp;
+  if (!server) throw new EmailError("refused", `No outgoing server is set for ${account.address}.`);
   const { default: MailComposer } = await import("nodemailer/lib/mail-composer");
   const composed = new MailComposer({
     from: account.address, to: input.to, ...(input.cc?.length ? { cc: input.cc } : {}), ...(input.bcc?.length ? { bcc: input.bcc } : {}),
@@ -249,9 +365,12 @@ export async function sendMessage(account: EmailAccount, guard: EmailGuard, inpu
   }).compile();
   const envelope = composed.getEnvelope();
   const raw = await composed.build();
-  const transport = await smtpTransport(account, account.smtp, guard);
   let sent: { accepted?: unknown[]; rejected?: unknown[]; messageId?: string };
-  try { sent = await transport.sendMail({ envelope, raw }); } catch (error) { throw failure(error); } finally { transport.close(); }
+  let transport: Awaited<ReturnType<typeof smtpTransport>> | undefined;
+  try {
+    transport = await smtpTransport(account, server, guard);
+    sent = await transport.sendMail({ envelope, raw });
+  } catch (error) { throw sendingError(error, server); } finally { transport?.close(); }
   const text = (list: unknown[] | undefined) => (list ?? []).map((entry) => (typeof entry === "string" ? entry : (entry as Address).address ?? "")).filter(Boolean);
   let filed = false;
   try {
