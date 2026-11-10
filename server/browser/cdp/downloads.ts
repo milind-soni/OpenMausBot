@@ -154,7 +154,7 @@ export class Downloads {
       rmSync(written, { force: true });
       return;
     }
-    const kept = this.list(download.owner ?? undefined).filter((entry) => entry.state === "completed" && entry.path);
+    const kept = this.list().filter((entry) => entry.owner === download.owner && entry.state === "completed" && entry.path);
     for (const evicted of kept.slice(0, Math.max(0, kept.length - this.#limits.perOwner))) {
       rmSync(join(this.dir, evicted.id), { recursive: true, force: true });
       this.#byGuid.delete(evicted.guid);
