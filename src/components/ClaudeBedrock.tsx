@@ -37,7 +37,7 @@ const draftOf = (instance: InstanceInfo): Draft => {
     name: instance.displayName,
     awsProfile: bedrock?.awsProfile || "default",
     awsRegion: bedrock?.awsRegion ?? "",
-    model: "",
+    model: bedrock?.model ?? "",
     opusModel: bedrock?.opusModel ?? "",
     sonnetModel: bedrock?.sonnetModel ?? "",
     haikuModel: bedrock?.haikuModel ?? "",
@@ -63,7 +63,7 @@ function BedrockForm({ instance, onDone }: { instance?: InstanceInfo; onDone: ()
     spellCheck: false,
     disabled: saving,
   });
-  const ready = Boolean(draft.name.trim() && draft.awsProfile.trim() && draft.awsRegion.trim());
+  const ready = Boolean(draft.name.trim() && draft.awsProfile.trim() && draft.awsRegion.trim() && draft.model.trim());
 
   const save = async () => {
     if (saving || !ready) return;
@@ -73,7 +73,7 @@ function BedrockForm({ instance, onDone }: { instance?: InstanceInfo; onDone: ()
       displayName: draft.name.trim(),
       awsProfile: draft.awsProfile.trim(),
       awsRegion: draft.awsRegion.trim(),
-      ...(draft.model.trim() ? { model: draft.model.trim() } : {}),
+      model: draft.model.trim(),
       ...Object.fromEntries(TIERS.map((tier) => [tier, draft[tier].trim()])),
     };
     try {

@@ -13,6 +13,7 @@ export interface ClaudeEndpointInfo {
 export interface ClaudeBedrockInfo {
   awsProfile: string;
   awsRegion: string;
+  model: string;
   models: string[];
   opusModel: string;
   sonnetModel: string;

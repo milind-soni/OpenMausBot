@@ -15,7 +15,7 @@ const bedrock = (extra: Record<string, unknown> = {}) => ({
   claudeBedrock: {
     awsProfile: "theiconic-claude-primary",
     awsRegion: "us-east-1",
-    models: ["global.anthropic.claude-sonnet-5-5"],
+    model: "global.anthropic.claude-sonnet-5-5", models: ["global.anthropic.claude-sonnet-5-5"],
     opusModel: "au.anthropic.claude-opus-5-5", sonnetModel: "", haikuModel: "", smallFastModel: "",
   },
   ...extra,

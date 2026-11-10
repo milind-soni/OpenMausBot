@@ -14,7 +14,7 @@ const bedrockInstance = () => ({
   snapshot: { state: "available" },
   models: { default: "", options: [] },
   claudeBedrock: {
-    awsProfile: "default", awsRegion: "us-east-1", models: ["global.anthropic.claude-opus-5-5"],
+    awsProfile: "default", awsRegion: "us-east-1", model: "global.anthropic.claude-opus-5-5", models: ["global.anthropic.claude-opus-5-5"],
     opusModel: "global.anthropic.claude-opus-5-5", sonnetModel: "", haikuModel: "", smallFastModel: "",
   },
 }) as unknown as store.InstanceInfo;
@@ -54,7 +54,17 @@ afterEach(() => {
 });
 
 describe("adding a Claude on Amazon Bedrock engine", () => {
-  it("posts the profile, region and only the filled model fields, trimmed", async () => {
+  it("waits for a model before it can be saved", () => {
+    mount([]);
+    flushSync(() => host.querySelector<HTMLButtonElement>("button")!.click());
+    setValue(host.querySelector<HTMLInputElement>('input[aria-label="AWS region"]')!, "us-west-2");
+    const submit = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    expect(submit.disabled).toBe(true);
+    setValue(host.querySelector<HTMLInputElement>('input[aria-label="Model"]')!, "global.anthropic.claude-sonnet-5-5");
+    expect(submit.disabled).toBe(false);
+  });
+
+  it("posts the profile, region and model fields, trimmed", async () => {
     mount([]);
     flushSync(() => host.querySelector<HTMLButtonElement>("button")!.click());
     const name = host.querySelector<HTMLInputElement>('input[aria-label="Name"]')!;
@@ -63,6 +73,7 @@ describe("adding a Claude on Amazon Bedrock engine", () => {
     setValue(name, "  Team Bedrock  ");
     setValue(profile, " my-profile ");
     setValue(region, " us-west-2 ");
+    setValue(host.querySelector<HTMLInputElement>('input[aria-label="Model"]')!, " global.anthropic.claude-sonnet-5-5 ");
     const form = host.querySelector<HTMLFormElement>("form")!;
     await flushSync(() => { form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
     await Promise.resolve();
@@ -73,7 +84,7 @@ describe("adding a Claude on Amazon Bedrock engine", () => {
     expect(init.method).toBe("POST");
     const body = JSON.parse(String(init.body));
     expect(body).toEqual({
-      displayName: "Team Bedrock", awsProfile: "my-profile", awsRegion: "us-west-2",
+      displayName: "Team Bedrock", awsProfile: "my-profile", awsRegion: "us-west-2", model: "global.anthropic.claude-sonnet-5-5",
       opusModel: "", sonnetModel: "", haikuModel: "", smallFastModel: "",
     });
   });
@@ -96,5 +107,6 @@ describe("adding a Claude on Amazon Bedrock engine", () => {
     const body = JSON.parse(String(init.body));
     expect(body.opusModel).toBe("");
     expect(body.awsProfile).toBe("default");
+    expect(body.model).toBe("global.anthropic.claude-opus-5-5");
   });
 });

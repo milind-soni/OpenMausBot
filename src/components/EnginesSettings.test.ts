@@ -499,7 +499,7 @@ describe("Settings → Engines → custom Claude endpoints", () => {
       {
         instanceId: "claude-bedrock-1", driverKind: "claudeAgent", displayName: "Claude on Bedrock", access: "custom",
         snapshot: { state: "available" }, models: { default: "", options: [] },
-        claudeBedrock: { awsProfile: "default", awsRegion: "us-east-1", models: [], opusModel: "", sonnetModel: "", haikuModel: "", smallFastModel: "" },
+        claudeBedrock: { awsProfile: "default", awsRegion: "us-east-1", model: "global.anthropic.claude-sonnet-5-5", models: ["global.anthropic.claude-sonnet-5-5"], opusModel: "", sonnetModel: "", haikuModel: "", smallFastModel: "" },
       },
     ];
     fixture.bots = [];

@@ -7,7 +7,6 @@ import type { ClaudeBedrockInfo } from "../shared/claude-endpoint.ts";
 import { assertSeparateClaudeAccount } from "./claude-accounts.ts";
 import { DATA_DIR, persistableInstanceConfigs, type AppConfig } from "./config.ts";
 import type { InstanceConfig, InstanceConfigMap } from "./contracts.ts";
-import { officialModels } from "./agent-endpoint-models.ts";
 import { CLAUDE_MODEL_ID } from "./drivers/claude-model-extras.ts";
 
 const displayName = z.string().trim().min(1).max(80).refine((value) => !/\p{Cc}/u.test(value), "Name cannot contain control characters");
@@ -21,7 +20,7 @@ export const claudeBedrockSchema = z.object({
   displayName,
   awsProfile,
   awsRegion,
-  model: model.optional(),
+  model,
   opusModel: optionalModel.optional(),
   sonnetModel: optionalModel.optional(),
   haikuModel: optionalModel.optional(),
@@ -68,6 +67,7 @@ export function claudeBedrockInfo(entry: InstanceConfig): ClaudeBedrockInfo {
   return {
     awsProfile: environment.AWS_PROFILE ?? "",
     awsRegion: environment.AWS_REGION ?? "",
+    model: environment.ANTHROPIC_MODEL ?? "",
     models: Array.isArray(config.endpointModels) ? [...config.endpointModels] : [],
     opusModel: environment.ANTHROPIC_DEFAULT_OPUS_MODEL ?? "",
     sonnetModel: environment.ANTHROPIC_DEFAULT_SONNET_MODEL ?? "",
@@ -104,11 +104,6 @@ function bedrockModels(fields: ResolvedBedrockFields): string[] {
   return [...new Set([(fields.model ?? "").trim(), ...tiers].filter(Boolean))];
 }
 
-/** Bedrock's own id for each official model, Claude Code's cross-region inference profile prefix. */
-function defaultBedrockModels(): string[] {
-  return officialModels(false).map((id) => `global.anthropic.${id}`);
-}
-
 function inheritedCli(instances: InstanceConfigMap): string | undefined {
   for (const entry of Object.values(instances)) {
     if (entry.driver !== "claudeAgent" || isClaudeBedrock(entry)) continue;
@@ -130,7 +125,7 @@ export function newClaudeBedrock(cfg: AppConfig, body: z.infer<typeof claudeBedr
       ...(cli ? { cli } : {}),
       configDir: join(DATA_DIR, "providers", instanceId),
       bedrock: true,
-      endpointModels: body.model ? bedrockModels(body) : defaultBedrockModels(),
+      endpointModels: bedrockModels(body),
     },
     environment: bedrockEnvironment(body),
   };

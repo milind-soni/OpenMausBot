@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { officialModels } from "./agent-endpoint-models.ts";
 import {
   claudeBedrockSchema,
   claudeBedrockUpdateSchema,
@@ -18,6 +17,7 @@ const BASE = {
   displayName: "Bedrock US",
   awsProfile: "bedrock-prod",
   awsRegion: "us-east-1",
+  model: "global.anthropic.claude-sonnet-5-5",
 };
 
 const cfg = () => ({
@@ -47,6 +47,7 @@ describe("Claude on Amazon Bedrock", () => {
         CLAUDE_CODE_USE_BEDROCK: "1",
         AWS_PROFILE: "bedrock-prod",
         AWS_REGION: "us-east-1",
+        ANTHROPIC_MODEL: "global.anthropic.claude-sonnet-5-5",
         ANTHROPIC_DEFAULT_OPUS_MODEL: "global.anthropic.claude-opus-5-5",
       },
     });
@@ -54,8 +55,8 @@ describe("Claude on Amazon Bedrock", () => {
     expect(entry.environment).not.toHaveProperty("ANTHROPIC_AUTH_TOKEN");
     expect(entry.environment).not.toHaveProperty("requireApiKey");
     expect((entry.config as { requireApiKey?: boolean }).requireApiKey).toBeUndefined();
-    // No model named: the default catalog is every official model under Bedrock's cross-region prefix.
-    expect((entry.config as { endpointModels: string[] }).endpointModels).toEqual(officialModels(false).map((id) => `global.anthropic.${id}`));
+    // The catalog is the named model and each tier set, never guessed Bedrock ids.
+    expect((entry.config as { endpointModels: string[] }).endpointModels).toEqual(["global.anthropic.claude-sonnet-5-5", "global.anthropic.claude-opus-5-5"]);
     // The caller's config is left as it was: the fleet is copied, not edited.
     expect(Object.keys((source as { instances: object }).instances)).toEqual(["claude", "other"]);
   });
@@ -72,17 +73,18 @@ describe("Claude on Amazon Bedrock", () => {
   });
 
   it("uses an explicit model as the only catalog entry when none of the tiers are set", () => {
-    const { instanceId, instances } = newClaudeBedrock(cfg(), { ...BASE, model: "global.anthropic.claude-sonnet-5-5" });
+    const { instanceId, instances } = newClaudeBedrock(cfg(), BASE);
     expect((instances[instanceId].config as { endpointModels: string[] }).endpointModels).toEqual(["global.anthropic.claude-sonnet-5-5"]);
     expect(instances[instanceId].environment?.ANTHROPIC_MODEL).toBe("global.anthropic.claude-sonnet-5-5");
   });
 
   it("reports only the profile, region and models to a client; never an AWS or Anthropic secret", () => {
-    const { instanceId, instances } = newClaudeBedrock(cfg(), { ...BASE, model: "global.anthropic.claude-sonnet-5-5" });
+    const { instanceId, instances } = newClaudeBedrock(cfg(), BASE);
     const info = claudeBedrockInfo(instances[instanceId]);
     expect(info).toEqual({
       awsProfile: "bedrock-prod",
       awsRegion: "us-east-1",
+      model: "global.anthropic.claude-sonnet-5-5",
       models: ["global.anthropic.claude-sonnet-5-5"],
       opusModel: "", sonnetModel: "", haikuModel: "", smallFastModel: "",
     });
@@ -134,6 +136,7 @@ describe("Claude on Amazon Bedrock", () => {
       { ...BASE, awsRegion: "US-EAST-1" },
       { ...BASE, model: "has space" },
       { ...BASE, model: "" },
+      { displayName: BASE.displayName, awsProfile: BASE.awsProfile, awsRegion: BASE.awsRegion },
       { ...BASE, model: "default" },
       { ...BASE, displayName: "Bad\nname" },
       { ...BASE, displayName: "" },
