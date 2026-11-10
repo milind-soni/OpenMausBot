@@ -81,12 +81,14 @@ export class ChromeLauncher implements BrowserLaunch {
   private readonly options: Required<Pick<ChromeLauncherOptions, "dataDir" | "env" | "platform" | "readyWaitMs">> & ChromeLauncherOptions;
   private readonly host: ChromeHost;
   private readonly sidecars: IdentitySidecars;
+  private language: (() => string | undefined) | undefined;
   private box: (() => LauncherBox | null) | null = null;
 
   constructor(options: ChromeLauncherOptions) {
     const env = options.env ?? process.env;
     const platform = options.platform ?? process.platform;
     this.options = { ...options, env, platform, readyWaitMs: options.readyWaitMs ?? 45_000 };
+    this.language = options.language;
     this.host = options.host ?? chromeHost({ dataDir: options.dataDir, env, platform, arch: options.arch });
     this.sidecars = options.sidecars ?? new IdentitySidecars();
     this.path = launcherPath(options.dataDir, platform);
@@ -111,11 +113,22 @@ export class ChromeLauncher implements BrowserLaunch {
     return resolveChromePlan(this.host, this.options.engine ? this.options.engine() : this.managedEngine());
   }
 
+  /** Keep the shared agent-browser launcher and sidecar in the application's current language. */
+  setLanguageProvider(language: (() => string | undefined) | undefined): void {
+    this.language = language ?? this.options.language;
+    this.followLanguage();
+  }
+
+  private resolvedLanguage(): string | undefined {
+    return browserLanguage(this.options.env, this.language?.());
+  }
+
   /** What agent-browser's environment gains: nothing while the engine keeps its own browser. */
   env(): Record<string, string> {
     if (this.state.kind === "failed" || this.plan().kind === "legacy") return {};
     void this.prepare();
     this.followTimeZone();
+    this.followLanguage();
     return { AGENT_BROWSER_EXECUTABLE_PATH: this.path, AGENT_BROWSER_HIDE_SCROLLBARS: "0" };
   }
 
@@ -133,6 +146,21 @@ export class ChromeLauncher implements BrowserLaunch {
       this.log(`browser: the next browser started tells time in ${timeZone ?? "the system's zone"}`);
     } catch (error) {
       this.log(`browser: could not move the browser to ${timeZone ?? "the system's zone"} (${message(error)})`);
+    }
+  }
+
+  private followLanguage(): void {
+    const state = this.state;
+    if (state.kind !== "ready" || !state.launcher) return;
+    const language = this.resolvedLanguage();
+    if (language === state.launcher.language) return;
+    const launcher = { ...state.launcher, language };
+    try {
+      writeLauncher(this.path, launcher, this.options.platform);
+      this.state = { ...state, launcher };
+      this.log(`browser: the next browser started uses ${language ?? "the system's language"}`);
+    } catch (error) {
+      this.log(`browser: could not change the browser language to ${language ?? "the system's language"} (${message(error)})`);
     }
   }
 
@@ -177,7 +205,7 @@ export class ChromeLauncher implements BrowserLaunch {
 
   async started(session: string, spec: LaunchSpec): Promise<void> {
     if (this.state.kind !== "ready" || !this.uses(spec) || !ownsBrowserViewport(spec.env ?? {})) return;
-    await this.sidecars.ensure(session, spec, { ...this.state.identity, acceptLanguage: languageList(browserLanguage(this.options.env, this.options.language?.())) });
+    await this.sidecars.ensure(session, spec, { ...this.state.identity, acceptLanguage: languageList(this.resolvedLanguage()) });
   }
 
   stopped(session: string): void {
@@ -231,7 +259,7 @@ export class ChromeLauncher implements BrowserLaunch {
       this.screen ??= this.options.screen ? this.options.screen() : primaryScreen(platform, env);
       launcher = {
         chrome: chrome.path, userAgent: identity.userAgent, screen: await this.screen,
-        language: browserLanguage(env, this.options.language?.()), timeZone: browserTimeZone(env, platform),
+        language: this.resolvedLanguage(), timeZone: browserTimeZone(env, platform),
         ...(platform === "darwin" ? { home: userInfo().homedir } : {}),
         ...this.boxed(),
       };

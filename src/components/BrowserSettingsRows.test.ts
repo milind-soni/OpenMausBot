@@ -121,6 +121,10 @@ describe("Built-in browser proxy setting", () => {
     show();
     expect(host.querySelector('input[aria-label="SOCKS5 proxy"]')).toBeNull();
     owner.value = true;
+    fixture.config = { features: { browser: false }, browserEngine: { kind: "engine", proxySaved: true, proxyConfigured: false } };
+    show();
+    expect(host.querySelector('input[aria-label="SOCKS5 proxy"]')).not.toBeNull();
+    expect([...host.querySelectorAll("button")].some((button) => button.textContent === "Remove")).toBe(true);
     fixture.api.mockResolvedValue({ features: { browser: true }, browserEngine: { kind: "engine", proxyConfigured: true } });
     show();
     const input = host.querySelector<HTMLInputElement>('input[aria-label="SOCKS5 proxy"]')!;

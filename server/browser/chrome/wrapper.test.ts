@@ -138,6 +138,7 @@ describe("the display, language and time zone the launcher gives Chrome", () => 
     expect(browserLanguage({ LANG: "POSIX" })).toBe("en-US");
     expect(browserLanguage({})).toBeUndefined();
     expect(browserLanguage({ OMB_BROWSER_LANG: "en US; rm" })).toBeUndefined();
+    expect(browserLanguage({ OMB_BROWSER_LANG: "en US; rm" }, "ko")).toBe("ko-KR");
   });
 
   it("gives Chrome the server's time zone, where Chrome reads TZ", () => {

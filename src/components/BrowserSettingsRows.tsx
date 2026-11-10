@@ -95,7 +95,7 @@ export function BrowserProxyRow() {
   const saved = state.config?.browserEngine?.proxySaved === true || configured;
   const [endpoint, setEndpoint] = useState("");
   const { saving, error, save } = useConfigSave();
-  if (owner !== true || !builtInBrowserEnabled(state.config)) return null;
+  if (owner !== true || (!builtInBrowserEnabled(state.config) && !saved)) return null;
 
   return (
     <SettingRow
