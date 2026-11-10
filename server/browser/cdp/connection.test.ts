@@ -172,6 +172,37 @@ describe("CdpConnection", () => {
     await expect(child.send("Page.enable")).rejects.toMatchObject({ code: "closed" });
   });
 
+  it("rejects a new event wait on an already detached renderer without registering a timer", async () => {
+    vi.useFakeTimers();
+    const browser = fakeBrowser();
+    const connection = new CdpConnection(browser.transport);
+    try {
+      browser.reply({ method: "Target.attachedToTarget", params: { sessionId: "S1", targetInfo: { targetId: "T1", type: "iframe" } } });
+      const child = connection.session("S1")!;
+      browser.reply({ method: "Target.detachedFromTarget", params: { sessionId: "S1" } });
+      await expect(child.waitFor("Page.loadEventFired")).rejects.toMatchObject({ code: "closed" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      connection.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a new browser event wait after the transport has closed", async () => {
+    vi.useFakeTimers();
+    const browser = fakeBrowser();
+    const connection = new CdpConnection(browser.transport);
+    try {
+      browser.drop("browser exited");
+      await expect(connection.root.waitFor("Target.targetCreated")).rejects.toBeInstanceOf(DriverError);
+      await expect(connection.root.waitFor("Target.targetCreated")).rejects.toMatchObject({ code: "closed" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      connection.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("times a call out, and fails every call when the browser goes away", async () => {
     const browser = fakeBrowser();
     const connection = new CdpConnection(browser.transport, { defaultTimeoutMs: 20 });
