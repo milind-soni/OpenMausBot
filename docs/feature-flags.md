@@ -46,7 +46,7 @@ text and extra work can increase its token usage.
 | `skillReview` | Off | Reviews long conversations and updates learned skills; also requires `skillAuthoring`. | Background model calls. `skillReviewSteps` controls the interval. |
 | `showToolCalls` | Off | Shows individual tool runs in the transcript. | Display option; it does not start tool runs. |
 | `browser` | On | Makes the built-in browser available, subject to engine and bot settings. | Browser work and the model turns using it still have their usual costs. |
-| `sharedComputers` | Owner lending only | Controls which paired sessions may lend a computer; see the three states below. | Computer use still needs consent and remains subject to access controls. |
+| `sharedComputers` | Ordinary owner lending | Controls ordinary server lending; the bots' home has separate rules below. | Ordinary lending asks for consent; making a server home uses the home workflow. |
 | `claudeUserMcp` | Off | Claude bots also load this machine's personal Claude Code MCP servers. | Adds tools and may start those servers; their tools can consume tokens or contact services. |
 | `claudeUserSkills` | Off | Claude bots also load the personal skills in `~/.claude/skills`. | Adds skill instructions/files to the engine's available context; does not control Codex native skills. |
 | `llmThreadTitles` | Off | Generates new conversation titles with the engine. | Additional one-shot model calls. |
@@ -59,17 +59,22 @@ text and extra work can increase its token usage.
 | `agentsToolBridge` | Off, except eligible local-model turns | Lists a smaller tool catalog with `find_tool` and `use_tool`. | Tool lookup can add model calls; smaller initial context is not a guaranteed saving. See [Agents tool bridge](agents-tool-bridge.md) for eligibility and measurements. |
 | `savedSteps` | On | Allows saving and repeating computer tasks from their steps on a supported host. | Currently requires a Mac server. Enabling it does not add host support. |
 
-### Computer lending has three states
+### Ordinary server lending has three states
 
-For `sharedComputers`, omission is different from `false`:
+For an ordinary self-hosted server that is not the bots' home,
+`sharedComputers` being omitted is different from `false`:
 
 - **Omitted:** a self-hosted server's own admin pairings may lend their computer.
 - **`false`:** disables that owner lending as well.
 - **`true`:** also allows other paired sessions to lend their computer.
 
-The desktop still asks its person first. This setting is not permission to use
-someone else's computer without their approval. See [Self-hosting](self-hosting.md)
-for pairing and trust boundaries.
+The desktop asks its person before ordinary server lending. There is an
+exception after **Make &lt;server&gt; my home** moves the bots to a server owned by
+that person alone: the computer then works for its home automatically, without
+another access dialog, even when `sharedComputers` is `false`. Use the
+OpenMausBot menu bar item to **Pause** that lending. Cloud homes also have their
+own lending rules; this flag is not a universal pause control. See
+[Self-hosting](self-hosting.md) for the move, pairing and trust boundaries.
 
 ## Other values under `features`
 
