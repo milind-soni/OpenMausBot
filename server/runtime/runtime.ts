@@ -193,17 +193,20 @@ export class Runtime {
     const lineage = parent ? path(this.store, parent) : [];
     const root = lineage[0];
     const target = req.assignee;
+    let sameCall = false;
     const ancestors = ownThread(lineage, target, req.ownThread) ? lineage.slice(0, -1) : lineage;
     if (!answersSender(parent, mode, { botId: target.botId, ...target.destination }) && ancestors.some(a => a.assignee.botId === target.botId &&
       (!a.assignee.destination.groupId || !target.destination.groupId || a.assignee.destination.groupId === target.destination.groupId))) {
       return refuse("Cannot assign work back to an ancestor; results return automatically");
     }
     if (parent) {
-      const existing = this.store.children(parent.id).findLast(c => c.brief === brief && c.mode === mode && c.assignee.botId === target.botId &&
+      const siblings = this.store.children(parent.id);
+      const existing = siblings.findLast(c => c.brief === brief && c.mode === mode && c.assignee.botId === target.botId &&
         c.assignee.destination.threadId === target.destination.threadId && c.assignee.destination.groupId === target.destination.groupId);
       if (existing && !(req.rework && isTerminal(existing))) return { ok: true, assignment: existing, duplicate: true };
       if (parent.depth + 1 > this.limits.depth) return refuse(`Assignment depth limit reached (${this.limits.depth})`);
-      if (root?.budgets && root.budgets.requests + 1 > this.limits.requests) {
+      sameCall = req.fanOut !== undefined && siblings.some(c => c.fanOut === req.fanOut);
+      if (!sameCall && root?.budgets && root.budgets.requests + 1 > this.limits.requests) {
         this.store.update(root, { kind: "budget", at: now, detail: `requests: ${root.budgets.requests} since last progress` });
         return refuse(`Request budget exhausted: ${this.limits.requests} requests without progress`, "budget");
       }
@@ -217,7 +220,7 @@ export class Runtime {
       reply: req.reply ?? (mode === "notify" ? "none" : "resume"), brief, ...(req.doneWhen ? { doneWhen: req.doneWhen } : {}),
       status: "queued", level, levelSource: source, executions: 0, restarts: 0, createdAt: now, lastActivityAt: now, result: "",
       rework: Boolean(req.rework), ...(req.approved !== undefined ? { approved: req.approved } : {}),
-      ...(req.batchKey !== undefined ? { batchKey: req.batchKey } : {}), version: 1,
+      ...(req.batchKey !== undefined ? { batchKey: req.batchKey } : {}), ...(req.fanOut !== undefined ? { fanOut: req.fanOut } : {}), version: 1,
     };
     if (!parent) { node.rootId = node.id; node.budgets = { since: now, requests: 0, executions: 0, wakes: 0 }; }
     const problem = this.safe("validate", () => this.runner.validate(node, parent));
@@ -225,7 +228,7 @@ export class Runtime {
     if (problem) return refuse(problem);
     this.store.transaction(() => {
       this.store.insert(node, { kind: "enqueued", at: now, detail: "queued" });
-      if (root?.budgets) { root.budgets.requests += 1; this.store.update(root); }
+      if (root?.budgets && !sameCall) { root.budgets.requests += 1; this.store.update(root); }
     });
     this.touch(node, ...root ? [root] : []);
     return { ok: true, assignment: node, duplicate: false };

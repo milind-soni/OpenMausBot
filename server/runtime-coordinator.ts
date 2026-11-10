@@ -18,7 +18,7 @@ const ANCESTOR = "Cannot assign work back to an ancestor; results return automat
 const ALREADY_COMPLETED = "This agent already completed your assignment. Do not send acknowledgements or approvals as new work. Finish with your decision; results return automatically. Only use rework=true for concrete additional work.";
 const ROOM_ANCESTOR = "A room request cannot return to an ancestor room; results are returned automatically";
 const DEPTH = "Room handoff depth limit reached";
-const BUDGET = "Room handoff budget exhausted";
+const budgetRefusal = (limit: number): string => `This request reached its limit of ${limit} hand-offs since any work last came back, so this one was not sent. The limit belongs to the request: nobody can reset it, the person included, so don't ask them to, and don't send it another way. If work is still out, end your turn: each result that comes back renews the limit and resumes you. If nothing is out, finish with what you have and say what is left undone.`;
 const NO_TURN = "The requesting turn has no root (no turn)";
 /** A stop with no other cause is the person's own. */
 const STOPPED_BY_USER = "Stopped by user";
@@ -228,7 +228,7 @@ export class RuntimeCoordinator implements Coordinator {
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,
     options: HandoffOptions = {}): { node: HandoffView; duplicate: boolean } {
     this.ready();
-    const { rework = false, requestBatchKey, thread } = options;
+    const { rework = false, requestBatchKey, fanOut, thread } = options;
     const mode = options.mode ?? "work";
     const parent = parentId ? this.store.get(parentId) : this.store.get(generation);
     if (!parent) throw new Error(parentId ? NOT_RUNNING : NO_TURN);
@@ -270,9 +270,10 @@ export class RuntimeCoordinator implements Coordinator {
       levels: { own: level.level, ...(level.chief !== undefined ? { chief: level.chief } : {}) },
       ...(level.driverKind !== undefined ? { driverKind: level.driverKind } : {}),
       ...(target.groupId && requestBatchKey ? { batchKey: requestBatchKey } : {}),
+      ...(fanOut ? { fanOut } : {}),
     });
     if (!result.ok) {
-      if (result.outcome === "budget") throw new Error(BUDGET);
+      if (result.outcome === "budget") throw new Error(budgetRefusal(this.runtime.limits.requests));
       throw new Error(RUNTIME_DEPTH.test(result.reason) ? DEPTH : result.reason);
     }
     return { node: view(result.assignment, parent), duplicate: result.duplicate };

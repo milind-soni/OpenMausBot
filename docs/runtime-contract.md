@@ -86,7 +86,7 @@ What a cut turn did outward is the host's knowledge, read through the optional p
 
 ## 6. Budgets and clocks
 
-Three budgets per root, counted since the root's last durable progress (a settlement, a completed turn): `requests`, `executions`, `wakes`. Progress renews them; nothing else does. The owed follow-up turn of a node whose children all settled is never refused for budget.
+Three budgets per root, counted since the root's last durable progress (a settlement, a completed turn): `requests`, `executions`, `wakes`. Progress renews them; nothing else does. One call that reaches several teammates (`fanOut`) counts as one request. The owed follow-up turn of a node whose children all settled is never refused for budget.
 
 Three clocks and no others: a queue bound (`queueMs`, expired means `failed(expired)`, "never started"); a per-root stall window on durable progress (`stallMs`, fails the tree); a per-turn activity window (`turnStallMs`, on the monotonic clock, so a laptop sleep is not a stall; a tool visibly in flight counts as activity through `progress()`). Time spent parked on the person is charged to no window. A wait on the person's words is bounded by `inputWaitMs`, which is infinite unless a host sets it: a question waits for the person however long they take. Where a host sets it, expiry is `failed(expired)`: not run, not refused, never reported as approved.
 
