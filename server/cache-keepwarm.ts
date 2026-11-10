@@ -158,7 +158,7 @@ export function createCacheKeepWarm(deps: KeepWarmDeps) {
 
     noteTurnCompleted(target: KeepWarmTarget, turn: { ok: boolean; stopReason?: string | null; contextTokens?: number }): void {
       if (disposed) return;
-      const existing = windows.get(target.threadId);
+      let existing = windows.get(target.threadId);
       const hadStopped = stoppedWhy.delete(target.threadId);
       const windowMs = deps.windowMs(target.botId);
       const quiet = (w: Window | undefined) => {
@@ -169,6 +169,11 @@ export function createCacheKeepWarm(deps: KeepWarmDeps) {
       if (windowMs === null || !turn.ok) return quiet(existing);
       if ((turn.contextTokens ?? 0) < MIN_CONTEXT_TOKENS) return quiet(existing);
       if (deps.ineligible(target)) return quiet(existing);
+      if (existing && (existing.target.botId !== target.botId || existing.target.instanceId !== target.instanceId)) {
+        end(existing, null);
+        lastPing.delete(target.threadId);
+        existing = undefined;
+      }
       const now = deps.now();
       const w: Window = existing ?? { target, deadline: 0, lastRequestAt: now, pending: null, nextPingAt: null, inflight: null, paused: false };
       w.target = target;
