@@ -6706,6 +6706,8 @@
   "apps.usedByNone": "No bots yet",
   "apps.usedByChange": "Change",
   "apps.whichBots": "Which bots can use {app}?",
+  "apps.botsCanUse": "Your bots can now use {app}.",
+  "apps.noBotsUse": "No bot uses {app} yet.",
   "apps.showAll": "Show all {count} apps",
   "apps.mcp.add": "Add MCP server",
   "apps.connectedCount": "{count} connected",

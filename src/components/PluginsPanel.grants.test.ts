@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement, useEffect } from "react";
+import { act, createElement, Fragment, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -47,7 +47,7 @@ vi.mock("./EmailCard", () => ({
 }));
 vi.mock("./Avatar", () => ({ BotAvatar: () => null }));
 
-import { connectAppFromBot } from "./AppGrantPrompt";
+import { AppGrantNotice, connectAppFromBot, showAppGrantNotice } from "./AppGrantPrompt";
 const { PluginsPanel } = await import("./PluginsPanel");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -60,9 +60,10 @@ let host: HTMLDivElement;
 let root: Root;
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 const open = async () => {
-  await act(async () => root.render(createElement(PluginsPanel)));
+  await act(async () => root.render(createElement(Fragment, null, createElement(PluginsPanel), createElement(AppGrantNotice))));
   await flush();
 };
+const toast = () => document.body.querySelector<HTMLElement>("[data-access-toast]");
 const tile = () => host.querySelector<HTMLElement>('[data-app-tile="apollo"]')!;
 const button = (scope: ParentNode, label: string) => Array.from(scope.querySelectorAll("button")).find((candidate) => candidate.textContent === label || candidate.getAttribute("aria-label") === label)!;
 const prompt = () => host.querySelector<HTMLElement>("[data-app-grant-prompt]");
@@ -99,6 +100,7 @@ beforeEach(() => {
   fixture.services = {};
   fixture.after = active;
   fixture.email = null;
+  showAppGrantNotice(null);
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -107,66 +109,127 @@ afterEach(async () => {
 });
 
 describe("after connecting an app", () => {
-  it("gives it to the only bot, with no question, by the same write as the bot's own switch", async () => {
-    fixture.state.bots = [bot("scout", { composio: false })];
+  it("is already on for untouched bots, so it writes nothing and says so without asking", async () => {
+    fixture.state.bots = [bot("scout"), bot("ada")];
     await open();
     await connectApollo();
     expect(prompt()).toBeNull();
+    expect(writes()).toEqual([]);
+    expect(toast()?.textContent).toBe("Your bots can now use Apollo.Change");
+  });
+
+  it("adds it to a bot with its own app list or tool list, by the same write as the bot's switch", async () => {
+    fixture.state.bots = [
+      bot("scout", { connectorScopes: { apps: { slack: "read" } } }),
+      bot("ada", { connectorTools: { slack: { tools: "*" } } }),
+      bot("free"),
+    ];
+    await open();
+    await connectApollo();
+    expect(writes()).toEqual([
+      { type: "updateBot", botId: "scout", patch: { connectorScopes: { apps: { slack: "read", apollo: "write" } } } },
+      { type: "updateBot", botId: "ada", patch: { connectorTools: { slack: { tools: "*" }, apollo: { tools: "*" } } } },
+    ]);
+    expect(toast()?.textContent).toContain("Your bots can now use Apollo.");
+  });
+
+  it("leaves a bot whose apps are off alone, except the bot it was started from", async () => {
+    fixture.state.bots = [bot("scout", { composio: false }), bot("ada", { composio: false }), bot("free")];
+    connectAppFromBot(fixture.dispatch, "ada");
+    fixture.dispatch.mockClear();
+    await open();
+    await connectApollo();
+    expect(writes()).toEqual([{ type: "updateBot", botId: "ada", patch: { composio: true, connectorScopes: { apps: { apollo: "write" } } } }]);
+    expect(toast()?.textContent).toContain("Your bots can now use Apollo.");
+  });
+
+  it("says plainly when every bot's apps are off, and Change opens the switches", async () => {
+    fixture.state.bots = [bot("scout", { composio: false }), bot("ada", { composio: false })];
+    await open();
+    await connectApollo();
+    expect(writes()).toEqual([]);
+    expect(toast()?.textContent).toBe("No bot uses Apollo yet.Change");
+    await click(toast()!.querySelector("button")!);
+    await flush();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "togglePlugins", open: true, surface: "apps" });
+    expect(toast()).toBeNull();
+    expect(prompt()?.textContent).toContain("Which bots can use Apollo?");
+    expect(switchOf("Scout").getAttribute("aria-checked")).toBe("false");
+    await click(switchOf("Scout"));
+    await click(button(prompt()!, "Done"));
     expect(writes()).toEqual([{ type: "updateBot", botId: "scout", patch: { composio: true, connectorScopes: { apps: { apollo: "write" } } } }]);
   });
 
-  it("asks which bots with several, starting on only the bot it was started from", async () => {
-    fixture.state.bots = [bot("scout", { connectorScopes: { apps: {} } }), bot("ada", { connectorScopes: { apps: {} } })];
-    connectAppFromBot(fixture.dispatch, "ada");
-    fixture.dispatch.mockClear();
+  it("skips hidden bots and bots whose model can't use apps, and says nothing when no bot is left", async () => {
+    fixture.state.bots = [
+      bot("ghost", { hidden: true, connectorScopes: { apps: {} } }),
+      bot("grok", { connectorScopes: { apps: {} }, modelSelection: { instanceId: "grok", model: "m" } as Bot["modelSelection"] }),
+    ];
     await open();
     await connectApollo();
-    expect(prompt()?.textContent).toContain("Which bots can use Apollo?");
-    expect(switchOf("Ada").getAttribute("aria-checked")).toBe("true");
-    expect(switchOf("Scout").getAttribute("aria-checked")).toBe("false");
     expect(writes()).toEqual([]);
-    await click(button(prompt()!, "Done"));
-    expect(prompt()).toBeNull();
-    expect(writes()).toEqual([{ type: "updateBot", botId: "ada", patch: { connectorScopes: { apps: { apollo: "write" } } } }]);
+    expect(toast()).toBeNull();
   });
 
-  it.each(["Close", "Escape", "the backdrop"])("changes nothing when dismissed by %s, even for the bot it was started from", async (how) => {
-    fixture.state.bots = [bot("scout", { connectorScopes: { apps: {} } }), bot("ada", { connectorScopes: { apps: {} } })];
-    connectAppFromBot(fixture.dispatch, "ada");
-    fixture.dispatch.mockClear();
+  it("writes nothing for an app the organization's rules refuse", async () => {
+    fixture.state.config = { managedPolicy: { organizationName: "Acme", apps: { allowAll: false, allowlist: ["slack"] } } };
+    fixture.state.bots = [bot("scout", { connectorScopes: { apps: {} } })];
     await open();
-    await connectApollo();
-    await click(switchOf("Scout"));
-    if (how === "Close") await click(button(prompt()!, "Close"));
-    else if (how === "Escape") await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
-    else await act(async () => { prompt()!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
-    expect(prompt()).toBeNull();
+    expect((tile().querySelector("button") as HTMLButtonElement).disabled).toBe(true);
+    const { useAppGrants } = await import("./AppGrantPrompt");
+    let grants!: ReturnType<typeof useAppGrants>;
+    const Probe = () => { grants = useAppGrants({ status: {}, emailConnected: null, inventoryReady: true }); return null; };
+    await act(async () => root.render(createElement(Fragment, null, createElement(Probe), createElement(AppGrantNotice))));
+    await act(async () => grants.appConnected("apollo", "Apollo"));
     expect(writes()).toEqual([]);
-    expect(fixture.dispatch).not.toHaveBeenCalledWith({ type: "togglePlugins", open: false });
+    expect(toast()).toBeNull();
+    await act(async () => grants.appConnected("slack", "Slack"));
+    expect(writes()).toEqual([{ type: "updateBot", botId: "scout", patch: { connectorScopes: { apps: { slack: "write" } } } }]);
+  });
+
+  it("keeps the notice when the Apps pop-up closes at the same moment, and it goes away on its own", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    fixture.state.bots = [bot("scout")];
+    const mounted = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(0); }); };
+    await act(async () => root.render(createElement(Fragment, null, createElement(PluginsPanel), createElement(AppGrantNotice))));
+    await mounted();
+    await click(tile().querySelector("button")!);
+    await type(tile().querySelector("form input") as HTMLInputElement, "work");
+    await act(async () => { tile().querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    await mounted();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+      root.render(createElement(Fragment, null, createElement(AppGrantNotice)));
+    });
+    await mounted();
+    expect(host.querySelector("[data-app-tile]")).toBeNull();
+    expect(toast()?.textContent).toContain("Your bots can now use Apollo.");
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(toast()).toBeNull();
   });
 
   it("does nothing when the connection failed or was left unfinished", async () => {
-    fixture.state.bots = [bot("scout", { composio: false }), bot("ada", { composio: false })];
+    fixture.state.bots = [bot("scout", { connectorScopes: { apps: {} } }), bot("ada")];
     await open();
     fixture.after = { connected: false, accounts: [{ id: "ca_new", status: "FAILED" }] };
     await connectApollo();
-    expect(prompt()).toBeNull();
     expect(writes()).toEqual([]);
+    expect(toast()).toBeNull();
   });
 
-  it("asks nothing and writes nothing on a reconnect", async () => {
-    fixture.state.bots = [bot("scout"), bot("ada")];
+  it("writes nothing and says nothing on a reconnect", async () => {
+    fixture.state.bots = [bot("scout", { connectorScopes: { apps: {} } }), bot("ada")];
     fixture.services = { apollo: { connected: false, accounts: [{ id: "ca_old", status: "EXPIRED", alias: "work" }] } };
     await open();
     await click(button(tile(), "Reconnect"));
     await flush();
     await settlePoll();
-    expect(prompt()).toBeNull();
     expect(writes()).toEqual([]);
+    expect(toast()).toBeNull();
   });
 
-  it("asks nothing and writes nothing when a second account of a connected app is added", async () => {
-    fixture.state.bots = [bot("scout"), bot("ada")];
+  it("writes nothing and says nothing when a second account of a connected app is added", async () => {
+    fixture.state.bots = [bot("scout", { connectorScopes: { apps: {} } }), bot("ada")];
     fixture.services = { apollo: { connected: true, accounts: [{ id: "ca_old", status: "ACTIVE" }] } };
     fixture.after = { connected: true, accounts: [{ id: "ca_old", status: "ACTIVE" }, { id: "ca_new", status: "ACTIVE" }] };
     await open();
@@ -175,8 +238,24 @@ describe("after connecting an app", () => {
     await act(async () => { tile().querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
     await flush();
     await settlePoll();
+    expect(writes()).toEqual([]);
+    expect(toast()).toBeNull();
+  });
+});
+
+describe("changing which bots use an app", () => {
+  it.each(["Close", "Escape", "the backdrop"])("changes nothing when dismissed by %s", async (how) => {
+    fixture.state.bots = [bot("scout", { connectorScopes: { apps: {} } }), bot("ada", { connectorScopes: { apps: {} } })];
+    fixture.services = { apollo: { connected: true, accounts: [{ id: "ca_old", status: "ACTIVE" }] } };
+    await open();
+    await click(button(tile(), "Which bots can use Apollo?"));
+    await click(switchOf("Scout"));
+    if (how === "Close") await click(button(prompt()!, "Close"));
+    else if (how === "Escape") await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+    else await act(async () => { prompt()!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
     expect(prompt()).toBeNull();
     expect(writes()).toEqual([]);
+    expect(fixture.dispatch).not.toHaveBeenCalledWith({ type: "togglePlugins", open: false });
   });
 });
 
@@ -239,24 +318,23 @@ describe("on a Team Cloud", () => {
     expect(prompt()).toBeNull();
   });
 
-  it("asks nothing and writes nothing for a member's own connection, even with one bot", async () => {
+  it("writes nothing and says nothing for a member's own connection, even with one bot", async () => {
     fixture.admin = false;
-    fixture.state.bots = [bot("scout", { composio: false })];
+    fixture.state.bots = [bot("scout", { connectorScopes: { apps: {} } })];
     await open();
     await connectApollo();
     expect(prompt()).toBeNull();
     expect(writes()).toEqual([]);
+    expect(toast()).toBeNull();
   });
 
-  it("asks an admin even with one bot, since the change reaches the whole team", async () => {
-    fixture.state.bots = [bot("scout", { composio: false })];
+  it("gives an admin's team app to the team's bots without asking, never to a person's own helper", async () => {
+    fixture.state.bots = [bot("scout", { connectorScopes: { apps: {} } }), bot("maus", { connectorScopes: { apps: {} }, defaultBot: { person: "ada@acme.test" } } as Partial<Bot>)];
     await open();
     await connectApollo();
-    expect(prompt()?.textContent).toContain("Which bots can use Apollo?");
-    expect(writes()).toEqual([]);
-    await click(switchOf("Scout"));
-    await click(button(prompt()!, "Done"));
-    expect(writes()).toEqual([{ type: "updateBot", botId: "scout", patch: { composio: true, connectorScopes: { apps: { apollo: "write" } } } }]);
+    expect(prompt()).toBeNull();
+    expect(writes()).toEqual([{ type: "updateBot", botId: "scout", patch: { connectorScopes: { apps: { apollo: "write" } } } }]);
+    expect(toast()?.textContent).toContain("Your bots can now use Apollo.");
   });
 
   it("leaves each person's own helper out of the choice", async () => {

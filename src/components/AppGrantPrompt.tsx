@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { X } from "lucide-react";
 
 import { appSwitchPatch, botAppScope } from "@/lib/bot-app-access";
@@ -8,11 +8,25 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useStore, type Action, type Bot, type InstanceInfo } from "@/state/store";
 import { EMAIL_SLUG } from "../../shared/email";
 import { BotAvatar } from "./Avatar";
+import { UndoToast } from "./bot-access/ShareBotButton";
 import { BotSwitch } from "./bot-panel/rows";
 
 let connectingFromBot: string | null = null;
+let notice: { slug: string; text: string } | null = null;
+let changeRequested: string | null = null;
+const watchers = new Set<() => void>();
 
-/** The Apps pop-up, opened from inside a bot: the prompt after a connect starts with that bot on. */
+function tell() {
+  for (const watch of Array.from(watchers)) watch();
+}
+function subscribe(watch: () => void) {
+  watchers.add(watch);
+  return () => {
+    watchers.delete(watch);
+  };
+}
+
+/** The Apps pop-up, opened from inside a bot: an app connected there goes to that bot even if its apps were off. */
 export function connectAppFromBot(dispatch: (action: Action) => void, botId: string) {
   connectingFromBot = botId;
   dispatch({ type: "toggleSettings", open: false });
@@ -23,6 +37,32 @@ function takeConnectingBot(): string | null {
   const botId = connectingFromBot;
   connectingFromBot = null;
   return botId;
+}
+
+export function showAppGrantNotice(next: { slug: string; text: string } | null) {
+  notice = next;
+  tell();
+}
+
+/** "Your bots can now use Apollo · Change", for a few seconds. It outlives the Apps pop-up, which Change opens again. */
+export function AppGrantNotice() {
+  const { dispatch } = useStore();
+  const shown = useSyncExternalStore(subscribe, () => notice, () => null);
+  const done = useCallback(() => showAppGrantNotice(null), []);
+  if (!shown) return null;
+  return (
+    <UndoToast
+      key={shown.text}
+      text={shown.text}
+      actionLabel={t("apps.usedByChange")}
+      onUndo={async () => {
+        changeRequested = shown.slug;
+        dispatch({ type: "togglePlugins", open: true, surface: "apps" });
+        tell();
+      }}
+      onDone={done}
+    />
+  );
 }
 
 /** The bots whose access an app can be given from here: a Team Cloud member's own helper is theirs alone. */
@@ -38,55 +78,68 @@ function connectedAppSlugs(status: Record<string, ConnectorStatus>, emailConnect
   return emailConnected && !slugs.includes(EMAIL_SLUG) ? [...slugs, EMAIL_SLUG] : slugs;
 }
 
-/** Security: only an owner or admin is ever asked or allowed to change which bots use an app; on a Team Cloud a change
- * reaches every member who chats with that bot, so it is always asked, never made silently. */
+/** Security: only an owner or admin's connection gives an app to bots, and only they can change which bots use it. A bot
+ * whose apps are off stays off, unless the connection was started from that bot. */
 export function useAppGrants({ status, emailConnected, inventoryReady }: { status: Record<string, ConnectorStatus>; emailConnected: boolean | null; inventoryReady: boolean }) {
   const { state, dispatch } = useStore();
   const admin = useOwnerOrAdmin();
   const [startingBot] = useState(takeConnectingBot);
-  const [prompt, setPrompt] = useState<{ slug: string; start: string | null } | null>(null);
-  const team = Boolean(state.config?.team);
+  const [changing, setChanging] = useState<string | null>(null);
+  const requested = useSyncExternalStore(subscribe, () => changeRequested, () => null);
   const bots = botsForApps(state.bots, state.instances);
   const canChange = admin === true && inventoryReady && bots.length > 0;
+  const allowed = state.config?.managedPolicy?.apps;
+
+  useEffect(() => {
+    if (!requested) return;
+    changeRequested = null;
+    setChanging(requested);
+    tell();
+  }, [requested]);
 
   const write = (bot: Bot, slug: string, on: boolean) => {
     const patch = appSwitchPatch(bot, connectedAppSlugs(status, emailConnected), slug, on);
     if (Object.keys(patch).length > 0) dispatch({ type: "updateBot", botId: bot.id, patch });
   };
-  const latest = useRef({ admin, canChange, bots, team, startingBot, write });
-  latest.current = { admin, canChange, bots, team, startingBot, write };
+  const latest = useRef({ admin, bots, allowed, startingBot, write });
+  latest.current = { admin, bots, allowed, startingBot, write };
 
-  const appConnected = useCallback((slug: string) => {
+  const appConnected = useCallback((slug: string, app: string) => {
     const now = latest.current;
     if (now.admin !== true || !now.bots.length) return;
-    if (now.bots.length === 1 && !now.team) now.write(now.bots[0]!, slug, true);
-    else if (now.canChange) setPrompt({ slug, start: now.startingBot });
+    if (now.allowed && !now.allowed.allowAll && !now.allowed.allowlist.includes(slug)) return;
+    let using = 0;
+    for (const bot of now.bots) {
+      if (botAppScope(bot, slug) !== null) using += 1;
+      else if (bot.composio !== false || bot.id === now.startingBot) {
+        now.write(bot, slug, true);
+        using += 1;
+      }
+    }
+    showAppGrantNotice({ slug, text: t(using ? "apps.botsCanUse" : "apps.noBotsUse", { app }) });
   }, []);
-  const change = useCallback((slug: string) => setPrompt({ slug, start: null }), []);
-  const dismiss = useCallback(() => setPrompt(null), []);
+  const dismiss = useCallback(() => setChanging(null), []);
 
   const done = (on: ReadonlySet<string>) => {
-    const slug = prompt?.slug;
-    if (slug) {
-      for (const bot of bots) if (on.has(bot.id) !== (botAppScope(bot, slug) !== null)) write(bot, slug, on.has(bot.id));
+    if (changing) {
+      for (const bot of bots) if (on.has(bot.id) !== (botAppScope(bot, changing) !== null)) write(bot, changing, on.has(bot.id));
     }
-    setPrompt(null);
+    setChanging(null);
   };
 
-  return { canChange, appConnected, change, dismiss, done, prompt, bots };
+  return { canChange, appConnected, change: setChanging, dismiss, done, changing: canChange ? changing : null, bots };
 }
 
-export function AppGrantPrompt({ app, slug, bots, start, onDone, onDismiss }: {
+export function AppGrantPrompt({ app, slug, bots, onDone, onDismiss }: {
   app: string;
   slug: string;
   bots: Bot[];
-  start: string | null;
   onDone: (on: ReadonlySet<string>) => void;
   onDismiss: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [on, setOn] = useState<ReadonlySet<string>>(() => new Set(
-    bots.filter((bot) => botAppScope(bot, slug) !== null || bot.id === start).map((bot) => bot.id),
+    bots.filter((bot) => botAppScope(bot, slug) !== null).map((bot) => bot.id),
   ));
 
   useEffect(() => {

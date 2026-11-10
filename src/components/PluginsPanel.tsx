@@ -321,7 +321,7 @@ export function PluginsPanel() {
     const stop = pollConnector(before, () => refreshStatus([slug]).then((services) => services[slug]), (result) => {
       if (polls.current.get(slug) === stop) polls.current.delete(slug);
       connectorConnect(slug, result);
-      if (result === "connected" && firstConnection) appGrants.appConnected(slug);
+      if (result === "connected" && firstConnection) appGrants.appConnected(slug, cards?.find((card) => card.slug === slug)?.label ?? slug);
     });
     polls.current.set(slug, stop);
   };
@@ -714,13 +714,12 @@ export function PluginsPanel() {
             </div>
           )}
         </div>
-        {appGrants.prompt && (
+        {appGrants.changing && (
           <AppGrantPrompt
-            key={appGrants.prompt.slug}
-            app={cards?.find((card) => card.slug === appGrants.prompt?.slug)?.label ?? appGrants.prompt.slug}
-            slug={appGrants.prompt.slug}
+            key={appGrants.changing}
+            app={cards?.find((card) => card.slug === appGrants.changing)?.label ?? appGrants.changing}
+            slug={appGrants.changing}
             bots={appGrants.bots}
-            start={appGrants.prompt.start}
             onDone={appGrants.done}
             onDismiss={appGrants.dismiss}
           />
