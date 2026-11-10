@@ -15,7 +15,7 @@ import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { PeopleSection } from "./PeopleSection";
 import { ActivitySection } from "./ActivitySection";
-import { BuiltInBrowserRow, ServerSitesRow } from "./BrowserSettingsRows";
+import { BrowserProxyRow, BuiltInBrowserRow, ServerSitesRow } from "./BrowserSettingsRows";
 import { LoginsSettings } from "./LoginsSettings";
 import { OrganizationSettings } from "./OrganizationSettings";
 import { CloudPlanRow, CloudPlanFootnote, useCloudPlan } from "./ProIntroduction";
@@ -140,7 +140,7 @@ export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { h
       )}
       {has("computer") && (
         <SettingsGroup label={t("settings.experimental.browser")} block="browser">
-          <SettingsRows><BuiltInBrowserRow /><ServerSitesRow /></SettingsRows>
+          <SettingsRows><BuiltInBrowserRow /><ServerSitesRow /><BrowserProxyRow /></SettingsRows>
           <BrowserProfilesRow />
         </SettingsGroup>
       )}

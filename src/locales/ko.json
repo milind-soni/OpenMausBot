@@ -7259,5 +7259,10 @@
   "rail.localRemoveAsk": "“{name}”을(를) 제거할까요? 이 컴퓨터에 있는 봇, 채팅, 파일이 삭제됩니다. 폴더는 먼저 휴지통으로 옮겨집니다.",
   "rail.localRemoveAskWin": "“{name}”을(를) 제거할까요? 이 컴퓨터에 있는 봇, 채팅, 파일이 삭제됩니다. 폴더는 먼저 휴지통으로 옮겨집니다.",
   "rail.localRemoveFailed": "제거되지 않았습니다. 잠시 후 다시 시도하세요.",
-  "native.menu.newLocal": "이 컴퓨터에 새 작업 공간…"
+  "native.menu.newLocal": "이 컴퓨터에 새 작업 공간…",
+  "settings.browser.proxy": "SOCKS5 프록시",
+  "settings.browser.proxyDetail": "선택 설정이며 인증 없는 프록시를 사용합니다. 사설·로컬 주소는 기존 차단 규칙을 유지합니다.",
+  "settings.browser.proxyConfigured": "새로 연결하는 사이트부터 프록시를 사용합니다. 사설·로컬 주소에는 적용되지 않습니다.",
+  "settings.browser.proxySave": "저장",
+  "settings.browser.proxyClear": "삭제"
 }

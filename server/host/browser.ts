@@ -34,7 +34,7 @@ import type { BrowserSitesTarget } from "../browser-sites.ts";
 import { namedUploadPaths } from "../browser-upload.ts";
 import type { BrowserSitesRef } from "../routes/browser-sites.ts";
 import { chromeLauncher } from "../browser/chrome/launcher.ts";
-import { LAUNCHER_SECCOMP_FD, type LauncherBox } from "../browser/chrome/wrapper.ts";
+import { LAUNCHER_SECCOMP_FD, browserLanguage, type LauncherBox } from "../browser/chrome/wrapper.ts";
 import type { HostKind } from "../browser/chrome/flags.ts";
 import { browserEngineKind, type BrowserEngineKind } from "../browser/config.ts";
 import { ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter } from "../browser/engines.ts";
@@ -52,6 +52,8 @@ import type { TurnOwner, TurnResources } from "../turn-resources.ts";
 
 export interface BrowserHostDeps {
   cfg: AppConfig;
+  /** Current application language for every built-in browser launch. */
+  language?(): string | undefined;
   /** The store is built after this host, so it is read when used. */
   store(): Pick<Store, "bots" | "bot" | "botByThread">;
   turnResources: Pick<TurnResources, "free" | "holder" | "onClaim">;
@@ -125,6 +127,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     egressPort: (key) => browserEgress.open(key),
     egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs,
+    language: deps.language,
     log: (line) => console.warn(line),
   });
   const lendRefusal = deps.lendRefusal ?? ((): LendRefusal => "unproven");
@@ -311,10 +314,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   }
   function browserSessionSpec(binaryPath: string, session: string, profile: string | undefined, egressPort?: number, cdpUrl?: string) {
     const attachCdpUrl = cdpUrl ?? browserEngineAttachCdpUrl(cfg);
+    const locale = browserLanguage(process.env, deps.language?.());
     return agentBrowserIntegration({
       binaryPath, session, encryptionKey: browserEngineEncryptionKey(), persistent: profile !== "guest", egressPort,
-      env: { ...process.env, PATH: augmentedPath() },
-      launcher: chromeLauncher.env(),
+      env: { ...process.env, PATH: augmentedPath(), ...(locale ? { OMB_BROWSER_LANG: locale } : {}) },
+      launcher: { ...chromeLauncher.env(), ...(locale ? { language: locale } : {}) },
       ...(usesMyChrome(profile) ? { attach: attachCdpUrl ? { cdpUrl: attachCdpUrl } : {} } : {}),
     });
   }
@@ -539,10 +543,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return { binaryPath: engine.binaryPath, session, env: browserSessionSpec(engine.binaryPath, session, profile, await browserEgress.open(session)).env, encryptionKey: browserEngineEncryptionKey() };
   }
   /** What Settings shows of the engine that runs bots' browsers here; My Chrome stays on agent-browser. */
-  function engineSummary<T extends { myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; serverSites?: boolean } {
+  function engineSummary<T extends { myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; serverSites?: boolean; proxyConfigured?: boolean } {
     const serverSites = sitesSwitch ? { serverSites: cfg.browserEngine?.egress?.localNetwork === true } : {};
-    if (browserEngineKind(cfg) !== "chrome") return { ...agentBrowser, ...serverSites, engine: "agent-browser" };
-    return { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), ...serverSites, engine: "chrome" };
+    const proxyConfigured = cfg.browserEngine?.egress?.proxy ? { proxyConfigured: true } : {};
+    if (browserEngineKind(cfg) !== "chrome") return { ...agentBrowser, ...serverSites, ...proxyConfigured, engine: "agent-browser" };
+    return { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), ...serverSites, ...proxyConfigured, engine: "chrome" };
   }
 
   return {

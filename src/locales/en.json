@@ -9659,5 +9659,10 @@
   "remote.e2e.anywhere": "Reachable from anywhere · end-to-end encrypted",
   "remote.e2e.connecting": "Connecting to MausBot Relay…",
   "remote.e2e.local": "On this Wi-Fi and Tailscale · end-to-end encrypted",
-  "serverError.mailbox.outgoingFields": "Check the outgoing server: a name like mail.example.com, a port from 1 to 65535, and SSL/TLS or STARTTLS."
+  "serverError.mailbox.outgoingFields": "Check the outgoing server: a name like mail.example.com, a port from 1 to 65535, and SSL/TLS or STARTTLS.",
+  "settings.browser.proxy": "SOCKS5 proxy",
+  "settings.browser.proxyDetail": "Optional, unauthenticated proxy for public websites. Private and local destinations keep existing protections.",
+  "settings.browser.proxyConfigured": "New connections use this SOCKS5 proxy. It is not used for private or local destinations.",
+  "settings.browser.proxySave": "Save",
+  "settings.browser.proxyClear": "Remove"
 }

@@ -127,6 +127,11 @@ describe("the display, language and time zone the launcher gives Chrome", () => 
 
   it("takes the language only when it is known, never guessing over Chrome's own", () => {
     expect(browserLanguage({ OMB_BROWSER_LANG: "de-DE", LANG: "en_US.UTF-8" })).toBe("de-DE");
+    expect(browserLanguage({}, "ko-KR")).toBe("ko-KR");
+    expect(browserLanguage({}, "ko")).toBe("ko-KR");
+    expect(browserLanguage({ LANG: "fr_FR.UTF-8" }, "ko-KR")).toBe("ko-KR");
+    expect(browserLanguage({ OMB_BROWSER_LANG: "ja-JP" }, "ko-KR")).toBe("ja-JP");
+    expect(browserLanguage({ LANG: "fr_FR.UTF-8" }, "not a locale")).toBe("fr-FR");
     expect(browserLanguage({ LANG: "en_GB.UTF-8" })).toBe("en-GB");
     expect(browserLanguage({ LC_ALL: "fr_FR@euro", LANG: "en_US.UTF-8" })).toBe("fr-FR");
     expect(browserLanguage({ LANG: "C.UTF-8" })).toBeUndefined();

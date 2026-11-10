@@ -53,6 +53,8 @@ export function runsLauncher(path: string, env: NodeJS.ProcessEnv, timeoutMs = 1
 export interface ChromeLauncherOptions {
   dataDir: string;
   env?: NodeJS.ProcessEnv;
+  /** Current application language, used after OMB_BROWSER_LANG and before the host locale. */
+  language?: () => string | undefined;
   platform?: NodeJS.Platform;
   arch?: string;
   host?: ChromeHost;
@@ -175,7 +177,7 @@ export class ChromeLauncher implements BrowserLaunch {
 
   async started(session: string, spec: LaunchSpec): Promise<void> {
     if (this.state.kind !== "ready" || !this.uses(spec) || !ownsBrowserViewport(spec.env ?? {})) return;
-    await this.sidecars.ensure(session, spec, { ...this.state.identity, acceptLanguage: languageList(browserLanguage(this.options.env)) });
+    await this.sidecars.ensure(session, spec, { ...this.state.identity, acceptLanguage: languageList(browserLanguage(this.options.env, this.options.language?.())) });
   }
 
   stopped(session: string): void {
@@ -229,7 +231,7 @@ export class ChromeLauncher implements BrowserLaunch {
       this.screen ??= this.options.screen ? this.options.screen() : primaryScreen(platform, env);
       launcher = {
         chrome: chrome.path, userAgent: identity.userAgent, screen: await this.screen,
-        language: browserLanguage(env), timeZone: browserTimeZone(env, platform),
+        language: browserLanguage(env, this.options.language?.()), timeZone: browserTimeZone(env, platform),
         ...(platform === "darwin" ? { home: userInfo().homedir } : {}),
         ...this.boxed(),
       };

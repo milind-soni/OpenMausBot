@@ -86322,7 +86322,12 @@
       "rail.localRemoveFailed": "29a77f76cc411a4f733e9d8a31e16e7ee108ad5855462085d2a043332b08e2f1",
       "engines.updatedTo": "da0fcccdc519425a9c333fda0838bbdd50d67fb0266194753bd1044abd0ecbb4",
       "homeLine.local": "81ce56630542e178fcb0c50e052e73a959517719e01d48d7747f416b0a7195c4",
-      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012"
+      "native.menu.newLocal": "f9d2bf6d9d6f075d9a96b8bbd609ea8b95d00bbe5925f709711aa84ae4796012",
+      "settings.browser.proxy": "6ea6f5da76b1661ac35889037d614ce145e82663bb58a9dc78fc0b690e6d4f8e",
+      "settings.browser.proxyDetail": "0842e236ffdbb000912da2e42057720fcb345d6bb3fa5aeb3ae444eaae55ac1f",
+      "settings.browser.proxyConfigured": "94c542da128ac257fd987bb3dcd7622648ffc6c791aea42351733c2fb95c17f7",
+      "settings.browser.proxySave": "1509f561f2416598629b886ad7d3c05a7e221e4e0675c84bbff4ee6d9e03913d",
+      "settings.browser.proxyClear": "c3812fc4acb861d5182fc2b8155f327f736fbe5e5eb86a7bd7afcb6dc5497282"
     }
   }
 }

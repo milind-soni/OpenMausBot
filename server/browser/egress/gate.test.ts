@@ -198,6 +198,56 @@ describe("egress gate", () => {
     expect(refusals).toEqual([[{ host: "rebind.example", port: 8799 }, "rebinding" satisfies Refusal]]);
   });
 
+  it("routes allowed public destinations through the configured SOCKS5 upstream using the checked IP", async () => {
+    const upstream = NodeNet.createServer((socket) => {
+      let data = Buffer.alloc(0);
+      let greeted = false;
+      socket.on("data", (chunk) => {
+        data = Buffer.concat([data, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+        if (!greeted && data.length >= 3 && data[0] === 5 && data[1] === 1) {
+          socket.write(Buffer.from([5, 0]));
+          data = data.subarray(3);
+          greeted = true;
+        }
+        if (greeted && data.length >= 10 && data[0] === 5 && data[1] === 1) {
+          expect([...data.subarray(4, 8)].join(".")).toBe("93.184.215.14");
+          socket.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
+          socket.removeAllListeners("data");
+        }
+      });
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const proxyPort = (upstream.address() as NodeNet.AddressInfo).port;
+    const opened = await openGate({
+      decide: async () => null,
+      resolve: async () => [{ address: "93.184.215.14", family: 4 }],
+      upstreamProxy: () => ({ host: "127.0.0.1", port: proxyPort }),
+    });
+    gates.push(opened);
+    const { code, socket } = await connectThrough(opened.port, domainTarget("example.com", 443));
+    socket.destroy();
+    expect(code).toBe(0);
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  });
+
+  it("does not contact the configured upstream when the destination policy refuses", async () => {
+    let proxyConnections = 0;
+    const upstream = NodeNet.createServer(() => { proxyConnections++; });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const proxyPort = (upstream.address() as NodeNet.AddressInfo).port;
+    const opened = await openGate({
+      decide: async () => "local-network",
+      resolve: async () => [{ address: "10.0.0.5", family: 4 }],
+      upstreamProxy: () => ({ host: "127.0.0.1", port: proxyPort }),
+    });
+    gates.push(opened);
+    const { code, socket } = await connectThrough(opened.port, domainTarget("private.example", 443));
+    socket.destroy();
+    expect(code).toBe(2);
+    expect(proxyConnections).toBe(0);
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  });
+
   it("answers connection-refused when the allowed destination is not listening", async () => {
     const closed = NodeNet.createServer();
     await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));

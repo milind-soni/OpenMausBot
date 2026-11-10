@@ -12,7 +12,7 @@ vi.mock("./UsageSection", () => ({ UsageSection: () => "USAGE TABLE" }));
 vi.mock("./PlanUsage", () => ({ PlanUsageSummary: () => "PLAN USAGE" }));
 vi.mock("./CloudUsageMeter", () => ({ useCloudUsageSettings: () => ({ usage: null, upgrade: null, dialog: null }), CloudUsageDetails: () => null, CloudUsageSummaryView: () => null }));
 vi.mock("./ProIntroduction", () => ({ useCloudPlan: () => null, CloudPlanRow: () => null, CloudPlanFootnote: () => null }));
-vi.mock("./BrowserSettingsRows", () => ({ BuiltInBrowserRow: () => null, ServerSitesRow: () => null }));
+vi.mock("./BrowserSettingsRows", () => ({ BuiltInBrowserRow: () => null, ServerSitesRow: () => null, BrowserProxyRow: () => null }));
 vi.mock("./AppSettingsRows", async (original) => ({ ...await original<object>(), BrowserProfilesRow: () => null }));
 vi.mock("./LoginsSettings", () => ({ LoginsSettings: () => null }));
 

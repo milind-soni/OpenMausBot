@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
-import { NewBrowserSettings, ServerSitesRow } from "./BrowserSettingsRows";
+import { BrowserProxyRow, NewBrowserSettings, ServerSitesRow } from "./BrowserSettingsRows";
 
 const fixture = vi.hoisted(() => ({
   config: undefined as Record<string, unknown> | undefined,
@@ -107,5 +107,33 @@ describe("Open sites on this server", () => {
     });
     show();
     expect(sites()?.getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+describe("Built-in browser proxy setting", () => {
+  const show = () => flushSync(() => root.render(createElement(BrowserProxyRow)));
+
+  it("is owner-only and saves the endpoint without echoing it in the status", async () => {
+    fixture.config = { features: { browser: true }, browserEngine: { kind: "engine", proxyConfigured: false } };
+    show();
+    expect(host.querySelector('input[aria-label="SOCKS5 proxy"]')).not.toBeNull();
+    owner.value = false;
+    show();
+    expect(host.querySelector('input[aria-label="SOCKS5 proxy"]')).toBeNull();
+    owner.value = true;
+    fixture.api.mockResolvedValue({ features: { browser: true }, browserEngine: { kind: "engine", proxyConfigured: true } });
+    show();
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="SOCKS5 proxy"]')!;
+    flushSync(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "socks5://127.0.0.1:1080");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    flushSync(() => [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Save")?.click());
+    await vi.waitFor(() => expect(fixture.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({
+      body: JSON.stringify({ browserEngine: { egress: { proxy: "socks5://127.0.0.1:1080" } } }),
+    })));
+    const body = JSON.parse(fixture.api.mock.calls[0]![1].body);
+    expect(body.browserEngine.egress.proxy).toBe("socks5://127.0.0.1:1080");
+    expect(fixture.dispatch.mock.calls[0]![0].config.browserEngine.proxyConfigured).toBe(true);
   });
 });

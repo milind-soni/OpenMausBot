@@ -33,6 +33,18 @@ const family = (address: string) => (isIP(address) === 6 ? "ipv6" : "ipv4");
 const FAKE_IP = new BlockList();
 FAKE_IP.addSubnet("198.18.0.0", 15, "ipv4");
 
+const SOCKS5_PROXY = /^socks5:\/\/(?:\[([0-9a-f:]+)\]|([A-Za-z0-9.-]+)):([0-9]{1,5})$/i;
+export interface Socks5Proxy { host: string; port: number }
+export function parseSocks5Proxy(value: string | undefined): Socks5Proxy | null {
+  if (!value) return null;
+  const match = SOCKS5_PROXY.exec(value.trim());
+  const port = Number(match?.[3]);
+  const host = match?.[1] ?? match?.[2];
+  if (!match || !host || !Number.isInteger(port) || port < 1 || port > 65_535) return null;
+  if (match[1] ? isIP(host) !== 6 : host.length > 253 || host.split(".").some((label) => label.length > 63 || !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u.test(label))) return null;
+  return { host, port };
+}
+
 /** An address literal, or a name RFC 6761 and Chrome resolve to loopback themselves. */
 export function namesThisMachine(host: string): boolean {
   return isIP(host) !== 0 || /^(?:[^.]+\.)*localhost\.?$/i.test(host);
@@ -40,6 +52,10 @@ export function namesThisMachine(host: string): boolean {
 
 /** `browserEngine.egress` in config.json. */
 export const browserEgressConfigSchema = z.object({
+  /** Owner-configured unauthenticated SOCKS5 upstream for public destinations only. */
+  proxy: z.string().trim().max(512).refine((value) => value === "" || parseSocks5Proxy(value) !== null, {
+    message: "must be an unauthenticated socks5://host:port URL",
+  }).optional(),
   /** Self-hosted servers only: local-network or this-computer destinations bots' browsers may reach, as
    * `10.0.0.5`, `192.168.1.0/24`, `10.0.0.5:8080`, `fd12::/48` or `[fd12::1]:443`. OpenMausBot's own ports,
    * cloud metadata and link-local addresses stay closed. MausBot Cloud ignores it. */
