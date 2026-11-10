@@ -459,7 +459,7 @@ listed.
 |---|---|
 | No access | Nothing: the bot is not listed for them, and every route naming it, its conversations, its rooms, routines and files answers 404 as for one that does not exist |
 | Can view | See the bot, its main chat and the conversations shared with them (rooms, their own earlier chats), read only; open them and mark them read |
-| Can chat | Also write to it, start their own conversations, answer its cards, react, stop it, write in its rooms, run its routines and make routines for it (and change or delete their own) |
+| Can chat | Also write to it, start their own conversations, answer its cards, react, stop a run they asked for (or one no person asked for; below, "Whoever asked owns the run"), write in its rooms, run its routines and make routines for it (and change or delete their own) |
 | Can edit | Also change its instructions, profile and model, which of the team's connected apps and MCP servers it uses, any of its routines, its sharing, and approve a card that changes the bot itself (instructions, model, skills, team, triggers) |
 
 Can edit never reaches what only an admin sets on any bot: what it may do on its computer (approval level, always
@@ -509,6 +509,40 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
   their own inbox ("Ada let you chat with Payroll."); it takes effect only while the person answering can edit the bot.
   Not now changes nothing and tells nobody; they can ask again. The card is a set-answer question card
   (`card.accessRequest`), shown in each person's language, and its answer is always its own option.
+
+## Whoever asked owns the run
+
+In a conversation more than one person reads (a bot's shared chats, a conversation opened from one, a group chat), a
+run belongs to the person whose own request it answers (`server/host/run-owner.ts`, the one place that decides):
+
+- **Someone else's line waits its turn.** Sent while Priya's request runs, Tom's line never reaches her run, never stops
+  it and never cuts it short to be answered first: it waits in the queue and runs after hers, as its own turn, with his
+  name on it. The send answers `{ queued: true, queueId }`. Lines from different people never join one turn; a run of
+  one person's lines does, as before. Priya adding to her own request is steered into it and, after a step has run a
+  minute with her line unread, answered first (`server/host/person-first.ts`), exactly as in a private chat; her own
+  line goes ahead of anyone else's waiting.
+- **Everyone there sees the queue.** Each waiting line carries its writer (`BotQueuedMessages[…].sender`) and the
+  conversation, while it works, the person whose request runs (`WireTask.askedBy`). The app's working line reads
+  "Working on Priya's request", with one quiet line under it, "Next: Tom's request" ("…, then 2 more" when more wait),
+  and a small remove control only for someone whose own message waits; that chat shows no queue above the composer.
+  Only its writer removes a waiting line (`DELETE
+  /api/bots/<bot>/queue/<id>`; a line no person wrote, an Owner or Admin), and waiting lines join the running request
+  (`…/steer`) only when every one is the asker's own and the asker adds them; otherwise 403 in plain words.
+- **Only the asker, or an Owner or Admin, stops it.** Stop (`POST /api/bots/<bot>/interrupt`, a group chat's
+  `/api/groups/<id>/interrupt`, a typed "stop", a guarded request's `/interrupt`) from anyone else answers 403 with
+  `code: "stop_not_yours"` and *"Only Priya or an admin can stop this."*; their "@Scout stop" in a group chat is an
+  ordinary line there. Stop stays the only interrupt.
+- **Who asked, for what is not a person's line** (read from the records the provenance labels come from, never from
+  model text). A routine, a webhook and an app's event never run in a person's conversation: each runs in its own and
+  leaves one report line, held while a turn runs and written before the queue behind it moves
+  ([automation-reports.md](verification/automation-reports.md)); none steers or stops anyone's run. Work a bot hands on
+  for a person (`[… · on their behalf at your level]`) is that person's run. A line sent through the API, one another
+  app relays, a bot's message and its report (*information only*) are nobody's request: they wait like anyone else's
+  line, a run they start is nobody's and anyone who may chat stops it, and a person's line waits behind such a run only
+  until it ends, ahead of any bot or app line still waiting.
+
+A private chat, a personal install and a My Cloud have one person: none of this applies there, and an older app, which
+reads neither field, simply shows no names on the queue.
 
 ## A team with no AI
 
@@ -629,6 +663,9 @@ On a My Cloud and on a desktop there are no team people: the @ list shows bots, 
 person as before, and `message_person` and the inbox do not exist.
 
 ## What is not closed here
+
+- **A group chat's waiting lines.** A group chat queues every line while it works, and only the asker or an admin stops
+  it, but its queue is still shown only to each line's own writer.
 
 - **Saved logins per member.** A login saved from a sign-in card is the team's (an Admin saves it, for every bot in the
   team); per-member saved logins are not built. Sign-ins a member makes in their own browser stay in it (above).
