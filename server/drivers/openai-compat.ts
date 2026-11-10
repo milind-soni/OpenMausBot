@@ -45,8 +45,8 @@ const OLLAMA_FIRST_LIST_MS = 2_000;
 
 const withEffort = (effort: string | undefined) => effort ? { reasoning_effort: effort } : {};
 const EFFORT_CHOICES = ["low", "medium", "high"].map((id) => ({ id, label: titleCaseModelId(id, /[-_ ]+/) }));
-/** OpenAI's reasoning models. o1-mini, o1-preview and the gpt-5 chat alias refuse `reasoning_effort`. */
-const OPENAI_REASONING = /^(?:o1(?!-mini|-preview)|o[3-9]|gpt-5(?!-chat))/i;
+/** OpenAI's reasoning models, gpt-5 onward. o1-mini, o1-preview and the chat aliases refuse `reasoning_effort`. */
+const OPENAI_REASONING = /^(?:o1(?!-mini|-preview)|o[3-9]|gpt-(?:[5-9]|[1-9]\d)(?![\d.]*-chat))/i;
 
 const localFacts = ({ bytes, parameters, quantization, tools, vision }: OllamaModel) => ({
   ...(bytes ? { bytes } : {}), ...(parameters ? { parameters } : {}), ...(quantization ? { quantization } : {}),

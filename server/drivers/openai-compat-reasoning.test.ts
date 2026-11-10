@@ -46,11 +46,14 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("reasoning effort on an API key", () => {
   it("offers OpenAI's reasoning models the levels, and sends the one picked as reasoning_effort", async () => {
-    const chats = server([{ id: "gpt-5.2", created: 3 }, { id: "gpt-5-chat-latest", created: 2 }, { id: "gpt-4.1", created: 1 }, { id: "o1-mini", created: 0 }]);
+    const chats = server([{ id: "gpt-6.1-sol", created: 5 }, { id: "gpt-5.1-chat-latest", created: 4 }, { id: "gpt-5.2", created: 3 }, { id: "gpt-5-chat-latest", created: 2 }, { id: "gpt-4.1", created: 1 }, { id: "o1-mini", created: 0 }]);
     const instance = await create({ url: "https://llm.example.test/v1", catalog: "openai" });
     try {
       expect(instance.adapter.capabilities.modelVariants).toBe(true);
-      expect(variantsOf(instance)).toEqual({ "gpt-5.2": ["low", "medium", "high"], "gpt-5-chat-latest": undefined, "gpt-4.1": undefined, "o1-mini": undefined });
+      expect(variantsOf(instance)).toEqual({
+        "gpt-6.1-sol": ["low", "medium", "high"], "gpt-5.1-chat-latest": undefined,
+        "gpt-5.2": ["low", "medium", "high"], "gpt-5-chat-latest": undefined, "gpt-4.1": undefined, "o1-mini": undefined,
+      });
       await turn(instance, "gpt-5.2", "low");
       await turn(instance, "gpt-5.2");
       await turn(instance, "gpt-4.1", "low");

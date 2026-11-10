@@ -282,7 +282,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
 
       const served = options.servedModel ? await options.servedModel(model) : model;
       const payload = JSON.stringify(route === "responses"
-        ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model) })
+        ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model), effort: options.requestBody(served, messages, stream, variant).reasoning_effort })
         : {
           ...options.requestBody(served, messages, stream, variant),
           ...(route === "chat-reasoning-off" ? { reasoning_effort: "none" } : {}),
