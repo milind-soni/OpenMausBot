@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { claudePlanUsageDisabled, planUsageCacheKey } from "./plan-usage-policy.ts";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
@@ -100,6 +101,7 @@ export type PlanFetch = (
 export interface PlanUsageDeps {
   fetch: PlanFetch;
   credentials: CredentialReader;
+  env?: NodeJS.ProcessEnv;
   now?: () => number;
   timeoutMs?: number;
 }
@@ -265,6 +267,7 @@ export function fileCredentialReader(source: CredentialSource): CredentialReader
   const now = source.now ?? Date.now;
   return {
     async read(account) {
+      if (claudePlanUsageDisabled(account, env)) return missingCredential();
       const merged: NodeJS.ProcessEnv = { ...env, ...account.environment };
       const at = now();
       if (account.driver === "claude") return readClaudeCredential(account, merged, source, at);
@@ -313,13 +316,15 @@ export async function loadPlanUsage(input: {
   timeoutMs?: number;
 }): Promise<PlanUsageReport> {
   const now = input.now ?? Date.now();
-  const key = planUsageCacheKey(input.accounts);
+  const env = input.env ?? process.env;
+  const key = planUsageCacheKey(input.accounts, env);
   if (!input.refresh && cachedReport && cachedReport.key === key && now - cachedReport.at < PLAN_USAGE_CACHE_MS) {
     return cachedReport.report;
   }
   const report = await fetchPlanUsage(input.accounts, {
     fetch: input.fetch ?? ((url, init) => globalThis.fetch(url, init)),
-    credentials: input.credentials ?? defaultCredentialReader(input.env),
+    credentials: input.credentials ?? defaultCredentialReader(env),
+    env,
     now: () => now,
     timeoutMs: input.timeoutMs,
   });
@@ -702,17 +707,6 @@ function grokPlan(settings: unknown): string | null {
   return planLabel(nested?.subscription_tier_display ?? root.subscription_tier_display);
 }
 
-function planUsageCacheKey(accounts: PlanAccount[]): string {
-  return accounts.map((account) => {
-    const environment = Object.entries(account.environment)
-      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([name, value]) => `${name}=${value}`)
-      .join("\n");
-    return [account.id, account.driver, account.name, account.configDir ?? "", environment].join("\u0000");
-  }).join("\n");
-}
-
 function claudeCredentialFromText(text: string | null, now: number): PlanCredential {
   const oauth = asRecord(asRecord(parseJson(text))?.claudeAiOauth);
   const token = secretString(oauth?.accessToken);
@@ -920,6 +914,7 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
 }
 
 async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: OpenCode, in every fleet, with no key of its own
+  if (claudePlanUsageDisabled(account, deps.env ?? process.env)) return errorRow(account, "Claude plan usage is disabled by OMB_CLAUDE_PLAN_USAGE=0");
   let credential: PlanCredential;
   try {
     credential = await deps.credentials.read(account);

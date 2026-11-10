@@ -455,6 +455,23 @@ A saved key goes only to its own engine and only to the workspace's endpoint:
 an engine instance in `config.json` with its own base URL or its own key (a
 router or proxy) never receives it.
 
+**Claude subscription usage meters (optional).** To stop OpenMausBot's own
+Claude plan-usage queries, set `OMB_CLAUDE_PLAN_USAGE=0` in the server process
+environment and restart the server. This stops the usage reader from opening Claude's credential file
+or macOS keychain and from calling the OAuth usage endpoint, including panel
+refreshes, engine-limit tools and limit-reset polling. Claude's meters show
+unavailable with a disabled explanation; limit handling still uses refusals
+reported by the Claude CLI, without proactive meter readings. Other engines'
+usage queries and normal Claude CLI sign-in and turns keep working.
+
+The default is enabled; unset the variable (or set it to `1`) and restart to
+restore usage queries. To disable only one Claude instance, put
+`"OMB_CLAUDE_PLAN_USAGE": "0"` in that instance's `environment` under
+`instances` in `config.json`, preserve its other settings, and restart. A
+server-level `0` cannot be overridden by an instance's `1`.
+This switch controls usage-meter credential reads, not the Claude CLI's own
+credential use. It is not a statement about a provider's credential policy.
+
 **OpenCode is the exception to "the server's own environment is ignored".**
 Like `opencode` in a terminal, it reads provider keys from its environment
 (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`,
