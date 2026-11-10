@@ -1,7 +1,7 @@
 # Computer use & browser use in OpenMausBot
 
 Decision doc, 2026-08-12. How bots in OpenMausBot get local computer use and
-browser use. macOS and packaged Ubuntu x64 builds use an out-of-the-box,
+browser use. macOS, Windows x64 and packaged Ubuntu x64 builds use an out-of-the-box,
 release-pinned provider; source/dev Ubuntu may use a separately installed provider. Based
 on a survey of OSS chat-app MCP hosts, macOS control servers,
 browser-automation stacks, and the local `cua` / `axstream` code on this
@@ -11,8 +11,8 @@ machine.
 
 ```text
 Electron main process
-├── CUA host  ──spawns──▶  cua-driver (bundled on macOS and packaged Ubuntu x64)
-│     platform permission boundary               │ unix socket (private)
+├── CUA host  ──spawns──▶  cua-driver (bundled on macOS, Windows x64 and packaged Ubuntu x64)
+│     platform permission boundary               │ private Unix socket / Windows named pipe
 ├── WebContentsView pool (embedded browser, persist: partitions per bot)
 │     driven via webContents.debugger (CDP) — zero-install browser use
 └── server/ harness (drivers spawn agent CLIs with --mcp-config)
@@ -24,9 +24,11 @@ Electron main process
   servers get injected into each bot's `--mcp-config`. Same pattern as Claude
   Desktop / Cherry Studio / LibreChat.
 - **Local desktop use = `cua-driver`**. macOS packages the Rust Mach-O in app
-  Resources; Ubuntu x64 packages the certified 0.41.3 ELF plus its cursor-theme
-  sidecar outside ASAR. Both remain paired with the application release. This
-  applies to the Ubuntu 24.04 GNOME/Xorg beta and guarded GNOME/Wayland beta;
+  Resources; Windows x64 packages `cua-driver.exe`, its background helper and the
+  matching UniFFI SDK outside ASAR; Ubuntu x64 packages the certified 0.41.3 ELF
+  plus its cursor-theme sidecar outside ASAR. Each remains paired with the
+  application release. The Linux support applies to the Ubuntu 24.04 GNOME/Xorg
+  beta and guarded GNOME/Wayland beta;
   remote/cloud Boat computers and the isolated Local VM remain separate providers.
   NOT Swift — the Swift file everyone remembers
   (`examples/embedded-host-macos/ExampleAgentHarness.swift`) is a 165-line
@@ -35,6 +37,16 @@ Electron main process
   embed pages in `WebContentsView` and drive them via the built-in
   `webContents.debugger` CDP transport. No Chrome dependency, no 281MB
   Playwright download, and the user watches the bot browse inside the chat.
+
+Windows supports **This computer** through the app-owned embedded
+CUA host. It uses a private named pipe and does not adopt a separately running
+Cua driver. The Windows packager verifies a pinned upstream executable's SHA-256
+and version, then stages it with the matching SDK. See
+[`scripts/prepare-cua-win.mjs`](../scripts/prepare-cua-win.mjs) and the Windows
+`extraResources` in [`electron-builder.yml`](../electron-builder.yml). The
+Windows CUA host smoke job in [CI](../.github/workflows/ci.yml) exercises the
+staged host and read-only lending. Preview-only screen capture is a separate
+capability and is currently unavailable on Windows.
 
 ## Local desktop use: CUA only — Electron owns the driver lifecycle
 
