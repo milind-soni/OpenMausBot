@@ -5,42 +5,84 @@
 // Security invariant: nothing in this file passes through text a person wrote. Every string that leaves is either a
 // constant below, an enumerated code, or matches one of the patterns below (a version, an image reference, an id).
 import {
-  checkJob, type CheckId, type ConnectorIdentity, type CopyInfo, type Heartbeat, type HomeReport, type HomeState, type HostHealth,
+  checkJob, type CheckId, type ConnectorIdentity, type CopyInfo, type Heartbeat, type HomeReport, type HostFacts, type HomeState, type HostHealth,
   type Job, type JobError, type JobErrorCode, type JobReply, type JobType,
 } from "./protocol.ts";
 
 // 1. JOBS. The only kinds the Admin may run. Not here, so refused: `export-disk` (uploads the data to MausBot) and
 // `import-disk` (replaces the data with an archive from elsewhere).
 
-export const CUSTOMER_RUN_JOBS = ["start", "stop", "restart", "update", "self-update", "status", "host-health", "backup", "restore"] as const satisfies readonly JobType[];
+export const CUSTOMER_RUN_JOBS = ["start", "stop", "restart", "update", "status", "host-health", "backup"] as const satisfies readonly JobType[];
+
+/**
+ * Kinds only root on the server may run (`mausbot-connector job <kind>`), never the Admin:
+ * - `self-update` replaces the connector, and with it every rule in this file. An older connector does not know this
+ *   mode at all, so the Admin asking for one would undo the mode. The owner replaces the connector, or nobody does.
+ * - `restore` puts older data back over what is there.
+ */
+export const CUSTOMER_RUN_LOCAL_JOBS = ["self-update", "restore"] as const satisfies readonly JobType[];
 
 /**
  * What each job may carry.
  * - `start`, `stop`, `restart`: nothing. They start and stop the server its owner installed, with the owner's settings;
  *   a `start` that names an image or settings is refused.
- * - `update`: the image to move to, MausBot's own server image pinned by digest. The server's own updater does it.
- * - `self-update`: the connector's next image, pinned by digest.
- * - `backup`: nothing. Copies the data to a Docker volume on this server. `restore`: the id of one of those copies.
+ * - `update`: the image to move to, MausBot's own server image pinned by digest, and never an older version than the
+ *   one running (below). The server's own updater does it.
+ * - `backup`: nothing. Copies the data to a Docker volume on this server; it never removes a copy the owner made.
  * - `status`, `host-health`: nothing. They read.
  */
 export const CUSTOMER_HOME_IMAGE = /^ghcr\.io\/milind-soni\/openmausbot@sha256:[0-9a-f]{64}$/;
 
-const isCustomerRunJob = (type: unknown): type is (typeof CUSTOMER_RUN_JOBS)[number] => (CUSTOMER_RUN_JOBS as readonly unknown[]).includes(type);
+/** Who sent a job: the Admin over the connection, or root on this server. */
+export type JobSource = "admin" | "local";
 
-/** Why this server refuses a job of `type`, or null when the kind is on the list. */
-export function customerRunRefusal(type: string): string | null {
-  return isCustomerRunJob(type) ? null : `This server is run by its owner, and ${JSON.stringify(type.slice(0, 32))} is not a job MausBot may run on it.`;
+const allowed = (type: unknown, by: JobSource): boolean =>
+  (CUSTOMER_RUN_JOBS as readonly unknown[]).includes(type) || (by === "local" && (CUSTOMER_RUN_LOCAL_JOBS as readonly unknown[]).includes(type));
+
+/** Why this server refuses a job of `type` sent by `by`, or null when the kind is on that sender's list. */
+export function customerRunRefusal(type: string, by: JobSource): string | null {
+  if (allowed(type, by)) return null;
+  if (allowed(type, "local")) return `This server is run by its owner, and only they may run ${type} here: sudo docker exec mausbot-connector mausbot-connector job ${type}`;
+  return `This server is run by its owner, and ${JSON.stringify(type.slice(0, 32))} is not a job that may run on it.`;
+}
+
+/**
+ * An `update` never moves the server to an older version than the one it runs, and never below this one. Checked on
+ * the image's own version label, once in the connector and again by the updater's runner on the server, which is the
+ * one that counts. The owner goes back with `./update.sh --rollback` or `--version` on the server, never the Admin.
+ * Raise this to the first release that carries the hardened profile when that release exists.
+ */
+export const SERVER_VERSION_FLOOR = "0.0.0";
+export const VERSION_LABEL = "org.opencontainers.image.version";
+
+/** "v0.1.130" → [0, 1, 130]; null for anything that is not a released version. */
+export function releasedVersion(label: unknown): [number, number, number] | null {
+  const match = typeof label === "string" ? /^v?(\d{1,5})\.(\d{1,5})\.(\d{1,5})$/.exec(label) : null;
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+const older = (a: readonly number[], b: readonly number[]) => a[0] !== b[0] ? a[0]! < b[0]! : a[1] !== b[1] ? a[1]! < b[1]! : a[2]! < b[2]!;
+
+/** Why an image labelled `next` may not replace one labelled `current`, or null. An image that names no version is refused. */
+export function olderVersionRefusal(next: unknown, current: unknown, floor: string = SERVER_VERSION_FLOOR): string | null {
+  const wanted = releasedVersion(next);
+  if (!wanted) return "The image does not say which version it is.";
+  const least = releasedVersion(floor);
+  if (least && older(wanted, least)) return `Version ${wanted.join(".")} is older than ${least.join(".")}, the oldest this server accepts.`;
+  const running = releasedVersion(current);
+  if (running && older(wanted, running)) return `Version ${wanted.join(".")} is older than ${running.join(".")}, which runs here.`;
+  return null;
 }
 
 type CheckedJob = { ok: true; job: Job } | { ok: false; id: string | null; code: "invalid_job" | "unknown_job" | "invalid_args" | "refused_by_mode"; message: string };
 
 /** A whole job message for a customer-run server: a listed kind with exactly that kind's arguments. */
-export function checkCustomerRunJob(message: unknown): CheckedJob {
+export function checkCustomerRunJob(message: unknown, by: JobSource): CheckedJob {
   const fields = typeof message === "object" && message !== null && !Array.isArray(message) ? message as Record<string, unknown> : {};
   const { id, type } = fields;
-  if (typeof type === "string" && !isCustomerRunJob(type)) {
+  if (typeof type === "string" && !allowed(type, by)) {
     const known = typeof id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : null;
-    return { ok: false, id: known, code: "refused_by_mode", message: customerRunRefusal(type)! };
+    return { ok: false, id: known, code: "refused_by_mode", message: customerRunRefusal(type, by)! };
   }
   if (type !== "start" && type !== "update") return checkJob(message);
   const args = fields.args === undefined ? {} : fields.args;
@@ -150,12 +192,18 @@ const machine = (value: unknown) => (typeof value === "string" && MACHINE.test(v
 const count = (value: unknown, max = 1e15) => (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= max ? value : 0);
 const seatsOrNull = (value: unknown) => (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 1_000_000 ? value : null);
 
+/** The server's facts as they leave it, at enrolment and in every heartbeat. */
+export function reducedFacts(host: HostFacts): HostFacts {
+  return {
+    os: machine(host.os), kernel: machine(host.kernel), arch: machine(host.arch), cpus: count(host.cpus), memMb: count(host.memMb), diskGb: count(host.diskGb),
+    docker: machine(host.docker), apparmor: host.apparmor === true, userns: host.userns === true,
+  };
+}
+
 function reducedHost(host: HostHealth): HostHealth {
   return {
-    os: machine(host.os), kernel: machine(host.kernel), arch: machine(host.arch), docker: machine(host.docker),
-    cpus: count(host.cpus), memMb: count(host.memMb), diskGb: count(host.diskGb), diskTotalGb: count(host.diskTotalGb), memAvailableMb: count(host.memAvailableMb),
-    load1: count(host.load1), uptimeS: count(host.uptimeS),
-    apparmor: host.apparmor === true, userns: host.userns === true,
+    ...reducedFacts(host),
+    diskTotalGb: count(host.diskTotalGb), memAvailableMb: count(host.memAvailableMb), load1: count(host.load1), uptimeS: count(host.uptimeS),
     clockSkewS: typeof host.clockSkewS === "number" && Number.isFinite(host.clockSkewS) ? host.clockSkewS : null,
     // The check's id and verdict. The sentence that tells the owner how to fix it stays on the server (`probe`).
     checks: (host.checks ?? []).filter((check) => CHECK_IDS.includes(check.id)).map((check) => ({ id: check.id, ok: check.ok === true, ...(check.warning ? { warning: true } : {}) })),
@@ -206,6 +254,7 @@ const FAILURES: Record<JobErrorCode, string> = {
   rollback_failed: "The update failed and the previous version did not come back healthy either.",
   update_unavailable: "The server's own updater is not installed, so MausBot cannot update it.",
   update_not_started: "The server's own updater did not start the update. Nothing was changed.",
+  older_version: "The image is older than the version the server runs, or names no version. Nothing was changed.",
   not_found: "There is no such backup on this server.",
   disk_full: "There is not enough free disk on the server for a safety copy of the data.",
   port_in_use: "A port the server needs is used by another program.",

@@ -14,6 +14,7 @@ import { reducedHeartbeat, reducedReply } from "./customer-run.ts";
 import { SocketDocker, dockerApiProblem, type DockerInfo } from "./docker.ts";
 import { adminOrigin, enroll } from "./enroll.ts";
 import { readHealth } from "./home-health.ts";
+import { neverOlder } from "./images.ts";
 import { serveRequest } from "./home-requests.ts";
 import { Home } from "./home.ts";
 import { hostChecks, hostFacts, hostHealth, probeBox, type BoxProbeResult, type HostReader } from "./host.ts";
@@ -151,7 +152,9 @@ async function run(): Promise<void> {
     updateWindowMs: envSeconds("MAUSBOT_UPDATE_WAIT_S", 600, 60, 3600) * 1000,
     onStep: ({ id, type, step, detail }) => note({ event: "step", id, type, step, ...(detail ? { detail } : {}) }),
   });
-  const updater = new SelfUpdater({ docker, state, log, instance, identity });
+  // On a customer-run server only its owner replaces the connector, and never with an older one: one from before this
+  // mode would not know the mode.
+  const updater = new SelfUpdater({ docker, state, log, instance, identity, ...(mode === "customer-run" ? { checkImage: neverOlder(docker) } : {}) });
   const heartbeat = async (): Promise<Heartbeat> => {
     await home.refreshHealth().catch(() => null);
     const facts = { host: await host.health(false), home: await home.report(), connector: identity() };

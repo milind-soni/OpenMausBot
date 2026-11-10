@@ -26,13 +26,15 @@ export interface RunnerDeps {
   selfUpdate: (job: Job<"self-update">) => Promise<JobReply | null>;
 }
 
-export function jobRunner(deps: RunnerDeps): (job: Job) => Promise<JobReply | null> {
+export function jobRunner(deps: RunnerDeps): (job: Job, by?: AuditSource) => Promise<JobReply | null> {
   let waiting = 0;
-  const run = async (job: Job): Promise<JobReply | null> => {
+  const run = async (job: Job, by: AuditSource): Promise<JobReply | null> => {
     const ok = <T extends JobType>(result: JobResults[T]): JobReply => ({ id: job.id, ok: true, result });
     try {
       const adopted = deps.adopted;
       if (adopted) {
+        const refusal = customerRunRefusal(job.type, by);
+        if (refusal) return { id: job.id, ok: false, error: { code: "refused_by_mode", message: refusal } };
         switch (job.type) {
           case "start":
             return ok(await adopted.start());
@@ -43,7 +45,7 @@ export function jobRunner(deps: RunnerDeps): (job: Job) => Promise<JobReply | nu
           case "update":
             return ok(await adopted.update(job.id, (job.args as JobArgs["update"]).image));
           case "backup":
-            return ok(await adopted.backup(job.id));
+            return ok(await adopted.backup(job.id, by));
           case "restore":
             return ok(await adopted.restore(job.id, (job.args as JobArgs["restore"]).backupId));
           case "status": {
@@ -56,7 +58,7 @@ export function jobRunner(deps: RunnerDeps): (job: Job) => Promise<JobReply | nu
           case "self-update":
             return await deps.selfUpdate(job as Job<"self-update">);
           default:
-            return { id: job.id, ok: false, error: { code: "refused_by_mode", message: customerRunRefusal(job.type) ?? "This server is run by its owner." } };
+            return { id: job.id, ok: false, error: { code: "refused_by_mode", message: "This server is run by its owner." } };
         }
       }
       const home = deps.home;
@@ -94,12 +96,12 @@ export function jobRunner(deps: RunnerDeps): (job: Job) => Promise<JobReply | nu
       return { id: job.id, ok: false, error: asJobError(error) };
     }
   };
-  return async (job) => {
-    if (!CHANGES.has(job.type)) return run(job);
+  return async (job, by = "admin") => {
+    if (!CHANGES.has(job.type)) return run(job, by);
     if (waiting >= MAX_WAITING) return { id: job.id, ok: false, error: { code: "busy", message: `${MAX_WAITING} jobs are already waiting on this server; send this one again later.` } };
     waiting += 1;
     try {
-      return await run(job);
+      return await run(job, by);
     } finally {
       waiting -= 1;
     }
@@ -118,11 +120,11 @@ export interface Desk {
 }
 
 export interface DeskDeps {
-  run: (job: Job) => Promise<JobReply | null>;
+  run: (job: Job, by: AuditSource) => Promise<JobReply | null>;
   audit: AuditLog;
   log: Log;
   policyFile?: string;
-  /** Absent: `operated`. On a customer-run server a job outside that mode's list is refused, whoever sent it. */
+  /** Absent: `operated`. On a customer-run server a job outside that mode's lists is refused: one list for MausBot, a longer one for root on the server. */
   mode?: ServerMode;
   /** The server's admin has paused remote management: every job from MausBot is refused until they resume it. */
   paused?: () => boolean;
@@ -148,12 +150,12 @@ export function jobDesk(deps: DeskDeps): Desk {
         record(resultEvent(by, job.type, refused));
         return refused;
       };
-      const outsideMode = deps.mode === "customer-run" ? customerRunRefusal(job.type) : null;
+      const outsideMode = deps.mode === "customer-run" ? customerRunRefusal(job.type, by) : null;
       if (outsideMode) return refuse("refused_by_mode", outsideMode);
       if (by === "admin" && deps.paused?.()) return refuse("paused", "This server's admin has paused remote management. They resume it with: mausbot-connector resume");
-      const refusal = by === "admin" && deps.policyFile ? policyRefusal(job, readPolicy(deps.policyFile), deps.policyFile, deps.mode) : null;
+      const refusal = by === "admin" && deps.policyFile ? policyRefusal(job, readPolicy(deps.policyFile), deps.policyFile) : null;
       if (refusal) return refuse("refused_by_policy", refusal);
-      const reply = await deps.run(job);
+      const reply = await deps.run(job, by);
       if (reply) record(resultEvent(by, job.type, reply));
       return reply;
     },

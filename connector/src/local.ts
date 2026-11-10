@@ -38,7 +38,7 @@ export function serveLocalJobs(socketPath: string, desk: Desk, log: Log, mode: S
       try { request = JSON.parse(text.slice(0, end)); } catch { request = null; }
       const fields = typeof request === "object" && request !== null && !Array.isArray(request) ? request as Record<string, unknown> : {};
       const message = { id: localJobId(), type: fields.type, args: fields.args };
-      const checked = mode === "customer-run" ? checkCustomerRunJob(message) : checkJob(message);
+      const checked = mode === "customer-run" ? checkCustomerRunJob(message, "local") : checkJob(message);
       if (!checked.ok) {
         answer({ ok: false, error: { code: checked.code, message: checked.message } });
         return;

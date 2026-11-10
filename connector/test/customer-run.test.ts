@@ -4,15 +4,15 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AdoptedHome, UPDATE_FILES, enrolmentRefusal, findInstall, standaloneServerPresent } from "../src/adopted-home.ts";
-import { Agent, type Refusal } from "../src/agent.ts";
+import { Agent, type Refusal, type Socket } from "../src/agent.ts";
 import { AuditLog, type AuditEvent, type AuditLine } from "../src/audit.ts";
 import { serveCustomerRunRequest } from "../src/customer-run-requests.ts";
 import {
-  CUSTOMER_RUN_JOBS, CUSTOMER_RUN_REQUESTS, HOME_READS, HOME_READS_COMMAND, checkCustomerRunJob, customerRunRefusal, parseHomeReads, reducedHeartbeat, reducedReply,
+  CUSTOMER_RUN_JOBS, CUSTOMER_RUN_LOCAL_JOBS, CUSTOMER_RUN_REQUESTS, HOME_READS, HOME_READS_COMMAND, checkCustomerRunJob, customerRunRefusal, olderVersionRefusal, parseHomeReads, reducedHeartbeat, reducedReply,
 } from "../src/customer-run.ts";
 import { enroll } from "../src/enroll.ts";
+import { neverOlder } from "../src/images.ts";
 import { jobDesk, jobRunner } from "../src/jobs.ts";
-import { parsePolicy, policyRefusal } from "../src/policy.ts";
 import { JOB_TYPES, checkJob, type HostFacts, type HostHealth, type Job, type JobReply, type JobType } from "../src/protocol.ts";
 import { StateStore, type AgentRecord } from "../src/state.ts";
 import { FakeAdmin } from "./fake-admin.ts";
@@ -23,6 +23,8 @@ const CLOUD_HOME = `ghcr.io/milind-soni/openmausbot-cloud-home@sha256:${"c".repe
 const CONNECTOR = `ghcr.io/milind-soni/mausbot-connector@sha256:${"1".repeat(64)}`;
 const RUNNING = "ghcr.io/milind-soni/openmausbot:v0.1.151";
 const NEXT = digest("b");
+const OLDER = digest("a");
+const UNNAMED = digest("d");
 const EMAIL = "ada.lovelace@customer.example";
 const WRITTEN = "Quarterly numbers for Project Nightingale";
 const SERVER_NAME = "Lovelace Analytical Engines";
@@ -47,7 +49,7 @@ async function until(check: () => boolean, ms = 5_000): Promise<void> {
 }
 
 /** A server its owner installed with deploy/install.sh: the Compose project, its data folder, and a home that answers on its own loopback. */
-function server(options: { image?: string; seats?: number | null } = {}) {
+async function server(options: { image?: string; seats?: number | null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-customer-run-"));
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   const dataDir = join(dir, "opt-openmausbot", "data");
@@ -59,10 +61,8 @@ function server(options: { image?: string; seats?: number | null } = {}) {
   let clock = 1_800_000_000_000;
   docker.now = () => clock;
   const image = options.image ?? RUNNING;
-  for (const ref of [image, NEXT, "caddy:2"]) {
-    docker.publish(ref, null);
-    docker.images.set(ref, {});
-  }
+  for (const [ref, version] of [[image, "v0.1.151"], [NEXT, "v0.1.152"], [OLDER, "v0.1.150"], [UNNAMED, null], ["caddy:2", null]] as const) docker.publish(ref, version);
+  for (const ref of [image, "caddy:2"]) await docker.pull(ref);
   const compose = (service: string) => ({ "com.docker.compose.project": "openmausbot", "com.docker.compose.service": service });
   const home = { answers: true, seats: options.seats === undefined ? 7 : options.seats, execs: [] as string[][] };
   docker.onExec = (_container, command) => {
@@ -92,10 +92,10 @@ function server(options: { image?: string; seats?: number | null } = {}) {
     docker.folder(dataDir).files.set("chats.json", WRITTEN);
     docker.calls.length = 0;
   };
-  return { dir, dataDir, updateDir, state, docker, adopted, home, steps, lines, install, image };
+  return { dir, dataDir, updateDir, state, docker, adopted, home, steps, lines, install, image, advance: (ms: number) => { clock += ms; } };
 }
 
-function desk(fixture: ReturnType<typeof server>, options: { mode?: "customer-run" | "operated"; paused?: () => boolean } = {}) {
+function desk(fixture: Awaited<ReturnType<typeof server>>, options: { mode?: "customer-run" | "operated"; paused?: () => boolean } = {}) {
   const ran: Job[] = [];
   const audit = new AuditLog(join(fixture.dir, "audit.jsonl"));
   const run = jobRunner({
@@ -103,44 +103,72 @@ function desk(fixture: ReturnType<typeof server>, options: { mode?: "customer-ru
     admin: () => ({ origin: "https://cloud.example.test", authorization: () => "Box token" }),
     selfUpdate: async (job) => ({ id: job.id, ok: true, result: { connector: identity } }),
   });
-  const made = jobDesk({ run: async (job) => { ran.push(job); return run(job); }, audit, log: () => {}, mode: options.mode ?? "customer-run", paused: options.paused });
+  const made = jobDesk({ run: async (job, by) => { ran.push(job); return run(job, by); }, audit, log: () => {}, mode: options.mode ?? "customer-run", paused: options.paused });
   const lines = () => audit.tail(100).map((line) => JSON.parse(line) as AuditLine);
   return { desk: made, ran, lines };
 }
 
 describe("a customer-run server: the jobs MausBot may run", () => {
-  it("lists nine kinds, and neither of the two that move the data", () => {
-    expect([...CUSTOMER_RUN_JOBS].sort()).toEqual(["backup", "host-health", "restart", "restore", "self-update", "start", "status", "stop", "update"]);
-    expect(JOB_TYPES.filter((type) => customerRunRefusal(type) !== null)).toEqual(["export-disk", "import-disk"]);
+  it("lists seven kinds for MausBot and two more for the server's own root, and for neither the two that move the data", () => {
+    expect([...CUSTOMER_RUN_JOBS].sort()).toEqual(["backup", "host-health", "restart", "start", "status", "stop", "update"]);
+    expect([...CUSTOMER_RUN_LOCAL_JOBS].sort()).toEqual(["restore", "self-update"]);
+    expect(JOB_TYPES.filter((type) => customerRunRefusal(type, "admin") !== null)).toEqual(["restore", "export-disk", "import-disk", "self-update"]);
+    expect(JOB_TYPES.filter((type) => customerRunRefusal(type, "local") !== null)).toEqual(["export-disk", "import-disk"]);
+  });
+
+  it("refuses MausBot replacing the connector or putting old data back, at each of the three checks, and lets the server's own root do both", async () => {
+    const jobs = [{ id: "c1", type: "self-update", args: { image: CONNECTOR } }, { id: "r1", type: "restore", args: { backupId: "20261028-104512-3fa9" } }] as Job[];
+    const fixture = await server();
+    await fixture.install();
+    const { desk: made, ran } = desk(fixture);
+    const run = jobRunner({
+      adopted: fixture.adopted, hostHealth: async () => health, identity: () => identity,
+      admin: () => ({ origin: "https://cloud.example.test", authorization: () => "Box token" }),
+      selfUpdate: async (job) => ({ id: job.id, ok: true, result: { connector: identity } }),
+    });
+    for (const job of jobs) {
+      expect(checkJob(job), job.type).toMatchObject({ ok: true });
+      expect(checkCustomerRunJob(job, "admin"), job.type).toMatchObject({ ok: false, id: job.id, code: "refused_by_mode", message: expect.stringContaining(`only they may run ${job.type} here`) });
+      expect(checkCustomerRunJob(job, "local"), job.type).toMatchObject({ ok: true });
+      expect(await made.submit(job, "admin"), job.type).toMatchObject({ ok: false, error: { code: "refused_by_mode" } });
+      expect(await run(job, "admin"), job.type).toMatchObject({ ok: false, error: { code: "refused_by_mode" } });
+    }
+    expect(ran).toEqual([]);
+    expect(fixture.docker.calls).toEqual([]);
+    expect(await made.submit(jobs[0]!, "local")).toEqual({ id: "c1", ok: true, result: { connector: identity } });
+    expect(await made.submit(jobs[1]!, "local")).toMatchObject({ ok: false, error: { code: "not_found" } });
+    expect(ran.map((job) => job.type)).toEqual(["self-update", "restore"]);
   });
 
   it("refuses export-disk, import-disk and any kind it does not list as the job arrives, while the operated check still takes them", () => {
     const moved: [JobType, Record<string, unknown>][] = [["export-disk", {}], ["import-disk", { url: "https://storage.example.test/disk.tar.gz" }]];
     for (const [type, args] of moved) {
       expect(checkJob({ id: "j1", type, args })).toMatchObject({ ok: true });
-      expect(checkCustomerRunJob({ id: "j1", type, args })).toEqual({
-        ok: false, id: "j1", code: "refused_by_mode", message: `This server is run by its owner, and "${type}" is not a job MausBot may run on it.`,
-      });
+      for (const by of ["admin", "local"] as const) {
+        expect(checkCustomerRunJob({ id: "j1", type, args }, by)).toEqual({
+          ok: false, id: "j1", code: "refused_by_mode", message: `This server is run by its owner, and "${type}" is not a job that may run on it.`,
+        });
+      }
     }
-    expect(checkCustomerRunJob({ id: "j2", type: "shell", args: { command: "cat /data" } })).toMatchObject({ ok: false, code: "refused_by_mode" });
+    expect(checkCustomerRunJob({ id: "j2", type: "shell", args: { command: "cat /data" } }, "admin")).toMatchObject({ ok: false, code: "refused_by_mode" });
   });
 
   it("refuses a start that names an image or settings, and an update to anything but MausBot's server image by digest", () => {
     const env = { OMB_CLOUD_ROLE: "team", OMB_CLOUD_MACHINE_ID: "m", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_PUBLIC_URL: "https://acme.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: "s".repeat(40) };
     expect(checkJob({ id: "s1", type: "start", args: { image: CLOUD_HOME, env } })).toMatchObject({ ok: true });
-    expect(checkCustomerRunJob({ id: "s1", type: "start", args: { image: CLOUD_HOME, env } })).toMatchObject({ ok: false, id: "s1", code: "refused_by_mode" });
-    expect(checkCustomerRunJob({ id: "s2", type: "start" })).toEqual({ ok: true, job: { id: "s2", type: "start", args: {} } });
-    expect(checkCustomerRunJob({ id: "u1", type: "update", args: { image: NEXT } })).toEqual({ ok: true, job: { id: "u1", type: "update", args: { image: NEXT } } });
+    expect(checkCustomerRunJob({ id: "s1", type: "start", args: { image: CLOUD_HOME, env } }, "admin")).toMatchObject({ ok: false, id: "s1", code: "refused_by_mode" });
+    expect(checkCustomerRunJob({ id: "s2", type: "start" }, "admin")).toEqual({ ok: true, job: { id: "s2", type: "start", args: {} } });
+    expect(checkCustomerRunJob({ id: "u1", type: "update", args: { image: NEXT } }, "admin")).toEqual({ ok: true, job: { id: "u1", type: "update", args: { image: NEXT } } });
     for (const image of [CLOUD_HOME, RUNNING, "ghcr.io/someone-else/openmausbot@sha256:" + "a".repeat(64)]) {
-      expect(checkCustomerRunJob({ id: "u2", type: "update", args: { image } }), image).toMatchObject({ ok: false, code: "invalid_args" });
+      expect(checkCustomerRunJob({ id: "u2", type: "update", args: { image } }, "admin"), image).toMatchObject({ ok: false, code: "invalid_args" });
     }
-    expect(checkCustomerRunJob({ id: "u3", type: "update", args: { image: NEXT, env } })).toMatchObject({ ok: false, code: "invalid_args" });
-    expect(checkCustomerRunJob({ id: "bad id", type: "start" })).toMatchObject({ ok: false, id: null, code: "invalid_job" });
-    expect(checkCustomerRunJob({ id: "r1", type: "restore", args: { backupId: "../etc" } })).toMatchObject({ ok: false, code: "invalid_args" });
+    expect(checkCustomerRunJob({ id: "u3", type: "update", args: { image: NEXT, env } }, "admin")).toMatchObject({ ok: false, code: "invalid_args" });
+    expect(checkCustomerRunJob({ id: "bad id", type: "start" }, "admin")).toMatchObject({ ok: false, id: null, code: "invalid_job" });
+    expect(checkCustomerRunJob({ id: "r1", type: "restore", args: { backupId: "../etc" } }, "local")).toMatchObject({ ok: false, code: "invalid_args" });
   });
 
   it("refuses them again at the desk, whoever sent them, runs nothing, and writes both the job and the refusal to the audit log", async () => {
-    const fixture = server();
+    const fixture = await server();
     await fixture.install();
     const { desk: made, ran, lines } = desk(fixture);
     for (const by of ["admin", "local"] as const) {
@@ -161,7 +189,7 @@ describe("a customer-run server: the jobs MausBot may run", () => {
   });
 
   it("has no way to run them even past both checks: the home it attached to refuses the kind", async () => {
-    const fixture = server();
+    const fixture = await server();
     await fixture.install();
     const run = jobRunner({
       adopted: fixture.adopted, hostHealth: async () => health, identity: () => identity,
@@ -175,13 +203,13 @@ describe("a customer-run server: the jobs MausBot may run", () => {
 });
 
 describe("a customer-run server: pausing remote management", () => {
-  it("refuses every job from MausBot while paused, the connector's own update too, logs each, and still runs the admin's own", async () => {
-    const fixture = server();
+  it("refuses every job from MausBot while paused, logs each, and still runs the admin's own", async () => {
+    const fixture = await server();
     await fixture.install();
     let paused = true;
     const { desk: made, ran, lines } = desk(fixture, { paused: () => paused });
-    for (const type of ["status", "stop", "self-update"] as const) {
-      const job = { id: `p-${type}`, type, args: type === "self-update" ? { image: CONNECTOR } : {} } as Job;
+    for (const type of ["status", "stop", "backup"] as const) {
+      const job = { id: `p-${type}`, type, args: {} } as Job;
       expect(await made.submit(job, "admin")).toMatchObject({ ok: false, error: { code: "paused" } });
     }
     expect(ran).toEqual([]);
@@ -191,17 +219,8 @@ describe("a customer-run server: pausing remote management", () => {
     expect(await made.submit({ id: "after", type: "status", args: {} }, "admin")).toMatchObject({ ok: true });
   });
 
-  it("lets the owner's policy file keep the connector they read: its job list covers the connector's own update here, and only here", () => {
-    const update = { id: "c1", type: "self-update", args: { image: CONNECTOR } } as Job;
-    const listed = parsePolicy('{"jobs":["status","host-health"]}');
-    expect(policyRefusal(update, listed, "/etc/mausbot/policy.json", "customer-run")).toBe("This server's policy /etc/mausbot/policy.json does not let MausBot run self-update jobs.");
-    expect(policyRefusal(update, listed, "/etc/mausbot/policy.json")).toBeNull();
-    expect(policyRefusal(update, parsePolicy(null), "/etc/mausbot/policy.json", "customer-run")).toBeNull();
-    expect(policyRefusal(update, parsePolicy('{"jobs":["self-update"]}'), "/etc/mausbot/policy.json", "customer-run")).toBeNull();
-  });
-
-  it("is kept on the server's disk, where the running connector reads it before each job", () => {
-    const { state } = server();
+  it("is kept on the server's disk, where the running connector reads it before each job", async () => {
+    const { state } = await server();
     expect(state.paused()).toBe(false);
     state.savePause(true);
     expect(new StateStore(state.dir).paused()).toBe(true);
@@ -219,8 +238,8 @@ describe("a customer-run server: what leaves it", () => {
     return out;
   };
 
-  it("reads three fields from the home and drops everything else it answered", () => {
-    const fixture = server();
+  it("reads three fields from the home and drops everything else it answered", async () => {
+    const fixture = await server();
     expect(HOME_READS).toEqual(["/api/health", "/.well-known/openmausbot/environment", "/api/seats"]);
     const facts = parseHomeReads(fixture.docker.onExec!({} as never, []).output);
     expect(facts).toEqual({ answers: true, version: "0.1.151", seats: 7 });
@@ -229,7 +248,7 @@ describe("a customer-run server: what leaves it", () => {
   });
 
   it("sends a heartbeat of versions, states, counts and the seat count, with no address, name or sentence in it", async () => {
-    const fixture = server();
+    const fixture = await server();
     await fixture.install();
     await fixture.adopted.refreshHealth();
     expect(fixture.home.execs).toEqual([[...HOME_READS_COMMAND]]);
@@ -282,19 +301,19 @@ describe("a customer-run server: what leaves it", () => {
 
 describe("a customer-run server: the home its owner installed", () => {
   it("attaches to the Compose install, and says in plain words why it cannot when there is none or it was built here", async () => {
-    const fixture = server();
+    const fixture = await server();
     expect(await standaloneServerPresent(fixture.docker)).toBe(false);
     expect(await findInstall(fixture.docker)).toEqual({ ok: false, why: "MausBot is not installed on this server yet. Install it first with the server's install command, then connect it." });
     await fixture.install();
     expect(await standaloneServerPresent(fixture.docker)).toBe(true);
     expect(await findInstall(fixture.docker)).toMatchObject({ ok: true, install: { dataDir: fixture.dataDir } });
-    const built = server({ image: "deploy-omb" });
+    const built = await server({ image: "deploy-omb" });
     await built.install();
     expect(await findInstall(built.docker)).toMatchObject({ ok: false, why: expect.stringContaining("was built here") });
   });
 
   it("will not be enrolled as a server MausBot runs where its owner's MausBot is already installed: that would start a second one", async () => {
-    const fixture = server();
+    const fixture = await server();
     expect(await enrolmentRefusal("operated", fixture.docker)).toBeNull();
     expect(await enrolmentRefusal("customer-run", fixture.docker)).toContain("MausBot is not installed on this server yet.");
     await fixture.install();
@@ -305,7 +324,7 @@ describe("a customer-run server: the home its owner installed", () => {
   });
 
   it("stops Caddy before the home and starts it after the home answers, and never makes, removes or renames a container", async () => {
-    const fixture = server();
+    const fixture = await server();
     await fixture.install();
     expect(await fixture.adopted.stop()).toEqual({ home: { state: "stopped", image: RUNNING, health: null } });
     expect(fixture.docker.calls).toEqual(["stop openmausbot-caddy-1", "stop openmausbot-omb-1"]);
@@ -320,7 +339,7 @@ describe("a customer-run server: the home its owner installed", () => {
   });
 
   it("says the home did not answer when it does not, within the wait", async () => {
-    const fixture = server();
+    const fixture = await server();
     await fixture.install();
     await fixture.adopted.stop();
     fixture.home.answers = false;
@@ -329,9 +348,9 @@ describe("a customer-run server: the home its owner installed", () => {
   });
 
   it("backs the data folder up to a volume on the same server and puts a backup back, with a safety copy first", async () => {
-    const fixture = server();
+    const fixture = await server();
     await fixture.install();
-    const { backup } = await fixture.adopted.backup("b1");
+    const { backup } = await fixture.adopted.backup("b1", "local");
     expect(fixture.docker.files(`mausbot-backup-${backup.id}`)).toEqual({ "chats.json": WRITTEN });
     expect(fixture.docker.container("openmausbot-omb-1")?.status).toBe("running");
     fixture.docker.folder(fixture.dataDir).files.set("chats.json", "changed since");
@@ -344,10 +363,24 @@ describe("a customer-run server: the home its owner installed", () => {
     await expect(fixture.adopted.restore("r2", "20200101-000000-aaaa")).rejects.toMatchObject({ code: "not_found" });
   });
 
-  it("puts the data back as it was when the connector restarts in the middle of a restore", async () => {
-    const fixture = server();
+  it("keeps three backups for each sender, so MausBot's backups never push out one the owner made", async () => {
+    const fixture = await server();
     await fixture.install();
-    const { backup } = await fixture.adopted.backup("b1");
+    const mine = (await fixture.adopted.backup("mine", "local")).backup.id;
+    const theirs: string[] = [];
+    for (const id of ["a1", "a2", "a3", "a4", "a5"]) {
+      fixture.advance(1_000);
+      theirs.push((await fixture.adopted.backup(id, "admin")).backup.id);
+    }
+    const kept = (await fixture.adopted.copies()).backups.map((copy) => copy.id).sort();
+    expect(kept).toEqual([mine, ...theirs.slice(2)].sort());
+    expect(fixture.docker.files(`mausbot-backup-${mine}`)).toEqual({ "chats.json": WRITTEN });
+  });
+
+  it("puts the data back as it was when the connector restarts in the middle of a restore", async () => {
+    const fixture = await server();
+    await fixture.install();
+    const { backup } = await fixture.adopted.backup("b1", "local");
     const before = { "chats.json": "the newest chats" };
     fixture.docker.folder(fixture.dataDir).files.set("chats.json", before["chats.json"]);
     await fixture.docker.createVolume("mausbot-snapshot", { "com.mausbot.role": "snapshot" });
@@ -360,9 +393,24 @@ describe("a customer-run server: the home its owner installed", () => {
   });
 });
 
+describe("a customer-run server: replacing the connector", () => {
+  it("is refused, even for the server's own root, when the new image is older than the one running or names no version", async () => {
+    const fixture = await server();
+    const [now, newer, old, unnamed] = ["1", "2", "3", "4"].map((letter) => `ghcr.io/milind-soni/mausbot-connector@sha256:${letter.repeat(64)}`);
+    for (const [ref, version] of [[now, "v0.1.152"], [newer, "v0.1.153"], [old, "v0.1.140"], [unnamed, null]] as const) {
+      fixture.docker.publish(ref!, version);
+      await fixture.docker.pull(ref!);
+    }
+    const check = neverOlder(fixture.docker);
+    await expect(check(newer!, { kind: "connector", current: now! })).resolves.toBeUndefined();
+    await expect(check(old!, { kind: "connector", current: now! })).rejects.toThrow("Version 0.1.140 is older than 0.1.152, which runs here.");
+    await expect(check(unnamed!, { kind: "connector", current: now! })).rejects.toThrow("The image does not say which version it is.");
+  });
+});
+
 describe("a customer-run server: updates go to the server's own updater", () => {
   /** Stands in for mausbot-update-runner.sh: reads the request the connector left and answers with update.sh's exit code. */
-  const updater = (fixture: ReturnType<typeof server>, code: number, seen: string[] = []) => {
+  const updater = (fixture: Awaited<ReturnType<typeof server>>, code: number, seen: string[] = []) => {
     writeFileSync(join(fixture.updateDir, UPDATE_FILES.runner), "1\n");
     const sleep = (fixture.adopted as unknown as { sleep: (ms: number) => Promise<void> }).sleep;
     (fixture.adopted as unknown as { sleep: (ms: number) => Promise<void> }).sleep = async (ms) => {
@@ -379,26 +427,47 @@ describe("a customer-run server: updates go to the server's own updater", () => 
   };
 
   it("leaves the image for the updater, touches no container itself, and reports the new image once the updater is done", async () => {
-    const fixture = server();
+    const fixture = await server();
     await fixture.install();
     const seen = updater(fixture, 0);
     const result = await fixture.adopted.update("u1", NEXT);
     expect(seen).toEqual([`id=u1\nimage=${NEXT}\n`]);
     expect(result).toMatchObject({ previousImage: RUNNING, snapshot: null, home: { state: "running" } });
-    expect(fixture.docker.calls.filter((call) => !call.startsWith("exec "))).toEqual([]);
+    expect(fixture.docker.calls.filter((call) => !call.startsWith("exec "))).toEqual([`pull ${NEXT}`]);
     expect(fixture.state.home()).toMatchObject({ image: NEXT, previousImage: RUNNING, operation: null });
     expect(fixture.steps).toEqual(["u1 request", "u1 wait"]);
   });
 
+  it("never moves the server to an older version, or to an image that names none, and asks nothing of the updater then", async () => {
+    expect(olderVersionRefusal("v0.1.152", "v0.1.151")).toBeNull();
+    expect(olderVersionRefusal("0.1.151", "v0.1.151")).toBeNull();
+    expect(olderVersionRefusal("v0.1.150", "v0.1.151")).toBe("Version 0.1.150 is older than 0.1.151, which runs here.");
+    expect(olderVersionRefusal("v0.2.0", "v0.10.0")).toBe("Version 0.2.0 is older than 0.10.0, which runs here.");
+    expect(olderVersionRefusal("v0.1.152", "v0.1.151", "0.1.160")).toBe("Version 0.1.152 is older than 0.1.160, the oldest this server accepts.");
+    expect(olderVersionRefusal(undefined, "v0.1.151")).toBe("The image does not say which version it is.");
+    expect(olderVersionRefusal("latest", null)).toBe("The image does not say which version it is.");
+    expect(olderVersionRefusal("v0.1.152", undefined)).toBeNull();
+    const fixture = await server();
+    await fixture.install();
+    const seen = updater(fixture, 0);
+    for (const image of [OLDER, UNNAMED]) {
+      await expect(fixture.adopted.update("u1", image), image).rejects.toMatchObject({ code: "older_version", message: expect.stringContaining("Nothing was changed.") });
+    }
+    expect(seen).toEqual([]);
+    expect(existsSync(join(fixture.updateDir, UPDATE_FILES.request))).toBe(false);
+    expect(fixture.state.home().operation).toBeNull();
+    expect(fixture.docker.calls.filter((call) => !call.startsWith("pull "))).toEqual([]);
+  });
+
   it("maps each way the updater ends to a code, and refuses when the server has no updater or the image is not MausBot's", async () => {
-    for (const [code, expected] of [[1, "update_rolled_back"], [2, "rollback_failed"], [3, "busy"], [4, "update_not_started"], [127, "update_unavailable"], [9, "docker"]] as const) {
-      const fixture = server();
+    for (const [code, expected] of [[1, "update_rolled_back"], [2, "rollback_failed"], [3, "busy"], [4, "update_not_started"], [5, "older_version"], [127, "update_unavailable"], [9, "docker"]] as const) {
+      const fixture = await server();
       await fixture.install();
       updater(fixture, code);
       await expect(fixture.adopted.update("u1", NEXT), String(code)).rejects.toMatchObject({ code: expected });
       expect(fixture.state.home().operation).toBeNull();
     }
-    const bare = server();
+    const bare = await server();
     await bare.install();
     await expect(bare.adopted.update("u2", NEXT)).rejects.toMatchObject({ code: "update_unavailable" });
     await expect(bare.adopted.update("u3", CLOUD_HOME)).rejects.toMatchObject({ code: "image_refused" });
@@ -406,7 +475,7 @@ describe("a customer-run server: updates go to the server's own updater", () => 
   });
 
   it("says so when the updater never answers, and takes its late verdict after a restart", async () => {
-    const fixture = server();
+    const fixture = await server();
     await fixture.install();
     writeFileSync(join(fixture.updateDir, UPDATE_FILES.runner), "1\n");
     await expect(fixture.adopted.update("u1", NEXT)).rejects.toMatchObject({ code: "interrupted" });
@@ -458,6 +527,40 @@ describe("a customer-run server: MausBot's requests", () => {
     expect("mode" in operated).toBe(false);
   });
 
+  it("sends the server's facts at enrolment as it does in the heartbeat: nothing that is not a machine's own name for itself", async () => {
+    const admin = new FakeAdmin();
+    await admin.listen();
+    cleanups.push(() => admin.close());
+    const odd = { ...host, os: `Ubuntu (${EMAIL})`, kernel: "6.8.0\nBcc: someone", docker: WRITTEN + "!" };
+    const record = await enroll({ admin: admin.origin, code: admin.mintCode(), host: odd, connector: identity, mode: "customer-run" });
+    expect(admin.boxes.get(record.boxId)!.enroll.host).toEqual({ ...host, os: "unknown", kernel: "unknown", docker: "unknown" });
+    const operated = await enroll({ admin: admin.origin, code: admin.mintCode(), host: odd, connector: identity });
+    expect(admin.boxes.get(operated.boxId)!.enroll.host).toEqual(odd);
+  });
+
+  it("closes a connection with the code alone: the reason, which can name a path on the server, stays in its own log", () => {
+    const closes: { mode: string; code?: number; reason?: string }[] = [];
+    const lines: string[] = [];
+    for (const mode of ["customer-run", "operated"] as const) {
+      const socket: Socket = {
+        readyState: 1, bufferedAmount: 0, binaryType: "", send: () => {}, onopen: null, onmessage: null, onclose: null, onerror: null,
+        close: (code, reason) => { closes.push({ mode, code, reason }); },
+      };
+      const agent = new Agent({
+        identity: () => ({ version: 2, admin: "https://cloud.example.test", boxId: "box-12345678", teamId: "t", publicKey: "", privateKey: "", adminKeys: {}, enrolledAt: 1 }),
+        log: (line) => lines.push(line), heartbeat: async () => { throw new Error("unused"); }, handle: async () => null, socket: () => socket, mode,
+        nextCount: () => { throw new Error("EACCES: permission denied, open '/state/connect-count.json'"); },
+        setTimer: () => null, clearTimer: () => {},
+      });
+      agent.start();
+      socket.onmessage!({ data: JSON.stringify({ t: "challenge", v: 1, nonce: "A".repeat(43) }) });
+      agent.stop();
+    }
+    expect(closes[0]).toEqual({ mode: "customer-run", code: 4000, reason: "" });
+    expect(closes.find((close) => close.mode === "operated")?.reason).toContain("/state/connect-count.json");
+    expect(lines.filter((line) => line.includes("/state/connect-count.json"))).toHaveLength(2);
+  });
+
   it("answers the four requests on its list itself, with numbers and versions only", async () => {
     const { admin, audits } = await connected();
     expect(Object.keys(CUSTOMER_RUN_REQUESTS)).toEqual(["GET /v1/health", "GET /v1/version", "GET /v1/seats", "GET /v1/update"]);
@@ -503,6 +606,13 @@ describe("a customer-run server: MausBot's requests", () => {
     expect(await admin.replyTo("x2", 5_000)).toMatchObject({ ok: false, error: { code: "refused_by_mode" } });
     expect(handled).toEqual([]);
     expect(refusals.map((refusal) => `${refusal.code} ${refusal.id} ${refusal.type}`)).toEqual(["refused_by_mode x1 export-disk", "refused_by_mode x2 import-disk"]);
+    admin.send({ job: admin.signJob(record.boxId, { id: "x4", type: "self-update", args: { image: CONNECTOR } }) });
+    expect(await admin.replyTo("x4", 5_000)).toMatchObject({ ok: false, error: { code: "refused_by_mode" } });
+    admin.send({ job: admin.signJob(record.boxId, { id: "x5", type: "restore", args: { backupId: "20261028-104512-3fa9" } }) });
+    expect(await admin.replyTo("x5", 5_000)).toMatchObject({ ok: false, error: { code: "refused_by_mode" } });
+    expect(handled).toEqual([]);
+    expect(refusals.slice(2).map((refusal) => `${refusal.code} ${refusal.id} ${refusal.type}`)).toEqual(["refused_by_mode x4 self-update", "refused_by_mode x5 restore"]);
+    refusals.length = 2;
     admin.send({ job: admin.signJob(record.boxId, { id: "x3", type: "stop", args: {} }) });
     const failed = await admin.replyTo("x3", 5_000);
     expect(failed).toMatchObject({ ok: false, error: { code: "docker" } });

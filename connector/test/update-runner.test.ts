@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { UPDATE_FILES } from "../src/adopted-home.ts";
-import { CUSTOMER_HOME_IMAGE } from "../src/customer-run.ts";
+import { CUSTOMER_HOME_IMAGE, SERVER_VERSION_FLOOR, VERSION_LABEL } from "../src/customer-run.ts";
 
 const SCRIPT = join(import.meta.dirname, "..", "host", "mausbot-update-runner.sh");
 const IMAGE = `ghcr.io/milind-soni/openmausbot@sha256:${"b".repeat(64)}`;
@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 /** Runs the runner on a request, beside an update.sh that records how it was called and exits with `exit`. */
-function run(request: string | null, options: { exit?: number; updater?: boolean } = {}) {
+function run(request: string | null, options: { exit?: number; updater?: boolean; wanted?: string; running?: string; pulls?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-update-runner-"));
   dirs.push(dir);
   const update = join(dir, "update");
@@ -28,8 +28,20 @@ function run(request: string | null, options: { exit?: number; updater?: boolean
     writeFileSync(join(install, "update.sh"), `printf '%s\\n' "$*" >> "${called}"\nexit ${options.exit ?? 0}\n`);
     chmodSync(join(install, "update.sh"), 0o755);
   }
+  // Stands in for docker: the image asked for carries `wanted` as its version, the server's container runs `running`.
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "docker"), `#!/bin/sh
+case "$1 $2" in
+  "image inspect") if [ "$3" = -f ]; then case "$5" in sha256:running) echo "${options.running ?? "v0.1.151"}" ;; *) echo "${options.wanted ?? "v0.1.152"}" ;; esac; else exit ${options.pulls === false ? 1 : 0}; fi ;;
+  "pull -q") exit 1 ;;
+  "ps -aq") echo c1 ;;
+  "inspect -f") echo sha256:running ;;
+esac
+`);
+  chmodSync(join(bin, "docker"), 0o755);
   if (request !== null) writeFileSync(join(update, UPDATE_FILES.request), request);
-  const result = spawnSync("sh", [SCRIPT], { encoding: "utf8", env: { PATH: "/usr/bin:/bin", MAUSBOT_UPDATE_DIR: update, MAUSBOT_INSTALL_DIR: install }, timeout: 30_000 });
+  const result = spawnSync("sh", [SCRIPT], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin`, MAUSBOT_UPDATE_DIR: update, MAUSBOT_INSTALL_DIR: install }, timeout: 30_000 });
   const answer = existsSync(join(update, UPDATE_FILES.result)) ? readFileSync(join(update, UPDATE_FILES.result), "utf8") : null;
   return { result, answer, calls: existsSync(called) ? readFileSync(called, "utf8").trim().split("\n") : [], install, pending: existsSync(join(update, UPDATE_FILES.request)) };
 }
@@ -61,6 +73,20 @@ describe.skipIf(!posix)("mausbot-update-runner.sh", () => {
     expect(odd.calls).toEqual([]);
     expect(odd.answer).toBeNull();
     expect(odd.pending).toBe(false);
+  });
+
+  it("never hands over an image older than the version running, or one that names no version, and holds the connector's own floor", () => {
+    for (const [wanted, running] of [["v0.1.150", "v0.1.151"], ["v0.1.9", "v0.1.10"], ["v0.9.9", "v1.0.0"], ["", "v0.1.151"], ["latest", "v0.1.151"], ["<no value>", "v0.1.151"]]) {
+      const refused = run(`id=u1\nimage=${IMAGE}\n`, { wanted, running });
+      expect(refused.calls, `${wanted} over ${running}`).toEqual([]);
+      expect(refused.answer, `${wanted} over ${running}`).toBe("id=u1\ncode=5\n");
+    }
+    for (const [wanted, running] of [["v0.1.151", "v0.1.151"], ["v0.1.152", "v0.1.151"], ["v0.2.0", "v0.1.151"], ["v1.0.0", "v0.9.9"], ["v0.1.152", ""]]) {
+      expect(run(`id=u1\nimage=${IMAGE}\n`, { wanted, running }).answer, `${wanted} over ${running}`).toBe("id=u1\ncode=0\n");
+    }
+    expect(run(`id=u1\nimage=${IMAGE}\n`, { pulls: false }).answer).toBe("id=u1\ncode=4\n");
+    expect(readFileSync(SCRIPT, "utf8")).toContain(`\nFLOOR=${SERVER_VERSION_FLOOR}\n`);
+    expect(readFileSync(SCRIPT, "utf8")).toContain(`\nVERSION_LABEL=${VERSION_LABEL}\n`);
   });
 
   it("answers 127 when the install has no update.sh, and does nothing without a request", () => {

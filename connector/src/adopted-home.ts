@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { CUSTOMER_HOME_IMAGE, HOME_READS_COMMAND, parseHomeReads, type HomeFacts } from "./customer-run.ts";
+import { CUSTOMER_HOME_IMAGE, HOME_READS_COMMAND, VERSION_LABEL, olderVersionRefusal, parseHomeReads, type HomeFacts, type JobSource } from "./customer-run.ts";
 import type { ContainerInfo, Docker, Mount } from "./docker.ts";
 import { JobFailure } from "./failure.ts";
 import { backupId, helperSpec } from "./home.ts";
@@ -27,8 +27,10 @@ const DELETE_CAPS = ["DAC_OVERRIDE", "DAC_READ_SEARCH"];
 
 /** The request the connector leaves for the server's updater, and the answer it reads: `key=value` lines. */
 export const UPDATE_FILES = { runner: "runner", request: "request", result: "result" } as const;
-/** deploy/update.sh's exit codes, and 127 when the server has no update.sh. */
-const UPDATE_EXIT = { done: 0, rolledBack: 1, rollbackFailed: 2, busy: 3, notStarted: 4, missing: 127 } as const;
+/** deploy/update.sh's exit codes; from the runner itself, 5 for an image older than the one running and 127 when the server has no update.sh. */
+const UPDATE_EXIT = { done: 0, rolledBack: 1, rollbackFailed: 2, busy: 3, notStarted: 4, older: 5, missing: 127 } as const;
+/** Who asked for a backup, kept on its volume: one sender's backups never push out the other's. */
+const MADE_BY_LABEL = "com.mausbot.by";
 
 const lastLine = (text: string) => text.trim().split("\n").pop()?.slice(0, 300) ?? "";
 const gb = (bytes: number) => Math.round((bytes / 1e9) * 10) / 10;
@@ -215,6 +217,7 @@ export class AdoptedHome {
       if (!existsSync(join(dir, UPDATE_FILES.runner))) {
         throw new JobFailure("update_unavailable", "This server has no updater for MausBot to hand an update to. Run the connector's install command again to add it; until then, update with ./update.sh on the server.");
       }
+      await this.refuseOlder(image, container);
       const wasRunning = container.State.Running;
       this.begin({ jobId, type: "update", phase: "request", previousImage: previous, nextImage: image, target: null, dataAtRisk: false, wasRunning });
       rmSync(join(dir, UPDATE_FILES.result), { force: true });
@@ -236,7 +239,7 @@ export class AdoptedHome {
     });
   }
 
-  backup(jobId: string): Promise<JobResults["backup"]> {
+  backup(jobId: string, by: JobSource): Promise<JobResults["backup"]> {
     return this.exclusive(async () => {
       const { container, dataDir } = await this.install();
       const helper = this.helperImage(container);
@@ -249,13 +252,14 @@ export class AdoptedHome {
       try {
         await this.takeDown();
         this.phase({ phase: "copy" });
-        await this.copy(helper, this.dataMount(dataDir, "/from", true), { Type: "volume", Source: target, Target: "/to" }, "backup", image);
+        await this.copy(helper, this.dataMount(dataDir, "/from", true), { Type: "volume", Source: target, Target: "/to" }, "backup", image, by);
       } finally {
         if (wasRunning) await this.bringUp().catch((error) => this.log(`could not start the home again: ${errorText(error)}`));
         this.finish({});
       }
       const { backups } = await this.copies();
-      for (const old of backups.slice(BACKUPS_KEPT)) await this.docker.removeVolume(`${NAMES.backupPrefix}${old.id}`);
+      const same = await this.backupsMadeBy(by);
+      for (const old of backups.filter((entry) => same.has(entry.id)).slice(BACKUPS_KEPT)) await this.docker.removeVolume(`${NAMES.backupPrefix}${old.id}`);
       return { backup: backups.find((entry) => entry.id === id) ?? { id, kind: "backup", createdAt: this.now(), image } };
     });
   }
@@ -356,6 +360,26 @@ export class AdoptedHome {
     }
   }
 
+  /** Refused before anything is asked of the updater: the Admin may move the server forward, never back. */
+  private async refuseOlder(image: string, container: ContainerInfo): Promise<void> {
+    if (!(await this.docker.imageInspect(image))) {
+      try {
+        await this.docker.pull(image);
+      } catch (error) {
+        throw new JobFailure("pull_failed", `Could not download ${image} (${errorText(error)}). Nothing was changed.`);
+      }
+    }
+    const label = async (ref: string) => (await this.docker.imageInspect(ref).catch(() => null))?.Config?.Labels?.[VERSION_LABEL];
+    const refusal = olderVersionRefusal(await label(image), await label(container.Image ?? container.Config.Image));
+    if (refusal) throw new JobFailure("older_version", `${refusal} Nothing was changed. To go back to an older version, run ./update.sh on the server yourself.`);
+  }
+
+  /** The ids of the backups `by` asked for. A backup made before senders were recorded counts as the owner's. */
+  private async backupsMadeBy(by: JobSource): Promise<Set<string>> {
+    const volumes = await this.docker.listVolumes({ [LABELS.role]: "backup" });
+    return new Set(volumes.filter((volume) => (volume.Labels?.[MADE_BY_LABEL] ?? "local") === by).map((volume) => volume.Name.slice(NAMES.backupPrefix.length)));
+  }
+
   private async container(service: string): Promise<ContainerInfo | null> {
     const [found] = await this.docker.listContainers({ [PROJECT_LABEL]: COMPOSE_PROJECT, [SERVICE_LABEL]: service });
     return found ? this.docker.containerInspect(found.Id) : null;
@@ -446,9 +470,9 @@ export class AdoptedHome {
     if (free < needed) throw new JobFailure("disk_full", `There is not enough free disk for a copy of the data: it needs about ${gb(needed)} GB and ${gb(free)} GB are free. Free some space or add a disk.`);
   }
 
-  private async copy(helper: string, from: Mount, to: Mount, kind: "backup" | "snapshot", image: string | null): Promise<void> {
+  private async copy(helper: string, from: Mount, to: Mount, kind: "backup" | "snapshot", image: string | null, by?: JobSource): Promise<void> {
     await this.docker.removeVolume(to.Source);
-    await this.docker.createVolume(to.Source, { [LABELS.role]: kind, [LABELS.created]: String(this.now()), ...(image ? { [LABELS.image]: image } : {}) });
+    await this.docker.createVolume(to.Source, { [LABELS.role]: kind, [LABELS.created]: String(this.now()), ...(image ? { [LABELS.image]: image } : {}), ...(by ? { [MADE_BY_LABEL]: by } : {}) });
     const copied = await this.helper(helper, [from, to], ["cp", "-a", "/from/.", "/to/"], COPY_CAPS);
     if (copied.code !== 0) {
       await this.docker.removeVolume(to.Source);
@@ -497,6 +521,7 @@ function updateFailure(code: number | null, previous: string | null): JobFailure
     case UPDATE_EXIT.rollbackFailed: return new JobFailure("rollback_failed", `The update failed and the previous version did not come back healthy either. ${log}`, previous ?? undefined);
     case UPDATE_EXIT.busy: return new JobFailure("busy", "Another update is already running on this server.");
     case UPDATE_EXIT.notStarted: return new JobFailure("update_not_started", `The server's updater did not start the update, and nothing was changed. ${log}`);
+    case UPDATE_EXIT.older: return new JobFailure("older_version", "The server's updater refused the image: it is older than the version running, or names no version. Nothing was changed.");
     case UPDATE_EXIT.missing: return new JobFailure("update_unavailable", "This server has no update.sh in its install folder, so MausBot cannot update it. Add deploy/update.sh there, or update by hand.");
     case null: return new JobFailure("interrupted", "The server's updater did not answer in time. It finishes or undoes an update by itself; ask for the status to see which version runs.");
     default: return new JobFailure("docker", `The server's updater stopped with code ${code}. ${log}`);

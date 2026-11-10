@@ -6,11 +6,9 @@
 //
 // `jobs`: the only kinds MausBot may run here (absent: all of them). `updates: "hold"`: MausBot's home updates wait.
 // A self-update of the connector is always accepted, so a held or locked-down server never strands an old connector.
-// On a customer-run server the owner's list covers it too: a new connector could carry other rules, so the owner may
-// keep the one they read.
 import { readFileSync } from "node:fs";
 
-import { JOB_TYPES, type Job, type JobType, type ServerMode } from "./protocol.ts";
+import { JOB_TYPES, type Job, type JobType } from "./protocol.ts";
 
 export const POLICY_FILE = "policy.json";
 
@@ -46,9 +44,9 @@ export function readPolicy(file: string): ReturnType<typeof parsePolicy> {
   return parsePolicy(text);
 }
 
-/** Why the server's policy refuses `job` from MausBot, or null. On a server MausBot operates a self-update is never refused. */
-export function policyRefusal(job: Job, read: ReturnType<typeof parsePolicy>, file: string, mode: ServerMode = "operated"): string | null {
-  if (job.type === "self-update" && (mode !== "customer-run" || !read.ok || !read.policy.jobs)) return null;
+/** Why the server's policy refuses `job` from MausBot, or null. A self-update is never refused. */
+export function policyRefusal(job: Job, read: ReturnType<typeof parsePolicy>, file: string): string | null {
+  if (job.type === "self-update") return null;
   if (!read.ok) return READS.has(job.type) ? null : `This server's policy ${file} cannot be used (${read.problem}), so MausBot changes nothing here until it is fixed.`;
   if (read.policy.jobs && !read.policy.jobs.includes(job.type)) return `This server's policy ${file} does not let MausBot run ${job.type} jobs.`;
   if (job.type === "update" && read.policy.updates === "hold") return `This server's policy ${file} holds updates.`;

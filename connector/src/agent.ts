@@ -237,7 +237,8 @@ export class Agent {
     const connection = this.connection;
     if (!connection) return;
     this.options.log(`dropping the connection to MausBot: ${why}`);
-    try { connection.socket.close(code, why.slice(0, 120)); } catch { /* already closed */ }
+    // What went wrong here can name a path or quote Docker; a customer-run server sends the close code alone.
+    try { connection.socket.close(code, this.options.mode === "customer-run" ? "" : why.slice(0, 120)); } catch { /* already closed */ }
     this.closed(code, why);
   }
 
@@ -405,7 +406,7 @@ export class Agent {
     const claimed = typeof opened.payload.job === "object" && opened.payload.job !== null ? opened.payload.job as { id?: unknown; type?: unknown } : {};
     const id = typeof claimed.id === "string" ? claimed.id.slice(0, 64) : undefined;
     if (!payload.ok) return this.refuse({ code: payload.code, message: payload.message, id, type: typeof claimed.type === "string" ? claimed.type.slice(0, 32) : undefined }, true);
-    const checked = this.options.mode === "customer-run" ? checkCustomerRunJob(payload.job) : checkJob(payload.job);
+    const checked = this.options.mode === "customer-run" ? checkCustomerRunJob(payload.job, "admin") : checkJob(payload.job);
     if (!checked.ok) {
       if (checked.code === "refused_by_mode") this.refuse({ code: checked.code, message: checked.message, id: checked.id ?? undefined, type: typeof claimed.type === "string" ? claimed.type.slice(0, 32) : undefined }, true);
       else if (checked.id) this.reply({ id: checked.id, ok: false, error: { code: checked.code, message: checked.message } });

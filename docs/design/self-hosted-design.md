@@ -24,9 +24,10 @@ A standalone server becomes connected by enrolling the connector. No reinstall, 
 - **Connector** (`connector/`): enrols with a one-time code, holds its own Ed25519 key, keeps one outbound WebSocket
   and runs only a fixed job list. No shell, no command of its own choosing, no read of a file by path. In this
   repository, so customers can read what it can do. It has two modes, chosen on the server when it enrols:
-  - `customer-run`, for a server its owner installed: nine jobs (`start`, `stop`, `restart`, `update`, `status`,
-    `backup`, `restore`, `host-health`, `self-update`), four requests it answers itself, and a reduced report. The
-    whole list is `connector/src/customer-run.ts`. This is the mode of the Business self-hosted plan.
+  - `customer-run`, for a server its owner installed: seven jobs from us (`start`, `stop`, `restart`, `update`,
+    `status`, `backup`, `host-health`), two more that only root on the server may run (`self-update`, `restore`),
+    four requests it answers itself, and a reduced report. The whole list is `connector/src/customer-run.ts`. This is
+    the mode of the Business self-hosted plan.
   - `operated`, for a server we run a Team Cloud on: those jobs plus `export-disk` and `import-disk`, a `start` that
     carries the image and the settings, and the Admin's signed requests to the home, pairing among them.
 - **Installer**: one script with a preflight. This repository.
@@ -106,6 +107,17 @@ Decided: the server installer brings MausBot; the connector attaches to that ins
 - **Enforced on the server, three times over for jobs.** A job outside the list is refused as it arrives
   (`checkCustomerRunJob`), again at the desk every job passes through (`jobDesk`), and the home the connector attached
   to has no code path for it (`AdoptedHome`). Each refusal is a line in the audit log.
+- **We cannot replace the connector.** `self-update` from the Admin is refused in this mode: any older connector image
+  is still in our registry, and one from before the mode would run as `operated`. Only root on the server replaces
+  it (`mausbot-connector job self-update`), and even then not with an older version or one that names none
+  (`images.ts neverOlder`, on the image's version label).
+- **Updates only move forward.** An `update` to an image older than the one running, or without a version label, is
+  refused by the connector after it pulls the image and again by `mausbot-update-runner` on the host, which is the
+  check that cannot be bypassed from the connector's container. Going back is the owner's, with `update.sh` by hand.
+  `SERVER_VERSION_FLOOR` (and `FLOOR` in the runner; a test holds them equal) is a second floor, to be set to the
+  first release with the hardened profile; it is `0.0.0` until such a release exists.
+- **`restore` is the owner's**, and a backup the owner made is never removed to make room for ours: each sender keeps
+  its own three.
 - **Requests never reach the home.** The connector answers the four listed requests itself from the facts it already
   reports (`customer-run-requests.ts`). Everything else is answered 403 and logged.
 - **The report is rebuilt, not filtered.** `reducedHeartbeat` and `reducedReply` copy named fields; every string is an
@@ -135,11 +147,11 @@ Backward compatible: a field is only ever added, and only by a customer-run serv
 |---|---|---|
 | `EnrollRequest` (`POST /api/cloud/box/v1/enroll`) | `mode: "customer-run"` | Present only for a customer-run server; absent means `operated`, exactly the request sent before. Store it with the box |
 | `Heartbeat.heartbeat` | `mode: "customer-run"`, `paused: boolean`, `seats: number \| null` | Present only for a customer-run server. `host`, `home` and `connector` keep their shape; `host.checks[]` carries `id`, `ok` and `warning` without `fix`; `home.health.box` is always null |
-| `JobErrorCode` | `refused_by_mode`, `paused`, `update_unavailable`, `update_not_started` | Only from a customer-run server. Its error `message` is a fixed sentence per code |
+| `JobErrorCode` | `refused_by_mode`, `paused`, `update_unavailable`, `update_not_started`, `older_version` | Only from a customer-run server. Its error `message` is a fixed sentence per code |
 
 For a customer-run box the Admin should: send `start` with no arguments; send `update` with
-`ghcr.io/milind-soni/openmausbot@sha256:…` (the server image, not the Cloud home image); never send `export-disk`,
-`import-disk` or a request other than `GET /v1/health`, `/v1/version`, `/v1/seats`, `/v1/update`; send
+`ghcr.io/milind-soni/openmausbot@sha256:…` (the server image, not the Cloud home image); never an older version than the one running; never send `export-disk`,
+`import-disk`, `self-update`, `restore` or a request other than `GET /v1/health`, `/v1/version`, `/v1/seats`, `/v1/update`; send
 `schedule.image: null` in the signed config (a Cloud home image there is accepted, any other is ignored with the whole
 config); and sign people in by sending them to the server's own address, never by pairing.
 
@@ -181,8 +193,15 @@ Read at the commit that adds the customer-run mode. "Built" means the code is in
   message, the bot's name and recent log lines to us, and its status is asked hourly while it is open; browser
   analytics are on until a person turns them off. Principle 6 is about the connector; these are the docs page's
   "What your server itself still sends".
-- **`self-update` can replace the rules.** A new connector is new code from our registry, pinned by digest and not
-  yet signed. The owner's policy file can leave `self-update` out on a customer-run server.
+- **Connector images are not signed.** Only the owner replaces the connector on a customer-run server, and never
+  with an older one, but what they install is trusted by its digest and our registry alone. Planned: a signing key's
+  public half built into the connector, the signature of the new image's digest checked in `images.ts` before it
+  runs (the `ImageCheck` hook is where it plugs in), and the same check in `connector/install.sh`.
+- **The hardened floor is not set.** The mechanism is built and tested; the number waits for the first release with
+  the hardened profile.
+- **A connector is updated by hand.** Since we cannot send `self-update`, a fix to the connector reaches a
+  customer-run server only when its owner runs it. The Admin should show which servers run an old connector.
+- **The WebSocket close reason is empty** from a customer-run server; the code says why.
 - **Only one layout is adopted.** Docker Compose from the server installer, the published image, data in a folder. A
   source build or an npm install cannot be connected.
 - **The seat count is a lower bound for a domain entry.** `@example.com` on the sign-in list counts each person from

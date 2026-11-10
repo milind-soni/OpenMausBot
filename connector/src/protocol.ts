@@ -202,8 +202,8 @@ export type JobErrorCode =
   | "no_home" | "docker" | "pull_failed" | "unhealthy" | "update_rolled_back" | "rollback_failed"
   | "not_found" | "disk_full" | "port_in_use" | "box_unavailable" | "transfer_failed" | "self_update_failed"
   | "unsigned_job" | "wrong_box" | "expired_job" | "pending_box"
-  /** A customer-run server only: the job is not on its list, its admin has paused remote management, or its own updater is missing or declined. */
-  | "refused_by_mode" | "paused" | "update_unavailable" | "update_not_started";
+  /** A customer-run server only: the job is not on its list, its admin has paused remote management, or its own updater is missing or declined, or the image asked for is older than the one running. */
+  | "refused_by_mode" | "paused" | "update_unavailable" | "update_not_started" | "older_version";
 
 /** `message` is plain words for the Admin's log and alerts; it never carries a secret. */
 export interface JobError {

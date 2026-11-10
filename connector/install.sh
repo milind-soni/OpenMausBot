@@ -397,6 +397,7 @@ install_connector() {
     say "You run this server: MausBot can start, stop, update and back it up, and sees its versions, health and seat count."
     say "  What it was asked to do:  sudo docker exec $CONNECTOR mausbot-connector audit"
     say "  Pause remote management:  sudo docker exec $CONNECTOR mausbot-connector pause"
+    say "Only you can replace the connector or restore a backup: sudo docker exec $CONNECTOR mausbot-connector job <self-update|restore>"
     return
   fi
   check_apparmor

@@ -1,6 +1,7 @@
 // Trades the one-time code for this server's place in the team: a key made here, whose public half the Admin keeps, and
 // the Admin's own keys, which the connector pins. Once, over HTTPS.
 import { errorText } from "./log.ts";
+import { reducedFacts } from "./customer-run.ts";
 import { ENROLL_PATH, checkEnrollCode, checkEnrollResponse, isLoopbackHost, type ConnectorIdentity, type EnrollRequest, type HostFacts, type ServerMode } from "./protocol.ts";
 import { generateKeyPair } from "./signed.ts";
 import type { AgentRecord } from "./state.ts";
@@ -37,7 +38,7 @@ export async function enroll(options: {
   if (!code.ok) throw new Error(code.message);
   const key = generateKeyPair();
   const customerRun = options.mode === "customer-run";
-  const request: EnrollRequest = { code: code.value, publicKey: key.publicKey, host: options.host, connector: options.connector, ...(customerRun ? { mode: "customer-run" } : {}) };
+  const request: EnrollRequest = { code: code.value, publicKey: key.publicKey, host: customerRun ? reducedFacts(options.host) : options.host, connector: options.connector, ...(customerRun ? { mode: "customer-run" } : {}) };
   let response: Response;
   try {
     response = await (options.fetch ?? fetch)(`${options.admin}${ENROLL_PATH}`, {
