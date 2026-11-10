@@ -4,7 +4,8 @@
 # naming the next release by digest, the same again (nothing to do), --rollback, an update to an image that never
 # answers and damages the data (it must roll back and leave every file as it was), an update killed with SIGKILL while
 # it waits (the next run asks before it puts the data back), a rollback whose restore fails (data and copy untouched,
-# tried again on request), an update whose terminal hangs up half-way (it finishes), and a refused downgrade.
+# tried again on request), an update whose terminal hangs up half-way (it finishes), a refused downgrade, and a
+# `docker compose stop` that fails (no copy, nothing changed).
 #   LAYOUT=installer  /opt/openmausbot with compose.yaml and a ./data folder, as deploy/install.sh lays it out
 #   LAYOUT=checkout   a copy of deploy/ with docker-compose.yml and the named volume `data`
 #   OUT=<evidence folder> LAYOUT=installer bash deploy/e2e/update.sh
@@ -225,6 +226,21 @@ step "9. no older version without --allow-older"
 "${UPDATE[@]}" --version "$FROM" | tee "$OUT/9-older.txt"
 [ "${PIPESTATUS[0]}" = 5 ] || fail "going back to $FROM did not exit 5"
 [ "$(version)" = "$TO" ] || fail "a refused downgrade changed the version"
+
+step "10. when docker compose stop fails, no copy is taken and nothing changes"
+# A stand-in for the docker CLI that refuses `compose stop` and passes everything else to the real one.
+mkdir -p "$OUT/stop-fails"
+printf '#!/bin/sh\nif [ "$1" = compose ] && [ "$2" = stop ]; then echo "e2e: compose stop refused" >&2; exit 1; fi\nexec %s "$@"\n' "$(command -v docker)" >"$OUT/stop-fails/docker"
+chmod +x "$OUT/stop-fails/docker"
+copies_before=$(copies)
+cp "$DIR/.env" "$OUT/env.before-stop"
+PATH="$OUT/stop-fails:$PATH" "${UPDATE[@]}" --image omb-e2e-broken:1 | tee "$OUT/10-stop-fails.txt"
+[ "${PIPESTATUS[0]}" = 4 ] || fail "an update whose stop failed did not exit 4"
+grep -q "The server could not be stopped" "$OUT/10-stop-fails.txt" || fail "no plain account of the failed stop"
+[ "$(version)" = "$TO" ] || fail "after the failed stop the server says $(version)"
+[ "$(copies)" = "$copies_before" ] || fail "a copy was taken or dropped although the server did not stop"
+cmp -s "$DIR/.env" "$OUT/env.before-stop" || fail "after the failed stop .env differs"
+[ ! -f "$DIR/.update/journal" ] || fail "the failed stop left a journal"
 cp "$DIR/.update/update.log" "$OUT/update.log"
 
 (cd "$DIR" && docker compose down -v) >/dev/null 2>&1

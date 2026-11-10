@@ -178,6 +178,7 @@ write_record() {
 read_record() {
   local file=$1 key value
   [ -f "$file" ] || return 1
+  # shellcheck disable=SC2034 # `value` is read by the eval
   while IFS='=' read -r key value; do
     case " $JOURNAL_KEYS " in *" $key "*) eval "J_$key=\$value" ;; esac
   done <"$file"
