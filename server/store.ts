@@ -1309,7 +1309,7 @@ export class Store {
       >
     > = {},
     opts: {
-      seedMessages?: boolean; id?: string; threadId?: string;
+      seedMessages?: boolean; id?: string; threadId?: string; beforeShown?: (bot: BotRecord) => void;
     } = {},
   ): BotRecord {
     const toolScope = parseToolScope(profile.toolScope);
@@ -1360,7 +1360,7 @@ export class Store {
       console.warn(`[bot-folder] could not write SOUL.md mirror for ${bot.id}: ${(e as Error).message}`);
     }
     // Before its transcript: clients need the bot/thread mapping to place either message.
-    this.emit({ type: "bot", botId: bot.id });
+    opts.beforeShown?.(bot); this.emit({ type: "bot", botId: bot.id });
     if (opts.seedMessages !== false) {
       this.appendMessage(bot.threadId, initialGreetingMessage(name, this.initialLanguage, !bot.soul?.trim() && !bot.description.trim(), this.personName()));
     }
