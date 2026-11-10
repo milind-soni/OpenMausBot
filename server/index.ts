@@ -15489,13 +15489,13 @@ restoreChannelMessages();
   if (movedAutoPins) console.log(`Works on: moved ${movedAutoPins} auto-pinned thread(s) to their bot's current Works on`);
 }
 
-if (CLOUD_HOME) registerCloudPower(cloudPower = createCloudPower({ dataDir: DATA_DIR, broadcast: (payload) => broadcast(payload), log: (line) => console.warn(line), bootedFromSleep: startedFromSleep, onWoke: createWokeNotifier({ adminOrigin: CLOUD_HOME.adminOrigin, machineId: CLOUD_HOME.machineId, secret: CLOUD_HOME.bootstrapSecret, log: (line) => console.warn(line) }), probes: {
+if (CLOUD_HOME) registerCloudPower(cloudPower = createCloudPower({ dataDir: DATA_DIR, broadcast: (payload) => broadcast(payload), log: (line) => console.warn(line), bootedFromSleep: startedFromSleep, onBootWakeRequest: (at) => cloudHealth?.speed.wakeRequest(at), onWoke: createWokeNotifier({ adminOrigin: CLOUD_HOME.adminOrigin, machineId: CLOUD_HOME.machineId, secret: CLOUD_HOME.bootstrapSecret, log: (line) => console.warn(line) }), probes: {
   turn: () => store.bots.some((bot) => botHasActiveTurn(bot.id)) || store.groups.some(groupIsWorking), run: () => Boolean(routines?.hasActiveRuns()), handoff: () => coordinator.pace() === "busy",
   liveCall: () => liveCalls.current() !== null, computer: () => cloudComputerPower.awake() || boatLifecycleBusyBots.size > 0, nextDueAt: () => { const due = [routines?.nextDueAt() ?? null, proactive.brief.nextWakeAt(), botWaits.nextWakeAt()].filter((at): at is number => at !== null); return due.length ? Math.min(...due) : null; },
   maintenance: () => workspaceMaintenance.active || providerFleetReloading || providerAuthSessions.active || browserEngineInstall !== null } }));
 
 server.listen(PORT, listenHost(server), async () => {
-  companyRuntimeReady();
+  companyRuntimeReady(); cloudHealth?.speed.ready();
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
   personWaits.boot(); browserSweep.start(); startCloudTeamPolicy({ cloudHome: CLOUD_HOME, dataDir: DATA_DIR, managed: managedPolicy, sessions }); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
   void afterFirstEngineRead().then(() => { if (builtInBrowserEnabled(cfg)) chromeLauncher.start(); });
