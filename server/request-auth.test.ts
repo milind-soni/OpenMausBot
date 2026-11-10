@@ -719,6 +719,12 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
     }
   });
 
+  it("lets a local check count the engines that can start a bot, as update.sh does, but no caller through a proxy", () => {
+    expect(check("GET", "/api/health/engines", { trust: "service" }).auth).toEqual({ kind: "loopback", scopes: ["client"], trust: "service" });
+    expect(check("POST", "/api/health/engines", { trust: "service" }).auth).toBeNull();
+    expect(check("GET", "/api/health/engines", { trust: "service", headers: { "x-forwarded-for": "203.0.113.9" } }).auth).toBeNull();
+  });
+
   it("still admits a real session with its own scopes on a service-trust server", () => {
     const admin = sessions.issue({ label: "Laptop", scopes: ["admin", "client"] });
     const member = sessions.issue({ label: "Phone", scopes: ["client"] });

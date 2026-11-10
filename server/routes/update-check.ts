@@ -1,7 +1,7 @@
-// GET /api/updates/check: whether a newer release exists, and how this install is updated. Read-only, so client sessions may ask.
+// GET /api/updates/check: whether a newer version exists, and how this install is updated. Read-only, so client sessions may ask.
 import { serverVersion } from "../environment.ts";
 import { SERVER_ROOT } from "../proxy-paths.ts";
-import { createUpdateChecker, installKind, type UpdateCheck } from "../update-check.ts";
+import { createUpdateChecker, installKind, updateChannel, type UpdateCheck } from "../update-check.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface UpdateCheckRouteDeps {
@@ -20,5 +20,5 @@ export function createUpdateCheckRoutes(deps: UpdateCheckRouteDeps): RouteHandle
 }
 
 export function serverUpdateChecker(where: { desktopManaged: boolean; managed: boolean }): () => Promise<UpdateCheck> {
-  return createUpdateChecker({ current: serverVersion(), install: installKind({ ...where, serverRoot: SERVER_ROOT }) });
+  return createUpdateChecker({ current: serverVersion(), install: installKind({ ...where, serverRoot: SERVER_ROOT }), channel: updateChannel() });
 }
