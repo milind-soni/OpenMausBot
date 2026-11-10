@@ -19,8 +19,8 @@ export function forkMessageItem(owner: Owner, dispatch: Dispatch<Action>, disabl
 export function ForkLinks(owner: Owner) {
   const { state, dispatch } = useStore();
   const tasks = owner.kind === "bot"
-    ? state.bots.find((bot) => bot.id === owner.ownerId)?.tasks
-    : state.groups.find((group) => group.id === owner.ownerId)?.tasks;
+    ? state.bots?.find((bot) => bot.id === owner.ownerId)?.tasks
+    : state.groups?.find((group) => group.id === owner.ownerId)?.tasks;
   const forks = tasks?.filter((task) => task.origin?.threadId === owner.threadId && task.origin.messageId === owner.messageId) ?? [];
   if (!forks.length) return null;
   return (
