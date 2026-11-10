@@ -130,6 +130,7 @@ describe("LiveCallController lifecycle", () => {
     f.message({ id: "approval", kind: "options", card: { title: "Approval needed", subtitle: "synthetic operation", options: ["Allow", "Deny"], requestId: "r1", tool: "Bash" } });
     await vi.advanceTimersByTimeAsync(0);
     expect(f.controller.playbackCredit(f.callId, { type: "playback.credit", epoch: 0, seq: 1, bytes: 24_000, contextState: "running" })).toBe(true);
+    f.provider.receive({ type: "response.created", response: { id: "prompt" } });
     f.provider.receive({ type: "response.audio.delta", response_id: "prompt", delta: Buffer.alloc(960).toString("base64") });
     expect(f.controller.playbackCredit(f.callId, { type: "playback.credit", epoch: 0, seq: 2, bytes: 960, contextState: "running" })).toBe(true);
     f.provider.receive({ type: "input_audio_buffer.speech_started", item_id: "yes", audio_start_ms: 1000 });
@@ -153,6 +154,7 @@ describe("LiveCallController lifecycle", () => {
     provider.open(); provider.receive({ type: "session.updated" });
     const media = { bufferedAmount: 0, send: vi.fn(), close: vi.fn() };
     expect(t.controller.bindMedia(call.callId, owner, media, "credit-v1")).toBe(true);
+    provider.receive({ type: "response.created", response: { id: "r" } });
     provider.receive({ type: "response.audio.delta", response_id: "r", delta: Buffer.alloc(960).toString("base64") });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "error", error: "The call ended because audio playback stopped making progress." });
@@ -637,6 +639,274 @@ describe("LiveCallController lifecycle", () => {
     t.socket().receive({ type: "session.input_transcript.delta", delta: "my secret plan", start_ms: 1, end_ms: 2 });
     await t.controller.shutdown();
     expect(t.logs.join("\n")).not.toContain("secret");
+  });
+});
+
+describe("Qwen delegation release", () => {
+  it("keeps a real adapter's pending request through 600 greetings, releases after all chunks, and preserves interrupted readout", async () => {
+    const provider = new FakeSocket("fixture", "fixture");
+    let accept!: (value: { kind: "started"; messageId: string }) => void;
+    let adapter!: Awaited<ReturnType<typeof createQwenLiveSession>>["socket"];
+    const t = setup({
+      send: vi.fn(() => new Promise<{ kind: "started"; messageId: string }>(resolve => { accept = resolve; })),
+      createSession: async input => {
+        const session = await createQwenLiveSession({ ...input, bot: { name: "Fixture" }, history: [], upstream: provider });
+        adapter = session.socket;
+        return session;
+      },
+    });
+    t.settings.provider = "qwen";
+    t.settings.endpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
+    const { call } = await t.controller.start({ auth: owner, ...BOT, sdp: "", client: "web", transports: ["ws-pcm"] });
+    provider.open(); provider.receive({ type: "session.updated" });
+    expect(t.controller.bindMedia(call.callId, owner, { bufferedAmount: 0, send: vi.fn(), close: vi.fn() })).toBe(true);
+    const released = vi.spyOn(adapter, "releaseDelegation");
+    const input = (id: string, transcript: string, tool = false) => {
+      provider.receive({ type: "input_audio_buffer.speech_started", item_id: id, audio_start_ms: 0 });
+      provider.receive({ type: "input_audio_buffer.speech_stopped", item_id: id, audio_end_ms: 100 });
+      provider.receive({ type: "input_audio_buffer.committed", item_id: id });
+      provider.receive({ type: "response.created", response: { id: `response-${id}` } });
+      provider.receive({ type: "conversation.item.input_audio_transcription.completed", item_id: id, transcript });
+      if (tool) provider.receive({ type: "response.function_call_arguments.done", response_id: `response-${id}`, call_id: id, name: "delegate_to_bot", arguments: "{}" });
+      provider.receive({ type: "response.done", response: { id: `response-${id}`, status: "completed" } });
+    };
+    input("task", "Perform the fixture request.", true);
+    await vi.advanceTimersByTimeAsync(DELEGATION_SETTLE_MS);
+    for (let index = 0; index < 600; index++) input(`greeting-${index}`, "Hello.");
+    expect(t.deps.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ text: "Perform the fixture request." }));
+    expect(released).not.toHaveBeenCalled();
+    const result = ["first", "second", "third"].map(word => `${word} ${"x".repeat(400)}.`).join(" ");
+    t.message({ id: "m1", role: "user", via: "call", callId: call.callId, text: "Perform the fixture request." });
+    t.message({ id: "answer", requestMessageId: "m1", turnTerminal: true, text: result });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(released).not.toHaveBeenCalled();
+    accept({ kind: "started", messageId: "m1" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(released).toHaveBeenCalledExactlyOnceWith("task");
+    const complete = (id: string) => {
+      provider.receive({ type: "response.created", response: { id } });
+      provider.receive({ type: "response.done", response: { id, status: "completed" } });
+    };
+    complete("ack");
+    provider.receive({ type: "response.created", response: { id: "readout-1" } });
+    provider.receive({ type: "input_audio_buffer.speech_started", item_id: "interrupt" });
+    provider.receive({ type: "input_audio_buffer.speech_stopped", item_id: "interrupt", reason: "turn_invalid" });
+    provider.receive({ type: "response.done", response: { id: "readout-1", status: "completed" } });
+    complete("readout-2"); complete("readout-3"); complete("incomplete-notice");
+    const outputs = provider.sent.map(event => event.item as { call_id?: string; output?: string } | undefined)
+      .filter(item => item?.call_id === "task").map(item => JSON.parse(item!.output!));
+    expect(outputs.map(output => output.status)).toEqual(["running", "completed", "completed", "completed", "incomplete"]);
+    for (const output of outputs) expect(output).toMatchObject({ request_id: "m1", thread_id: "t1" });
+    expect(outputs[4].result).toContain("not fully spoken");
+    expect(t.controller.current()?.status).toBe("live");
+    await t.controller.shutdown();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  async function live(overrides: Partial<LiveCallDeps> = {}) {
+    const t = setup(overrides);
+    t.settings.provider = "qwen";
+    t.settings.endpoint = { provider: "qwen", apiBase: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", model: "qwen-audio-3.1-realtime-flash" };
+    const { call } = await t.controller.start({ auth: owner, ...BOT, sdp: "", client: "web", transports: ["ws-pcm"] });
+    t.socket().open();
+    const release = vi.fn((id: string) => { t.socket().sent.push({ type: "fixture.release", delegation_id: id }); });
+    Object.assign(t.socket(), { releaseDelegation: release, bindMedia: () => true });
+    t.controller.bindMedia(call.callId, owner, { bufferedAmount: 0, send: vi.fn(), close: vi.fn() });
+    const delegate = async (id: string, text = "fixture request") => {
+      t.socket().receive({ type: "session.delegation.created", delegation: { id, target: "client" }, request: { text, withoutEcho: text } });
+      await vi.advanceTimersByTimeAsync(DELEGATION_SETTLE_MS);
+    };
+    return { ...t, release, delegate, callId: call.callId };
+  }
+
+  it("queues every completed chunk before releasing and sends later notifications without the old delegation", async () => {
+    const t = await live();
+    await t.delegate("d1");
+    const text = ["first", "second", "third"].map(word => `${word} ${"x".repeat(400)}.`).join(" ");
+    t.message({ id: "answer", requestMessageId: "m1", turnTerminal: true, text });
+    await vi.advanceTimersByTimeAsync(0);
+    const events = t.socket().sent.filter(event => event.type === "session.commentary.append" || event.type === "fixture.release");
+    expect(events).toHaveLength(4);
+    expect(events.slice(0, 3)).toEqual(["first", "second", "third"].map(word => expect.objectContaining({ content: expect.stringContaining(word), delegation_id: "d1", status: "completed" })));
+    expect(events[3]).toMatchObject({ type: "fixture.release", delegation_id: "d1" });
+    t.message({ id: "approval", kind: "options", card: { title: "Approval", subtitle: "Fixture operation", options: ["Allow", "Deny"], requestId: "card", tool: "Bash" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("instructions").at(-1)?.delegation_id).toBeNull();
+    await t.controller.shutdown();
+  });
+
+  it("holds a pending send and early result until the receipt, then releases exactly once", async () => {
+    let accept!: (value: { kind: "started"; messageId: string }) => void;
+    const t = await live({ send: vi.fn(() => new Promise<{ kind: "started"; messageId: string }>(resolve => { accept = resolve; })) });
+    await t.delegate("d1");
+    t.message({ id: "m1", role: "user", via: "call", callId: t.callId, text: "fixture request" });
+    t.message({ id: "answer", requestMessageId: "m1", turnTerminal: true, text: "Early result." });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(t.release).not.toHaveBeenCalled();
+    expect(t.socket().appends("commentary")).toHaveLength(0);
+    accept({ kind: "started", messageId: "m1" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().sent.filter(event => ["session.delegation.accepted", "session.commentary.append", "fixture.release"].includes(String(event.type)))).toMatchObject([
+      { type: "session.delegation.accepted", delegation_id: "d1" },
+      { type: "session.commentary.append", delegation_id: "d1", content: "Early result." },
+      { type: "fixture.release", delegation_id: "d1" },
+    ]);
+    expect(t.release).toHaveBeenCalledOnce();
+    await t.controller.shutdown();
+  });
+
+  it("waits for a pending steering receipt before settling the original result and both aliases", async () => {
+    let accept!: (value: { kind: "steered"; messageId: string; requestMessageId: string }) => void;
+    const t = await live({ send: vi.fn().mockResolvedValueOnce({ kind: "started", messageId: "m1" }).mockImplementationOnce(() => new Promise(resolve => { accept = resolve; })) });
+    await t.delegate("d1"); await t.delegate("d2");
+    t.message({ id: "answer", requestMessageId: "m1", turnTerminal: true, text: "Steered final result." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.release).not.toHaveBeenCalled();
+    expect(t.socket().appends("commentary")).toHaveLength(0);
+    accept({ kind: "steered", messageId: "steer", requestMessageId: "m1" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.release.mock.calls.map(([id]) => id).sort()).toEqual(["d1", "d2"]);
+    expect(t.socket().appends("commentary")).toHaveLength(1);
+    await t.controller.shutdown();
+  });
+
+  it("drains early results only after both concurrent send receipts arrive", async () => {
+    const accepts: Array<(value: { kind: "started"; messageId: string }) => void> = [];
+    const t = await live({ send: vi.fn(() => new Promise<{ kind: "started"; messageId: string }>(resolve => { accepts.push(resolve); })) });
+    await t.delegate("d1"); await t.delegate("d2");
+    t.message({ id: "answer1", requestMessageId: "m1", turnTerminal: true, text: "First result." });
+    await vi.advanceTimersByTimeAsync(0);
+    accepts[0]({ kind: "started", messageId: "m1" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary")).toHaveLength(0);
+    expect(t.release).not.toHaveBeenCalled();
+    accepts[1]({ kind: "started", messageId: "m2" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary")).toMatchObject([{ content: "First result.", delegation_id: "d1" }]);
+    expect(t.release).toHaveBeenCalledExactlyOnceWith("d1");
+    t.message({ id: "answer2", requestMessageId: "m2", turnTerminal: true, text: "Second result." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.release.mock.calls).toEqual([["d1"], ["d2"]]);
+    await t.controller.shutdown();
+  });
+
+  it("waits for a pending send receipt before settling an idle turn without a result", async () => {
+    let accept!: (value: { kind: "started"; messageId: string }) => void;
+    const t = await live({ send: vi.fn(() => new Promise<{ kind: "started"; messageId: string }>(resolve => { accept = resolve; })) });
+    await t.delegate("d1");
+    t.setActivity("working"); await vi.advanceTimersByTimeAsync(0);
+    t.setActivity("idle"); await vi.advanceTimersByTimeAsync(0);
+    expect(t.release).not.toHaveBeenCalled();
+    accept({ kind: "started", messageId: "m1" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary")).toMatchObject([{ content: LIVE_COPY.noAnswer, delegation_id: "d1" }]);
+    expect(t.release).toHaveBeenCalledExactlyOnceWith("d1");
+    await t.controller.shutdown();
+  });
+
+  it.each(["approval", "question", "question-failed", "send-failed", "empty", "goodbye"])("releases %s paths without an accepted request", async path => {
+    const t = await live(path === "send-failed" ? { send: vi.fn(async () => { throw new Error("fixture send failure"); }) }
+      : path === "question-failed" ? { respond: vi.fn(async () => ({ ok: false as const, error: "fixture answer failure" })) } : {});
+    if (path === "approval" || path.startsWith("question")) {
+      t.message({ id: "card", kind: "options", card: { title: "Fixture", subtitle: "Which one?", options: path === "approval" ? ["Allow", "Deny"] : ["One", "Two"], requestId: "card", ...(path === "approval" ? { tool: "Bash" } : {}) } });
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    await t.delegate("d1", path === "empty" ? "" : path === "goodbye" ? "hang up" : "one");
+    expect(t.release).toHaveBeenCalledExactlyOnceWith("d1");
+    expect(t.socket().sent.some(event => event.type === "session.delegation.accepted")).toBe(false);
+    expect(t.socket().sent.at(-1)).toMatchObject({ type: "fixture.release" });
+    await t.controller.shutdown();
+  });
+
+  it.each(["empty-result", "idle"])("releases accepted requests ending with %s", async ending => {
+    const t = await live();
+    await t.delegate("d1");
+    if (ending === "empty-result") t.message({ id: "answer", requestMessageId: "m1", turnTerminal: true, text: "" });
+    else {
+      t.setActivity("working");
+      await vi.advanceTimersByTimeAsync(0);
+      t.setActivity("idle");
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.release).toHaveBeenCalledExactlyOnceWith("d1");
+    t.patch({ id: "answer", requestMessageId: "m1", turnTerminal: true, text: "Late duplicate." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary").some(event => event.content === "Late duplicate.")).toBe(false);
+    await t.controller.shutdown();
+  });
+
+  it("releases a canceled queue entry even while the bot stays idle", async () => {
+    const t = await live({ send: vi.fn(async () => ({ kind: "queued" as const, queueId: "q1" })) });
+    t.queue.add("q1");
+    await t.delegate("d1");
+    expect(t.release).not.toHaveBeenCalled();
+    t.queue.delete("q1");
+    t.setActivity("idle");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.release).toHaveBeenCalledExactlyOnceWith("d1");
+    await t.controller.shutdown();
+  });
+
+  it("transfers queued ownership to every drained batch member and releases them after the combined answer", async () => {
+    const t = await live({ send: vi.fn().mockResolvedValueOnce({ kind: "queued", queueId: "q1" }).mockResolvedValueOnce({ kind: "queued", queueId: "q2" }) });
+    t.queue.add("q1"); t.queue.add("q2");
+    await t.delegate("d1"); await t.delegate("d2");
+    t.queue.clear();
+    for (const [id, queueId] of [["m1", "q1"], ["m2", "q2"]]) t.message({ id, queueId, role: "user", via: "call", callId: t.callId, text: "fixture request" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.release).not.toHaveBeenCalled();
+    t.message({ id: "answer", requestMessageId: "m2", turnTerminal: true, text: "Combined result." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.release.mock.calls).toEqual([["d1"], ["d2"]]);
+    expect(t.socket().sent.slice(-3)).toMatchObject([{ type: "session.commentary.append" }, { type: "fixture.release" }, { type: "fixture.release" }]);
+    await t.controller.shutdown();
+  });
+
+  it("settles a 201-member queue batch when its first request index has been evicted", async () => {
+    let index = 0;
+    const t = await live({ send: vi.fn(async () => ({ kind: "queued" as const, queueId: `q${index++}` })) });
+    for (let member = 0; member < 201; member++) {
+      t.queue.add(`q${member}`);
+      await t.delegate(`d${member}`);
+    }
+    t.queue.clear();
+    for (let member = 0; member < 201; member++) t.message({ id: `m${member}`, queueId: `q${member}`, role: "user", via: "call", callId: t.callId, text: "fixture request" });
+    t.message({ id: "answer", requestMessageId: "m0", turnTerminal: true, text: "Combined result." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.release).toHaveBeenCalledTimes(201);
+    expect(new Set(t.release.mock.calls.map(([id]) => id))).toEqual(new Set(Array.from({ length: 201 }, (_, member) => `d${member}`)));
+    expect(t.socket().appends("commentary")).toHaveLength(1);
+    await t.controller.shutdown();
+  });
+
+  it("settles every queue batch member when the result uses a steering alias", async () => {
+    const t = await live({ send: vi.fn().mockResolvedValueOnce({ kind: "queued", queueId: "q1" }).mockResolvedValueOnce({ kind: "queued", queueId: "q2" }).mockResolvedValueOnce({ kind: "steered", messageId: "steer", requestMessageId: "m2" }) });
+    t.queue.add("q1"); t.queue.add("q2");
+    await t.delegate("d1"); await t.delegate("d2");
+    t.queue.clear();
+    for (const [id, queueId] of [["m1", "q1"], ["m2", "q2"]]) t.message({ id, queueId, role: "user", via: "call", callId: t.callId, text: "fixture request" });
+    await vi.advanceTimersByTimeAsync(0);
+    await t.delegate("d3");
+    t.message({ id: "answer", requestMessageId: "steer", turnTerminal: true, text: "Combined steered result." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.release.mock.calls.map(([id]) => id).sort()).toEqual(["d1", "d2", "d3"]);
+    expect(t.socket().appends("commentary")).toHaveLength(1);
+    await t.controller.shutdown();
+  });
+
+  it("settles all steered request aliases together without releasing an unrelated pending request", async () => {
+    const t = await live({ send: vi.fn().mockResolvedValueOnce({ kind: "started", messageId: "m1" }).mockResolvedValueOnce({ kind: "steered", messageId: "steer1", requestMessageId: "m1" }).mockResolvedValueOnce({ kind: "steered", messageId: "steer2", requestMessageId: "m1" }).mockResolvedValueOnce({ kind: "started", messageId: "m2" }) });
+    for (const id of ["d1", "d2", "d3", "d4"]) await t.delegate(id);
+    t.message({ id: "answer", requestMessageId: "m1", turnTerminal: true, text: "Steered result." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.release.mock.calls.map(([id]) => id).sort()).toEqual(["d1", "d2", "d3"]);
+    t.message({ id: "alias-answer", requestMessageId: "steer2", turnTerminal: true, text: "Duplicate alias result." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.socket().appends("commentary")).toHaveLength(1);
+    t.message({ id: "other-answer", requestMessageId: "m2", turnTerminal: true, text: "Independent result." });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.release.mock.calls.at(-1)).toEqual(["d4"]);
+    await t.controller.shutdown();
   });
 });
 

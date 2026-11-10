@@ -102,6 +102,8 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
         const field = parsed.error.issues[0]?.path[0];
         if (field === "azureEndpoint") return json(res, 400, { error: "The Azure endpoint must be the https address of an Azure OpenAI resource, like https://my-resource.openai.azure.com." });
         if (field === "azureDeployment") return json(res, 400, { error: "The Azure deployment name may use letters, digits, '-', '_' and '.', up to 64 characters." });
+        if (field === "qwenWorkspace") return json(res, 400, { error: "The Qwen business space may use lowercase letters, digits and '-', up to 63 characters. It must start and end with a letter or digit." });
+        if (field === "qwenVoice") return json(res, 400, { error: "The Qwen voice must start with a letter and use letters, digits, '-', '_' and '.', up to 80 characters." });
         return json(res, 400, { error: "Those Live settings are not valid." });
       }
       if (!Object.keys(parsed.data).length) return json(res, 400, { error: "nothing to save" });

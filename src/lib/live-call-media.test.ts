@@ -5,6 +5,7 @@ import {
   liveMedia, onLiveStreamConnected, onServerCall, resetLiveMedia, setLiveMuted, startLiveCall, subscribeLiveMedia, takeLiveCallAction,
 } from "./live-call-media";
 import { ApiError } from "@/state/store";
+import type { PcmMediaOptions } from "./live-pcm-media";
 
 class FakeTrack { enabled = true; stopped = false; stop() { this.stopped = true; } }
 class FakeChannel {
@@ -73,6 +74,176 @@ const windowIs = (dictation: Partial<DesktopCapabilities["dictation"]>) => () =>
   ({ dictation: { available: false, engine: "none", onDevice: false, ...dictation } }) as DesktopCapabilities;
 afterEach(() => { resetLiveMedia(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
+describe("PCM transport closure and server end reasons", () => {
+  beforeEach(() => vi.useFakeTimers());
+  async function startPcm(mediaReady = true, callId = "c1", serverReady = true) {
+    let options!: PcmMediaOptions;
+    const pcm = { close: vi.fn() };
+    configureLiveMedia({ ...fakes(), createPcmSession: (input) => { options = input; return pcm; } });
+    request.mockImplementationOnce(async () => ({ call: { ...call, callId }, transport: { type: "ws-pcm", path: "/api/live/media", inputSampleRate: 16000, outputSampleRate: 24000 } }));
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    if (serverReady) onServerCall({ ...call, callId, status: "live" });
+    if (mediaReady) options.onReady();
+    return { options, pcm };
+  }
+
+  it("releases media immediately and uses a subsequent idle end without ending the server call early", async () => {
+    const { options, pcm } = await startPcm();
+    options.onClose();
+    expect(track.stopped).toBe(true);
+    expect(pcm.close).toHaveBeenCalledOnce();
+    expect(liveMedia()).toMatchObject({ phase: "ending", callId: "c1", notice: null });
+    expect(currentCall()).toBe("b1");
+    expect(endRequests()).toEqual([]);
+    options.onReady();
+    options.onEvent(JSON.stringify({ type: "session.output_transcript.delta", delta: "stale" }));
+    options.onFailure("late socket failure");
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(liveMedia().caption).toBe("");
+    onServerCall({ ...call, status: "ended", endReason: "idle" });
+    expect(liveMedia()).toMatchObject({ phase: "ended", notice: "Call ended after a long silence.", action: null });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(liveMedia().phase).toBe("ended");
+    expect(endRequests()).toEqual([]);
+  });
+
+  it("keeps an authoritative end when the socket close callback arrives afterward", async () => {
+    const { options } = await startPcm();
+    onServerCall({ ...call, status: "ended", endReason: "idle" });
+    options.onClose();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(liveMedia()).toMatchObject({ phase: "ended", notice: "Call ended after a long silence.", action: null });
+    expect(endRequests()).toEqual([]);
+  });
+
+  it("cannot return to live from delayed server state after ready PCM closes during startup", async () => {
+    const { options } = await startPcm(true, "c1", false);
+    expect(liveMedia().phase).toBe("starting");
+    options.onClose();
+    expect(liveMedia()).toMatchObject({ phase: "ending", callId: "c1" });
+    onServerCall({ ...call, status: "connecting" });
+    onServerCall({ ...call, status: "live" });
+    options.onReady();
+    expect(liveMedia()).toMatchObject({ phase: "ending", startedAt: null });
+    expect(endRequests()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(liveMedia()).toMatchObject({ phase: "failed", action: "retry" });
+  });
+
+  it("waits through an intermediate ending state for the same call's final reason", async () => {
+    const { options } = await startPcm();
+    options.onClose();
+    onServerCall({ ...call, status: "ending" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(liveMedia()).toMatchObject({ phase: "ending", callId: "c1", notice: null });
+    onServerCall({ ...call, status: "ended", endReason: "expired" });
+    expect(liveMedia()).toMatchObject({ phase: "ended", notice: endNotice("expired").text, action: null });
+    expect(endRequests()).toEqual([]);
+  });
+
+  it("starts the close wait when server ending precedes socket closure and keeps the final reason", async () => {
+    const { pcm } = await startPcm();
+    onServerCall({ ...call, status: "ending" });
+    expect(pcm.close).toHaveBeenCalledExactlyOnceWith(false);
+    expect(track.stopped).toBe(true);
+    expect(liveMedia()).toMatchObject({ phase: "ending", callId: "c1" });
+    expect(endRequests()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(2_999);
+    onServerCall({ ...call, status: "ended", endReason: "idle" });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(liveMedia()).toMatchObject({ phase: "ended", notice: "Call ended after a long silence.", action: null });
+    expect(endRequests()).toEqual([]);
+  });
+
+  it.each([false, true])("bounds server-ending-first cleanup when ended is missing (null state: %s)", async (nullState) => {
+    const { pcm } = await startPcm();
+    onServerCall({ ...call, status: "ending" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    onServerCall({ ...call, status: "ending" });
+    if (nullState) onServerCall(null);
+    expect(pcm.close).toHaveBeenCalledExactlyOnceWith(false);
+    expect(endRequests()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(liveMedia().phase).toBe("ending");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(liveMedia()).toMatchObject({ phase: "failed", notice: "Call dropped.", action: "retry" });
+    expect(endRequests()).toEqual(["c1"]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["missing", "null", "ending", "another call"])("reports a dropped call after the grace period when the only server state is %s", async (state) => {
+    const { options } = await startPcm();
+    options.onClose();
+    if (state === "null") onServerCall(null);
+    if (state === "ending") onServerCall({ ...call, status: "ending" });
+    if (state === "another call") onServerCall({ ...call, callId: "unrelated", status: "ended", endReason: "idle" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    options.onClose();
+    options.onEvent(JSON.stringify({ type: "session.closed" }));
+    expect(endRequests()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(liveMedia().phase).not.toBe("failed");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(liveMedia()).toMatchObject({ phase: "failed", notice: "Call dropped.", action: "retry" });
+    expect(endRequests()).toEqual(["c1"]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not treat session.closed without an end state as a normal PCM end", async () => {
+    const { options } = await startPcm();
+    options.onEvent(JSON.stringify({ type: "session.closed" }));
+    await vi.advanceTimersByTimeAsync(500);
+    options.onClose();
+    onServerCall(null);
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(liveMedia()).toMatchObject({ phase: "failed", action: "retry" });
+    expect(endRequests()).toEqual(["c1"]);
+  });
+
+  it("fails immediately before PCM readiness", async () => {
+    const { options, pcm } = await startPcm(false);
+    options.onClose();
+    expect(liveMedia()).toMatchObject({ phase: "failed", action: "retry" });
+    expect(pcm.close).toHaveBeenCalledOnce();
+    expect(track.stopped).toBe(true);
+    expect(endRequests()).toEqual(["c1"]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("clears the close wait on hangup and ignores old callbacks throughout the next call", async () => {
+    const old = await startPcm();
+    old.options.onClose();
+    let confirm!: (value: unknown) => void;
+    request.mockImplementationOnce(() => new Promise((resolve) => { confirm = resolve; }));
+    const hanging = hangUpLiveCall();
+    onServerCall({ ...call, status: "ending" });
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(liveMedia()).toMatchObject({ phase: "ending", hangingUp: true });
+    confirm({ call: { ...call, status: "ended", endReason: "hung-up" } });
+    await hanging;
+    peer = new FakePeer(); track = new FakeTrack();
+    await startPcm(true, "c2");
+    old.options.onClose(); old.options.onReady(); old.options.onFailure("old");
+    old.options.onEvent(JSON.stringify({ type: "session.closed" }));
+    await vi.advanceTimersByTimeAsync(3_001);
+    expect(liveMedia()).toMatchObject({ phase: "live", callId: "c2", notice: null });
+    expect(track.stopped).toBe(false);
+    expect(endRequests()).toEqual(["c1"]);
+  });
+
+  it("cancels the grace timer when media state resets", async () => {
+    const { options } = await startPcm();
+    options.onClose();
+    resetLiveMedia();
+    expect(vi.getTimerCount()).toBe(0);
+    options.onClose();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(liveMedia().phase).toBe("idle");
+    expect(endRequests()).toEqual([]);
+  });
+});
+
 describe("live call media", () => {
   it("passes the server transport credit capability to the real PCM session boundary", async () => {
     const createPcmSession = vi.fn(() => ({ close: vi.fn() }));
@@ -81,7 +252,7 @@ describe("live call media", () => {
     await startLiveCall({ botId: "b1", threadId: "t1" });
     expect(createPcmSession).toHaveBeenCalledWith(expect.objectContaining({ callId: "c1", playbackFlow: "credit-v1" }));
   });
-  it("a PCM disconnect releases media, ends the exact server call and ignores late callbacks", async () => {
+  it("a PCM media failure releases resources, ends the exact server call and ignores late callbacks", async () => {
     let options: any;
     const pcm = { close: vi.fn() };
     configureLiveMedia({ ...fakes(), createPcmSession: (input) => { options = input; return pcm; } });

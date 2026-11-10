@@ -13,9 +13,6 @@ export interface QwenVoice {
   sourceUrl: string;
 }
 
-// Live probes show the realtime model accepts only a subset of the TTS Plus/Flash lists: 71 of the
-// advertised ids answer `invalid_value / Unsupported voice`, which ends the call. Keep only ids that a
-// real qwen-audio-3.1-realtime session.update accepted.
 const voices: readonly QwenVoice[] = [
   { id: "longanqian_v3.1", name: "官方默认", description: "3.1 实时模型默认音色；官方未标注性别与风格", sourceUrl: QWEN_VOICE_SOURCES.compatibility },
   { id: "longanlingxin_v3.1", name: "龙安灵心_v3.1", gender: "女", description: "旗舰音色", sourceUrl: QWEN_VOICE_SOURCES.catalog },

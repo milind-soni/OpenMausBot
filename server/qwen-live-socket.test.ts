@@ -140,6 +140,7 @@ describe("Qwen protocol adapter", () => {
   it("paces burst provider audio below the browser playback limit and fails closed on backpressure or budget abuse", async () => {
     const t = setup(); t.ready();
     const pcm = Buffer.alloc(48_000);
+    t.upstream.event({ type: "response.created", response: { id: "r1" } });
     t.upstream.event({ type: "response.audio.delta", response_id: "r1", delta: pcm.toString("base64") });
     const chunks = () => t.media.send.mock.calls.map(([value]) => value).filter((value): value is Buffer => Buffer.isBuffer(value));
     expect(chunks().reduce((n, b) => n + b.length, 0)).toBeLessThanOrEqual(960);
@@ -169,6 +170,7 @@ describe("Qwen protocol adapter", () => {
   });
   it("does not authorize echo-overlap and clears playback on VAD without a second provider cancel", async () => {
     const t = setup(); t.ready();
+    t.upstream.event({ type: "response.created", response: { id: "speaking" } });
     t.upstream.event({ type: "response.audio.delta", response_id: "speaking", delta: "AQACAA==" });
     t.upstream.event({ type: "response.audio_transcript.delta", response_id: "speaking", delta: "May I do that?" });
     expect(t.media.send).toHaveBeenCalledWith(expect.stringContaining('"type":"session.output_transcript.delta"'));
@@ -276,6 +278,7 @@ describe("Qwen protocol adapter", () => {
     expect(t.media.send).toHaveBeenCalledWith(JSON.stringify({ type: "media.ready" }));
     expect(t.socket.appendPcm(Buffer.from([1, 0, 2, 0]))).toBe(true);
     expect(t.upstream.of("input_audio_buffer.append")).toEqual([{ type: "input_audio_buffer.append", audio: "AQACAA==" }]);
+    t.upstream.event({ type: "response.created", response: { id: "r1" } });
     t.upstream.event({ type: "response.audio.delta", response_id: "r1", delta: "AwAEAA==" });
     expect(t.media.send).toHaveBeenCalledWith(Buffer.from([3, 0, 4, 0]));
     t.socket.close();

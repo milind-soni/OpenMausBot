@@ -20,12 +20,13 @@ export function LiveProviderSettings() {
   const [error, setError] = useState<string | null>(null);
   const azureChanged = endpoint.trim() !== (live.azureEndpoint ?? "") || deployment.trim() !== (live.azureDeployment ?? "");
 
-  const save = async (patch: ProviderPatch) => {
+  const save = async (patch: ProviderPatch): Promise<LiveSettings | undefined> => {
     setSaving(true);
     setError(null);
     try {
       const body = await api<{ live: LiveSettings }>("/api/live/settings", { method: "PATCH", body: JSON.stringify(patch) });
       if (state.config) dispatch({ type: "configStatus", config: { ...state.config, live: body.live } });
+      return body.live;
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError));
     } finally {
@@ -93,40 +94,47 @@ export function LiveProviderSettings() {
           )}
         </form>
       )}
-      {provider === "qwen" && <QwenProviderFields key={JSON.stringify([live.qwenRegion, live.qwenWorkspace, live.qwenModel, live.qwenVoice])} live={live} saving={saving} save={save} />}
+      {provider === "qwen" && <QwenProviderFields live={live} saving={saving} save={save} />}
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );
 }
 
-function QwenProviderFields({ live, saving, save }: { live: LiveSettings; saving: boolean; save(patch: ProviderPatch): Promise<void> }) {
-  const [region, setRegion] = useState(live.qwenRegion ?? "cn-beijing");
-  const [workspace, setWorkspace] = useState(live.qwenWorkspace ?? "");
-  const [model, setModel] = useState(live.qwenModel ?? "qwen-audio-3.1-realtime-flash");
-  const [voice, setVoice] = useState(live.qwenVoice || "longanqian_v3.1");
-  const [custom, setCustom] = useState(() => !qwenVoicesForModel(model).some((option) => option.id === voice));
+function QwenProviderFields({ live, saving, save }: { live: LiveSettings; saving: boolean; save(patch: ProviderPatch): Promise<LiveSettings | undefined> }) {
+  const [draft, setDraft] = useState<Partial<Pick<LiveSettings, "qwenRegion" | "qwenWorkspace" | "qwenModel" | "qwenVoice">>>({});
+  const region = draft.qwenRegion ?? live.qwenRegion ?? "cn-beijing";
+  const workspace = draft.qwenWorkspace ?? live.qwenWorkspace ?? "";
+  const model = draft.qwenModel ?? live.qwenModel ?? "qwen-audio-3.1-realtime-flash";
+  const voice = draft.qwenVoice ?? (live.qwenVoice || "longanqian_v3.1");
+  const [custom, setCustom] = useState(false);
   const voices = qwenVoicesForModel(model);
   const showCustom = custom || !voices.some((option) => option.id === voice);
   return <form data-qwen-live-settings className="flex flex-col gap-2" onSubmit={(event) => {
     event.preventDefault();
-    void save({ provider: "qwen", qwenRegion: region, qwenWorkspace: workspace.trim(), qwenModel: model, qwenVoice: voice.trim() });
+    const trimmedVoice = voice.trim();
+    if (saving || !trimmedVoice) return;
+    void save({ provider: "qwen", qwenRegion: region, qwenWorkspace: workspace.trim(), qwenModel: model, qwenVoice: trimmedVoice }).then((saved) => {
+      if (!saved) return;
+      setDraft({});
+      setCustom(false);
+    });
   }}>
     <label className="flex flex-col gap-1">
       <span className="text-[12px] text-ink-secondary">{t("call.live.qwen.region")}</span>
-      <Select value={region} disabled={saving} aria-label={t("call.live.qwen.region")} onChange={(event) => setRegion(event.target.value as typeof region)}>
+      <Select value={region} disabled={saving} aria-label={t("call.live.qwen.region")} onChange={(event) => setDraft((current) => ({ ...current, qwenRegion: event.target.value as typeof region }))}>
         <option value="cn-beijing">{t("call.live.qwen.region.beijing")}</option>
         <option value="ap-southeast-1">{t("call.live.qwen.region.singapore")}</option>
       </Select>
     </label>
     <label className="flex flex-col gap-1">
       <span className="text-[12px] text-ink-secondary">{t("call.live.qwen.workspace")}</span>
-      <input className={FIELD} value={workspace} disabled={saving} autoComplete="off" spellCheck={false} maxLength={128}
-        aria-label={t("call.live.qwen.workspace")} onChange={(event) => setWorkspace(event.target.value)} />
+      <input className={FIELD} value={workspace} disabled={saving} autoComplete="off" spellCheck={false} maxLength={63}
+        aria-label={t("call.live.qwen.workspace")} onChange={(event) => setDraft((current) => ({ ...current, qwenWorkspace: event.target.value }))} />
     </label>
     <div className="text-[12px] text-ink-tertiary">{t("call.live.qwen.workspaceHint")}</div>
     <label className="flex flex-col gap-1">
       <span className="text-[12px] text-ink-secondary">{t("call.live.qwen.model")}</span>
-      <Select value={model} disabled={saving} aria-label={t("call.live.qwen.model")} onChange={(event) => setModel(event.target.value as typeof model)}>
+      <Select value={model} disabled={saving} aria-label={t("call.live.qwen.model")} onChange={(event) => setDraft((current) => ({ ...current, qwenModel: event.target.value as typeof model }))}>
         <option value="qwen-audio-3.1-realtime-flash">Qwen Audio 3.1 Realtime Flash</option>
         <option value="qwen-audio-3.1-realtime-plus">Qwen Audio 3.1 Realtime Plus</option>
       </Select>
@@ -136,7 +144,7 @@ function QwenProviderFields({ live, saving, save }: { live: LiveSettings; saving
       <Select value={showCustom ? "custom" : voice} disabled={saving} aria-label={t("call.live.qwen.voice")} onChange={(event) => {
         const id = event.target.value;
         setCustom(id === "custom");
-        if (id !== "custom") setVoice(id);
+        setDraft((current) => ({ ...current, qwenVoice: id === "custom" ? voice : id }));
       }}>
         {voices.map((option) => <option key={option.id} value={option.id}>
           {option.name} · {option.gender ? `${option.gender} · ` : ""}{option.description} ({option.id})
@@ -148,7 +156,10 @@ function QwenProviderFields({ live, saving, save }: { live: LiveSettings; saving
       <label className="flex flex-col gap-1">
         <span className="text-[12px] text-ink-secondary">{t("call.live.qwen.voiceCustomId")}</span>
         <input className={FIELD} value={voice} disabled={saving} autoComplete="off" spellCheck={false} maxLength={80} required
-          aria-label={t("call.live.qwen.voiceCustomId")} onChange={(event) => setVoice(event.target.value)} />
+          aria-label={t("call.live.qwen.voiceCustomId")} onChange={(event) => {
+            setCustom(true);
+            setDraft((current) => ({ ...current, qwenVoice: event.target.value }));
+          }} />
       </label>
       <div className="text-[12px] text-ink-tertiary">{t("call.live.qwen.voiceCustomHint")}</div>
     </>}
@@ -156,6 +167,6 @@ function QwenProviderFields({ live, saving, save }: { live: LiveSettings; saving
     <a className="text-[12px] text-accent hover:underline" href={QWEN_VOICE_SOURCES.catalog} target="_blank" rel="noreferrer">{t("call.live.qwen.voiceSource")}</a>
     <div className="text-[12px] text-warning">{t("call.live.qwen.limited")}</div>
     <div className="text-[12px] text-ink-tertiary">{t("call.live.qwen.cost")}</div>
-    <button type="submit" disabled={saving} className="ui-button ui-button-primary self-start">{t("common.save")}</button>
+    <button type="submit" disabled={saving || !voice.trim()} className="ui-button ui-button-primary self-start">{t("common.save")}</button>
   </form>;
 }

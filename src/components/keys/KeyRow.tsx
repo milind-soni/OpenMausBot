@@ -78,16 +78,7 @@ function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']*': (?:\w+: )?/, "") : String(cause);
 }
 
-export function KeyRow({
-  id,
-  row: rowId,
-  via = "settings",
-  onSaved,
-  bare = false,
-  rejected: rejectedHere,
-  className,
-  children,
-}: {
+interface KeyRowProps {
   id: KeyId;
   row?: KeyId;
   via?: KeyVia;
@@ -96,9 +87,32 @@ export function KeyRow({
   rejected?: boolean;
   className?: string;
   children?: ReactNode;
-}) {
-  const { state, dispatch, refreshInstances } = useStore();
+  editorKey?: string;
+}
+
+export function KeyRow({ children, className, editorKey, ...props }: KeyRowProps) {
+  const { state } = useStore();
   const titleId = useId();
+  const entry = shownKeyEntry(props.id, state.config);
+  const row = props.row ? shownKeyEntry(props.row, state.config) : entry;
+  const saved = savedState(entry, state.config);
+  return (
+    <div
+      data-key-row={row.id}
+      data-api-key-row={row.id !== entry.id ? undefined : entry.id}
+      data-key-state={saved.configured ? "saved" : saved.included ? "included" : "empty"}
+      aria-labelledby={props.bare ? undefined : titleId}
+      role="group"
+      className={cn(KEY_ROW, className)}
+    >
+      <KeyEditor key={editorKey} {...props} titleId={titleId} />
+      {children && <div className={cn("flex flex-col gap-2", !props.bare && "pl-8")}>{children}</div>}
+    </div>
+  );
+}
+
+function KeyEditor({ id, row: rowId, via = "settings", onSaved, bare = false, rejected: rejectedHere, titleId }: Omit<KeyRowProps, "children" | "className" | "editorKey"> & { titleId: string }) {
+  const { state, dispatch, refreshInstances } = useStore();
   const [draft, setDraft] = useState("");
   const [shown, setShown] = useState(false);
   const [replacing, setReplacing] = useState(false);
@@ -337,18 +351,16 @@ export function KeyRow({
 
   const warning = target.warningKey && fieldShown ? t(target.warningKey) : null;
   const note = target.noteKey && fieldShown && !pointer ? t(target.noteKey) : null;
+  const qwenDestination = id === "liveKey" && state.config?.live?.provider === "qwen" ? state.config.live : null;
 
   return (
-    <div
-      data-key-row={row.id}
-      data-api-key-row={pointer ? undefined : entry.id}
-      data-key-state={saved.configured ? "saved" : saved.included ? "included" : "empty"}
-      aria-labelledby={bare ? undefined : titleId}
-      role="group"
-      className={cn(KEY_ROW, className)}
-    >
+    <>
       {bare ? status && <KeyStatusChip status={status} /> : <RowHeading entry={row} status={status} titleId={titleId} />}
       <div className={cn("flex flex-col gap-2", !bare && "pl-8")}>
+        {qwenDestination && <div data-key-destination className="text-[12px] text-ink-secondary">
+          {t("call.live.qwen.region")}: {t(qwenDestination.qwenRegion === "ap-southeast-1" ? "call.live.qwen.region.singapore" : "call.live.qwen.region.beijing")}
+          {" · "}{t("call.live.qwen.workspace")}: {qwenDestination.qwenWorkspace || "—"}
+        </div>}
         {fieldShown ? field : saved.configured ? masked : (
           <div>
             <button type="button" data-key-own className="ui-button" onClick={() => { setOwnKey(true); focusAfter.current = "input"; }}>{t("keys.row.useOwn")}</button>
@@ -408,8 +420,7 @@ export function KeyRow({
             ) : null}
           </div>
         )}
-        {children}
       </div>
-    </div>
+    </>
   );
 }

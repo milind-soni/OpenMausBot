@@ -66,6 +66,20 @@ function deps(overrides: Partial<LiveRouteDeps> = {}): LiveRouteDeps & { saved: 
 }
 
 describe("live routes", () => {
+  it("identifies invalid Qwen workspace and voice fields without saving them", async () => {
+    const d = deps();
+    for (const qwenWorkspace of ["x".repeat(64), "Uppercase", "-team", "team-", "a.evil.invalid"]) {
+      expect(await request(d, "PATCH", "/api/live/settings", { qwenWorkspace })).toMatchObject({ status: 400, body: { error: expect.stringContaining("Qwen business space") } });
+    }
+    for (const qwenVoice of ["", "  ", "x".repeat(81), "1voice", "bad voice"]) {
+      expect(await request(d, "PATCH", "/api/live/settings", { qwenVoice })).toMatchObject({ status: 400, body: { error: expect.stringContaining("Qwen voice") } });
+    }
+    expect(d.saved).toEqual([]);
+    for (const qwenWorkspace of ["", "x".repeat(63)]) {
+      expect((await request(d, "PATCH", "/api/live/settings", { qwenWorkspace })).status).toBe(200);
+    }
+    expect((await request(d, "PATCH", "/api/live/settings", { qwenVoice: "v".repeat(80) })).status).toBe(200);
+  });
   it("negotiates ws-pcm without returning a fake SDP answer", async () => {
     const d = deps();
     const transport = { type: "ws-pcm" as const, path: "/api/live/media" as const, inputSampleRate: 16000 as const, outputSampleRate: 24000 as const };

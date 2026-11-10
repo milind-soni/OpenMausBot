@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest";
 import source from "../testing/qwen-voices-source.json";
-
-const path = "./qwen-voices";
-const catalog = await import(/* @vite-ignore */ path).catch(() => ({}));
+import { qwenVoicesForModel, QWEN_VOICE_SOURCES } from "./qwen-voices";
 
 describe("official Qwen 3.1 realtime system voices", () => {
   it("contains only voices the realtime model accepts, plus the realtime default, with source provenance", () => {
-    expect(catalog.qwenVoicesForModel).toBeTypeOf("function");
     for (const model of ["qwen-audio-3.1-realtime-flash", "qwen-audio-3.1-realtime-plus"]) {
-      const voices = catalog.qwenVoicesForModel(model);
+      const voices = qwenVoicesForModel(model);
       expect(voices).toHaveLength(69);
       expect(new Set(voices.map((voice: { id: string }) => voice.id)).size).toBe(69);
       expect(voices[0]).toMatchObject({ id: "longanqian_v3.1", sourceUrl: source.compatibilitySourceUrl });
@@ -16,9 +13,9 @@ describe("official Qwen 3.1 realtime system voices", () => {
       expect(voices.some((voice: { id: string }) => voice.id === "longanlingxin")).toBe(false);
       expect(voices.some((voice: { id: string }) => voice.id === "Cherry")).toBe(false);
     }
-    expect(catalog.qwenVoicesForModel("qwen-audio-3.0-realtime-plus")).toEqual([]);
-    expect(catalog.qwenVoicesForModel("unknown-model")).toEqual([]);
-    expect(catalog.QWEN_VOICE_SOURCES).toEqual({
+    expect(qwenVoicesForModel("qwen-audio-3.0-realtime-plus")).toEqual([]);
+    expect(qwenVoicesForModel("unknown-model")).toEqual([]);
+    expect(QWEN_VOICE_SOURCES).toEqual({
       compatibility: source.compatibilitySourceUrl,
       catalog: source.sourceUrl,
       custom: "https://help.aliyun.com/zh/model-studio/audio-realtime-voice-cloning-api",

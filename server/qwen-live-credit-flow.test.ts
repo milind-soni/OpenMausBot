@@ -78,6 +78,7 @@ it("negotiates credit through the real media route and current controller bindin
     const client = await f.open();
     client.send({ type: "bind", callId: f.callId, playbackFlow: "credit-v1" });
     await vi.waitFor(() => expect({ messages: client.messages, closed: client.closed() }).toEqual({ messages: [JSON.stringify({ type: "media.ready", playbackFlow: "credit-v1", epoch: 0 })], closed: undefined }));
+    f.provider.event({ type: "response.created", response: { id: "r" } });
     f.provider.event({ type: "response.audio.delta", response_id: "r", delta: Buffer.alloc(1_920).toString("base64") });
     expect(client.bytes()).toBe(0);
     client.send(credit);

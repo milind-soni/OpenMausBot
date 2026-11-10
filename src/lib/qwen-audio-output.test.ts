@@ -19,6 +19,50 @@ function fixture(savedId = "") {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Qwen browser-local output routing", () => {
+  it.each(["before", "during"])("preserves a restore warning set %s playback resumes", async (timing) => {
+    const { controller, context } = fixture("headset-fixture");
+    let resume!: () => void;
+    const playback = Object.assign(context, { state: "running", resume: vi.fn(() => new Promise<void>((done) => { resume = done; })) });
+    const attached = controller.attach(playback);
+    if (timing === "before") await attached.ready;
+    const pending = controller.resumePlayback();
+    await attached.ready;
+    expect(controller.getSnapshot().error).toBe("restore");
+    resume(); await pending;
+    expect(controller.getSnapshot()).toMatchObject({ error: "restore", playbackPaused: false, selectedId: "" });
+    attached.release();
+  });
+  it.each(["NotAllowedError", "NotFoundError"])("preserves a %s output selection error during playback resume", async (name) => {
+    const { controller, context } = fixture();
+    let resume!: () => void;
+    const playback = Object.assign(context, { state: "running", resume: vi.fn(() => new Promise<void>((done) => { resume = done; })) });
+    const attached = controller.attach(playback);
+    await attached.ready;
+    const pending = controller.resumePlayback();
+    context.setSinkId.mockRejectedValueOnce(new DOMException("fixture", name));
+    await controller.select("speaker-fixture");
+    resume(); await pending;
+    expect(controller.getSnapshot()).toMatchObject({ error: name === "NotAllowedError" ? "permission" : "missing", playbackPaused: false });
+    attached.release();
+  });
+  it("keeps device recovery visible when playback remains paused or resume rejects", async () => {
+    const { controller, context } = fixture("headset-fixture");
+    const playback = Object.assign(context, { state: "running", resume: vi.fn(async () => {}) });
+    const attached = controller.attach(playback);
+    await attached.ready;
+    playback.state = "suspended";
+    playback.dispatchEvent(new Event("statechange"));
+    expect(controller.getSnapshot()).toMatchObject({ error: "restore", playbackPaused: true });
+    await controller.resumePlayback();
+    expect(controller.getSnapshot()).toMatchObject({ error: "restore", playbackPaused: true });
+    playback.resume.mockRejectedValueOnce(new DOMException("fixture autoplay", "NotAllowedError"));
+    await controller.resumePlayback();
+    expect(controller.getSnapshot()).toMatchObject({ error: "restore", playbackPaused: true });
+    playback.state = "running";
+    playback.dispatchEvent(new Event("statechange"));
+    expect(controller.getSnapshot()).toMatchObject({ error: "restore", playbackPaused: false });
+    attached.release();
+  });
   it.each(["NotAllowedError", "NotFoundError", "InvalidAccessError"])("keeps the current route and preference when setSinkId rejects with %s", async (name) => {
     const { controller, context, storage } = fixture();
     const attached = controller.attach(context);

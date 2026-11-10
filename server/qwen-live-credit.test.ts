@@ -28,7 +28,10 @@ function fixture(flow: "credit-v1" | null = "credit-v1", ready = true) {
   if (ready) open();
   const chunks = () => media.send.mock.calls.map(([value]) => value).filter((value): value is Buffer => Buffer.isBuffer(value));
   const delivered = () => chunks().reduce((sum, chunk) => sum + chunk.length, 0);
-  const audio = (bytes: number) => provider.event({ type: "response.audio.delta", response_id: "audio", delta: Buffer.alloc(bytes, 7).toString("base64") });
+  const audio = (bytes: number, id = "audio") => {
+    provider.event({ type: "response.created", response: { id } });
+    provider.event({ type: "response.audio.delta", response_id: id, delta: Buffer.alloc(bytes, 7).toString("base64") });
+  };
   return { socket, provider, media, events, open, chunks, delivered, audio };
 }
 beforeEach(() => vi.useFakeTimers());
@@ -84,6 +87,7 @@ it.each(["speech", "cancelled"])("isolates late credit by epoch after %s clear a
   if (cause === "speech") f.provider.event({ type: "input_audio_buffer.speech_started", item_id: "u", audio_start_ms: 0 });
   else f.provider.event({ type: "response.done", response: { id: "audio", status: "cancelled" } });
   expect(f.media.send).toHaveBeenCalledWith(JSON.stringify({ type: "audio.clear", epoch: 1 }));
+  f.provider.event({ type: "response.created", response: { id: "new-audio" } });
   f.provider.event({ type: "response.audio.delta", response_id: "new-audio", delta: Buffer.alloc(1_920, 9).toString("base64") });
   expect(f.socket.playbackCredit({ ...credit, seq: 999 })).toBe(true);
   expect(f.socket.playbackCredit({ ...credit, epoch: 2 })).toBe(false);
@@ -195,7 +199,7 @@ it("clears the old stall deadline on VAD and releases both flow timers on close"
   await vi.advanceTimersByTimeAsync(60_000);
   expect(f.socket.readyState).toBe(1);
   expect(vi.getTimerCount()).toBe(0);
-  f.audio(1_920);
+  f.audio(1_920, "new-audio");
   expect(f.socket.playbackCredit({ type: "playback.credit", epoch: 1, seq: 1, bytes: 960, contextState: "running" })).toBe(true);
   expect(vi.getTimerCount()).toBe(2);
   f.socket.close();

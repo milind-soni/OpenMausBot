@@ -29,6 +29,7 @@ afterEach(() => vi.useRealTimers());
 
 it("plays a 30-second provider burst without dropping the call or losing PCM", async () => {
   const f = fixture();
+  f.provider.event({ type: "response.created", response: { id: "long" } });
   for (let i = 0; i < 75; i++) f.provider.event({ type: "response.audio.delta", response_id: "long", delta: Buffer.alloc(19_200, i).toString("base64") });
   expect(f.socket.readyState).toBe(1);
   expect(f.delivered()).toBeLessThanOrEqual(960);
@@ -52,6 +53,7 @@ it("does not start the next readout until generated audio has drained", async ()
 
 it("reports a fixed redacted reason when an explicit output limit is exceeded", () => {
   const f = fixture();
+  f.provider.event({ type: "response.created", response: { id: "abuse" } });
   for (let i = 0; i < 400 && f.socket.readyState !== 3; i++) f.provider.event({ type: "response.audio.delta", response_id: "abuse", delta: Buffer.alloc(19_200).toString("base64") });
   expect(f.socket.readyState).toBe(3);
   expect(f.events).toContainEqual({ type: "error", error: { code: "qwen-output-audio-limit" } });

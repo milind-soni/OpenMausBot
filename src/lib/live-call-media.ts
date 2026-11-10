@@ -101,6 +101,7 @@ let channel: RTCDataChannel | null = null;
 let pcm: PcmMediaSession | null = null;
 let pcmMode = false;
 let pcmReady = false;
+let pcmClosing = false;
 let heardTimer: ReturnType<typeof setTimeout> | null = null;
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -248,9 +249,10 @@ export async function startLiveCall(target: { botId: string; threadId: string })
       connectTimer = setTimeout(() => { if (mine === generation) void dropped(t("call.live.droppedNoAudio")); }, MEDIA_CONNECT_TIMEOUT_MS);
       pcm = deps.createPcmSession({
         stream, callId: result.call.callId, playbackFlow: result.transport.playbackFlow,
-        onReady: () => { if (mine === generation) { pcmReady = true; stopConnectWait(); goLiveWhenReady(); } },
-        onEvent: (raw) => { if (mine === generation) onChannelMessage(raw); },
-        onFailure: (message) => { if (mine === generation) void dropped(message); },
+        onReady: () => { if (mine === generation && !pcmClosing) { pcmReady = true; stopConnectWait(); goLiveWhenReady(); } },
+        onEvent: (raw) => { if (mine === generation && !pcmClosing) onChannelMessage(raw); },
+        onClose: () => { if (mine === generation) pcmDisconnected(mine); },
+        onFailure: (message) => { if (mine === generation && !pcmClosing) void dropped(message); },
       });
       return;
     }
@@ -284,6 +286,8 @@ export async function hangUpLiveCall(): Promise<void> {
   const { callId, phase } = state;
   if (phase === "idle" || phase === "ended" || phase === "failed") return dismissLiveNotice();
   const mine = ++generation;
+  if (closeTimer) clearTimeout(closeTimer);
+  closeTimer = null;
   set({ phase: "ending", hangingUp: true });
   // Stop capturing now; keep the channel alive until its close command and the end request leave.
   stopCapturing();
@@ -368,7 +372,7 @@ export function onServerCall(call: LiveCallState | null): void {
 function applyServerCall(call: LiveCallState | null) {
   if (!state.callId) return;
   if (!call) {
-    if (state.phase === "starting" || state.phase === "live") finish({ text: t("call.live.ended"), dropped: false });
+    if (!pcmClosing && (state.phase === "starting" || state.phase === "live")) finish({ text: t("call.live.ended"), dropped: false });
     return;
   }
   if (call.callId !== state.callId) return;
@@ -379,6 +383,7 @@ function applyServerCall(call: LiveCallState | null) {
   }
   if (call.status !== "connecting") serverAttached = true;
   if (call.status === "ending") {
+    if (pcmMode && pcmReady && !state.hangingUp) { pcmDisconnected(generation); return; }
     stopCapturing();
     stopConnectWait();
     if (state.phase !== "ending") set({ phase: "ending" });
@@ -422,6 +427,21 @@ async function endOnServer(callId: string): Promise<void> {
   await deps.request("/api/live/call/end", { method: "POST", body: JSON.stringify({ callId }), timeoutMs: 8_000 }).catch(() => undefined);
 }
 
+function pcmDisconnected(mine: number) {
+  if (pcmClosing || !pcmMode) return;
+  if (!pcmReady) { void dropped(t("call.live.dropped")); return; }
+  pcmClosing = true;
+  set({ phase: "ending" });
+  stopCapturing(false);
+  stopConnectWait();
+  if (closeTimer) clearTimeout(closeTimer);
+  closeTimer = setTimeout(() => {
+    if (mine !== generation || !pcmClosing) return;
+    closeTimer = null;
+    void dropped(t("call.live.dropped"));
+  }, SERVER_CLOSE_GRACE_MS);
+}
+
 function onChannelMessage(raw: unknown) {
   let event: { type?: unknown; delta?: unknown };
   try {
@@ -430,10 +450,12 @@ function onChannelMessage(raw: unknown) {
     return;
   }
   if (event.type === "session.closed") {
+    if (pcmMode) { pcmDisconnected(generation); return; }
     stopCapturing();
     stopConnectWait();
     if (!closeTimer) void checkLiveSignIn();
-    closeTimer ??= setTimeout(() => finish({ text: t("call.live.ended"), dropped: false }), SERVER_CLOSE_GRACE_MS);
+    const mine = generation;
+    closeTimer ??= setTimeout(() => { if (mine === generation) finish({ text: t("call.live.ended"), dropped: false }); }, SERVER_CLOSE_GRACE_MS);
     return;
   }
   const next = applyCaption(state, event);
@@ -481,8 +503,8 @@ function sendClose() {
   }
 }
 
-function stopCapturing() {
-  pcm?.close();
+function stopCapturing(hangup = true) {
+  pcm?.close(hangup);
   pcm = null;
   microphone?.getTracks().forEach((track) => track.stop());
   microphone = null;
@@ -497,7 +519,7 @@ function release() {
   stopGestureWait = null;
   stopCapturing();
   retirePeer();
-  pcmMode = pcmReady = false;
+  pcmMode = pcmReady = pcmClosing = false;
   deps.stopRemote();
   if (state.botId) endCall(state.botId);
 }

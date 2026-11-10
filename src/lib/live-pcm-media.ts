@@ -30,9 +30,10 @@ export interface PcmMediaOptions {
   playbackFlow?: LivePcmTransport["playbackFlow"];
   onReady(): void;
   onEvent(raw: string): void;
+  onClose(): void;
   onFailure(message: string): void;
 }
-export interface PcmMediaSession { close(): void }
+export interface PcmMediaSession { close(hangup?: boolean): void }
 
 export function createPcmMedia(options: PcmMediaOptions): PcmMediaSession {
   if (typeof AudioContext === "undefined" || typeof AudioWorkletNode === "undefined") throw new Error(t("call.live.qwen.audioUnavailable"));
@@ -270,6 +271,11 @@ export function createPcmMedia(options: PcmMediaOptions): PcmMediaSession {
   function bounded(value: number, max: number): number { return Number.isFinite(value) ? Math.min(max, Math.max(0, Math.floor(value))) : 0; }
   function fail(code: LiveClientFailureCode) {
     if (closed) return;
+    if (code === "media-socket" && notifiedReady) {
+      close(false);
+      options.onClose();
+      return;
+    }
     if (flow && ready && socket.readyState === 1) {
       const diagnostic: LiveClientFailure = { type: "client.failure", code, contextState: contextState(), bufferedBytes: bounded(socket.bufferedAmount, 10_000_000), queuedMs: bounded((queuedBytes + scheduledBytes + pendingPcmBytes) / 48 + upload.length * 20, 3_600_000), frameAgeMs: bounded(upload.length ? frameAge(upload[0]) : 0, 3_600_000) };
       try { socket.send(JSON.stringify(diagnostic)); } catch {}

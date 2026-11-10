@@ -48,6 +48,17 @@ realtime model is not a replacement tool-executing agent. Client playback
 credits are untrusted flow-control signals, not proof the user heard audio or
 consented. Qwen approvals require the existing clickable approval cards.
 
+Completed turns are reclaimed while pending delegations retain their result
+route until the controller releases them after its final update. The 256-entry
+limits apply to live state; a long-running task must not be evicted to make
+room for completed turns. Bounded recent-ID caches reject duplicate events.
+
+After a ready PCM connection closes or the server reports it is ending, capture
+stops immediately and the client waits up to three seconds for the matching
+server end state. An idle or expired
+call uses that end reason; missing final state remains a dropped call with a
+retry action.
+
 ## Repeatable offline checks
 
 Use the repository-pinned Node and pnpm versions, then run:
@@ -57,6 +68,7 @@ pnpm exec vitest run \
   server/qwen-live-config.test.ts \
   server/qwen-live-config.e2e.test.ts \
   server/qwen-live-socket.test.ts \
+  server/qwen-live-state.test.ts \
   server/qwen-live-flow.test.ts \
   server/qwen-live-playback.test.ts \
   server/qwen-live-credit.test.ts \
@@ -64,6 +76,7 @@ pnpm exec vitest run \
   server/qwen-live-media.e2e.test.ts \
   server/routes/live-media.test.ts \
   server/routes/live-media-heartbeat.test.ts \
+  server/routes/live.test.ts \
   server/live-call-controller.test.ts
 
 pnpm exec vitest run \
@@ -94,9 +107,22 @@ for device APIs; they do not certify physical sound or mobile hardware.
 
 Never use a person's running app or real conversations as a test fixture.
 Launch an isolated fixture as described in [README.md](README.md), use a
-disposable bot and explicit fixture URL, and keep optional live-provider tests
-separate from credential-free regression tests. Use only synthetic speech and
-requests if supplying a test-owned Qwen credential.
+disposable bot and explicit fixture URL. The `control-omb launch` command
+serves the API, not the renderer. Keep it running and, in a second terminal,
+start Vite with `OMB_PORT` set to the port in the printed fixture URL:
+
+```sh
+OMB_PORT=<fixture-port> pnpm exec vite --host 127.0.0.1 --strictPort
+```
+
+Open the Vite URL printed by this command for the manual call. Vite proxies
+both API requests and WebSocket traffic to the isolated fixture. Continue to
+use the fixture URL for `control-omb` commands. Stop Vite and interrupt the
+fixture launcher with Ctrl-C when finished so it cleans up its temporary data.
+
+Keep optional live-provider tests separate from credential-free regression
+tests. Use only synthetic speech and requests if supplying a test-owned Qwen
+credential.
 
 Verify: a completed spoken request reaches the original bot; greetings while a
 task is pending do not cancel/resubmit it; the final result is read out;

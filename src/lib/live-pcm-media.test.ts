@@ -55,18 +55,19 @@ class Context extends EventTarget {
 let failure: ReturnType<typeof vi.fn<(message: string) => void>>;
 let ready: ReturnType<typeof vi.fn>;
 let event: ReturnType<typeof vi.fn>;
+let closed: ReturnType<typeof vi.fn>;
 let session: any;
 const stream = { getTracks: () => [] } as unknown as MediaStream;
 const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
 const controls = (socket: Socket) => socket.sent.filter((value): value is string => typeof value === "string").map((value) => JSON.parse(value));
 const start = async (playbackFlow?: "credit-v1") => {
   expect(media.createPcmMedia).toBeTypeOf("function");
-  session = media.createPcmMedia({ stream, callId: "call-fixture", playbackFlow, onReady: ready, onEvent: event, onFailure: failure });
+  session = media.createPcmMedia({ stream, callId: "call-fixture", playbackFlow, onReady: ready, onEvent: event, onClose: closed, onFailure: failure });
   await settle();
   return { socket: Socket.instances[0], context: Context.instances[0], worklet: Worklet.instances[0] };
 };
 beforeEach(() => {
-  failure = vi.fn(); ready = vi.fn(); event = vi.fn();
+  failure = vi.fn(); ready = vi.fn(); event = vi.fn(); closed = vi.fn();
   Socket.instances = []; Context.instances = []; Worklet.instances = [];
   vi.stubGlobal("WebSocket", Socket);
   vi.stubGlobal("AudioContext", Context);
@@ -152,7 +153,7 @@ describe("Qwen browser PCM relay", () => {
     expect(ready).toHaveBeenCalledOnce();
     expect(socket.close).not.toHaveBeenCalled();
   });
-  it.each(["capture-stale", "capture-overrun", "upload-backpressure", "media-protocol", "media-processor", "audio-context", "media-socket"])("reports one bounded %s failure without a hangup or private payload", async (code) => {
+  it.each(["capture-stale", "capture-overrun", "upload-backpressure", "media-protocol", "media-processor", "audio-context"])("reports one bounded %s failure without a hangup or private payload", async (code) => {
     vi.useFakeTimers();
     const { socket, context, worklet } = await start("credit-v1");
     socket.open(); socket.message(JSON.stringify({ type: "media.ready", playbackFlow: "credit-v1", epoch: 0 }));
@@ -164,7 +165,6 @@ describe("Qwen browser PCM relay", () => {
     if (code === "media-protocol") socket.message(new ArrayBuffer(24_002));
     if (code === "media-processor") processorError({ message: "private fixture" });
     if (code === "audio-context") { context.state = "closed"; context.dispatchEvent(new Event("statechange")); }
-    if (code === "media-socket") socketError({ message: "private fixture" });
     processorError(); socketError(); session.close();
     const failures = controls(socket).filter(({ type }) => type === "client.failure");
     expect(failures).toHaveLength(1);
@@ -174,6 +174,7 @@ describe("Qwen browser PCM relay", () => {
     expect(controls(socket).some(({ type }) => type === "hangup")).toBe(false);
     expect(JSON.stringify(failures)).not.toMatch(/private|deviceId|pcm|secret/);
     expect(failure).toHaveBeenCalledOnce();
+    expect(closed).not.toHaveBeenCalled();
     expect(String(failure.mock.calls[0][0])).not.toMatch(/private fixture/);
     if (code.startsWith("capture") || code === "upload-backpressure") expect(String(failure.mock.calls[0][0])).toMatch(/repeat/i);
     expect(vi.getTimerCount()).toBe(0);
@@ -315,7 +316,7 @@ describe("Qwen browser PCM relay", () => {
     session.close();
     expect(qwenAudioOutput.getSnapshot().active).toBe(false);
     const remove = vi.spyOn(context, "removeEventListener");
-    session = media.createPcmMedia({ stream, callId: "next-call", onReady: ready, onEvent: event, onFailure: failure });
+    session = media.createPcmMedia({ stream, callId: "next-call", onReady: ready, onEvent: event, onClose: closed, onFailure: failure });
     await settle();
     const next = Context.instances[1];
     expect(next.setSinkId).toHaveBeenCalledWith("headset-fixture");
@@ -340,17 +341,45 @@ describe("Qwen browser PCM relay", () => {
       class MissingModule extends Context { constructor() { super(); this.audioWorklet = undefined as never; } }
       vi.stubGlobal("AudioContext", MissingModule);
     } else vi.stubGlobal("WebSocket", class { constructor() { throw new Error("socket cannot open"); } });
-    expect(() => media.createPcmMedia({ stream, callId: "partial", onReady: ready, onEvent: event, onFailure: failure })).toThrow();
+    expect(() => media.createPcmMedia({ stream, callId: "partial", onReady: ready, onEvent: event, onClose: closed, onFailure: failure })).toThrow();
     expect(Context.instances[0].close).toHaveBeenCalledOnce();
   });
 
-  it("fails closed when a capture frame cannot be sent", async () => {
+  it("releases media and reports transport closure when a ready capture frame cannot be sent", async () => {
     const { socket, worklet } = await start();
     socket.open(); socket.message(JSON.stringify({ type: "media.ready" }));
     socket.send = () => { throw new Error("closing"); };
     expect(() => worklet.frame()).not.toThrow();
-    expect(failure).toHaveBeenCalledOnce();
+    expect(closed).toHaveBeenCalledOnce();
+    expect(failure).not.toHaveBeenCalled();
     expect(socket.close).toHaveBeenCalledOnce();
+  });
+  it.each([2, 3])("reports transport closure when the upload timer finds socket state %s before onclose", async (socketState) => {
+    vi.useFakeTimers();
+    const { socket, worklet } = await start();
+    socket.open(); socket.message(JSON.stringify({ type: "media.ready" }));
+    socket.bufferedAmount = 32_000;
+    worklet.frame();
+    const onclose = socket.onclose;
+    socket.readyState = socketState;
+    await vi.advanceTimersByTimeAsync(20);
+    onclose();
+    expect(closed).toHaveBeenCalledOnce();
+    expect(failure).not.toHaveBeenCalled();
+    expect(socket.sent.filter((value) => value instanceof ArrayBuffer)).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("reports transport closure when a ready playback credit cannot be sent", async () => {
+    vi.useFakeTimers();
+    const { socket, context } = await start("credit-v1");
+    socket.open(); socket.message(JSON.stringify({ type: "media.ready", playbackFlow: "credit-v1", epoch: 0 }));
+    socket.message(new ArrayBuffer(960));
+    context.sources[0].onended();
+    socket.send = () => { throw new Error("closing"); };
+    await vi.advanceTimersByTimeAsync(50);
+    expect(closed).toHaveBeenCalledOnce();
+    expect(failure).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
   it("announces media ready only once, after the capture worklet is running", async () => {
     let loaded!: () => void;
@@ -358,7 +387,7 @@ describe("Qwen browser PCM relay", () => {
       constructor() { super(); this.audioWorklet.addModule = vi.fn(() => new Promise<void>((resolve) => { loaded = resolve; })); }
     }
     vi.stubGlobal("AudioContext", LoadingContext);
-    session = media.createPcmMedia({ stream, callId: "loading", onReady: ready, onEvent: event, onFailure: failure });
+    session = media.createPcmMedia({ stream, callId: "loading", onReady: ready, onEvent: event, onClose: closed, onFailure: failure });
     const socket = Socket.instances[0];
     socket.open(); socket.message(JSON.stringify({ type: "media.ready" }));
     expect(ready).not.toHaveBeenCalled();
@@ -379,7 +408,7 @@ describe("Qwen browser PCM relay", () => {
       }
       vi.stubGlobal("AudioContext", RefusingContext);
     }
-    try { session = media.createPcmMedia({ stream, callId: "unavailable", onReady: ready, onEvent: event, onFailure: failure }); }
+    try { session = media.createPcmMedia({ stream, callId: "unavailable", onReady: ready, onEvent: event, onClose: closed, onFailure: failure }); }
     catch (error) { failure((error as Error).message); }
     await settle();
     expect(failure).toHaveBeenCalledOnce();
@@ -393,15 +422,54 @@ describe("Qwen browser PCM relay", () => {
     expect(failure).toHaveBeenCalledOnce();
     expect(socket.close).toHaveBeenCalledOnce();
   });
-  it.each(["onclose", "onerror"])("fails once on socket %s without reconnecting", async (handler) => {
+  it.each(["onclose", "onerror"])("fails once on pre-ready socket %s without reconnecting", async (handler) => {
     const { socket, context } = await start();
     socket.open();
     const callback = socket[handler as "onclose"];
     expect(callback).toBeTypeOf("function");
     callback(); callback();
     expect(failure).toHaveBeenCalledOnce();
+    expect(closed).not.toHaveBeenCalled();
     expect(context.close).toHaveBeenCalledOnce();
     expect(Socket.instances).toHaveLength(1);
+  });
+  it.each(["error", 1000, 1006])("releases ready media once before reporting socket closure (%s)", async (first) => {
+    vi.useFakeTimers();
+    const { socket, context, worklet } = await start("credit-v1");
+    socket.open(); socket.message(JSON.stringify({ type: "media.ready", playbackFlow: "credit-v1", epoch: 0 }));
+    socket.message(new ArrayBuffer(960));
+    const onerror = socket.onerror;
+    const onclose = socket.onclose;
+    closed.mockImplementation(() => {
+      expect(context.close).toHaveBeenCalledOnce();
+      expect(worklet.disconnect).toHaveBeenCalledOnce();
+      expect(context.input.disconnect).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+    if (first === "error") onerror();
+    else onclose({ code: first });
+    onclose({ code: 1000 }); onerror();
+    expect(closed).toHaveBeenCalledOnce();
+    expect(failure).not.toHaveBeenCalled();
+    expect(socket.close).toHaveBeenCalledOnce();
+    expect(controls(socket).some(({ type }) => type === "hangup" || type === "client.failure")).toBe(false);
+    expect(Socket.instances).toHaveLength(1);
+  });
+  it("fails immediately if the socket closes after negotiation while the worklet is still loading", async () => {
+    let loaded!: () => void;
+    class LoadingContext extends Context {
+      constructor() { super(); this.audioWorklet.addModule = vi.fn(() => new Promise<void>((resolve) => { loaded = resolve; })); }
+    }
+    vi.stubGlobal("AudioContext", LoadingContext);
+    session = media.createPcmMedia({ stream, callId: "loading", onReady: ready, onEvent: event, onClose: closed, onFailure: failure });
+    const socket = Socket.instances[0];
+    socket.open(); socket.message(JSON.stringify({ type: "media.ready" }));
+    socket.onclose();
+    loaded(); await settle();
+    expect(failure).toHaveBeenCalledOnce();
+    expect(closed).not.toHaveBeenCalled();
+    expect(ready).not.toHaveBeenCalled();
+    expect(Worklet.instances).toHaveLength(0);
   });
   it("buffers a bounded legacy burst in FIFO order while scheduling at most 250 ms ahead", async () => {
     vi.useFakeTimers();
@@ -517,7 +585,7 @@ describe("Qwen browser PCM relay", () => {
     }
     expect(original).toBeTruthy();
     vi.stubGlobal("AudioContext", LoadingContext);
-    session = media.createPcmMedia({ stream, callId: "cancelled", onReady: ready, onEvent: event, onFailure: failure });
+    session = media.createPcmMedia({ stream, callId: "cancelled", onReady: ready, onEvent: event, onClose: closed, onFailure: failure });
     session.close();
     loaded(); await settle();
     expect(Worklet.instances).toHaveLength(0);

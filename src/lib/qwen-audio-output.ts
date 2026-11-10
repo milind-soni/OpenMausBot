@@ -91,11 +91,14 @@ export function createQwenAudioOutput(env: OutputEnvironment = browser) {
     const target = context;
     const version = lifecycle;
     if (!target?.resume) return;
-    update({ error: "playback" });
     try {
       await target.resume();
-      if (version === lifecycle) update({ error: paused(target) ? "playback" : null, playbackPaused: paused(target) });
-    } catch { if (version === lifecycle) update({ error: "playback", playbackPaused: paused(target) }); }
+      if (version === lifecycle) update({ error: playbackError(paused(target)), playbackPaused: paused(target) });
+    } catch { if (version === lifecycle) update({ error: playbackError(true), playbackPaused: paused(target) }); }
+  }
+  function playbackError(blocked: boolean): OutputError | null {
+    const error = getSnapshot().error;
+    return error && error !== "playback" ? error : blocked ? "playback" : null;
   }
   function paused(target: SinkContext): boolean { return target.state === "suspended" || target.state === "interrupted"; }
   async function route(id: string, target: SinkContext | null, version: number) {
@@ -148,7 +151,7 @@ export function createQwenAudioOutput(env: OutputEnvironment = browser) {
     const stateChanged = () => {
       if (context !== target) return;
       const playbackPaused = paused(target);
-      update({ playbackPaused, error: playbackPaused ? "playback" : getSnapshot().error === "playback" ? null : getSnapshot().error });
+      update({ playbackPaused, error: playbackError(playbackPaused) });
     };
     target.addEventListener?.("sinkchange", sinkChanged);
     target.addEventListener?.("statechange", stateChanged);

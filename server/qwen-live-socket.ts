@@ -28,7 +28,11 @@ interface SpokenInput {
   text?: string;
   consumed: boolean;
   echoUnsafe: boolean;
+  stopped?: boolean;
+  committed?: boolean;
+  timer?: ReturnType<typeof setTimeout>;
 }
+interface SpokenResponse { inputId?: string; done?: boolean }
 interface ToolSignal {
   id: string;
   responseId: string;
@@ -55,13 +59,16 @@ export class QwenLiveSocket implements LiveSocket {
   private readonly upstream: LiveSocket;
   private media: LiveMediaConsumer | null = null;
   private readonly inputs = new Map<string, SpokenInput>();
-  private readonly responses = new Map<string, { inputId?: string; done?: boolean }>();
+  private readonly responses = new Map<string, SpokenResponse>();
   private readonly tools = new Map<string, ToolSignal>();
   private readonly committed: string[] = [];
   private readonly notes: SpokenNote[] = [];
   private active: { id?: string; note?: SpokenNote; interrupted?: boolean } | null = null;
   private readonly suppressedAudio = new Set<string>();
-  private speaking = false;
+  private readonly retiredInputs = new Set<string>();
+  private readonly retiredResponses = new Set<string>();
+  private readonly retiredTools = new Set<string>();
+  private speaking: string | null = null;
   private awaitingTurn = false;
   private playbackUnproven = false;
   private readonly history: NonNullable<QwenSocketInput["history"]>;
@@ -100,6 +107,7 @@ export class QwenLiveSocket implements LiveSocket {
       try {
         if (Buffer.byteLength(String(data)) > 256 * 1024) { this.close(1008, "provider event limit"); return; }
         this.receive(JSON.parse(String(data)) as Record<string, unknown>);
+        this.prune();
         if (this.inputs.size > 256 || this.responses.size > 256 || this.tools.size > 256 || this.notes.length > 64) this.close(1008, "call state limit");
       }
       catch { this.close(1002, "invalid provider event"); }
@@ -184,6 +192,13 @@ export class QwenLiveSocket implements LiveSocket {
     if (this.notes.length > 64) this.close(1008, "pending speech limit");
   }
 
+  releaseDelegation(id: string): void {
+    const tool = this.tools.get(id);
+    if (!tool?.finished) return;
+    this.retireTool(tool);
+    this.prune();
+  }
+
   close(code = 1000, reason = "call ended"): void {
     if (this.readyState === 3) return;
     const failureCodes: Record<string, string> = {
@@ -206,7 +221,9 @@ export class QwenLiveSocket implements LiveSocket {
     this.watchPlayback();
     this.playbackBytes = 0;
     for (const tool of this.tools.values()) if (tool.timer) clearTimeout(tool.timer);
+    for (const input of this.inputs.values()) if (input.timer) clearTimeout(input.timer);
     this.inputs.clear(); this.responses.clear(); this.tools.clear(); this.notes.length = 0; this.committed.length = 0;
+    this.suppressedAudio.clear(); this.retiredInputs.clear(); this.retiredResponses.clear(); this.retiredTools.clear();
     this.upstream.onopen = this.upstream.onmessage = this.upstream.onerror = this.upstream.onclose = null;
     try { this.upstream.close(code, reason); } catch {}
     try { this.media?.close(code, reason); } catch {}
@@ -232,7 +249,7 @@ export class QwenLiveSocket implements LiveSocket {
       this.onopen?.({});
       this.emit({ type: "session.started" });
     } else if (event.type === "response.audio.delta" && typeof event.delta === "string") {
-      if (typeof event.response_id === "string" && this.suppressedAudio.has(event.response_id)) return;
+      if (typeof event.response_id !== "string" || !this.responses.has(event.response_id) || this.responses.get(event.response_id)?.done || this.suppressedAudio.has(event.response_id)) return;
       this.playbackUnproven = true;
       if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(event.delta)) { this.close(1002, "invalid provider audio"); return; }
       const pcm = Buffer.from(event.delta, "base64");
@@ -241,49 +258,48 @@ export class QwenLiveSocket implements LiveSocket {
       this.watchPlayback();
       if (!this.audioTimer) this.drainAudio();
     } else if (event.type === "response.audio_transcript.delta" && typeof event.delta === "string") {
+      if (typeof event.response_id !== "string" || !this.responses.has(event.response_id) || this.responses.get(event.response_id)?.done || this.suppressedAudio.has(event.response_id)) return;
       const caption = { type: "session.output_transcript.delta", delta: event.delta };
       this.emit(caption);
       this.media?.send(JSON.stringify(caption));
     } else if (event.type === "input_audio_buffer.speech_started" && typeof event.item_id === "string") {
-      this.speaking = true;
+      if (this.retiredInputs.has(event.item_id) || this.inputs.has(event.item_id)) return;
+      this.speaking = event.item_id;
       if (this.active) {
         this.active.interrupted = true;
-        if (this.active.id) this.suppressedAudio.add(this.active.id);
+        if (this.active.id) this.remember(this.suppressedAudio, this.active.id);
       }
       this.clearAudio();
       // With PCM-only uplink there is no trusted playback receipt, so elapsed time cannot prove echo-free consent.
       if (!this.inputs.has(event.item_id)) this.inputs.set(event.item_id, { start: Number(event.audio_start_ms) || 0, end: 0, consumed: false, echoUnsafe: this.playbackUnproven });
     } else if (event.type === "input_audio_buffer.speech_stopped" && typeof event.item_id === "string") {
-      this.speaking = false;
-      this.awaitingTurn = event.reason !== "turn_invalid";
       const input = this.inputs.get(event.item_id);
-      if (input) input.end = Number(event.audio_end_ms) || input.start;
+      if (!input || input.stopped) return;
+      input.stopped = true;
+      if (this.speaking === event.item_id) this.speaking = null;
+      this.awaitingTurn = event.reason !== "turn_invalid";
+      input.end = Number(event.audio_end_ms) || input.start;
+      if (event.reason === "turn_invalid") { this.retireInput(event.item_id); this.flush(); }
     } else if (event.type === "input_audio_buffer.committed" && typeof event.item_id === "string") {
-      if (!this.committed.includes(event.item_id) && this.inputs.has(event.item_id)) this.committed.push(event.item_id);
+      const input = this.inputs.get(event.item_id);
+      if (input && !input.committed) { input.committed = true; this.committed.push(event.item_id); }
     } else if (event.type === "response.created") {
       const response = event.response as { id?: string } | undefined;
-      if (response?.id && !this.responses.has(response.id)) {
-        const reserved = this.active && !this.active.id;
-        const inputId = !reserved && this.committed.length === 1 ? this.committed.shift() : undefined;
-        this.responses.set(response.id, { inputId });
-        if (reserved) this.active!.id = response.id;
-        else this.active = { id: response.id };
-        if (inputId) this.awaitingTurn = false;
-      }
+      if (response?.id) this.trackResponse(response.id);
     } else if (event.type === "response.done") {
       const response = event.response as { id?: string; status?: string } | undefined;
-      if (!response?.id || this.responses.get(response.id)?.done) return;
-      const tracked = this.responses.get(response.id) ?? { inputId: this.committed.length === 1 ? this.committed.shift() : undefined };
-      if (tracked.inputId) this.awaitingTurn = false;
+      if (!response?.id) return;
+      const tracked = this.responses.get(response.id) ?? this.trackResponse(response.id, true);
+      if (!tracked || tracked.done) return;
       if (response.status === "cancelled") {
         this.awaitingTurn = true;
-        this.suppressedAudio.add(response.id);
+        this.remember(this.suppressedAudio, response.id);
         this.clearAudio();
       }
       tracked.done = true;
       this.responses.set(response.id, tracked);
       for (const tool of this.tools.values()) this.delegate(tool);
-      if (this.active?.id === response.id || (this.active && !this.active.id && !tracked.inputId)) {
+      if (this.active?.id === response.id) {
         const active = this.active;
         if (active.note?.status === "completed" && (active.interrupted || response.status !== "completed")) {
           const note = active.note;
@@ -302,7 +318,7 @@ export class QwenLiveSocket implements LiveSocket {
       this.media?.send(JSON.stringify(caption));
       for (const tool of this.tools.values()) this.delegate(tool);
     } else if (event.type === "response.function_call_arguments.done" && event.name === "delegate_to_bot" && typeof event.call_id === "string" && typeof event.response_id === "string") {
-      if (this.tools.has(event.call_id)) return;
+      if (this.tools.has(event.call_id) || this.retiredTools.has(event.call_id) || this.retiredResponses.has(event.response_id)) return;
       let args: unknown;
       try { args = JSON.parse(String(event.arguments)); } catch { return; }
       if (!args || Array.isArray(args) || typeof args !== "object" || Object.keys(args).length) return;
@@ -311,8 +327,15 @@ export class QwenLiveSocket implements LiveSocket {
       tool.timer = setTimeout(() => {
         if (tool.finished || this.readyState === 3) return;
         tool.finished = true;
+        const inputId = this.responses.get(tool.responseId)?.inputId;
+        const input = inputId ? this.inputs.get(inputId) : undefined;
+        if (input) input.consumed = true;
         this.notes.push({ callId: tool.id, status: "not_accepted", result: "The completed spoken request could not be safely matched. Please repeat the request. Nothing was sent to the bot." });
+        this.retireTool(tool);
+        if (!this.responses.has(tool.responseId)) this.remember(this.retiredResponses, tool.responseId);
+        this.prune();
         this.flush();
+        if (this.notes.length > 64) this.close(1008, "pending speech limit");
       }, 3_000);
       tool.timer.unref?.();
       this.delegate(tool);
@@ -326,11 +349,73 @@ export class QwenLiveSocket implements LiveSocket {
     if (!input || input.text === undefined) return;
     tool.finished = true;
     if (tool.timer) clearTimeout(tool.timer);
-    if (input.consumed || !input.text) return;
+    if (input.consumed || !input.text) { this.retireTool(tool); return; }
     input.consumed = true;
     this.emit({ type: "session.delegation.created", delegation: { id: tool.id, target: "client" }, offset_ms: input.end,
       request: { text: input.text, withoutEcho: input.echoUnsafe ? "" : input.text },
     });
+  }
+
+  private remember(history: Set<string>, id: string): void {
+    history.add(id);
+    if (history.size > 1_024) history.delete(history.values().next().value!);
+  }
+
+  private retireTool(tool: ToolSignal): void {
+    if (tool.timer) clearTimeout(tool.timer);
+    this.tools.delete(tool.id);
+    this.remember(this.retiredTools, tool.id);
+  }
+
+  private retireInput(id: string): void {
+    const input = this.inputs.get(id);
+    if (input?.timer) clearTimeout(input.timer);
+    this.inputs.delete(id);
+    const index = this.committed.indexOf(id);
+    if (index !== -1) this.committed.splice(index, 1);
+    this.remember(this.retiredInputs, id);
+  }
+
+  private trackResponse(id: string, done = false): SpokenResponse | undefined {
+    if (this.retiredResponses.has(id)) return;
+    const existing = this.responses.get(id);
+    if (existing) return existing;
+    const reserved = this.active && !this.active.id;
+    if (done && (reserved || ![...this.tools.values()].some((tool) => !tool.finished && tool.responseId === id))) return;
+    if (!reserved && this.committed.length > 1) {
+      while (this.committed.length) this.retireInput(this.committed[0]!);
+      this.awaitingTurn = false;
+      this.notes.push({ status: "not_accepted", result: "Multiple spoken requests could not be safely matched. Please repeat one request. Nothing was sent to the bot." });
+    }
+    const inputId = !reserved && this.committed.length === 1 ? this.committed.shift() : undefined;
+    const response = { inputId };
+    this.responses.set(id, response);
+    if (reserved) this.active!.id = id;
+    else if (!done) this.active = { id };
+    if (inputId) this.awaitingTurn = false;
+    return response;
+  }
+
+  private prune(): void {
+    for (const [id, response] of this.responses) {
+      if (!response.done || this.active?.id === id) continue;
+      if ([...this.tools.values()].some((tool) => !tool.finished && tool.responseId === id)) continue;
+      const input = response.inputId ? this.inputs.get(response.inputId) : undefined;
+      if (input && input.text === undefined && !input.consumed) {
+        if (!input.timer) {
+          input.timer = setTimeout(() => {
+            if (response.inputId) this.retireInput(response.inputId);
+            this.prune();
+          }, 3_000);
+          input.timer.unref?.();
+        }
+        continue;
+      }
+      if (response.inputId) this.retireInput(response.inputId);
+      this.responses.delete(id);
+      this.suppressedAudio.delete(id);
+      this.remember(this.retiredResponses, id);
+    }
   }
 
   private emit(event: Record<string, unknown>): void {

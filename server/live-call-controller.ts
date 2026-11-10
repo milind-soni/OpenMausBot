@@ -14,6 +14,7 @@ import { QWEN_VOICE, qwenVoiceSchema } from "./qwen-live-config.ts";
 import type { LiveMediaConsumer } from "./qwen-live-socket.ts";
 import type { LiveSocket } from "./live-socket.ts";
 import { liveClientFailureSchema } from "./live-media-protocol.ts";
+import { answerBatch, finishDelegation, forgetUnqueued, linkSteeredRequests, releaseDelegations, settleRequests, trackDrain } from "./live-delegation-lifecycle.ts";
 
 export const DELEGATION_SETTLE_MS = 700;
 export const CONSENT_SETTLE_MS = 1_200;
@@ -106,7 +107,10 @@ interface Call {
   activeDelegation: string | null;
   requestDelegations: Map<string, string>;
   queueDelegations: Map<string, string>;
+  pendingDelegations: Set<string>;
+  requestAliases: Map<string, Set<string>>;
   pendingSends: number;
+  pendingIdleSettlement: boolean;
   earlyAnswers: Map<string, Message>;
   lastProgressAt: number;
   lastActivityAt: number;
@@ -310,7 +314,10 @@ export class LiveCallController {
       activeDelegation: null,
       requestDelegations: new Map(),
       queueDelegations: new Map(),
+      pendingDelegations: new Set(),
+      requestAliases: new Map(),
       pendingSends: 0,
+      pendingIdleSettlement: false,
       earlyAnswers: new Map(),
       lastProgressAt: 0,
       lastActivityAt: this.now(),
@@ -520,7 +527,8 @@ export class LiveCallController {
         if (call.endpoint.provider === "qwen" && (!request || typeof request.text !== "string" || typeof request.withoutEcho !== "string")) return;
         call.stats.delegations += 1;
         this.touch(call);
-        this.later(call, () => this.delegate(call, id, offset, request), DELEGATION_SETTLE_MS);
+        if (call.endpoint.provider === "qwen") call.pendingDelegations.add(id);
+        this.later(call, () => this.delegate(call, id, offset, request).finally(() => finishDelegation(call, id)), DELEGATION_SETTLE_MS);
         return;
       }
       case "session.usage.updated":
@@ -608,6 +616,7 @@ export class LiveCallController {
         else if (result.requestMessageId) {
           call.pendingCall.add(result.requestMessageId);
           if (!call.requestDelegations.has(result.requestMessageId)) call.requestDelegations.set(result.requestMessageId, id);
+          linkSteeredRequests(call, result.messageId, result.requestMessageId);
         }
       } else call.pendingCall.add(result.messageId);
       if (result.kind !== "queued") call.requestDelegations.set(result.messageId, id);
@@ -625,13 +634,14 @@ export class LiveCallController {
       this.append(call, "commentary", `The request could not be sent to ${call.botName}${detail ? `: ${detail}` : "."}`, id);
     } finally {
       call.pendingSends -= 1;
-      if (call.state.status === "live" && this.call === call) {
+      if (!call.pendingSends && call.state.status === "live" && this.call === call) {
         for (const [messageId, answer] of call.earlyAnswers) {
           if (answer.requestMessageId && call.pendingCall.has(answer.requestMessageId)) {
             call.earlyAnswers.delete(messageId);
             this.onAnswer(call, answer);
           }
         }
+        if (call.pendingIdleSettlement) this.settleIdleWork(call);
       }
       if (!call.pendingSends) call.earlyAnswers.clear();
     }
@@ -696,25 +706,26 @@ export class LiveCallController {
     if (activity === "working") this.touch(call);
     if (activity === "working" && (was === "idle" || call.workStartedAt === null)) this.beginWork(call);
     if (activity === "idle") call.workStartedAt = null;
+    if (activity === "idle" && !call.goodbye && (call.endpoint.provider === "qwen" || was !== "idle")) forgetUnqueued(call, id => this.deps.queued(call.state.botId, call.state.threadId, id));
     if (was === "idle" || activity !== "idle" || call.goodbye) return;
-    this.forgetUnqueued(call);
-    if (call.approval || call.question || call.queuedIds.size) return;
-    if (!call.pendingCall.size && !call.claimNextTerminal) return;
-    call.pendingCall.clear();
-    call.claimNextTerminal = false;
-    this.append(call, "commentary", LIVE_COPY.noAnswer);
+    this.settleIdleWork(call);
   }
 
-  private forgetUnqueued(call: Call): void {
-    for (const queueId of call.queuedIds) {
-      if (!this.deps.queued(call.state.botId, call.state.threadId, queueId)) call.queuedIds.delete(queueId);
-    }
+  private settleIdleWork(call: Call): void {
+    if (call.endpoint.provider === "qwen" && call.pendingSends) { call.pendingIdleSettlement = true; return; }
+    call.pendingIdleSettlement = false;
+    if (this.deps.activity(call.state.botId, call.state.threadId) !== "idle" || call.approval || call.question || call.queuedIds.size) return;
+    if (!call.pendingCall.size && !call.claimNextTerminal) return;
+    const released = settleRequests(call, [...call.pendingCall]);
+    call.claimNextTerminal = false;
+    this.append(call, "commentary", LIVE_COPY.noAnswer);
+    releaseDelegations(call, released);
   }
 
   private onMessage(call: Call, type: "message" | "message.patch", message: Message): void {
     if (call.state.status === "ended") return;
     this.touch(call);
-    if (type === "message") this.trackDrain(call, message);
+    if (type === "message") trackDrain(call, message);
     if (message.role === "user") {
       if (type !== "message" || message.kind !== "text") return;
       if (message.via === "call") {
@@ -762,30 +773,12 @@ export class LiveCallController {
     return message.sender?.id === call.personKey;
   }
 
-  private trackDrain(call: Call, message: Message): void {
-    if (message.role !== "user" || message.kind !== "text" || !message.queueId) {
-      call.drainBatch = null;
-      return;
-    }
-    call.drainBatch ??= [];
-    call.drainBatch.push(message.id);
-    call.batches.set(message.id, call.drainBatch);
-    if (call.batches.size > 200) call.batches.delete(call.batches.keys().next().value!);
-  }
-
   private onAnswer(call: Call, message: Message): void {
     const request = message.requestMessageId;
-    const batch = request === undefined ? [] : call.batches.get(request) ?? [request];
+    const batch = answerBatch(call, request);
     const forCall = batch.some((id) => call.pendingCall.has(id)) || (call.endpoint.provider !== "qwen" && (call.claimNextTerminal || (request === undefined && call.pendingCall.size > 0)));
     const typed = !forCall && request !== undefined ? call.typedTexts.get(request) : undefined;
-    const settle = () => {
-      for (const id of batch) {
-        call.pendingCall.delete(id);
-        call.typedTexts.delete(id);
-        call.batches.delete(id);
-      }
-    };
-    if (!forCall && typed === undefined) {
+    if ((!forCall && typed === undefined) || (call.endpoint.provider === "qwen" && call.pendingSends && forCall)) {
       if (call.endpoint.provider === "qwen" && call.pendingSends) {
         if (call.earlyAnswers.size >= 64) this.finish(call, "error", "The call reached its pending result limit.");
         else call.earlyAnswers.set(message.id, message);
@@ -794,17 +787,21 @@ export class LiveCallController {
     }
     if (!forCall && !this.deps.settings().readTypedReplies) {
       // Off means nothing about a typed exchange reaches OpenAI, not even as context.
-      settle();
+      releaseDelegations(call, settleRequests(call, batch));
       call.spokenAnswers.add(message.id);
       return;
     }
     const lead = !forCall && typed !== undefined ? [LIVE_COPY.typedAnswerLead(typed)] : [];
     const utterances = this.deps.speakable(message.text ?? "");
-    if (!utterances.length) return;
-    const chunks = commentaryChunks([...lead, ...utterances]);
-    if (!chunks.length) return;
+    const chunks = utterances.length ? commentaryChunks([...lead, ...utterances]) : [];
+    if (!chunks.length) {
+      if (call.endpoint.provider === "qwen") {
+        call.spokenAnswers.add(message.id);
+        releaseDelegations(call, settleRequests(call, batch));
+      }
+      return;
+    }
     call.spokenAnswers.add(message.id);
-    settle();
     if (forCall) {
       if (request === undefined || call.claimNextTerminal) call.pendingCall.clear();
       call.claimNextTerminal = false;
@@ -818,7 +815,7 @@ export class LiveCallController {
       });
       else this.append(call, "commentary", chunk, delegationId);
     }
-    for (const id of batch) call.requestDelegations.delete(id);
+    releaseDelegations(call, settleRequests(call, batch));
   }
 
   private onCard(call: Call, message: Message): void {
