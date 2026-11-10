@@ -80,6 +80,8 @@ export interface HomeWindow {
   profile(): string | null;
   opensNow(ask: "cloud" | { team: string } | { cloud: string }): boolean | null;
   cancel(): void;
+  stopOpening(): void;
+  stay(): void;
   openCloud(open?: "phone" | null): Promise<unknown>;
   /** Remove from list from this computer's screen: the Cloud it shows leaves the person's list. */
   remove(): Promise<import("./cloud-account.mjs").CloudRemoveOutcome>;

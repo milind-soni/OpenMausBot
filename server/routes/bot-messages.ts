@@ -36,6 +36,7 @@ import { extractSteerImages } from "../turn-images.ts";
 import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { noteTypedSend } from "../typed-sends.ts";
+import { startFresh } from "../fresh-start.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { refusalBody, userError } from "../user-errors.ts";
@@ -54,7 +55,7 @@ type Behavior = "allow" | "deny" | "answer";
 
 export interface BotMessageRouteDeps {
   store: Pick<Store,
-    | "activeLeaf" | "appendMessage" | "bot" | "botByThread" | "bots" | "groupByThread" | "messagesFor"
+    | "activeLeaf" | "activePath" | "appendMessage" | "bot" | "botByThread" | "bots" | "groupByThread" | "messagesFor"
     | "patchMessage" | "patchTask" | "projectBotForTask" | "setActiveLeaf" | "setTaskAskedAt" | "taskByThread" | "tasks">;
   registry: Pick<ProviderRegistry, "get">;
   /** On a team: the words for a turn with no AI to answer with, having told who can connect one. */
@@ -478,6 +479,19 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         threadId: bot.threadId, compactOnly: true, cardContinuation: true, trigger: usageTriggerFor(auth),
       });
       return json(res, 202, { ok: true, threadId: bot.threadId });
+    }
+
+    m = path.match(/^\/api\/bots\/([\w-]+)\/start-fresh$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      requirePinnedClientThread(m[1], body?.threadId);
+      const bot = requestedTaskBot(m[1], body?.threadId);
+      const notYours = cloudThreadRefusal(auth, bot.threadId);
+      if (notYours) return json(res, 403, { error: notYours });
+      // Synchronous from here: startTurn flips busy before the next request, so a turn cannot slip past this check.
+      if (threadBusy(bot.id, bot.threadId)) return json(res, 409, userError("serverError.chat.busyFresh"));
+      if (phoneSecretSubmissions.hasThread(bot.threadId)) return json(res, 409, userError("serverError.chat.savingCredential"));
+      return json(res, 200, { ok: true, message: startFresh(store, bot.id, bot.threadId), threadId: bot.threadId });
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages\/([\w-]+)\/edit$/);
