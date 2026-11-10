@@ -430,11 +430,52 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("codex"), "a read from after it").toBeNull();
   });
 
-  it("keeps a Claude hold whatever its usage shows, since Claude refuses on limits those windows do not show", () => {
+  it("ends a Claude hold too once fresh usage shows room, but not while a window is still at its limit (emails 1a1c2500, 1a1c136d)", () => {
     const { instance } = clock();
     instance.noteRefusal("claude", NOW + 23 * HOUR);
+    instance.noteUsage(report(claude([100, NOW + 2 * HOUR], [8, NOW + 5 * 24 * HOUR])));
+    expect(instance.blockedUntil("claude"), "a window still full keeps it held").not.toBeNull();
     instance.noteUsage(report(claude([3, NOW + 4 * HOUR], [8, NOW + 5 * 24 * HOUR])));
-    expect(instance.blockedUntil("claude")).toBe(NOW + 23 * HOUR);
+    expect(instance.blockedUntil("claude")).toBeNull();
+  });
+
+  it("re-reads usage every few minutes while an engine is held, with nothing else waiting, and so ends a hold that reset early", async () => {
+    vi.useFakeTimers({ now: NOW });
+    let usage = report(claude([100, NOW + 23 * HOUR], [8, NOW + 5 * 24 * HOUR]));
+    const loadUsage = vi.fn(async () => ({ ...usage, fetchedAt: iso(Date.now()) }));
+    const instance = new LimitResetClock({ accounts: () => accounts, loadUsage, waiting: () => false });
+    instance.start();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(loadUsage, "nothing held, nothing waiting: no reads").not.toHaveBeenCalled();
+    instance.noteRefusal("claude", Date.now() + 23 * HOUR);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(instance.blockedUntil("claude"), "the read soon after the refusal still shows the full window").not.toBeNull();
+    usage = report(claude([2, NOW + 5 * HOUR], [8, NOW + 5 * 24 * HOUR]));
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(instance.blockedUntil("claude")).toBeNull();
+    instance.stop();
+  });
+
+  it("ends a hold at once on Try again now, saved across a restart, and a new refusal holds it again", () => {
+    const dir = mkdtempSync(join(tmpdir(), "limit-release-"));
+    try {
+      const file = join(dir, "holds.json");
+      const changed = vi.fn();
+      const boot = () => new LimitResetClock({ accounts: () => accounts, now: () => NOW, file, onChange: changed });
+      const instance = boot();
+      expect(instance.release("claude"), "nothing held").toBe(false);
+      instance.noteRefusal("claude", NOW + 23 * HOUR);
+      changed.mockClear();
+      expect(instance.release("claude")).toBe(true);
+      expect(changed).toHaveBeenCalled();
+      expect(instance.blockedUntil("claude")).toBeNull();
+      expect(boot().blockedUntil("claude"), "still released after a restart").toBeNull();
+      instance.noteRefusal("claude", NOW + 23 * HOUR);
+      expect(instance.blockedUntil("claude")).toBe(NOW + 23 * HOUR);
+      instance.stop();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("never holds the engine for one model's own limit", () => {

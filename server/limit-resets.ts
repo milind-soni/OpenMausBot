@@ -46,11 +46,12 @@ export function engineLimitFromUsage(row: PlanProviderRow): EngineLimit | null {
 /** How far apart a refusal's reset and its window's own reset can be: a refusal names its minute, usage the second. */
 const SAME_RESET_MS = 5 * 60_000;
 
-/** A Codex refusal's hold that fresh usage shows is over: no window at its limit and none resetting at the hold's time,
- * so the window that refused is gone (a plan upgrade, a reset Codex moved). Every new turn goes to another AI while the
- * engine is held, so no turn could end the hold. Claude keeps its holds: it also refuses on limits these windows do not show. */
-function codexHoldGone(row: PlanProviderRow, limit: EngineLimit, held: number | undefined, guessed: boolean): boolean {
-  if (held === undefined || guessed || limit.driver !== "codex" || limit.blocked || limit.usedPercent === null) return false;
+/** A refusal's hold that fresh usage shows is over: no window at its limit and none resetting at the hold's time, so the
+ * window that refused is gone (a plan upgrade, a reset moved early or done outside the app). Every new turn goes to another
+ * AI while the engine is held, so no turn could end the hold. Claude too: if it still refuses on a limit these windows do
+ * not show, that refusal holds it again. A guessed hold (no reset named) has no time to compare and runs out in an hour. */
+function holdGone(row: PlanProviderRow, limit: EngineLimit, held: number | undefined, guessed: boolean): boolean {
+  if (held === undefined || guessed || limit.blocked || limit.usedPercent === null || limit.usedPercent >= 100) return false;
   const windows = [windowLine("5-hour", row.fiveHour), windowLine("weekly", row.weekly)];
   return windows.every((line) => line === null || (line.resetsAt !== null && Math.abs(line.resetsAt - held) > SAME_RESET_MS));
 }
@@ -208,7 +209,7 @@ export class LimitResetClock {
       const limit = engineLimitFromUsage(row);
       if (!limit) continue;
       next.set(limit.engine, limit);
-      if (fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && codexHoldGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
+      if (fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && holdGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
         this.refusals.delete(limit.engine);
         this.heldAt.delete(limit.engine);
         released = true;
@@ -218,6 +219,16 @@ export class LimitResetClock {
     this.usage = next;
     this.checkedAt = this.now();
     this.options.onChange?.();
+  }
+
+  /** The person's "Try again now": the engine's hold ends at once, so the next turn goes to it. A refusal holds it again. */
+  release(engine: string): boolean {
+    if (!this.refusals.delete(engine)) return false;
+    this.guessed.delete(engine);
+    this.heldAt.delete(engine);
+    this.saveHolds();
+    this.options.onChange?.();
+    return true;
   }
 
   /** Reads usage again when what is known is older than `maxAgeMs`; one read at a time. */
@@ -244,7 +255,8 @@ export class LimitResetClock {
 
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => { if (this.options.waiting?.()) void this.ensureFresh(LIMIT_POLL_MS - 1_000); }, 60_000);
+    // While an engine is held its usage is read every few minutes too, so a limit that reset early ends the hold.
+    this.timer = setInterval(() => { if (this.refusals.size || this.options.waiting?.()) void this.ensureFresh(LIMIT_POLL_MS - 1_000); }, 60_000);
     this.timer.unref?.();
   }
 

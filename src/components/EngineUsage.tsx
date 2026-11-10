@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import {
-  limitLine, limitsCheckedAt, loadLimits, reportsUsage, resetTime, usageBars, usageRows, usageTone, useEngineLimits, USAGE_BARS, windowLabel,
+  limitLine, limitsCheckedAt, loadLimits, releaseLimit, reportsUsage, resetTime, usageBars, usageRows, usageTone, useEngineLimits, USAGE_BARS, windowLabel,
   type EngineLimit, type UsageTone,
 } from "@/lib/limit-resets";
 import type { Routine } from "@/lib/routines";
@@ -103,6 +103,7 @@ export function UsageGlyph({ limit, className }: { limit: EngineLimit; className
  * clears and a fresh check. */
 export function UsageRows({ limit }: { limit: EngineLimit }) {
   const [checking, setChecking] = useState(false);
+  const { dispatch } = useStore();
   const now = Date.now();
   const checkedAt = limitsCheckedAt();
   return (
@@ -128,11 +129,23 @@ export function UsageRows({ limit }: { limit: EngineLimit }) {
       {limit.blocked && (
         <div className="flex items-start justify-between gap-3 border-t-[0.5px] border-ink/10 pt-2.5 text-[12px] leading-4">
           <p className="min-w-0 text-ink-tertiary">{t("limits.clearsOnReply", { engine: limit.name })}</p>
-          <button type="button" data-usage-check disabled={checking} aria-busy={checking}
-            onClick={() => { setChecking(true); void loadLimits(true).finally(() => setChecking(false)); }}
-            className="shrink-0 font-medium text-ink underline underline-offset-2 hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60">
-            {t("common.checkAgain")}
-          </button>
+          <span className="flex shrink-0 flex-col items-end gap-1.5">
+            <button type="button" data-usage-check disabled={checking} aria-busy={checking}
+              onClick={() => { setChecking(true); void loadLimits(true).finally(() => setChecking(false)); }}
+              className="font-medium text-ink underline underline-offset-2 hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60">
+              {t("common.checkAgain")}
+            </button>
+            <button type="button" data-usage-release disabled={checking} aria-busy={checking}
+              onClick={() => {
+                setChecking(true);
+                void releaseLimit(limit.engine)
+                  .catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }))
+                  .finally(() => setChecking(false));
+              }}
+              className="font-medium text-ink underline underline-offset-2 hover:text-ink-secondary disabled:cursor-wait disabled:opacity-60">
+              {t("limits.tryAgainNow")}
+            </button>
+          </span>
         </div>
       )}
     </div>

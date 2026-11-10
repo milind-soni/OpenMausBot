@@ -228,6 +228,13 @@ describe("the bars", () => {
     flushSync(() => blocked.querySelector<HTMLButtonElement>("[data-usage-check]")!.click());
     await settle();
     expect(fixture.api).toHaveBeenCalledWith("/api/limit-resets?refresh=1");
+    fixture.api.mockClear();
+    fixture.api.mockImplementation(async () => ({ checkedAt: NOW, engines: [windows(100, 80)] }));
+    // the check above keeps both buttons busy until its read settles
+    await vi.waitFor(() => expect(blocked.querySelector<HTMLButtonElement>("[data-usage-release]")!.disabled).toBe(false));
+    flushSync(() => blocked.querySelector<HTMLButtonElement>("[data-usage-release]")!.click());
+    await settle();
+    expect(fixture.api, "Try again now ends the hold (emails 1a1c2500, 1a1c136d)").toHaveBeenCalledWith("/api/limit-resets/release", { method: "POST", body: JSON.stringify({ engine: "claude" }) });
     expect(opened).not.toHaveBeenCalled();
   });
 

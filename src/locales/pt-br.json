@@ -7708,6 +7708,7 @@
   "settings.recovery.ownBackups": "Bots com modelos de reserva próprios (Modelo → Modelos de reserva deste bot) usam essas opções, esteja esta configuração ligada ou não.",
   "limits.windowAtLimit": "No limite",
   "limits.clearsOnReply": "O bloqueio termina automaticamente quando {engine} voltar a responder.",
+  "limits.tryAgainNow": "Tentar agora",
   "limits.cardTitle": "Uso do {engine}",
   "limits.checked": "verificado {when}",
   "botAccess.share": "Compartilhar",
