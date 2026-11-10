@@ -6,6 +6,8 @@ export interface EnvironmentDescriptor {
   label: string;
   platform: string;
   version: string;
+  /** A team's Cloud: the person's team page on MausBot Cloud, where they open it in this browser again. */
+  teamSignIn?: string;
   capabilities: { remoteSessions: true; selfUpdate: "desktop-managed" | "operator"; emailSignIn?: boolean; sharedComputers?: true; cloudHome?: true; cloudTeam?: true };
 }
 
@@ -143,7 +145,7 @@ export async function pairWithCode(
   return { ok: false, error: refusalText(body, res) };
 }
 
-export async function previewBrowserSignIn(credential: string, fetchImpl: typeof fetch = fetch): Promise<{ owner: string } | null> {
+export async function previewBrowserSignIn(credential: string, fetchImpl: typeof fetch = fetch): Promise<{ owner: string; team?: string } | null> {
   try {
     const res = await fetchImpl("/api/auth/pair", {
       method: "POST",
@@ -151,8 +153,9 @@ export async function previewBrowserSignIn(credential: string, fetchImpl: typeof
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code: credential, browser: true, preview: true }),
     });
-    const owner: unknown = Reflect.get(Object(await res.json().catch(() => ({}))), "owner");
-    return res.ok && typeof owner === "string" && owner ? { owner } : null;
+    const body = Object(await res.json().catch(() => ({})));
+    const owner: unknown = Reflect.get(body, "owner"), team: unknown = Reflect.get(body, "team");
+    return res.ok && typeof owner === "string" && owner ? { owner, ...(typeof team === "string" && team.trim() ? { team: team.trim() } : {}) } : null;
   } catch {
     return null;
   }

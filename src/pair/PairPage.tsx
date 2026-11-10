@@ -57,6 +57,17 @@ export function unencryptedPublic(where: { protocol: string; hostname: string })
   return where.protocol === "http:" && !isPrivateHost(where.hostname);
 }
 
+/** A team's Cloud: its page on MausBot Cloud, where anyone in the team opens it in this browser again. Only an https page
+ * (or a loopback fixture's), never anything else the descriptor might say. */
+export function teamPage(environment: EnvironmentDescriptor | null): string | null {
+  if (!environment?.capabilities.cloudTeam || typeof environment.teamSignIn !== "string") return null;
+  try {
+    const url = new URL(environment.teamSignIn);
+    const loopback = url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+    return (url.protocol === "https:" || loopback) && !url.username && !url.password && !url.hash ? url.href : null;
+  } catch { return null; }
+}
+
 export function pairTitle(environment: EnvironmentDescriptor | null, mode: "email" | "code" | null): string {
   if (environment?.capabilities.cloudTeam) return environment.label;
   if (environment?.capabilities.cloudHome) return t("pair.myCloud");
@@ -159,6 +170,10 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
         </p>
         {reasonWorthShowing(reason) && !connected ? <p className="mt-3 text-[13px] text-ink-secondary">{reasonWorthShowing(reason)}</p> : null}
         {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">{t("pair.expired", { app: productName(), open: t("cloudHome.connect"), section: t("settings.section.cloudAccount") })}</p> : null}
+        {!connected && teamPage(environment) ? <div data-team-sign-in className="mt-4 flex flex-col items-start gap-1.5">
+          <a href={teamPage(environment)!} className="rounded-md bg-accent px-4 py-2 text-[14px] font-medium text-accent-ink">{t("pair.team.open", { team: environment!.label })}</a>
+          <p className="text-[13px] text-ink-secondary">{t("pair.team.openHint")}</p>
+        </div> : null}
         </>}
         {opening ? null : connected ? (
           <p className="mt-4 text-[14px]">

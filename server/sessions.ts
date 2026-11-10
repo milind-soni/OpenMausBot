@@ -33,6 +33,8 @@ export const SESSION_TTL_MS = daysMs(process.env.OMB_SESSION_TTL_DAYS, 30);
 /** OMB_SESSION_MAX_DAYS (default 180): renewal never passes this, so a stolen cookie has a bounded life. */
 export const SESSION_MAX_AGE_MS = daysMs(process.env.OMB_SESSION_MAX_DAYS, 180);
 export const SESSION_RENEW_WHEN_LEFT_MS = SESSION_TTL_MS / 2;
+/** A team session the roster check keeps alive was used within this long. */
+const TEAM_ACTIVE_MS = 60 * 60_000;
 
 export function cookieMaxAgeSeconds(session: { expiresAt: number }, now = Date.now()): number {
   return Math.max(1, Math.floor((session.expiresAt - now) / 1000));
@@ -75,6 +77,9 @@ const sessionSchema = z.object({
   /** A team session opened with a code its member made (their phone): when the Admin last vouched for that member. The
    * session ends within the hour of it; each new Admin-signed pairing of the same member, in the same role, moves it. */
   memberCheckedAt: z.number().optional(),
+  /** A team session the Admin's roster check (cloud-team-roster.ts) last found its member in the team, at this role: it ends
+   * within the hour of that, so a browser or app in use stays signed in with no new pairing. */
+  vouchedAt: z.number().optional(),
   /** A browser sign-in (PairingCode `browser`): accepted only as its browser's cookie, never as a bearer token. */
   cookieOnly: z.literal(true).optional(),
   owner: z.string().max(254).optional(),
@@ -499,6 +504,34 @@ export class SessionRegistry {
     }
   }
 
+  /** The team members whose sessions the roster check should keep: used within the last hour and ending within `soonMs`
+   * (never a script's token or a move-in sign-in, which end as they were made to). At most `max` people, soonest first. */
+  membersToVouch(soonMs: number, max: number): string[] {
+    this.prune();
+    const now = this.now(), soonest = new Map<string, number>();
+    for (const session of this.sessions) {
+      if (session.membershipAuthority !== "team" || !session.email || session.token || session.moveIn) continue;
+      if (session.expiresAt <= now || session.expiresAt - now > soonMs || now - session.lastSeenAt > TEAM_ACTIVE_MS) continue;
+      soonest.set(session.email, Math.min(soonest.get(session.email) ?? Infinity, session.expiresAt));
+    }
+    return [...soonest].sort((a, b) => a[1] - b[1]).slice(0, max).map(([email]) => email);
+  }
+
+  /** The Admin's roster check found this member in the team at `role` just now: their sessions at that role, phones
+   * included, live on another hour. Any at another role end (a role change the Admin's own pairing didn't reach). */
+  vouchMember(email: string, role: TeamRole): void {
+    const address = email.trim().toLowerCase(), now = this.now();
+    this.revokeMember(address, role);
+    let changed = false;
+    for (const session of this.sessions) {
+      if (session.membershipAuthority !== "team" || session.email !== address || session.teamRole !== role || session.token || session.moveIn || session.expiresAt <= now) continue;
+      if (session.memberCheckedAt !== undefined) session.memberCheckedAt = now; else session.vouchedAt = now;
+      session.expiresAt = Math.max(session.expiresAt, teamSessionExpiresAt(now, Math.min(now + SESSION_TTL_MS, session.createdAt + SESSION_MAX_AGE_MS)));
+      changed = true;
+    }
+    if (changed) this.persist();
+  }
+
   issue(input: { label: string; scopes: Scope[]; userId?: string; email?: string }): { token: string; session: PublicSession } {
     return this.issueAccount(input);
   }
@@ -642,7 +675,7 @@ export class SessionRegistry {
     if (!record || record.expiresAt <= now || record.token) return false;
     if (record.expiresAt - now > SESSION_RENEW_WHEN_LEFT_MS) return false;
     const proposed = Math.min(now + SESSION_TTL_MS, record.createdAt + SESSION_MAX_AGE_MS);
-    const next = record.membershipAuthority === "team" ? teamSessionExpiresAt(record.memberCheckedAt ?? record.createdAt, proposed) : proposed;
+    const next = record.membershipAuthority === "team" ? teamSessionExpiresAt(Math.max(record.memberCheckedAt ?? record.createdAt, record.vouchedAt ?? 0), proposed) : proposed;
     if (next <= record.expiresAt) return false;
     record.expiresAt = next;
     record.lastSeenAt = now;
