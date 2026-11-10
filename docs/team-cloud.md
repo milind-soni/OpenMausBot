@@ -355,7 +355,7 @@ else's. A bot sent to anyone carries only the conversations they may read; when 
 else's, the main chat is named instead, without the other's messages, and its unread mark counts only what they see.
 Search, SSE (live and replayed), attachments, notifications, usage traces, routine runs, the activity and decision rows
 (kept as when, bot, tool and outcome, without their words), a bot's activity, synced folders and a team backup go
-through the same check, a deleted private chat included. Incidents and escalations from a private chat go to its person,
+through the same check, a deleted private chat included. Incidents from a private chat go to its person,
 never into a Chief's thread; work handed on from a private chat runs in a thread of that same person's, and nothing
 from a private chat is handed into a room or posted in one; a conversation a bot opens from a shared chat is the
 team's, never the last speaker's; `retry_thread`, `close_thread` and `session_search` reading a message reach only what the turn may read;
@@ -437,7 +437,7 @@ the person's picture from their team profile, or their initial when they have no
 
 | Route | Who | What |
 |---|---|---|
-| `GET /api/team/people` | any member | the members the Admin has paired here (`team-people.json`), each `{email, name, role, you?, pictureUrl?}` |
+| `GET /api/team/people` | any member | the members the Admin has paired here (`team-people.json`), each `{email, name, role, you?, pictureUrl?, here}` (below, "Who is here") |
 | `GET /api/team/people/<person>/picture?v=<version>` | the team's members | that member's picture (`<person>` is their person key). `pictureUrl` names it, and its `v` changes whenever they change it; it is revalidated on every use (`private, no-cache` with an ETag). A session that isn't a member of this team gets 403, anything off a team or not a current member's picture 404 |
 | `PUT /api/bots/<id>/reports-to {email}` | an Admin, or the bot's owner handing it over | one bot's owner; `null` hands it back to its creator |
 | `PUT /api/team/reports-to {botIds, email}` | an Admin | "Set who looks after all bots…" on a department |
@@ -453,8 +453,8 @@ whose inbox a bot's own asks reach; who may chat with the bot is its sharing's (
 
 **One Chief of Staff per person.** A crowned bot that someone owns is that person's Chief; a team has at most one per
 person (crowning a second hands the role over, and moving a Chief to someone who has one is refused). Its authority is
-exactly the bots that person owns, in every department: they are its team in its roster, their incidents and
-escalations come to it (into a notices chat of the person's own, "Problems to look at"; a notice from someone else's
+exactly the bots that person owns, in every department: they are its team in its roster, their incidents come
+to it (into a notices chat of the person's own, "Problems to look at"; a notice from someone else's
 private chat goes to that person instead), and it retries their threads and changes their setup. The person's private
 chat with it is their inbox (below). A crowned bot nobody owns stays its department's Chief, as on any other server.
 The app offers no crown on a team, so this is reached only through the API (`PATCH /api/bots/<id>` with `chiefOfStaff`).
@@ -465,10 +465,9 @@ from reaching a bot everyone sees (`sameAudience`), so today it cannot hand work
 **Every bot reaches every bot.** Departments are folders, not walls. Any bot can ask, hand work to or @mention any
 other bot on the team, in any department, someone's Chief included, with nothing to set up (`canReach` in
 `server/peer-roster.ts`). Each bot's roster lists them all, its own department first; a Chief's lists its own team
-first and everyone else as reachable. Reaching a bot gives no authority over it: supervision, incidents, escalations,
-the inbox, setup changes and automations follow ownership and departments as above (`hasAuthority`, `canManage`).
-Only three things narrow reach: a bot's own peers list (a person can open it again in the bot's settings, under
-Permissions), archived bots, and the audience rule below (a bot shared with different people). A turn in someone's
+first and everyone else as reachable. Reaching a bot gives no authority over it: supervision, incidents, the inbox,
+setup changes and automations follow ownership and departments as above (`hasAuthority`, `canManage`). Only two
+things narrow reach: archived bots, and the audience rule below (a bot shared with different people). A turn in someone's
 private chat may ask any bot, and the work it hands on stays in that person's audience; it never hands work into a room
 or posts in one.
 
@@ -666,6 +665,40 @@ leaves takes their inbox with them.
 On a My Cloud and on a desktop there are no team people: the @ list shows bots, `@you` and the profile name tag the one
 person as before, and `message_person` and the inbox do not exist.
 
+## Who is here
+
+The sidebar's People puts a dot on the face of each teammate who is here now, and lists them first after you; a
+screen reader hears *"Write to Ada. Here now"*. A bot's shared chat and a group chat show at the right of their header
+the faces of the others who have that conversation open right now (*"Ada and Ben have this open"* to a screen reader).
+A private chat shows none of it. Nothing says when someone was last here, and nothing says who is typing.
+
+- **Here.** A person is here while one of their sessions has the event stream open (`GET /api/events`), or a window of
+  theirs said so in the last 45 seconds, and for 45 seconds after the last of those ends, so a reconnect or a phone in
+  the background for a moment changes nothing. It is kept in memory only (`server/team-presence.ts`) and nothing about
+  it is written to disk. A restart forgets who was here until their apps reconnect.
+- **What the app sends.** `POST /api/presence/here {tab, threadId}` (any team session): `tab` is the window's own id,
+  `threadId` the conversation it shows, or null for none, a hidden window or a private chat. It is sent when the
+  conversation changes and every minute while the window shows. A window not heard from for about three minutes no
+  longer shows anything.
+- **What comes back.** `GET /api/team/people` gives each person `here`. On the event stream, outside the replay buffer
+  (frames with no `id`): `team.presence {email, here}` to everyone signed in, at most one every 5 seconds per person,
+  with the state it ends in, and `thread.presence {threadId, people}` to the people listed, at most one a conversation
+  every 0.75 seconds. `team.people` (replayed, like any frame) says someone joined, left or changed role: the app reads
+  the people and its own session again, so a role the Admin changed shows without reopening the team. A stream that
+  reconnects without its replay reads the people again and sends its window again. Types: `shared/team-presence.ts`.
+- **Private means private.** A conversation counts only when more than one person can read it (the team's or a group
+  chat's audience, with nobody's own MausBot in it) and the person sending can read it; anything else, a private chat
+  above all, is taken as no conversation and is never kept. Each list is checked again as it is sent, against who may
+  read the conversation then (`VisibleSet.thread`). So nobody, the Owner and every Admin included, learns from
+  presence that a person has a private chat open, which bot they talk to privately, or that a private chat exists: that
+  person only counts as here. `server/cloud-team-presence.e2e.test.ts` proves it from a member's and an admin's side.
+- **The People list itself** says *"Loading people…"* while it loads and *"Couldn't load people"* with **Try again** when
+  it cannot, and at phone width choosing a person closes the full-screen list.
+- **Older apps and servers.** A server that sends no `here` on the people list gets no `POST /api/presence/here` and the
+  app shows nothing of this; an older app on a newer server still counts as here by its stream and ignores the frames.
+
+On a My Cloud and on a desktop there is one person: no People list, no presence, nothing sent.
+
 ## What is not closed here
 
 - **Saved logins per member.** A login saved from a sign-in card is the team's (an Admin saves it, for every bot in the
@@ -677,6 +710,9 @@ person as before, and `message_person` and the inbox do not exist.
   team's sign-in files in each engine home, above); a member cannot sign an engine in as themselves, by design.
 - **A roster read from the Admin.** Without the Admin's `member-left` request (above), removal takes effect within the
   hour, and nothing is deleted.
+- **Someone invited who never opened the team.** The machine first learns of a member at their first pairing, so until
+  then they are in no People list, and nothing says they joined (`team.people`): the Admin sends no roster and no
+  "joined" of its own.
 - **Engine homes without a box, and engines outside the list.** Without the bot box (bubblewrap refused, or switched
   off) a shell reaches every file of the server's user, engine homes included; only the box keeps them apart. An engine
   whose sign-in file is not named in `engine-homes/layout.ts` starts signed out in every audience's home. Engines

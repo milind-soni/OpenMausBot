@@ -20,8 +20,17 @@ export const botDefaultModelSchema = z.object({
 }).strict().refine(value => value.effort === undefined || value.variant === undefined,
   "choose either a model variant or an effort level");
 
+/** Saved defaults may still carry fields no bot has any more; they read as if absent. */
+const RETIRED_FIELDS = ["approvePeerComms", "peers"] as const;
+function withoutRetiredFields(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const rest = { ...(value as Record<string, unknown>) };
+  for (const field of RETIRED_FIELDS) delete rest[field];
+  return rest;
+}
+
 // Preferences only: consent flags, live grants, bot IDs and execution state can never be replayed as permission grants.
-export const botDefaultsProfileSchema = profilePatchSchema.extend({
+export const botDefaultsProfileSchema = z.preprocess(withoutRetiredFields, profilePatchSchema.extend({
   name: z.string({ error: "name must be a string" }).max(100, { error: "name must be at most 100 characters" })
     .refine(fitsOnOneLine, "name must fit on one line").optional(),
   section: z.string({ error: "section must be a string" }).trim().max(60, { error: "section must be at most 60 characters" }).optional(),
@@ -36,8 +45,6 @@ export const botDefaultsProfileSchema = profilePatchSchema.extend({
   alwaysAllow: strings(200, 500).optional(),
   chiefOfStaff: z.boolean().optional(),
   managedSections: strings(100, 60).optional(),
-  approvePeerComms: z.boolean().optional(),
-  peers: strings(1000, 100).nullable().optional(),
   composio: z.boolean().optional(),
   browser: z.boolean().optional(),
   browserProfile: z.string().max(100).nullable().optional(),
@@ -49,7 +56,7 @@ export const botDefaultsProfileSchema = profilePatchSchema.extend({
   voiceNoteEveryReply: z.boolean({ error: "voiceNoteEveryReply must be true, false or null" }).nullable().optional(),
   /** At creation, so a copy of a bot kept off the helper model is off it from its first moment. */
   helperModel: z.boolean().optional(),
-}).strict();
+}).strict());
 
 const scheduleSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("once"), at: timestamp }).strict(),

@@ -75,6 +75,15 @@ export function teamOfConfig(config: unknown): { id: string } | null {
   return typeof team?.id === "string" && team.id ? { id: team.id } : null;
 }
 
+/** The person's role may have changed: read the session again. */
+export function rereadTeamChats(): void {
+  const teamId = current?.teamId;
+  if (!teamId) return;
+  void readSessionState().then((session) => {
+    if (current?.teamId === teamId && session.kind === "session") setTeamChats({ teamId, member: !session.scopes.includes("admin"), opened: session.openedThreads ?? [] });
+  }).catch(() => {});
+}
+
 /** Keeps the sidebar's rule in step with the page's server: on a team, the person's own conversations; a Member until
  * the session says otherwise is never assumed (an Admin's rule is the safe one). */
 export function useTeamChats(config: unknown) {

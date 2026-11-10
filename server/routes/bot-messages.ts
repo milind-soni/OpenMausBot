@@ -113,7 +113,7 @@ export interface BotMessageRouteDeps {
   revokeInternalCapabilitiesForThread(threadId: string): void;
   cancelGroupTurnOperations(groupId: string, threadId: string): void;
   closeOpenApprovals(threadId: string): void;
-  /** The outcome of a card the harness raised itself (a peer approval, a quota-switch offer); undefined for any other card. */
+  /** The outcome of a card the harness raised itself (a quota-switch offer); undefined for any other card. */
   harnessCardOutcome(threadId: string, requestId: string, behavior: Behavior, message: unknown): Promise<string | undefined>;
   /** What a press on one of the bot's own server-built cards is about, from the server's records; null leaves the press the person's plain answer. */
   pressRecords(bot: BotRecord, action: WidgetAction): string | null;

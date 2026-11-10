@@ -64,11 +64,16 @@ const reportableAppVersion = (value) => {
 
 const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1_000;
 
+/** What `409 relay_capable` may say about the tunnel this computer goes without: old phone apps no longer get one
+ * ("retired"), or every account is at its limit ("full"). */
+const RELAY_ONLY_REASONS = new Set(["retired", "full"]);
+
 export class ControlPlaneError extends Error {
-  constructor(code, status = 0, requestId = "", retryAfterMs = 0) {
+  constructor(code, status = 0, requestId = "", retryAfterMs = 0, tunnel = null) {
     super(code);
     this.name = "ControlPlaneError";
     this.code = code;
+    this.tunnel = code === "relay_capable" && RELAY_ONLY_REASONS.has(tunnel) ? tunnel : null;
     this.status = status;
     this.requestId = REQUEST_ID.test(requestId) ? requestId : "";
     this.retryAfterMs =
@@ -244,6 +249,7 @@ export function createControlPlaneClient({
         response.status,
         response.headers.get("x-request-id") ?? "",
         retryAfterMilliseconds(response.headers.get("retry-after")),
+        stringValue(plainObject(payload)?.tunnel),
       );
     }
     if (!allowEmpty && !plainObject(payload)) {
@@ -382,7 +388,8 @@ export function createControlPlaneClient({
     },
 
     /** `legacyDevices`: paired phones that can't use the encrypted connection; a relay-capable desktop with none gets
-     * `409 relay_capable` instead of a new tunnel. */
+     * `409 relay_capable` instead of a new tunnel. The error's `tunnel` is "retired" when old phone apps no longer
+     * get one and "full" when every account is at its limit; otherwise null. */
     async ensureEndpoint(installationCredential, { appVersion, legacyDevices } = {}) {
       if (
         typeof installationCredential !== "string" ||

@@ -5,12 +5,19 @@ import { dirname, join, relative, sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Counts disk touches for the cost test: the count is what the design promises, whatever the machine's speed.
-const fsCalls = vi.hoisted(() => ({ lstat: 0, opendir: 0, read: 0, failOpening: "" }));
+// `sameTick`: a path whose mtime and ctime stand still from its first look on, as within one tick of a filesystem's clock.
+const fsCalls = vi.hoisted(() => ({ lstat: 0, opendir: 0, read: 0, failOpening: "", sameTick: "", tick: undefined as { mtimeNs: bigint; ctimeNs: bigint } | undefined }));
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
   return {
     ...fs,
-    lstatSync: ((...args: Parameters<typeof fs.lstatSync>) => { fsCalls.lstat++; return fs.lstatSync(...args); }) as typeof fs.lstatSync,
+    lstatSync: ((...args: Parameters<typeof fs.lstatSync>) => {
+      fsCalls.lstat++;
+      const stat = fs.lstatSync(...args) as unknown as { mtimeNs?: bigint; ctimeNs?: bigint } | undefined;
+      if (!fsCalls.sameTick || String(args[0]) !== fsCalls.sameTick || typeof stat?.mtimeNs !== "bigint" || typeof stat.ctimeNs !== "bigint") return stat;
+      fsCalls.tick ??= { mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs };
+      return Object.create(stat, { mtimeNs: { value: fsCalls.tick.mtimeNs }, ctimeNs: { value: fsCalls.tick.ctimeNs } });
+    }) as typeof fs.lstatSync,
     opendirSync: ((...args: Parameters<typeof fs.opendirSync>) => {
       fsCalls.opendir++;
       if (fsCalls.failOpening && String(args[0]) === fsCalls.failOpening) throw Object.assign(new Error("EMFILE: too many open files"), { code: "EMFILE" });
@@ -25,7 +32,7 @@ import { botMemoryFiles, changedFiles, createLendingMemory, FOLDER_ENTRY_CAP, fi
 const memoryFingerprint = (workspace: string, workingFolders: readonly string[] = []) => fingerprintOf(memoryFiles(workspace, workingFolders));
 
 let dir = "";
-afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = ""; });
+afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = ""; Object.assign(fsCalls, { sameTick: "", tick: undefined }); vi.restoreAllMocks(); });
 const workspace = () => {
   dir = mkdtempSync(join(tmpdir(), "omb-lending-memory-"));
   const ws = join(dir, "workspaces", "bot1");
@@ -336,6 +343,9 @@ describe("a bot's memory and a lent Mac (server/lending-memory.ts)", () => {
     for (let i = 0; i < 3_000; i += 1) mkdirSync(join(tasks, "bot1", `t${i}`), { recursive: true });
     for (let i = 0; i < 3_000; i += 300) writeFileSync(join(tasks, "bot1", `t${i}`, "AGENTS.md"), `folder ${i}`);
     const snapshot = () => botMemoryFiles(bot, { workspace: () => ws, taskWorkspaces: tasks });
+    // Folders made a moment ago are read again at every look (the next test); this is the cost once they have settled.
+    const later = Date.now() + 60_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
     const cold = snapshot();
     expect(Object.keys(cold).filter((name) => name.endsWith("AGENTS.md"))).toHaveLength(10);
     Object.assign(fsCalls, { lstat: 0, opendir: 0, read: 0 });
@@ -354,6 +364,24 @@ describe("a bot's memory and a lent Mac (server/lending-memory.ts)", () => {
     const memory = createLendingMemory({ file: join(dir, "record.json"), files: snapshot, knownBots: () => ["bot1"] });
     memory.reconcile("bot1", false);
     expect(statSync(join(dir, "record.json")).size).toBeLessThan(10_000);
+  });
+  it("sees a second change made within the same tick of the filesystem's clock as the first, in a folder and in a file", () => {
+    // NTFS moves its clock about every 16 ms: a Windows runner removed a link and planted another inside one tick, and
+    // the folder's remembered names hid the new one. Here the clock of one path stands still instead.
+    const ws = workspace();
+    const project = join(dir, "projects", "site");
+    const skills = join(project, ".claude", "skills");
+    mkdirSync(skills, { recursive: true });
+    fsCalls.sameTick = skills;
+    const empty = memoryFingerprint(ws, [project]);
+    symlinkSync(join(dir, "elsewhere"), join(skills, "evil"));
+    expect(memoryFingerprint(ws, [project])).not.toBe(empty);
+    // A file rewritten in place to the same length, with the same stamp.
+    Object.assign(fsCalls, { sameTick: join(ws, "MEMORY.md"), tick: undefined });
+    const before = memoryFingerprint(ws);
+    writeFileSync(join(ws, "MEMORY.md"), "# Mine!!\n");
+    expect(statSync(join(ws, "MEMORY.md")).size).toBe("# Memory\n".length);
+    expect(memoryFingerprint(ws)).not.toBe(before);
   });
 });
 

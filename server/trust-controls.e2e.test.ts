@@ -308,7 +308,7 @@ it("retains Gmail draft limits through delegated work and the requester's resume
   const b = draftBot;
   const helper = draftHelper;
   for (const bot of [b, helper]) {
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, peers: [b.id, helper.id].filter(id => id !== bot.id), acknowledgePeerScope: true, outbound: { policy: "ask" } })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, outbound: { policy: "ask" } })).status).toBe(200);
   }
   const draft = { thread_id: "continued-thread", recipient_email: "sam@example.test", subject: "Re: Continuation", body: "Draft response" };
   const write = { server: "composio", tool: "GMAIL_CREATE_EMAIL_DRAFT", arguments: draft };
@@ -347,7 +347,7 @@ it("honors Ask every time on Full-access delegated and resumed turns without rel
   const b = outboundPolicyBot;
   const helper = draftHelper;
   for (const bot of [b, helper]) {
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, peers: [b.id, helper.id].filter(id => id !== bot.id), acknowledgePeerScope: true, outbound: { policy: "ask" } })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, outbound: { policy: "ask" } })).status).toBe(200);
   }
   const send = { server: "composio", tool: "GMAIL_REPLY_TO_THREAD", arguments: { thread_id: "ask-delegation" }, expectError: true };
   writeFileSync(join(fixture.info.dataDir, "gmail-plan.json"), JSON.stringify({
