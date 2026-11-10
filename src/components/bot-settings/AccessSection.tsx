@@ -24,6 +24,7 @@ import { ToolBudgetLine } from "./ToolBudgetLine";
 import { useCloudPlan } from "../ProIntroduction";
 import { xResearchAction } from "@/lib/cloud-plan";
 import { useBotApps } from "./useBotApps";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import {
   classifyConnectorTool,
   connectorServiceAccess,
@@ -711,6 +712,7 @@ export function AccessSection({
   // The same list the Vault tab shows: Composio's connected accounts plus the native Email connection.
   const apps = useBotApps(bot);
   const inventoryReady = apps.phase === "ready";
+  const ownerOrAdmin = useOwnerOrAdmin();
   const connectedSlugs = apps.connectedSlugs;
   const appLabels = Object.fromEntries(apps.apps.map((app) => [app.slug, app.label]));
 
@@ -780,8 +782,12 @@ export function AccessSection({
           <>
             {!draft && <ConnectorScopesControl connectedSlugs={connectedSlugs} labels={appLabels} scopes={bot.connectorScopes} onChange={(connectorScopes) => patch({ connectorScopes })} />}
             <ConnectorToolsGrants bot={bot} patch={patch} slugs={connectedSlugs} />
-            {bot.connectorTools !== undefined && <AppSandboxRow on={bot.appSandbox === true} onChange={(appSandbox) => patch({ appSandbox })} />}
           </>
+        )}
+        {/* Only an owner or admin may change it (the server refuses an editor). An enabled switch stays shown while the
+            app list is unknown, so it can always be turned off. */}
+        {connectedAppsEnabled && ownerOrAdmin === true && bot.connectorTools !== undefined && (inventoryReady || bot.appSandbox === true) && (
+          <AppSandboxRow on={bot.appSandbox === true} onChange={(appSandbox) => patch({ appSandbox })} />
         )}
         {connectedAppsEnabled && connectedAppsConfigured && (
           <button
