@@ -208,6 +208,7 @@ export class CdpSession {
 
   /** The next `method` event that `match` accepts; rejects on timeout or when the session goes. */
   waitFor(method: string, { match = () => true, timeoutMs = 30_000 }: { match?: (params: Params) => boolean; timeoutMs?: number } = {}): Promise<Params> {
+    if (this.#detached) return Promise.reject(new DriverError("closed", `The ${this.kind} closed while waiting for ${method}.`));
     return new Promise<Params>((resolve, reject) => {
       const done = () => {
         off();
