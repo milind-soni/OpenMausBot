@@ -163,7 +163,13 @@ describe("choosing a model with the keyboard", () => {
 
   it("moves through the Thinking steps with the arrow keys and applies one only on Enter, staying open", async () => {
     await openWith("click");
-    const low = document.querySelector<HTMLElement>("[data-effort-pill]")!;
+    const toggle = document.querySelector<HTMLElement>("[data-simple-thinking-toggle]")!;
+    expect(toggle.textContent).toBe("ThinkingAuto");
+    expect(document.querySelector("[data-simple-effort]")!.closest("[hidden]")).not.toBeNull();
+    flushSync(() => toggle.click());
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector("[data-simple-effort]")!.closest("[hidden]")).toBeNull();
+    const low = document.querySelector<HTMLElement>("[data-effort-pill]:not([data-effort-auto])")!;
     low.focus();
     press("ArrowRight");
     expect(focused()?.textContent).toBe("Medium");
@@ -359,13 +365,13 @@ describe("the floating menu and the pointer", () => {
     vi.spyOn(chip(), "getBoundingClientRect").mockImplementation(() =>
       ({ left: right - 80, right, top: 40, bottom: 72, width: 80, height: 32, x: right - 80, y: 40, toJSON: () => ({}) }) as DOMRect);
     await openWith("click");
-    expect(menu()!.style.left).toBe(`${980 - 300}px`);
+    expect(menu()!.style.left).toBe(`${980 - 324}px`);
     right = 952;
     flushSync(() => chip().parentElement!.dispatchEvent(new Event("animationend", { bubbles: true })));
-    expect(menu()!.style.left).toBe(`${952 - 300}px`);
+    expect(menu()!.style.left).toBe(`${952 - 324}px`);
     right = 900;
     flushSync(() => menu()!.dispatchEvent(new Event("animationend", { bubbles: true })));
-    expect(menu()!.style.left).toBe(`${952 - 300}px`);
+    expect(menu()!.style.left).toBe(`${952 - 324}px`);
   });
 
   it("moves the keyboard highlight to the row under the mouse once the keyboard is in the list", async () => {

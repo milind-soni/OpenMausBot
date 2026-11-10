@@ -96,6 +96,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       "broken-account": {
         driver: "claudeAgent", displayName: "Repairable shadow", config: { cli, configDir: "relative/saved-directory" },
       },
+      codex: { driver: "codex", config: { cli: join(SERVER_DIR, "testing", "fake-codex-app-server.ts") } },
       claude: {
         driver: "claudeAgent", displayName: "Default fixture", config: { cli },
         environment: { ANTHROPIC_AUTH_TOKEN: "fixture-base-secret", BASE_ONLY_SENTINEL: "base-only" },
@@ -108,7 +109,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   clientToken = paired.token;
   const port = await freePortBlock([0, 1]);
   base = `http://127.0.0.1:${port}`;
-  const offlinePrelude = `data:text/javascript,${encodeURIComponent('globalThis.fetch = async () => new Response("offline fixture", { status: 503 });')}`;
+  const offlinePrelude = `data:text/javascript,${encodeURIComponent('let refreshes = 0; globalThis.fetch = async (url) => String(url).startsWith("https://catalog-fixture.example/") ? Response.json({ data: [{ id: "model-a" }, { id: "model-b" }] }) : String(url).startsWith("https://growing-fixture.example/") ? Response.json({ data: [{ id: "model-a" }, ...(refreshes++ ? [{ id: "model-new" }] : [])] }) : new Response("offline fixture", { status: 503 });')}`;
   child = spawn(process.execPath, ["--import", offlinePrelude, join(SERVER_DIR, "index.ts")], {
     cwd: join(SERVER_DIR, ".."),
     env: {
@@ -138,6 +139,109 @@ afterAll(async () => {
 });
 
 describe("Claude account HTTP API", () => {
+  it.each(["claude", "codex"])("connects %s without a model and keeps independent bot choices", async engine => {
+    const created = await api("POST", `/api/instances/${engine}-endpoint`, { displayName: "Catalog fixture", baseUrl: "https://catalog-fixture.example/v1", token: "catalog-fixture-key" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    const instance = created.body.instances.find((row: any) => row.instanceId === id);
+    expect(instance.models.options).toEqual(expect.arrayContaining([expect.objectContaining({ id: "model-a", custom: true }), expect.objectContaining({ id: "model-b", custom: true })]));
+    const first = await addBotOn(id, "model-a");
+    const second = await addBotOn(id, "model-b");
+    expect((await bot(first.id)).modelSelection.model).toBe("model-a");
+    expect((await bot(second.id)).modelSelection.model).toBe("model-b");
+    if (engine === "claude") {
+      for (const [launched, model] of [[first, "model-a"], [second, "model-b"]] as const) {
+        expect((await api("POST", `/api/bots/${launched.id}/messages`, { text: "which model" })).status).toBe(202);
+        await idle(launched.id);
+        const spawn = JSON.parse(readFileSync(join(saved().instances[id].config.configDir, "spawn.json"), "utf8"));
+        expect(spawn.argv[spawn.argv.indexOf("--model") + 1]).toBe(model);
+      }
+    }
+    expect((await api("PATCH", `/api/instances/${id}/${engine}-endpoint`, { displayName: "Renamed", baseUrl: "https://catalog-fixture.example/v1" })).status).toBe(200);
+    const configs = saved().instances[id].config;
+    expect(engine === "codex" ? configs.endpoint.models : configs.endpointModels).toEqual(["model-a", "model-b"]);
+  });
+
+  it.each([
+    ["claude", "https://api.anthropic.com"],
+    ["codex", "https://api.openai.com/v1"],
+  ])("connects official %s without choosing a provider-wide model", async (engine, baseUrl) => {
+    const result = await api("POST", `/api/instances/${engine}-endpoint`, { displayName: "Official fixture", baseUrl, token: "official-fixture-key" });
+    expect(result.status, JSON.stringify(result.body)).toBe(201);
+    const instance = result.body.instances.find((row: any) => row.instanceId === result.body.instanceId);
+    expect(instance.models.options.length).toBeGreaterThan(1);
+    expect(instance.models.options.every((option: any) => option.custom)).toBe(true);
+    expect(saved().instances[result.body.instanceId].environment).not.toHaveProperty("ANTHROPIC_MODEL");
+  });
+
+  it("does not persist an endpoint when gateway model discovery fails", async () => {
+    const before = Object.keys(saved().instances);
+    const result = await api("POST", "/api/instances/codex-endpoint", { displayName: "Failed fixture", baseUrl: "https://offline.example/v1", token: "failed-fixture-secret" });
+    expect(result.status).toBe(400);
+    expect(result.body.error).toContain("Could not discover gateway models");
+    expect(JSON.stringify(result.body)).not.toContain("failed-fixture-secret");
+    expect(Object.keys(saved().instances)).toEqual(before);
+  });
+
+  it("reads a gateway's model list again on Refresh models", async () => {
+    const created = await api("POST", "/api/instances/codex-endpoint", { displayName: "Growing fixture", baseUrl: "https://growing-fixture.example/v1", token: "growing-fixture-key" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    expect(saved().instances[id].config.endpoint.models).toEqual(["model-a"]);
+    const refreshed = await api("POST", `/api/instances/${id}/refresh-models`, {});
+    expect(refreshed.status, JSON.stringify(refreshed.body)).toBe(200);
+    expect(saved().instances[id].config.endpoint.models).toEqual(["model-a", "model-new"]);
+    expect(refreshed.body.instances.find((row: any) => row.instanceId === id).models.options.map((option: any) => option.id)).toContain("model-new");
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+  });
+
+  it("keeps a Codex endpoint's fixed model when its key changes on the official URL", async () => {
+    const created = await api("POST", "/api/instances/codex-endpoint", { displayName: "Fixed fixture", baseUrl: "https://api.openai.com/v1", token: "fixed-fixture-key", model: "fixed-model" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { token: "fixed-rotated-key" })).status).toBe(200);
+    expect(saved().instances[id].config.endpoint.models).toEqual(["fixed-model"]);
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+  });
+
+  it("rotates a legacy Claude endpoint's key without a model catalog", async () => {
+    const created = await api("POST", "/api/instances/claude-endpoint", { displayName: "Legacy fixture", baseUrl: "https://offline.example", token: "legacy-fixture-key", model: "legacy-model" });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    const rotated = await api("PATCH", `/api/instances/${id}/claude-endpoint`, { token: "legacy-rotated-key" });
+    expect(rotated.status, JSON.stringify(rotated.body)).toBe(200);
+    expect(saved().instances[id].environment).toMatchObject({ ANTHROPIC_API_KEY: "legacy-rotated-key", ANTHROPIC_MODEL: "legacy-model" });
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+  });
+
+  it("creates, edits and removes an isolated Codex API endpoint without OAuth or key disclosure", async () => {
+    const fields = { displayName: "CLIProxyAPI", baseUrl: "https://gateway.example/v1", token: "codex-api-fixture-secret", model: "gateway-model" };
+    const created = await api("POST", "/api/instances/codex-endpoint", fields);
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.instanceId;
+    const instance = created.body.instances.find((row: any) => row.instanceId === id);
+    expect(instance.codexEndpoint).toEqual({ baseUrl: fields.baseUrl, models: ["gateway-model"], tokenSaved: true });
+    expect(instance.authentication).toBeUndefined();
+    expect(JSON.stringify(created.body)).not.toContain(fields.token);
+    expect(saved().instances[id].environment.CODEX_HOME).toContain(id);
+    expect(saved().instances[id].environment.OPENMAUSBOT_CODEX_API_KEY).toBe(fields.token);
+    expect((await api("POST", `/api/instances/${id}/auth/start`)).status).not.toBe(200);
+    expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { baseUrl: "https://other.example/v1" })).status).toBe(400);
+    expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { model: "another-model" })).status).toBe(200);
+    expect(saved().instances[id].config.endpoint.models).toEqual(["another-model"]);
+    expect((await api("PATCH", `/api/instances/${id}/codex-endpoint`, { token: "codex-api-rotated-secret" })).status).toBe(200);
+    expect(saved().instances[id].config.endpoint.models).toEqual(["another-model"]);
+    const bot = await addBotOn(id, "another-model");
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(409);
+    expect((await api("PATCH", `/api/bots/${bot.id}/model`, { instanceId: "claude", model: MODEL })).status).toBe(200);
+    expect((await api("DELETE", `/api/instances/${id}`)).status).toBe(200);
+    expect(saved().instances[id]).toBeUndefined();
+    for (const baseUrl of ["http://gateway.example/v1", "https://user:secret@gateway.example/v1", "invalid"]) {
+      expect((await api("POST", "/api/instances/codex-endpoint", { ...fields, baseUrl })).status).toBe(400);
+    }
+    expect((await api("POST", "/api/instances/codex-endpoint", fields, { authorization: `Bearer ${clientToken}` })).status).toBe(403);
+  });
+
   it("creates beside an invalid saved directory and repairs that unused shadow without accepting invalid replacements", async () => {
     const initial = (await api("GET", "/api/instances")).body.instances.find((row: any) => row.instanceId === "broken-account");
     expect(initial.snapshot.state).toBe("unavailable");

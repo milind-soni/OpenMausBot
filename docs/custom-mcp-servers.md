@@ -83,6 +83,30 @@ the ones that show card details, so choose which bots get it under **Bot
 access**. Existing custom entries at the official HTTP endpoint are recognized
 rather than replaced.
 
+### Email, phone numbers and calls for your bots
+
+Four cards give bots their own email, numbers and calls on accounts you own,
+so each service bills you directly and OpenMausBot pays for none of it.
+
+| Card | Official endpoint | Connects with |
+| --- | --- | --- |
+| **AgentMail**, email inboxes | `https://mcp.agentmail.to/mcp` | Browser sign-in |
+| **AgentPhone**, US and Canadian numbers, texts and calls | `https://mcp.agentphone.ai/mcp` | Browser sign-in |
+| **Vapi**, phone calls | `https://mcp.vapi.ai/mcp` | A private API key from the Vapi dashboard |
+| **Telnyx**, numbers in many countries, texts and calls | `https://api.telnyx.com/v2/mcp` | An API key from the Telnyx portal |
+
+Vapi and Telnyx have no browser sign-in, so their cards take a pasted key. The
+key goes in the server's `Authorization: Bearer` header, never in its
+address, on a server that stays off until its tools load with that key; a
+refused key leaves it off and says why. Like every header value it is never
+shown again. **Disconnect** on a key card deletes the server and its key.
+
+Placing a call, buying a number and every Telnyx action (Telnyx reaches its
+whole API through one tool) follow **Sending on your behalf**, the same as
+sending a message. Choose which bots get each card under **Bot access**. To
+have a bot answer new mail, texts or calls, add a webhook for that bot in
+**Automations** and paste its address into the service.
+
 ### Servers that ask you to sign in
 
 Some URL servers take no token; they want you to sign in with your browser
@@ -93,7 +117,11 @@ button. Sign in opens the provider's page in your browser, which returns to
 OpenMausBot when you approve. The server then shows **Signed in**, and Test
 lists its tools. A server that lists its tools before you sign in but refuses
 tool calls the same way (an HTTP 401 pointing at those sign-in details) shows
-**Sign in** too.
+**Sign in** too. Test first calls a tool name no server has. If the server
+answers that without asking who is calling, as Gmail's MCP server does, Test
+calls one of the server's own tools once, with no arguments: only a tool the
+server marks read-only and not destructive, and that requires arguments, so it
+has nothing to work on. Background checks never do this.
 
 - **Which servers work.** The authorization server must support PKCE with
   S256. If it lets apps register themselves (dynamic client registration),

@@ -1,6 +1,6 @@
 // ~/.openmausbot/config.json, with env vars overriding its credentials.
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
-import { homedir } from "node:os";
+import { dataHome } from "./data-dir.ts";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
@@ -402,8 +402,8 @@ const appConfigSchema = z.object({
   live: liveConfigSchema.optional(),
   /** Image provider credentials stay separate; choosing a router never reuses a cloud key. */
   imageGen: imageGenConfigSchema.optional(),
-  /** Non-secret profile details; aboutMe is shared with every bot. */
-  profile: z.object({ name: optionalText, email: optionalText, aboutMe: z.string().max(24_000).optional(), avatarUrl: z.union([z.literal(""), botAvatarUrlSchema]).optional() }).optional(),
+  /** Non-secret profile details; aboutMe is shared with every bot, and so are everyBotRules, ahead of each bot's own instructions. */
+  everyBotRules: z.string().max(24_000).optional(), profile: z.object({ name: optionalText, email: optionalText, aboutMe: z.string().max(24_000).optional(), avatarUrl: z.union([z.literal(""), botAvatarUrlSchema]).optional() }).optional(),
   /** UI language override (BCP-47, lowercase), absent follows the system; what a paired phone calls this computer, "" for the default. */
   language: optionalText, computerName: z.string().trim().max(63).optional(),
   rooms: roomConfigSchema.optional(),
@@ -493,7 +493,7 @@ export interface AppConfig extends HelperConfig {
   decider?: DeciderConfig;
   imageGen?: ImageGenerationConfig;
   live?: LiveConfig;
-  profile?: { name?: string; email?: string; aboutMe?: string; avatarUrl?: string };
+  profile?: { name?: string; email?: string; aboutMe?: string; avatarUrl?: string }; everyBotRules?: string;
   rooms?: { turnTimeoutMinutes: number };
   mcp?: { callTimeoutMinutes?: number };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
@@ -674,10 +674,10 @@ export function builtInBrowserEnabled(cfg: AppConfig, _env: NodeJS.ProcessEnv = 
   return cfg.features?.browser !== false;
 }
 
-/** Security: off unless true because a read-only folder grant can still be escalated to a shell. */
-export function sharedComputersEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.sharedComputers === true;
-}
+/** Security: every paired session may lend its computer only when true, because a read-only folder grant can still be escalated to a shell. */
+export function sharedComputersEnabled(cfg: AppConfig): boolean { return cfg.features?.sharedComputers === true; }
+/** A self-hosted server's own admin pairings may lend their computer unless this is false (each desktop asks its person first). */
+export function ownerLendingEnabled(cfg: AppConfig): boolean { return cfg.features?.sharedComputers !== false; }
 
 export function claudeUserMcpEnabled(cfg: Pick<AppConfig, "features">): boolean {
   return cfg.features?.claudeUserMcp === true;
@@ -710,8 +710,8 @@ export function changedInstanceIds(before: Record<string, unknown>, after: Recor
     .filter((id) => !isDeepStrictEqual(before[id], after[id]));
 }
 
-export const DATA_DIR = process.env.OMB_DATA_DIR ?? join(homedir(), ".openmausbot");
-const LEGACY_DATA_DIR = join(homedir(), ".opengrokbot");
+export const DATA_DIR = process.env.OMB_DATA_DIR || join(dataHome(), ".openmausbot");
+const LEGACY_DATA_DIR = join(dataHome(), ".opengrokbot");
 export const EVENTS_DIR = join(DATA_DIR, "events");
 export const NATIVE_DIR = join(DATA_DIR, "native");
 
@@ -944,7 +944,7 @@ export function saveConfig(
   }
   keepImageModels();
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
-  for (const key of ["language", "computerName"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
+  for (const key of ["language", "computerName", "everyBotRules"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
   if (checkedPatch.customDomain !== undefined) disk.customDomain = checkedPatch.customDomain;
   if (checkedPatch.signIn !== undefined) disk.signIn = checkedPatch.signIn;
   // Replace the section so clearing a backup cannot revive the old selection.

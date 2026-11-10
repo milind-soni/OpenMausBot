@@ -122,8 +122,9 @@ export type RuntimeEvent = RuntimeEventBase &
     | { type: "item.completed"; itemType: "tool"; ok: boolean; output?: string }
     | { type: "item.completed"; itemType: "assistant_text"; text: string }
     /** Provider-generated raster bytes, folded into the private attachment
-     * store and never forwarded to renderer SSE. */
-    | { type: "item.completed"; itemType: "assistant_image"; data: string; alt?: string }
+     * store and never forwarded to renderer SSE. `fromTool`: a tool's result
+     * returned the image to the engine; the bot did not make or send it. */
+    | { type: "item.completed"; itemType: "assistant_image"; data: string; alt?: string; fromTool?: true }
     | { type: "content.delta"; streamKind: "assistant_text" | "reasoning_text"; delta: string }
     | {
         type: "request.opened";
@@ -195,13 +196,16 @@ export type RuntimeEvent = RuntimeEventBase &
     // `limitResetsAt`: epoch ms when the usage limit refusing this account resets, when the engine says.
     // `limit`: a usage limit refused this turn: the account's on this engine ("engine"), one model's own window
     // ("model"), or that model's extra usage credits ("credits"); the engine's other models still work for the last two.
+    // `limitModels`: the models a "model" limit holds, when one allowance is shared (OpenCode's free models).
     | { type: "runtime.error"; message: string; partial?: boolean; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; trialCredit?: "used_up" | "ended" | "paused" | "too_low";
-        stalled?: boolean; limitResetsAt?: number; limit?: "engine" | "model" | "credits";
+        stalled?: boolean; limitResetsAt?: number; limit?: "engine" | "model" | "credits"; limitModels?: string[];
         /** `message` as a `chat.notice.*` key and params, when it is one of the server's fixed sentences. */
         text?: ServerText }
     /** Something the person should know that did not fail the turn — for
      * example, a saved model the engine no longer offers was replaced. */
     | { type: "runtime.notice"; message: string; text?: ServerText }
+    /** The engine condensed the conversation into its own summary (Claude Code's compact_boundary); the chat marks it. */
+    | { type: "context.compacted" }
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;

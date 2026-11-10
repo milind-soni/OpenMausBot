@@ -308,6 +308,19 @@ describe("who goes first when memory holds several", () => {
     await finish(h, "running");
     expect(order[0]).toBe("handoff");
   });
+
+  it("asks who goes first once per waiter, since every waiter orders the queue on each wake", async () => {
+    const h = await full(["person"]);
+    const asked: string[] = [];
+    h.memory.useTurnOrder((threadId) => { asked.push(threadId); return threadId === "person"; });
+    for (const threadId of ["handoff-1", "handoff-2", "person"]) void waiting(h, threadId, []);
+    await settle();
+    asked.length = 0;
+    h.advance(1);
+    const order = (h.memory as unknown as { order(): { threadId: string }[] }).order();
+    expect(order.map((waiter) => waiter.threadId)).toEqual(["person", "handoff-1", "handoff-2"]);
+    expect(asked).toEqual(["handoff-1", "handoff-2", "person"]);
+  });
 });
 
 describe("running short", () => {
@@ -606,6 +619,108 @@ describe("an engine's adapter on a Cloud home", () => {
     const local = fakeInstance();
     const localAdapter = local.instance.adapter;
     expect(withEngineMemory(local.instance, new EngineMemory({ enabled: false })).adapter).toBe(localAdapter);
+  });
+});
+
+describe("a plan's limit on turns at once", () => {
+  const signal = () => new AbortController().signal;
+  const capped = (most: number | undefined, waitsOnOthers: (threadId: string) => boolean = () => false) => {
+    const h = host();
+    h.memory.useCap({ most: () => most, waitsOnOthers });
+    h.memory.useWaits({ text: (_threadId, wait) => `limit ${wait.limit} ahead ${wait.ahead}`, began: () => {}, changed: () => {} });
+    return h;
+  };
+
+  it("runs the plan's number of turns, whatever memory allows, and the next starts once one ends, saying why it waits", async () => {
+    const h = capped(2);
+    expect(h.memory.limited()).toBe(true);
+    expect(await h.memory.admit("a", signal(), () => {}, "turn")).toBe(true);
+    expect(await h.memory.admit("b", signal(), () => {}, "turn")).toBe(true);
+    const said: string[] = [];
+    let third: boolean | null = null;
+    void h.memory.admit("c", signal(), (text) => said.push(text), "turn").then((admitted) => { third = admitted; });
+    await settle();
+    expect([third, said]).toEqual([null, ["limit 2 ahead 0"]]);
+    h.memory.turnEnded("a");
+    await settle();
+    expect(third).toBe(true);
+  });
+
+  it("lets two woken together take only the places there are", async () => {
+    const h = capped(2);
+    await h.memory.admit("a", signal(), () => {}, "turn");
+    const admitted: string[] = [];
+    for (const threadId of ["b", "c"]) void h.memory.admit(threadId, signal(), () => {}, "turn").then(() => admitted.push(threadId));
+    await settle();
+    expect(admitted).toEqual(["b"]);
+  });
+
+  it("asks who goes first and who holds a place a number of times that grows with the queue, not with its square", async () => {
+    const perWake = async (waiters: number) => {
+      const h = host({ tickMs: 60_000 });
+      let asked = 0;
+      h.memory.useCap({ most: () => 2, waitsOnOthers: () => { asked++; return false; } });
+      h.memory.useTurnOrder(() => { asked++; return false; });
+      await h.memory.admit("a", signal(), () => {}, "turn");
+      await h.memory.admit("b", signal(), () => {}, "turn");
+      const stop = new AbortController();
+      for (let at = 0; at < waiters; at++) void h.memory.admit(`w${at}`, stop.signal, () => {}, "turn");
+      await settle();
+      asked = 0;
+      for (let round = 0; round < 5; round++) {
+        (h.memory as unknown as { wake(): void }).wake();
+        await settle();
+      }
+      const each = asked / 5;
+      stop.abort();
+      await settle();
+      return each;
+    };
+    const [ten, forty] = [await perWake(10), await perWake(40)];
+    expect(forty, "one wake of 40 waiters").toBeLessThanOrEqual(2 * 40 + 10);
+    expect(forty / ten, "four times the waiters, about four times the asking").toBeLessThan(6);
+  });
+
+  it("holds no place for a turn waiting on work it handed out, so that work runs", async () => {
+    const waiting = new Set(["a", "b"]);
+    const h = capped(2, (threadId) => waiting.has(threadId));
+    await h.memory.admit("a", signal(), () => {}, "turn");
+    await h.memory.admit("b", signal(), () => {}, "turn");
+    expect(await h.memory.admit("child", signal(), () => {}, "turn")).toBe(true);
+  });
+
+  it("limits nothing where the plan sets no number", async () => {
+    const h = capped(undefined);
+    expect(h.memory.limited()).toBe(false);
+    for (const threadId of ["a", "b", "c", "d"]) expect(await h.memory.admit(threadId, signal(), () => {}, "turn")).toBe(true);
+  });
+
+  it("makes a turn wait for a place even when its thread's engine is still running", async () => {
+    const h = capped(1);
+    h.memory.turnStarted("t1"); h.spawn("t1"); h.memory.turnEnded("t1");
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const fake = fakeInstance();
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "again" } as SendTurnInput);
+    await settle();
+    expect(fake.sent).toEqual([]);
+    h.memory.turnEnded("busy");
+    expect(await turn).toEqual({ turnId: "turn-t1" });
+    expect(fake.sent).toEqual(["t1"]);
+  });
+
+  it("gives the place back when a turn is stopped while it waits for memory", async () => {
+    const h = capped(2);
+    h.state.available = 300 * MB;
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const fake = fakeInstance();
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    await settle();
+    await decorated.adapter.interruptTurn("t1");
+    await expect(turn).rejects.toBeInstanceOf(TurnNotStartedError);
+    expect(h.memory.busy()).toBe(1);
+    expect(await h.memory.admit("t2", signal(), () => {}, "turn")).toBe(true);
   });
 });
 

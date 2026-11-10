@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
 import { appPermissionHandlers } from "./app-permissions.mjs";
+import { parseServerInput } from "./server-address.mjs";
 
 const require = createRequire(import.meta.url);
 const environments = require("./environments.cjs");
@@ -60,7 +61,7 @@ test("a saved server's page is refused the microphone until the person allows it
 });
 
 test("an address typed before pairing gets no microphone on its own (the review's repro)", async () => {
-  const typed = environments.parseHostedWorkspaceLink("stranger-server.example.com");
+  const typed = { origin: parseServerInput("stranger-server.example.com").candidates[0] };
   let s = environments.withEnvironment({ environments: [], activeId: environments.LOCAL_ID }, { origin: typed.origin }, () => "typed");
   s = environments.withActive(s, "typed");
   const h = harness(s);

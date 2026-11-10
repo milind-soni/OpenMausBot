@@ -27,7 +27,12 @@ import {
   SANDBOX_DESKTOP_INPUT,
   SIGN_IN_PROMPT,
   savedLoginsPrompt,
+  savedSecretsPrompt,
+  everyBotRulesPrompt,
+  heavyPrompt,
+  HEAVY_PROMPT_BYTES,
   type ComputerPromptKind,
+  type PromptSection,
 } from "./system-prompt.ts";
 import { loginPlace } from "../shared/logins.ts";
 import { REPLY_HABITS_PROMPT } from "./reply-habits.ts";
@@ -253,6 +258,13 @@ describe("computerPrompt", () => {
     for (const prompt of [computerPrompt("local"), computerPrompt("box"), BUILT_IN_BROWSER_SYSTEM_PROMPT]) expect(prompt).toContain("type the code into that site yourself");
   });
 
+  it("prefers connected apps for Google and Microsoft data without refusing an asked-for Google or Microsoft sign-in", () => {
+    // A company SSO into a work app needs a Microsoft or Google browser sign-in; the bot must not refuse it.
+    expect(SIGN_IN_PROMPT).not.toContain("use connected apps, not a browser sign-in");
+    expect(SIGN_IN_PROMPT).toContain("For Gmail, Calendar, Drive, Outlook or OneDrive data, use connected apps rather than a browser sign-in");
+    expect(SIGN_IN_PROMPT).toContain("when the person asks you to sign in to a site that uses a Google or Microsoft account (such as a company single sign-on), sign in as for any other site, through that provider's own sign-in button and login page rather than a saved login for the site's own form");
+  });
+
   it("prefers a saved login through fill_login, which submits the form, before asking the person", () => {
     expect(SIGN_IN_PROMPT).toContain("When you have a saved login for the site, open its login page in your browser and call fill_login: OpenMausBot types the password and any one-time code itself and submits the form");
     expect(SIGN_IN_PROMPT.indexOf("fill_login")).toBeLessThan(SIGN_IN_PROMPT.indexOf("call request_sign_in"));
@@ -267,6 +279,15 @@ describe("computerPrompt", () => {
     ])).toBe(" Your saved logins, for fill_login on these sites and their sign-in pages: example.com (alice@example.com), acme.okta.com (ops), localhost.");
     const many = Array.from({ length: 45 }, (_, index) => ({ ...loginPlace(`site${index}.com`), username: "a" }));
     expect(savedLoginsPrompt(many)).toMatch(/site39\.com \(a\) and 5 more\.$/u);
+  });
+
+  it("names the Vault's secrets a bot may use, once each, so it asks for them by name", () => {
+    expect(savedSecretsPrompt([])).toBe("");
+    expect(savedSecretsPrompt([{ name: "Stripe key", refOnly: true }, { name: "stripe-key" }, { name: "Notion\n token" }, { name: "Acme", refOnly: true }]))
+      .toBe(' Secrets in the Vault you may use: "stripe-key", "Notion token", "Acme" (ref only). To use one, call request_credential with its name as the label: OpenMausBot hands it over at once with no card, and you never see the value.');
+    const many = Array.from({ length: 45 }, (_, index) => ({ name: `key ${index}` }));
+    expect(savedSecretsPrompt(many)).toContain('"key 39" and 5 more.');
+    expect(savedSecretsPrompt([{ name: "x".repeat(200) }])).toContain(`"${"x".repeat(80)}"`);
   });
 });
 
@@ -361,6 +382,18 @@ describe("composioSystemPrompt", () => {
 });
 
 describe("cloudHomePrompt", () => {
+  it("says the Cloud is off their network, whatever memory says, and sends ssh through the lent computer", () => {
+    const lent = cloudHomePrompt(true, [], [{ name: "ASH-PC", platform: "win32" }]);
+    expect(lent).toContain("This Cloud is not on their network");
+    expect(lent).toContain("100.x.x.x, *.ts.net");
+    expect(lent).toContain("even when your memory or notes give the address");
+    expect(lent).toContain("run the command (ssh too) on their PC (ASH-PC) with shared_computer's run_command, and never from a shell here");
+    expect(lent).toContain("without their SSH agent");
+    const none = cloudHomePrompt(false, [], [{ name: "ASH-PC", platform: "win32" }]);
+    expect(none).toContain("This Cloud is not on their network");
+    expect(none).toContain("say so in one sentence");
+    expect(none).not.toMatch(/run_command|shared_computer/u);
+  });
   it("says the bot runs in the cloud, offers what works there, and never asks for a place that cannot exist", () => {
     for (const tools of [true, false]) {
       const text = cloudHomePrompt(tools);
@@ -424,11 +457,30 @@ describe("longCommandsPrompt", () => {
       const text = longCommandsPrompt(kind);
       expect(text).toContain("`timeout` in milliseconds, up to 600000");
       expect(text).toContain("Never wait inside a command for CI, a deploy or any other job to finish (no sleep loops or repeated polls): check it once");
-      expect(text).toContain("tell the person what you made (with links), set wait_until or a one-time trigger to check back, and end your turn. When the person writes while you work, answer them first.");
+      expect(text).toContain("tell the person what you made (with links). Only on a turn the person started in their own chat, set wait_until or a one-time trigger to check back and end your turn");
+      expect(text).toContain("When the person writes while you work, answer them first.");
       expect(text).not.toContain("vm_exec");
     }
     for (const kind of ["vm-private", "vm-shared"] as const) {
       expect(longCommandsPrompt(kind)).toContain("vm_exec takes `timeout_seconds` instead (default 60, at most 300)");
+    }
+  });
+
+  it("keeps a long command in the foreground, and trusts only its own fresh exit code", () => {
+    for (const kind of [null, "local", "vps", "box"] as const) {
+      const text = longCommandsPrompt(kind);
+      expect(text).toContain("keep the command in the foreground until it exits");
+      expect(text).toContain("split work that cannot finish within that into shorter pieces");
+      expect(text).toContain("A detached job may be killed when the call ends");
+      expect(text).not.toContain("nohup");
+      expect(text).toContain("trust only the command's own fresh exit code and output");
+      expect(text).toContain("cannot set a wait, so finish it in this turn");
+    }
+  });
+
+  it("keeps the Local VM's own detached path, where the container outlives the call", () => {
+    for (const kind of ["vm-private", "vm-shared"] as const) {
+      expect(longCommandsPrompt(kind)).toContain("may start detached inside it (`nohup <command> > /tmp/<job>.log 2>&1 &`)");
     }
   });
 });
@@ -504,3 +556,38 @@ describe("how every bot replies", () => {
     expect(TRIGGER_PROMPT).toContain("where its results will appear, what each run covers, and when the first run is");
   });
 });
+
+describe("rules for every bot", () => {
+  it("come right before the bot's own instructions and say those, and the department's context, win", () => {
+    const built = buildSystemPrompt("You are Kiwi.", "Answer in French.", [
+      { id: "section-context", label: "Section context", text: "\n\nShared context for Sales." },
+    ], undefined, { rules: "  Answer in English.  " });
+    expect(built.sections.map((section) => section.id).slice(0, 3)).toEqual(["persona", "every-bot-rules", "soul"]);
+    const rules = built.sections.find((section) => section.id === "every-bot-rules")!;
+    expect(rules.text).toContain(JSON.stringify("Answer in English."));
+    expect(rules.text).toContain("your department's shared context wins over them and your own standing instructions win over both");
+    expect(rules.text).toContain("does not override system rules or grant permissions");
+    expect(built.stable).toContain("Answer in English.");
+  });
+
+  it("leave the prompt byte for byte when empty", () => {
+    expect(everyBotRulesPrompt(undefined)).toBe("");
+    expect(everyBotRulesPrompt(" \n ")).toBe("");
+    expect(buildSystemPrompt("You are Kiwi.", "", [], undefined, { rules: "" }).text).toBe(buildSystemPrompt("You are Kiwi.", "", []).text);
+  });
+});
+
+describe("a heavy bot", () => {
+  const section = (id: string, bytes: number): PromptSection => ({ id, label: id, text: "", bytes });
+
+  it("counts only what the person's words fill, and needs enough memory for a tidy-up to help", () => {
+    expect(heavyPrompt([section("memory", HEAVY_PROMPT_BYTES)])).toBe(true);
+    expect(heavyPrompt([section("memory", HEAVY_PROMPT_BYTES - 1)])).toBe(false);
+    expect(heavyPrompt([section("memory", HEAVY_PROMPT_BYTES / 3), section("every-bot-rules", HEAVY_PROMPT_BYTES / 3), section("soul", HEAVY_PROMPT_BYTES / 3)])).toBe(true);
+    // the app's own text is not the person's to trim
+    expect(heavyPrompt([section("memory", HEAVY_PROMPT_BYTES / 2), section("browser", HEAVY_PROMPT_BYTES)])).toBe(false);
+    // a long Soul with little memory: tidying would not help
+    expect(heavyPrompt([section("memory", 1_000), section("soul", HEAVY_PROMPT_BYTES)])).toBe(false);
+  });
+});
+

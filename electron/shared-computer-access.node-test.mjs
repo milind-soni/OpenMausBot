@@ -70,6 +70,15 @@ test("legacy insecure saved addresses never receive sharing credentials", async 
   assert.equal(calls, 0);
 });
 
+test("a server on the person's own network is reached over plain http", async t => {
+  const { dir } = await fixture(t);
+  const asked = [];
+  const sharing = createComputerSharing({ file: path.join(dir, "profile", "sharing.json"), environments: () => [], enabled: async () => true, cuaConnection: async () => null, fetch: async (url) => { asked.push(new URL(url).origin); throw new Error("fixture offline"); } });
+  t.after(() => sharing.close());
+  await sharing.observe({ id: "lan", origin: "http://192.168.1.20:8799", name: "Kitchen box" }).catch(() => {});
+  assert.deepEqual([...new Set(asked)], ["http://192.168.1.20:8799"]);
+});
+
 test("saved grants and stale consent cannot bypass a disabled or unavailable local gate", async t => {
   const { dir, folder } = await fixture(t);
   const env = { id: "saved", origin: "https://workspace.fixture.example", name: "Saved" };

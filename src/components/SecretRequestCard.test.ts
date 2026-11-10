@@ -25,6 +25,7 @@ vi.mock("@/state/store", async (original) => ({
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 
 import { SecretRequestCard } from "./SecretRequestCard";
+import { VaultChoices } from "./VaultChoices";
 import { setLocale } from "@/lib/i18n";
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request";
 
@@ -241,6 +242,18 @@ describe("SecretRequestCard mailbox", () => {
     expect(html).toContain('data-email-check="waiting"');
   });
 
+  it("for a mailbox that reads but can't send, asks only for its outgoing server, filled with what is known", () => {
+    const html = view({ ...email, label: "Outgoing server for me@shop.example", placeholder: "Password for sending", address: "me@shop.example", emailOutgoing: { smtpHost: "smtp.shop.example", smtpPort: 587 } });
+    expect(html).toContain("data-email-outgoing-request");
+    expect(html).toContain("Outgoing server for me@shop.example");
+    expect(html).toContain('value="smtp.shop.example"');
+    expect(html).toContain('value="587"');
+    expect(html).toContain('type="password"');
+    expect(html).toContain("Save securely");
+    expect(html).not.toContain('type="email"');
+    expect(html).not.toContain(">Connect<");
+  });
+
   it("says the bot goes on once connected, without the address field", () => {
     const html = view({ ...email, provided: true, resumed: true, address: "me@shop.example" });
     expect(html).toContain('data-ask-card="settled"');
@@ -385,5 +398,22 @@ describe("SecretRequestCard custom secrets", () => {
     expect(file).not.toContain("Where to get this key");
     const ref = view({ target: "customSecret", label: "Notion key", reason: "For Notion.", helpUrl: "", delivery: "ref" });
     expect(ref).toContain("MausBot keeps it for one use by its own tools. Your bot never sees it");
+  });
+});
+
+describe("SecretRequestCard saved secrets", () => {
+  type Props = { children?: ReactNode };
+  const nodes = (tree: ReactNode): Array<ReactElement<Props>> =>
+    Children.toArray(tree).flatMap((child) => isValidElement<Props>(child) ? [child, ...nodes(child.props.children)] : []);
+  const offered = (secret: Record<string, unknown>) => {
+    Object.assign(fixture, { counting: true, index: 0, values: [] });
+    try { return nodes(SecretRequestCard({ botId: "bot-1", threadId: "thread-1", message: secretCard(secret) })).some((node) => node.type === VaultChoices); }
+    finally { fixture.counting = false; }
+  };
+
+  it("offers the Vault's secrets on a card for any other secret, never for a key the app keeps or a mailbox", () => {
+    expect(offered({ target: "customSecret", label: "Stripe secret key", delivery: "ref", helpUrl: "" })).toBe(true);
+    expect(offered({})).toBe(false);
+    expect(offered({ target: "customSecret", label: "Connect your mailbox", delivery: "email", helpUrl: "" })).toBe(false);
   });
 });

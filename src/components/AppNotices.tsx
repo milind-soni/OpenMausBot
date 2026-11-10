@@ -13,6 +13,8 @@ import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits, firstChatQuiet, firstReplyPending } from "@/lib/corner-popup";
 import { BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { useTwoPlaces } from "@/lib/two-places";
+import { SIMPLE_ONLY } from "@/lib/simple-only";
+import { useNewLookDue } from "@/lib/new-look";
 import { useSimpleModePromptSeen } from "@/lib/simple-mode-prompt";
 import { reportWhatsNew, WHATS_NEW_SOURCES, whatsNewAudience, whatsNewView, type WhatsNewAction, type WhatsNewSlide } from "@/lib/whats-new";
 import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
@@ -32,6 +34,7 @@ import { useDesktopNotices, useOtherDialogOpen } from "./notice-dialogs";
 import { localDesktopPage } from "./onboarding/WelcomeGate";
 import { UpdatesConsentDialog, updatesConsentBridge, useUpdatesConsent } from "./UpdatesConsent";
 import { useMausBotWelcomeDue } from "./MausBotWelcome";
+import { NewLookNotice, reportNewLook } from "./NewLookNotice";
 import { reportSimpleModePrompt, SimpleModePrompt } from "./SimpleModePrompt";
 import { TwoPlacesCard } from "./TwoPlacesCard";
 import { WhatsNewPopup } from "./whats-new/WhatsNewPopup";
@@ -142,8 +145,10 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const consentDue = consent.state?.available === true && consent.state.due && !consentDone;
   const consentBlocked = useOtherDialogOpen(consentDue) || Boolean(state.liveCall && state.liveCall.status !== "ended");
   const consentFact = !consentHere || consentDone ? false : consent.state === undefined ? null : consentDue ? (consentBlocked ? null : true) : false;
-  // Every page with the app's chrome, desktop or Cloud, new install or not: once per browser, as the mode is.
-  const simpleDue = !useSimpleModePromptSeen();
+  // Every page with the app's chrome, desktop or Cloud, new install or not: once per browser, as the mode is. With Simple
+  // the only mode, its place goes to the word about the new look, only where Advanced was on.
+  const promptSeen = useSimpleModePromptSeen(), newLookDue = useNewLookDue();
+  const simpleDue = SIMPLE_ONLY ? newLookDue : !promptSeen;
   const simpleBlocked = useOtherDialogOpen(simpleDue) || Boolean(state.liveCall && state.liveCall.status !== "ended");
   const boatHere = boatOfferRuns(now()) && brandStatus().source !== "file";
 
@@ -227,7 +232,8 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       void planBridge?.noticeSeen?.().catch(() => {});
     } else if (shownKey === SIMPLE_MODE_NOTICE && !simpleShown) {
       setSimpleShown(true);
-      reportSimpleModePrompt("shown");
+      if (SIMPLE_ONLY) reportNewLook("shown");
+      else reportSimpleModePrompt("shown");
     } else if (shownKey === BOAT_OFFER_NOTICE && !boatShown) {
       setBoatShown(true);
       reportBoatOffer("shown", "card");
@@ -256,7 +262,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     return <GrokMovePopup onDone={done} />;
   }
 
-  if (notice === SIMPLE_MODE_NOTICE) return <SimpleModePrompt onClose={close} />;
+  if (notice === SIMPLE_MODE_NOTICE) return SIMPLE_ONLY ? <NewLookNotice onClose={close} /> : <SimpleModePrompt onClose={close} />;
 
   if (notice === WHATS_NEW_NOTICE && whatsNew && desktop) {
     const report = (action: WhatsNewAction, slide: WhatsNewSlide) => reportWhatsNew(action, slide, whatsNew);

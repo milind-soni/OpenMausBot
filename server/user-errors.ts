@@ -1,10 +1,12 @@
+import { PAIRING_INPUT_PROBLEM_TEXT } from "../shared/pairing-code.ts";
 import { redactParams } from "../shared/redact.ts";
 import { formatServerText, type ServerErrorBody, type ServerTextParams } from "../shared/server-text.ts";
 
 /** The client translates by key and falls back to this English, which the server keeps sending for older clients. */
 export const USER_ERROR = {
   "serverError.pair.codeWrong": "pairing code is wrong or has expired; create a new one on the server",
-  "serverError.pair.tooMany": "too many failed pairing attempts from your address; try again in {seconds}s",
+  "serverError.pair.tooMany": "Too many wrong codes. Try again at {time}.",
+  ...PAIRING_INPUT_PROBLEM_TEXT,
   "serverError.pair.linkExpired": "this sign-in link has expired or was already used",
   "serverError.email.invalid": "enter a valid email address",
   "serverError.email.codeFormat": "enter the 8-digit code from the email",
@@ -40,6 +42,7 @@ export const USER_ERROR = {
   "serverError.page.fromMcp": "That app came from an MCP server; only a page a bot made can be published.",
   "serverError.page.versionGone": "That version of the page is no longer kept.",
   "serverError.page.notStored": "This app's page is not stored on this computer.",
+  "serverError.page.downloadHasFiles": "This page has files beside it, so it can't be saved as one file. Share it for a link instead.",
   "serverError.department.notFound": "No such department",
   "serverError.department.missing": "no such department",
   "serverError.department.nameLength": "Department name must be 1 to 60 characters",
@@ -171,6 +174,8 @@ export const USER_ERROR = {
   "serverError.inbox.answerRequired": "This waits on your answer: answer it, or close it, where it asks.",
   "serverError.instance.settingsInvalid": "Supply a valid CLI path, account name, configuration directory, boolean tools setting or a reply wait of 1 to 60 minutes.",
   "serverError.instance.replyWaitUnsupported": "The reply wait is available for OpenAI-compatible servers only.",
+  "serverError.instance.modelsUnsupported": "Model IDs can be changed for added OpenAI-compatible servers only.",
+  "serverError.instance.defaultModelRemoved": "{model} is the default model. Choose another default model before removing it from this server.",
   "serverError.mcp.personalHeadersShared": "Personal MCP header values cannot be saved in shared configuration. Save your key in your personal connection.",
   "serverError.mcp.testSignInFirst": "Sign in to the team to test your own connection.",
   "serverError.postiz.adminOnly": "Only the owner or an admin can manage the Postiz connection.",
@@ -200,6 +205,7 @@ export const USER_ERROR = {
   "serverError.mailbox.outgoingFields": "Check the outgoing server: a name like mail.example.com, a port from 1 to 65535, and SSL/TLS or STARTTLS.",
   "serverError.voice.fishKeyRequired": "Add a Fish Audio key in Settings → API keys to talk to your bots here.",
   "serverError.voice.fishTranscribeConnection": "Couldn't reach Fish Audio to hear you — check your connection.",
+  "serverError.file.tooLarge": "This file is {size}, over the {limit} limit for opening files from chat. The file itself is still saved as {name}.",
 } as const;
 
 export type UserErrorKey = keyof typeof USER_ERROR;

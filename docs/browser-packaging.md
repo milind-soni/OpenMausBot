@@ -39,8 +39,9 @@ real Chrome whenever this machine has one, chosen once per machine
 2. Otherwise **Chrome for Testing** 153.0.8010.47, downloaded once into
    `tools/chrome/` in the data directory at first launch, checked against its
    pinned size and SHA-256 before it is unpacked, and moved into place in one
-   rename. Only platforms with a pin download (Apple silicon Macs today;
-   `scripts/pin-chrome-for-testing.ts` measures more). A browser call made
+   rename. Only platforms with a pin download (Apple silicon Macs and Linux
+   servers on x64 or arm64 today; `scripts/pin-chrome-for-testing.ts` measures
+   more). A browser call made
    during the download waits up to 45 seconds, then says how far it got.
 3. A Linux desktop without Google Chrome, and a platform without a pin, keep
    the bundled headless shell. That stays the machine's choice; it never
@@ -48,7 +49,10 @@ real Chrome whenever this machine has one, chosen once per machine
 
 Servers and the Docker image name their browser with
 `AGENT_BROWSER_EXECUTABLE_PATH` (the image's Chrome for Testing), or use the
-Chrome for Testing `agent-browser install` put in place. `OMB_CHROME_PATH`
+Chrome for Testing `agent-browser install` put in place. A Linux server where
+agent-browser already finds a browser (Chrome, Chromium or Brave on `PATH`, or a
+complete Puppeteer or Playwright Chromium in their caches) keeps it; with none,
+it downloads its own as in step 2. `OMB_CHROME_PATH`
 names one explicitly. An `OMB_AGENT_BROWSER_PATH` engine keeps its own choice
 unless a Chrome is named too.
 
@@ -107,12 +111,13 @@ WebRTC sends no UDP around it. If the gate is not running, the browser
 connects nowhere.
 
 The owner can set an optional unauthenticated SOCKS5 upstream in Settings →
-Browser. The gate still resolves and checks every destination locally, then
-passes only a checked public IP to that proxy; local, private, own-service,
-link-local and metadata destinations are never sent through it. New
-connections use the saved proxy immediately. My Chrome keeps using the
-person's own Chrome settings. The built-in browser also follows the app's
-language setting for its Chrome locale and `Accept-Language`; an explicit
+Computer → Built-in browser in simple settings, or Settings → Devices → Bot
+desktops in advanced settings. The gate still resolves and checks every
+destination locally, then passes only a checked public IP to that proxy; local,
+private, own-service, link-local and metadata destinations are never sent
+through it. New connections use the saved proxy immediately. My Chrome keeps
+using the person's own Chrome settings. The built-in browser also follows the
+app's language setting for its Chrome locale and `Accept-Language`; an explicit
 `OMB_BROWSER_LANG` environment value takes precedence.
 
 | Destination | Desktop | Self-hosted server | MausBot Cloud |
@@ -143,7 +148,9 @@ A self-hosted server opens more with `config.json`:
 ```
 
 Each entry is an address or CIDR range with an optional `:port` (IPv6 in
-brackets for a port: `[fd12::1]:443`). OpenMausBot's own ports, metadata and
+brackets for a port: `[fd12::1]:443`). `localhost` resolves to both loopback
+addresses, so `127.0.0.1:9000` also allows `[::1]:9000` and the other way
+round, on that port only. OpenMausBot's own ports, metadata and
 link-local addresses stay closed whatever it lists, and MausBot Cloud and shared
 company workspaces ignore it.
 

@@ -29,7 +29,7 @@ const STALL_PERCENT = 20;
 const MINUTE_MS = 60_000, DAY_MINUTES = 24 * 60;
 /** Engines that run each thread's turns in processes of their own. */
 export const ENGINE_PROCESS_KINDS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "opencodeGo", "grokAgent", "geminiAgent", "kimiAgent",
-  "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "copilotAgent", "commandCodeAgent", "customAcp", "piAgent", "antigravityAgent"]);
+  "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "copilotAgent", "commandCodeAgent", "kiroAgent", "customAcp", "piAgent", "antigravityAgent"]);
 
 export interface HostMemory { totalBytes: number; availableBytes: number; swapFreeBytes: number; oomKills: number | null; fullStall10: number | null }
 
@@ -91,8 +91,9 @@ export const memoryWaitText = (count: number) => `Waiting for memory: ${running(
 export const memoryStillWaitingText = (count: number) => `Still waiting for memory: ${running(count)}.`;
 /** How a wait reads to the person, in their language, and where else it shows. */
 export interface EngineWaits {
-  text(threadId: string, wait: { first: boolean; running: number; ahead: number }): string;
-  began(threadId: string, wait: { running: number; ahead: number }): void;
+  /** `limit`: the plan's most turns at once, when that is what this one waits for rather than memory. */
+  text(threadId: string, wait: { first: boolean; running: number; ahead: number; limit?: number }): string;
+  began(threadId: string, wait: { running: number; ahead: number; limit?: number }): void;
   /** Whether anything is waiting for memory changed. */
   changed(): void;
 }
@@ -140,6 +141,14 @@ export interface EngineBrowsers {
   stopped(threadId: string): void;
 }
 
+/** A plan's limit on how many turns run at once, whatever memory allows. */
+export interface EngineCap {
+  /** The most turns that may run at once; undefined when the plan sets no such limit. */
+  most(): number | undefined;
+  /** Whether this thread's running turn waits on work it handed out: it holds no place, so the work it waits on can run. */
+  waitsOnOthers(threadId: string): boolean;
+}
+
 /** An engine process and the threads whose sessions it runs: one, or several when the driver shares processes. */
 interface Engine { child: ChildProcess; threads: Set<string>; startedAt: number; stopping: boolean }
 interface Waiter { wake: () => void; threadId: string; since: number }
@@ -180,7 +189,10 @@ export class EngineMemory {
   private timer: ReturnType<typeof setInterval> | null = null;
   private browsers: EngineBrowsers | null = null;
   private personsOwn: (threadId: string) => boolean = () => false;
+  private generation = 0;
+  private ordered: { at: number; generation: number; list: Waiter[] } | null = null;
   private waits: EngineWaits | null = null;
+  private cap: EngineCap | null = null;
 
   constructor(options: EngineMemoryOptions) {
     this.enabled = options.enabled;
@@ -198,6 +210,23 @@ export class EngineMemory {
   useTurnOrder(personsOwn: (threadId: string) => boolean): void { this.personsOwn = personsOwn; }
 
   useWaits(waits: EngineWaits): void { this.waits = waits; }
+
+  useCap(cap: EngineCap): void { this.cap = cap; }
+
+  /** Whether every turn here waits for a place under the plan's limit, not only one that starts an engine. */
+  limited(): boolean { return this.enabled && this.cap?.most() !== undefined; }
+
+  /** The plan's limit when it is what this thread's turn must wait for now; undefined when there is a place. */
+  private capped(threadId: string): number | undefined {
+    const most = this.cap?.most();
+    if (most === undefined) return undefined;
+    let running = 0;
+    for (const other of new Set([...this.active, ...this.reserved.keys()])) {
+      if (other === threadId || this.cap!.waitsOnOthers(other)) continue;
+      if (++running >= most) return most;
+    }
+    return undefined;
+  }
 
   /** Whether a task is waiting for memory now. */
   waiting(): boolean { return this.waitingSince.size > 0; }
@@ -263,20 +292,24 @@ export class EngineMemory {
     return threads;
   }
 
-  /** Resolves once a new engine process, or a session in the running one `joining` names by pid, fits for this thread;
-   * `notify` tells the person when it has to wait. False when aborted. A thread joining a process counts on it at once, so
-   * that process is never stopped as idle to make room for its own new session. */
-  async admit(threadId: string, abort: AbortSignal, notify: (text: string) => void, start: "process" | "session" = "process",
+  /** Resolves once a new engine process, or a session in the running one `joining` names by pid, fits for this thread, or
+   * for `turn` once the plan's limit has a place for its turn; `notify` tells the person when it has to wait. False when
+   * aborted. A thread joining a process counts on it at once, so that process is never stopped as idle to make room for its
+   * own new session. */
+  async admit(threadId: string, abort: AbortSignal, notify: (text: string) => void, start: "process" | "session" | "turn" = "process",
     joining?: number): Promise<boolean> {
     if (!this.enabled) return true;
     if (joining !== undefined) this.engines.get(joining)?.threads.add(threadId);
     const waiter: Waiter = { wake: () => {}, threadId, since: this.now() };
     this.queue.push(waiter);
+    this.generation++;
     let announced: number | null = null;
     try {
       for (;;) {
         if (abort.aborted) return false;
-        if (this.order()[0] === waiter) {
+        if (this.order()[0] === waiter && this.capped(threadId) === undefined) {
+          // Counted at once: another waiter woken with this one must see its place taken.
+          if (start === "turn") { this.active.add(threadId); return true; }
           const room = this.room(start, threadId);
           if (room === "admit") {
             this.reserved.set(threadId, { at: this.now(), start, browser: this.browserStarts(threadId) });
@@ -287,13 +320,14 @@ export class EngineMemory {
         }
         if (announced === null || this.now() - announced >= NOTICE_REPEAT_MS) {
           const others = this.othersBusy(threadId), first = announced === null, ahead = this.order().indexOf(waiter);
+          const limit = this.capped(threadId), wait = { running: others, ahead, ...(limit === undefined ? {} : { limit }) };
           if (first) {
             this.waitingSince.set(waiter, this.now());
             this.ledger.note(this.now(), "waits");
-            this.waits?.began(threadId, { running: others, ahead });
+            this.waits?.began(threadId, wait);
             if (this.waitingSince.size === 1) this.waits?.changed();
           }
-          notify(this.waits?.text(threadId, { first, running: others, ahead }) ?? (first ? memoryWaitText(others) : memoryStillWaitingText(others)));
+          notify(this.waits?.text(threadId, { first, ...wait }) ?? (first ? memoryWaitText(others) : memoryStillWaitingText(others)));
           announced = this.now();
         }
         await new Promise<void>((resolve) => {
@@ -306,6 +340,7 @@ export class EngineMemory {
       }
     } finally {
       this.queue.splice(this.queue.indexOf(waiter), 1);
+      this.generation++;
       const since = this.waitingSince.get(waiter);
       if (since !== undefined) {
         this.waitingSince.delete(waiter);
@@ -456,13 +491,20 @@ export class EngineMemory {
     }
   }
 
+  /** Every waiter orders the queue each time it wakes, so the order is worked out once per wake and moment. */
   private order(): Waiter[] {
     const at = this.now();
-    const ahead = (waiter: Waiter) => this.personsOwn(waiter.threadId) || at - waiter.since >= BOT_TURN_GIVES_WAY_MS;
-    return [...this.queue.filter(ahead), ...this.queue.filter((waiter) => !ahead(waiter))];
+    if (this.ordered?.at === at && this.ordered.generation === this.generation) return this.ordered.list;
+    const first: Waiter[] = [], rest: Waiter[] = [];
+    for (const waiter of this.queue) (this.personsOwn(waiter.threadId) || at - waiter.since >= BOT_TURN_GIVES_WAY_MS ? first : rest).push(waiter);
+    this.ordered = { at, generation: this.generation, list: [...first, ...rest] };
+    return this.ordered.list;
   }
 
-  private wake(): void { for (const waiter of this.queue) waiter.wake(); }
+  private wake(): void {
+    this.generation++;
+    for (const waiter of this.queue) waiter.wake();
+  }
 
   private arm(): void {
     if (this.timer || !this.enabled) return;
@@ -513,7 +555,7 @@ export function withEngineMemory(instance: ProviderInstance, memory: EngineMemor
     },
     sendTurn: async (input) => {
       const { threadId } = input;
-      const admit = async (start: "process" | "session", joining?: number) => {
+      const admit = async (start: "process" | "session" | "turn", joining?: number) => {
         const controller = new AbortController();
         waiting.get(threadId)?.abort();
         waiting.set(threadId, controller);
@@ -526,8 +568,14 @@ export function withEngineMemory(instance: ProviderInstance, memory: EngineMemor
           if (waiting.get(threadId) === controller) waiting.delete(threadId);
         }
       };
-      const driverAdmits = adapter.capabilities.engineAdmission === true;
-      if (!driverAdmits && !memory.hasEngine(threadId)) await admit("process");
+      const driverAdmits = adapter.capabilities.engineAdmission === true, limited = memory.limited();
+      if (limited) await admit("turn");
+      try {
+        if (!driverAdmits && !memory.hasEngine(threadId)) await admit("process");
+      } catch (error) {
+        if (limited) memory.turnEnded(threadId);
+        throw error;
+      }
       memory.turnStarted(threadId);
       try {
         return await memory.within(threadId, () => adapter.sendTurn(driverAdmits ? { ...input, engineAdmission: admit } : input));

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  acceptLegacyOrigins,
   BROWSER_SIGN_IN,
   clearSessionCookie,
   fromBrowser,
@@ -105,6 +106,15 @@ describe("scopes", () => {
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
   });
 
+  it("keeps a card's \"Use a saved one\" an admin's, since picking one lets a bot use a Vault item", () => {
+    for (const [method, path] of [
+      ["GET", "/api/bots/bot-1/secret-cards/card-1/saved"],
+      ["POST", "/api/bots/bot-1/secret-cards/card-1/use"],
+      ["GET", "/api/bots/bot-1/sign-in-cards/card-1/saved-logins"],
+      ["POST", "/api/bots/bot-1/sign-in-cards/card-1/use-login"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
+  });
+
   it("keeps the attachments clear to the owner: a client may read one file, never empty the store", () => {
     for (const method of ["GET", "POST"]) expect(requiredScope(method, "/api/attachment-storage"), method).toBe("admin");
     expect(requiredScope("GET", "/api/attachments/a1b2.png")).toBe("client");
@@ -144,7 +154,7 @@ describe("scopes", () => {
       ["POST", "/api/bots/x/sign-in-cards/m/done"], ["POST", "/api/bots/x/sign-in-cards/m/cancel"], ["POST", "/api/bots/x/sign-in-cards/m/save-login"],
       ["GET", "/api/bots/x/sign-in-cards/m/save-login"],
       ["GET", "/api/bots/x/browser/live"], ["POST", "/api/bots/x/browser/action"],
-      ["GET", "/api/threads/t/messages/m/app"], ["POST", "/api/bots/x/apps/m/rpc"], ["POST", "/api/bots/x/apps/m/context"],
+      ["GET", "/api/threads/t/messages/m/app"], ["GET", "/api/threads/t/messages/m/app/download"], ["POST", "/api/bots/x/apps/m/rpc"], ["POST", "/api/bots/x/apps/m/context"],
       ["POST", "/api/bots/x/queue/q/steer"], ["POST", "/api/groups/g/queue/q/steer"],
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
     for (const [method, path] of [
@@ -166,6 +176,7 @@ describe("scopes", () => {
       ["POST", "/api/bots/x/sign-in-cards/m/provide"], ["POST", "/api/browser-engine/install"],
       ["GET", "/api/logins"], ["POST", "/api/logins"], ["PATCH", "/api/logins/l1"], ["DELETE", "/api/logins/l1"],
       ["POST", "/api/logins/1password"], ["POST", "/api/logins/1password/refresh"], ["DELETE", "/api/logins/1password"],
+      ["GET", "/api/vault"], ["POST", "/api/vault/secrets"], ["PATCH", "/api/vault/secrets/s1"], ["DELETE", "/api/vault/secrets/s1"],
       ["POST", "/api/threads/t/messages/m/app"], ["GET", "/api/bots/x/apps/m/rpc"], ["POST", "/api/bots/x/apps/m/delete"],
       ["POST", "/api/bots/x/apps/m/rpc/extra"], ["DELETE", "/api/bots/x/apps/m/context"],
       ["PATCH", "/api/logins/1password/vaults/v1"], ["GET", "/api/bots/x/sign-in-cards/m/done"],
@@ -412,6 +423,10 @@ describe("resolveRequestAuth", () => {
   it("never grants loopback trust to a request that came through a proxy, whatever Host it carries", () => {
     expect(isProxied(request({ host: "localhost", "x-forwarded-for": "203.0.113.9" }))).toBe(true);
     expect(isProxied(request({ host: "localhost", "x-forwarded-proto": "https" }))).toBe(true);
+    for (const name of ["x-real-ip", "cf-connecting-ip", "true-client-ip", "x-client-ip"]) {
+      expect(isProxied(request({ host: "localhost", [name]: "203.0.113.9" }))).toBe(true);
+      expect(resolve({ host: "localhost", [name]: "203.0.113.9" }).auth).toBeNull();
+    }
     expect(isProxied(request({ host: "localhost" }))).toBe(false);
     const viaProxy = resolve({ host: "localhost", "x-forwarded-for": "203.0.113.9" });
     expect(viaProxy.auth).toBeNull();
@@ -438,6 +453,41 @@ describe("resolveRequestAuth", () => {
     expect(csrf.auth).toBeNull();
     expect(csrf.status).toBe(403);
     expect(csrf.error).toBe("forbidden: cross-origin request");
+  });
+
+  it("takes a moved Cloud home's configured former address as its own, and no other, whatever X-Forwarded-Host says", () => {
+    const token = pairedToken();
+    const { credential } = sessions.openPairing({ browser: true, owner: "ada@example.test" });
+    const browser = sessions.exchange({ code: credential, label: "Chrome on Mac", source: "1.2.3.4", browser: true });
+    if (!browser.ok) throw new Error(browser.error);
+    // What the old address's forwarder sends: Host rewritten to this home's name, the page's own Origin kept.
+    const forwarded = (origin: string, cookie = token, extra: Record<string, string> = {}) => ({
+      host: "omb-u-1.homes.example", "x-forwarded-proto": "https", "x-forwarded-for": "203.0.113.9", "x-forwarded-host": "omb-u-1.fly.dev",
+      cookie: `${cookieName}=${cookie}`, origin, ...extra,
+    });
+    const page = { "sec-fetch-site": "same-origin", "sec-fetch-dest": "empty" };
+    try {
+      acceptLegacyOrigins(["https://omb-u-1.fly.dev"]);
+      expect(resolve(forwarded("https://omb-u-1.fly.dev"), "/api/bots", "POST").auth?.kind).toBe("session");
+      expect(resolve(forwarded("https://OMB-U-1.fly.dev "), "/api/bots", "POST").auth?.kind).toBe("session");
+      expect(resolve(forwarded("https://omb-u-1.fly.dev", browser.token, page), "/api/bots", "POST").auth?.kind).toBe("session");
+      expect(resolve(forwarded("https://omb-u-1.fly.dev"), "/api/events").auth?.kind).toBe("session");
+      expect(isSameOrigin(request({ host: "omb-u-1.homes.example", "x-forwarded-proto": "https", origin: "https://omb-u-1.fly.dev", upgrade: "websocket" }))).toBe(true);
+      expect(provesSameOrigin(request({ host: "omb-u-1.homes.example", "x-forwarded-proto": "https", origin: "https://omb-u-1.fly.dev" }))).toBe(true);
+      // Only the exact origin: not another app on the same provider, its http twin, a port, or a name X-Forwarded-Host gives.
+      for (const origin of ["https://omb-u-2.fly.dev", "http://omb-u-1.fly.dev", "https://omb-u-1.fly.dev:8443", "https://evil.example"]) {
+        const refused = resolve(forwarded(origin), "/api/bots", "POST");
+        expect(refused, origin).toMatchObject({ auth: null, status: 403, error: "forbidden: cross-origin request" });
+      }
+      expect(isSameOrigin(request({ host: "omb-u-1.homes.example", "x-forwarded-proto": "https", "x-forwarded-host": "evil.example", origin: "https://evil.example" }))).toBe(false);
+      // Never loopback trust: the former address is a remote page's, so a request with no session is still refused.
+      expect(resolve({ host: "127.0.0.1:8799", origin: "https://omb-u-1.fly.dev" }).auth).toBeNull();
+    } finally {
+      acceptLegacyOrigins([]);
+    }
+    const unconfigured = resolve(forwarded("https://omb-u-1.fly.dev"), "/api/bots", "POST");
+    expect(unconfigured).toMatchObject({ auth: null, status: 403, error: "forbidden: cross-origin request" });
+    expect(isSameOrigin(request({ host: "omb-u-1.homes.example", "x-forwarded-proto": "https", "x-forwarded-host": "omb-u-1.fly.dev", origin: "https://omb-u-1.fly.dev" }))).toBe(false);
   });
 
   it("lets a browser sign-in's session make changes only when the browser says the request is its own page's", () => {
@@ -539,6 +589,28 @@ describe("resolveRequestAuth", () => {
     expect(remote.status).toBe(401);
     expect(remote.error).toMatch(/expired or was revoked; pair this device again/);
     expect(resolve({ host: "127.0.0.1:8799", cookie: `${cookieName}=${token}` })).toMatchObject({ auth: null, status: 401 });
+  });
+});
+
+describe("a listener on the local network (openmausbot serve --lan)", () => {
+  // SAFETY: only headers, method and the socket peer are read
+  const fromPeer = (remoteAddress: string, headers: Record<string, string>) => ({ headers, method: "GET", socket: { remoteAddress } }) as unknown as IncomingMessage;
+  const gate = (dir: string) => ({ sessions: new SessionRegistry({ file: join(dir, "sessions.json") }), cookieName: "omb_session_test", streamPath: "/api/events", url: new URL("/api/bots", "http://x") });
+
+  it("never makes another machine the owner, whatever Host it writes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-auth-lan-"));
+    try {
+      for (const peer of ["192.168.1.50", "::ffff:192.168.1.50", "100.101.102.103", "fd12::5"]) {
+        const spoofed = resolveRequestAuth(fromPeer(peer, { host: "127.0.0.1:8799" }), gate(dir));
+        expect([peer, spoofed.auth]).toEqual([peer, null]);
+        expect(isProxied(fromPeer(peer, { host: "localhost" }))).toBe(true);
+      }
+      for (const peer of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
+        expect(resolveRequestAuth(fromPeer(peer, { host: "127.0.0.1:8799" }), gate(dir)).auth?.kind, peer).toBe("loopback");
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

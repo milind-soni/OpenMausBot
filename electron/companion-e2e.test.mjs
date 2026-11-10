@@ -107,13 +107,16 @@ describe("relay tokens", () => {
 
 describe("the desktop's end-to-end connection", () => {
   it("counts devices for the adoption gates and knows when the relay is needed", () => {
-    const state = { enabled: true, pairing: null, devices: [{ e2eAt: 1, routes: "local" }, { routes: "any" }] };
+    const relay = { routes: { relay: { on: true, since: 1 } } };
+    const state = { enabled: true, ...relay, pairing: null, devices: [{ e2eAt: 1, routes: "local" }, { routes: "any" }] };
     expect(deviceCounts(state)).toEqual({ e2e: 1, legacy: 1 });
     expect(relayNeed(state)).toBe(true);
+    expect(relayNeed({ ...state, routes: { relay: { on: false, since: null } } })).toBe(false);
+    expect(relayNeed({ ...state, routes: undefined })).toBe(false);
     expect(relayNeed({ ...state, devices: [{ routes: "local" }] })).toBe(false);
     expect(relayNeed({ ...state, devices: [], pairing: { token: "t" } })).toBe(true);
     expect(relayNeed({ enabled: false })).toBe(false);
-    expect(relayNeed({ enabled: true, error: "x" })).toBeNull();
+    expect(relayNeed({ enabled: true, ...relay, error: "x" })).toBeNull();
   });
 
   it("makes the key on the first relay token, tells the sidecar, and keeps it on after the token goes", async () => {
@@ -126,7 +129,7 @@ describe("the desktop's end-to-end connection", () => {
         document = derive(document);
       },
       fetchGrant: async () => (answer instanceof Error ? Promise.reject(answer) : answer),
-      companionState: async () => ({ enabled: true, devices: [], pairing: { token: "t" } }),
+      companionState: async () => ({ enabled: true, routes: { relay: { on: true, since: 1 } }, devices: [], pairing: { token: "t" } }),
       post: (message) => posted.push(message),
       setTimer: () => 1,
       clearTimer: () => {},
@@ -153,7 +156,7 @@ describe("the desktop's end-to-end connection", () => {
       readCredentials: () => ({}),
       updateCredentials: async () => {},
       fetchGrant: async () => Promise.reject(Object.assign(new Error("off"), { code: "relay_unavailable" })),
-      companionState: async () => ({ enabled: true, devices: [], pairing: { token: "t" } }),
+      companionState: async () => ({ enabled: true, routes: { relay: { on: true, since: 1 } }, devices: [], pairing: { token: "t" } }),
       post: (message) => posted.push(message),
       setTimer: () => 1,
       clearTimer: () => {},

@@ -3,7 +3,7 @@
 // with owner "bot") in bubblewrap by the plan (plan.ts). Nothing here changes a spawn when the box is off: the command,
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { engineInstallRoots } from "../engine-roots.ts";
@@ -97,7 +97,6 @@ export class BoxRunner {
     const request: BoxRequest = lent.length ? { ...given, rw: [...(given.rw ?? []), ...lent] } : given;
     const extraFds: number[] = [];
     const seccomp = this.options.seccompFile && !this.options.setup.mutate?.has("no-seccomp") ? this.options.seccompFile : null;
-    if (seccomp) extraFds.push(openSync(seccomp, "r"));
     const plan = planBox({ ...this.options.setup, seccompFd: seccomp ? BOX_SECCOMP_FD : undefined }, request);
     const mutate = this.options.setup.mutate;
     const env = mutate?.has("env-all")
@@ -113,9 +112,16 @@ export class BoxRunner {
     const relay = plan.net === "isolated" && request.relay ? inBoxSocket(RELAY_SOCKET_NAME) : undefined;
     const inner = bridgedCommand(this.options.bridge, bridges, request.command, request.args, relay);
     const brokered = this.broker(env, plan, request);
-    const vouched = (request.allowEnv ?? []).filter((name) => /(?:KEY|TOKEN|SECRET)$/.test(name) && brokered.env[name] !== undefined && brokered.env[name] === request.env[name]);
-    const unbrokered = [...new Set([...brokered.unbrokered, ...vouched])];
-    return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered, extraFds };
+    try {
+      const vouched = (request.allowEnv ?? []).filter((name) => /(?:KEY|TOKEN|SECRET)$/.test(name) && brokered.env[name] !== undefined && brokered.env[name] === request.env[name]);
+      const unbrokered = [...new Set([...brokered.unbrokered, ...vouched])];
+      if (seccomp) extraFds.push(openSync(seccomp, "r"));
+      return { command: this.options.bwrap, args: [...bwrapArgs(plan), "--", inner.command, ...inner.args], env: brokered.env, plan, token: brokered.token, release: brokered.release, unbrokered, extraFds };
+    } catch (error) {
+      for (const fd of extraFds) { try { closeSync(fd); } catch {} }
+      brokered.release();
+      throw error;
+    }
   }
 
   /** Keys become a per-process token when the broker is on and the box has its own network (the bridge to the broker). */
@@ -124,11 +130,13 @@ export class BoxRunner {
     if (!broker || plan.net !== "isolated") return { env, token: null, release: () => {}, unbrokered: [] };
     const ids = request.cwd ? taskWorkspaceIds(request.cwd, this.options.setup.dataDir) : null;
     // The token is minted first (its value goes in the environment), then granted exactly what the rewrite took out.
-    const minted = broker.mintForProcess({ botId: plan.botId, threadId: ids?.threadId ?? null, grants: {} });
+    // A process the bot's conversations share belongs to none of them.
+    const threadId = request.botThreads ? null : ids?.threadId ?? null;
+    const minted = broker.mintForProcess({ botId: plan.botId, threadId, grants: {} });
     const rewrite = brokerRewrite(env, minted.token, broker.port);
     broker.revoke(minted.token);
     if (!Object.keys(rewrite.grants).length) return { env, token: null, release: () => {}, unbrokered: rewrite.unbrokered };
-    const granted = broker.mintForProcess({ botId: plan.botId, threadId: ids?.threadId ?? null, grants: rewrite.grants });
+    const granted = broker.mintForProcess({ botId: plan.botId, threadId, grants: rewrite.grants });
     const again = brokerRewrite(env, granted.token, broker.port);
     return { env: again.env, token: granted.token, release: () => broker.revoke(granted.token), unbrokered: again.unbrokered };
   }

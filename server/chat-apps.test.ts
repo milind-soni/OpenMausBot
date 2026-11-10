@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,9 +13,15 @@ import {
   showPublishedPage, withAppContext, type ChatApps,
 } from "./chat-apps.ts";
 import { folderPageCsp } from "../shared/app-frame/csp.ts";
-import { readPageBundle } from "./pages/bundle.ts";
+import { PageBundleError, readPageBundle } from "./pages/bundle.ts";
 import { createAgentCard, type AgentCardStore } from "./chat-widgets.ts";
 import type { Message, StoreChange } from "./store.ts";
+
+// The real reader, wrapped so a test can make one read fail or wait.
+vi.mock("./pages/bundle.ts", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./pages/bundle.ts")>();
+  return { ...real, readPageBundle: vi.fn(real.readPageBundle) };
+});
 
 const THREAD = "thread-scout";
 const SCOUT = { id: "bot-scout", name: "Scout", color: "blue" as const };
@@ -664,3 +670,217 @@ describe("createChatApps", () => {
     }
   });
 });
+
+describe("a live folder page", () => {
+  function liveSetup(maxBytes?: number, paused?: () => boolean, liveRoots?: (threadId: string, botId: string | undefined) => readonly string[] | null) {
+    const fake = fakeStore();
+    const base = mkdtempSync(join(tmpdir(), "omb-live-pages-"));
+    const dash = join(base, "dash");
+    mkdirSync(dash, { recursive: true });
+    writeFileSync(join(dash, "index.html"), "<h1>Dash</h1><script src=\"app.js\"></script>");
+    writeFileSync(join(dash, "app.js"), "draw()");
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,10\n");
+    const live = vi.fn((): Array<{ threadId: string; messageId: string }> => []);
+    const apps = createChatApps({ store: fake.store, dataDir: mkdtempSync(join(tmpdir(), "omb-chat-apps-")), sweeps: false, liveRows: live, ...(maxBytes ? { maxBytes } : {}), ...(paused ? { paused } : {}), ...(liveRoots ? { liveRoots } : {}) });
+    opened.push(apps);
+    const folders = async () => ({ roots: [base], vmWorkspace: null });
+    const show = (input: Record<string, unknown>) => apps.createAppCard({ bot: SCOUT, threadId: THREAD, input: { tool: "show_html", title: "Dash", ...input }, folders });
+    const row = (id: string) => fake.rows(THREAD).find((message) => message.id === id)!;
+    return { apps, base, dash, live, show, row, rows: () => fake.rows(THREAD), patch: fake.store.patchMessage };
+  }
+
+  it("is marked live only when asked, and only for a page from a folder", async () => {
+    const { show, row } = liveSetup();
+    expect(await show({ path: "dash", live: true })).toEqual({ ok: true, messageId: "m1" });
+    expect(row("m1").app).toMatchObject({ live: true, rev: 0 });
+    expect(await show({ path: "dash" })).toEqual({ ok: true, messageId: "m2" });
+    expect(row("m2").app).not.toHaveProperty("live");
+    expect(await show({ html: PAGE, live: true })).toMatchObject({ ok: false, status: 400, error: expect.stringContaining("live:") });
+    expect(await show({ path: "dash", live: "yes" })).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("reloads in place when a file in its folder changes, and not otherwise", async () => {
+    const { apps, dash, live, show, row } = liveSetup();
+    await show({ path: "dash", live: true });
+    await show({ path: "dash" });
+    live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }, { threadId: THREAD, messageId: "m2" }]);
+    const first = row("m1").app!.doc;
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app).toMatchObject({ doc: first, rev: 0 });
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,10\n2,25\n");
+    expect(await apps.refreshLive()).toBe(1);
+    expect(row("m1").app).toMatchObject({ live: true, rev: 1, history: [first] });
+    expect(apps.docs.readFile(row("m1").app!.doc, "data.csv")?.toString()).toBe("day,sales\n1,10\n2,25\n");
+    // The page that did not ask to be live stays as it was shown.
+    expect(row("m2").app).toMatchObject({ rev: 0 });
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app!.rev).toBe(1);
+  });
+
+  it("stops being live once its bot can no longer read the folder, or is gone", async () => {
+    let roots: readonly string[] | null = null;
+    const { apps, base, dash, show, row } = liveSetup(undefined, undefined, () => roots);
+    roots = [base];
+    await show({ path: "dash", live: true });
+    await apps.refreshLive();
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,12\n");
+    expect(await apps.refreshLive()).toBe(1);
+    // The conversation's working folder moved elsewhere: the card keeps the page it shows, and is no longer live.
+    roots = [mkdtempSync(join(tmpdir(), "omb-live-elsewhere-"))];
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,13\n");
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app).toMatchObject({ rev: 1 });
+    expect(row("m1").app).not.toHaveProperty("live");
+    // A bot that is gone: same.
+    roots = [base];
+    await show({ path: "dash", live: true });
+    await apps.refreshLive();
+    roots = null;
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,14\n");
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m2").app).not.toHaveProperty("live");
+  });
+
+  it("lists the store's live pages once, after a restart, not on every refresh", async () => {
+    const { apps, live } = liveSetup();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      for (let minute = 0; minute < 3; minute++) {
+        await apps.refreshLive();
+        vi.setSystemTime(Date.now() + 61_000);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(live).toHaveBeenCalledTimes(1);
+  });
+
+  it("can be turned off, and a folder that is gone leaves the page as it was", async () => {
+    const { apps, dash, live, show, row } = liveSetup();
+    await show({ path: "dash", live: true });
+    live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }]);
+    await apps.refreshLive();
+    rmSync(dash, { recursive: true, force: true });
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app).toMatchObject({ live: true, rev: 0 });
+    // Half-written: a folder with no index.html yet is not a page; the card stays as it was.
+    mkdirSync(dash, { recursive: true });
+    writeFileSync(join(dash, "data.csv"), "day,sales\n");
+    expect(await apps.refreshLive()).toBe(0);
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app).toMatchObject({ live: true, rev: 0 });
+    writeFileSync(join(dash, "index.html"), "<h1>Back</h1>");
+    expect(await apps.refreshLive()).toBe(1);
+    expect(await apps.createAppCard({ bot: SCOUT, threadId: THREAD, input: { tool: "update_html", app_id: "m1", html: "<p>still</p>", live: false } }))
+      .toEqual({ ok: true, messageId: "m1" });
+    expect(row("m1").app).not.toHaveProperty("live");
+  });
+
+  it("uses the card's current title, skips files a read leaves out, and stops at a folder swapped for a link", async () => {
+    const { apps, base, dash, live, show, row, patch } = liveSetup();
+    await show({ path: "dash", live: true });
+    live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }]);
+    await apps.refreshLive();
+    // Files a page never takes (hidden, badly named, not a page file) are not a change.
+    writeFileSync(join(dash, ".notes"), "x");
+    writeFileSync(join(dash, "a#b.html"), "x");
+    writeFileSync(join(dash, "build.zip"), "x");
+    expect(await apps.refreshLive()).toBe(0);
+    patch(THREAD, "m1", { app: { ...row("m1").app!, title: "Sales" } });
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,11\n");
+    expect(await apps.refreshLive()).toBe(1);
+    expect(row("m1").app).toMatchObject({ title: "Sales", rev: 1 });
+    // The folder swapped for a link to another one: not the folder the page was shown from.
+    const other = join(base, "other");
+    mkdirSync(other);
+    writeFileSync(join(other, "index.html"), "<h1>Other</h1>");
+    rmSync(dash, { recursive: true, force: true });
+    symlinkSync(other, dash);
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app!.rev).toBe(1);
+  });
+
+  it("waits while the workspace is being backed up or restored", async () => {
+    let busy = false;
+    const { apps, dash, live, show, row } = liveSetup(undefined, () => busy);
+    await show({ path: "dash", live: true });
+    live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }]);
+    await apps.refreshLive();
+    busy = true;
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,13\n");
+    expect(await apps.refreshLive()).toBe(0);
+    expect(row("m1").app).toMatchObject({ rev: 0 });
+    busy = false;
+    expect(await apps.refreshLive()).toBe(1);
+    expect(row("m1").app).toMatchObject({ rev: 1 });
+  });
+
+  it("tries a folder again later when it was briefly not found, without another change", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { apps, dash, live, show, row } = liveSetup();
+      await show({ path: "dash", live: true });
+      live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }]);
+      await apps.refreshLive();
+      writeFileSync(join(dash, "data.csv"), "day,sales\n1,14\n");
+      vi.mocked(readPageBundle).mockRejectedValueOnce(new PageBundleError("Nothing was found at dash.", 404));
+      expect(await apps.refreshLive()).toBe(0);
+      expect(await apps.refreshLive()).toBe(0);
+      vi.advanceTimersByTime(61_000);
+      expect(await apps.refreshLive()).toBe(1);
+      expect(row("m1").app).toMatchObject({ rev: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("writes nothing when a backup starts while its folder is read, and a backup waits for that read", async () => {
+    let busy = false;
+    const { apps, dash, live, show, row } = liveSetup(undefined, () => busy);
+    await show({ path: "dash", live: true });
+    live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }]);
+    await apps.refreshLive();
+    writeFileSync(join(dash, "data.csv"), "day,sales\n1,15\n");
+    const read = vi.mocked(readPageBundle), actual = read.getMockImplementation()!;
+    let release: (() => void) | undefined;
+    read.mockImplementationOnce(async (...args) => { await new Promise<void>((done) => { release = done; }); return actual(...args); });
+    const running = apps.refreshLive();
+    let settled = false;
+    const settling = apps.settleLive().then(() => { settled = true; });
+    await vi.waitFor(() => expect(release).toBeDefined());
+    busy = true;
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    release!();
+    expect(await running).toBe(0);
+    await settling;
+    expect(settled).toBe(true);
+    expect(row("m1").app).toMatchObject({ rev: 0 });
+    busy = false;
+    expect(await apps.refreshLive()).toBe(1);
+  });
+
+  it("keeps the page it shows when there is no room for a new version, and tries again later", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { apps, dash, live, show, row } = liveSetup(100_000);
+      await show({ path: "dash", live: true });
+      expect(apps.docs.usage()).toBeLessThan(50_000);
+      live.mockReturnValue([{ threadId: THREAD, messageId: "m1" }]);
+      await apps.refreshLive();
+      writeFileSync(join(dash, "data.csv"), "x".repeat(200_000));
+      expect(await apps.refreshLive()).toBe(0);
+      expect(row("m1").app).toMatchObject({ live: true, rev: 0 });
+      expect(row("m1").app).not.toHaveProperty("blocked");
+      writeFileSync(join(dash, "data.csv"), "day,sales\n1,12\n");
+      // Not before the wait is over, then without needing another change.
+      expect(await apps.refreshLive()).toBe(0);
+      vi.advanceTimersByTime(61_000);
+      expect(await apps.refreshLive()).toBe(1);
+      expect(row("m1").app).toMatchObject({ rev: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+

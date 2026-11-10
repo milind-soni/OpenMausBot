@@ -188,6 +188,8 @@ describe("CI outputs", () => {
     expect(out.jobs).toEqual(["build", "vitest"]);
     expect(VITEST_SUBSETS["locale-tests"].files).toEqual([
       "src/",
+      "electron/cua-launch.test.mjs",
+      "electron/cua-windows-isolation.test.mjs",
       "electron/menu.test.mjs",
       "electron/updater.test.mjs",
       "scripts/generate-locale.test.mjs",
@@ -240,6 +242,7 @@ describe("CI outputs", () => {
       "server/parked-cards.e2e.test.ts",
       "server/question-cards.e2e.test.ts",
       "server/shared-computers.e2e.test.ts",
+      "server/shared-computers.gate.test.ts",
       "server/team-move.e2e.test.ts",
       "server/use-my-mac.e2e.test.ts",
       "server/workspace-banner.e2e.test.ts",

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ChevronRight, FolderPlus, Plus } from "lucide-react";
 import { openBotRow, visibleMessages, type Bot, type Message } from "@/state/store";
 import { avatarCropRadius, botAvatarProfile } from "../../shared/bot-avatar";
-import { liveActivityLabel } from "@/lib/live-activity";
+import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
 import { BotAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
@@ -60,7 +60,7 @@ export function PinnedCircleThreadPanel(props: BotRowProps) {
   if (!showThreads) return null;
   return (
     <div id={pinnedCircleThreadPanelId(bot.id)} data-sidebar-pinned-circle-thread-list={bot.id} className="mt-1">
-      <BotThreadList {...props} activityLabel={liveActivityLabel(last)} query={threadListQuery(bot, query)} />
+      <BotThreadList {...props} activityLabel={liveActivityLabel(sidebarMessage(last))} query={threadListQuery(bot, query)} />
       <div className="flex items-center gap-1 pl-6">
         <button type="button" aria-label={t("task.newShort")} title={t("task.newShort")} onClick={() => dispatch({ type: "newTask", botId: bot.id })}
           className="inline-flex h-7 items-center gap-1 rounded px-1 text-[13px] font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent/60">

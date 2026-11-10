@@ -79,6 +79,8 @@ export const CHAT_NOTICE = {
   "chat.notice.phone.write.PHONE_SEND_WHATSAPP": "Send whatsapp on {phone}",
   "chat.notice.acpEmpty": "{provider} finished without replying.",
   "chat.notice.acpNoReason": "{provider} stopped without saying why.",
+  "chat.notice.acpMcpAppsFailed": "Connected apps couldn't be set up, so {provider} couldn't start this reply. Try again, or switch this bot to another AI.",
+  "chat.notice.acpMcpServerFailed": "The \"{server}\" MCP server couldn't be set up, so {provider} couldn't start this reply. Try again, or switch this bot to another AI.",
   "chat.notice.stop.refusal": "{provider} refused to go on with this request (stop reason: {reason}). Try again, reword the request, or switch this bot to another AI.",
   "chat.notice.stop.refusalGeneric": "The AI refused to go on with this request (stop reason: {reason}). Try again, reword the request, or switch this bot to another AI.",
   "chat.notice.stop.maxTokens": "{provider}'s reply reached its maximum length before it finished (stop reason: {reason}). Ask it to continue, or ask for a shorter answer.",
@@ -93,6 +95,7 @@ export const CHAT_NOTICE = {
 
   "chat.notice.copilotAccountRefused": "GitHub Copilot refused this request for the signed-in account. Check its Copilot plan and premium request allowance, then try again.",
   "chat.notice.commandCodeAccountRefused": "Command Code refused this request for the signed-in account. Check its plan and credits on commandcode.ai, then try again.",
+  "chat.notice.kiroAccountRefused": "Kiro refused this request for the signed-in account. Check its Kiro plan and credits, then try again.",
   "chat.notice.acpQuietUsageLimit": "{name} reached a usage limit{said} and is waiting it out without replying, so this turn was stopped.",
   "chat.notice.acpQuietStuck": "{name} sent nothing for {quiet} with no tool running, no open request to its model and no CPU use, so the turn was stopped as stuck. Send the message again to retry.",
   "chat.notice.acpModelRequestFailed": "{name}'s model request failed: \"{message}\" {name} may retry or stop; no reply for {quiet} so far.",

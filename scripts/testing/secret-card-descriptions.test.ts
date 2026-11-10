@@ -7,6 +7,7 @@ import { DATA_DIR, loadConfig } from "../../server/config.ts";
 import { createSecretCards } from "../../server/host/secret-cards.ts";
 import { PhoneSecretSubmissionRegistry } from "../../server/phone-secret.ts";
 import { Store } from "../../server/store.ts";
+import { VaultStore } from "../../server/vault-store.ts";
 import "../../server/server-line-packs.ts";
 import { SecretRequestCard } from "../../src/components/SecretRequestCard";
 import { setLocale } from "../../src/lib/i18n";
@@ -21,13 +22,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function producedCard(target: CredentialTargetId, reason: string, language?: string): Message {
+async function producedCard(target: CredentialTargetId, reason: string, language?: string): Promise<Message> {
   const store = new Store(() => ({ instanceId: "fixture", model: "fixture-model" }));
   const bot = store.createBot({ name: "Scout" });
   const cards = createSecretCards({
     store,
     cfg: loadConfig(),
-    botLogins: { credentialConfig: (config) => ({ ...config, onePassword: { connected: false } }) },
+    botLogins: { credentialConfig: (config) => ({ ...config, onePassword: { connected: false } }), linkedSecret: async () => null },
+    vaultStore: new VaultStore({ dataDir: DATA_DIR }),
     phoneSecrets: { provide: vi.fn(), open: vi.fn() },
     phoneSecretSubmissions: new PhoneSecretSubmissionRegistry(),
     connectorThread: () => ({ bot, group: undefined }),
@@ -38,7 +40,7 @@ function producedCard(target: CredentialTargetId, reason: string, language?: str
     turnVm: () => undefined,
     threadLanguage: () => language,
   });
-  const response = cards.requestCredential(bot, bot.threadId, { credentialId: target, reason });
+  const response = await cards.requestCredential(bot, bot.threadId, { credentialId: target, reason });
   expect(response.status).toBe(201);
   return store.messagesFor(bot.threadId).find((message) => message.id === response.body.messageId)! as Message;
 }
@@ -52,9 +54,9 @@ const localizedTargets = [
 ] as const;
 
 describe("credential descriptions from the real producer to the renderer", () => {
-  it.each(Object.keys(CREDENTIAL_TARGETS) as CredentialTargetId[])("preserves the complete English description for %s", (target) => {
+  it.each(Object.keys(CREDENTIAL_TARGETS) as CredentialTargetId[])("preserves the complete English description for %s", async (target) => {
     const reason = "For today's report <draft>.";
-    const message = producedCard(target, reason);
+    const message = await producedCard(target, reason);
     const description = `${CREDENTIAL_TARGETS[target].description} ${reason} Scout can use it but never read it back.`;
     expect(message.secret!.description).toBe(description);
     const english = render(message);
@@ -67,9 +69,9 @@ describe("credential descriptions from the real producer to the renderer", () =>
     }
   });
 
-  it.each(localizedTargets)("keeps the reason and guarantee when localizing %s", (target, base) => {
+  it.each(localizedTargets)("keeps the reason and guarantee when localizing %s", async (target, base) => {
     const reason = "For today's report <draft>.";
-    const message = producedCard(target, reason);
+    const message = await producedCard(target, reason);
     const saved = JSON.stringify(message);
     const english = render(message);
     setLocale("pt-br");
@@ -79,8 +81,8 @@ describe("credential descriptions from the real producer to the renderer", () =>
     expect(render(message)).toBe(english);
   });
 
-  it.each(localizedTargets)("uses the received English fallback verbatim for %s", (target) => {
-    const message = producedCard(target, "For the requested report.", "pt-br");
+  it.each(localizedTargets)("uses the received English fallback verbatim for %s", async (target) => {
+    const message = await producedCard(target, "For the requested report.", "pt-br");
     message.secret!.description += " Additional server context.";
     message.secret!.label += " supplied label";
     message.secret!.placeholder += " supplied placeholder";
@@ -95,15 +97,15 @@ describe("credential descriptions from the real producer to the renderer", () =>
     ["greenferenceApiKey", "pt-br"],
     ["geminiTtsKey", "en"],
     ["geminiTtsKey", "pt-br"],
-  ] as const)("keeps the raw description of an older %s card in %s", (target, locale) => {
-    const message = producedCard(target, "For the requested report.");
+  ] as const)("keeps the raw description of an older %s card in %s", async (target, locale) => {
+    const message = await producedCard(target, "For the requested report.");
     delete message.secret!.descriptionParts;
     setLocale(locale);
     expect(render(message)).toContain(escapedText(message.secret!.description));
   });
 
-  it.each(localizedTargets)("keeps the guarantee without an optional reason for %s", (target, base) => {
-    const message = producedCard(target, "");
+  it.each(localizedTargets)("keeps the guarantee without an optional reason for %s", async (target, base) => {
+    const message = await producedCard(target, "");
     setLocale("pt-br");
     expect(render(message)).toContain(escapedText(`${base} Scout pode usar o valor, mas nunca consegue lê-lo.`));
   });

@@ -10,6 +10,7 @@ import { approvalDetailText, composioActionPhrase, outboundSummary } from "@/lib
 import { niceDate, niceTime, scheduleLabel } from "@/lib/schedule-label";
 import { cronPresetText, cronText } from "@/lib/cron-text";
 import { PROFILE_REQUEST_FIELDS, type ProfileRequestField } from "../../shared/profile-request";
+import { RESERVED_MCP_NAMES } from "../../shared/mcp-name";
 import type { RoutineRequestSchedule } from "../../shared/routine-request";
 import { isSkillSwitchAction, type SkillShareRecord } from "../../shared/skill-request";
 import { cardAutomation } from "@/lib/automations";
@@ -108,7 +109,11 @@ export function approvalCardOutcome(card: OptionCardData): string | undefined {
 
 export function toolLabel(tool?: string): string {
   if (!tool) return t("approval.tool.takeAction");
-  const bare = tool.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ");
+  // MCP tool names are `mcp__<server>__<name>`; a server name may itself carry underscores, so the server is the
+  // second `__`-split segment and everything after it is the tool.
+  const mcp = tool.startsWith("mcp__") ? tool.split("__") : undefined;
+  const server = mcp?.[1];
+  const action = (mcp ? mcp.slice(2).join("__") : tool).replace(/_/g, " ");
   const nice: ToolLabels = {
     Bash: "approval.tool.runCommand",
     Read: "approval.tool.readFile",
@@ -134,7 +139,9 @@ export function toolLabel(tool?: string): string {
   };
   const key = nice[tool];
   if (key) return t(key);
-  return composioActionPhrase(tool.replace(/^mcp__[^_]+__/, "")) ?? bare;
+  // A custom MCP server's tools read like the app's own unless the card names the server asking.
+  const phrase = mcp ? composioActionPhrase(mcp.slice(2).join("__")) ?? action : action;
+  return server && !RESERVED_MCP_NAMES.has(server) ? `${server} · ${phrase}` : phrase;
 }
 
 function plainWhen(schedule: RoutineRequestSchedule): string {
@@ -465,6 +472,9 @@ export function ApprovalCard({
       ? skillAction === "update" ? "update_skill" : "stage_skill"
     : isProfileRequest
       ? "update_profile"
+    // An ACP permission request without a tool kind carries the qualified MCP tool name as its title: label the
+    // action with it instead of "use a tool".
+    : (!card.tool || card.tool === "tool") && (card.title ?? "").startsWith("mcp__") ? card.title
     : card.tool;
   const profileHeader = isProfileRequest && card.profileRequest
     ? card.profileRequest.targetBotId === card.profileRequest.botId

@@ -12,11 +12,11 @@ export function deviceCounts(state) {
   return { e2e: Math.min(e2e, 100), legacy: Math.min(devices.length - e2e, 100) };
 }
 
-/** The relay is needed while the companion runs and a phone could use it: one not restricted to Wi-Fi and Tailscale,
- * or a pairing window. Null when that can't be told. */
+/** The relay is needed while the companion runs, the person has Anywhere, through MausBot on, and a phone could use it:
+ * one not restricted to Wi-Fi and Tailscale, or a pairing window. Null when that can't be told. */
 export function relayNeed(state) {
   if (!state || typeof state !== "object") return null;
-  if (state.enabled !== true) return false;
+  if (state.enabled !== true || state.routes?.relay?.on !== true) return false;
   if (state.error) return null;
   if (state.devicesUnreadable === true || !Array.isArray(state.devices)) return null;
   return Boolean(state.pairing) || state.devices.some((device) => device?.routes !== "local");

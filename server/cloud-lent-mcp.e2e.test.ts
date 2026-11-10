@@ -195,8 +195,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify({ version: 1, records: { [env.id]: { sessionId: null, environmentId: null, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true,
     folders: [], terminal: false, computer: false, internet: true, cloud: { accountId: "acct_fixture", origin: base } } } }));
+  let macServerPorts: number[] = [];
   connector = createComputerSharing({
-    file, environments: () => [env], localEnvironments: () => [MAC_INSTALL], myCloud: () => env, ownClouds: () => [env], cuaConnection: async () => null, enabled: async () => false,
+    file, serverPorts: () => macServerPorts, environments: () => [env], localEnvironments: () => [MAC_INSTALL], myCloud: () => env, ownClouds: () => [env], cuaConnection: async () => null, enabled: async () => false,
     cloud: () => ({ status: "connected", accountId: "acct_fixture", origin: base }), home: join(home, "mac-home"),
     fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, authorization: `Bearer ${owner}`, host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", origin: `https://${HOST}` } }),
   });
@@ -227,6 +228,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   expect(macRequests.filter((request) => request.method === "initialize").every((request) => request.client === "openmausbot-lent")).toBe(true);
   expect(macRequests.every((request) => request.authorization === "Bearer mac-header-key")).toBe(true);
   expect(connector.activity(env.id).map((entry) => [entry.action, entry.ok])).toEqual(expect.arrayContaining([["mcp_tools", true], ["mcp_call", true]]));
+
+  // Were the Mac's own OpenMausBot server on that port, the Mac refuses the call itself, in words the bot reads, and
+  // nothing reaches the port.
+  macServerPorts = [Number(new URL(macUrl).port)];
+  const reached = macRequests.length;
+  const own = await call("tools/call", { name: "search_notes", arguments: { q: "plan" } });
+  expect(own.result).toEqual({ content: [{ type: "text", text: "Only an MCP server on its own port (1024 or higher) at this computer's address can be reached, never this computer's own OpenMausBot or Chrome ports" }], isError: true });
+  expect(macRequests.length).toBe(reached);
+  macServerPorts = [];
 
   // The person lets My Cloud run commands on this Mac: the program starts there, from the connector, never on My Cloud.
   await connector.lendTerminal(true);

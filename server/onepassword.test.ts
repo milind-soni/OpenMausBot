@@ -2,15 +2,20 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { LoginBots } from "../shared/logins.ts";
 import { fillLogin, type FillCandidate } from "./login-fill.ts";
-import { loginFields, ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED, OnePasswordLogins, onePasswordProblem, onePasswordUnavailable, OnePasswordUnavailableError, sdkOnePasswordClient } from "./onepassword.ts";
+import { loginFields, ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED, OnePasswordLogins, onePasswordProblem, onePasswordUnavailable, OnePasswordUnavailableError, sdkOnePasswordClient, secretFields } from "./onepassword.ts";
 import { FakeLoginPage, LOGIN_FORM } from "./testing/fake-login-page.ts";
 import { fakeOnePasswordSdk } from "./testing/fake-onepassword.ts";
 import { parseTotpKey, totpCode } from "./totp.ts";
+import { findLinkedSecret, linkedCandidates, linkedSecrets, linkedSites, readLinkedSecret } from "./vault/providers.ts";
 
 // Obvious fakes only; no network.
 const TOKEN = "ops_fake-service-account-token";
 const VAULT_PASSWORD = "fake-1P-Passw0rd";
 const KEY = "otpauth://totp/Example:alice?secret=JBSWY3DPEHPK3PXP&issuer=Example";
+const STRIPE = "sk_test_fake-stripe-key-123";
+const DEPLOY = "fake-deploy-Passw0rd";
+const NOTE = "fake-note-text-456";
+const ACME_SECRET = "fake-acme-client-secret-789";
 
 function setup(options: { token?: string | null; fail?: () => Error | null; now?: () => number; grants?: Record<string, LoginBots> } = {}) {
   const { sdk, calls } = fakeOnePasswordSdk({
@@ -26,6 +31,12 @@ function setup(options: { token?: string | null; fail?: () => Error | null; now?
         { id: "i3", title: "No website", urls: [], username: "x", password: "fake-x-pass" },
         { id: "i4", title: "A note", category: "SecureNote", urls: ["https://notes.example.com"] },
         { id: "i5", title: "No password", urls: ["https://empty.example.com"], username: "nobody" },
+        { id: "i6", title: "Stripe secret key", category: "ApiCredentials", urls: [], username: "acct_fake",
+          fields: [{ id: "credential", title: "credential", fieldType: "Concealed", value: STRIPE }] },
+        { id: "i7", title: "Deploy", category: "Password", urls: ["https://deploy.example.io"], password: DEPLOY },
+        { id: "i8", title: "Acme OAuth", category: "SecureNote", urls: [], notes: NOTE,
+          fields: [{ id: "s1", title: "client_secret", fieldType: "Concealed", value: ACME_SECRET }] },
+        { id: "i9", title: "A card", category: "CreditCard", urls: [], fields: [{ id: "n", title: "number", fieldType: "Concealed", value: "4111" }] },
       ] },
     },
   });
@@ -65,7 +76,7 @@ describe("1Password logins", () => {
       { id: "v2", title: "Finance", items: 1, bots: "all" },
       { id: "v1", title: "Shared with OMB", items: 2, bots: "all" },
     ] });
-    expect(calls).toEqual(["createClient OpenMausBot", "vaults.list", "items.list v2", "items.getAll v2 f1", "items.list v1", "items.getAll v1 i1,i2,i5"]);
+    expect(calls).toEqual(["createClient OpenMausBot", "vaults.list", "items.list v2", "items.getAll v2 f1", "items.list v1", "items.getAll v1 i1,i2,i4,i5,i6,i7,i8"]);
     const rows = source.list();
     expect(rows.map((row) => [row.site, row.hosts, row.username, row.hasTotp, row.source, row.bots])).toEqual([
       ["example.com", ["accounts.example.com"], "alice@example.com", true, "1password", "all"],
@@ -74,15 +85,15 @@ describe("1Password logins", () => {
     ]);
     expect(JSON.stringify(rows)).not.toContain(VAULT_PASSWORD);
     expect(JSON.stringify(source.status())).not.toContain(TOKEN);
-    expect(source.sitesFor("pepper")).toContainEqual({ site: "example.com", hosts: ["accounts.example.com"], exactHost: false, username: "alice@example.com" });
+    expect(linkedSites(source, "pepper")).toContainEqual({ site: "example.com", hosts: ["accounts.example.com"], exactHost: false, username: "alice@example.com" });
   });
 
   it("offers a login on its site, and reads its password and 2FA key from 1Password at fill time", async () => {
     const { source, calls } = setup();
     await source.refresh();
-    expect(source.candidates("example.org.evil.test", "pepper")).toEqual([]);
-    expect(source.candidates("login.accounts.example.com", "pepper")).toHaveLength(1);
-    const [candidate] = source.candidates("example.com", "pepper");
+    expect(linkedCandidates(source, "example.org.evil.test", "pepper")).toEqual([]);
+    expect(linkedCandidates(source, "login.accounts.example.com", "pepper")).toHaveLength(1);
+    const [candidate] = linkedCandidates(source, "example.com", "pepper");
     expect(candidate).toMatchObject({ site: "example.com", hosts: ["accounts.example.com"], username: "alice@example.com", source: "1password" });
     calls.length = 0;
     expect(await candidate!.secrets()).toEqual({ password: VAULT_PASSWORD, totp: parseTotpKey(KEY) });
@@ -96,11 +107,14 @@ describe("1Password logins", () => {
       { id: "v2", title: "Finance", items: 1, bots: ["quill"] },
       { id: "v1", title: "Shared with OMB", items: 2, bots: [] },
     ]);
-    expect(source.candidates("bank.example.net", "pepper")).toEqual([]);
-    expect(source.candidates("accounts.example.com", "pepper")).toEqual([]);
-    expect(source.sitesFor("pepper")).toEqual([]);
-    expect(source.candidates("bank.example.net", "quill").map((candidate) => candidate.username)).toEqual(["treasurer"]);
-    expect(source.sitesFor("quill").map((login) => login.site)).toEqual(["example.net"]);
+    expect(linkedCandidates(source, "bank.example.net", "pepper")).toEqual([]);
+    expect(linkedCandidates(source, "accounts.example.com", "pepper")).toEqual([]);
+    expect(linkedSites(source, "pepper")).toEqual([]);
+    expect(linkedCandidates(source, "bank.example.net", "quill").map((candidate) => candidate.username)).toEqual(["treasurer"]);
+    expect(linkedSites(source, "quill").map((login) => login.site)).toEqual(["example.net"]);
+    expect(linkedSecrets(source, "pepper")).toEqual([]);
+    expect(findLinkedSecret([source], "Stripe secret key", "pepper")).toBeNull();
+    expect(linkedSecrets(source).map((secret) => [secret.name, secret.bots])).toContainEqual(["Stripe secret key", []]);
     expect(source.list().find((row) => row.site === "example.net")?.bots).toEqual(["quill"]);
     expect(source.hasVault("v2")).toBe(true);
     expect(source.hasVault("v9")).toBe(false);
@@ -115,8 +129,8 @@ describe("1Password logins", () => {
     const saved: FillCandidate = { id: "local", site: "example.org", hosts: ["other.example.org"], exactHost: true, username: "local", source: "settings", secrets: async () => ({ password: "fake-local", totp: null }) };
     const fill = () => fillLogin({
       submit: false,
-      candidates: async (host) => [...[saved].filter((login) => login.hosts.includes(host)), ...source.candidates(host, "pepper")],
-      available: async () => [{ ...saved }, ...source.sitesFor("pepper")],
+      candidates: async (host) => [...[saved].filter((login) => login.hosts.includes(host)), ...linkedCandidates(source, host, "pepper")],
+      available: async () => [{ ...saved }, ...linkedSites(source, "pepper")],
     }, {
       engine: (args) => page!.engine(args), insertText: (text) => page!.insertText(text), press: (key) => page!.press(key), click: (selector) => page!.click(selector),
       remember: (value) => { remembered.push(value); }, now: () => now, sleep: async () => undefined,
@@ -191,11 +205,62 @@ describe("1Password logins", () => {
     expect(calls.filter((call) => call === "vaults.list")).toHaveLength(2);
     setToken(null);
     expect(source.list()).toEqual([]);
-    expect(source.sitesFor("pepper")).toEqual([]);
-    expect(source.candidates("accounts.example.com", "pepper")).toEqual([]);
+    expect(linkedSites(source, "pepper")).toEqual([]);
+    expect(linkedCandidates(source, "accounts.example.com", "pepper")).toEqual([]);
     source.clear();
     expect(source.list()).toEqual([]);
-    expect(source.candidates("accounts.example.com", "pepper")).toEqual([]);
+    expect(linkedCandidates(source, "accounts.example.com", "pepper")).toEqual([]);
     expect(source.status()).toEqual({ connected: false });
+  });
+});
+
+describe("1Password secrets", () => {
+  it("takes an API Credential's credential, a Password's password and a Secure Note's text as the main value, with other fields by title", () => {
+    const concealed = (id: string, title: string, value: string) => ({ id, title, fieldType: "Concealed", value });
+    expect([...secretFields("ApiCredentials", { fields: [{ id: "username", title: "username", fieldType: "Text", value: "acct" }, concealed("credential", "credential", "k1")] })])
+      .toEqual([["", "k1"], ["username", "acct"]]);
+    expect([...secretFields("Password", { fields: [concealed("password", "password", "p1")] })]).toEqual([["", "p1"]]);
+    expect([...secretFields("SecureNote", { fields: [concealed("s1", "client_secret", "c1")], notes: "n1" })]).toEqual([["", "n1"], ["client_secret", "c1"]]);
+    expect([...secretFields("SecureNote", { fields: [concealed("s1", "client_secret", "c1")] })]).toEqual([["", "c1"]]);
+    expect(secretFields("SecureNote", { fields: [] }).size).toBe(0);
+  });
+
+  it("lists API Credential, Password and Secure Note items with a value as secrets, by name and field names only", async () => {
+    const { source } = setup();
+    await source.refresh();
+    expect(linkedSecrets(source, "pepper").map((secret) => [secret.id, secret.name, secret.fields, secret.provider, secret.readOnly, secret.bots])).toEqual([
+      ["1password:v1:i8", "Acme OAuth", ["client_secret"], "1password", true, "all"],
+      ["1password:v1:i7", "Deploy", [], "1password", true, "all"],
+      ["1password:v1:i6", "Stripe secret key", ["username"], "1password", true, "all"],
+    ]);
+    expect(linkedCandidates(source, "deploy.example.io", "pepper")).toEqual([]);
+    const listed = JSON.stringify(source.items());
+    for (const value of [STRIPE, DEPLOY, NOTE, ACME_SECRET, VAULT_PASSWORD]) expect(listed).not.toContain(value);
+  });
+
+  it("finds one by its name or \"<name> <field>\", and reads its value from 1Password only then", async () => {
+    const { source, calls } = setup();
+    await source.refresh();
+    calls.length = 0;
+    const stripe = findLinkedSecret([source], "stripe-secret-key", "pepper");
+    expect(stripe).toMatchObject({ secret: { id: "1password:v1:i6" } });
+    expect(calls).toEqual([]);
+    expect(await readLinkedSecret(stripe!)).toBe(STRIPE);
+    expect(calls).toEqual(["items.getAll v1 i6"]);
+    expect(await readLinkedSecret(findLinkedSecret([source], "Acme OAuth", "pepper")!)).toBe(NOTE);
+    expect(await readLinkedSecret(findLinkedSecret([source], "Acme OAuth client secret", "pepper")!)).toBe(ACME_SECRET);
+    expect(findLinkedSecret([source], "A card", "pepper")).toBeNull();
+    expect(source.items().find((item) => item.id === "1password:v1:i6")?.lastUsedAt).toEqual(expect.any(Number));
+  });
+
+  it("says plainly when a secret left 1Password, and when 1Password can't be read", async () => {
+    let failure: Error | null = null;
+    const { source } = setup({ fail: () => failure });
+    await source.refresh();
+    const deploy = findLinkedSecret([source], "Deploy", "pepper")!;
+    failure = new Error("getaddrinfo ENOTFOUND my.1password.com");
+    await expect(readLinkedSecret(deploy)).rejects.toThrow("Could not reach 1Password.");
+    failure = null;
+    await expect(readLinkedSecret({ ...deploy, field: "nothing" })).rejects.toThrow("Deploy is no longer in 1Password, or has no value there.");
   });
 });

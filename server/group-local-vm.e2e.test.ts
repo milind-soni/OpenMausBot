@@ -609,6 +609,36 @@ describe("Group Local VM ownership on the real isolated server", () => {
     }
   });
 
+  it("lets a chat tool's Auto start a stopped private desktop before waking a sleeping cloud computer", async () => {
+    vmState({ containers: ["shared"], stopped: ["shared"] }); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot } = await api("POST", "/api/bots", { name: "Chat prefers its desktop" });
+    try {
+      await api("PUT", "/api/config", { box: { token: "box_fixture" } });
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "browser", browser: false });
+      const environmentId = readFileSync(join(fixtureHome, "data", "environment-id"), "utf8").trim();
+      const scope = createHash("sha256").update(environmentId).digest("hex").slice(0, 12);
+      const prefix = bot.id.slice(0, 8).replace(/[^a-z0-9]/g, "");
+      const suffix = createHash("sha256").update(bot.id).digest("hex").slice(0, 6);
+      boatRow = { id: "bx_23456789", name: `ogb-${scope}-${prefix}-${suffix}`, state: "archived" };
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Open Chrome on an available computer" });
+      const token = ((await dump()) as any).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+      const call = (method: string, body?: unknown) => fetch(base + "/api/internal/computer/select", { method,
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      const listed = await (await call("GET")).json() as any, offered = listed.options;
+      // Works on Browser with the browser off: chosen, but not to be had, so Auto picks.
+      expect(listed.chosen).toBe("browser");
+      expect(offered).toContainEqual(expect.objectContaining({ surface: "cloud", ready: false, canStart: true }));
+      expect(offered).toContainEqual(expect.objectContaining({ surface: "vm", ready: false, available: true }));
+      expect(await (await call("POST", { surface: "auto" })).json()).toMatchObject({ status: "pending", surface: "vm" });
+    } finally {
+      writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id);
+      boatRow = null;
+      await api("DELETE", `/api/bots/${bot.id}`);
+      await api("PUT", "/api/config", { box: { token: "" } });
+    }
+  });
+
   it.each(["stop", "failure", "off", "manual-selection", "new-request"])("does not continue a computer selection after %s", async failure => {
     vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
     const { bot } = await api("POST", "/api/bots", { name: `Computer selection ${failure}` });

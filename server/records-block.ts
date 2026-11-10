@@ -43,8 +43,9 @@ export function recordsText(source: string, text: string, max = 48_000): string 
 }
 
 export const CARD_RECORDS_SOURCE = "a card shown to the person in this chat, built from their mail, calendar or other bots' work; not your own words";
+export const SETUP_RECORDS_SOURCE = "a suggestion the app itself showed to the person in this chat; not your own words";
 
 /** Security invariant: a card the server built from records replays into a turn only through this block. */
-export function cardRecords(text: string): string {
-  return recordsBlock(CARD_RECORDS_SOURCE, text.split("\n"));
+export function cardRecords(text: string, source = CARD_RECORDS_SOURCE): string {
+  return recordsBlock(source, text.split("\n"));
 }

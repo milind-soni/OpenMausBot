@@ -4,20 +4,28 @@ description: Understand the harness, webhook, and companion network boundaries.
 icon: Network
 ---
 
-OpenMausBot separates its network surfaces by trust level.
+MausBot separates its network surfaces by trust level.
 
 | Surface | Default bind | Purpose |
 |---|---|---|
-| Harness | `127.0.0.1:8799` | Full app API and event stream |
+| Harness | `127.0.0.1:8799` (every private address with `serve --lan`) | Full app API and event stream |
 | Webhook receiver | `127.0.0.1:8800` | Health and secret hook endpoints only |
 | Companion sidecar | `0.0.0.0:8810` when enabled | Paired-device, token-authenticated allowlist |
 | Companion control | `127.0.0.1:8811` | Pairing and device administration |
 
 ## Remote access
 
-Use the companion sidecar rather than exposing the harness. Tailscale is the recommended remote route because it encrypts and authenticates the network path without making the machine public.
+Never forward the harness port yourself. A self-hosted server is reached through one of `openmausbot serve`'s ways in:
 
-For webhook delivery, proxy only the dedicated webhook receiver. Never forward the main harness port to the public internet.
+- `--public-url https://…`: your own cloudflared tunnel, Caddy or nginx in front;
+- `--domain HOST`: a managed Caddy that gets the certificate;
+- `--tailscale`: your tailnet, with Tailscale's HTTPS;
+- `--lan`: this network only, plain http. It listens on every address, but answers only connections whose two ends are both private;
+- `--tunnel`: a free MausBot web address.
+
+Each prints one pairing link; paste it into the desktop app under **＋ → Connect to a server**. The app accepts plain http only on private networks: LAN addresses, Tailscale's 100.64/10 and `*.ts.net`, and `*.local`.
+
+A loopback request counts as the owner only when it really comes from this machine; a LAN client that writes `Host: 127.0.0.1` is still a stranger. For webhook delivery, proxy only the dedicated webhook receiver. Never forward the main harness port to the public internet.
 
 ## Port overrides
 

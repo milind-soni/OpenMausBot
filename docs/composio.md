@@ -4,12 +4,11 @@ OpenMausBot uses one Composio project API key and one reusable Composio Session.
 
 ## Packaged desktop app
 
-1. Open the [Composio Dashboard](https://dashboard.composio.dev).
-2. Select **Platform**, select or create a project, then open **Settings → API Keys**.
-3. Copy a project key beginning with `ak_`.
-4. In OpenMausBot, open **App Settings → Connections** and save it under **Composio project key**.
-5. Open **Connected apps** and choose Gmail, GitHub, Slack, or another service. Enter a unique label such as `work` or `personal`, then finish the authorization in your normal browser.
-6. To connect another account for the same app, choose **Add account**, give it a unique label, and finish the second authorization in your browser.
+1. Open your project's [API Keys page](https://dashboard.composio.dev/~/project/settings/api-keys) in the Composio Dashboard (sign in or create a project first if asked).
+2. Create a project key there if the project has none, then copy it (it begins with `ak_`). The `ck_` key on the personal **Sessions & API Key** page is a different key and won't work.
+3. In OpenMausBot, open **Settings → API keys** and save it under **Self-host connected apps → Composio project key**.
+4. Open **Connected apps** and choose Gmail, GitHub, Slack, or another service. Enter a unique label such as `work` or `personal`, then finish the authorization in your normal browser.
+5. To connect another account for the same app, choose **Add account**, give it a unique label, and finish the second authorization in your browser.
 
 The Connected tab lists every account separately. **Disconnect** revokes only the account named on that row. OpenMausBot asks for a label for every new account and configures Composio to require explicit selection when more than one account could run a tool; a new OAuth flow never silently becomes the default for an existing connection.
 
@@ -77,7 +76,7 @@ COMPOSIO_API_KEY=ak_your_project_key pnpm dev:server
 
 The browser-only development UI can also save a key to the owner-only `~/.openmausbot/config.json` file. Using the environment variable is preferred for headless and shared development machines.
 
-OpenMausBot creates a stable random user identifier for the installation, stores the returned Session identifier, and reuses that Session across launches. No Gmail, GitHub, Slack, or other provider tokens are stored by OpenMausBot; Composio owns their connection lifecycle.
+OpenMausBot creates a stable random user identifier for the installation, stores the returned Session identifier, and reuses that Session across launches. A fresh personal installation that connects a project key uses the Composio user of an earlier OpenMausBot installation in that project when there is exactly one such user and it still has a live connection, so the apps connected there come back after a reinstall or on another computer. A Team Cloud, or a self-hosted server several people sign in to, never does this and does not even list the project's accounts, because every member's bots would then get that person's apps. No Gmail, GitHub, Slack, or other provider tokens are stored by OpenMausBot; Composio owns their connection lifecycle.
 
 Sessions created by older OpenMausBot versions are upgraded in place by creating a multi-account Session for the same stable Composio user. Connected accounts belong to that user, so existing grants remain available while the new Session adds explicit multi-account routing. Each toolkit is capped at five usable accounts.
 
@@ -85,7 +84,7 @@ Sessions created by older OpenMausBot versions are upgraded in place by creating
 
 Yes. Gmail, Google Calendar, Google Drive, and the other Google toolkits can each hold multiple labeled authorizations, and Slack can hold multiple labeled workspace/account authorizations. Accounts are scoped to the OpenMausBot installation's stable Composio user and appear by alias and connected-account ID in **Connected apps**.
 
-If a provider or restricted Composio project policy prevents another authorization, the safe fallback is a separate OpenMausBot installation/configuration with its own Composio user. Re-authorizing the same single-account Session is not a safe workaround: it can change which grant is selected. Do not share raw provider tokens or place them in bot prompts.
+If a provider or restricted Composio project policy prevents another authorization, the safe fallback is a separate OpenMausBot installation/configuration using its own Composio project key, which gives it its own Composio user; a second personal installation on the same project key picks up the earlier installation's user instead. Re-authorizing the same single-account Session is not a safe workaround: it can change which grant is selected. Do not share raw provider tokens or place them in bot prompts.
 
 The hosted/managed connected-apps broker exposes the same account-aware response shape and account-specific removal routes as the self-hosted project-key mode; it does not send broker or provider credentials to the renderer.
 
@@ -203,4 +202,4 @@ A bot with no grant record at all keeps the legacy behavior: every tool on every
 
 Grants are enforced on the real tool names at call time (including batches inside the MULTI_EXECUTE meta-tool), the tool list offered to the model is filtered to the granted set, and every allow/deny writes a decision-log row. Refusals do not enumerate what else is granted. Paired phones see each bot's grants read-only in its profile (What this bot does → App tools); grants are assigned on the computer, never from a phone.
 
-Connected-app sends also follow the bot's **Permissions → Sending on your behalf** setting at every access level, including Full access. **Ask every time** requires approval for each send regardless of prompt language. **Send without asking** lets sends go out on their own, with no daily limit. A Full-access bot with no setting here sends without asking. Reading and drafting are not sends; opaque app code execution always requires approval because its effects cannot be read.
+Connected-app sends also follow the bot's **Permissions → Sending on your behalf** setting at every access level, including Full access. **Ask every time** requires approval for each send regardless of prompt language. **Send without asking** lets sends go out on their own, with no daily limit. A Full-access bot with no setting here sends without asking. Reading and drafting are not sends; below Full access, code the app can't read always asks, even under Send without asking; at Full access it goes out without a card unless the rule is Ask every time.

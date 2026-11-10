@@ -5,6 +5,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { CaptureBuffer, captureItemLimit, capturePrompt, captureSize, newCandidates, parseCandidates, statedInConversation, worthCapturing, type Candidate, type CaptureBatch, type CaptureTurn } from "./memory-capture.ts";
 import { DREAM_FIRST_LOOKBACK_MS, DREAM_MIN_CONVERSATIONS, dreamPrompt, parseDream, type DreamConversation } from "./memory-dream.ts";
+import { checkDreamFacts } from "./memory-fact-checks.ts";
 import { factIdentity, lineFactIdentity, notebookIdentities } from "./memory-entries.ts";
 import { mergeTopicText } from "./memory-topics.ts";
 import { isForgotten } from "./profile-learned.ts";
@@ -559,7 +560,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
     const first = readRaw(botId, "MEMORY.md") ?? "";
     const candidates = organizeCandidates(first, today, core);
     if (!candidates.length) return 0;
-    const answer = await askModel(engine, organizePrompt(candidates, memoryTopicIndex(botId)));
+    const answer = await askModel(engine, organizePrompt(candidates, memoryTopicIndex(botId), today));
     if (answer === null || cancelled(started) || !upkeepEnabled(deps.bot(botId))) return 0;
     const before = readRaw(botId, "MEMORY.md") ?? "";
     if (before !== first) return 0;
@@ -762,6 +763,8 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       return late;
     }
     const dreamt = parseDream(answer, conversations.length, notebook.length);
+    dreamt.learned = dreamt.learned.filter((item) => checkDreamFacts(item.text, item.from, item.evidence, conversations) && !isForgotten(item.text));
+    dreamt.outdated = dreamt.outdated.filter((item) => checkDreamFacts(item.now, item.from, item.evidence, conversations) && !isForgotten(item.now));
     const source = `dream across ${conversations.length} chats`;
     // Re-read inside the write: if the notes changed after the prompt, its line numbers are stale.
     const written = writing(botId, () => {
@@ -901,7 +904,9 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
           log(`memory upkeep: could not queue turns saved at the last shutdown: ${(error as Error).message}`);
         }
       }
-      const started = ++generation;
+      // stop() already ended the last generation; a capture that began before the first start (a chat answered while
+      // the engines are still being read at boot) is kept.
+      const started = generation;
       const scheduledTick = () => { if (started === generation) void tick(); };
       timer = setInterval(scheduledTick, TIDY_CHECK_MS);
       timer.unref?.();

@@ -20,8 +20,9 @@ export interface FakeHttpMcpOptions {
   /** WWW-Authenticate value sent with a 401 */
   wwwAuthenticate?: string;
   /** which requests `requireHeader`, `requireHeaders` and `acceptBearer` guard: every request (default), or only tools/call,
-   * as mcp.agentcard.sh does (initialize and tools/list answer anyone) */
-  guard?: "every-request" | "tools/call";
+   * as mcp.agentcard.sh does (initialize and tools/list answer anyone), or only tools/call of a tool it lists, as
+   * gmailmcp.googleapis.com does (an unknown tool name is answered -32602 before anyone is asked to sign in) */
+  guard?: "every-request" | "tools/call" | "listed-tools";
   /** JSON documents served to GET at these paths of this server's own origin; a function receives the origin, for documents
    * that must name it */
   wellKnown?: Record<string, unknown | ((origin: string) => unknown)>;
@@ -239,9 +240,13 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
         res.writeHead(404, { "content-type": "text/plain" }).end("Not found");
         return;
       }
-      const guardsCallsOnly = options.guard === "tools/call";
+      const guardsCallsOnly = options.guard === "tools/call" || options.guard === "listed-tools";
       const body = guardsCallsOnly && req.method === "POST" ? await readBody(req) : undefined;
-      const early = body === undefined ? undefined : JSON.parse(body || "{}") as { method?: unknown; params?: unknown };
+      const early = body === undefined ? undefined : JSON.parse(body || "{}") as { id?: unknown; method?: unknown; params?: { name?: unknown } };
+      if (options.guard === "listed-tools" && early?.method === "tools/call" && !(tools ?? []).some((tool) => tool.name === early.params?.name)) {
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: early.id, error: { code: -32602, message: "Tools Call name is not found in the list of tools" } }));
+        return;
+      }
       const guarded = !guardsCallsOnly || early?.method === "tools/call";
       if (guarded && options.requireHeaders && Object.entries(options.requireHeaders).some(([name, value]) => req.headers[name.toLowerCase()] !== value)) {
         res.writeHead(403, { "content-type": "text/plain" }).end("Forbidden");

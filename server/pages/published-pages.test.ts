@@ -1,11 +1,12 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PublishedPageCard } from "../../shared/published-page.ts";
 import { FAKE_DESKTOP_TOKEN, FAKE_HOME, FAKE_TOKEN_URL, fakePagesService } from "../testing/fake-pages.ts";
 import { applyIncludedPagesMessage, pagesHomeSignature } from "./access.ts";
 import { PageBundleError, readPageBundle, skippedNote } from "./bundle.ts";
+import * as bundle from "./bundle.ts";
 import { PublishedPagesStore } from "./store.ts";
 import { createPublishedPages } from "./service.ts";
 import { createPagesInternalRoutes, createPublishedPageRoutes, type AppPages } from "../routes/published-pages.ts";
@@ -29,13 +30,20 @@ function writeSite(folder: string, files: Record<string, string> = SITE) {
 }
 const signIn = () => applyIncludedPagesMessage({ type: "openmausbot:included-pages", access: { url: FAKE_TOKEN_URL, token: FAKE_DESKTOP_TOKEN } });
 
-function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean } = {}) {
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean; liveRoots?: (botId: string, threadId: string) => readonly string[] | null; paused?: () => boolean } = {}) {
   const service = fakePagesService({ quota: options.quota });
   const work = join(dir, "work"), data = join(dir, "data");
   mkdirSync(work, { recursive: true });
   const cards: Array<{ threadId: string; id: string; text: string; card: PublishedPageCard }> = [];
   let ids = 0;
   const pages = createPublishedPages({ dataDir: data, cloudHome: options.home ? FAKE_HOME : null, selfHosted: options.selfHosted, fetch: (input, init) => service.fetch(input, init),
+    ...(options.liveRoots ? { liveRoots: options.liveRoots } : {}), ...(options.paused ? { paused: options.paused } : {}),
     patch: (threadId, messageId, text, card) => { const shown = cards.find((each) => each.id === messageId && each.threadId === threadId); if (shown) Object.assign(shown, { text, card }); } });
   const post = (threadId: string) => (text: string, card: PublishedPageCard) => { const id = `m${++ids}`; cards.push({ threadId, id, text, card }); return id; };
   const publish = (input: { path: string; title?: string; pageId?: string; botId?: string; threadId?: string }) => pages.publisher.publish({
@@ -125,6 +133,39 @@ describe("publishing a page", () => {
     expect(again.status).toBe(200);
     expect([...f.service.pages.keys()]).toHaveLength(1);
     expect([...f.service.pages.keys()][0]).not.toBe(first);
+  });
+
+  it("recovers a lost PUT response by updating the remembered page instead of creating another", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method === "PUT") throw new TypeError("response lost");
+      return response;
+    };
+    const outcome = await f.publish({ path: "site" });
+    const [pageId] = [...f.service.pages.keys()];
+    expect(outcome).toMatchObject({ status: 503, card: { pageId, uncertain: true } });
+    expect(new PublishedPagesStore(join(f.data, "published-pages.json")).get(pageId!)).toMatchObject({ uncertain: true });
+    f.service.fetch = fetch;
+    expect(await f.publish({ path: "site" })).toMatchObject({ status: 200, card: { pageId } });
+    expect(f.service.pages.size).toBe(1);
+    expect(f.service.minted.map((each) => each.action)).toEqual(["create", "update"]);
+    expect(new PublishedPagesStore(join(f.data, "published-pages.json")).get(pageId!)?.uncertain).toBeUndefined();
+  });
+
+  it.each([402, 410, 413])("drops a new pending record when the Worker confirms rejection with %s", async (status) => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    const fetch = f.service.fetch;
+    f.service.fetch = (input, init) => init?.method === "PUT" ? Promise.resolve(Response.json({}, { status })) : fetch(input, init);
+    expect((await f.publish({ path: "site" })).status).not.toBe(200);
+    expect(f.service.pages.size).toBe(0);
+    expect(f.pages.store.list()).toEqual([]);
+    expect(f.cards.every(({ card }) => card.state === "limit")).toBe(true);
   });
 
   it("at the plan's limit, says so for the bot to pass on and shows a card offering more pages, with the usage", async () => {
@@ -299,6 +340,30 @@ describe("a page tool call whose turn ends", () => {
     expect(f.service.minted).toEqual([]);
     expect(f.service.pages.size).toBe(0);
   });
+
+  it("keeps a removable page when the request goes while the committed upload's answer is still arriving", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    const gone = new AbortController();
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method !== "PUT") return response;
+      const signal = init.signal!;
+      const body = new ReadableStream({ start: (stream) => signal.addEventListener("abort", () => stream.error(signal.reason)) });
+      setTimeout(() => gone.abort());
+      return new Response(body, { status: response.status, headers: response.headers });
+    };
+    const { call, sent } = tool(f, { signal: gone.signal });
+    await call("/api/internal/pages/publish", { path: "site", title: "Bake sale" });
+    expect(sent.status).toBe(503);
+    const [pageId] = [...f.service.pages.keys()];
+    expect(new PublishedPagesStore(join(f.data, "published-pages.json")).get(pageId!)).toMatchObject({ uncertain: true, cards: [{ threadId: "thread-1", messageId: "m1" }] });
+    expect(await f.pages.publisher.unpublish({ path: "site", botId: "bot-1", roots: [f.work] })).toMatchObject({ status: 200 });
+    expect(f.service.pages.size).toBe(0);
+    expect(f.pages.store.list()).toEqual([]);
+  });
 });
 
 describe("unpublishing a page", () => {
@@ -332,6 +397,165 @@ describe("unpublishing a page", () => {
     f.service.pages.delete(page!);
     expect(await f.pages.publisher.unpublish({ pageId: page })).toMatchObject({ status: 200, text: "That page was already taken down.", card: { state: "unpublished" } });
     expect(f.pages.store.get(page!)).toBeNull();
+  });
+
+  it.each(["path", "page id"])("unpublishes by %s while a missing page is replaced", async (by) => {
+    const f = setup();
+    signIn();
+    const source = await bundle.pageSource(writeSite(join(f.work, "site")), [f.work]);
+    await f.publish({ path: "site" });
+    const [oldId] = [...f.service.pages.keys()];
+    f.service.pages.delete(oldId!);
+    const arrived = deferred(), answered = deferred();
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method === "PUT" && response.status === 410) { arrived.resolve(); await answered.promise; }
+      return response;
+    };
+    const update = f.publish({ path: "site" });
+    await arrived.promise;
+    const lookup = vi.spyOn(bundle, "pageSource").mockResolvedValue(source);
+    const unpublished = f.pages.publisher.unpublish(by === "path" ? { path: "site", botId: "bot-1", roots: [f.work] } : { pageId: oldId });
+    await Promise.resolve();
+    lookup.mockRestore();
+    answered.resolve();
+    expect((await update).status).toBe(200);
+    const replacement = f.cards.at(-1)!.card.pageId!;
+    expect(replacement).not.toBe(oldId);
+    expect(await unpublished).toMatchObject({ status: 200, card: { pageId: by === "path" ? replacement : oldId } });
+    expect(f.service.pages.has(replacement)).toBe(by !== "path");
+    expect(f.pages.store.get(replacement) === null).toBe(by === "path");
+    expect(f.cards.at(-1)!.card.state).toBe(by === "path" ? "unpublished" : "live");
+  });
+
+  it("unpublishes by path after the first publish in flight creates its record", async () => {
+    const f = setup();
+    signIn();
+    const source = await bundle.pageSource(writeSite(join(f.work, "site")), [f.work]);
+    const arrived = deferred(), answered = deferred();
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method === "PUT") { arrived.resolve(); await answered.promise; }
+      return response;
+    };
+    const publish = f.publish({ path: "site" });
+    await arrived.promise;
+    const lookup = vi.spyOn(bundle, "pageSource").mockResolvedValue(source);
+    const unpublished = f.pages.publisher.unpublish({ path: "site", botId: "bot-1", roots: [f.work] });
+    await Promise.resolve();
+    lookup.mockRestore();
+    answered.resolve();
+    expect((await publish).status).toBe(200);
+    expect((await unpublished).status).toBe(200);
+    expect(f.service.pages.size).toBe(0);
+    expect(f.pages.store.list()).toEqual([]);
+    expect(f.cards.map((card) => card.card.state)).toEqual(["unpublished"]);
+  });
+
+  it.each([["the same folder", false], ["another folder by its page id", true]])("takes a page down after an update from %s already in flight, so the update's late answer leaves no record or live card", async (_case, byId) => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    writeSite(join(f.work, "draft"));
+    await f.publish({ path: "site" });
+    const [page] = [...f.service.pages.keys()];
+    let release!: () => void;
+    const answered = new Promise<void>((resolve) => { release = resolve; });
+    let uploaded!: () => void;
+    const stored = new Promise<void>((resolve) => { uploaded = resolve; });
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method === "PUT") { uploaded(); await answered; }
+      return response;
+    };
+    const update = f.publish(byId ? { path: "draft", pageId: page } : { path: "site" });
+    await stored;
+    const unpublished = f.pages.publisher.unpublish({ pageId: page });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+    expect((await update).status).toBe(200);
+    expect((await unpublished).status).toBe(200);
+    expect(f.service.pages.size).toBe(0);
+    expect(f.pages.store.get(page!)).toBeNull();
+    expect(f.cards.map((card) => card.card.state)).toEqual(["unpublished", "unpublished"]);
+  });
+
+  it("takes a page down after its folder's update in flight, though an update from another folder by its page id moved the page meanwhile", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    writeSite(join(f.work, "draft"));
+    await f.publish({ path: "site" });
+    const [page] = [...f.service.pages.keys()];
+    let release!: () => void;
+    const answered = new Promise<void>((resolve) => { release = resolve; });
+    let uploaded!: () => void;
+    const stored = new Promise<void>((resolve) => { uploaded = resolve; });
+    let held = false;
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method === "PUT" && !held) { held = true; uploaded(); await answered; }
+      return response;
+    };
+    const fromSite = f.publish({ path: "site" });
+    await stored;
+    const fromDraft = f.publish({ path: "draft", pageId: page });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const unpublished = f.pages.publisher.unpublish({ pageId: page });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+    expect((await Promise.all([fromSite, fromDraft, unpublished])).map((outcome) => outcome.status)).toEqual([200, 200, 200]);
+    expect(f.service.pages.size).toBe(0);
+    expect(f.pages.store.get(page!)).toBeNull();
+    expect(f.cards.map((card) => card.card.state)).toEqual(["unpublished", "unpublished", "unpublished"]);
+  });
+
+  it("updates the page a folder's publish waited for, though the folder moved to another page meanwhile", async () => {
+    const f = setup();
+    signIn();
+    for (const folder of ["site", "other", "draft", "draft2"]) writeSite(join(f.work, folder));
+    await f.publish({ path: "site" });
+    await f.publish({ path: "other" });
+    const [p, q] = [...f.service.pages.keys()];
+    const holds = new Map<number, { arrived: () => void; answered: Promise<void> }>();
+    const hold = (put: number) => {
+      let arrived!: () => void, release!: () => void;
+      const reached = new Promise<void>((resolve) => { arrived = resolve; });
+      holds.set(put, { arrived, answered: new Promise<void>((resolve) => { release = resolve; }) });
+      return { reached, release: () => release() };
+    };
+    let puts = 0;
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      const held = init?.method === "PUT" ? holds.get(++puts) : undefined;
+      if (held) { held.arrived(); await held.answered; }
+      return response;
+    };
+    const first = hold(1), third = hold(3);
+    const fromDraft = f.publish({ path: "draft", pageId: p });
+    await first.reached;
+    // The folder's publish must pick its page (p) before anything below moves the folder to q.
+    const read = vi.spyOn(bundle, "readPageBundle");
+    const fromSite = f.publish({ path: "site" });
+    await vi.waitFor(() => expect(read).toHaveBeenCalled());
+    await read.mock.results[0]!.value;
+    await new Promise((resolve) => setTimeout(resolve));
+    read.mockRestore();
+    await f.publish({ path: "site", pageId: q });
+    first.release();
+    await third.reached;
+    await f.publish({ path: "draft2", pageId: q });
+    expect((await f.pages.publisher.unpublish({ pageId: q })).status).toBe(200);
+    third.release();
+    await Promise.all([fromDraft, fromSite]);
+    expect(f.service.pages.has(q!)).toBe(false);
+    expect(f.pages.store.get(q!)).toBeNull();
+    expect(f.pages.store.get(p!)).not.toBeNull();
   });
 });
 
@@ -415,3 +639,97 @@ describe("pages access", () => {
     expect(pagesHomeSignature("s".repeat(43), "cm-test-home", "1792670400", "nonce-nonce-nonce-1", '{"action":"create"}')).toBe("smys7kDYS99REKsdwsd9OaXv6pH_hP1Wajaq3KrTiVo");
   });
 });
+
+describe("a live published page", () => {
+  const publishLive = (f: ReturnType<typeof setup>, live?: boolean) => f.pages.publisher.publish({
+    botId: "bot-1", threadId: "thread-1", path: "site", title: "Bake sale", roots: [f.work], post: () => "m1", ...(live !== undefined ? { live } : {}) });
+
+  it("carries a version and a reload check in its index.html, and is remembered as live", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    expect((await publishLive(f, true)).status).toBe(200);
+    const [page] = [...f.service.pages.keys()];
+    const html = f.service.pages.get(page!)!.files.get("index.html")!;
+    expect(html.startsWith("<!doctype html><meta name=\"omb-live\" content=\"")).toBe(true);
+    expect(html).toContain("location.reload()");
+    expect(html.endsWith("<h1>Bake sale</h1>")).toBe(true);
+    expect(f.service.pages.get(page!)!.files.get("style.css")).toBe(SITE["style.css"]);
+    expect(f.pages.store.get(page!)).toMatchObject({ live: true });
+  });
+
+  it("publishes again to the same link when its folder changes, at most once a minute, and never a page that isn't live", async () => {
+    const f = setup();
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    writeSite(join(f.work, "still"), { "index.html": "<p>Still</p>" });
+    await f.pages.publisher.publish({ botId: "bot-1", threadId: "thread-1", path: "still", title: "Still", roots: [f.work], post: () => "m2" });
+    const [page] = [...f.service.pages.keys()];
+    const version = () => /content="([^"]+)"/u.exec(f.service.pages.get(page!)!.files.get("index.html")!)?.[1];
+    const first = version();
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(0);
+    writeFileSync(join(site, "style.css"), "h1{color:blue}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 1_000)).toBe(0);
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
+    expect(f.service.pages.get(page!)!.files.get("style.css")).toBe("h1{color:blue}");
+    expect(version()).not.toBe(first);
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "create", "update"]);
+    expect(await f.pages.publisher.refreshLive(Date.now() + 130_000)).toBe(0);
+    // Publishing it again keeps it live unless told otherwise.
+    await publishLive(f);
+    expect(f.pages.store.get(page!)).toMatchObject({ live: true });
+    await publishLive(f, false);
+    expect(f.pages.store.get(page!)).not.toHaveProperty("live");
+    expect(f.service.pages.get(page!)!.files.get("index.html")).toBe(SITE["index.html"]);
+  });
+
+  it("stops being published again once its bot can no longer read the folder, and keeps its link", async () => {
+    let roots: readonly string[] | null = null;
+    const asked: string[] = [];
+    const f = setup({ liveRoots: (botId, threadId) => { asked.push(`${botId} ${threadId}`); return roots; } });
+    roots = [f.work];
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    const [page] = [...f.service.pages.keys()];
+    writeFileSync(join(site, "style.css"), "h1{color:blue}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
+    expect(asked).toContain("bot-1 thread-1");
+    roots = null;
+    writeFileSync(join(site, "style.css"), "h1{color:green}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 130_000)).toBe(0);
+    expect(f.pages.store.get(page!)).not.toHaveProperty("live");
+    expect(f.pages.store.get(page!)).toMatchObject({ url: expect.any(String) });
+    expect(f.service.pages.get(page!)!.files.get("style.css")).toBe("h1{color:blue}");
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "update"]);
+  });
+
+  it("waits while the workspace is backed up, restored or moved", async () => {
+    let paused = false;
+    const f = setup({ paused: () => paused });
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    writeFileSync(join(site, "style.css"), "h1{color:blue}");
+    paused = true;
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(0);
+    paused = false;
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
+  });
+
+  it("waits ten minutes before trying a folder that can't be published as it is", async () => {
+    const f = setup();
+    signIn();
+    const site = writeSite(join(f.work, "site"));
+    await publishLive(f, true);
+    const start = Date.now();
+    rmSync(join(site, "index.html"));
+    expect(await f.pages.publisher.refreshLive(start + 61_000)).toBe(0);
+    writeFileSync(join(site, "index.html"), "<h1>Back</h1>");
+    expect(await f.pages.publisher.refreshLive(start + 130_000)).toBe(0);
+    expect(await f.pages.publisher.refreshLive(start + 662_000)).toBe(1);
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "update"]);
+  });
+});
+

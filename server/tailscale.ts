@@ -1,5 +1,7 @@
 // Never log Tailscale's raw stderr (it can contain auth keys and node names): failures are classified into a closed set.
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { tailscaleCandidates, tailscaleEnvironment } from "../companion/src/listener.ts";
 
@@ -8,6 +10,8 @@ export interface TailscaleStatus {
   dnsName: string | null;
   addresses: string[];
   backendState: string;
+  /** The tailnet hands out HTTPS certificates (`CertDomains` in `tailscale status --json`). */
+  httpsEnabled: boolean;
 }
 
 export type TailscaleFailure =
@@ -17,6 +21,7 @@ export type TailscaleFailure =
   | "no-magicdns"
   | "needs-operator"
   | "https-not-enabled"
+  | "other-server"
   | "unknown";
 
 export function classifyTailscaleStderr(text: string): TailscaleFailure {
@@ -42,7 +47,9 @@ export function explainTailscaleFailure(reason: TailscaleFailure): string {
     case "needs-operator":
       return "Tailscale refused: on Linux run `sudo tailscale set --operator=$USER` once, then try again";
     case "https-not-enabled":
-      return "HTTPS certificates are off for this tailnet: enable them in the admin console (DNS → HTTPS Certificates)";
+      return "HTTPS certificates are off for this tailnet: enable them at https://login.tailscale.com/admin/dns (HTTPS Certificates), then try again";
+    case "other-server":
+      return "this machine's tailnet name already fronts a different MausBot server: stop that one, or pass --port for this one";
     default:
       return "Tailscale reported an error; run `tailscale status` and `tailscale serve status` to see it";
   }
@@ -73,11 +80,13 @@ export function parseTailscaleStatus(cli: string, stdout: string): TailscaleStat
   const dns = Reflect.get(Object(self), "DNSName");
   const ips = Reflect.get(Object(self), "TailscaleIPs");
   const state = Reflect.get(Object(parsed), "BackendState");
+  const certDomains = Reflect.get(Object(parsed), "CertDomains");
   return {
     cli,
     dnsName: typeof dns === "string" && dns ? dns.replace(/\.$/, "") : null,
     addresses: Array.isArray(ips) ? ips.filter((v): v is string => typeof v === "string") : [],
     backendState: typeof state === "string" ? state : "unknown",
+    httpsEnabled: Array.isArray(certDomains) && certDomains.length > 0,
   };
 }
 
@@ -98,17 +107,52 @@ export async function tailscaleStatus(): Promise<{ status: TailscaleStatus } | {
   return { failure: sawCli ? "unknown" : "not-installed" };
 }
 
+/** Where a run that shares over Tailscale notes it, so the next start can turn off a share a crash left behind. */
+export const tailscaleMarker = (dataDir: string) => join(dataDir, "tailscale-serve.marker");
+
+/**
+ * `tailscale serve` in the foreground: the share ends with this process. Before serving, the tailnet must have HTTPS
+ * certificates (`CertDomains`), or serve waits on an enablement link forever; and the name must not already front a
+ * different MausBot server. Resolves once serve has run for `settleMs` without exiting.
+ */
 export async function tailscaleServe(
   status: TailscaleStatus,
   localPort: number,
-  httpsPort = 443,
-): Promise<{ origin: string } | { failure: TailscaleFailure }> {
+  options: { dataDir: string; httpsPort?: number; settleMs?: number; spawnImpl?: typeof spawn; otherServer?: (origin: string) => Promise<boolean> },
+): Promise<{ origin: string; stop(): Promise<void> } | { failure: TailscaleFailure }> {
+  const httpsPort = options.httpsPort ?? 443;
   if (!status.dnsName) return { failure: "no-magicdns" };
-  const result = await run(status.cli, ["serve", "--bg", `--https=${httpsPort}`, `http://127.0.0.1:${localPort}`], 20_000);
-  if (!result.ok) return { failure: classifyTailscaleStderr(result.stderr || result.stdout) };
-  return { origin: httpsPort === 443 ? `https://${status.dnsName}` : `https://${status.dnsName}:${httpsPort}` };
+  if (!status.httpsEnabled) return { failure: "https-not-enabled" };
+  const origin = httpsPort === 443 ? `https://${status.dnsName}` : `https://${status.dnsName}:${httpsPort}`;
+  if (await (options.otherServer ?? (() => Promise.resolve(false)))(origin)) return { failure: "other-server" };
+  const child = (options.spawnImpl ?? spawn)(status.cli, ["serve", `--https=${httpsPort}`, `http://127.0.0.1:${localPort}`], { stdio: ["ignore", "ignore", "pipe"], env: tailscaleEnvironment() });
+  let stderr = "";
+  child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-4096); });
+  const exited = new Promise<number | null>((done) => { child.once("exit", (code) => done(code)); child.once("error", () => done(-1)); });
+  const early = await Promise.race([exited, new Promise<"running">((done) => setTimeout(() => done("running"), options.settleMs ?? 2_500))]);
+  if (early !== "running") return { failure: early === -1 ? "not-installed" : classifyTailscaleStderr(stderr) };
+  writeFileSync(tailscaleMarker(options.dataDir), JSON.stringify({ cli: status.cli, httpsPort, localPort }), { mode: 0o600 });
+  return {
+    origin,
+    async stop() {
+      child.kill("SIGTERM");
+      const timer = setTimeout(() => child.kill("SIGKILL"), 3_000);
+      await exited;
+      clearTimeout(timer);
+      rmSync(tailscaleMarker(options.dataDir), { force: true });
+    },
+  };
 }
 
-export async function tailscaleServeOff(status: TailscaleStatus, httpsPort = 443): Promise<void> {
-  await run(status.cli, ["serve", `--https=${httpsPort}`, "off"], 10_000);
+/** Turns off a share a run of ours left on (its marker says so), never one the person made. True when it did. */
+export async function clearLeftoverTailscaleServe(dataDir: string): Promise<boolean> {
+  let marker: { cli?: unknown; httpsPort?: unknown };
+  try {
+    marker = JSON.parse(readFileSync(tailscaleMarker(dataDir), "utf8"));
+  } catch {
+    return false;
+  }
+  if (typeof marker.cli === "string" && Number.isInteger(marker.httpsPort)) await run(marker.cli, ["serve", `--https=${marker.httpsPort}`, "off"], 10_000);
+  rmSync(tailscaleMarker(dataDir), { force: true });
+  return true;
 }

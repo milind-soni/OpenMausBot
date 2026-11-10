@@ -9,6 +9,7 @@ import environments from "./environments.cjs";
 import { handSaved } from "./own-home-main.mjs";
 import { homeLook, withoutOldCloudHome } from "./cloud-list.mjs";
 import nativeText from "./native-text.cjs";
+import { pairingPageUrl, parseServerInput } from "./server-address.mjs";
 
 const NOW = 1_800_000_000_000;
 const origin = "https://omb-u-1a2b3c4d5e6f.fly.dev";
@@ -99,7 +100,8 @@ test("connecting uses the pairing page with the code in the hash, or the machine
   assert.equal(cloudHomeConnectUrl({ origin, grant: { origin, code, expiresAt: NOW + 1 } }, NOW, "phone"), `${origin}/pair?desktop-settings=phone#code=${code}`);
   assert.equal(cloudHomeConnectUrl({ origin, grant: null }, NOW, "phone"), `${origin}/?desktop-settings=phone`);
   assert.equal(cloudHomeConnectUrl({ origin, grant: null }, NOW, "evil"), origin);
-  assert.deepEqual(environments.parseHostedWorkspaceLink(`${origin}/pair#code=${code}`), { origin, code, url: `${origin}/pair#code=${code}` });
+  const parsed = parseServerInput(`${origin}/pair#code=${code}`);
+  assert.deepEqual([parsed.candidates, parsed.code, pairingPageUrl(origin, parsed.code)], [[origin], code, `${origin}/pair#code=${code}`]);
 });
 
 const accessToken = `omc_${"T".repeat(43)}`;

@@ -4,7 +4,7 @@ import { Trash2 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { api, useStore } from "@/state/store";
 import { phoneAppChips, phonePlatformLabel, phoneRemovePath, usePhones } from "../lib/phones";
-import { relative } from "./CompanionSection";
+import { relative } from "./PhoneDevicesSection";
 
 export function PhonesList() {
   const { phase, phones, refresh } = usePhones();

@@ -92,6 +92,7 @@ export function BrowserProxyRow() {
   const { state } = useStore();
   const owner = useOwnerOrAdmin();
   const configured = state.config?.browserEngine?.proxyConfigured === true;
+  const saved = state.config?.browserEngine?.proxySaved === true || configured;
   const [endpoint, setEndpoint] = useState("");
   const { saving, error, save } = useConfigSave();
   if (owner !== true || !builtInBrowserEnabled(state.config)) return null;
@@ -99,7 +100,7 @@ export function BrowserProxyRow() {
   return (
     <SettingRow
       title={t("settings.browser.proxy")}
-      subtitle={configured ? t("settings.browser.proxyConfigured") : t("settings.browser.proxyDetail")}
+      subtitle={configured ? t("settings.browser.proxyConfigured") : saved ? t("settings.browser.proxyInactive") : t("settings.browser.proxyDetail")}
       message={error ? <p role="alert" className="text-danger">{error}</p> : null}
     >
       <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -115,7 +116,7 @@ export function BrowserProxyRow() {
         <button type="button" disabled={saving || !endpoint.trim()} onClick={() => void save({ browserEngine: { egress: { proxy: endpoint.trim() } } })} className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink disabled:opacity-50">
           {t("settings.browser.proxySave")}
         </button>
-        {configured ? <button type="button" disabled={saving} onClick={() => void save({ browserEngine: { egress: { proxy: "" } } })} className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink disabled:opacity-50">{t("settings.browser.proxyClear")}</button> : null}
+        {saved ? <button type="button" disabled={saving} onClick={() => void save({ browserEngine: { egress: { proxy: "" } } })} className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink disabled:opacity-50">{t("settings.browser.proxyClear")}</button> : null}
       </div>
     </SettingRow>
   );

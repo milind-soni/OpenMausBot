@@ -49,7 +49,7 @@ function world(options: { live?: string[]; privateTo?: string; steers?: boolean;
   const settled: string[] = [];
   const steered: Array<{ threadId: string; text: string }> = [];
   const deps: QuestionRoutingDeps = {
-    store: store as unknown as QuestionRoutingDeps["store"],
+    handedInUnproven: () => {}, store: store as unknown as QuestionRoutingDeps["store"],
     active: () => [...nodes.values()],
     node: (id) => nodes.get(id),
     parkedFor: (botId) => [...nodes.values()].filter((one) => one.botId === botId && one.status === "waiting" && one.question !== undefined),

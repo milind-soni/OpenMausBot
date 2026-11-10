@@ -12,12 +12,12 @@ import { closeMessageDb,
   insertMessage,
   insertNotificationLog,
   lastRowAt,
+  liveAppRows,
   latestPersonLineAts,
   logNotification,
   openRescueMessages,
   latestSaidByBot,
   markNotificationLogRead,
-  markThreadNotificationLogRead,
   readMessageText,
   recentMessages,
   recentNotificationLog,
@@ -62,6 +62,16 @@ describe("message-db", () => {
     const thread = readThread("t1", legacy("t1"));
     expect(thread.messages.map((m) => m.text)).toEqual(["hello, edited", "world"]);
     expect(thread.activeLeafId).toBe("m2");
+  });
+
+  it("lists the live pages, newest first, up to the limit", () => {
+    const app = (id: string, live?: true) => msg(id, "", { role: "bot", kind: "app", app: { title: "Sales", doc: `d-${id}`, rev: 0, ...(live ? { live } : {}) } } as Partial<Message>);
+    insertMessage("t1", app("a1", true));
+    insertMessage("t1", app("a2"));
+    insertMessage("t2", app("a3", true));
+    insertMessage("t2", msg("m1", "{\"app\":{\"live\":true}}"));
+    expect(liveAppRows()).toEqual([{ threadId: "t2", messageId: "a3" }, { threadId: "t1", messageId: "a1" }]);
+    expect(liveAppRows(1)).toEqual([{ threadId: "t2", messageId: "a3" }]);
   });
 
   it("finds the first-reply rescue rows that never settled or ended", () => {
@@ -211,6 +221,23 @@ describe("message-db", () => {
     expect(recallMessages("broken links", ["own-a"])).toHaveLength(1);
     deleteThread("own-a");
     expect(recallMessages("audit", ["own-a", "own-b"])).toEqual([]);
+  });
+
+  it("recalls exact Han tokens with CJK punctuation only in the requested threads and range", () => {
+    const text = "本季度预算审批结果：已通过";
+    insertMessage("own-a", msg("m1", text, { at: 2000 }));
+    insertMessage("own-a", msg("old", text, { at: 1000 }));
+    insertMessage("other-bot", msg("private", text, { at: 2000 }));
+    insertMessage("own-a", msg("chip", text, { kind: "activity", at: 2000 }));
+
+    const recall = (query: string) => recallMessages(query, ["own-a"], 12, { since: 1500 }, "any");
+    expect(recall("本季度预算审批结果?").map((hit) => hit.messageId)).toEqual(["m1"]);
+    for (const query of ["本季度预算审批结果？", "「本季度预算审批结果」", "预算、本季度预算审批结果；进度"]) {
+      const hits = recall(query);
+      expect(hits.map((hit) => hit.messageId)).toEqual(["m1"]);
+      expect(hits[0]?.snippet).toContain("[本季度预算审批结果]");
+    }
+    expect(recallMessages("本季度预算审批结果？", [], 12, undefined, "any")).toEqual([]);
   });
 
   it("recall by time: a window on ranked hits, a newest-first listing without words", () => {
@@ -568,17 +595,6 @@ describe("notification_log", () => {
     rows = recentNotificationLog();
     expect(rows).toHaveLength(3);
     expect(rows.filter((r) => r.read).map((r) => r.id).sort()).toEqual(["n1", "n2"]);
-  });
-
-  it("reading a conversation reads only its own notifications, a pending question's included", () => {
-    insertNotificationLog(entry("n1", 1000));
-    insertNotificationLog(entry("n2", 2000, { kind: "question" }));
-    insertNotificationLog(entry("n3", 3000, { threadId: "thread-2" }));
-    expect(markThreadNotificationLogRead("thread-1").sort()).toEqual(["n1", "n2"]);
-    const rows = recentNotificationLog();
-    expect(rows.filter((r) => r.read).map((r) => r.id).sort()).toEqual(["n1", "n2"]);
-    expect(rows.find((r) => r.id === "n3")?.read).toBe(false);
-    expect(markThreadNotificationLogRead("thread-1")).toEqual([]);
   });
 
   it("keeps only the newest 500 rows, FIFO", () => {

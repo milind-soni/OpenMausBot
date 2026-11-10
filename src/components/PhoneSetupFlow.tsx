@@ -17,10 +17,10 @@ import {
   QrCode,
   ShieldCheck,
   Smartphone,
-  Wifi,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { phonePairingLink } from "../../shared/pairing-link";
+import { codeUntil } from "@/lib/pairing-time";
 import {
   companionPairingAddressText,
   companionPairingRoute,
@@ -65,10 +65,11 @@ import {
 } from "../lib/companion-state";
 import { ConnectionDetail } from "./ConnectionDetail";
 import { PhonePairingQr } from "./PhonePairingQr";
+import { PhoneSetupSignInRoutes } from "./PhoneSetupSignInRoutes";
 import { productName } from "../lib/brand";
 
 import type { CompanionBridge, CompanionState } from "../lib/companion-types";
-export type { CompanionBridge, CompanionState, PhoneDevice } from "../lib/companion-types";
+export type { CompanionBridge, CompanionRoute, CompanionState, PhoneDevice } from "../lib/companion-types";
 
 type AccountBridge = NonNullable<NonNullable<Window["ogb"]>["companionAccount"]>;
 type StateBridge<T> = { state: () => Promise<T> };
@@ -132,7 +133,6 @@ export interface PhoneSetupController {
   error: string | null;
   accountError: string | null;
   pairingLink: string | null;
-  secondsLeft: number;
   address: string | undefined;
   pairingPort: number;
   addressText: string | undefined;
@@ -172,7 +172,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
   const [setupTimedOut, setSetupTimedOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accountError, setAccountError] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [, setNow] = useState(() => Date.now());
   const [flow, dispatchFlow] = useReducer(phoneSetupReducer, initialPhoneSetupFlowState);
   const emailEdited = useRef(false);
   const pairingUiOwner = useRef<PhonePairingAttemptLock>({ generation: null });
@@ -328,7 +328,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
             read: () => companion.state(),
             start: () => mutateCompanionBridgeState(
               companionMutationEpoch,
-              () => companion.start(),
+              () => companion.start(routeMode === "automatic" ? undefined : []),
             ),
             refreshTailscale: () => mutateCompanionBridgeState(
               companionMutationEpoch,
@@ -786,9 +786,6 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
     error,
     accountError,
     pairingLink,
-    secondsLeft: state?.pairing
-      ? Math.max(0, Math.round((state.pairing.expiresAt - now) / 1000))
-      : 0,
     address: pairingRoute?.address,
     pairingPort: pairingRoute?.port ?? state?.port ?? 8810,
     addressText: pairingRoute ? companionPairingAddressText(pairingRoute) : undefined,
@@ -932,7 +929,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
             </label>
             {c.codeSent && (
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-medium text-ink-secondary">{t("phone.signIn.code")}</span>
+                <span className="text-[12px] font-medium text-ink-secondary">{t("phone.signIn.emailCode")}</span>
                 <input
                   autoFocus
                   autoComplete="one-time-code"
@@ -980,19 +977,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
           </button>
         )}
         {actionError && <p role="alert" className="mt-3 text-[13px] text-danger">{actionError}</p>}
-        <div className="my-4 flex items-center gap-3 text-[11px] text-ink-secondary">
-          <span className="h-px flex-1 bg-hairline/40" /> {t("phone.signIn.or")} <span className="h-px flex-1 bg-hairline/40" />
-        </div>
-        <button
-          disabled={c.busy || c.accountBusy}
-          onClick={c.useLocal}
-          className="flex items-center justify-center gap-2 rounded-lg border border-hairline/50 py-2.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
-        >
-          <Wifi size={15} /> {t("phone.signIn.wifiInstead")}
-        </button>
-        <p className="mt-2 text-center text-[11px] leading-relaxed text-ink-secondary">
-          {t("phone.signIn.wifiNote")}
-        </p>
+        <PhoneSetupSignInRoutes c={c} />
       </div>
     );
   }
@@ -1063,14 +1048,14 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
       )}
       {!c.pairingExpired && manualCodeMode === "direct" && c.state?.pairing && (
         <div className="mt-4 w-full max-w-[320px] rounded-xl bg-inset px-4 py-3 text-[13px] text-ink-secondary">
-          <div>{t("phone.code.manualIntro")}</div>
+          <div>{t("phone.code.typeIntro", { app: productName() })}</div>
           <div className="mt-2 font-mono text-[22px] tracking-[0.25em] text-ink">
             {c.state.pairing.code}
           </div>
         </div>
       )}
       {!c.pairingExpired && manualCodeMode === "details" && c.state?.pairing && (
-        <p className="mt-3 text-[12px] text-ink-secondary">{t("phone.code.expiresIn", { seconds: c.secondsLeft })}</p>
+        <p className="mt-3 text-[12px] text-ink-secondary">{codeUntil(c.state.pairing.expiresAt)}</p>
       )}
       {!c.pairingExpired && c.localFallback && c.state?.publicNetwork && (
         <p role="note" className="mt-3 w-full max-w-[390px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-left text-[12px] leading-relaxed text-warning">
@@ -1086,7 +1071,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
         <details className="mt-4 w-full max-w-[390px] rounded-lg border border-hairline/40 px-3 py-2 text-left">
           <summary className="cursor-pointer text-[12px] text-ink-secondary">{t("phone.code.trouble")}</summary>
           <div className="mt-3 text-[12px] text-ink-secondary">
-            {t("phone.code.manual")}
+            {t("phone.code.pairingCode")}
             <div className="mt-1 font-mono text-[22px] tracking-[0.25em] text-ink">{c.state.pairing.code}</div>
             {c.address && (
               <div className="mt-3">

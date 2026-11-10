@@ -74,7 +74,7 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
-const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame"]);
+const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
@@ -143,6 +143,8 @@ function invokeWithPlainError(channel, ...args) {
 
 const bridge = {
   platform: process.platform,
+  /** Linux without a GPU (electron/linux-gpu.mjs): the page drops its backdrop blurs. */
+  softwareRendering: process.argv.includes("--omb-software-rendering=1"),
   /** This app's version, and whether this page is this app's own (served by this computer, not a server from the Server menu). */
   app: { version: appVersion, ownPage: isLocalPage },
   // Safe on a cloud page: the person chooses in a native menu, or a circle of the rail main listed (only for this app's
@@ -154,8 +156,9 @@ const bridge = {
     places: () => ipcRenderer.invoke("workspaces:places"),
     open: (id) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("workspaces:open", String(id)) : Promise.reject(new Error("Choose a place to open it.")),
-    add: (choice, link) => isLocalPage || navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("workspaces:add", String(choice), ...(typeof link === "string" ? [link] : [])) : Promise.reject(new Error("Choose what to add.")),
+    add: (choice, link, code) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("workspaces:add", String(choice), ...(typeof link === "string" ? [link, ...(typeof code === "string" ? [code] : [])] : [])) : Promise.reject(new Error("Choose what to add.")),
+    probe: (address, code) => ipcRenderer.invoke("workspaces:probe", String(address ?? ""), String(code ?? "")),
     // The colour of the place this page is (never another's): read, and changed only from the person's click.
     look: () => ipcRenderer.invoke("workspaces:look"),
     color: (swatch) => isLocalPage || navigator.userActivation?.isActive === true
@@ -260,10 +263,13 @@ const bridge = {
   },
   companion: {
     state: () => ipcRenderer.invoke("companion:state"),
-    start: () => ipcRenderer.invoke("companion:start"),
+    start: (routes) => ipcRenderer.invoke("companion:start", Array.isArray(routes) ? routes.filter((route) => typeof route === "string") : undefined),
     stop: () => ipcRenderer.invoke("companion:stop"),
     keepAwake: (enabled) => ipcRenderer.invoke("companion:keep-awake", enabled),
     refreshTailscale: () => ipcRenderer.invoke("companion:refresh-tailscale"),
+    setTailscale: (on) => ipcRenderer.invoke("companion:tailscale", on === true),
+    setRoute: (route, on) => ipcRenderer.invoke("companion:route", String(route), on === true),
+    dismissNotice: (route) => ipcRenderer.invoke("companion:notice-dismiss", String(route)),
     pairing: (open, expectedToken) => ipcRenderer.invoke("companion:pairing", open, expectedToken),
     cloudDesktop: (deviceId, allowed) => ipcRenderer.invoke("companion:cloud-desktop", deviceId, allowed),
     browserControl: (deviceId, allowed) => ipcRenderer.invoke("companion:browser-control", deviceId, allowed),
@@ -405,6 +411,7 @@ const bridge = {
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
   saveFile: (filePath) => invokeWithPlainError("desktop:save-file", filePath),
   revealInFolder: (filePath) => ipcRenderer.invoke("desktop:reveal-file", filePath),
+  openFolder: (folderPath) => ipcRenderer.invoke("desktop:open-folder", folderPath),
   openHtmlInBrowser: (source, name) => invokeWithPlainError("desktop:open-html", source, name),
   // This app's own logs folder (server.log, desktop-crashes.log, updater.log); the page names no path.
   openLogsFolder: () => ipcRenderer.invoke("desktop:open-logs"),
@@ -414,6 +421,11 @@ const bridge = {
       ? ipcRenderer.invoke("open-at-login:set", on === true) : Promise.reject(new Error("Turn on the switch to open OpenMausBot at login.")),
   },
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
+  // Saved keys this launch could not read, and "Reset saved keys" (main asks the person first, then restarts).
+  credentialStore: {
+    unreadable: () => ipcRenderer.invoke("credential-store:unreadable"),
+    reset: () => ipcRenderer.invoke("credential-store:reset"),
+  },
 
   updater: {
     check: () => ipcRenderer.invoke("update:check"),
@@ -439,6 +451,13 @@ const bridge = {
     create: (name, dataDir) => ipcRenderer.invoke("environments:create", name, dataDir),
     pickDir: () => ipcRenderer.invoke("environments:pick-dir"),
     forget: (id, purge) => ipcRenderer.invoke("environments:forget", id, purge === true),
+    status: () => ipcRenderer.invoke("environments:status"),
+    retry: (id) => ipcRenderer.invoke("environments:retry", ...(typeof id === "string" ? [id] : [])),
+    onStatus: (cb) => {
+      const handler = () => cb();
+      ipcRenderer.on("environments:status-changed", handler);
+      return () => ipcRenderer.removeListener("environments:status-changed", handler);
+    },
     onOpenSettings: (cb) => {
       const handler = (_event, computerId) => cb(computerId);
       ipcRenderer.on("workspaces:open-settings", handler);
@@ -624,6 +643,10 @@ const bridge = {
     save: (id, grant) => ipcRenderer.invoke("sharing:save", id, grant),
     revoke: id => ipcRenderer.invoke("sharing:revoke", id),
     activity: id => ipcRenderer.invoke("sharing:activity", id),
+    servers: () => ipcRenderer.invoke("sharing:servers"),
+    allow: id => ipcRenderer.invoke("sharing:allow", id),
+    pause: () => ipcRenderer.invoke("sharing:pause"),
+    resume: () => ipcRenderer.invoke("sharing:resume"),
   },
   confirm: message => ipcRenderer.invoke("dialog:confirm", message),
   /** The window onto My Cloud once it is the person's home: this computer's screen while My Cloud can't be opened, and

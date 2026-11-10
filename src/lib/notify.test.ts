@@ -110,6 +110,12 @@ describe("desktop notifications", () => {
     expect(notices[0]!.options).toMatchObject({ tag: "openmausbot:spend", icon: undefined });
   });
 
+  it("shows a stored Markdown body as plain text", () => {
+    const { notices } = installNotification("granted");
+    showNotification({ ...frame, body: "**Facture reçue** — [voir](https://example.com)" }, vi.fn());
+    expect(notices[0]?.options?.body).toBe("Facture reçue — voir");
+  });
+
   it("still alerts a focused app when another task is visible", () => {
     const { notices } = installNotification("granted", true);
 
@@ -177,6 +183,13 @@ describe("on the desktop app, where main shows the banner so its click outlives 
       title: frame.title, body: frame.body, tag: "openmausbot:bot-1", silent: false, picture: "/api/attachments/face.png", botId: "bot-1", threadId: "thread-1",
     });
     expect(notices).toHaveLength(0);
+  });
+
+  it("hands main the same plain line for an older Markdown body", async () => {
+    const { show } = installBridge(async () => true);
+    showNotification({ ...frame, body: "**Facture reçue**" }, vi.fn());
+    await flush();
+    expect(show).toHaveBeenCalledWith(expect.objectContaining({ body: "Facture reçue" }));
   });
 
   it("asks main for nothing without the person's permission or over the thread on screen, as ever", async () => {

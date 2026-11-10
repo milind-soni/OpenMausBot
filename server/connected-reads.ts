@@ -1,6 +1,8 @@
 // Reads Google Calendar events and Gmail headers from the server through the connected-apps relay, with no AI turn, as
-// the default connected account of each app. Tool names, arguments and answer shapes follow Composio's documentation; the
-// fixtures are not yet checked against the live service, so an answer of any other shape is an error, never an empty list.
+// the default connected account of each app, or the one the host names when an app has several. Tool names, arguments
+// and answer shapes follow Composio's documentation; the fixtures are not yet checked against the live service, so an
+// answer of any other shape is an error, never an empty list.
+import { findMeetingLink } from "../shared/meetings.ts";
 import { parseMcpResponse } from "./connector-tools-list.ts";
 
 export const READ_APPS = ["gmail", "googlecalendar"] as const;
@@ -48,10 +50,13 @@ const SIGNED_OUT = /\b(?:unauthori[sz]ed|unauthenticated|invalid[_ ]grant|expire
 export class SourceError extends Error {
   readonly app: ReadApp;
   readonly signedOut: boolean;
-  constructor(app: ReadApp, message: string) {
+  /** The read named one of the app's several connected accounts, so that account is the one to check. */
+  readonly severalAccounts: boolean;
+  constructor(app: ReadApp, message: string, severalAccounts = false) {
     super(message);
     this.app = app;
     this.signedOut = SIGNED_OUT.test(message);
+    this.severalAccounts = severalAccounts;
     this.name = "SourceError";
   }
 }
@@ -194,7 +199,8 @@ function calendarEvent(raw: unknown, calendar: { id: string; owned: boolean }): 
   const original = record(item.originalStartTime);
   const originalStart = Date.parse(String(original?.dateTime ?? original?.date ?? ""));
   const organizer = record(item.organizer)?.email;
-  const joinUrl = [item.hangoutLink, video, location].find((value): value is string => typeof value === "string" && /^https:\/\/\S+$/i.test(value.trim()));
+  const joinUrl = [item.hangoutLink, video, location].find((value): value is string => typeof value === "string" && /^https:\/\/\S+$/i.test(value.trim()))
+    ?? findMeetingLink(typeof item.description === "string" ? item.description : undefined) ?? undefined;
   return {
     id: item.id,
     title: flat(item.summary) || "Untitled meeting",
@@ -310,9 +316,28 @@ export function calendarsFromData(data: unknown): Array<{ id: string; name: stri
 
 export const READ_TIMEOUT_MS = 60_000;
 
+/** `promise`, or a rejection with the signal's reason once `signal` aborts first (after `onAbort`). */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, onAbort: () => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      onAbort();
+      reject(signal.reason);
+    };
+    if (signal.aborted) return abort();
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
+/** The account to name per app, for apps with several connected. */
+type AppAccounts = Partial<Record<ReadApp, string>>;
+
 export interface ConnectedReadDeps {
   /** Null when connected apps are not set up here; else which of the two apps are connected. */
   connected(): Promise<Record<ReadApp, boolean> | null>;
+  /** The account to read for each app with several connected (Composio refuses a read that names none then); an app
+   *  with one is left out, and its reads name no account. Asked once per session. */
+  accounts?(): Promise<AppAccounts>;
   relay(payload: unknown, transportSessionId: string | undefined, signal: AbortSignal): Promise<{ status: number; bytes: Uint8Array; transportSessionId?: string }>;
   readTimeoutMs?: number;
 }
@@ -344,6 +369,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
 
   function session(): ReadSession {
     let opened: Promise<string | undefined> | undefined;
+    let accounts: Promise<AppAccounts> | undefined;
 
     async function open(signal: AbortSignal): Promise<string | undefined> {
       const init = await deps.relay({
@@ -360,6 +386,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
     async function call(slug: string, args: Record<string, unknown>, options: { signal?: AbortSignal; gone?: (toolError: string) => boolean } = {}): Promise<unknown> {
       const { gone, signal = AbortSignal.timeout(readTimeoutMs) } = options;
       const app = appOf(slug);
+      let account: string | undefined;
       try {
         signal.throwIfAborted();
         opened ??= open(signal).catch((error: unknown) => {
@@ -367,9 +394,19 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
           throw error;
         });
         const transport = await opened;
+        // A failed lookup reads as no account named and is asked again on the next read, not kept for the session.
+        accounts ??= deps.accounts?.().catch((): AppAccounts => {
+          accounts = undefined;
+          return {};
+        }) ?? Promise.resolve({});
+        // The lookup counts toward this read's time limit; one that runs out is dropped so the next read asks again.
+        const lookup = accounts;
+        account = (await untilAborted(lookup, signal, () => {
+          if (accounts === lookup) accounts = undefined;
+        }))[app];
         const answer = await deps.relay({
           jsonrpc: "2.0", id: CALL_ID, method: "tools/call",
-          params: { name: MULTI_EXECUTE, arguments: { tools: [{ tool_slug: slug, arguments: args }] } },
+          params: { name: MULTI_EXECUTE, arguments: { tools: [{ tool_slug: slug, arguments: args, ...(account ? { account } : {}) }] } },
         }, transport, signal);
         if (answer.status !== 200) throw new Error(`${slug} answered HTTP ${answer.status}`);
         return toolData(slug, parseMcpResponse(new TextDecoder().decode(answer.bytes), CALL_ID));
@@ -377,7 +414,8 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
         if (error instanceof SourceError) throw error;
         if (gone && error instanceof ToolAnswerError && gone(error.message)) return GONE;
         if (signal.aborted) throw new SourceError(app, `${slug} did not answer within ${Math.round(readTimeoutMs / 1000)} seconds`);
-        throw new SourceError(app, errorText(error));
+        // Only the tool's own refusal points at the named account; a relay hiccup (HTTP 5xx) is a later try.
+        throw new SourceError(app, errorText(error), account !== undefined && error instanceof ToolAnswerError);
       }
     }
 
@@ -414,7 +452,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): ConnectedReads {
             return eventsFromData(data, { id: calendar.id, owned: calendar.owned });
           } catch (error) {
             failed.abort();
-            throw new SourceError("googlecalendar", `calendar ${calendar.name}: ${errorText(error)}`);
+            throw new SourceError("googlecalendar", `calendar ${calendar.name}: ${errorText(error)}`, error instanceof SourceError && error.severalAccounts);
           }
         });
         return perCalendar.flat();

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   CheckCircle2,
+  ExternalLink,
   FlaskConical,
   Globe,
   Loader2,
@@ -19,6 +20,7 @@ import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { updateMcpServers } from "@/lib/mcp-servers";
+import { reserveConnectionPage } from "@/lib/connector-oauth";
 import { completeMcpSignIn, mcpSignInLink, runMcpSignIn, type McpSignInStatus } from "@/lib/mcp-sign-in";
 import { listenLiveFrames } from "@/lib/live-events";
 import { api, useStore } from "@/state/store";
@@ -30,7 +32,7 @@ import { HostedMcpIcon } from "./HostedMcpIcon";
 import type { McpMessage } from "./McpResultBudgetField";
 import { McpServerEditor, type McpServerSubmission } from "./McpServerEditor";
 import { isRemoteMcpListing, type McpServerListing } from "./mcp-draft";
-import { HOSTED_MCP_APPS, hostedConnections, hostedMcpApp, hostedServerName, type HostedApp, type HostedConnections, type HostedMcpAppId } from "@/lib/hosted-mcp-apps";
+import { HOSTED_KEY_HEADER, HOSTED_MCP_APPS, hostedConnections, hostedMcpApp, hostedServerName, type HostedApp, type HostedConnections, type HostedMcpAppId } from "@/lib/hosted-mcp-apps";
 import { POSTIZ_SERVER } from "../../shared/postiz";
 import { CHAT_TOOL_LIMIT, chatToolBudgetFit } from "../../shared/tool-budget";
 import { openBotSettings } from "./bot-panel/panel-link";
@@ -68,13 +70,14 @@ async function toolsCheck(
 export async function signedInToolsCheck(
   name: string,
   request: (path: string, init?: RequestInit) => Promise<ProbeResult>,
-  signal: AbortSignal,
+  signal: AbortSignal | undefined,
   service: string,
+  failed: LocaleKey = "hostedMcp.testFailed",
 ): Promise<ProbeResult> {
   const tested = await toolsCheck(name, request, signal);
   if (tested.ok) return tested;
   const reason = (tested.error ?? "").trim();
-  return { ...tested, error: t("hostedMcp.testFailed", { service, reason: reason && !/[.!?]$/.test(reason) ? `${reason}.` : reason }) };
+  return { ...tested, error: t(failed, { service, reason: reason && !/[.!?]$/.test(reason) ? `${reason}.` : reason }) };
 }
 
 /** Security: names the headers, never their values. */
@@ -131,6 +134,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
   const [connecting, setConnecting] = useState<string | null>(null);
   /** A failed card action belongs to that card alone: the cards share one instance, and `error` shows on every one. */
   const [cardFailure, setCardFailure] = useState<{ id: HostedMcpAppId; message: string } | null>(null);
+  const [keys, setKeys] = useState<Partial<Record<HostedMcpAppId, string>>>({});
   const loadGeneration = useRef(0);
   const mounted = useRef(true);
   const hostedOf = (server: McpServerListing) => isRemoteMcpListing(server) ? hostedMcpApp(server) : undefined;
@@ -328,6 +332,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
   };
 
   async function signIn(server: McpServerListing) {
+    const launch = reserveConnectionPage();
     const controller = new AbortController();
     signInAbort.current = controller;
     setSigningIn(server.name);
@@ -340,7 +345,10 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     forgetProbe(server.name);
     const hosted = hostedOf(server);
     try {
-      const result = await runMcpSignIn(server.name, { api, open: openExternalLink, signal: controller.signal, onStarted: (status, complete) => {
+      const open = async (url: string) => {
+        if (!await launch.open(url) && mounted.current && !controller.signal.aborted) setCallbackError(t("connectors.card.popupBlocked"));
+      };
+      const result = await runMcpSignIn(server.name, { api, open, signal: controller.signal, onStarted: (status, complete) => {
         setSignInFlow(status);
         signInComplete.current = complete;
       } });
@@ -361,6 +369,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     } catch (cause) {
       if (mounted.current && !controller.signal.aborted) setProbe((current) => ({ ...current, [server.name]: { ok: false, error: cause instanceof Error ? cause.message : String(cause) } }));
     } finally {
+      launch.cancel();
       if (signInAbort.current === controller) {
         signInAbort.current = null;
         signInComplete.current = null;
@@ -377,6 +386,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
   const connectHosted = async (app: HostedApp) => {
     if (!servers || busy !== null || signingIn !== null) return;
     const existing = servers.find((server) => hostedOf(server) === app);
+    if ("key" in app) { await connectWithKey(app, existing); return; }
     if (existing) { await signIn(existing); return; }
     setBusy(`hosted:${app.id}`);
     loadGeneration.current += 1;
@@ -394,6 +404,34 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
       if (mounted.current) setCardFailure({ id: app.id, message: cause instanceof Error ? cause.message : String(cause) });
     } finally { if (mounted.current) setBusy(null); }
     if (added && mounted.current) await signIn(added);
+  };
+
+  const connectWithKey = async (app: Extract<HostedApp, { key: unknown }>, existing: McpServerListing | undefined) => {
+    const key = keys[app.id]?.trim();
+    if (!servers || !key) return;
+    setBusy(`hosted:${app.id}`);
+    loadGeneration.current += 1;
+    setError(null);
+    setCardFailure(null);
+    setNotice(null);
+    const name = existing?.name ?? hostedServerName(app, servers);
+    forgetProbe(name);
+    try {
+      const entry = { type: "http", url: app.url, headers: { [HOSTED_KEY_HEADER]: `Bearer ${key}` }, enabled: false };
+      listed((await api(existing ? `/api/mcp/servers/${name}` : "/api/mcp/servers", {
+        method: existing ? "PUT" : "POST",
+        body: JSON.stringify(existing ? entry : { name, ...entry }),
+      })).servers);
+      const tested = await signedInToolsCheck(name, api, undefined, app.label, "hostedMcp.keyTestFailed");
+      if (!mounted.current) return;
+      setProbe((current) => ({ ...current, [name]: tested.reason === "keys" ? { ...tested, error: t("hostedMcp.keyRefused", { service: app.label }) } : tested }));
+      if (!tested.ok) return;
+      listed((await api(`/api/mcp/servers/${name}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) })).servers);
+      setKeys((current) => ({ ...current, [app.id]: "" }));
+      setNotice({ key: "hostedMcp.connected", params: { service: app.label } });
+    } catch (cause) {
+      if (mounted.current) setCardFailure({ id: app.id, message: cause instanceof Error ? cause.message : String(cause) });
+    } finally { if (mounted.current) setBusy(null); }
   };
 
   const completeSignIn = async () => {
@@ -419,6 +457,11 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     setNotice(null);
     forgetProbe(server.name);
     try {
+      // A key card's server is the key, so disconnecting removes it and the key with it.
+      if (card && "key" in card) {
+        listed((await api(`/api/mcp/servers/${server.name}`, { method: "DELETE" })).servers);
+        return;
+      }
       if (hostedOf(server)) {
         listed((await api(`/api/mcp/servers/${server.name}`, { method: "PATCH", body: JSON.stringify({ enabled: false }) })).servers);
       }
@@ -475,7 +518,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
           <Loader2 size={13} className="animate-spin" /> {signInFlow?.phase !== "succeeded" ? t("mcp.auth.waiting") : hosted ? t("hostedMcp.loadingTools", { service: hosted.label }) : t("mcp.auth.loadingTools")}
         </div>
         {signInFlow?.authorizationUrl && mcpSignInLink(signInFlow.authorizationUrl) && (
-          <button type="button" onClick={() => void openExternalLink(signInFlow.authorizationUrl!).catch(() => setCallbackError(t("mcp.auth.openFailed")))} className="text-accent hover:underline">
+          <button type="button" onClick={() => { setCallbackError(null); void openExternalLink(signInFlow.authorizationUrl!).catch(() => setCallbackError(t("mcp.auth.openFailed"))); }} className="text-accent hover:underline">
             {t("mcp.auth.openAgain")}
           </button>
         )}
@@ -513,13 +556,24 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
         </div>
         {server && signingIn === server.name ? <button type="button" onClick={() => signInAbort.current?.abort()} className="inline-flex h-7 shrink-0 items-center rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink">{t("mcp.auth.cancel")}</button> :
           <button type="button" aria-label={t(connected ? "hostedMcp.disconnect" : "hostedMcp.connect", { service: app.label })}
-            disabled={pending || (servers !== null && !connected && (Boolean(server?.managedBy) || (restricted && !policy?.mcp.allowlist.length)))}
+            disabled={pending || (servers !== null && !connected && (Boolean(server?.managedBy) || (restricted && !policy?.mcp.allowlist.length) || ("key" in app && !keys[app.id]?.trim())))}
             onClick={() => void (servers === null ? load() : connected && server ? signOut(server, app) : connectHosted(app))}
             className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink hover:bg-raised-hover disabled:opacity-40">
             {pending && (mine || busy === "load") ? <Loader2 size={14} className="animate-spin" /> : servers === null ? t("connectors.action.retry") : t(connected ? "connectors.disconnect" : "connectors.action.connect")}
           </button>}
       </div>
       <div className="ps-[52px]">
+      {"key" in app && !connected && servers !== null && <div className="mt-2 flex flex-col items-start gap-2">
+        <input type="password" value={keys[app.id] ?? ""} disabled={pending} autoComplete="off" spellCheck={false}
+          aria-label={t("hostedMcp.keyLabel", { service: app.label })} placeholder={t("hostedMcp.keyPlaceholder", { service: app.label })}
+          onChange={(event) => { const value = event.target.value; setKeys((current) => ({ ...current, [app.id]: value })); }}
+          onKeyDown={(event) => { if (event.key === "Enter") void connectHosted(app); }}
+          className="h-8 w-full min-w-0 rounded-lg bg-inset px-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent/50" />
+        <button type="button" onClick={() => void openExternalLink(app.key.url)} className="inline-flex items-center gap-1 text-[12px] font-medium text-accent-text hover:underline">
+          {t("hostedMcp.getKey", { service: app.label })}
+          <ExternalLink size={11} aria-hidden="true" />
+        </button>
+      </div>}
       {failed && <p role="alert" className="mt-1.5 text-[12px] text-danger">{typeof failed === "string" ? failed : t(failed.key, failed.params)}</p>}
       {server && renderSignIn(server)}
       <details className="mt-1 text-[12px] text-ink-secondary">

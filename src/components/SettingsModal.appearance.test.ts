@@ -115,25 +115,22 @@ afterEach(() => {
 const render = () => renderToStaticMarkup(createElement(SettingsModal));
 
 describe("Settings → Appearance", () => {
-  it.each([true, false])("flips Advanced mode from General, first in Advanced and last in Simple, when the switch is %s", (enabled) => {
+  it.each([true, false])("has no Advanced mode switch in General, Simple being the only mode (Advanced %s)", (enabled) => {
     fixture.section = "general";
     fixture.advancedMode = enabled;
     const html = render();
-    if (enabled) expect(html.indexOf('aria-label="Advanced mode"')).toBeLessThan(html.indexOf("Language"));
-    else expect(html.indexOf('aria-label="Advanced mode"')).toBeGreaterThan(html.indexOf("Language"));
-    expect(html).toContain('aria-label="Advanced mode"');
-    expect(html).toContain("Nothing is deleted either way");
-    const toggle = fixture.switches.find((props) => props["aria-label"] === "Advanced mode")!;
-    expect(toggle.checked).toBe(enabled);
-    toggle.onClick!({} as never);
-    expect(fixture.setAdvancedMode).toHaveBeenCalledWith(!enabled);
-    expect(fixture.api).not.toHaveBeenCalled();
-    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(html).toContain("Language");
+    expect(html).not.toContain('aria-label="Advanced mode"');
+    expect(html).not.toContain("Nothing is deleted either way");
+    expect(fixture.switches.some((props) => props["aria-label"] === "Advanced mode")).toBe(false);
   });
 
-  it("keeps the Advanced mode switch reachable from a paired remote client", () => {
+  it.each([true, false])("has none for a paired remote client either (Advanced %s)", (enabled) => {
+    fixture.advancedMode = enabled;
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
-    expect(render()).toContain('aria-label="Advanced mode"');
+    const html = render();
+    expect(html).toContain('aria-label="App language"');
+    expect(html).not.toContain('aria-label="Advanced mode"');
   });
 
   it("does not repeat the Advanced mode switch in Appearance on this computer", () => {
@@ -353,7 +350,7 @@ describe("Settings → Appearance", () => {
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     const html = render();
     expect(html).toContain('<option value="appearance" selected="">Appearance</option>');
-    expect(html).toContain('<option value="companion">Remote access</option>');
+    expect(html).toContain('<option value="companion">This server</option>');
     expect(html).not.toContain('<option value="general">');
     expect(html).not.toContain('<option value="connections">');
     expect(html).not.toContain('<option value="engines">');
@@ -413,10 +410,9 @@ describe("Settings → Appearance", () => {
     vi.stubGlobal("window", { ogb: { environments: {} } });
     const local = render();
     expect(local).toContain('<option value="desktopWorkspaces" selected="">Servers</option>');
-    expect(local).toContain("Server address or pairing link");
-    expect(local).toContain("Name (optional)");
     expect(local).toContain("Your servers");
-    expect(local).toContain("npx openmausbot pair --label");
+    expect(local).toContain("Loading servers…");
+    expect(local, "connecting is the same sheet as ＋, not a form of its own").not.toContain("Name (optional)");
     fixture.section = "general";
     vi.stubGlobal("window", { ogb: { workspaces: {} } });
     expect(render()).not.toContain('<option value="desktopWorkspaces"');

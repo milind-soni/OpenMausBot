@@ -164,6 +164,30 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
 describe("bounded action announcement recovery", () => {
   const later = `${"The terminal output is absent; the launch receipt only confirms the process. ".repeat(7)}\n\nLet me execute the commands to create the file and read it back.`;
 
+  it.each(["我会先运行命令，保存并核对回执。", "我會先執行命令，保存並核對回執。"])("continues a Chinese announcement into one real tool effect: %s", async (announcement) => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) answer(response, announcement);
+      else if (round === 2) sse(response, [chunk({ tool_calls: [toolCall()] }, "tool_calls")]);
+      else answer(response, "回执已保存并核对。");
+    });
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(3);
+    expect(f.effects()).toHaveLength(1);
+  });
+
+  it.each([
+    "我会先执行命令，你确认吗？…",
+    "我会在收到你的许可后发送邮件。",
+    "我先检查了文件，确认没有问题。",
+  ])("does not continue a Chinese clarification, approval wait, or completed report: %s", async (reply) => {
+    const f = await fixture((_body, response) => answer(response, reply));
+    await f.start({ approvalMode: "ask" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(1);
+    expect(f.effects()).toEqual([]);
+  });
+
   it("recovers a later long announcement after the first nudge and preserves earlier results", async () => {
     const f = await fixture((_body, response, round) => {
       if (round === 1) answer(response, "I'll open the terminal.");
@@ -853,6 +877,20 @@ describe("structured tool execution boundaries", () => {
     expect(f.effects()).toEqual([{ name: "receipt", value: "done" }]);
   });
 
+  it("finishes a turn whose streamed reasoning details pass 256 KB of JSON", async () => {
+    // OpenRouter streams reasoning a few characters per delta, each wrapped in a full block.
+    const deltas = Array.from({ length: 8_000 }, () => chunk({ reasoning_details: [{ type: "reasoning.text", text: "think", format: "unknown", index: 0 }] }));
+    const f = await fixture((_request, response, round) => {
+      if (round > 1) return answer(response);
+      sse(response, [...deltas, chunk({ content: null, tool_calls: [toolCall()] }, "tool_calls")]);
+    });
+    await f.start();
+    await f.decide();
+    expect(await f.recorder.until((event) => event.type === "turn.completed", 19_000)).toMatchObject({ ok: true });
+    const assistant = f.requests[1].messages.find((message) => message.role === "assistant");
+    expect(assistant?.reasoning_details).toHaveLength(8_000);
+  }, 20_000);
+
   // Groq's wording, truncated in the runtime error but not in the body.
   const reasoningRejection = { error: {
     message: "'messages.2' : for 'role:assistant' the following must be satisfied[('messages.2' : property 'reasoning_content' is unsupported)]",
@@ -1000,20 +1038,37 @@ describe("structured tool execution boundaries", () => {
 
   it.each([
     // Letters outside hex and the usual id alphabets, so a random id in the events can never contain the credential.
-    { scenario: "one chunk", pieces: ["zqxzqx"] },
-    { scenario: "split chunks", pieces: ["zqx", "zqx"] },
+    { scenario: "one chunk", pieces: ["zqxzqxzqx"] },
+    { scenario: "split chunks", pieces: ["zqxzqx", "zqx"] },
   ])("redacts an overlapping-prefix credential received in $scenario", async ({ pieces }) => {
     const f = await fixture((_request, response) => sse(response, [
       chunk({ content: "Before " }),
       ...pieces.map((piece) => chunk({ content: piece })),
       chunk({ content: " after." }, "stop"),
-    ]), "openai-compat", "zqxzqx");
+    ]), "openai-compat", "zqxzqxzqx");
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: true });
     const combined = f.recorder.events.filter((event) => event.type === "content.delta").map((event) => event.delta).join("");
     expect(combined).toBe("Before [redacted] after.");
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text: combined }));
-    expect(JSON.stringify(f.recorder.events)).not.toContain("zqxzqx");
+    expect(JSON.stringify(f.recorder.events)).not.toContain("zqxzqxzqx");
+  });
+
+  it.each([
+    { scenario: "the provider key", apiKey: "1", token: undefined },
+    { scenario: "an integration token", apiKey: undefined, token: "1" },
+  ])("leaves the reply alone when $scenario is a short placeholder like \"1\"", async ({ apiKey, token }) => {
+    const text = "1 12:00–13:00 123 8901 10 11 ID: 1A2B3C";
+    const f = await fixture((_request, response) => sse(response, [
+      ...text.match(/.{1,5}/gs)!.map((piece) => chunk({ content: piece })),
+      chunk({}, "stop"),
+    ]), "openai-compat", apiKey);
+    const audit = f.integrations!.custom!.audit as { command: string; args: string[]; env: Record<string, string> };
+    await f.start({ integrations: token ? { custom: { audit: { ...audit, env: { ...audit.env, AUDIT_TOKEN: token } } } } : undefined });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const combined = f.recorder.events.filter((event) => event.type === "content.delta").map((event) => event.delta).join("");
+    expect(combined).toBe(text);
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text }));
   });
 
   it("redacts a configured credential echoed by a tool from events, diagnostics, and the returned tool result", async () => {

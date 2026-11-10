@@ -142,9 +142,10 @@ export function browserLanguage(env: NodeJS.ProcessEnv, configured?: string): st
     try {
       const canonical = Intl.getCanonicalLocales(app)[0];
       return canonical?.toLowerCase() === "ko" ? "ko-KR" : canonical;
-    } catch { /* An invalid app override falls through to the host locale. */ }
+    } catch {}
   }
   const locale = env.LC_ALL?.trim() || env.LC_MESSAGES?.trim() || env.LANG?.trim() || "";
+  if (/^(?:C|POSIX)(?:[.@].*)?$/u.test(locale)) return "en-US";
   const match = /^([a-z]{2,3})(?:_([A-Z]{2}))?(?:[.@]|$)/u.exec(locale);
   return match ? (match[2] ? `${match[1]}-${match[2]}` : match[1]) : undefined;
 }

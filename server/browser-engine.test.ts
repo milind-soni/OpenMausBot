@@ -602,6 +602,23 @@ describe("restoring exactly one browser profile", () => {
 });
 
 describe("finding the browser engine", () => {
+  it("resolves Android to the statically linked Linux build instead of reporting it missing", () => {
+    // Android is bionic, not musl, so isMusl() is false there; the asset that actually
+    // runs is the statically linked musl build, which needs no interpreter.
+    expect(isMusl("android")).toBe(false);
+
+    const android = resolveAgentBrowserReleaseAsset("android", "arm64");
+    expect(android).not.toBeNull();
+    expect(android!.asset).toBe("agent-browser-linux-musl-arm64");
+    expect(android!.target).toBe("linux-musl-arm64");
+
+    // Every other platform keeps the key it had before.
+    expect(resolveAgentBrowserReleaseAsset("linux", "arm64", true)!.target).toBe("linux-musl-arm64");
+    expect(resolveAgentBrowserReleaseAsset("linux", "arm64", false)!.target).toBe("linux-arm64");
+    expect(resolveAgentBrowserReleaseAsset("linux", "x64", false)!.target).toBe("linux-x64");
+    expect(resolveAgentBrowserReleaseAsset("darwin", "arm64")!.target).toBe("darwin-arm64");
+  });
+
   it("pins the native-verified Windows revision in both download and desktop manifests", () => {
     const asset = resolveAgentBrowserReleaseAsset("win32", "x64")!;
     expect(asset).toEqual({

@@ -20,7 +20,7 @@ export function StepHeading({ title, sub, aside, headingRef }: { title: ReactNod
 }
 
 export function CardIcon({ icon: Icon }: { icon: LucideIcon }) {
-  return <span aria-hidden="true" className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] bg-accent/15 text-accent-text">
+  return <span aria-hidden="true" className="flex size-[34px] shrink-0 items-center justify-center rounded-[8px] bg-accent/15 text-accent-text">
     <Icon size={18} />
   </span>;
 }

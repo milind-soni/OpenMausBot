@@ -176,10 +176,25 @@ export function requestOrigin(req: IncomingMessage): string | null {
   return `${proto}://${host.toLowerCase()}`;
 }
 
-/** A proxy that hands the server a loopback Host must not turn a remote client into the owner. */
+/** Every header a reverse proxy uses to name its client, so one that sets only X-Real-IP is still not loopback. */
+const PROXY_HEADERS = [
+  "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "forwarded",
+  "x-real-ip", "cf-connecting-ip", "true-client-ip", "x-client-ip",
+] as const;
+
+/** Security: loopback trust rests on the Host header, which any client writes, so a request is remote (never the owner)
+ * when it came through a proxy, over the IPC socket, or from another machine's address, as on a LAN listener. */
 export function isProxied(req: IncomingMessage): boolean {
-  const h = req.headers;
-  return ipcPeer(req) || Boolean(h["x-forwarded-for"] || h["x-forwarded-proto"] || h["x-forwarded-host"] || h["forwarded"]);
+  if (ipcPeer(req) || networkPeer(req)) return true;
+  return PROXY_HEADERS.some((name) => req.headers[name] !== undefined);
+}
+
+const LOOPBACK_PEER = /^(?:127\.|::1$|::ffff:127\.)/;
+
+/** A TCP peer other than this machine. */
+export function networkPeer(req: IncomingMessage): boolean {
+  const address = req.socket?.remoteAddress;
+  return typeof address === "string" && !LOOPBACK_PEER.test(address);
 }
 
 /** An IPC listener's only peer is a forwarding gateway, so its requests are remote: never loopback trust. */
@@ -188,11 +203,21 @@ export function ipcPeer(req: IncomingMessage): boolean {
   return Boolean(socket) && socket.remoteAddress === undefined && socket.remoteFamily === undefined;
 }
 
+let legacyOrigins: ReadonlySet<string> = new Set();
+
+/** A Cloud home that moved to another provider (OMB_CLOUD_LEGACY_ORIGINS): its old address forwards here with Host
+ * rewritten to this home's own name, so a page or client still on the old address sends that address as its Origin.
+ * Security: only these exact origins count as this server's own besides its Host's; X-Forwarded-Host, which any client
+ * writes, is never read. */
+export function acceptLegacyOrigins(origins: readonly string[]): void {
+  legacyOrigins = new Set(origins);
+}
+
 export function isSameOrigin(req: IncomingMessage): boolean {
   const origin = headerValue(req.headers.origin);
   if (!origin) return true;
-  const own = requestOrigin(req);
-  return own !== null && origin.trim().toLowerCase() === own;
+  const own = requestOrigin(req), presented = origin.trim().toLowerCase();
+  return own !== null && (presented === own || legacyOrigins.has(presented));
 }
 
 /** The desktop window's session adds the owner header to every request for this server, whichever page in it asks, and
@@ -311,7 +336,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/tool$/ },
   // an app row's document is transcript data, read under the transcript's rules
-  { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app$/ },
+  { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app(?:\/download)?$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/export$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/evidence(?:\.tar|\/[A-Za-z0-9-]{8,64}\/step-\d{6,12}\.jpg)?$/ },
   { methods: ["GET", "POST"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/file$/ },

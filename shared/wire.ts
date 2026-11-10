@@ -9,7 +9,7 @@ import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop, MascotFaceColor } from "./bot-avatar.ts";
 import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
-import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts";
+import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts"; import type { EmailOutgoingFields } from "./email.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
 import type { SetupCardFields } from "./setup-card.ts"; import type { BugReportField } from "./devs-report-status.ts"; import type { AccessRequestCardField, BotAccessFields } from "./bot-access.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts"; import type { SavedStepsMark } from "./saved-steps.ts";
@@ -96,7 +96,7 @@ export interface TaskOpenedBy {
   threadId?: string;
   /** A parallel room job's thread: `threadId` is the room thread it came from, and the member must stay in that room. */
   roomLane?: true;
-  at: number;
+  /** Security invariant: harness-set only, when a turn that could itself use the owner's lent computer opened this thread (server/cloud-lending.ts); any other hand-in clears it for good. */ forOwner?: true; at: number;
 }
 
 /** The bot that closed a thread it opened (or one of its own). */
@@ -458,17 +458,14 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";
   text?: string;
   digest?: TurnDigest;
-  compaction?: {
-    summary: string;
-    firstKeptId: string;
-    foldedThroughId: string;
-    tokensBefore: number;
-    by: "person" | "harness";
-  };
+  /** kind "compaction" with no `compaction` record: the engine condensed its own session. A marker for people, never context. */
+  engineCompaction?: true;
+  compaction?: { summary: string; firstKeptId: string; foldedThroughId: string; tokensBefore: number; by: "person" | "harness" };
   /** Renderers receive only the allowlisted /api/attachments URL. `file` entries are opened through the message-scoped
-   * file route, never by path. `source`: a bot attach-file copy's original path on the server, for Show in folder. */
+   * file route, never by path. `source`: a bot attach-file copy's original path on the server, for Show in folder.
+   * `fromTool`: an image a tool's result returned while the bot worked, which it did not make or send. */
   attachments?: Array<
-    | { kind: "image"; path: string; mime: string; name?: string; source?: string }
+    | { kind: "image"; path: string; mime: string; name?: string; source?: string; fromTool?: true }
     | { kind: "file"; path: string; mime: string; name: string; source?: string }
     /** `text` is the words the note speaks (secret-redacted when stored): clients show it behind a
      * collapsed transcript, never as message body, and the model's replay folds it back after `text`. */
@@ -740,6 +737,7 @@ export interface SecretRequestCardData {
   /** An email card: the mailbox it is for, when known; off a phone the person can change it on the card. */ address?: string;
   /** An email card: the incoming server that took the password, once it did, while sending is still being checked. */
   emailReading?: string;
+  /** An email card for a connected mailbox that can't send: only its outgoing server, from what is known, never a password. */ emailOutgoing?: EmailOutgoingFields;
   /** A custom secret: the bot's own words on why; `description` adds what the bot may do with it, and helpUrl is empty. */
   reason?: string;
   /** A file secret's Local VM target key, when the asking turn ran in one. */
