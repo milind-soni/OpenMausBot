@@ -370,14 +370,14 @@ describe("as cloud computer tools", () => {
   const rpc = (name: string, args: unknown, options: { folderOf?: () => string | null | undefined; budgetMs?: number } = {}) => {
     let gated = 0;
     const done = tools.cloudComputerRpc({ method: "tools/call", params: { name, arguments: args } }, {
-      cfg: own, boxId: () => BOX, folder: options.folderOf ?? (() => folder), signal: signal(), budgetMs: options.budgetMs,
+      cfg: own, boxId: () => BOX, folder: options.folderOf ?? (() => folder), signal: signal(), budgetMs: options.budgetMs, provider: "box",
       gate: async () => { gated++; return { held: false }; }, assertActive: () => {},
     }) as Promise<{ isError?: boolean; content: Array<{ text: string }> }>;
     return { done, gated: () => gated };
   };
 
   it("lists both copies, and runs them after the control gate", async () => {
-    const listed = await tools.cloudComputerRpc({ method: "tools/list" }, { cfg: own, boxId: () => BOX, signal: signal(), gate: async () => ({ held: false }), assertActive: () => {} });
+    const listed = await tools.cloudComputerRpc({ method: "tools/list" }, { cfg: own, boxId: () => BOX, signal: signal(), gate: async () => ({ held: false }), assertActive: () => {}, provider: "box" });
     expect(("tools" in listed ? listed.tools : []).map(tool => tool.name).slice(-2)).toEqual(["copy_from_computer", "copy_to_computer"]);
     disk.set("/tmp/a.txt", { bytes: Buffer.from("abc") });
     const call = rpc("copy_from_computer", { path: "/tmp/a.txt" });

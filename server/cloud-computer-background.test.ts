@@ -197,7 +197,7 @@ describe.each([
   const call = (name: string, args: unknown, boxId = BOX, budgetMs?: number) => {
     let gated = 0, checks = 0;
     const done = tools.cloudComputerRpc({ method: "tools/call", params: { name, arguments: args } }, {
-      cfg, boxId: () => boxId, signal: new AbortController().signal, ...(budgetMs ? { budgetMs } : {}),
+      cfg, boxId: () => boxId, signal: new AbortController().signal, ...(budgetMs ? { budgetMs } : {}), provider: "box",
       gate: async () => { gated++; return { held: false }; }, assertActive: () => { checks++; },
     }) as Promise<Result>;
     return { done, gated: () => gated, checks: () => checks };
