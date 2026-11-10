@@ -302,12 +302,15 @@ export function openGate(options: GateOptions): Promise<EgressGate> {
         const addresses = named === null ? await resolve(target.host) : [];
         const refusal = named ?? (addresses.length ? await options.decide(target, addresses).catch(() => "error") : null);
         if (client.destroyed) return;
-        client.off("data", holdEarly);
         if (refusal !== null) {
+          client.off("data", holdEarly);
           options.onRefusal?.(target, refusal);
           return refuse(client, NOT_ALLOWED);
         }
-        if (!addresses.length) return refuse(client, HOST_UNREACHABLE);
+        if (!addresses.length) {
+          client.off("data", holdEarly);
+          return refuse(client, HOST_UNREACHABLE);
+        }
         const own = options.own?.();
         const configuredProxy = options.upstreamProxy?.() ?? null;
         const proxy = configuredProxy && !staysHere(target.host, own) ? configuredProxy : null;
@@ -340,6 +343,7 @@ export function openGate(options: GateOptions): Promise<EgressGate> {
             }
           }
           if (!tunnel) {
+            client.off("data", holdEarly);
             const code = (lastError as NodeJS.ErrnoException | undefined)?.code;
             return refuse(client, code === "ECONNREFUSED" || lastError === undefined ? CONNECTION_REFUSED : HOST_UNREACHABLE);
           }
@@ -354,6 +358,7 @@ export function openGate(options: GateOptions): Promise<EgressGate> {
           tunnel.on("close", () => client.destroy());
           return;
         }
+        client.off("data", holdEarly);
         client.pause();
         // Every checked address, IPv6 and IPv4 alike, so a host is still reached where one family is broken. The
         // attempts go to exactly the checked addresses, so a name that now resolves elsewhere changes nothing.

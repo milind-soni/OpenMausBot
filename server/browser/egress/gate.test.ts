@@ -230,6 +230,71 @@ describe("egress gate", () => {
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
   });
 
+  it("buffers client bytes sent while the SOCKS5 upstream handshake is pending", async () => {
+    const payload = Buffer.from("early browser bytes");
+    let releaseGreeting!: () => void;
+    let greetingReceived!: () => void;
+    const handshakeHeld = new Promise<void>((resolve) => { greetingReceived = resolve; });
+    const greetingReleased = new Promise<void>((resolve) => { releaseGreeting = resolve; });
+    const upstream = NodeNet.createServer((socket) => {
+      let data = Buffer.alloc(0);
+      let greeted = false;
+      let connected = false;
+      socket.on("data", (chunk) => {
+        data = Buffer.concat([data, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+        if (!greeted && data.length >= 3) {
+          data = data.subarray(3);
+          greeted = true;
+          greetingReceived();
+          void greetingReleased.then(() => socket.write(Buffer.from([5, 0])));
+        }
+        if (greeted && !connected && data.length >= 10 && data[0] === 5 && data[1] === 1) {
+          data = data.subarray(10);
+          connected = true;
+          socket.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
+          socket.on("data", (bytes) => socket.write(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes)));
+        }
+      });
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const proxyPort = (upstream.address() as NodeNet.AddressInfo).port;
+    const opened = await openGate({
+      decide: async () => null,
+      resolve: async () => [{ address: "93.184.215.14", family: 4 }],
+      upstreamProxy: () => ({ host: "127.0.0.1", port: proxyPort }),
+    });
+    gates.push(opened);
+    const socket = NodeNet.connect(opened.port, "127.0.0.1");
+    socket.on("error", () => {});
+    let received = Buffer.alloc(0);
+    let resolveMethod!: () => void;
+    let methodResolved = false;
+    const methodReply = new Promise<void>((resolve) => { resolveMethod = resolve; });
+    const response = new Promise<Buffer>((resolve) => {
+      socket.on("data", (chunk) => {
+        received = Buffer.concat([received, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+        if (!methodResolved && received.length >= 2) { methodResolved = true; resolveMethod(); }
+        if (received.includes(payload)) resolve(received);
+      });
+    });
+    await new Promise<void>((resolve) => socket.once("connect", resolve));
+    socket.write(Buffer.concat([Buffer.from([5, 1, 0, 5, 1, 0]), domainTarget("example.com", 443)]));
+    await methodReply;
+    await handshakeHeld;
+    socket.write(payload);
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    releaseGreeting();
+    const bytes = await Promise.race([
+      response,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("The proxy tunnel dropped client bytes sent during its handshake.")), 1_000)),
+    ]);
+    expect(bytes.subarray(0, 2)).toEqual(Buffer.from([5, 0]));
+    expect(bytes.subarray(2, 12)).toEqual(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
+    expect(bytes.subarray(12)).toEqual(payload);
+    socket.destroy();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  });
+
   it("preserves destination bytes sent with a SOCKS5 CONNECT reply", async () => {
     const first = Buffer.from("first-bytes");
     const upstream = NodeNet.createServer((socket) => {
