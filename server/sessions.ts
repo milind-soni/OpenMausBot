@@ -713,6 +713,22 @@ export class SessionRegistry {
     return this.memberPhones().filter((phone) => this.revoke(phone.id)).length;
   }
 
+  /** The credentials of a person no longer in the team, for a day, by digest only (memory, never stored): their page can say
+   * why it was signed out. */
+  private readonly left = new Map<string, number>();
+  private noteLeft(address: string): void {
+    const now = this.now();
+    for (const [hash, until] of this.left) if (until <= now) this.left.delete(hash);
+    for (const session of this.sessions) {
+      if (session.membershipAuthority === "team" && session.email?.toLowerCase() === address && this.left.size < 5_000) this.left.set(session.tokenHash, now + 86_400_000);
+    }
+  }
+  /** Whether this credential's session ended because its person is no longer in the team. */
+  leftTeam(token: string): boolean {
+    const until = this.left.get(sha256(token));
+    return until !== undefined && until > this.now();
+  }
+
   /** Remote access turned off on a Team Cloud: every User's browser sign-in signs out. An Owner's and an Admin's stay. */
   closeMemberBrowsers(): number {
     this.prune();
@@ -725,6 +741,7 @@ export class SessionRegistry {
    * how many sessions ended. */
   revokeMember(email: string, keepRole?: TeamRole): number {
     const address = email.trim().toLowerCase();
+    if (keepRole === undefined) this.noteLeft(address);
     this.pairings = this.pairings.filter((pairing) => pairing.member?.email.toLowerCase() !== address || pairing.member.role === keepRole);
     const ended = this.sessions.filter((session) => session.membershipAuthority === "team" && session.email?.toLowerCase() === address && (keepRole === undefined || session.teamRole !== keepRole));
     for (const session of ended) this.revoke(session.id);

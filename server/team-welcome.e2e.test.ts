@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { TEAM_LEFT_REFUSAL } from "../shared/cloud-hints.ts";
 
 const ADA = { email: "ada@acme.test", role: "owner" as const };
 const BOB = { email: "bob@acme.test", role: "admin" as const };
@@ -65,4 +66,33 @@ it("tells a signed-in member, never anyone before sign-in, where their team page
   expect((await team.as(cleo, "GET", "/api/auth/session")).body.teamSignIn).toMatch(/\/cloud\/team\/team-acme-1$/);
   const descriptor = await (await fetch(`${team.base}/.well-known/openmausbot/environment`, { headers: fx.edge })).json() as Record<string, unknown>;
   expect(JSON.stringify(descriptor)).not.toContain("/cloud/team/");
+});
+
+it("the welcome's one action, a chat with a bot, is the person's own private chat: the new conversation is marked private on the wire at once", async () => {
+  const ada = (await team.pair(ADA)).token!, cleo = (await team.pair(CLEO)).token!;
+  const made = await team.as(ada, "POST", "/api/bots", { name: "Research", description: "Briefs before a call." });
+  expect(made.status, JSON.stringify(made.body)).toBe(201);
+  const botId = made.body.bot.id as string;
+  const opened = await team.as(cleo, "POST", `/api/bots/${botId}/tasks`, {});
+  expect(opened.status, JSON.stringify(opened.body)).toBeLessThan(300);
+  const threadId = opened.body.task.threadId as string;
+  expect(threadId).not.toBe(made.body.bot.mainThreadId);
+  expect(opened.body.bot.threadId).toBe(threadId);
+  expect((opened.body.bot.tasks as Array<{ threadId: string; private?: boolean }>).find((task) => task.threadId === threadId)?.private).toBe(true);
+});
+
+it("a User's copy of a team bot carries what the welcome's one line reads, and a removed person's page is told why", async () => {
+  const ada = (await team.pair(ADA)).token!;
+  const made = await team.as(ada, "POST", "/api/bots", { name: "Seedling" });
+  await team.as(ada, "PATCH", `/api/bots/${made.body.bot.id}`, { soul: "You look after the team's plants." });
+  const dee = (await team.pair({ email: "dee@acme.test", role: "member" })).token!;
+  const copy = ((await team.as(dee, "GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; soul?: string }>).find((bot) => bot.id === made.body.bot.id);
+  expect(copy?.soul).toBe("You look after the team's plants.");
+  expect((await team.signed("POST", "/api/cloud/team/member-left", { email: "dee@acme.test" })).status).toBe(200);
+  const after = await team.as(dee, "GET", "/api/auth/session");
+  expect(after.status).toBe(401);
+  expect(after.body.error).toBe(TEAM_LEFT_REFUSAL);
+  // A session that simply ended says what it always said.
+  const expired = await team.as("omb_sess_" + "x".repeat(43), "GET", "/api/auth/session");
+  expect(expired.body.error).not.toBe(TEAM_LEFT_REFUSAL);
 });

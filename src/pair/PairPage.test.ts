@@ -6,7 +6,7 @@ const f = vi.hoisted(() => ({ effects: [] as EffectCallback[], pair: vi.fn() }))
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(), useEffect: (effect: EffectCallback) => { f.effects.push(effect); } }));
 vi.mock("../lib/session", async original => ({ ...await original<typeof import("../lib/session")>(), pairWithCode: f.pair, readSessionState: vi.fn().mockResolvedValue({ kind: "unauthenticated", error: "" }) }));
 vi.mock("../components/DesktopWorkspaceSwitcher", () => ({ DesktopWorkspaceSwitcher: () => null }));
-import { codeProblem, codeReady, openInAppLink, PairPage, pairIntro, pairsAutomatically, pairTitle, teamPage, unencryptedPublic } from "./PairPage";
+import { codeProblem, codeReady, openInAppLink, PairPage, pairIntro, pairsAutomatically, pairTitle, TeamLeftPage, teamPage, unencryptedPublic } from "./PairPage";
 import en from "../locales/en.json";
 import type { EnvironmentDescriptor } from "../lib/session";
 
@@ -109,4 +109,10 @@ it("a team's Cloud whose session ended offers the way back through MausBot Cloud
   for (const bad of ["javascript:alert(1)", "http://evil.example/cloud", "https://u:p@cloud.example/x", "https://cloud.example/x#signin=1", "nope"]) expect(teamPage(team, bad)).toBeNull();
   expect(teamPage({ ...team, capabilities: { remoteSessions: true, cloudHome: true } } as unknown as EnvironmentDescriptor, "https://cloud.openmausbot.com/cloud/team/t1"), "a My Cloud has no team page").toBeNull();
   expect(en["pair.team.open"].replace("{team}", "Acme")).toBe("Open Acme with MausBot Cloud");
+});
+
+it("a team's page whose person is no longer in the team says so in one sentence, with nothing to sign in to", () => {
+  const html = renderToStaticMarkup(createElement(TeamLeftPage, { team: "Acme" }));
+  expect(html).toContain("You&#x27;re no longer in Acme.");
+  expect(html).not.toMatch(/<(input|button|a) /);
 });

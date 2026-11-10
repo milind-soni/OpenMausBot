@@ -151,3 +151,16 @@ describe("a Team Cloud's roster check", () => {
     }
   });
 });
+
+describe("why a session ended", () => {
+  it("remembers, by digest, the sessions of someone no longer in the team; a role change or an ended session is no such thing", async () => {
+    const ada = browserSession(), ben = browserSession({ email: "ben@acme.test", role: "admin" });
+    registry.revokeMember(ADA.email);
+    registry.revokeMember("ben@acme.test", "member");
+    expect(registry.leftTeam(ada)).toBe(true);
+    expect(registry.leftTeam(ben)).toBe(false);
+    expect(registry.leftTeam("omb_sess_" + "y".repeat(43))).toBe(false);
+    clock += 25 * HOUR;
+    expect(registry.leftTeam(ada), "said for a day").toBe(false);
+  });
+});

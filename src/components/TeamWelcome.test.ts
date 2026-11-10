@@ -15,7 +15,8 @@ vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
 vi.mock("@/state/team-people", async (original) => ({ ...await original<typeof import("@/state/team-people")>(), useTeamPeople: () => fixture.people }));
 import { TeamWelcome } from "./TeamWelcome";
 import { teamPrivateChatsLineDue } from "./TeamPrivateChatsLine";
-import { finishTeamWelcome, parseTeamWelcome, resetTeamWelcome, teamWelcomeDue, teamWelcomeView } from "@/lib/team-welcome";
+import { finishTeamWelcome, markTeamWelcomeShown, parseTeamWelcome, resetTeamWelcome, teamWelcomeDue, teamWelcomeView, WELCOME_USE_MS } from "@/lib/team-welcome";
+import { teamQuiet } from "./MausBotWelcome";
 
 const ACME = { id: "team-acme", name: "Acme" };
 const people = [
@@ -110,5 +111,35 @@ describe("when it shows", () => {
     fixture.api.mockRejectedValue(new Error("offline"));
     await finishTeamWelcome(ACME.id);
     expect(fixture.api).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("its manners", () => {
+  it("puts focus on the one action, not a ring on the heading, and a bot with no description gets a quiet line from what its copy carries", () => {
+    fixture.state = { ...fixture.state, bots: [...bots, bot("seed", "Seedling", { soul: "# Seedling\n\nYou look after the team's plants." })] };
+    render();
+    expect(document.activeElement?.textContent).toBe("Start a chat with Support");
+    expect(container.querySelector("h1")?.getAttribute("tabindex")).toBeNull();
+    expect(container.querySelector('[data-team-welcome-bot="seed"]')?.textContent).toBe("SeedlingYou look after the team's plants.");
+    const view = teamWelcomeView({ invitedBy: null, people: [], bots: [bot("bare", "Bare"), bot("soul", "Soul", { soul: "\n> You answer questions about pay.\n" })] });
+    expect(view.bots.map((entry) => entry.line)).toEqual(["", "You answer questions about pay."]);
+  });
+
+  it("counts as using the team while it is on screen and the page is visible", () => {
+    vi.useFakeTimers();
+    try {
+      render();
+      fixture.api.mockClear();
+      vi.advanceTimersByTime(WELCOME_USE_MS);
+      expect(fixture.api).toHaveBeenCalledWith("/api/me", expect.objectContaining({ background: true }));
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("MausBot's own card doesn't interrupt a team's first run: not after the team's welcome in this launch, never over a run", () => {
+    expect(teamQuiet({ config: { team: ACME }, bots: [{ busy: true }] })).toBe(true);
+    expect(teamQuiet({ config: { team: ACME }, bots: [{ busy: false }] })).toBe(false);
+    markTeamWelcomeShown();
+    expect(teamQuiet({ config: { team: ACME }, bots: [] })).toBe(true);
+    expect(teamQuiet({ config: {}, bots: [{ busy: true }] }), "off a team as before").toBe(false);
   });
 });

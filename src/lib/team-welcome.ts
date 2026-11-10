@@ -44,15 +44,25 @@ export async function finishTeamWelcome(teamId: string): Promise<void> {
   await api("/api/me/welcome", { method: "PUT", body: JSON.stringify({ welcomed: true }), timeoutMs: 10_000 }).catch(() => {});
 }
 
+/** The welcome counts as using the team: one quiet read this often while it is on screen and the page is visible. */
+export const WELCOME_USE_MS = 5 * 60_000;
+let shownThisLaunch = false;
+/** The team's own welcome was on screen in this launch: nothing else introduces itself over the first run that follows. */
+export function markTeamWelcomeShown(): void { shownThisLaunch = true; }
+export const teamWelcomeShownThisLaunch = () => shownThisLaunch;
+
 /** Only for tests: the record is module state. */
-export function resetTeamWelcome(): void { asked.clear(); publish(null); }
+export function resetTeamWelcome(): void { asked.clear(); shownThisLaunch = false; publish(null); }
 
 /** A User's first time in the team: they have a record and haven't seen it. An Admin has the Cloud's own welcome. */
 export function teamWelcomeDue(input: { team: { id: string } | null | undefined; canSave: boolean | undefined; record: TeamWelcomeRecord | null | undefined }): boolean {
   return Boolean(input.team) && input.canSave === false && Boolean(input.record) && input.record!.welcomedAt === null;
 }
 
-interface WelcomeBot { id: string; name: string; title?: string; description?: string; hidden?: boolean; defaultBot?: { person?: string } | null; yourAccess?: string }
+interface WelcomeBot { id: string; name: string; title?: string; description?: string; soul?: string; hidden?: boolean; defaultBot?: { person?: string } | null; yourAccess?: string }
+/** One line about a bot: its description, else its title, else the first line of its instructions when this copy carries
+ * them (a quiet fallback); else none. */
+const firstLine = (text: string | undefined, name = "") => (text ?? "").split("\n").map((line) => line.replace(/^[#>*\-\s]+/, "").trim()).find((line) => line && line !== name) ?? "";
 export const WELCOME_PEOPLE = 6, WELCOME_BOTS = 4;
 
 /**
@@ -64,7 +74,7 @@ export function teamWelcomeView(input: { invitedBy: string | null; people: reado
   const inviter = input.invitedBy ? input.people.find((person) => person.email === input.invitedBy) ?? { email: input.invitedBy, name: "", role: "member" } : null;
   const others = input.people.filter((person) => !person.you);
   const shared = input.bots.filter((bot) => !bot.hidden && !bot.defaultBot?.person);
-  const line = (bot: WelcomeBot) => (bot.description?.trim() || bot.title?.trim() || "").split("\n")[0]!.slice(0, 140);
+  const line = (bot: WelcomeBot) => (firstLine(bot.description) || bot.title?.trim() || firstLine(bot.soul, bot.name)).slice(0, 140);
   return {
     inviter,
     people: others.slice(0, WELCOME_PEOPLE), morePeople: Math.max(0, others.length - WELCOME_PEOPLE),

@@ -75,6 +75,13 @@ export function pairTitle(environment: EnvironmentDescriptor | null, mode: "emai
   return t(mode === "email" ? "pair.signInTo" : "pair.connectTo", { name: environment?.label ?? t("pair.thisOpenMausBot", { app: productName() }) });
 }
 
+/** A team's page whose session ended because its person is no longer in the team: one sentence, nothing that can't work. */
+export function TeamLeftPage({ team }: { team: string | null }) {
+  return <main data-team-left className="flex min-h-screen items-center justify-center bg-app px-6 text-ink">
+    <p role="status" className="max-w-[420px] text-[16px]">{t("homeLine.left", { name: team ?? t("pair.thisOpenMausBot", { app: productName() }) })}</p>
+  </main>;
+}
+
 export function PairPage({ initialCode, initialEmail = null, reason }: { initialCode: string | null; initialEmail?: string | null; reason?: string }) {
   const [code, setCode] = useState(initialCode ?? "");
   const [label, setLabel] = useState(defaultDeviceLabel());

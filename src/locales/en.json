@@ -1593,6 +1593,7 @@
   "cloudWelcome.bring.title": "What should {name} start with?",
   "cloudWelcome.bring.sub": "Bots on your computer come here by themselves from the {app} app.",
   "cloudWelcome.bring.subTeam": "Your own bots stay on your computer. {name} starts with bots of its own that everyone in the team can use.",
+  "cloudWelcome.bring.subTeamShared": "{name} is your team’s: its bots are shared with everyone in {name}, and your own bots stay where they are.",
   "cloudWelcome.bring.fresh": "Start fresh",
   "cloudWelcome.bring.freshHint": "Pick a ready-made team from the library, or start with one bot and build your own.",
   "cloudWelcome.bring.chooseTeam": "Choose a team",

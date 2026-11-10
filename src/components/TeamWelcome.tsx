@@ -6,9 +6,9 @@ import { PersonFace } from "@/components/TeamOwner";
 import { markTeamPrivateChatsLineSaid } from "@/components/TeamPrivateChatsLine";
 import { BotAvatar } from "@/components/Avatar";
 import { t } from "@/lib/i18n";
-import { finishTeamWelcome, teamWelcomeView } from "@/lib/team-welcome";
+import { finishTeamWelcome, markTeamWelcomeShown, teamWelcomeView, WELCOME_USE_MS } from "@/lib/team-welcome";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { openBot, useStore } from "@/state/store";
+import { api, openBot, useStore } from "@/state/store";
 import { useTeamPeople } from "@/state/team-people";
 
 /**
@@ -21,11 +21,17 @@ export function TeamWelcome({ team, invitedBy }: { team: { id: string; name: str
   const showThreads = useShowThreads();
   const people = useTeamPeople();
   const view = teamWelcomeView({ invitedBy, people: people?.people ?? [], bots: state.bots });
-  const heading = useRef<HTMLHeadingElement>(null);
+  const action = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    heading.current?.focus();
+    action.current?.focus({ preventScroll: true });
     markTeamPrivateChatsLineSaid(team.id);
+    markTeamWelcomeShown();
   }, [team.id]);
+  // Reading this page is using the team, as any screen is: while it is in front of them, the session hears from them.
+  useEffect(() => {
+    const timer = setInterval(() => { if (document.visibilityState === "visible") void api("/api/me", { timeoutMs: 10_000, background: true }).catch(() => {}); }, WELCOME_USE_MS);
+    return () => clearInterval(timer);
+  }, []);
   const done = () => { void finishTeamWelcome(team.id); };
   const start = () => {
     done();
@@ -38,7 +44,7 @@ export function TeamWelcome({ team, invitedBy }: { team: { id: string; name: str
     <WindowDragStrip />
     <div className="mx-auto flex w-full max-w-[560px] flex-col gap-6 px-5 pb-12 pt-10 max-md:pt-14">
       <header className="flex flex-col gap-1.5">
-        <h1 ref={heading} tabIndex={-1} className="text-[22px] font-semibold tracking-[-0.015em] text-ink outline-none [text-wrap:balance]">{t("teamWelcome.title", { team: team.name })}</h1>
+        <h1 className="text-[22px] font-semibold tracking-[-0.015em] text-ink [text-wrap:balance]">{t("teamWelcome.title", { team: team.name })}</h1>
         <p data-team-welcome-invited className="text-[14px] leading-relaxed text-ink-secondary">
           {inviter ? t("teamWelcome.invited", { person: inviter, team: team.name }) : t("teamWelcome.invitedNobody", { team: team.name })}
         </p>
@@ -70,8 +76,8 @@ export function TeamWelcome({ team, invitedBy }: { team: { id: string; name: str
         <Lock size={14} aria-hidden="true" className="mt-0.5 shrink-0" />{t("team.privateChats", { team: team.name })}
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        {view.first ? <button type="button" className={PRIMARY} onClick={start}>{t("teamWelcome.start", { bot: view.first.name })}</button>
-          : <button type="button" className={PRIMARY} onClick={done}>{t("teamWelcome.look")}</button>}
+        {view.first ? <button ref={action} type="button" className={PRIMARY} onClick={start}>{t("teamWelcome.start", { bot: view.first.name })}</button>
+          : <button ref={action} type="button" className={PRIMARY} onClick={done}>{t("teamWelcome.look")}</button>}
         {view.first && <button type="button" className={QUIET} onClick={done}>{t("teamWelcome.later")}</button>}
       </div>
     </div>

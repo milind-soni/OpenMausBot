@@ -1,5 +1,6 @@
 // Loopback requests (Host and Origin both loopback) or paired sessions (bearer, cookie, stream ticket); a session swaps the loopback rule for same-origin (CSRF) and a scope check.
 // Browsers never get loopback trust: a page a bot opens is a browser on this machine too.
+import { TEAM_LEFT_REFUSAL } from "../shared/cloud-hints.ts";
 import type { IncomingMessage } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
@@ -623,6 +624,8 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
 
   // A removed member's invalid credential must not fall back to loopback owner.
   if (via) {
+    const presented = via === "bearer" ? bearer : via === "cookie" ? cookie : null;
+    if (presented && options.sessions.leftTeam(presented)) return deny(401, TEAM_LEFT_REFUSAL);
     return deny(401, "unauthorized: this session has expired or was revoked; pair this device again");
   }
 
