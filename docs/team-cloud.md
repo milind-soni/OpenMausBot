@@ -523,15 +523,19 @@ run belongs to the person whose own request it answers (`server/host/run-owner.t
   line goes ahead of anyone else's waiting.
 - **Everyone there sees the queue.** Each waiting line carries its writer (`BotQueuedMessages[…].sender`) and the
   conversation, while it works, the person whose request runs (`WireTask.askedBy`). The app's working line reads
-  "Working on Priya's request", with one quiet line under it, "Next: Tom's request" ("…, then 2 more" when more wait),
-  and a small remove control only for someone whose own message waits; that chat shows no queue above the composer.
+  "Working on Priya's request", with one quiet line under it, "Next: Tom's request" ("…, then 2 more" when more wait);
+  someone whose own message waits also sees its words there ("Yours: …") with a small remove control, which nobody else
+  sees; that chat shows no queue above the composer. A person is named as the People list names them: their name, or
+  for an address the part before the @ ("Dev's request" for dev@acme.test).
   Only its writer removes a waiting line (`DELETE
   /api/bots/<bot>/queue/<id>`; a line no person wrote, an Owner or Admin), and waiting lines join the running request
   (`…/steer`) only when every one is the asker's own and the asker adds them; otherwise 403 in plain words.
 - **Only the asker, or an Owner or Admin, stops it.** Stop (`POST /api/bots/<bot>/interrupt`, a group chat's
   `/api/groups/<id>/interrupt`, a typed "stop", a guarded request's `/interrupt`) from anyone else answers 403 with
   `code: "stop_not_yours"` and *"Only Priya or an admin can stop this."*; their "@Scout stop" in a group chat is an
-  ordinary line there. Stop stays the only interrupt.
+  ordinary line there. Stop stays the only interrupt. The app shows Stop, and Retry on a stopped request, only to the
+  asker and to Owners and Admins (and to everyone for a run no person asked for). The stopped row records who pressed
+  Stop (`WireMessage.stoppedBy`): it reads "Maya stopped this." to everyone else and "You stopped this." to Maya.
 - **Who asked, for what is not a person's line** (read from the records the provenance labels come from, never from
   model text). A routine, a webhook and an app's event never run in a person's conversation: each runs in its own and
   leaves one report line, held while a turn runs and written before the queue behind it moves

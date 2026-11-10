@@ -25,11 +25,11 @@ const ANSWERS: Record<string, string> = {
   [PRIYA_ASK]: "CI for PR 42 is green.",
 };
 
-type Row = { id: string; role: string; kind: string; text?: string; steered?: boolean; sender?: { name: string; id?: string }; tool?: { name: string } };
+type Row = { id: string; role: string; kind: string; text?: string; steered?: boolean; sender?: { name: string; id?: string }; tool?: { name: string }; stoppedBy?: { name: string; id?: string } };
 type Queued = { queueId: string; text: string; sender?: { name: string; id?: string } };
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
-let ada = "", priya = "", tom = "", sam = "";
+let ada = "", priya = "", tom = "", sam = "", dev = "";
 let botId = "", shared = "";
 
 const home = (name: string) => join(team.home, name);
@@ -73,6 +73,7 @@ beforeAll(async () => {
   priya = (await team.pair({ email: "priya@acme.test", role: "member" })).token!;
   tom = (await team.pair({ email: "tom@acme.test", role: "member" })).token!;
   sam = (await team.pair({ email: "sam@acme.test", role: "member" })).token!;
+  dev = (await team.pair({ email: "dev@acme.test", role: "member" })).token!;
   for (const [token, name] of [[ada, "Ada"], [priya, "Priya"], [tom, "Tom"], [sam, "Sam"]]) {
     expect((await team.as(token, "PUT", "/api/me", { name })).status).toBe(200);
   }
@@ -135,6 +136,8 @@ it("only Priya or an admin can stop her run: Tom's Stop and typed stop are refus
   expect(admin.status, JSON.stringify(admin.body)).toBe(200);
   await expect.poll(() => busy(), { timeout: hostTimeout(30_000), interval: 100 }).toBe(false);
   expect((await transcript(ada)).filter((row) => row.role === "bot" && row.text?.includes(ANSWERS[PRIYA_ASK])).length, "her run ended unanswered").toBe(answersBefore);
+  await expect.poll(async () => (await transcript(priya)).findLast((row) => row.kind === "activity" && row.tool?.name.startsWith("stopped:"))?.stoppedBy?.name,
+    { timeout: hostTimeout(10_000), interval: 100 }).toBe("Ada");
 }, hostTimeout(120_000));
 
 it("Priya can stop her own run", async () => {
@@ -142,6 +145,8 @@ it("Priya can stop her own run", async () => {
   const own = await team.as(priya, "POST", `/api/bots/${botId}/interrupt`, { threadId: shared });
   expect(own.status, JSON.stringify(own.body)).toBe(200);
   await expect.poll(() => busy(), { timeout: hostTimeout(30_000), interval: 100 }).toBe(false);
+  await expect.poll(async () => (await transcript(tom)).findLast((row) => row.kind === "activity" && row.tool?.name.startsWith("stopped:"))?.stoppedBy?.name,
+    { timeout: hostTimeout(10_000), interval: 100 }).toBe("Priya");
 }, hostTimeout(120_000));
 
 it("Priya adding to her own run in the shared chat is steered into it, and person-first still answers her first", async () => {
@@ -218,3 +223,20 @@ it("a routine run started mid-run neither steers nor stops her run, and Tom's li
   expect(last(TOM_ASK)).toBeLessThan(last(ANSWERS[TOM_ASK]));
   expect(rows.some((row) => row.role === "user" && row.text?.includes("pay runs")), "the routine ran in its own conversation").toBe(false);
 }, hostTimeout(180_000));
+
+it("a person with no name set is named as the People list names them, in the queue and in the refusal", async () => {
+  await priyaRuns();
+  expect((await send(dev, TOM_ASK)).body.queued).toBe(true);
+  expect((await queue(priya)).map((item) => item.sender?.name)).toEqual(["Dev"]);
+  await release();
+  writeFileSync(home("tool-calls.json"), JSON.stringify([POLL]));
+  rmSync(home("release"), { force: true });
+  expect((await send(dev, SAM_ASK)).status).toBe(202);
+  await expect.poll(() => busy(), { timeout: hostTimeout(30_000), interval: 100 }).toBe(true);
+  const refused = await team.as(tom, "POST", `/api/bots/${botId}/interrupt`, { threadId: shared });
+  expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+  expect(refused.body.error).toBe("Only Dev or an admin can stop this.");
+  const task = ((await team.as(tom, "GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; tasks?: Array<{ threadId: string; askedBy?: { name: string } }> }>)
+    .find((one) => one.id === botId)?.tasks?.find((one) => one.threadId === shared);
+  expect(task?.askedBy?.name).toBe("Dev");
+}, hostTimeout(120_000));
