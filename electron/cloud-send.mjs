@@ -32,6 +32,7 @@ const ATTACHMENT_NAMES = 2000;
 const ROW_IDS = 10_000;
 const ROW_ID_CONVERSATIONS = 200;
 const MEMORY_FILES = 100;
+const SCOPED_READ = /^\/api\/cloud-send(?:\?move=1|\/manifest|\/chats(?:\?attachments=1)?|\/files)$/u;
 const PICTURE_TYPES = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 const VAULT_ID = /^[\w-]{1,128}$/u;
 /** Whole sends, which carry the chats too; a send of some items (Use this computer's, one login) never does. */
@@ -212,7 +213,7 @@ const movedResult = () => ({ moved: 0, memory: 0, files: { sent: 0, kept: 0 }, c
 export function createCloudSend({ local, cloud, handoff, store, onChange = () => {}, now = Date.now, sleep, patience = {}, engineWaitMs, space, team = null, t = nativeText.englishText.t }) {
   let saved = parseSendState(safeRead(store));
   let view = { cloud: "none", plan: null, local: null, theirs: null, chats: null };
-  let running = null, progress = null, checking = null;
+  let running = null, progress = null, checking = null, localScope = null;
   const only = team?.bot ?? null;
   /** A route as a move of one bot asks it of either side: kept to that bot. */
   const scoped = (route) => (only ? `${route}${route.includes("?") ? "&" : "?"}bot=${only}` : route);
@@ -249,9 +250,11 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   const publish = () => { const value = snapshot(); try { onChange(value); } catch {} return value; };
 
   const allowed = (route) => LOCAL_ROUTE.test(route.replace(/[?&]bot=[\w-]{1,128}$/u, ""));
+  /** What a move of some bots reads of this computer's server names them. */
+  const chosenOnly = (route) => (localScope && SCOPED_READ.test(route) ? `${route}${route.includes("?") ? "&" : "?"}scope=${localScope}` : route);
   async function localJson(route, options) {
     if (!allowed(route)) throw new CloudSendError("invalid", "Unsupported local request.");
-    const response = await local(route, options);
+    const response = await local(chosenOnly(route), options);
     if (!response.ok) throw new CloudSendError("local", "OpenMausBot on this computer did not answer. Try again in a moment.");
     return response.json();
   }
@@ -330,13 +333,14 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   /** One send at a time; one asked while another runs waits for it, then runs as it was asked. A move (`reason: "move"`)
    * carries everything; its final pass (`final`) carries the sign-ins that refresh themselves too, and this computer lets
    * go of each once My Cloud has it. */
-  async function send({ keys = null, force = [], reason = "button", final = false } = {}) {
+  async function send({ keys = null, force = [], reason = "button", final = false, scope = null } = {}) {
     while (running) await running.promise.catch(() => {});
     const origin = cloud.origin();
     if (!origin) throw new CloudSendError("no_cloud", "This computer has no My Cloud yet.");
-    const job = { reason, final: reason === "move" && final === true, promise: null, chats: false };
+    const job = { reason, final: reason === "move" && final === true, scope, promise: null, chats: false };
     running = job;
     progress = null;
+    localScope = scope;
     publish();
     job.promise = (async () => {
       try { return await sendTo(origin, job, { keys, force: Array.isArray(force) ? force.filter((key) => typeof key === "string") : [], reason }); }
@@ -349,7 +353,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
         if (unanswered(error)) view = { ...view, cloud: "unreachable" };
         throw error;
       }
-      finally { running = null; progress = null; publish(); }
+      finally { running = null; progress = null; localScope = null; publish(); }
     })();
     return job.promise;
   }
@@ -395,7 +399,8 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       if (move) {
         await assertTakesMove(session);
         // A bot moving into a team carries nothing of the person's: their apps and keys stay.
-        if (!team) computer = await moveConnections(origin, session, result, job.final);
+        // A sign-in that refreshes itself stays with the bots that stay: only one place can hold it.
+        if (!team) computer = await moveConnections(origin, session, result, job.final && !job.scope);
       }
       settleCreating(origin, theirs);
       const planned = plan(origin, mine, theirs, force, { everything: move });
@@ -892,19 +897,22 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
 
   /** What did not arrive of what a move carried (cloud-send-check.mjs `moveCheck`), over one owner session that counts
    * as someone using My Cloud; `snapshot().checking` says how far it is. A check that stood still too long fails as
-   * unanswered, saying whether it got anywhere (`progressed`). */
-  async function check({ stopped } = {}) {
+   * unanswered, saying whether it got anywhere (`progressed`). `scope`: only the bots a move of some of them carries; its
+   * credentials are copies this computer goes on using, and are not checked. */
+  async function check({ scope = null, stopped } = {}) {
     const origin = cloud.origin();
     if (!origin) throw new CloudSendError("no_cloud", "This computer has no My Cloud yet.");
     const session = await cloud.open({ move: true }).catch((error) => { throw new CloudSendError("session", sentence(error?.message) ?? "This app could not sign in to My Cloud. Try again.", { cause: error }); });
+    localScope = scope;
     try {
-      return await moveCheck({ session, kept: entry(origin), persist, localJson, handoff: team ? null : handoff, scoped, now, sleep, patience, stopped, takesMove: () => assertTakesMove(session),
+      return await moveCheck({ session, kept: entry(origin), persist, localJson, handoff: team || scope ? null : handoff, scoped, now, sleep, patience, stopped, takesMove: () => assertTakesMove(session),
         refuse: (answer, message) => refusedError("unreachable", answer, message), onStep: (value) => { checking = value; publish(); } });
     } catch (error) {
       if (error?.code === "slow") throw Object.assign(new CloudSendError("unreachable", sentence(error.message) ?? "My Cloud did not answer.", { cause: error.cause }), { progressed: error.progressed === true });
       throw error;
     } finally {
       checking = null;
+      localScope = null;
       publish();
       try { await session.close(); } catch {}
     }

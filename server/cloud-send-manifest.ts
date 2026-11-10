@@ -5,6 +5,7 @@ import type { ChatStore } from "./cloud-chat-merge.ts";
 import { listBotFiles, type BotFile } from "./cloud-send-files.ts";
 import { chatHeads, conversationSettings } from "./cloud-send-chats.ts";
 import { activeLeaves, attachmentNamesOf } from "./cloud-send-rows.ts";
+import { roomGoes } from "./cloud-send-scope.ts";
 import { automationSwitches, routineRunIds, type MoveKindsDeps } from "./cloud-send-kinds.ts";
 import { journalIds, memoryFiles, memoryLines, teamsHere } from "./cloud-send-memory.ts";
 import type { CloudSendSummary } from "./cloud-send.ts";
@@ -57,6 +58,8 @@ export interface ManifestSources {
   /** False: the attachments, or the bot files, are not listed (the desktop's check never reads My Cloud's attachments). */
   attachments?: boolean;
   files?: boolean;
+  /** A move of only these bots: their conversations, and the rooms that go with all their bots. */
+  scope?: ReadonlySet<string>;
 }
 
 function memoryOf(botId: string): CloudSendManifest["memory"] {
@@ -68,10 +71,11 @@ export async function cloudSendManifest(sources: ManifestSources): Promise<Cloud
   const { store } = sources;
   const sent = [...new Set(summary.items.filter((item) => item.kind === "bot" && item.id).map((item) => item.id!))];
   const only = sources.bot;
-  const rooms = only === undefined ? store.groups.filter((room) => !room.dm) : [];
+  const chosen = sources.scope;
+  const rooms = only === undefined ? store.groups.filter((room) => !room.dm && (!chosen || roomGoes(room, chosen, (id) => store.bot(id)))) : [];
   const counts = sources.heads();
   const leaves = activeLeaves();
-  const conversations: ManifestConversation[] = chatHeads(only === undefined ? store.bots : store.bots.filter((bot) => bot.id === only), rooms).map((head) => ({
+  const conversations: ManifestConversation[] = chatHeads(only !== undefined ? store.bots.filter((bot) => bot.id === only) : chosen ? store.bots.filter((bot) => chosen.has(bot.id)) : store.bots, rooms).map((head) => ({
     threadId: head.threadId, ...(head.bot ? { bot: head.bot } : { room: head.room }), rows: counts.get(head.threadId)?.rows ?? 0, newest: head.lastId, leaf: leaves.get(head.threadId) ?? head.lastId,
     settings: conversationSettings(store, head),
   }));

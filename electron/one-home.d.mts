@@ -24,6 +24,8 @@ type OneHomePhase =
   /** `checking`: the check of what arrived, at its step (`manifest`, `files`, `chats`, `attachments`, `credentials`), with
    * `done` of `total` there and how many bots it checks. */
   | { phase: "finishing"; checking?: OneHomeChecking; slow?: OneHomeSlow; failing?: OneHomeFailing }
+  /** No move has started: the person is asked which bots go. */
+  | { phase: "choose" }
   /** What arrived, checked on both sides; `at`: when the move was done; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts; `left`: what My Cloud refused for good, which stayed where it was; `stayed`: connectors that work only on this computer (`needs`: a program My Cloud lacks). */
   | { phase: "done"; at?: number; counts?: OneHomeCounts; phone: boolean; held: string[]; left?: OneHomeNotCarried[]; stayed?: OneHomeStayed[] }
   /** This computer's bots are on their way home from a My Cloud that goes on, because the person keeps them here;
@@ -99,6 +101,8 @@ export function createOneHome(deps: {
   release?(): Promise<void>;
   /** One computer at a time runs the heavy part of a move into My Cloud: `take()` is null once this one does, else who does. */
   lease?: { take(): Promise<null | { name: string }>; release(): Promise<void> };
+  /** True while no first move should start, as the person is asked which bots go. */
+  choosing?(): Promise<boolean>;
   lend?(projects: string[]): Promise<unknown>;
   phone?: { paired(): boolean; stop(): Promise<void>; start(): Promise<void> };
   openHome?(): void;

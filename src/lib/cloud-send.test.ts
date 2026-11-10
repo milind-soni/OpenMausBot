@@ -3,10 +3,37 @@ import { setLocale } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import en from "@/locales/en.json";
 import ptBr from "@/locales/pt-br.json";
-import { ipcErrorText, moveLine } from "./cloud-send";
+import { botMoveLine, filterBots, ipcErrorText, moveLine, moveQuietUntil } from "./cloud-send";
 
 beforeEach(() => { setLocale("en"); });
 afterEach(() => { setLocale("en"); });
+
+describe("choosing which bots move", () => {
+  const bot = (id: string, name: string) => ({ id, name });
+
+  it("finds bots by every word of what is typed, in any case, and finds thousands at once", () => {
+    const bots = Array.from({ length: 50_000 }, (_, i) => bot(`b${i}`, `Sales Bot ${i}`));
+    const started = performance.now();
+    expect(filterBots(bots, " sales  49999 ").map((entry) => entry.id)).toEqual(["b49999"]);
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(filterBots(bots, "   ")).toBe(bots);
+  });
+
+  it("says how the chosen bots' move goes, for one bot and for many, in both languages", () => {
+    const move = (phase: "moving" | "failed" | "done", bots?: number) => ({ bot: { id: "bots-1", name: "Ada" }, team: { id: "my-cloud", name: "My Cloud" }, phase, ...(bots ? { bots } : {}) });
+    expect(botMoveLine(move("moving", 1))).toEqual({ kind: "sending", text: "Moving Ada to My Cloud…" });
+    expect(botMoveLine(move("moving", 12)).text).toBe("Moving 12 bots to My Cloud…");
+    expect(botMoveLine(move("done", 12))).toEqual({ kind: "done", text: "12 bots live on My Cloud now." });
+    expect(botMoveLine(move("failed")).kind).toBe("failed");
+    setLocale("pt-br");
+    expect(botMoveLine(move("done", 1)).text).toBe("Ada agora vive no Cloud.");
+  });
+
+  it("says nothing on the move's line while the person is asked, and nothing waits for it", () => {
+    expect(moveLine({ phase: "choose" }, "local")).toBeNull();
+    expect(moveQuietUntil({ phase: "choose" })).toBe(0);
+  });
+});
 
 describe("the one-time move's line", () => {
   it("never says everything is here when a connector stayed on this computer, and says why", () => {

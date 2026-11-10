@@ -1,5 +1,5 @@
 // What either page says about the one-time move to My Cloud (electron/one-home.mjs), and what arrived, in words.
-import type { CloudSendCounts } from "../../electron/cloud-send.mjs";
+import type { BotMoveView, CloudSendCounts } from "../../electron/cloud-send.mjs";
 import type { OneHomeCounts, OneHomeNotCarried, OneHomeStayed, OneHomeView } from "../../electron/one-home.mjs";
 import type { TeamMoveRefusal, TeamMoveRefusalCode, TeamMoveView } from "../../electron/team-move.mjs";
 import type { LocaleKey } from "@/locales";
@@ -15,6 +15,7 @@ const BRIDGE_REFUSALS: Readonly<Record<string, LocaleKey>> = {
   "Turn the switch to keep this computer's bots here.": "cloudAccount.keepHere.unclicked",
   "Choose Try again to move.": "cloudSend.move.unclicked",
   "Choose Move to move the bot.": "teamMove.unclicked",
+  "Choose which bots move.": "cloudSend.choose.unclicked",
 };
 
 /** The words main threw, without Electron's "Error invoking remote method" wrapper; null when there are none. */
@@ -56,7 +57,7 @@ export const MOVE_QUIET_MS = 5 * 60_000;
 /** Until when the corner cards that sell or ask for something (Product Hunt, the star, Cloud offers) wait for the
  * one-time move: for good while it goes or brings things home (Infinity), and MOVE_QUIET_MS after it is done. */
 export function moveQuietUntil(move: OneHomeView | null | undefined): number {
-  if (!move) return 0;
+  if (!move || move.phase === "choose") return 0;
   if (move.phase === "done") return move.at ? move.at + MOVE_QUIET_MS : 0;
   return Infinity;
 }
@@ -93,6 +94,7 @@ function underWayLine(move: OneHomeView, place?: string): string | null {
  * computer's bots on their way home and home because the person keeps them here.
  * `page`: which page shows it; `reason`: why a failing move failed, in main's words, when it said. */
 export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "sending" | "failed" | "done"; text: string; extra: string[]; phone?: true; retry?: true; reason?: string; place?: string } | null {
+  if (move.phase === "choose") return null;
   if (move.place) return ownMoveLine(move, move.place, page);
   if (move.phase === "done") {
     if (page !== "cloud") return null;
@@ -158,6 +160,26 @@ function ownMoveLine(move: OneHomeView, place: string, page: "local" | "cloud"):
   }
   const chats = move.phase === "copy" ? move.chats : undefined;
   return line("sending", chats ? t("cloudSend.move.copyChatsNamed", { place, done: chats.done, total: chats.total }) : t("cloudSend.move.copyNamed", { place }));
+}
+
+/** The "team" a bot that moved from this computer to My Cloud is held for (electron/bot-move-main.mjs). */
+export const MY_CLOUD_TEAM = "my-cloud";
+/** How many of the choice the list shows at a time, however many bots there are. */
+export const CHOOSER_PAGE = 200;
+/** The bots whose names hold every word of `query`. */
+export function filterBots<T extends { name: string }>(bots: readonly T[], query: string): readonly T[] {
+  const words = query.trim().toLocaleLowerCase(activeLocale()).split(/\s+/u).filter(Boolean);
+  if (!words.length) return bots;
+  return bots.filter((bot) => { const name = bot.name.toLocaleLowerCase(activeLocale()); return words.every((word) => name.includes(word)); });
+}
+
+/** Some of this computer's bots moving to My Cloud, on this computer's page. */
+export function botMoveLine(move: BotMoveView): { kind: "sending" | "failed" | "done"; text: string } {
+  const count = move.bots ?? 1, many = count > 1;
+  const params: Record<string, string | number> = many ? { count } : { bot: move.bot.name };
+  if (move.phase === "done") return { kind: "done", text: t(many ? "cloudSend.botMove.doneMany" : "cloudSend.botMove.done", params) };
+  if (move.phase === "failed") return { kind: "failed", text: t(many ? "cloudSend.botMove.failedMany" : "cloudSend.botMove.failed", params) };
+  return { kind: "sending", text: t(many ? "cloudSend.botMove.movingMany" : "cloudSend.botMove.moving", params) };
 }
 
 /** A bot moving from My Cloud into a team, on My Cloud's page: on its way, failed (it is still here, unchanged), or done. */

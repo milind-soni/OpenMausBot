@@ -176,6 +176,7 @@ export function arrivedCounts(here, there) {
  *   session(): Promise<{ call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, close(): Promise<void> }>,
  *   release?(): Promise<void>,
  *   lease?: { take(): Promise<null | { name: string }>, release(): Promise<void> },
+ *   choosing?(): Promise<boolean>,
  *   lend?(projects: string[]): Promise<unknown>,
  *   phone?: { paired(): boolean, start(): Promise<void> },
  *   openHome?(): void,
@@ -199,6 +200,7 @@ export function arrivedCounts(here, there) {
  * and kept only until it is deleted); null for anything else, and while it can't be asked. `cloud().verified`: the Admin
  * answered this sign-in just now (connected). `local.marker()`: this computer's freeze marker. `lease`: one computer at a
  * time runs the heavy part of a move into My Cloud (move-lease.mjs); `take()` is null once this one does, else who does.
+ * `choosing`: no first move starts yet, as the person is asked which bots go; the line says so with phase "choose".
  */
 export function createOneHome(deps) {
   const now = deps.now ?? Date.now;
@@ -211,6 +213,8 @@ export function createOneHome(deps) {
   let noted = null, heldOff = false;
   /** The other computer whose move into the same Cloud this one waits for (`deps.lease`), by its name ("" without one). */
   let queuedFor = null;
+  /** No move has started, and the person is asked first which bots go (`deps.choosing`). */
+  let choosing = false;
 
   const read = () => parseJournal(deps.journal.read());
   const kept = () => { try { return parseKeep(deps.keep?.read()).on; } catch { return false; } };
@@ -234,6 +238,7 @@ export function createOneHome(deps) {
    * until it is closed, and coming home; `place`, a server of the person's own the move goes to, by its name. Null when
    * there is nothing to say. */
   function view() {
+    if (choosing && !read() && !kept()) return { phase: "choose" };
     if (anotherAccount(read())) return null;
     const seen = phaseView(), place = read()?.cloud?.name;
     return seen && typeof place === "string" ? { ...seen, place } : seen;
@@ -727,6 +732,9 @@ export function createOneHome(deps) {
       // local environment) nothing starts or counts as failing, and it looks again in a minute.
       if (deps.ownCopy?.() === false) { noted = "local_unavailable"; if (!heldOff) log("one home: the move waits until this computer's own copy runs"); heldOff = true; later(MINUTE); return; }
       heldOff = false;
+      const asks = await deps.choosing?.().catch(() => false) === true;
+      if (asks !== choosing) { choosing = asks; publish(); }
+      if (asks) return;
       journal = write({ v: 1, phase: "copy", cloud: { origin: cloud.origin, account: cloud.account, machine: cloud.machine, ...(cloud.id ? { id: cloud.id } : {}), ...(cloud.name ? { name: cloud.name } : {}) },
         startedAt: now() });
     }

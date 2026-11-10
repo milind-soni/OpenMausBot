@@ -22,14 +22,15 @@ export function installCloudSend(deps: {
   patience?: { stallMs?: number; waits?: number[]; blips?: number[] };
   space?: { disk(): unknown; grow(sizeGb: number): Promise<unknown> };
   move?: () => { view(): unknown; seen(): unknown; retry(): Promise<unknown> } | null;
+  botMove?: () => { view(): unknown; seen(): unknown } | null;
   /** The one session every pass of the move uses (move-session.mjs). */
   moveSession?: { open(target: CloudTarget): Promise<CloudSendSession> };
 }): {
   receive(proc: unknown, message: unknown): boolean;
   /** This computer's server's private port, asked as a send asks it: another move's sends share it. */
   handoff(what: { kind: string; [key: string]: unknown }): Promise<any>;
-  move(options?: { final?: boolean }): Promise<CloudSendOutcome>;
-  check(options?: { stopped?(): boolean }): Promise<CloudMoveCheck>;
+  move(options?: { final?: boolean; scope?: string }): Promise<CloudSendOutcome>;
+  check(options?: { scope?: string; stopped?(): boolean }): Promise<CloudMoveCheck>;
   switches(): Record<string, boolean>;
   snapshot(): CloudSendSnapshot;
   publish(): void;

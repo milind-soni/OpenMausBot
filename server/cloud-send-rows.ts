@@ -9,6 +9,8 @@ import type { Message } from "./store.ts";
 export interface ThreadLinks { ids: string[]; parent: Map<string, string | null>; leaf: string | null }
 
 const BY_ID_CHUNK = 200;
+/** Up to this many conversations are read one by one, by their index, rather than by reading every row. */
+const BY_THREAD_MAX = 500;
 
 /** As the store reads a conversation: a row stored without a parent follows the row before it, and the active leaf is
  * the newest row when none was kept. Null when messages.db holds no row of it. */
@@ -64,10 +66,14 @@ export function storedRows(threadId: string, ids: readonly string[], { owners = 
  * parsed, one at a time. */
 export function attachmentNamesOf(threadIds: ReadonlySet<string>, dataDir: string): Set<string> {
   const names = new Set<string>();
-  const rows = prepared("SELECT thread_id AS threadId, json FROM messages WHERE instr(json, 'attachments') > 0 OR instr(json, '<attached-') > 0").iterate();
-  for (const row of rows as Iterable<{ threadId: string; json: string }>) {
-    if (!threadIds.has(row.threadId)) continue;
-    for (const name of attachmentNames(JSON.parse(row.json) as Message, dataDir)) names.add(name);
-  }
+  const add = (rows: Iterable<unknown>) => {
+    for (const row of rows as Iterable<{ threadId: string; json: string }>) {
+      if (!threadIds.has(row.threadId)) continue;
+      for (const name of attachmentNames(JSON.parse(row.json) as Message, dataDir)) names.add(name);
+    }
+  };
+  const naming = "(instr(json, 'attachments') > 0 OR instr(json, '<attached-') > 0)";
+  if (threadIds.size > BY_THREAD_MAX) add(prepared(`SELECT thread_id AS threadId, json FROM messages WHERE ${naming}`).iterate());
+  else for (const threadId of threadIds) add(prepared(`SELECT thread_id AS threadId, json FROM messages WHERE thread_id = ? AND ${naming}`).iterate(threadId));
   return names;
 }
