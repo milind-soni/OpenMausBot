@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  previewBrowserSignIn, readSessionState, takeBrowserSignInFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation,
+  previewBrowserSignIn, readSessionState, rememberTeamSignIn, takeBrowserSignInFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation,
 } from "./lib/session";
 import { bootstrapBrand, productName } from "./lib/brand";
 import { t } from "./lib/i18n";
@@ -51,6 +51,7 @@ async function chooseRoot(): Promise<React.ReactNode> {
     return home ? <SignedOutAtHome bridge={home} fallback={pair} /> : pair;
   }
   forgetEndedSession();
+  if (session.kind === "session") rememberTeamSignIn(session.teamSignIn);
   if (session.kind === "loopback" && session.trust === "service") {
     await pageLanguage;
     return <PairPage initialCode={null} reason={t("pair.serviceTrust")} />;

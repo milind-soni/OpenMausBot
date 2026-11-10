@@ -1,7 +1,8 @@
-// A Team Cloud's roster check: every few minutes it asks the Admin, signed with its bootstrap secret, whether the people
-// whose sessions are in use and about to end are still in the team, and at which role (openmaus-cloud docs/team-cloud.md "A
-// session that lives without a desktop"). A member found at their role keeps their sessions another hour, so a browser or a
-// phone stays signed in with no desktop re-pairing for it; anyone the Admin no longer lists is signed out at once.
+// A Team Cloud's roster check: every 5 minutes it asks the Admin, signed with its bootstrap secret, whether the people
+// whose sessions were used in the last hour are still in the team, and at which role (openmaus-cloud docs/team-cloud.md "A
+// session that lives without a desktop"). A member found at their role keeps each session they use until an hour after its
+// last use, so a browser or a phone stays signed in with no desktop re-pairing; anyone the Admin no longer lists is signed
+// out at once, at the next check.
 // Security invariants: membership is the Admin's word only, read fresh, about this Cloud's own team. No answer changes
 // nothing, so a session still ends within the hour of the last word, as every team session did before.
 import { createHash, createHmac, randomBytes } from "node:crypto";
@@ -13,8 +14,6 @@ import type { SessionRegistry } from "./sessions.ts";
 /** On the Admin; must match openmaus-cloud's TEAM_ROSTER_MACHINE_PATH. */
 export const TEAM_ROSTER_ADMIN_PATH = "/api/cloud/machines/team-member";
 export const TEAM_ROSTER_EVERY_MS = 5 * 60_000;
-/** Sessions ending within this long are asked about: two checks before the end, so one missed answer costs nothing. */
-export const TEAM_ROSTER_SOON_MS = 20 * 60_000;
 /** The Admin's own limit on one ask. */
 export const TEAM_ROSTER_MAX = 50;
 const FETCH_TIMEOUT_MS = 15_000, ANSWER_MAX_BYTES = 64 * 1024;
@@ -56,7 +55,7 @@ export function startTeamRoster(options: TeamRosterOptions): TeamRoster {
   let timer: Timer | null = null, stopped = false, running: Promise<void> | null = null;
 
   const ask = async (): Promise<void> => {
-    const emails = options.sessions.membersToVouch(TEAM_ROSTER_SOON_MS, TEAM_ROSTER_MAX);
+    const emails = options.sessions.membersToVouch(TEAM_ROSTER_MAX);
     if (!emails.length) return;
     const body = JSON.stringify({ v: 1, emails });
     const timestamp = String(Math.floor(now() / 1000)), nonce = randomBytes(18).toString("base64url");

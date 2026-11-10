@@ -94,8 +94,11 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **In a browser, with nothing installed.** The join page's Open <team> (and a User's team home on MausBot Cloud) signs the
   browser in here as that person, at their role: the Admin's browser sign-in with their member claim, "Open Acme as
   <address>" and one Continue (`/pair#signin=`, BrowserSignInPage). The browser is the same app, at phone width too.
-  When its session ends, the sign-in page offers "Open Acme with MausBot Cloud" (`teamSignIn` in
-  `/.well-known/openmausbot/environment`: the person's team page there, an address and nothing that signs anyone in).
+  When its session ends, the sign-in page offers "Open Acme with MausBot Cloud": the person's team page there, which their
+  signed-in session told this browser (`/api/auth/session` `teamSignIn`, kept in the browser); never told before sign-in.
+  With the team's rule turning remote access off, a User's browser sign-in is refused (`remote_access_off`) and their open
+  browsers sign out with their phones (`closeMemberBrowsers`); an Owner's and an Admin's stay, since their admin pages
+  open in a browser and the rule is theirs to change.
 - **The first screen.** A User's first time in the team (TeamWelcome): "Welcome to Acme", who invited them (the Admin's
   `member.invitedBy`, named from the people list), who else is in it with their pictures, the bots shared with them with one
   line each, the privacy sentence (said here, so the first private chat doesn't say it again) and one action, Start a chat
@@ -108,13 +111,19 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 
 ### Signed in without a desktop
 
-Every 5 minutes the Team Cloud asks the Admin about the people whose team sessions were used in the last hour and end
-within 20 minutes (`server/cloud-team-roster.ts`): `POST <Admin>/api/cloud/machines/team-member { v: 1, emails }`, at most
-50, signed with the bootstrap secret in its own context (`teamRosterSignature`). The answer is each address's role now,
-or null. A member at their role keeps their sessions (app windows, browsers, phones) another hour (`vouchMember`: a phone's
-`memberCheckedAt`, anyone else's `vouchedAt`); one the Admin no longer lists is signed out at once; one at another role
-loses the sessions of the old role. No answer, a refusal or an older Admin (404) changes nothing: every session still ends
-within the hour of the Admin's last word. A script's token and a move-in sign-in end as they were made to.
+Every 5 minutes (give or take a minute) the Team Cloud asks the Admin about everyone with a team session used in the last
+hour (`server/cloud-team-roster.ts`): `POST <Admin>/api/cloud/machines/team-member { v: 1, emails }`, at most 50, signed
+with the bootstrap secret in its own context (`teamRosterSignature`). The answer is each address's role now, or null.
+
+- **Someone removed, or whose role changed**, is signed out at that check, within about 6 minutes, even without the Admin's
+  `member-left` (which ends their sessions at once). A role in the answer never upgrades a session: the old role's ends.
+- **A session in use** ends no sooner than an hour after its last use while the Admin keeps finding its person in the team
+  (`vouchMember`: a phone's `memberCheckedAt`, anyone else's `vouchedAt`), so a browser or a phone stays signed in with no
+  desktop.
+- **An unused session** still ends within the hour of its last use (at most an hour after it opened, if never used),
+  however much the same person uses another device: only a session itself used within the hour is ever kept.
+- No answer, a refusal or an older Admin (404) changes nothing, and a deleted team's Cloud is told nothing (404). A
+  script's token and a move-in sign-in end as they were made to.
 
 ### Off a team
 
@@ -286,7 +295,8 @@ The session carries `teamRole` and `membershipAuthority: "team"`: the sign-in li
 
 **Membership lives on the Admin.** The machine checks membership at each pairing, which the Admin signs only for a current
 member, and through its roster check ("Signed in without a desktop"). A team session therefore ends within the hour of the
-Admin's last word about its member (`TEAM_SESSION_MAX_MS`); a removed member's next pairing is refused by the Admin (404).
+Admin's last word about its member and within the hour of its own last use (`TEAM_SESSION_MAX_MS`); a removed member's next
+pairing is refused by the Admin (404).
 A session is also kept only across a clean restart.
 
 `member.invitedBy` (optional): who invited this member, by address. Kept for their welcome the first time it is said;
@@ -666,7 +676,7 @@ person as before, and `message_person` and the inbox do not exist.
 - **Per-member engine sign-ins.** Every audience's engine signs in as the team (its key through the broker, or the
   team's sign-in files in each engine home, above); a member cannot sign an engine in as themselves, by design.
 - **Removal without `member-left`.** Without the Admin's `member-left` request (above), removal takes effect at the next
-  roster check, within the hour at most, and nothing is deleted.
+  roster check (about 6 minutes), and nothing is deleted.
 - **Engine homes without a box, and engines outside the list.** Without the bot box (bubblewrap refused, or switched
   off) a shell reaches every file of the server's user, engine homes included; only the box keeps them apart. An engine
   whose sign-in file is not named in `engine-homes/layout.ts` starts signed out in every audience's home. Engines
@@ -688,6 +698,10 @@ person as before, and `message_person` and the inbox do not exist.
   opens the team; signed out it starts its own browser sign-in and opens the team once signed in; signed in as someone
   the team isn't listed for, main's own dialog says so and offers to sign in with another address (Add another account:
   the one in use stays signed in). A link left waiting is dropped after 30 minutes. `openmausbot://cloud` is unchanged.
-- **Landing** (`landing` in the Admin's session: no Cloud of the account's own, invited into a team): the team opens first,
-  once per device (`team-landing.json`; a team opened here by any way counts), and no plan is pushed meanwhile: no trial
-  card, no Start free trial in Settings (`cloudPlanView` `invited`).
+- **Landing** (`landing` in the Admin's session: no Cloud of the account's own, invited into a team): the window moves to the
+  team only on a sign-in this app just saw, the first on this device (`team-landing.json` keeps the accounts signed in here
+  and the teams opened here), with no place of the person's own on screen (My Cloud, a remembered place); then once. Any
+  other time, the team is in the rail and the window stays. No plan is pushed meanwhile: no trial card, no Start free trial
+  in Settings (`cloudPlanView` `invited`).
+- A sign-in the link started that finishes as an address the team isn't listed for says so, with the way to sign in with
+  the other address, never nothing.

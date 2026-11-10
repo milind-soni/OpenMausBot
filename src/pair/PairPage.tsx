@@ -9,6 +9,7 @@ import {
   pairWithCode,
   readSessionState,
   reasonWorthShowing,
+  rememberedTeamSignIn,
   startEmailSignIn,
   verifyEmailSignIn,
   type EnvironmentDescriptor,
@@ -57,12 +58,12 @@ export function unencryptedPublic(where: { protocol: string; hostname: string })
   return where.protocol === "http:" && !isPrivateHost(where.hostname);
 }
 
-/** A team's Cloud: its page on MausBot Cloud, where anyone in the team opens it in this browser again. Only an https page
- * (or a loopback fixture's), never anything else the descriptor might say. */
-export function teamPage(environment: EnvironmentDescriptor | null): string | null {
-  if (!environment?.capabilities.cloudTeam || typeof environment.teamSignIn !== "string") return null;
+/** A team's Cloud: the person's team page on MausBot Cloud, as their signed-in session told this browser (never before
+ * sign-in), where they open it again. Only an https page (or a loopback fixture's). */
+export function teamPage(environment: EnvironmentDescriptor | null, remembered: string | null = rememberedTeamSignIn()): string | null {
+  if (!environment?.capabilities.cloudTeam || typeof remembered !== "string") return null;
   try {
-    const url = new URL(environment.teamSignIn);
+    const url = new URL(remembered);
     const loopback = url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
     return (url.protocol === "https:" || loopback) && !url.username && !url.password && !url.hash ? url.href : null;
   } catch { return null; }

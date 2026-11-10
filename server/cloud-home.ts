@@ -180,7 +180,7 @@ export function createCloudRequestVerifier(options: { secret: string; now?: () =
 }
 
 export interface CloudPairingResult {
-  status: 200 | 400 | 401 | 429 | 503;
+  status: 200 | 400 | 401 | 403 | 429 | 503;
   body: Record<string, unknown>;
 }
 
@@ -191,6 +191,9 @@ export function createCloudPairing(options: {
   sessions: PairingSessions;
   /** The team this machine serves: then every pairing body must carry the Admin's `member` claim. */
   team?: CloudTeam | null;
+  /** The team's rule turned remote access off: a User's browser sign-in is refused (an Owner's and an Admin's stay: the
+   * rule is theirs to change, and their admin pages open in a browser). */
+  memberBrowserOff?: () => boolean;
   /** The claim's `member.invitedBy` (additive): who invited this member, for their welcome (team-welcome.ts). */
   invited?: (member: string, by: string) => void;
   now?: () => number;
@@ -225,6 +228,7 @@ export function createCloudPairing(options: {
       if ((browser || owner !== undefined) && (typeof owner !== "string" || owner.length > 254 || !OWNER_EMAIL.test(owner))) {
         return { status: 400, body: { error: "invalid_owner" } };
       }
+      if (browser && member?.role === "member" && options.memberBrowserOff?.()) return { status: 403, body: { error: "remote_access_off" } };
       const ttl = Math.min((ttlSeconds as number | undefined) ?? CLOUD_PAIRING_DEFAULT_TTL_S, browser ? CLOUD_BROWSER_SIGN_IN_MAX_TTL_S : CLOUD_PAIRING_MAX_TTL_S);
       if (member) sessions.revokeMember(member.email, member.role);
       if (member && invitedBy && invitedBy !== member.email) {

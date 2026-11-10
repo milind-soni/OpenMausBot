@@ -504,30 +504,37 @@ export class SessionRegistry {
     }
   }
 
-  /** The team members whose sessions the roster check should keep: used within the last hour and ending within `soonMs`
-   * (never a script's token or a move-in sign-in, which end as they were made to). At most `max` people, soonest first. */
-  membersToVouch(soonMs: number, max: number): string[] {
+  /** The team members the roster check asks about: those with a session used within the last hour (never a script's token
+   * or a move-in sign-in, which end as they were made to). At most `max` people, the soonest to end first. */
+  membersToVouch(max: number): string[] {
     this.prune();
     const now = this.now(), soonest = new Map<string, number>();
     for (const session of this.sessions) {
-      if (session.membershipAuthority !== "team" || !session.email || session.token || session.moveIn) continue;
-      if (session.expiresAt <= now || session.expiresAt - now > soonMs || now - session.lastSeenAt > TEAM_ACTIVE_MS) continue;
-      soonest.set(session.email, Math.min(soonest.get(session.email) ?? Infinity, session.expiresAt));
+      if (!this.vouchable(session, now)) continue;
+      soonest.set(session.email!, Math.min(soonest.get(session.email!) ?? Infinity, session.expiresAt));
     }
     return [...soonest].sort((a, b) => a[1] - b[1]).slice(0, max).map(([email]) => email);
   }
 
-  /** The Admin's roster check found this member in the team at `role` just now: their sessions at that role, phones
-   * included, live on another hour. Any at another role end (a role change the Admin's own pairing didn't reach). */
+  /** A team session the roster check may keep: live, used within the last hour, and not a token or a move-in sign-in. */
+  private vouchable(session: SessionRecord, now: number): boolean {
+    return session.membershipAuthority === "team" && Boolean(session.email) && !session.token && !session.moveIn
+      && session.expiresAt > now && now - session.lastSeenAt <= TEAM_ACTIVE_MS;
+  }
+
+  /** The Admin's roster check found this member in the team at `role` just now. Their sessions at another role end (a role
+   * change the Admin's own pairing didn't reach; never an upgrade). Each of their sessions at that role that was used within
+   * the hour, phones included, ends no later than an hour after its last use: an idle one, left on another computer, still
+   * ends on schedule however much the person uses another device. */
   vouchMember(email: string, role: TeamRole): void {
     const address = email.trim().toLowerCase(), now = this.now();
     this.revokeMember(address, role);
     let changed = false;
     for (const session of this.sessions) {
-      if (session.membershipAuthority !== "team" || session.email !== address || session.teamRole !== role || session.token || session.moveIn || session.expiresAt <= now) continue;
+      if (session.email !== address || session.teamRole !== role || !this.vouchable(session, now)) continue;
       if (session.memberCheckedAt !== undefined) session.memberCheckedAt = now; else session.vouchedAt = now;
-      session.expiresAt = Math.max(session.expiresAt, teamSessionExpiresAt(now, Math.min(now + SESSION_TTL_MS, session.createdAt + SESSION_MAX_AGE_MS)));
-      changed = true;
+      const next = Math.min(teamSessionExpiresAt(now, Math.min(now + SESSION_TTL_MS, session.createdAt + SESSION_MAX_AGE_MS)), session.lastSeenAt + TEAM_ACTIVE_MS);
+      if (next > session.expiresAt) { session.expiresAt = next; changed = true; }
     }
     if (changed) this.persist();
   }
@@ -704,6 +711,13 @@ export class SessionRegistry {
   closeMemberPhones(): number {
     this.pairings = this.pairings.filter((pairing) => !(pairing.member && pairing.memberCheckedAt !== undefined));
     return this.memberPhones().filter((phone) => this.revoke(phone.id)).length;
+  }
+
+  /** Remote access turned off on a Team Cloud: every User's browser sign-in signs out. An Owner's and an Admin's stay. */
+  closeMemberBrowsers(): number {
+    this.prune();
+    return this.sessions.filter((session) => session.membershipAuthority === "team" && session.cookieOnly && session.teamRole === "member").map((session) => session.id)
+      .filter((id) => this.revoke(id)).length;
   }
 
   /** A person who left a Team Cloud: every session of theirs (app windows, phones) ends now, and no open code of theirs

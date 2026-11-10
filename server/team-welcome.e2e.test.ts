@@ -59,3 +59,10 @@ it("the Cloud's own welcome for admins: one admin finishing it ends it for that 
   expect(adas).not.toContain("cloud-welcome-done");
   expect(adas).not.toContain("cloud-welcome-shown");
 });
+
+it("tells a signed-in member, never anyone before sign-in, where their team page on MausBot Cloud is", async () => {
+  const cleo = (await team.pair(CLEO)).token!;
+  expect((await team.as(cleo, "GET", "/api/auth/session")).body.teamSignIn).toMatch(/\/cloud\/team\/team-acme-1$/);
+  const descriptor = await (await fetch(`${team.base}/.well-known/openmausbot/environment`, { headers: fx.edge })).json() as Record<string, unknown>;
+  expect(JSON.stringify(descriptor)).not.toContain("/cloud/team/");
+});

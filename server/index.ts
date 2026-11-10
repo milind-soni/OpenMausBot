@@ -274,7 +274,7 @@ import { EventBus } from "./harness/bus.ts";
 import { ENGINE_LIST_REUSE_MS, engineMemory, enginesByUse, ProviderRegistry } from "./harness/registry.ts"; import { afterFirstEngineRead, holdUntilFirstEngineRead } from "./first-engine-read.ts";
 import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { mainThread, wasOldestThread } from "./main-thread.ts";
-import { computerKindForResource, ManagedDesktopPolicy, type ComputerKind } from "./managed-policy.ts"; import { nudgeCloudTeamPolicy, remoteAccessPaths, startCloudTeamPolicy, stopCloudTeamPolicy } from "./cloud-team-policy.ts"; import { startCloudTeamRoster, stopCloudTeamRoster } from "./cloud-team-roster.ts"; import { createTeamWelcomeStore } from "./team-welcome.ts"; import { personalHints } from "../shared/cloud-hints.ts";
+import { computerKindForResource, ManagedDesktopPolicy, type ComputerKind } from "./managed-policy.ts"; import { nudgeCloudTeamPolicy, remoteAccessPaths, startCloudTeamPolicy, stopCloudTeamPolicy } from "./cloud-team-policy.ts"; import { startCloudTeamRoster, stopCloudTeamRoster } from "./cloud-team-roster.ts"; import { createTeamWelcomeStore } from "./team-welcome.ts"; import { teamOnboarding, teamSignInFor } from "./host/team-join-host.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER } from "./hosted-models.ts";
 import { CLOUD_HOME_SECRET_KEYS, CLOUD_IGNORED_KEYS, cloudHomeConfiguration, cloudHomeOffersPlace, cloudHomePlaceRefusal, firstCloudTurnPatch } from "./cloud-home.ts";
 import { botBox, startBotBoxAtBoot } from "./bot-box/boot.ts"; import { attachmentsForBox } from "./box-attachments.ts"; import { brokerPath } from "./bot-box/broker-probe.ts";
@@ -2840,8 +2840,7 @@ const phones = createPhones({
   active: (turn) => internalCapabilityIsActive(turn as InternalCapability),
 });
 const cloudPlanTier = createCloudPlanTier({ dataDir: DATA_DIR, cloudHome: Boolean(CLOUD_HOME), changed: () => broadcast({ kind: "config", ...configStatus() }) }); const botLimit = createBotLimit({ starter: () => cloudPlanTier.starter(), bots: () => store.bots }); const starterAwake = createStarterAwake({ dataDir: DATA_DIR, starter: () => cloudPlanTier.starter(), bots: () => store.bots, changed: () => broadcast({ kind: "config", ...configStatus() }) }); const starterCaps = createStarterCaps({ starter: () => cloudPlanTier.starter(), awake: starterAwake, waitsOnOthers: (threadId) => coordinator.outstandingFor(threadId).length > 0, botName: (botId) => store.bot(botId)?.name, pausedLine: (language, limit) => serverLine(language, "server.botPaused", { limit }), refused: () => broadcast({ kind: "config", ...configStatus() }) }); engineMemory.useCap(starterCaps.engine); let cloudPower: CloudPower | null = null; // The sleep handshake of a plan that sleeps (server/cloud-power.ts), made just before the server listens.
-const teamWelcome = createTeamWelcomeStore(DATA_DIR);
-const { cloudHealth, cloudSigned } = createCloudSignedHost({ cloudHome: CLOUD_HOME, sessions, power: () => cloudPower, box: () => botBox.report(), teamAdmin: teamAdminHost(), policyChanged: nudgeCloudTeamPolicy, invited: (email, by) => teamWelcome.invited(personKey({ id: "", email }), by), plan: (cancelled) => routineHolds?.plan(cancelled), planTier: (tier) => cloudPlanTier.set(tier), memberLeft: (email) => leaveTeam ? leaveTeam(email).then((result) => { botApi.manager.revokeMintedBy(personKey({ id: "", email })); teamOwners.left(email); teamMessages.inbox.forget(personKey({ id: "", email })); forgetSetupPresser(store, personKey({ id: "", email })); devsReports.forget(personKey({ id: "", email })); return result; }) : Promise.reject(new Error("not a team")), health: { store, bus, dataDir: DATA_DIR, eventsDir: EVENTS_DIR, version: serverVersion(), image: process.env.OMB_CLOUD_IMAGE,
+const teamWelcome = createTeamWelcomeStore(DATA_DIR); const { cloudHealth, cloudSigned } = createCloudSignedHost({ cloudHome: CLOUD_HOME, sessions, power: () => cloudPower, box: () => botBox.report(), teamAdmin: teamAdminHost(), policyChanged: nudgeCloudTeamPolicy, invited: (email, by) => teamWelcome.invited(personKey({ id: "", email }), by), memberBrowserOff: () => managedPolicy.remoteAccessRefusal() !== undefined, plan: (cancelled) => routineHolds?.plan(cancelled), planTier: (tier) => cloudPlanTier.set(tier), memberLeft: (email) => leaveTeam ? leaveTeam(email).then((result) => { botApi.manager.revokeMintedBy(personKey({ id: "", email })); teamOwners.left(email); teamMessages.inbox.forget(personKey({ id: "", email })); forgetSetupPresser(store, personKey({ id: "", email })); devsReports.forget(personKey({ id: "", email })); return result; }) : Promise.reject(new Error("not a team")), health: { store, bus, dataDir: DATA_DIR, eventsDir: EVENTS_DIR, version: serverVersion(), image: process.env.OMB_CLOUD_IMAGE,
   engines: () => registry.instances().map((instance) => ({ instanceId: instance.instanceId, driverKind: instance.driverKind, snapshot: registry.knownSnapshot(instance.instanceId) })),
   connectors: () => emailHost.health(composio.configured(cfg) ? composio.connectedServices(cfg) : null),
   browser: () => ({ available: browserReady(undefined), installing: Boolean(browserEngineInstall), interrupted: browserRuntime.interruptedCount() }), firstHour: () => firstHourHooks.health(), ...(engineMemory.enabled ? { room: () => engineMemory.dayPressure() } : {}) } });
@@ -11828,8 +11827,7 @@ function configStatus() {
 /** `session`: who is asking. On a Team Cloud the profile is theirs alone, never the server's. */
 function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean, session?: SessionRecord | null) {
   const profile: MemberProfile = CLOUD_TEAM ? (session ? teamHost.memberProfile(session) : NOBODY_PROFILE) : status.profile;
-  // On a team the welcome's own record is each person's (shared/cloud-hints.ts personalHints).
-  const onboarding = CLOUD_TEAM ? { ...status.onboarding, hintsSeen: personalHints(status.onboarding.hintsSeen, session ? teamWelcome.read(personKey(session)).hints : [], session?.teamRole === "owner") } : status.onboarding;
+  const onboarding = CLOUD_TEAM ? teamOnboarding(status.onboarding, session, teamWelcome) : status.onboarding;
   if (admin) return CLOUD_TEAM ? { ...status, profile, onboarding } : status;
   // Client sessions get configured-or-not only: no SSH alias, email, browser partition id or sign-in list.
   return {
@@ -11838,8 +11836,7 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
     signIn: { admins: [], members: [] }, live: liveSettingsForClient(status.live), everyBotRules: undefined,
     vps: { configured: status.vps.configured, sshAlias: "" },
     opencodeGo: { configured: status.opencodeGo.configured, providerKeys: [] },
-    ...(CLOUD_TEAM ? { onboarding } : {}),
-    profile: CLOUD_TEAM ? profile : { name: profile.name, email: "", ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}) },
+    ...(CLOUD_TEAM ? { onboarding } : {}), profile: CLOUD_TEAM ? profile : { name: profile.name, email: "", ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}) },
     browserProfiles: status.browserProfiles.map((profile) => Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "partitionId"))),
   };
 }
@@ -12401,8 +12398,7 @@ const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persi
   computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict, perBotLocalVmCountForModeChange,
   checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
   configForAccess: (status, auth) => configForAccess(status as ReturnType<typeof configStatus>, auth.scopes.includes("admin"), auth.kind === "session" ? auth.session : null),
-  ...(CLOUD_TEAM ? { ownProfile: (auth: RequestAuth, profile: { name?: string; avatarUrl?: string; aboutMe?: string }) => auth.kind === "session" ? (teamHost.saveMemberProfile(auth.session, profile), true) : false,
-    ownHints: (auth: RequestAuth, hints: string[]) => auth.kind === "session" ? (teamWelcome.save(personKey(auth.session), { hints }), true) : false } : {}),
+  ...(CLOUD_TEAM ? { ownProfile: (auth: RequestAuth, profile: { name?: string; avatarUrl?: string; aboutMe?: string }) => auth.kind === "session" ? (teamHost.saveMemberProfile(auth.session, profile), true) : false, ownHints: (auth: RequestAuth, hints: string[]) => auth.kind === "session" ? (teamWelcome.save(personKey(auth.session), { hints }), true) : false } : {}),
   resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, postiz,
 }));
 ROUTES.push(createInstanceRoutes({
@@ -12617,8 +12613,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // Two public routes come first; everything else needs the loopback owner or a paired session with the right scope.
     if (method === "GET" && !path.startsWith("/api/") && !path.startsWith("/.well-known/") && (moveFreeze.screen(path) ? (res.writeHead(302, { location: moveFreeze.screen(path)!, "cache-control": "no-store" }).end(), true) : serveStatic(res, path, STATIC_DIR))) return;
     if (method === "GET" && path === "/.well-known/openmausbot/environment") {
-      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null, ownHome: ownHome.takesMove(),
-        ...(CLOUD_HOME?.team ? { teamSignIn: `${CLOUD_HOME.adminOrigin}/cloud/team/${encodeURIComponent(CLOUD_HOME.team.id)}` } : {}) }));
+      return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: !HOSTED_WORKSPACE && !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null, ownHome: ownHome.takesMove() }));
     }
     const domainCheck = /^\/\.well-known\/openmausbot\/domain-check\/([a-f0-9]{64})$/.exec(path);
     if (method === "GET" && domainCheck) {
@@ -12764,7 +12759,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               ...(auth.session.email ? { email: auth.session.email } : {}),
               ...(auth.session.owner ? { owner: auth.session.owner } : {}),
               ...(HOSTED_WORKSPACE ? { hosted: true } : {}),
-              ...(CLOUD_HOME ? { cloudHome: true } : {}), ...(ownHome.owner(auth) ? { own: true, ...(ownerLends() ? { lending: OWNER_LENDING } : {}) } : {}), ...(teamHost.sessionInfo(auth.session) ? { team: teamHost.sessionInfo(auth.session), openedThreads: threadStarters.threadsOf(actorKey(auth), 2_000) } : {}),
+              ...(CLOUD_HOME ? { cloudHome: true } : {}), ...teamSignInFor(CLOUD_HOME, auth.session), ...(ownHome.owner(auth) ? { own: true, ...(ownerLends() ? { lending: OWNER_LENDING } : {}) } : {}), ...(teamHost.sessionInfo(auth.session) ? { team: teamHost.sessionInfo(auth.session), openedThreads: threadStarters.threadsOf(actorKey(auth), 2_000) } : {}),
               ...(CLOUD_PERSONAL && !cloudOwnerSession(auth) ? { cloudGuest: true, openedThreads: threadStarters.threadsOf(actorKey(auth), 2_000) } : {}),
               ...(reactorFor(auth).by !== "user" ? { reactor: reactorFor(auth).by } : {}),
             },

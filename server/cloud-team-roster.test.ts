@@ -62,15 +62,14 @@ describe("a Team Cloud's roster check", () => {
     const browser = browserSession(), phone = phoneSession(browser);
     const started = clock;
     const { check, asked } = admin({ [ADA.email]: "member" });
-    clock += 30 * MINUTE;
-    await check();
-    expect(asked, "nobody's session ends soon: nothing is asked").toEqual([]);
-    clock += 15 * MINUTE;
-    registry.authenticate(browser);
-    await check();
-    expect(asked).toEqual([[ADA.email]]);
-    expect(registry.authenticate(browser)?.expiresAt).toBe(clock + HOUR);
-    expect(registry.authenticate(phone)?.expiresAt).toBe(clock + HOUR);
+    // Used through the first hour: each check keeps both another hour from their last use.
+    for (let minute = 5; minute <= 55; minute += 5) {
+      clock = started + minute * MINUTE;
+      registry.authenticate(browser); registry.authenticate(phone);
+      await check();
+    }
+    expect(asked.every((emails) => emails.length === 1 && emails[0] === ADA.email)).toBe(true);
+    expect(registry.authenticate(browser)?.expiresAt).toBeGreaterThan(started + HOUR);
     registry.close();
     registry = new SessionRegistry({ file: join(dir, "sessions.json"), now: () => clock });
     clock = started + HOUR + 10 * MINUTE;
@@ -78,25 +77,65 @@ describe("a Team Cloud's roster check", () => {
     expect(registry.authenticate(phone)).not.toBeNull();
   });
 
-  it("asks nothing about a session nobody used in the last hour; it ends at its hour", async () => {
-    const browser = browserSession();
-    const { check, asked } = admin({ [ADA.email]: "member" });
-    clock += 59 * MINUTE;
-    // Not used since it opened, an hour ago in effect: the check leaves it.
-    clock += 2 * MINUTE;
-    await check();
-    expect(asked).toEqual([]);
-    expect(registry.authenticate(browser)).toBeNull();
+  it("one person, two sessions, one left idle (a shared computer): the idle one ends within the hour of its last use, the one in use is kept", async () => {
+    const idle = browserSession(), active = browserSession();
+    const opened = clock;
+    const { check } = admin({ [ADA.email]: "member" });
+    for (let minute = 5; minute <= 120; minute += 5) {
+      clock = opened + minute * MINUTE;
+      registry.authenticate(active);
+      await check();
+    }
+    clock = opened + HOUR;
+    expect(registry.authenticate(idle), "never used after it opened: it ends at its hour").toBeNull();
+    clock = opened + 2 * HOUR;
+    expect(registry.authenticate(active)).not.toBeNull();
+    // The active one, left alone now: it too ends within the hour of its last use.
+    const lastUse = clock;
+    for (let minute = 5; minute <= 65; minute += 5) { clock = lastUse + minute * MINUTE; await check(); }
+    expect(registry.authenticate(active)).toBeNull();
   });
 
-  it("signs someone out at once when the Admin no longer lists them, and ends sessions at a role they no longer have", async () => {
-    const ada = browserSession(), ben = browserSession({ email: "ben@acme.test", role: "admin" });
-    const { check } = admin({ [ADA.email]: null, "ben@acme.test": "member" });
-    clock += 45 * MINUTE;
-    registry.authenticate(ada); registry.authenticate(ben);
+  it("asks nothing about a session nobody used in the last hour, and lets it end", async () => {
+    const browser = browserSession();
+    const { check, asked } = admin({ [ADA.email]: "member" });
+    // Used once, then kept by the checks while that use is within the hour; never past an hour from it.
+    clock += 2 * MINUTE;
+    registry.authenticate(browser);
+    const used = clock;
+    clock = used + 30 * MINUTE;
     await check();
-    expect(registry.authenticate(ada)).toBeNull();
+    expect(asked).toEqual([[ADA.email]]);
+    const end = registry.list()[0]!.expiresAt;
+    expect(end).toBeLessThanOrEqual(used + HOUR);
+    asked.length = 0;
+    clock = used + HOUR + 1;
+    await check();
+    expect(asked, "its last use is over an hour ago: not asked about").toEqual([]);
+    expect(registry.list()).toEqual([]);
+  });
+
+  it("signs someone out at the next check when the Admin no longer lists them, ends sessions at a role they no longer have, and never upgrades one", async () => {
+    const ada = browserSession(), ben = browserSession({ email: "ben@acme.test", role: "admin" }), cleo = browserSession({ email: "cleo@acme.test", role: "member" });
+    const { check } = admin({ [ADA.email]: null, "ben@acme.test": "member", "cleo@acme.test": "admin" });
+    clock += 5 * MINUTE;
+    registry.authenticate(ada); registry.authenticate(ben); registry.authenticate(cleo);
+    await check();
+    expect(registry.authenticate(ada), "removed: out at the first check, not when the session nears its end").toBeNull();
     expect(registry.authenticate(ben), "an Admin made a User: their admin session ends").toBeNull();
+    expect(registry.authenticate(cleo), "a User made an Admin: the member session ends rather than gaining admin").toBeNull();
+    expect(registry.list().some((session) => session.scopes.includes("admin"))).toBe(false);
+  });
+
+  it("never keeps a script's token or a move-in sign-in alive", async () => {
+    const issued = registry.issueMoveIn({ label: "Moving a bot in", email: ADA.email, teamRole: "member", bot: "bot-1" });
+    const before = registry.list().find((session) => session.id === issued.session.id)!.expiresAt;
+    const { check, asked } = admin({ [ADA.email]: "member" });
+    clock += 5 * MINUTE;
+    registry.authenticate(issued.token);
+    await check();
+    expect(asked).toEqual([]);
+    expect(registry.list().find((session) => session.id === issued.session.id)?.expiresAt).toBe(before);
   });
 
   it("no answer, a refusal or an older Admin changes nothing: sessions end within the hour, as before", async () => {

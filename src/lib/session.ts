@@ -6,8 +6,6 @@ export interface EnvironmentDescriptor {
   label: string;
   platform: string;
   version: string;
-  /** A team's Cloud: the person's team page on MausBot Cloud, where they open it in this browser again. */
-  teamSignIn?: string;
   capabilities: { remoteSessions: true; selfUpdate: "desktop-managed" | "operator"; emailSignIn?: boolean; sharedComputers?: true; cloudHome?: true; cloudTeam?: true };
 }
 
@@ -16,7 +14,7 @@ export interface TeamSession { id: string; name: string; role: string }
 
 export type SessionState =
   | { kind: "loopback"; trust?: "service" }
-  | { kind: "session"; id: string; label: string; email?: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[]; reactor?: string; team?: TeamSession }
+  | { kind: "session"; id: string; label: string; email?: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[]; reactor?: string; team?: TeamSession; teamSignIn?: string }
   | { kind: "unauthenticated"; error: string }
   | { kind: "unreachable"; error: string };
 
@@ -31,6 +29,16 @@ export function profileForSession(profile: SessionProfile | undefined, sessionSt
   const email = sessionState.email;
   if (!email?.trim()) return undefined;
   return profile?.email?.trim().toLowerCase() === email.trim().toLowerCase() ? profile : { email };
+}
+
+const TEAM_SIGN_IN_KEY = "omb.team-sign-in";
+/** A team session's page on MausBot Cloud, kept by this browser for this server, so the page its session ended on can offer
+ * the way back. Nothing that signs anyone in: an address the signed-in session was told. */
+export function rememberTeamSignIn(url: string | undefined): void {
+  try { if (url) globalThis.localStorage?.setItem(TEAM_SIGN_IN_KEY, url); } catch {}
+}
+export function rememberedTeamSignIn(): string | null {
+  try { return globalThis.localStorage?.getItem(TEAM_SIGN_IN_KEY) ?? null; } catch { return null; }
 }
 
 export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise<SessionState> {
@@ -55,6 +63,7 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
       scopes: Array.isArray(record.scopes) ? record.scopes.filter((s): s is string => typeof s === "string") : [],
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
       ...(typeof record.reactor === "string" ? { reactor: record.reactor } : {}),
+      ...(typeof record.teamSignIn === "string" ? { teamSignIn: record.teamSignIn } : {}),
       ...(teamSessionOf(record.team) ? { team: teamSessionOf(record.team)!, openedThreads: Array.isArray(record.openedThreads) ? record.openedThreads.filter((id): id is string => typeof id === "string") : [] } : {}),
       ...(record.cloudGuest === true ? {
         cloudGuest: true as const,

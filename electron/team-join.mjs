@@ -60,19 +60,23 @@ export function createTeamJoin({ account, addAccount, open, ask, reveal, now = D
     if (!ready || !want || !client) return false;
     let state = client.state();
     if (state?.status === "signed-out" && state.message === "restoring") return false;
-    if (state?.status === "signed-out") { log("team link: signing in to open the team"); await client.begin(); return true; }
-    if (state?.status === "reauth-required") { await client.signInAgain(); return true; }
+    if (state?.status === "signed-out") { log("team link: signing in to open the team"); want.begun = true; await client.begin(); return true; }
+    if (state?.status === "reauth-required") { want.begun = true; await client.signInAgain(); return true; }
     if (state?.status === "connecting") return true;
     // Joined a moment ago: the list is read again now, not at the next minute's check.
     state = await client.refresh().catch(() => client.state());
     if (await openIfListed(state)) return true;
+    return askOther(want, state);
+  }
+  /** Signed in, and the team isn't listed for this account: said once, with the way to sign in with the other address. */
+  async function askOther(want, state) {
     if (state?.status !== "connected" || want.asked || asking) return false;
     want.asked = true;
     asking = true;
     try {
       const email = state.account?.email ?? "";
       if (await ask({ kind: "other-account", email })) await addAccount();
-      else wanted = null;
+      else if (wanted === want) wanted = null;
     } finally { asking = false; }
     return true;
   }
@@ -94,33 +98,48 @@ export function createTeamJoin({ account, addAccount, open, ask, reveal, now = D
     },
     /** The sign-in changed (a sign-in finished, another account became the one in use): the waiting team opens once listed. */
     changed(state) {
-      if (!fresh()) return;
-      void openIfListed(state).catch((error) => log(`team link: ${error?.message ?? error}`));
+      const want = fresh();
+      if (!want) return;
+      void openIfListed(state).then((opened) => {
+        // The sign-in this link started finished as an account the team isn't listed for: say so, never just nothing.
+        if (!opened && want.begun && state?.status === "connected") { want.begun = false; return askOther(want, state); }
+      }).catch((error) => log(`team link: ${error?.message ?? error}`));
     },
     pending: () => fresh()?.teamId ?? null,
   };
 }
 
 /**
- * The team an invited person's account lands in (the session's `landing`: no Cloud of their own, invited into a team): opened
- * once on this device, the first time the session says so, so a new install signed in with the invited address shows the team
- * first, not an empty place or a plan to buy. Once the person opened that team here, by any way, it never moves the window again.
- * @param {{ store: { read(): unknown, write(value: unknown): void }, open(team: { id: string, name: string }): Promise<unknown>, log?(line: string): void }} deps
- * `store`: team-landing.json, the teams already opened here.
+ * The team an invited person's account lands in (the session's `landing`: no Cloud of their own, invited into a team). The
+ * window moves there only on a sign-in this app just saw, the first on this device, with no place of the person's own in
+ * use; then once. Any other time the team is in the rail and the window stays where it is.
+ * @param {{ store: { read(): unknown, write(value: unknown): void }, open(team: { id: string, name: string }): Promise<unknown>,
+ *   ownPlace(): boolean, log?(line: string): void }} deps `store`: team-landing.json, the accounts signed in here before and the
+ * teams already opened here. `ownPlace()`: My Cloud or another place of the person's own is what the window shows.
  */
-export function createTeamLanding({ store, open, log = () => {} }) {
-  const MAX = 50;
-  const seen = () => {
-    try { const kept = store.read(); return Array.isArray(kept?.teams) ? kept.teams.filter((id) => TEAM_ID.test(id)) : []; } catch { return []; }
+export function createTeamLanding({ store, open, ownPlace, log = () => {} }) {
+  const MAX = 50, ACCOUNT = /^[\w-]{1,128}$/;
+  let signingIn = false;
+  const kept = () => {
+    try {
+      const value = store.read();
+      return { teams: Array.isArray(value?.teams) ? value.teams.filter((id) => TEAM_ID.test(id)) : [], accounts: Array.isArray(value?.accounts) ? value.accounts.filter((id) => ACCOUNT.test(id)) : [] };
+    } catch { return { teams: [], accounts: [] }; }
   };
+  const save = (next) => { try { store.write(next); } catch (error) { log(`team landing: could not keep it (${error?.message ?? error})`); } };
   const mark = (teamId) => {
-    if (!TEAM_ID.test(teamId ?? "") || seen().includes(teamId)) return;
-    try { store.write({ teams: [...seen(), teamId].slice(-MAX) }); } catch (error) { log(`team landing: could not keep it (${error?.message ?? error})`); }
+    const now = kept();
+    if (TEAM_ID.test(teamId ?? "") && !now.teams.includes(teamId)) save({ ...now, teams: [...now.teams, teamId].slice(-MAX) });
   };
   return {
     changed(state) {
-      const teamId = state?.status === "connected" ? state.landing?.teamId : null;
-      if (!teamId || seen().includes(teamId)) return;
+      if (state?.status === "connecting" || (state?.status === "signed-out" && state.message !== "restoring")) { signingIn = true; return; }
+      if (state?.status !== "connected" || !state.account?.id) return;
+      const justSignedIn = signingIn, before = kept();
+      signingIn = false;
+      if (!before.accounts.includes(state.account.id)) save({ ...before, accounts: [...before.accounts, state.account.id].slice(-MAX) });
+      const teamId = state.landing?.teamId;
+      if (!justSignedIn || before.accounts.length || !teamId || before.teams.includes(teamId) || ownPlace()) return;
       const team = listed(state, teamId);
       if (!team) return;
       mark(teamId);

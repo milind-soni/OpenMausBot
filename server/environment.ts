@@ -22,9 +22,6 @@ export interface EnvironmentDescriptor {
   label: string;
   platform: NodeJS.Platform;
   version: string;
-  /** A team's Cloud only: the person's team page on MausBot Cloud, where anyone in the team opens it in a browser again,
-   * signed for them there. An address, nothing that signs anyone in. */
-  teamSignIn?: string;
   capabilities: {
     /** Pairing and sessions are available (this build). */
     remoteSessions: true;
@@ -164,10 +161,9 @@ export function serverInstall(env: NodeJS.ProcessEnv = process.env, script = pro
  * /api/auth/session answer, never in the description anyone may read before pairing. */
 export const OWNER_LENDING = Object.freeze({ sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, lentMcp: true } as const);
 
-export function environmentDescriptor(input: { environmentId: string; desktopManaged: boolean; emailSignIn?: boolean; sharedComputers?: boolean; cloudHome?: boolean; cloudTeam?: boolean; ownHome?: boolean; label?: string; teamSignIn?: string }): EnvironmentDescriptor {
+export function environmentDescriptor(input: { environmentId: string; desktopManaged: boolean; emailSignIn?: boolean; sharedComputers?: boolean; cloudHome?: boolean; cloudTeam?: boolean; ownHome?: boolean; label?: string }): EnvironmentDescriptor {
   return {
     environmentId: input.environmentId,
-    ...(input.cloudTeam === true && input.teamSignIn ? { teamSignIn: input.teamSignIn } : {}),
     label: input.label?.trim() || process.env.OMB_ENVIRONMENT_LABEL?.trim() || process.env.OMB_SERVER_NAME?.trim() || hostname(),
     platform: process.platform,
     version: serverVersion(),

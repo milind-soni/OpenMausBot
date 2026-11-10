@@ -847,3 +847,30 @@ it("a My Cloud refuses a team claim: it is one person's", () => {
   expect(f.mint(f.sign(JSON.stringify({ team: { id: "team-1" } })))).toEqual({ status: 400, body: { error: "not_a_team" } });
   expect(f.sessions.openPairings()).toHaveLength(0);
 });
+
+it("a Team Cloud with remote access turned off refuses a User's browser sign-in, keeps an Owner's and an Admin's, and every app pairing", () => {
+  const root = directory();
+  let off = true, counter = 0;
+  const now = 1_800_000_000_000;
+  const sessions = new SessionRegistry({ file: join(root, "sessions.json"), now: () => now });
+  const pairing = createCloudPairing({ secret, sessions, team: { id: "team-1", name: "Acme" }, memberBrowserOff: () => off, now: () => now });
+  const mint = (claims: Record<string, unknown>) => {
+    const body = JSON.stringify({ label: "Web browser", ttlSeconds: 120, ...claims });
+    const timestamp = String(Math.floor(now / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
+    return pairing.handle({ timestamp, nonce, signature: `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}`, body: Buffer.from(body), source: "203.0.113.9" });
+  };
+  const browser = (email: string, role: string) => mint({ purpose: "browser", owner: email, member: { email, role } });
+  expect(browser("ada@acme.test", "member")).toEqual({ status: 403, body: { error: "remote_access_off" } });
+  expect(browser("ben@acme.test", "admin").status).toBe(200);
+  expect(browser("olive@acme.test", "owner").status).toBe(200);
+  expect(mint({ member: { email: "ada@acme.test", role: "member" } }).status, "the app's pairing stays: it is how the team reaches its Cloud").toBe(200);
+  off = false;
+  expect(browser("ada@acme.test", "member").status).toBe(200);
+  // Turned off again: the User's open browser signs out, the admins' stay.
+  const ada = sessions.exchange({ code: (browser("ada@acme.test", "member").body.credential as string), browser: true, label: "", source: "s" });
+  const ben = sessions.exchange({ code: (browser("ben@acme.test", "admin").body.credential as string), browser: true, label: "", source: "s" });
+  expect(ada.ok && ben.ok).toBe(true);
+  expect(sessions.closeMemberBrowsers()).toBe(1);
+  expect(sessions.list().map((session) => session.email)).toEqual(expect.arrayContaining(["ben@acme.test"]));
+  expect(sessions.list().map((session) => session.email)).not.toContain("ada@acme.test");
+});

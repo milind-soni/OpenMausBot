@@ -60,10 +60,6 @@ test("signed out: the app's own browser sign-in starts, and the team opens once 
   h.join.request(ACME);
   await settle();
   assert.deepEqual(h.calls, ["reveal", "begin"]);
-  // Another account's list first (the wrong address in the browser): nothing opens, and the link keeps waiting.
-  h.join.changed(connected([{ id: OTHER, name: "Other", role: "member" }]));
-  await settle();
-  assert.equal(h.calls.length, 2);
   h.join.changed(connected([{ id: ACME, name: "Acme", role: "admin" }]));
   await settle();
   assert.deepEqual(h.calls.at(-1), ["open", { id: ACME, name: "Acme" }]);
@@ -102,26 +98,50 @@ test("a link from the launch waits for the app to be ready, shows nothing before
   assert.deepEqual(h.calls, ["begin"]);
 });
 
-test("an invited person's team opens first, once on this device; never again once opened here, and never a team the session doesn't list", async () => {
-  let kept = null;
-  const opened = [];
-  const landing = createTeamLanding({ store: { read: () => kept, write: (value) => { kept = value; } }, open: async (team) => { opened.push(team.id); } });
+test("an invited person's team opens first only on a sign-in just made, the first on this device, with no place of their own in use; once", async () => {
+  const make = (initial = null, own = false) => {
+    let kept = initial;
+    const opened = [];
+    const landing = createTeamLanding({ store: { read: () => kept, write: (value) => { kept = value; } }, open: async (team) => { opened.push(team.id); }, ownPlace: () => own });
+    return { landing, opened, kept: () => kept };
+  };
   const state = { ...connected([{ id: ACME, name: "Acme", role: "member" }]), landing: { teamId: ACME } };
-  landing.changed({ ...state, teams: [] });
-  landing.changed({ status: "signed-out", landing: { teamId: ACME } });
+  // A fresh install: the sign-in, then the team.
+  const fresh = make();
+  fresh.landing.changed({ status: "signed-out" });
+  fresh.landing.changed({ status: "connecting" });
+  fresh.landing.changed(state);
+  fresh.landing.changed({ status: "signed-out" });
+  fresh.landing.changed(state);
   await settle();
-  assert.deepEqual(opened, []);
-  landing.changed(state);
-  landing.changed(state);
+  assert.deepEqual(fresh.opened, [ACME]);
+  assert.deepEqual(fresh.kept(), { teams: [ACME], accounts: ["u1"] });
+  // Already signed in when the app started (a session read, not a sign-in): the team is in the rail, the window stays.
+  const restored = make();
+  restored.landing.changed({ status: "signed-out", message: "restoring" });
+  restored.landing.changed(state);
   await settle();
-  assert.deepEqual(opened, [ACME]);
-  assert.deepEqual(kept, { teams: [ACME] });
-  // A team opened by hand first is no landing.
-  const other = { ...connected([{ id: OTHER, name: "Other", role: "member" }]), landing: { teamId: OTHER } };
-  landing.opened(OTHER);
-  landing.changed(other);
+  assert.deepEqual(restored.opened, []);
+  // A sign-in on a device another account used before, or with My Cloud on screen: no move either.
+  const used = make({ teams: [], accounts: ["someone-else"] });
+  used.landing.changed({ status: "connecting" }); used.landing.changed(state);
+  const own = make(null, true);
+  own.landing.changed({ status: "connecting" }); own.landing.changed(state);
+  // A team the session doesn't list is never a landing.
+  const unlisted = make();
+  unlisted.landing.changed({ status: "connecting" }); unlisted.landing.changed({ ...state, teams: [] });
   await settle();
-  assert.deepEqual(opened, [ACME]);
+  assert.deepEqual([used.opened, own.opened, unlisted.opened], [[], [], []]);
+});
+
+test("the link's own sign-in finishing as an address the team isn't listed for says so, instead of nothing", async () => {
+  const h = harness({ status: "signed-out" });
+  await h.join.ready();
+  h.join.request(ACME);
+  await settle();
+  h.join.changed(connected([], "other@home.test"));
+  await settle();
+  assert.deepEqual(h.calls.slice(-2), [["ask", { kind: "other-account", email: "other@home.test" }], "addAccount"]);
 });
 
 test("the session's landing is read only for a team the same session lists", async () => {
@@ -130,4 +150,22 @@ test("the session's landing is read only for a team the same session lists", asy
   assert.deepEqual(parseCloudLanding({ teamId: ACME }, teams), { teamId: ACME });
   assert.equal(parseCloudLanding({ teamId: OTHER }, teams), null);
   for (const value of [null, undefined, {}, { teamId: 3 }, "x"]) assert.equal(parseCloudLanding(value, teams), null);
+});
+
+test("main's wiring: a team URL or command line is taken, anything else is left to the other handlers, and main's own dialog asks", async () => {
+  const { installTeamJoin } = await import("./team-join-main.mjs");
+  const asked = [];
+  let state = connected([], "me@home.test");
+  const client = { state: () => state, refresh: async () => state, begin: async () => state, signInAgain: async () => state };
+  const argv = ["/app", LINK];
+  const links = installTeamJoin({ argv, account: () => client, addAccount: async () => {}, openTeam: async () => {}, t: (key, params) => `${key}${params ? JSON.stringify(params) : ""}`,
+    confirm: async (message, detail, button) => { asked.push([message, detail, button]); return false; }, reveal: () => {}, store: { read: () => null, write: () => {} }, ownPlace: () => false, log: () => {} });
+  assert.deepEqual(argv, ["/app"]);
+  assert.equal(links.fromUrl("openmausbot://cloud"), false);
+  assert.equal(links.fromArgs(["/app", "openmausbot://cloud"]), false);
+  await links.ready();
+  await settle();
+  assert.deepEqual(asked, [["native.teamLink.otherTitle", 'native.teamLink.otherDetail{"email":"me@home.test"}', "native.teamLink.signIn"]]);
+  state = connected([{ id: ACME, name: "Acme", role: "member" }]);
+  assert.equal(links.fromUrl(LINK), true);
 });
