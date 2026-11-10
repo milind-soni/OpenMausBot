@@ -21,6 +21,7 @@ import { PhonesList } from "./PhonesList";
 import { PairedPhones } from "./PairedPhones";
 import { Card, Switch } from "./SettingsPrimitives";
 import { Layer } from "./Layer";
+import { useModalDialog } from "../hooks/use-modal-dialog";
 import { productName } from "../lib/brand";
 import { useStore } from "@/state/store";
 
@@ -217,14 +218,17 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
     if (secureAddress) start();
   }, [secureAddress, start]);
   const chosen = needed.filter((route) => picked[route]);
+  const dialog = useRef<HTMLDivElement>(null);
+  const dismiss = () => { if (step === "pairing") c.cancel(); onClose(); };
+  useModalDialog(dialog, dismiss);
   const begin = async () => {
     for (const route of chosen) await c.act((bridge) => setRoute(bridge, route, true));
     setStep("pairing");
     c.useLocal();
   };
   return <Layer modal>
-    <div role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" data-pair-dialog={step}>
+    <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 outline-none" data-pair-dialog={step}>
       <div className="flex max-h-full w-full max-w-[460px] flex-col gap-4 overflow-y-auto rounded-2xl bg-card p-5 shadow-xl">
         <div className="text-[15px] font-semibold text-ink">{step === "consent" ? t("devices.pair.title") : t("devices.pair.titlePhone")}</div>
         {step === "consent" ? (
@@ -254,7 +258,7 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false }: {
             <PhoneSetupFlowView controller={c} />
             <div className="text-[12px] leading-relaxed text-ink-secondary">{reachLine(state)}</div>
             <div className="flex justify-end">
-              <button type="button" className={button} onClick={() => { c.cancel(); onClose(); }}>{t("devices.pair.done")}</button>
+              <button type="button" className={button} onClick={dismiss}>{t("devices.pair.done")}</button>
             </div>
           </>
         )}

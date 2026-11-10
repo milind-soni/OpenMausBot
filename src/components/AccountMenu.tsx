@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, LogOut, Plus, UserRound, X } from "lucide-react";
 import type { AccountsView, AccountSwitchResult, RailOpenResult } from "../../electron/cloud-account.mjs";
 import { cn } from "@/lib/cn";
@@ -8,6 +8,7 @@ import { usePlaces } from "@/lib/places";
 import { CLOSE, Heading, PRIMARY, QUIET, SCREEN, SHEET } from "./cloud-buy/parts";
 import { codeDigits, SignInScreen } from "./cloud-buy/SignInScreen";
 import { Layer } from "./Layer";
+import { useModalDialog } from "../hooks/use-modal-dialog";
 import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 
 export interface AccountsAccess {
@@ -162,8 +163,10 @@ export function AccountsSheet({ onClose, adding = null, note: given = null }: { 
     }, () => setNote(t("accounts.failed")));
   };
   const active = view?.active ?? null;
+  const dialog = useRef<HTMLDivElement>(null);
+  useModalDialog(dialog, onClose);
   return <Layer modal><div className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <div role="dialog" aria-modal="true" aria-labelledby="cloud-add-title" data-accounts-sheet className={cn(SHEET, "relative w-full max-w-[420px]")}>
+    <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="cloud-add-title" data-accounts-sheet className={cn(SHEET, "relative w-full max-w-[420px] outline-none")}>
       <button type="button" onClick={onClose} aria-label={t("accounts.close")} className={cn(CLOSE, "absolute end-4 top-4 z-10")}><X size={16} /></button>
       {add !== null
         ? <AddAccount start={add} onBack={() => (adding !== null ? onClose() : setAdd(null))} onDone={(said) => { setAdd(null); if (said) setNote(said); else onClose(); }} />

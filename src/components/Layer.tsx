@@ -13,8 +13,6 @@ const never = () => () => {};
  *
  * Render a Layer only while its content is shown: a mounted modal Layer counts as open. On the server, where React
  * cannot portal, the content stays in place.
- *
- * A `modal` layer joins the stack of open modals in the order they opened; see `useIsTopLayer`.
  */
 export function Layer({ modal = false, children }: { modal?: boolean; children: ReactNode }) {
   const [order] = useState(() => ++opened);
