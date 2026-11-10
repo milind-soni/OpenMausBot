@@ -2168,7 +2168,7 @@ export class Store {
   }
 
   createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: "ask" | "full",
-    modelSelection?: ModelSelection, cwd?: string): TaskRecord | null {
+    modelSelection?: ModelSelection, cwd?: string, beforeShown?: (task: TaskRecord) => void): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
@@ -2177,7 +2177,7 @@ export class Store {
       bot.tasks = [task, ...(bot.tasks ?? [])];
       if (activate) this.mirrorActiveTask(bot, task);
     });
-    this.emit({ type: "bot", botId });
+    beforeShown?.(task); this.emit({ type: "bot", botId });
     return task;
   }
 
