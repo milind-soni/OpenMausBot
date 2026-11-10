@@ -49,6 +49,7 @@ install_until_https() { # evidence-file [the install command, when not the usual
 
 step "the checks alone, with a name that points nowhere: one thing to fix, nothing changed"
 status=0
+containers_before=$(sudo docker ps -aq | sort)
 as_root sh "$ROOT/deploy/install.sh" --check --domain "$DOMAIN" >"$OUT/check.txt" 2>&1 || status=$?
 cat "$OUT/check.txt"
 [ "$status" = 1 ] || fail "--check exited $status, not 1"
@@ -58,7 +59,7 @@ for line in "operating system: Ubuntu 24.04" "processor: x86-64" "processor core
   contains "$OUT/check.txt" "  ok    $line" "--check did not pass: $line"
 done
 [ ! -e "$DIR" ] || fail "--check made $DIR"
-[ -z "$(sudo docker ps -aq)" ] || fail "--check started a container"
+[ "$(sudo docker ps -aq | sort)" = "$containers_before" ] || fail "--check started a container"
 
 step "the checks pass once the DNS record is set aside"
 "${INSTALL[@]}" --check --domain "$DOMAIN" | tee "$OUT/check-ready.txt"
