@@ -218,8 +218,13 @@ jobs:
           bound=$(docker exec omb-hard node dist-server/bot-box/box-check.js --public=none --mutate=bind-data || true)
           jq -e '(.failed | sort) == ["config-hidden", "data-dir-empty", "messages-db-hidden", "other-bot-folder-hidden", "other-task-folder-hidden", "secret-not-on-disk"]' <<<"$bound"
           # A server that ran the profile never drops out of it quietly: the same data without the box's settings does not start.
-          docker rm -f omb-hard >/dev/null
+          # Stopped as an operator stops it, so it lets go of the data folder's lease: a killed one's lease names its own
+          # container, and a new container then refuses the folder before the profile is asked.
+          echo "omb-hard before stop: $(docker inspect -f '{{.State.Status}}' omb-hard)"
+          docker stop -t 30 omb-hard >/dev/null
+          docker rm omb-hard >/dev/null
           if timeout 120 docker run --name omb-lost -v omb-hard-ci:/data openmausbot:ci >lost.log 2>&1; then cat lost.log; echo "a server that was sandboxed started without its sandbox"; exit 1; fi
+          cat lost.log
           test "$(docker inspect -f '{{.State.ExitCode}}' omb-lost)" = 78
           grep -F "this server ran its bots in a sandbox before, and now it can't" lost.log
           docker rm -f omb-lost >/dev/null
