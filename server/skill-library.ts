@@ -303,6 +303,56 @@ function librarySkillListing(root: string, entry: SkillLibraryEntry): LibrarySki
   };
 }
 
+const libraryOptOutSchema = z.array(z.string());
+
+function libraryOptOutPath(botId: string): string | null {
+  if (!/^[\w-]+$/.test(botId)) return null;
+  return join(DATA_DIR, "skill-state", botId, "library-opt-out.json");
+}
+
+/** Names this bot has taken off its own list. An explicit assignment still wins; the shared copy stays. */
+export function librarySkillOptOuts(botId: string): ReadonlySet<string> {
+  const path = libraryOptOutPath(botId);
+  if (!path || !existsSync(path)) return new Set();
+  try {
+    const parsed = libraryOptOutSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+    if (!parsed.success) return new Set();
+    return new Set(parsed.data.filter(isSkillName));
+  } catch {
+    return new Set();
+  }
+}
+
+export function setLibrarySkillOptOut(botId: string, name: string, optedOut: boolean): void {
+  if (!isSkillName(name)) return;
+  const path = libraryOptOutPath(botId);
+  if (!path) return;
+  const names = new Set(librarySkillOptOuts(botId));
+  if (names.has(name) === optedOut) return;
+  if (optedOut) names.add(name);
+  else names.delete(name);
+  mkdirSync(join(DATA_DIR, "skill-state", botId), { recursive: true, mode: 0o700 });
+  writeFileAtomic(path, `${JSON.stringify([...names].sort(), null, 2)}\n`, { mode: 0o600 });
+}
+
+/** Drops one bot's assignment. A skill on for every bot is opted out here so the others keep it. */
+export function unassignLibrarySkill(
+  botId: string,
+  name: string,
+  assigned: readonly string[] | undefined,
+): { unassigned: true; assignedSkills?: string[] } | { absent: true } {
+  if (!isSkillName(name)) return { absent: true };
+  const listing = listLibrarySkills().find((skill) => skill.name === name);
+  if (!listing) return { absent: true };
+  const explicit = assigned?.includes(name) === true;
+  const viaEvery = listing.everyBot && !librarySkillOptOuts(botId).has(name);
+  if (!explicit && !viaEvery) return { absent: true };
+  setLibrarySkillOptOut(botId, name, true);
+  return explicit
+    ? { unassigned: true, assignedSkills: assigned!.filter((skill) => skill !== name) }
+    : { unassigned: true };
+}
+
 export function setLibrarySkillEveryBot(
   name: string,
   everyBot: boolean,
