@@ -1,11 +1,22 @@
 // Every test file gets a throwaway home, so DATA_DIR (~/.openmausbot) never touches the real one;
 // os.homedir() reads HOME / USERPROFILE at call time, and this runs before server/config.ts is imported.
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterAll, afterEach } from "vitest";
 
 import { removeTempDir } from "./cleanup.ts";
+
+// Hosted Linux runners may expose working bwrap. Cloud fixtures exercise fake engines without a box;
+// mask its probe through PATH so their child servers get the same test environment on every runner image.
+if (process.platform === "linux" && process.env.GITHUB_ACTIONS === "true" &&
+    process.env.RUNNER_ENVIRONMENT !== "self-hosted" && !process.env.OMB_TEST_BWRAP_SHIM) {
+  const shimDir = mkdtempSync(join(tmpdir(), "omb-test-no-bwrap-"));
+  writeFileSync(join(shimDir, "bwrap"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+  process.env.PATH = `${shimDir}${process.env.PATH ? delimiter + process.env.PATH : ""}`;
+  process.env.OMB_TEST_BWRAP_SHIM = shimDir;
+  process.once("exit", () => rmSync(shimDir, { recursive: true, force: true }));
+}
 
 const home = mkdtempSync(join(tmpdir(), "omb-test-home-"));
 process.env.HOME = home;
