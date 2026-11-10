@@ -2,18 +2,19 @@ import { useId } from "react";
 import { RESULTS_JUST_ME } from "../../../shared/routines";
 import { t } from "@/lib/i18n";
 import type { Bot } from "@/state/store";
+import { useTeamPeople } from "@/state/team-people";
 import { Select } from "../Select";
 
-export function ResultsDestination({ bot, value, allowCurrent = false, team = false, onChange }: {
+export function ResultsDestination({ bot, value, allowCurrent = false, team, onChange }: {
   bot?: Bot;
   value: string | null | undefined;
   allowCurrent?: boolean;
-  /** A Team Cloud: the routine reports to the person alone or to the bot's shared chat, nowhere else. */
+  /** A Team Cloud, where the routine reports to the person alone or to the bot's shared chat; read from the app when unset. */
   team?: boolean;
   onChange: (threadId: string | null | undefined) => void;
 }) {
-  const id = useId();
-  if (team) return <TeamResultsDestination id={id} bot={bot} value={value} allowCurrent={allowCurrent} onChange={onChange} />;
+  const id = useId(), people = useTeamPeople();
+  if (team ?? people !== null) return <TeamResultsDestination id={id} bot={bot} value={value} allowCurrent={allowCurrent} onChange={onChange} />;
   const tasks = (bot?.tasks ?? []).filter((task) => !task.routineRunId);
   const selectedMissing = typeof value === "string" && !tasks.some((task) => task.threadId === value);
   const groups = [...(bot?.projects ?? []), { id: "", name: t("folder.none") }];
