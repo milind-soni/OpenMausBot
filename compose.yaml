@@ -23,6 +23,9 @@ services:
       OMB_SERVER_NAME: ${OMB_SERVER_NAME:-mausbot-docker}
       OMB_PUBLIC_URL: ${OMB_PUBLIC_URL:-http://localhost:${OMB_HTTP_PORT:-8080}}
       OMB_WEBHOOK_PUBLIC_URL: ${OMB_WEBHOOK_PUBLIC_URL:-${OMB_PUBLIC_URL:-http://localhost:${OMB_HTTP_PORT:-8080}}}
+      # "1": phones pair by QR through MausBot Relay (docs/phone-relay-server.md). Sign the
+      # container in once first: docker compose exec omb openmausbot login --relay
+      OMB_PHONE_RELAY: ${OMB_PHONE_RELAY:-}
     healthcheck:
       test:
         - CMD

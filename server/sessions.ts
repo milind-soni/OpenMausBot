@@ -701,6 +701,18 @@ export class SessionRegistry {
     return this.sessions.map(publicSession);
   }
 
+  /** The stored digest of each live bearer session among `ids`: the phone relay derives a phone's keys from it. */
+  bearerDigests(ids: ReadonlySet<string>): Array<{ id: string; tokenHash: string }> {
+    this.prune();
+    return this.sessions.filter((s) => ids.has(s.id) && !s.cookieOnly && !this.personal(s.scopes)).map((s) => ({ id: s.id, tokenHash: s.tokenHash }));
+  }
+
+  /** The credential digests of the newest open pairing windows a device may redeem (never a browser sign-in's). */
+  pairingDigests(max: number): string[] {
+    this.prune();
+    return this.pairings.filter((p) => !p.browser).sort((a, b) => b.createdAt - a.createdAt).slice(0, max).map((p) => p.credentialHash);
+  }
+
   /** The live sessions a Team Cloud member's own codes opened: their phones. Never an Admin-signed pairing (an app). */
   memberPhones(): PublicSession[] {
     this.prune();

@@ -178,7 +178,7 @@ export function requestOrigin(req: IncomingMessage): string | null {
 }
 
 /** Every header a reverse proxy uses to name its client, so one that sets only X-Real-IP is still not loopback. */
-const PROXY_HEADERS = [
+export const PROXY_HEADERS = [
   "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "forwarded",
   "x-real-ip", "cf-connecting-ip", "true-client-ip", "x-client-ip",
 ] as const;

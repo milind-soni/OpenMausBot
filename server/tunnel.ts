@@ -133,6 +133,8 @@ export function createTunnelAccount(options: {
   fetchImpl?: typeof fetch;
   machineName?: string;
   recovery?: TunnelRecovery;
+  /** `login --relay`: sign in without reserving a public address; phones reach this machine through MausBot Relay. */
+  relayOnly?: boolean;
   log?: (line: string) => void;
   clock?: {
     setTimer: (callback: () => void, milliseconds: number) => unknown;
@@ -152,6 +154,7 @@ export function createTunnelAccount(options: {
     identity: { name: options.machineName ?? hostname(), platform: platformName(), appVersion: options.version },
     newClientInstanceId: () => randomUUID(),
     ...(options.log ? { log: options.log } : {}),
+    ...(options.relayOnly ? { onDemand: true, managedEndpointNeeded: async () => false, relay: { capable: () => true, legacyDevices: async () => 0 } } : {}),
     ...(recovery
       ? {
           autoRecover: true,
