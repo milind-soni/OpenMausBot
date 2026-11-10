@@ -130,7 +130,7 @@ import { PinnedBanner } from "./ChatPinnedBanner";
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { useCanWriteIn, useReactor } from "@/lib/cloud-guest";
 import { formattedReplyWidth, isFormattedReply, splitReplyBlocks } from "@/lib/formatted-reply";
-import { otherSpeaker } from "@/lib/own-profile";
+import { otherSpeaker } from "@/lib/own-profile"; import { useSharedRun } from "./SharedQueueLine";
 import { latestFailure, latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
@@ -724,7 +724,7 @@ const MessagesList = memo(function MessagesList({
           if (isCancelledTranscriptRow(m)) {
             return (
               <CancelledTurnRow
-                onRetry={m.id === lookups.retryableId && canRetryLast ? onRegenerate : undefined} name={m.tool?.name}
+                onRetry={m.id === lookups.retryableId && canRetryLast ? onRegenerate : undefined} name={m.tool?.name} stoppedBy={m.stoppedBy}
               />
             );
           }
@@ -968,7 +968,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     }, 520);
   }, [lastMessage?.id, lastMessage?.role, lastMessage?.kind]);
   const teammatesWorking = !advanced && !bot.busy && Boolean(bot.waitingForTeammates);
-  const presenceVisible = waiting || popping !== null || teammatesWorking;
+  const presenceVisible = waiting || popping !== null || teammatesWorking, sharedRun = useSharedRun(bot, advanced);
   const lastShownRow = windowedMessages.findLast((message) => !quietRow(message, showToolCalls));
   const presenceUnderBubble = Boolean(lastShownRow && isBotTextRow(lastShownRow, bot.id));
   const announcement = useMemo((): TranscriptSnapshot => {
@@ -1196,7 +1196,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               editingId={editingId}
               lastBotTextId={lastBotTextId}
               emergingId={popping}
-              canRetryLast={!bot.busy && Boolean(lastUserMessage)}
+              canRetryLast={!bot.busy && Boolean(lastUserMessage) && sharedRun.mayAct(lastUserMessage?.sender)}
               engine={state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId)}
               unreadDividerId={unreadDivider.messageId}
               unreadDividerFading={unreadDivider.fading}
@@ -1239,14 +1239,14 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             }
             simple={!advanced}
             className={cn(!advanced && presenceUnderBubble && SIMPLE_STACKED)}
-            label={teammatesWorking ? t("chat.teammatesWorking") : undefined}
+            label={teammatesWorking ? t("chat.teammatesWorking") : sharedRun.label}
             visible={presenceVisible}
             {...now}
             phrases={teammatesWorking ? undefined : now.phrases}
             seed={`${bot.id}:${bot.threadId ?? ""}:${busySince ?? ""}`}
             answering={popping !== null}
             since={busySince}
-          />
+          />{presenceVisible && sharedRun.line}
         </div>
       </div>
 
