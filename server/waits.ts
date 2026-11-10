@@ -216,7 +216,7 @@ export class WaitManager {
   }
 
   private limitRefusal({ botId, threadId, assignmentId }: Pick<NewWait, "botId" | "threadId" | "assignmentId">): CreateWaitResult | null {
-    const handed = assignmentId ? this.waits.filter((w) => w.assignmentId === assignmentId) : [];
+    const handed = assignmentId ? this.waits.filter((w) => w.assignmentId === assignmentId && !w.ending) : [];
     if (handed.length >= WAIT_LIMITS.perAssignment) {
       return { state: "refused", status: 409, error: `Work handed to you keeps one wait at a time, and this work already has one:\n${waitList(handed)}\nFinish this turn; it tells you here when it happens.` };
     }

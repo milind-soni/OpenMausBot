@@ -108,6 +108,17 @@ describe("WaitManager", () => {
     expect(await handed("a1")).toMatchObject({ state: "created" });
   });
 
+  it("lets handed-on work set a new wait once its wait has ended, even before the ending is posted", async () => {
+    const h = harness();
+    const handed = () => h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" }, assignmentId: "a1" });
+    const first = await handed();
+    const id = (first as { wait: WaitRecord }).wait.id;
+    h.stamp = { size: 1, mtimeMs: 1 }; h.postOk = false; h.advance(5_000); await h.manager.tick();
+    expect(h.waitOf(id).ending).toMatchObject({ status: "fired" });
+    h.stamp = null;
+    expect(await handed()).toMatchObject({ state: "created", wait: { assignmentId: "a1" } });
+  });
+
   it("creates a wait with a 24-hour default and its first check due, and keeps it across a restart", async () => {
     const h = harness();
     const created = await h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" } });
