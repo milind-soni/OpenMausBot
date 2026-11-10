@@ -22,12 +22,8 @@ export function useWindowPlace(): WorkspaceState | null {
   return place;
 }
 
-/** The name My Cloud is saved under until its owner picks another (electron/cloud-home.mjs CLOUD_HOME_NAME). */
 const CLOUD_HOME_NAME = "My Cloud";
 
-/** What the window's top bar calls the place: This computer (This Mac in a profile), the window's home by the name its
- * owner gave it (My Cloud, in the app's language, until they rename it; a team's name on a team's Cloud), else the name it
- * was saved under. */
 export function windowPlaceName(place: WorkspaceState, team: string | undefined): string {
   if (place.home) return team || (place.name && place.name !== CLOUD_HOME_NAME ? place.name : t("cloudSetup.myCloud"));
   if (place.profile) return place.profileName || computerName({ profile: place.profile });
