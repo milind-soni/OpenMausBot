@@ -8,6 +8,7 @@ import { userInfo } from "node:os";
 import { browserEngineStatus } from "../../browser-engine.ts";
 import { attachesToChrome, ownsBrowserViewport, type BrowserLaunch } from "../../browser-runtime.ts";
 import { DATA_DIR } from "../../config.ts";
+import { augmentedPath } from "../../env-path.ts";
 import { calibrateIdentity, chromeFingerprint, loadOrCalibrateIdentity, type CalibratedIdentity } from "./calibrate.ts";
 import { needsNoSandbox, type ChromeIdentity } from "./identity.ts";
 import { installChromeForTesting, type ChromeForTestingPin, type DownloadProgress } from "./install.ts";
@@ -306,4 +307,5 @@ function product(chrome: FoundChrome, identity?: ChromeIdentity): string {
   return chrome.source === "downloaded" || /for Testing|chrome-(?:linux|mac|win)/iu.test(chrome.path) ? "Chrome for Testing" : "Chromium";
 }
 
-export const chromeLauncher = new ChromeLauncher({ dataDir: DATA_DIR });
+// Linux discovery looks where agent-browser does: it is started with the augmented PATH.
+export const chromeLauncher = new ChromeLauncher({ dataDir: DATA_DIR, host: chromeHost({ dataDir: DATA_DIR, enginePath: augmentedPath }) });

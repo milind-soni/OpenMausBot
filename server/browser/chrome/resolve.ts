@@ -31,6 +31,8 @@ export interface ChromeHost {
   registryKeyExists(key: string): boolean;
   /** LaunchServices' answer for a bundle id on macOS. */
   appForBundleId(bundleId: string): string | null;
+  /** The PATH agent-browser is started with, when it differs from `env.PATH`. */
+  enginePath?: () => string;
 }
 
 export interface ChromeEngine {
@@ -109,7 +111,7 @@ const LINUX_CACHE_EXECUTABLES = ["chrome-linux64/chrome", "chrome-linux/chrome"]
 /** A Linux server where agent-browser already finds a browser keeps it rather than downloading another. */
 export function engineFindsLinuxBrowser(host: ChromeHost): boolean {
   const { join } = posix;
-  const onPath = (host.env.PATH ?? "").split(":").filter(Boolean);
+  const onPath = (host.enginePath?.() ?? host.env.PATH ?? "").split(":").filter(Boolean);
   if (onPath.some((directory) => LINUX_ENGINE_BROWSERS.some((name) => host.exists(join(directory, name))))) return true;
   const cached = (directory: string, prefix: string) => host.list(directory)
     .some((name) => name.startsWith(prefix) && LINUX_CACHE_EXECUTABLES.some((executable) => host.exists(join(directory, name, executable))));
@@ -165,7 +167,7 @@ function launchServicesApp(bundleId: string): string | null {
 }
 
 /** The registry and LaunchServices take a process each, so each answer is read once per host; files are checked every time. */
-export function chromeHost(options: { dataDir: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; arch?: string }): ChromeHost {
+export function chromeHost(options: { dataDir: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; arch?: string; enginePath?: () => string }): ChromeHost {
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
   const answers = new Map<string, string | null>();
@@ -178,6 +180,7 @@ export function chromeHost(options: { dataDir: string; env?: NodeJS.ProcessEnv; 
     arch: options.arch ?? process.arch,
     env,
     dataDir: options.dataDir,
+    ...(options.enginePath ? { enginePath: options.enginePath } : {}),
     home: (platform === "win32" ? env.USERPROFILE : env.HOME) || homedir(),
     exists: existsSync,
     list: (directory) => { try { return readdirSync(directory); } catch { return []; } },
