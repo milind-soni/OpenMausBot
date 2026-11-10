@@ -2,6 +2,79 @@
 
 From a blank Linux server to OpenMausBot running on it around the clock, reachable from your laptop, the desktop app and your phone, with your bots working while every laptop is closed. It assumes nothing beyond being able to open a terminal and paste commands. About twenty minutes, most of it waiting.
 
+## Quick start: one command on your own domain
+
+For a fresh Ubuntu 22.04 or 24.04 server (x86-64, at least 2 CPUs, 4 GB of memory and 20 GB of free disk) and a domain name whose A record already points at it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
+```
+
+The installer ([`deploy/install.sh`](https://github.com/milind-soni/OpenMausBot/blob/main/deploy/install.sh)) does path B below for you and ends with MausBot answering at `https://maus.example.com`.
+
+**It checks the server first, and changes nothing while it checks.** Each check that fails prints one sentence saying what to fix, and nothing is installed until all pass:
+
+| Check | Passes when |
+|---|---|
+| Operating system | Ubuntu 22.04 or 24.04 |
+| Processor | x86-64, 2 cores or more |
+| Memory | 4 GB or more (8 GB suggested) |
+| Free disk | 20 GB or more, where the install and Docker keep their files |
+| Docker | Docker 24 or newer with the Compose plugin, running, not rootless |
+| Ports | 80 and 443 are free |
+| DNS | the domain resolves to this server's public address |
+| Outbound | HTTPS reaches the image registries (`ghcr.io`, `pkg-containers.githubusercontent.com`, Docker Hub), Let's Encrypt and `raw.githubusercontent.com` |
+| User namespaces | switched on, for the bots' sandbox |
+| Bots' sandbox | AppArmor is on with its tools, as it is on a stock Ubuntu |
+| Clock | within five minutes of the internet's |
+| Version | a MausBot release to install was found |
+
+To run only the checks, add `--check`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --check --domain maus.example.com
+```
+
+If Docker is missing, the installer asks before installing it with Docker's official script (`get.docker.com`); `--install-docker` says yes ahead of time. It installs nothing else on the server.
+
+**Then it installs** everything under one folder, `/opt/openmausbot` (`--dir` picks another):
+
+| Path | What |
+|---|---|
+| `compose.yaml`, `Caddyfile` | the same server-plus-Caddy setup as path B, Caddy in its own container reaching the server over a socket; written again on every run |
+| `.env` | your settings: `DOMAIN`, the pinned version (`OMB_IMAGE`) and anything you add, such as [who may sign in with an email](self-hosting.md#sign-in-with-your-email). The installer keeps your lines |
+| `data/` | everything MausBot stores: chats, bots, engine sign-ins, paired devices. Never touched once it exists |
+| `caddy/` | the HTTPS certificates |
+| `update.sh` | the update command, once this repository has it (see below) |
+| `compose.box.yaml`, `box/` | the sandbox's settings and the files that prepare the server for it |
+
+`update.sh` and the sandbox's files are this repository's own, taken from the tag of the version being installed so they match it, and from `main` only when that tag does not have them. The installer says which it used.
+
+It runs the newest release, pinned by its version; once a `stable` channel is published it follows that instead. If that version has no bots' sandbox, the checks (`--check` too) say so before anything is downloaded. It never runs `latest`, which follows every commit. It then waits until the server reports healthy and `https://maus.example.com` answers with a valid certificate, and prints the address.
+
+**The bots' sandbox.** A MausBot version with the hardened profile runs every bot in a sandbox, away from the server's settings, keys and other bots' files, and Docker's defaults do not let a container build one. For such a version the installer prepares the server (a seccomp profile in `/etc/mausbot` and an AppArmor profile in `/etc/apparmor.d`, the two the MausBot connector installs), starts the server with the four security settings in `compose.box.yaml` (no `--privileged`, no added capability), and then runs the server's own self-check, which among other things confirms that a bot cannot read `config.json`. If a check fails that means a bot could reach something it must not, or that bots would not work, the installer names it and does not report success; so does a self-check that gives no answer, or a check the installer has never heard of. Five checks that are about neither (the kernel keyring, the sandbox's host name, the CPU list, a hosting provider's address, and reaching the public internet) only print a note. For a version without the hardened profile it says the sandbox is not there yet; run the install command again after updating to one that has it. `--no-sandbox` skips all of this, for a server only you sign in to on a host without AppArmor.
+
+**Sign in as the first admin** with a one-time link made on the server. Run in a terminal, the installer makes one and prints it when it finishes. It does not when its output goes anywhere else, such as a log, because whoever reads the link can sign in as the admin until it is used or expires. To make one yourself:
+
+```sh
+cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair --label "First admin"
+```
+
+Open the link it prints, or paste it into the desktop app under **＋ → Connect to a server**. To sign in with an emailed code instead, run the installer with `--email you@example.com`.
+
+- **Update:** `sudo /opt/openmausbot/update.sh`, which backs the data up, checks the new version's health and puts the old one back if it fails. The installer places it once this repository has it and prints the command when it finishes; until then, running the install command again moves to the newest release. `update.sh` pins the version by digest in `.env`, and a later run of the installer keeps that pin.
+- **Repair:** run the install command again. It checks the server, rewrites its own files and leaves `.env` and `data/` alone. That also moves an install made before Caddy got its own container: Caddy then shared the server's network, and HTTPS went down whenever the server restarted without it.
+- **Stop:** `--uninstall` stops the server and removes its containers. It deletes nothing: your data stays in `/opt/openmausbot/data`.
+- **Every other command in this guide** that starts `docker compose` for path B works from `/opt/openmausbot`.
+- **What the installer contacts:** the registries and Let's Encrypt from the table, GitHub's release list, this repository's files on `raw.githubusercontent.com`, and `cloudflare.com/cdn-cgi/trace` to learn the server's public address for the DNS check. It sends no telemetry.
+- **Behind a load balancer or NAT** that forwards ports 80 and 443 to the server, set `OMB_INSTALL_SKIP_DNS=1` to skip the DNS check.
+
+The installer also accepts the one-time code of a server connected to MausBot. That offering is not available yet.
+
+Not on Ubuntu, or prefer to do it by hand? Use one of the three ways below.
+
+## Three ways in, by hand
+
 Three ways to make the server reachable are covered. Pick one; the rest of the guide is the same. The short version of every path, including `--lan` and your own cloudflared or proxy (`--public-url`), is at the top of [Self-hosting](self-hosting.md#pick-a-way-in); this guide adds the server setup around it.
 
 | | You need | Who can reach it | Best for |
@@ -92,6 +165,8 @@ Skip to "Install and sign the engines in".
 
 One container for the server plus Caddy for HTTPS at `https://maus.example.com`.
 
+The [installer](#quick-start-one-command-on-your-own-domain) does these steps for you on Ubuntu. Do them by hand on another system, to build your own image with `ENGINES`, or to see what it does.
+
 1. **Point a name at the server.** In your DNS provider add an **A record** (name `maus`, value the server's public IP). After a few minutes `ping maus.example.com` should answer with that IP. Ports 80 and 443 must be open; most providers open them by default.
 2. **Install Docker:**
 
@@ -114,6 +189,7 @@ One container for the server plus Caddy for HTTPS at `https://maus.example.com`.
 
    ```sh
    docker compose pull omb && docker compose up -d
+   ./update.sh              # move to the stable version (see "Update")
    docker compose ps        # omb "healthy", caddy "running"
    ```
 
@@ -258,19 +334,172 @@ same release without an npm install prompt or an implicit upgrade.
 
 ## Update
 
-- **Paths A and C with the service above:** choose the new published version,
-  then run these commands from the administrator shell, replacing `X.Y.Z`:
+A self-hosted server follows the **stable** channel: a released version that
+MausBot's own Clouds have run for 48 hours first. The image tag `stable` and
+[`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json)
+name it. The tag `latest` follows every change on `main`; it is for trying
+things out, not for a server you rely on. **Check for updates** in the app
+compares your server with the stable version. To hear of every release as soon
+as it is published instead, set `OMB_UPDATE_CHANNEL=newest` in the server's
+environment.
 
-  ```sh
-  sudo systemctl stop openmausbot
-  sudo -iu maus npm install --global --prefix /home/maus/.local openmausbot@X.Y.Z
-  sudo systemctl start openmausbot
-  ```
+### Path B (Docker): one command, with a way back
 
-  Check that installation succeeded before starting. A service restart by itself
-  does not update the installed package. For foreground `npx` usage, specify the
-  desired release as `npx --yes openmausbot@X.Y.Z serve --tunnel`.
-- **Path B:** `cd OpenMausBot/deploy && docker compose pull omb && docker compose up -d`.
+From `OpenMausBot/deploy`:
+
+```sh
+git pull && ./update.sh
+```
+
+`git pull` brings the current `update.sh` and `docker-compose.yml`; the server
+image comes from the stable channel, not from your checkout. An install that
+has no checkout, with its `compose.yaml`, `.env` and `data/` in one folder such
+as `/opt/openmausbot`, runs the same script on that folder:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/update.sh -o update.sh
+sudo bash update.sh --dir /opt/openmausbot
+```
+
+An install made with the installer (`deploy/install.sh`) already has `update.sh` in
+its folder: `sudo /opt/openmausbot/update.sh`.
+
+Until a first version has been made stable, `./update.sh` takes the newest
+release instead, as **Check for updates** does then.
+
+The data may be a Docker volume or a folder on the server; the copy keeps
+every file's owner and mode either way. The script then:
+
+1. Downloads the stable image, by its digest. If that fails it stops, and
+   nothing has changed. It also stops, changing nothing, when that version is
+   older than the one your server says it runs (see "From `latest` to stable"
+   below).
+2. Checks there is room for a copy of your data where Docker keeps its
+   volumes, stops the server, checks that it has stopped, and copies
+   everything under `/data` into a new Docker volume named for the update
+   (`deploy_data-before-update-20261110T120000Z`;
+   `openmausbot_data-before-update-…` for `/opt/openmausbot`). It then
+   compares the copy with the data, every file by checksum; a copy that does
+   not match is thrown away, the server is started again, and nothing has
+   changed. The copy from the update before is removed only after this one
+   has matched. The server is down from here until step 4; how long depends
+   on how much data there is.
+3. Writes the image into `.env` (`OMB_IMAGE=ghcr.io/milind-soni/openmausbot@sha256:…`)
+   and starts it. An install the installer made while Caddy still shared the
+   server's network gets the installer's current `compose.yaml` and
+   `Caddyfile` here, as a run of the installer would write them (the rollback
+   puts the old ones back). For this repository's `docker-compose.yml`,
+   `git pull` brings the current one; `--check` says when it is needed.
+4. Waits, up to two minutes (`OMB_UPDATE_WAIT_S` for longer), until the new server answers `/api/health`
+   steadily, says it is the new version, can still start a bot if it could
+   before (the server's own count of ready engines, `GET /api/health/engines`,
+   which a hardened server answers too; `openmausbot doctor` on a version
+   without it), and Caddy runs again.
+5. If any of that fails: puts back the data from the copy, `.env` and the old
+   image, starts the old version, and tells you what went wrong. Your server
+   is as it was before step 1, `.env` included, byte for byte. Only when `.env`
+   named a tag that moves (the installer's `stable`, `latest`, or no image at
+   all) does it now name the old version by its digest instead: that tag may
+   have moved since, and a later run of the installer would otherwise follow
+   it. `--rollback` does the same. The copy is put into a new folder inside the
+   data and checked there before it takes the data's place, so a restore that
+   fails (a full disk, say) leaves both the data and the copy as they were:
+   the server stays stopped, the update's journal is kept, and
+   `./update.sh --rollback` tries again once the cause is fixed.
+
+A closed terminal or a dropped SSH session does not stop an update: it carries
+on, and `deploy/.update/update.log` says how it ended. Each step is written to
+`deploy/.update/journal` before it starts. Ctrl-C undoes the update at once:
+before the new version starts, nothing has changed; after, the old version and
+its data are put back. When an update was cut short some other way (a reboot,
+a killed process), the next `./update.sh` keeps the new version if that is up
+and healthy. If it is not, it says which version and data going back would put
+back, and that everything made on the server since that update would be lost,
+and asks: `yes` goes back, `keep` leaves the server as it is (the copy stays
+for `--rollback`), and anything else, or no answer at all, changes nothing.
+Run again after a finished update, it says there is nothing to do. Two runs at
+once are refused.
+
+```sh
+./update.sh --check            # what would change; changes nothing
+./update.sh --version 0.1.151  # one released version instead of the stable one
+./update.sh --rollback         # the version and the data from before the last update
+./update.sh --allow-older      # go ahead although that version is not newer than the one running
+```
+
+`--rollback` is for an update that passed its checks and still turned out
+wrong. It asks first, because everything made since the update (chats, files,
+settings) is replaced by the copy; `--yes` answers for you. The copy is kept
+until the next update has made and checked its own. The script's own log is
+`deploy/.update/update.log`.
+
+| The script ends with | Meaning |
+| --- | --- |
+| `0` | Updated, or already on that version |
+| `1` | The update failed; the old version and its data are back |
+| `2` | The old version or its data could not be brought back; read the last lines it printed, then `./update.sh --rollback` |
+| `3` | Another update is running |
+| `4` | Nothing was changed (could not download, not enough disk, the folder cannot be written, a question not answered `yes`, refused) |
+| `5` | Nothing was changed: the version asked for is older than the one running, or one of the two versions cannot be told; `--allow-older` goes ahead |
+| `130` | Interrupted with Ctrl-C before the new version started: nothing was changed, and the server was started again |
+
+### From `latest` to stable
+
+A server started from the `latest` image runs a build of `main`. Its image is
+labelled with the branch, not a version, so `update.sh` goes by the version the
+server itself reports, which is that of the release it was built after, or of
+the next one. Such a build may already hold changes made after that release,
+and may have written data in ways the release does not read. So `update.sh`
+moves it to stable only once the stable version is newer than the version the
+server reports; until then it says so and changes nothing (exit `5`). Nothing
+else is needed: the first `./update.sh` after a newer version is made stable
+moves the server onto it and pins it by digest. To move now anyway, run
+`./update.sh --allow-older`; the data is copied first, and `--rollback` puts
+the `latest` build and its data back.
+
+If you built the image yourself (`docker compose up -d --build`, with
+`ENGINES` baked in), `update.sh` refuses to replace it without being told to:
+keep updating with `git pull && docker compose up -d --build`, or move to the
+published image with `./update.sh --replace-local-build`. Building needs about 6 GB of memory:
+on a smaller server, add swap first or use the published image. Engines you install
+from **Settings → Engines** live on the data volume and survive either way.
+
+### Paths A and C (npm with the service above): the same steps by hand
+
+There is no one-command updater for an npm install yet. Do what the script
+does: copy the data first, install one named version, check it, and keep the
+way back. Take the stable version number from
+[`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json)
+(`"version"`), and note the one you run now (`openmausbot --version`). From
+the administrator shell, replacing `X.Y.Z`:
+
+```sh
+sudo systemctl stop openmausbot
+sudo -iu maus sh -c 'umask 077; tar czf ~/openmausbot-before-update.tgz -C ~ .openmausbot && chmod 600 ~/openmausbot-before-update.tgz'
+sudo -iu maus npm install --global --prefix /home/maus/.local openmausbot@X.Y.Z
+sudo systemctl start openmausbot
+curl -sf http://127.0.0.1:8799/api/health && sudo -iu maus openmausbot doctor
+```
+
+If the install fails, or the last line does not end with the server answering
+and an engine ready, go back (replace `OLD` with the version you noted):
+
+```sh
+sudo systemctl stop openmausbot
+sudo -iu maus npm install --global --prefix /home/maus/.local openmausbot@OLD
+sudo -iu maus sh -c 'mv ~/.openmausbot ~/.openmausbot-failed-update && tar xzf ~/openmausbot-before-update.tgz -C ~'
+sudo systemctl start openmausbot
+```
+
+A service restart by itself does not update the installed package. For
+foreground `npx` usage, name the release: `npx --yes openmausbot@X.Y.Z serve --tunnel`.
+
+### How far behind a server may fall
+
+The desktop and phone apps are built to work with any server version that was
+the stable one within the last 90 days. An older server keeps running, but the
+app tells you it is behind, and newer features may not work until you update
+it. Update at least every 90 days.
 
 Routines and queued work survive a restart. A teammate turn running at that moment runs again once at the next start, told to check what it already did, and the bot that asked for it is told. A person's own turn and a running routine are not run again: the conversation says it was interrupted. Update between runs where you can.
 
@@ -288,6 +517,7 @@ credentials, and paired sessions). Run it from the service account's shell:
 umask 077
 backup_dir=$(mktemp -d "$PWD/openmausbot-backup.XXXXXX")
 tar czf "$backup_dir/openmausbot-data.tgz" -C "$HOME" .openmausbot
+chmod 600 "$backup_dir/openmausbot-data.tgz"
 ```
 
 A full backup also needs your engine credential/configuration paths, such as
@@ -297,26 +527,66 @@ any configured home/data-directory overrides, and workspaces outside the app
 directory. These are not included in the command above.
 
 For path B, the whole `/data` volume includes the container's CLI homes. From
-`OpenMausBot/deploy`, stop the app before archiving; `deploy_data` is the default
-volume name, so use your actual volume name if you changed the Compose project:
+`OpenMausBot/deploy`, stop the whole project before archiving, and start it
+again after; `deploy_data` is the default volume name, so use your actual
+volume name if you changed the Compose project:
 
 ```sh
-docker compose stop omb
+docker compose stop
 backup_dir=$(mktemp -d "$PWD/openmausbot-backup.XXXXXX")
-docker run --rm -v deploy_data:/data:ro -v "$backup_dir":/b alpine sh -c 'umask 077; tar czf /b/openmausbot-data.tgz -C /data .'
+docker run --rm -v deploy_data:/data:ro -v "$backup_dir":/b alpine sh -c 'umask 077; tar czf /b/openmausbot-data.tgz -C /data . && chmod 600 /b/openmausbot-data.tgz'
+docker compose start
 ```
 
-Each command creates a fresh private folder in the current directory, so it
+To restore that archive, with the project stopped, replace what is in the
+volume with it (`openmausbot-backup.XXXXXX` is the folder the backup made):
+
+```sh
+docker compose stop
+docker run --rm -v deploy_data:/data -v "$PWD/openmausbot-backup.XXXXXX":/b:ro alpine sh -c 'find /data -mindepth 1 -delete && tar xzpf /b/openmausbot-data.tgz -C /data'
+docker compose start
+```
+
+With the installer, the data is the folder `/opt/openmausbot/data`. This backs
+it up, with `.env`, into an archive in `/opt/openmausbot/backups`, the whole
+project stopped and started again around it. The folder is `700` and the archive
+`600` whatever the server's umask or the folder's default ACLs, since the archive
+holds every chat, key and session:
+
+```sh
+cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'set -e; install -d -m 700 backups; f="backups/backup-$(date -u +%Y%m%dT%H%M%SZ).tgz"; (umask 077; tar --warning=no-file-ignored -czf "$f" data .env); chmod 600 "$f"'; sudo docker compose start
+```
+
+Copy the archive to another machine and keep it private.
+`--warning=no-file-ignored` keeps tar from listing the sockets in the data
+folder, which are not data: the server makes them again when it starts.
+
+To restore an archive, replace `backups/backup-20261110T153000Z.tgz` with its name.
+The data as it is now is moved aside to `data.before-restore`, and the archive's
+data takes its place, with its owner and permissions. An archive without a
+`data/` folder changes nothing:
+
+```sh
+cd /opt/openmausbot && sudo docker compose stop && sudo sh -c 'set -e; tar -tzf backups/backup-20261110T153000Z.tgz data/ >/dev/null; rm -rf data.before-restore; mv data data.before-restore; tar -xzpf backups/backup-20261110T153000Z.tgz data'; sudo docker compose start
+```
+
+Once MausBot runs on the restored data, remove the old copy:
+`sudo rm -rf /opt/openmausbot/data.before-restore`. The restore leaves `.env` as
+it is. On a new server, install first with the same `--domain`, then restore.
+
+Each path B backup creates a fresh private folder in the current directory, so it
 cannot overwrite an older archive with more permissive access. Keep the
-archive inside that folder privately on another machine. Restore with the server stopped,
-using the same paths and original ownership. After backup or restore, start the
-service with `sudo systemctl start openmausbot`, or `docker compose start omb`.
+archive inside that folder privately on another machine. Restore paths A and C
+with the server stopped, using the same paths and original ownership. After
+backup or restore, start the service with `sudo systemctl start openmausbot`.
+Stop and start the Docker project as a whole, as above, rather than `omb` on
+its own.
 
 ## The rules the setup relies on
 
 Read this before putting anything else in front of the server.
 
-- The server only ever listens on loopback (`127.0.0.1:8799`). Never publish that port yourself. The tunnel, Caddy and Tailscale each reach it from the same machine.
+- The server only ever listens on loopback (`127.0.0.1:8799`). Never publish that port yourself. The tunnel, Caddy and Tailscale each reach it from the same machine; path B's Caddy, in its own container, reaches it over a Unix socket (`OMB_TUNNEL_SOCKET`), and a request on that socket always counts as a remote one.
 - A request that arrives through a proxy or the tunnel is treated as remote and needs a session, whatever headers it carries. A proxy of your own (nginx, Traefik, Cloudflare Tunnel) must forward the real `Host` and add `X-Forwarded-For` and `X-Forwarded-Proto`, must not buffer the event stream, and must **not** rewrite `Host` to `127.0.0.1`.
 - Pairing is the login. Want a second wall in front of it? Path B's `Caddyfile` has a commented `basic_auth` block for a shared password.
 - The session cookie is marked `Secure`; do not serve this over plain HTTP on the public internet.
@@ -325,6 +595,8 @@ Read this before putting anything else in front of the server.
 ## Troubleshooting
 
 **`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot login` on this machine first; the credentials are per machine.
+
+**The server does not start and says its data "was written by a newer OpenMausBot".** An older version was started on data a newer one had already changed, which happens when a version is put back without its data. Nothing was changed. Install the version the message names (or a newer one), or put back the copy of the data from before that update.
 
 **The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot logout && npx openmausbot login` issues a fresh address.
 
