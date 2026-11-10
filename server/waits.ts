@@ -48,11 +48,15 @@ export interface WaitRecord {
   /** Decided and saved first; posted once its chat is free. */
   ending?: WaitNotice;
 }
-export interface NewWait { botId: string; threadId: string; label: string; condition: NewWaitCondition; followUp?: string; hours?: number; assignmentId?: string }
+export interface NewWait {
+  botId: string; threadId: string; label: string; condition: NewWaitCondition; followUp?: string; hours?: number; assignmentId?: string;
+  /** Asked again right before the wait is stored, after the checks `create` awaits; a refusal text stores nothing, so work stopped meanwhile leaves no wait behind. Never saved. */
+  stillAllowed?: () => string | null;
+}
 export type CreateWaitResult =
   | { state: "created"; wait: WaitRecord; note?: string }
   | { state: "already"; text: string }
-  | { state: "refused"; status: 400 | 409; error: string };
+  | { state: "refused"; status: 400 | 403 | 409; error: string };
 export interface WaitProbes { page(url: string): Promise<PageResult>; stamp(path: string): Promise<FileStamp | null>; processes(): Promise<ProcessEntry[]> }
 export interface WaitManagerOptions {
   file?: string; now?: () => number; probes?: Partial<WaitProbes>;
@@ -175,6 +179,11 @@ export class WaitManager {
     }
   }
 
+  /**
+   * Makes a wait once its first check shows the condition is not met yet. Limits are checked before
+   * and after that check, and `input.stillAllowed` last of all, since the check can take seconds and
+   * the work that asked for the wait can end meanwhile.
+   */
   async create(input: NewWait): Promise<CreateWaitResult> {
     const full = this.limitRefusal(input);
     if (full) return full;
@@ -186,6 +195,8 @@ export class WaitManager {
     if (verdict.met) return { state: "already", text: `${describeCondition(condition)} already. Nothing was set up: tell the person now.` };
     const crowded = this.limitRefusal(input);
     if (crowded) return crowded;
+    const ended = input.stillAllowed?.();
+    if (ended) return { state: "refused", status: 403, error: ended };
     const now = this.now();
     const wait: WaitRecord = {
       id: randomUUID(),

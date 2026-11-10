@@ -233,6 +233,20 @@ describe("the waits route", () => {
     expect(await call("POST", "/api/internal/waits", FILE_WAIT, { sourceRefusal, assignmentId: () => (reads++ === 0 ? "a1" : undefined) })).toMatchObject({ status: 403, payload: { error: WAIT_MESSAGES.notPerson } });
     expect(waits.create).not.toHaveBeenCalled();
   });
+  it("has the manager ask once more, right before storing, whether the handed-on work still runs", async () => {
+    waits.create.mockClear();
+    let current: string | undefined = "a1";
+    await call("POST", "/api/internal/waits", FILE_WAIT, { assignmentId: () => current });
+    const { stillAllowed } = waits.create.mock.calls[0]![0];
+    expect(stillAllowed?.()).toBeNull();
+    current = undefined;
+    expect(stillAllowed?.()).toBe(WAIT_MESSAGES.notPerson);
+    current = "a2";
+    expect(stillAllowed?.()).toBe(WAIT_MESSAGES.notPerson);
+    waits.create.mockClear();
+    await call("POST", "/api/internal/waits", FILE_WAIT);
+    expect(waits.create.mock.calls[0]![0]).not.toHaveProperty("stillAllowed");
+  });
   it("offers files and programs only on the bot's own computer", () => {
     const own = { cloudHome: false, hosted: false, guest: false, place: null };
     for (const place of [null, "local", "browser"] as const) expect(hostWaitRefusal({ ...own, place })).toBeNull();

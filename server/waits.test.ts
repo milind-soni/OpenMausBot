@@ -108,6 +108,23 @@ describe("WaitManager", () => {
     expect(await handed("a1")).toMatchObject({ state: "created" });
   });
 
+  it("stores no handed-on wait when the work ends while its first check is still running", async () => {
+    const h = harness();
+    let open!: () => void, running = true;
+    h.pageGate = new Promise((resolve) => { open = resolve; });
+    const pending = h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the page", condition: { kind: "url_contains", url: "https://example.com/", text: "done" }, assignmentId: "a1", stillAllowed: () => (running ? null : "ended") });
+    await vi.waitFor(() => expect(h.pageCalls).toBe(1));
+    running = false;
+    open();
+    expect(await pending).toEqual({ state: "refused", status: 403, error: "ended" });
+    expect(h.manager.list("bot-1")).toEqual([]);
+    expect(h.showCard).not.toHaveBeenCalled();
+    h.pageGate = null;
+    const kept = await h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" }, assignmentId: "a2", stillAllowed: () => null });
+    expect(kept).toMatchObject({ state: "created", wait: { assignmentId: "a2" } });
+    expect(h.waitOf((kept as { wait: WaitRecord }).wait.id)).not.toHaveProperty("stillAllowed");
+  });
+
   it("lets handed-on work set a new wait once its wait has ended, even before the ending is posted", async () => {
     const h = harness();
     const handed = () => h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" }, assignmentId: "a1" });

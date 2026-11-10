@@ -178,7 +178,11 @@ export interface WaitRouteContext {
   elsewhere?: (name: string) => { where: string } | { hint: string } | null;
 }
 
-/** `sleeps`: the home is a personal My Cloud, whose plan sleeps when idle; a Team Cloud never sleeps. */
+/**
+ * Routes for listing, making and stopping a bot's waits. `sleeps`: the home is a personal My Cloud, whose plan
+ * sleeps when idle; a Team Cloud never sleeps. Work a bot handed on is read once, before the body, and must still
+ * be running after the body is read and again right before the wait is stored.
+ */
 export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "list" | "cancel">; home?: () => string; cloudHome?: boolean; sleeps?: boolean }) {
   const home = deps.home ?? homedir;
   return async (ctx: WaitRouteContext): Promise<typeof PASS | void> => {
@@ -239,7 +243,7 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
       condition,
       ...(request.followUp ? { followUp: request.followUp } : {}),
       hours: request.hours,
-      ...(assignmentId ? { assignmentId } : {}),
+      ...(assignmentId ? { assignmentId, stillAllowed: () => (ctx.assignmentId?.() === assignmentId ? null : WAIT_MESSAGES.notPerson) } : {}),
     });
     if (result.state === "refused") return void json(res, result.status, { error: result.error });
     if (result.state === "already") return void json(res, 200, { text: result.text });
