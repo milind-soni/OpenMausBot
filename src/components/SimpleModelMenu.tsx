@@ -51,7 +51,8 @@ function RowLines({ label, children }: { label: ReactNode; children?: ReactNode 
   );
 }
 
-/** Stays where it is when pressed: the row moves up the next time the menu opens, not under the pointer. */
+/** Stays where it is when pressed: the row moves up the next time the menu opens, not under the pointer. The arrow away
+ * from the start of the line moves from its row to it and back (model-menu-keys.ts); it shows while either has keyboard focus. */
 export function FavoriteStar({ instanceId, model, name }: { instanceId: string; model: string; name: string }) {
   const favorite = useFavoriteModels().has(favoriteKey(instanceId, model));
   return (
@@ -64,7 +65,7 @@ export function FavoriteStar({ instanceId, model, name }: { instanceId: string; 
       title={t(favorite ? "model.favorite.remove" : "model.favorite.add", { name })}
       onClick={() => toggleFavoriteModel(instanceId, model)}
       className={cn("absolute end-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-ink-tertiary hover:text-ink",
-        favorite ? "opacity-100" : "opacity-0 group-hover/model:opacity-100 touch:opacity-100")}
+        favorite ? "opacity-100" : "opacity-0 group-hover/model:opacity-100 touch:opacity-100 focus-visible:opacity-100 peer-focus-visible/row:opacity-100")}
     >
       <Star size={13} aria-hidden="true" className={cn(favorite && "fill-current")} />
     </button>
@@ -86,7 +87,7 @@ function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: Men
       title={[modelOptionLabel(option), option.provider, row.detail, reason].filter(Boolean).join(" · ")}
       tabIndex={-1}
       onClick={() => onPick(instance, row.model ?? option.id, row.variant)}
-      className={cn(SIMPLE_MENU_ROW, "pe-8")}
+      className={cn(SIMPLE_MENU_ROW, "peer/row pe-8")}
     >
       <Gutter />
       <RowLines label={row.label}>

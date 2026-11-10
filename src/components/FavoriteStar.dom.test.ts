@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { favoriteKey, favoriteModels, forgetFavoriteModelsForTest } from "@/lib/favorite-models";
+import { modelMenuKey } from "./model-menu-keys";
 import { FavoriteStar } from "./SimpleModelMenu";
 
 let host: HTMLDivElement;
@@ -37,5 +38,35 @@ describe("the star on a model", () => {
     expect(JSON.parse(localStorage.getItem("omb-favorite-models")!)).toEqual([favoriteKey("openaiCompat", "qwen3:4b")]);
     flushSync(() => star.click());
     expect(star.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("is reached from its row with the arrow keys, and Enter on it stars the model, not picks it", () => {
+    const picked: string[] = [];
+    const row = (model: string) => createElement("div", { key: model, className: "group/model relative" },
+      createElement("button", { type: "button", "data-menu-row": "", tabIndex: -1, onClick: () => picked.push(model) }, model),
+      createElement(FavoriteStar, { instanceId: "openaiCompat", model, name: model }));
+    flushSync(() => root.render(createElement("div", {
+      role: "menu", tabIndex: -1, onKeyDown: (event: Parameters<typeof modelMenuKey>[0]) => modelMenuKey(event, { query: "", typed: { current: null }, close: () => {} }),
+    }, row("a"), row("b"))));
+    const [rowA, rowB] = [...host.querySelectorAll<HTMLButtonElement>("[data-menu-row]")];
+    const [starA, starB] = [...host.querySelectorAll<HTMLButtonElement>("[data-model-favorite]")];
+    const press = (key: string) => {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      document.activeElement!.dispatchEvent(event);
+      return event;
+    };
+    rowA!.focus();
+    press("ArrowRight");
+    expect(document.activeElement).toBe(starA);
+    press("ArrowDown");
+    expect(document.activeElement).toBe(rowB);
+    press("ArrowRight");
+    expect(document.activeElement).toBe(starB);
+    expect(press("Enter").defaultPrevented, "the button's own Enter presses the star").toBe(false);
+    expect(picked).toEqual([]);
+    press("ArrowLeft");
+    expect(document.activeElement).toBe(rowB);
+    press("Enter");
+    expect(picked).toEqual(["b"]);
   });
 });
