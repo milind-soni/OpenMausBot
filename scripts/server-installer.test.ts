@@ -572,6 +572,14 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(unpublished.stdout).toContain("To update later, run this command again.");
   });
 
+  // update.sh moves an install from before Caddy had its own container, writing these two files as the installer does.
+  const UPDATE = join(ROOT, "deploy", "update.sh");
+  it.skipIf(!existsSync(UPDATE))("hands update.sh the very compose.yaml and Caddyfile it writes", () => {
+    const heredoc = (text: string, mark: string) => text.slice(text.indexOf(`<<'${mark}'\n`) + `<<'${mark}'\n`.length, text.indexOf(`\n${mark}\n`));
+    const updater = readFileSync(UPDATE, "utf8");
+    for (const mark of ["COMPOSE", "CADDY"]) expect(heredoc(updater, mark), mark).toBe(heredoc(script, mark));
+  });
+
   it("writes the Caddyfile and the server's settings the manual Compose setup uses", () => {
     const caddyfile = readFileSync(join(ROOT, "deploy", "Caddyfile"), "utf8");
     const result = run(["--domain", "maus.example.com"]);
