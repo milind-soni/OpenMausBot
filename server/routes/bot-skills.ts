@@ -113,8 +113,8 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
         }
       }
       const origin = (listBotSkills(bot).find((skill) => skill.name === name) as { origin?: string } | undefined)?.origin;
-      if (origin === "imported") return json(res, 409, { error: `"${name}" comes from this computer and can't be removed from one bot. Turn it off instead.` });
-      if (origin === "native") return json(res, 409, { error: `"${name}" comes from this bot's engine and can't be removed here.` });
+      if (origin === "imported") return json(res, 404, { error: `"${name}" comes from this computer and can't be removed from one bot. Turn it off instead.` });
+      if (origin === "native") return json(res, 404, { error: `"${name}" comes from this bot's engine and can't be removed here.` });
       return json(res, 404, { error: removed.error });
     }
 

@@ -144,10 +144,10 @@ describe("removing a skill from one bot", () => {
     expect((await call("GET", `/api/bots/${first}/skills`)).body.skills?.map((skill) => skill.name)).not.toContain(shared);
 
     const refused = await call("DELETE", `/api/bots/${first}/skills/${brought}`);
-    expect(refused.status).toBe(409);
+    expect(refused.status).toBe(404);
     expect(refused.body.error).toMatch(/can't be removed from one bot/);
     const native = await call("DELETE", `/api/bots/${first}/skills/engine-notes`);
-    expect(native.status).toBe(409);
+    expect(native.status).toBe(404);
     expect(native.body.error).toMatch(/can't be removed here/);
     expect((await call("DELETE", `/api/bots/${first}/skills/missing-skill`)).status).toBe(404);
 
