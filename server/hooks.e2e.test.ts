@@ -20,6 +20,8 @@ interface Msg {
   text?: string;
   tool?: { name: string; itemId?: string; fullResult?: boolean; output?: string };
   digest?: { hookCoverage: string; tools: Array<{ name: string; count: number }> };
+  compaction?: unknown;
+  engineCompaction?: true;
 }
 
 const BIG = `line ${"x".repeat(80)}\n`.repeat(200); // ~17 KB: past the 6 KB preview
@@ -157,6 +159,11 @@ posixOnly("engine hooks e2e: compaction", () => {
       "context compaction started (auto)",
       "context compacted — re-sent the last 1 digest",
     ]);
+    // Those rows hide with tool calls; the chat also gets one marker people always see, with nothing for the engine.
+    const markers: Msg[] = after.messages.filter((m: Msg) => m.kind === "compaction");
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({ role: "bot", engineCompaction: true });
+    expect(markers[0]!.compaction).toBeUndefined();
     // The fake echoes what SessionStart's stdout gave it: the first turn's digest line.
     const replies: Msg[] = after.messages.filter((m: Msg) => m.role === "bot" && m.kind === "text" && m.text);
     expect(replies.at(-1)!.text).toContain("[What ");

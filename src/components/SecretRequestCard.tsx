@@ -12,6 +12,7 @@ import { EmailConnectForm, type EmailConnectRefusal } from "./EmailCard";
 import { EmailOutgoingRequestForm, EmailRequestSettled } from "./EmailRequestCard";
 import type { EmailConnectRequest, EmailOutgoingFields } from "../../shared/email";
 import { productName } from "@/lib/brand";
+import { VaultChoices } from "./VaultChoices";
 
 // Security: the value goes straight to the host's settings, never into the chat.
 
@@ -263,7 +264,8 @@ export function SecretRequestCard({
           submitStyle={askPrimary(color).style}
           footer={<span className="flex items-center gap-1 text-[12px] text-ink-tertiary"><LockKeyhole size={11} /> {t("secretCard.email")}</span>}
         />
-      ) : (
+      ) : (<>
+        {custom && <VaultChoices kind="secret" botId={botId} botName={authorName} threadId={threadId} messageId={message.id} />}
         <form onSubmit={(event) => void save(event)}>
           <div className="flex flex-wrap gap-2">
             <input
@@ -300,7 +302,7 @@ export function SecretRequestCard({
             )}
           </div>
         </form>
-      )}
+      </>)}
       {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
     </AskCard>
   );

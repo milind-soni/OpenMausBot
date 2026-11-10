@@ -56,7 +56,7 @@ describe("a login kept to some bots, and bots that share a browser", () => {
     { id: "payroll", browserProfile: "finance" }, { id: "infra", browserProfile: "finance" }, { id: "notes" }, { id: "audit", browserProfile: null },
     { id: "scout", browserProfile: "guest" }, { id: "visitor", browserProfile: "guest" },
   ];
-  const onePassword = { fresh: async () => {}, sitesFor: () => [], candidates: () => [], markUsed: () => {} } as unknown as OnePasswordLogins;
+  const onePassword = { id: "1password", label: "1Password", fresh: async () => {}, items: () => [], read: async () => ({}), markUsed: () => {} } as unknown as OnePasswordLogins;
   const world = () => {
     const store = new VaultStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-bot-logins-")) });
     const logins = new BotLogins(store, onePassword, () => bots);
@@ -110,3 +110,32 @@ describe("a login kept to some bots, and bots that share a browser", () => {
   });
 });
 
+
+describe("the secrets a bot may use", () => {
+  it("are named from the Vault and any linked manager, never by value, and a linked one is read only when asked for", async () => {
+    const reads: string[] = [];
+    const held: string[] = [];
+    const provider = {
+      id: "fake", label: "Fake manager", fresh: async () => {}, markUsed: () => {},
+      items: () => [
+        { kind: "secret", id: "fake:1", name: "Deploy key", fields: ["user"], source: "linked", provider: "fake", bots: "all", readOnly: true },
+        { kind: "secret", id: "fake:2", name: "Payroll token", fields: [], source: "linked", provider: "fake", bots: ["payroll"], readOnly: true },
+        { kind: "login", id: "fake:3", site: "example.com", hosts: ["example.com"], exactHost: false, username: "u", hasTotp: false, source: "1password", bots: "all", createdAt: 0 },
+      ],
+      read: async (id: string, field?: string) => { reads.push(`${id}/${field ?? ""}`); return { value: `value-of-${id}-${field ?? "main"}` }; },
+    };
+    const store = new VaultStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-bot-logins-")) });
+    store.saveSecret({ name: "Stripe key", value: "sk_fake-saved", source: "card", bots: ["notes"], refOnly: true });
+    const logins = new BotLogins(store, provider as unknown as OnePasswordLogins, () => [], (value) => held.push(value));
+    expect(logins.secretNamesFor("notes")).toEqual([{ name: "Stripe key", refOnly: true }, { name: "Deploy key" }, { name: "Deploy key user" }]);
+    expect(logins.secretNamesFor("payroll")).toEqual([{ name: "Deploy key" }, { name: "Deploy key user" }, { name: "Payroll token" }]);
+    expect(logins.sitesFor("notes")).toEqual([{ site: "example.com", hosts: ["example.com"], exactHost: false, username: "u" }]);
+    expect(await logins.linkedSecret("payroll token", "notes")).toBeNull();
+    expect(reads).toEqual([]);
+    const deploy = await logins.linkedSecret("deploy-key-user", "notes");
+    expect(deploy).toMatchObject({ name: "Deploy key user", value: "value-of-fake:1-user" });
+    expect(deploy!.id).toMatch(/^linked-[0-9a-f]{32}$/u);
+    expect(reads).toEqual(["fake:1/user"]);
+    expect(held).toEqual(["value-of-fake:1-user"]);
+  });
+});

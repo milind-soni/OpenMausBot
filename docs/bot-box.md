@@ -93,7 +93,10 @@ Cloudflare Worker answers with 404), anything below it below that address, with 
 upstream's own. MCP Settings → **Test** reaches a URL server the same way where turns are boxed
 (`server/bot-box/broker-probe.ts`): a grant made like a turn's, through the broker's socket, revoked when the test
 ends. A server that answers directly but not through the broker fails the test with "Your bots can't reach this
-server", never "Connected", and says the fault is ours. Connected apps (Composio) were already behind the harness
+server", never "Connected", and says the fault is ours. A tool call a URL server refuses with HTTP 401 is answered by the
+broker as a failed tool result that names the server and what to do (`server/bot-box/broker-mcp-refusal.ts`): passed through,
+the 401 starts the engine's own sign-in, which cannot work because the broker drops any `Authorization` the engine sends, and
+Claude Code then says only "Error dialing <address>", since the address holds a token. Connected apps (Composio) were already behind the harness
 (`/api/internal/connectors/*` with a per-turn bearer) and stay there.
 
 A key whose CLI takes no base URL from the environment (xAI, Mistral, Groq, Greenference, Cerebras, MiniMax, Kimi, Cursor, Factory,
