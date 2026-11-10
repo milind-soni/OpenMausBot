@@ -72,7 +72,6 @@ export const USER_ERROR = {
   "serverError.voice.utteranceTooLong": "voice utterances are limited to 500 characters",
   "serverError.goal.alreadyRunning": "A goal is already running in this chat. Stop it before starting another.",
   "serverError.chat.missingConversation": "no such conversation",
-  "serverError.department.confirmPeers": "Letting a bot talk to more bots requires confirming it first (acknowledgePeerScope)",
   "serverError.department.chiefResponsibility": "Only a Chief of Staff can be made responsible for additional departments",
   "serverError.department.confirmResponsibility": "Confirm which additional departments this Chief is responsible for (acknowledgePeerScope)",
   "serverError.owner.teamOnly": "Only a team's bots report to someone.",

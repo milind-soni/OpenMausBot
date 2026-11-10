@@ -1,6 +1,6 @@
 import { userError } from "../user-errors.ts";
 // Who a Team Cloud bot reports to. GET /api/team/people lists the members a bot can report to, with each one's
-// picture; GET /api/team/people/<person>/picture serves it. PUT /api/bots/<id>/reports-to {email} changes one bot's
+// picture and, to a member, whether they are here now; GET /api/team/people/<person>/picture serves it. PUT /api/bots/<id>/reports-to {email} changes one bot's
 // owner: an Admin may, and so may the member who owns it now, to hand it over. PUT /api/team/reports-to {botIds, email}
 // sets a whole department's at once, for an Admin.
 // Security: all but the last are client-scoped, so the checks here are the gate. A member's name and picture are shown
@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { botAvatarUrlSchema } from "../../shared/bot-avatar.ts";
+import type { PersonPresence } from "../../shared/team-presence.ts";
 import { botOwner, nameFromEmail, ownerEmail } from "../../shared/bot-owner.ts";
 import { attachmentExists, readAttachment } from "../attachments.ts";
 import { setReportsTo } from "../bot-owners.ts";
@@ -40,6 +41,8 @@ export interface TeamOwnerRouteDeps {
   publicBot(bot: BotRecord): unknown;
   /** Settings → Activity: who a bot reports to decides who edits it. */
   record?(auth: RequestAuth, row: Omit<AdminActionRow, "at" | "actor">): void;
+  /** Whether a member is here now (docs/team-cloud.md "Who is here"). */
+  presence?(email: string): PersonPresence;
 }
 
 /** The address a session speaks for: a team member's, or none (a loopback service, a session the Admin never signed). */
@@ -88,7 +91,8 @@ export function createTeamOwnerRoutes(deps: TeamOwnerRouteDeps): RouteHandler {
       return json(res, 200, { people: members().map(({ email, role }) => {
         const avatarUrl = me ? profileOf(email).avatarUrl : undefined;
         return { email, name: nameOf(email), role, ...(email === me ? { you: true } : {}),
-          ...(avatarUrl && storedPicture(avatarUrl) ? { pictureUrl: teamPictureUrl(email, avatarUrl) } : {}) };
+          ...(avatarUrl && storedPicture(avatarUrl) ? { pictureUrl: teamPictureUrl(email, avatarUrl) } : {}),
+          ...(me && deps.presence ? deps.presence(email) : {}) };
       }) });
     }
 

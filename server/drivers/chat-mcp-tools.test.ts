@@ -257,7 +257,7 @@ describe("Chat MCP session", () => {
     const session = await mountChatTools({ agents: agents.server, custom: { onepassword: own.server } }, own.controller.signal);
     sessions.push(session);
     const of = (receipt: string) => spawned.find((entry) => entry.opts.env?.RECEIPT === receipt)!;
-    expect(of(own.receipt)).toMatchObject({ owner: "bot", opts: { box: { allowEnv: ["RECEIPT", "OP_SERVICE_ACCOUNT_TOKEN"] } } });
+    expect(of(own.receipt)).toMatchObject({ owner: "bot", opts: { box: { allowEnv: ["RECEIPT", "OP_SERVICE_ACCOUNT_TOKEN"], configured: true } } });
     expect(of(agents.receipt).opts.box).toBeUndefined();
   });
 

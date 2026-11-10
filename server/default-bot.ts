@@ -93,14 +93,14 @@ function introduce(store: DefaultBotStore, bot: BotRecord, team?: string | null)
 export type DefaultBotIntro = (bot: BotRecord) => Omit<Message, "id" | "at">;
 
 /** A new MausBot, with its intro as its first message. On a Team Cloud it is its member's alone. */
-export function createDefaultBot(store: DefaultBotStore, options: { person?: string; team?: string | null; chief?: (id: string) => void; intro?: DefaultBotIntro } = {}): BotRecord {
+export function createDefaultBot(store: DefaultBotStore, options: { person?: string; team?: string | null; chief?: (id: string) => void; intro?: DefaultBotIntro; opened?: (bot: BotRecord) => void } = {}): BotRecord {
   const person = options.person?.trim().toLowerCase() ?? "";
   const taken = new Set(person ? [] : store.bots.map((bot) => bot.name.trim().toLowerCase()));
   const created = store.createBot({
     name: takeImportName(DEFAULT_BOT_NAME, taken),
     color: DEFAULT_BOT_COLOR,
     ...(person ? { visibility: { people: [person] } } : {}),
-  }, { seedMessages: false });
+  }, { seedMessages: false, beforeShown: (made) => options.opened?.({ ...made, defaultBot: person ? { person } : {} }) });
   options.chief?.(created.id);
   const bot = store.patchBot(created.id, { defaultBot: person ? { person } : {} }) ?? created;
   store.appendMessage(bot.threadId, options.intro?.(bot) ?? helperIntroMessage(bot, options.team));
@@ -111,7 +111,8 @@ export function createDefaultBot(store: DefaultBotStore, options: { person?: str
  * install's own adopted, or a new one. A MausBot that is gone is never made again. Two marked ones keep the oldest. A
  * place with no Chief of Staff at all gets MausBot as its Chief, so someone keeps an eye on the day; one that has a
  * Chief keeps it. */
-export function ensureDefaultBot(store: DefaultBotStore, options: { dataDir: string; person?: string; team?: string | null }): BotRecord | null {
+/** `opened`: a new one, before anyone is told of it, so its person's main chat is theirs from its first frame. */
+export function ensureDefaultBot(store: DefaultBotStore, options: { dataDir: string; person?: string; team?: string | null; opened?: (bot: BotRecord) => void }): BotRecord | null {
   const person = options.person?.trim().toLowerCase() ?? "";
   const marked = store.bots.filter((bot) => bot.defaultBot && defaultBotPerson(bot) === person)
     .sort((a, b) => a.createdAt - b.createdAt);
@@ -129,7 +130,7 @@ export function ensureDefaultBot(store: DefaultBotStore, options: { dataDir: str
     chief?.(bot.id);
     introduce(store, bot, options.team);
   } else {
-    bot = createDefaultBot(store, { person, team: options.team, chief });
+    bot = createDefaultBot(store, { person, team: options.team, chief, opened: options.opened });
   }
   remember(options.dataDir, person, bot.id);
   return bot;

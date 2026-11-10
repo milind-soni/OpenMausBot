@@ -44,6 +44,7 @@ export function PhoneRow({ device, connected, state, c, onRemoved, defaultOpen =
           <div className="truncate text-[14px] font-medium text-ink">{device.name}</div>
           <div className="truncate text-[12px] text-ink-secondary">{phoneSubtitle(device, connected, e2eEnabled)}</div>
           {c.account?.paused && <div className="truncate text-[12px] text-ink-secondary">{t("remote.devices.paused")}</div>}
+          {c.account?.tunnelRetired && !device.e2eAt && <div className="text-[12px] leading-relaxed text-warning">{t("remote.devices.retired")}</div>}
         </div>
         <button
           onClick={() => setOpen((value) => !value)}

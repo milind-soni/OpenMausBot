@@ -8,9 +8,10 @@ import { appEventCatalog, appLabel } from "./app-event-catalog.ts";
 import { brokerClient, type AppTriggerBroker, type BrokerAccess } from "./app-trigger-broker.ts";
 import { AppTriggerRequestService, type AppTriggerRequestStore } from "./app-trigger-requests.ts";
 import { AppTriggerError, AppTriggerManager, type AppTriggerPatch } from "./app-triggers.ts";
+import { managedComposioBrokerOff } from "./composio-broker-access.ts";
 import type { RosterMember } from "./peer-roster.ts";
 import type { RequestAuth } from "./request-auth.ts";
-import type { RoutineManager } from "./routines.ts";
+import type { Routine, RoutineManager } from "./routines.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./routes/table.ts";
 import { listTriggers, triggerTarget } from "./trigger-tools.ts";
 import { addressFor } from "./webhook-address.ts";
@@ -50,6 +51,8 @@ export interface InternalTriggerContext {
   /** A run a webhook or app event started, or work one handed on. */
   outsideDriven: () => boolean;
   canCommit: () => boolean;
+  /** Whether this turn may know of the routine: on a Team Cloud one that lives in someone's private chat only in theirs. */
+  routineShown?: (routine: Routine) => boolean;
 }
 
 const GUEST_REFUSAL = "Only the Cloud's owner can make a bot watch their connected apps. Tell the person to ask from their own conversation.";
@@ -63,6 +66,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
   const service = () => {
     const mode = deps.connectionMode();
     if (mode === "self-hosted") return { available: false as const, reason: "self-hosted" as const };
+    if (managedComposioBrokerOff()) return { available: false as const, reason: "off" as const };
     return mode === "managed" && deps.access() ? { available: true as const } : { available: false as const, reason: "unavailable" as const };
   };
   const manager = new AppTriggerManager({
@@ -82,7 +86,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
   });
   const requests = new AppTriggerRequestService({ store: deps.store, triggers: manager, botName: (botId) => deps.store.bot(botId)?.name ?? "the bot" });
 
-  const unavailableText = (reason: "self-hosted" | "unavailable") => reason === "self-hosted"
+  const unavailableText = (reason: "self-hosted" | "unavailable" | "off") => reason === "self-hosted"
     ? "App events need OpenMausBot's connected apps. This server uses its own Composio key, so a bot cannot watch apps here yet: use a schedule that checks the app, or a webhook."
     : "Connected apps are not set up here, so a bot cannot watch apps yet.";
 
@@ -177,7 +181,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
     if ("error" in target) return json(res, target.status, { error: target.error });
     const ownerId = target.forBot?.botId ?? context.from.id;
     const listing = listTriggers({
-      botId: ownerId, triggerId: url.searchParams.get("triggerId") ?? undefined, routines: deps.routines().listRoutines(),
+      botId: ownerId, triggerId: url.searchParams.get("triggerId") ?? undefined, routines: deps.routines().listRoutines().filter((routine) => context.routineShown?.(routine) ?? true),
       webhooks: deps.webhooks.list(), appTriggers: manager.list(), runs: deps.routines().listRuns(), timeZone: deps.timeZone(), now: Date.now(),
     });
     const shown = listing.trigger;

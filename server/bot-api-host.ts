@@ -151,12 +151,11 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     let opened = false;
     if (threadId === undefined) {
       // Asks from the start, with none of the bot's saved allowances: nothing may answer an approval for an outside caller.
-      const task = store.createTask(botId, message.slice(0, 80), false, undefined, undefined, "ask");
+      const task = store.createTask(botId, message.slice(0, 80), false, undefined, undefined, "ask", undefined, undefined, (created) => deps.opened?.(created.threadId));
       if (!task) fail(404, "no such bot");
       threadId = task.threadId;
       opened = true;
       store.patchTask(botId, threadId, { botApi: true, outside: true });
-      deps.opened?.(threadId);
     }
     const receivedAt = Date.now();
     const userMessage = store.appendMessage(threadId, { role: "user", kind: "text", text: message, via: "api" });
