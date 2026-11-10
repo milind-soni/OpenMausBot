@@ -154,5 +154,8 @@ function HtmlFileContent({ path, name, message }: { path: string; name: string; 
 }
 
 export function HtmlPreviewFrame({ source, name }: { source: string; name: string }) {
-  return <iframe sandbox="" referrerPolicy="no-referrer" srcDoc={htmlPreviewDocument(source)} title={t("html.frameTitle", { name })} className="h-[72dvh] w-full rounded-lg border border-hairline/40 bg-white" />;
+  return <>
+    <p role="note" className="rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">{t("html.previewRestrictions")}</p>
+    <iframe sandbox="" referrerPolicy="no-referrer" srcDoc={htmlPreviewDocument(source)} title={t("html.frameTitle", { name })} className="h-[72dvh] w-full rounded-lg border border-hairline/40 bg-white" />
+  </>;
 }

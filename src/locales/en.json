@@ -154,6 +154,7 @@
   "html.rendered": "View page",
   "html.reload": "Reload",
   "html.frameTitle": "Preview of {name}",
+  "html.previewRestrictions": "Scripts and external resources are disabled in this preview. Download the original file to open it in your browser.",
   "html.openInBrowser": "Open {name} in your browser",
   "html.openFailed": "Could not open this page in your browser.",
   "markdown.preview": "Preview: {name}",

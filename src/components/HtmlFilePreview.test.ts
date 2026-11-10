@@ -37,6 +37,13 @@ describe("HtmlPreviewFrame", () => {
     expect(markup).not.toMatch(/allow-/);
   });
 
+  it("explains preview restrictions outside the isolated document", () => {
+    expect(markup).toContain('role="note"');
+    expect(markup).toContain("Scripts and external resources are disabled in this preview.");
+    expect(markup).toContain("Download the original file to open it in your browser.");
+    expect(markup.indexOf('role="note"')).toBeLessThan(markup.indexOf("<iframe"));
+  });
+
   it("loads the page inline, never from a URL, and names the frame", () => {
     expect(markup).toContain("srcDoc=");
     expect(markup).not.toMatch(/\ssrc="/);
