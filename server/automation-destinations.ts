@@ -28,9 +28,8 @@ function legacyResultsThread(routineName: string, task: TaskRecord): boolean {
 export function createAutomationDestinations(deps: AutomationDestinationDeps) {
   const { store, cloud } = deps;
   const chatOfItsOwn = (botId: string, name: string, person?: string) => {
-    const threadId = store.createTask(botId, `${name} · Results`, false)?.threadId;
-    if (threadId && person) cloud?.opened(threadId, person);
-    return threadId;
+    return store.createTask(botId, `${name} · Results`, false, undefined, undefined, undefined, undefined, undefined,
+      person ? (created) => cloud?.opened(created.threadId, person) : undefined)?.threadId;
   };
   return {
     /** The chat of its own an outside event's run reports into on a Cloud: never the person's, and never a wait's, which reports to the chat that set it. */
