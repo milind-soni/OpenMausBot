@@ -8,7 +8,7 @@ import { personKey } from "../person-key.ts";
 import { PASS } from "../routes/table.ts";
 
 const MAYA = "maya@example.com", BEN = "ben@example.com";
-const maya = personKey({ id: "", email: MAYA }), ben = personKey({ id: "", email: BEN });
+const maya = personKey({ id: "", email: MAYA });
 const SECRET = "s".repeat(43), MACHINE = "cm-team-home";
 
 const dirs: string[] = [], aways: TeamAway[] = [];
