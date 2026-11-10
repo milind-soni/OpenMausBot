@@ -254,6 +254,7 @@ describe("unavailable pairing routes", () => {
     flushSync(() => button("Pair using Tailscale")!.click());
     await vi.waitFor(() => expect(fake.bridge.companion.refreshTailscale).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(button("Pair a device")?.disabled).toBe(false));
+    expect(text()).toContain("Make sure Tailscale is connected and MagicDNS is on");
     expect(fake.bridge.companion.pairing).not.toHaveBeenCalled();
     expect(host.querySelector('[aria-label="Device pairing QR code"]')).toBeNull();
   });
