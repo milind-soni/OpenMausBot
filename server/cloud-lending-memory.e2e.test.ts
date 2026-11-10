@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { createComputerSharing } from "../electron/computer-sharing.mjs";
 import { cloudPairingSignature } from "./cloud-home.ts";
+import { HANDOFF_TICK_MS } from "./handoff-ticks.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { markLeftBehind } from "./testing/cloud-left-behind.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
@@ -108,12 +109,24 @@ async function leftBehind(of: { threadIds?: string[]; routineIds?: string[] }, s
   await boot();
   macAway = true;
 }
-/** A turn a restart cuts reruns at the next start, beside this test's next turn, and could be the one toolsFor connects to. */
+/** A turn a restart cuts reruns at the next start, beside this test's next turn, and could be the one toolsFor connects to.
+ * Stopping it resumes the sender on the next busy handoff tick, so idle has to hold across that tick. */
 async function stopRunningTurns() {
   const running = async () => ((await api("GET", "/api/bots?messages=0", { token: owner })).body.bots as Array<{ id: string; tasks?: Array<{ threadId: string; busy?: boolean }> }>)
     .flatMap((bot) => (bot.tasks ?? []).filter((task) => task.busy).map((task) => ({ bot, threadId: task.threadId })));
-  for (const { bot, threadId } of await running()) await stop(bot, threadId);
-  await expect.poll(async () => (await running()).length, { timeout: 10_000 }).toBe(0);
+  const acrossTick = HANDOFF_TICK_MS.busy * 2;
+  let idleAt = 0;
+  await expect.poll(async () => {
+    const turns = await running();
+    if (turns.length > 0) {
+      idleAt = 0;
+      for (const { bot, threadId } of turns) await stop(bot, threadId);
+      return false;
+    }
+    const now = Date.now();
+    if (idleAt === 0) idleAt = now;
+    return now - idleAt >= acrossTick;
+  }, { timeout: hostTimeout(10_000), interval: 50 }).toBe(true);
 }
 /** After a restart, wait for the lent Mac's connector, so what a turn is offered is never just the Mac being offline. */
 async function macOnline() {
