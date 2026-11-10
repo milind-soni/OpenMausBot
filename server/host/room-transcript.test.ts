@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { Message } from "../store.ts";
-import { createRoomTranscript, GROUP_CONTEXT_MESSAGES, isRoomContextMessage } from "./room-transcript.ts";
+import { createRoomTranscript, GROUP_CONTEXT_MESSAGES, isRoomContextMessage, roomCoordinationReminder } from "./room-transcript.ts";
+import { composeBackgroundResults, continuationLine } from "../runtime/envelope.ts";
 
 const editor = { botId: "editor", name: "Editor", color: "green" };
 const writer = { botId: "writer", name: "Writer", color: "blue" };
@@ -64,6 +65,29 @@ const GOLDEN = [
 ].join("\n");
 
 describe("the room transcript", () => {
+  it("keeps terminal output and artifact verification when the room already carries the assignment", () => {
+    const note = composeBackgroundResults(['{"status":"finished","exitCode":7,"stdout":"fresh evidence"}']);
+    expect(roomCoordinationReminder({ resumed: true, turnInstructions: note, turnNote: note }, true, true)).toBe(`\n\n${note}`);
+    expect(roomCoordinationReminder({ resumed: true, turnInstructions: "request" }, true, false)).toContain("Review their results in the conversation above against the request");
+    expect(roomCoordinationReminder({ turnInstructions: "request", turnNote: "scope" }, true, true)).toBe("\n\nscope\nIts words are the request above.");
+    expect(roomCoordinationReminder({ turnInstructions: "request" }, false, true)).toBe("\n\nrequest");
+  });
+
+  it.each([false, true])("keeps restart, background and cap evidence with reports already shown=%s", contextHasCoordination => {
+    const restart = "Resuming verification after a restart.";
+    const background = composeBackgroundResults(['{"status":"finished","exitCode":7,"stdout":"fresh evidence"}']);
+    const continuation = continuationLine({ note: "Check the recorded plan", handoffPath: "/fixture/handoff.md" });
+    const note = [restart, background, continuation, "Your downstream room requests have settled. Review their results in the conversation above against your assignment."].join("\n\n");
+    const instructions = `${note}\n\nCSV checks passed`;
+    const reminder = roomCoordinationReminder({ resumed: true, turnInstructions: instructions, turnNote: note, turnRestartNote: restart }, contextHasCoordination, true);
+    for (const text of [background, continuation]) expect(reminder).toContain(text);
+    expect(reminder.match(/Resuming verification after a restart\./g)).toHaveLength(1);
+    if (contextHasCoordination) {
+      expect(reminder).not.toContain("CSV checks passed");
+      expect(reminder).toContain("Review their results in the conversation above against your assignment");
+    } else expect(reminder).toBe(`\n\n${instructions}`);
+  });
+
   it("renders the last window of a room as one member reads it", () => {
     const { text } = transcript(thread()).window("room", "Omkar", [{ messageId: "latest", text: "Use this frame" }], "editor");
     expect(text).toBe(GOLDEN);

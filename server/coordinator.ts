@@ -1,7 +1,7 @@
 import { RuntimeCoordinator } from "./runtime-coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
 import type { LegacyThreadResolver } from "./runtime/import-legacy.ts";
-import type { Answerer, Assignment, EnvelopeNames, Level, Limits, Mode, Origin, Outcome, Owner, Reply, Requester, StatusView, TurnEvidence } from "./runtime/types.ts";
+import type { Answerer, Assignment, BackgroundCommand, EnvelopeNames, Level, Limits, Mode, Origin, Outcome, Owner, Reply, Requester, StatusView, TurnEvidence } from "./runtime/types.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 
 /** One coordinate_bots call, as the internal route hands it to the server. */
@@ -130,6 +130,8 @@ export interface LiveHandoffEdge {
 
 /** Every method may throw; the runtime logs a throw and reads it as "not now". */
 export interface CoordinatorHost {
+  backgroundStatus?(command: BackgroundCommand, signal: AbortSignal): Promise<string | undefined>;
+  validateBackground?(node: HandoffView, command: BackgroundCommand): string | undefined;
   /** Recheck addresses and route permission immediately before every dispatch. */
   validate(node: HandoffView, parent?: HandoffView): string | undefined;
   busy(node: HandoffView): boolean;
@@ -161,6 +163,8 @@ export interface CoordinatorHost {
 }
 
 export interface Coordinator {
+  trackBackground(source: RoomAddress, id: string, command: Pick<BackgroundCommand, "boxId" | "processId" | "expiresAt" | "teamComputerId">): boolean;
+  observeBackground(source: RoomAddress, id: string, boxId: string, processId: string, result: string): boolean;
   node(id: string): HandoffView | undefined;
   /** The conversation the running assignment `id` may answer with a one-way notice: its requester, when it was handed
    * with reply none outside rooms. */

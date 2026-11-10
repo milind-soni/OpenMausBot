@@ -77,6 +77,10 @@ const assignmentSchema = z.object({
   continuation: z.object({ note: z.string(), handoffPath: z.string().optional(), count: z.number().int().nonnegative() }).optional(),
   guard: z.object({ stale: z.number().int().nonnegative(), errors: z.array(z.string()) }).optional(),
   carrying: z.array(z.string()).optional(),
+  backgroundCommands: z.array(z.object({
+    boxId: z.string().min(1), teamComputerId: z.string().min(1).optional(), processId: z.string().min(1), expiresAt: z.number(),
+    result: z.string().optional(), delivered: z.boolean().optional(), verifying: z.boolean().optional(),
+  })).optional(),
   approved: z.boolean().optional(),
   batchKey: z.string().optional(),
   version: z.literal(1),

@@ -55,10 +55,9 @@ describe("cloud computer tools", () => {
     ]);
     expect(calls).toEqual([]);
     const exec = listed.tools.find(tool => tool.name === "exec")!;
-    expect(exec.description).toContain("Completion does not automatically resume this turn or notify a delegator");
+    expect(exec.description).toContain("a terminal result resumes this assignment if the turn ends first");
     expect(exec.description).toContain("use exec_status with wait_seconds in this turn");
-    expect(exec.description).toContain("check its exit code and output");
-    expect(exec.description).toContain("report the work as unfinished with the process_id");
+    expect(exec.description).toContain("Check the exit code and artifacts");
     const status = listed.tools.find(tool => tool.name === "exec_status")!;
     expect(status.inputSchema.properties.wait_seconds.description).toContain("A running result can arrive before the full interval");
   });

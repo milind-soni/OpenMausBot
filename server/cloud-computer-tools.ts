@@ -3,13 +3,35 @@ import type { ValidateFunction } from "ajv";
 import { isolatedRemoteCommand, runCommand, screenshotBoat } from "./boat.ts";
 import { isRedditAddress, REDDIT_REFUSAL } from "./browser/egress/reddit.ts";
 import {
-  backgroundStatus, commandLateText, EXEC_LATE, PROCESS_ID_PATTERN, startInBackground, STATUS_WAIT_MAX_SECONDS, STDERR_TAIL_CHARS, STDOUT_TAIL_CHARS,
+  BACKGROUND_KEEPS_AWAKE_MS, backgroundStatus, commandCompletion, commandLateText, EXEC_LATE, PROCESS_ID_PATTERN, restoreBackgroundCommand, startInBackground, STATUS_WAIT_MAX_SECONDS, STDERR_TAIL_CHARS, STDOUT_TAIL_CHARS, type BackgroundCommandHooks,
 } from "./cloud-computer-background.ts";
 import { copyFromComputer, copyToComputer } from "./cloud-computer-files.ts";
 import type { AppConfig } from "./config.ts";
+import type { Coordinator, RoomAddress } from "./coordinator.ts";
+import type { BackgroundCommand } from "./runtime/types.ts";
 import { controlRefusal, type ControlState } from "./control-client.ts";
 import { COMPUTER_COPY_BUDGET_MS, HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
 import { compileToolSchema } from "./mcp-schema-validator.ts";
+
+export function commandHandoff(coordinator: Coordinator, source: RoomAddress & Pick<BackgroundCommand, "teamComputerId">, id: string, assertActive: () => void): BackgroundCommandHooks {
+  const address = { ...source, groupId: source.groupId ?? coordinator.node(id)?.groupId };
+  return {
+    started: (boxId, processId) => {
+      assertActive();
+      return coordinator.trackBackground(address, id, { boxId, processId, expiresAt: Date.now() + BACKGROUND_KEEPS_AWAKE_MS,
+        ...(source.teamComputerId ? { teamComputerId: source.teamComputerId } : {}) });
+    },
+    observed: (boxId, processId, result) => {
+      assertActive();
+      coordinator.observeBackground(address, id, boxId, processId, result);
+    },
+  };
+}
+
+export async function commandResult(cfg: AppConfig, command: BackgroundCommand, signal: AbortSignal): Promise<string | undefined> {
+  restoreBackgroundCommand(command.boxId, command.processId, command.expiresAt);
+  return commandCompletion(await backgroundStatus(cfg, command.boxId, { process_id: command.processId }, AbortSignal.any([signal, AbortSignal.timeout(20_000)])));
+}
 
 const coordinate = { type: "integer", minimum: 0, maximum: 32767 };
 const tool = (name: string, description: string, properties: Record<string, unknown> = {}, required: string[] = []) =>
@@ -24,7 +46,7 @@ export const CLOUD_COMPUTER_TOOLS = [
   tool("key_press", "Press an X11 key or shortcut.", { key: { type: "string", pattern: "^[A-Za-z0-9_+]+$", minLength: 1, maxLength: 100 } }, ["key"]),
   tool("scroll", "Scroll at a point on the cloud desktop.", { x: coordinate, y: coordinate, direction: { type: "string", enum: ["up", "down", "left", "right"] }, amount: { type: "integer", minimum: 1, maximum: 30 } }, ["x", "y", "direction"]),
   tool("open_url", "Request opening an HTTP or HTTPS URL in the cloud desktop browser; inspect the screen to confirm it loaded.", { url: { type: "string", pattern: "^https?://", maxLength: 2000 } }, ["url"]),
-  tool("exec", "Run a shell command on the assigned cloud computer and wait for its result. For a command that may run long (downloads, installs, builds, data jobs), set background: true: it starts the command and answers at once with a process_id to follow with exec_status, and the computer stays on for it for up to two hours. Completion does not automatically resume this turn or notify a delegator. If the result is needed for this task, use exec_status with wait_seconds in this turn until it finishes, then check its exit code and output. If you cannot finish checking in this turn, report the work as unfinished with the process_id; do not claim completion or start another copy blindly.", {
+  tool("exec", "Run a shell command on the assigned cloud computer and wait for its result. For a command that may run long (downloads, installs, builds, data jobs), set background: true: it starts the command and answers at once with a process_id to follow with exec_status, and the computer stays on for it for up to two hours. The result says whether completion is tracked for this task: when tracked, a terminal result resumes this assignment if the turn ends first. Otherwise use exec_status with wait_seconds in this turn until it finishes. Check the exit code and artifacts; do not claim completion or start another copy blindly.", {
     command: { type: "string", minLength: 1, maxLength: 4000 },
     background: { type: "boolean", description: "Start the command and answer at once with a process_id, instead of waiting for it to finish." },
   }, ["command"]),
@@ -80,6 +102,7 @@ export async function runCloudComputerTool(
   args: Record<string, unknown>,
   signal: AbortSignal,
   folder?: string | null,
+  background?: BackgroundCommandHooks,
 ): Promise<CloudComputerResult> {
   const problem = cloudComputerCallProblem(name, args);
   if (problem) return { isError: true, content: [{ type: "text", text: problem }] };
@@ -108,8 +131,13 @@ export async function runCloudComputerTool(
     case "key_press": command = `xdotool key --clearmodifiers ${quote(String(a.key))}`; break;
     case "scroll": command = `${mouse} click --repeat ${a.amount ?? 3} --delay 80 ${scrollButtons[String(a.direction)]}`; break;
     case "open_url": command = `nohup xdg-open ${quote(String(a.url))} >/dev/null 2>&1 </dev/null &`; break;
-    case "exec": if (a.background === true) return startInBackground(cfg, boxId, String(a.command), signal); command = String(a.command); break;
-    case "exec_status": return backgroundStatus(cfg, boxId, a as { process_id: string; wait_seconds?: number }, signal);
+    case "exec": if (a.background === true) return startInBackground(cfg, boxId, String(a.command), signal, background); command = String(a.command); break;
+    case "exec_status": {
+      const result = await backgroundStatus(cfg, boxId, a as { process_id: string; wait_seconds?: number }, signal);
+      const completed = commandCompletion(result);
+      if (completed !== undefined) background?.observed(boxId, String(a.process_id), completed);
+      return result;
+    }
     default: return { isError: true, content: [{ type: "text", text: "Unknown cloud computer tool." }] };
   }
   const result = await runCommand(cfg, boxId, isolatedRemoteCommand(command), { signal });
@@ -125,6 +153,7 @@ export async function cloudComputerRpc(
   request: { method?: unknown; params?: unknown } | null | undefined,
   deps: {
     cfg: AppConfig;
+    background?: BackgroundCommandHooks;
     /** The Boat this call acts on, read after the gate. */
     boxId(): string | null | undefined;
     /** The bot's working folder, which the copy tools read from and write into. */
@@ -157,7 +186,7 @@ export async function cloudComputerRpc(
   const late = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
   let result: CloudComputerResult;
   try {
-    result = await runCloudComputerTool(deps.cfg, boxId, params.name as string, args as Record<string, unknown>, AbortSignal.any([deps.signal, late]), deps.folder?.());
+    result = await runCloudComputerTool(deps.cfg, boxId, params.name as string, args as Record<string, unknown>, AbortSignal.any([deps.signal, late]), deps.folder?.(), deps.background);
   } catch (error) {
     if (!late.aborted || deps.signal.aborted) throw error;
     return { isError: true, content: [{ type: "text", text: commandLateText(params.name, args) ?? (copy ? CLOUD_COMPUTER_COPY_LATE : CLOUD_COMPUTER_LATE) }] };
