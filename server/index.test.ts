@@ -3632,12 +3632,13 @@ describe("harness HTTP API", () => {
         (group: { id: string }) => group.id === roomId,
       ).messages;
       expect(roomMessages.some((message) => (message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"))).toBe(true);
-      const roomEvents = ((await api("GET", `/api/threads/${room.threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
+      const roomEvents = async () => ((await api("GET", `/api/threads/${room.threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
         .filter((entry) => entry.kind === "runtime").map((entry) => entry.data);
-      expect(roomEvents.find((event) => event.type === "turn.wait_started")).toMatchObject({
+      await expect.poll(async () => (await roomEvents()).find((event) => event.type === "turn.wait_started"), { timeout: 5_000 }).toMatchObject({
         resource: expect.stringMatching(/^computer:/),
       });
-      expect(roomEvents.find((event) => event.type === "turn.wait_ended")).toMatchObject({
+      // The activity chip can arrive before the runtime event is recorded.
+      await expect.poll(async () => (await roomEvents()).find((event) => event.type === "turn.wait_ended"), { timeout: 5_000 }).toMatchObject({
         outcome: "acquired",
       });
       expect(promptsOnBoat()).toBe(0);
