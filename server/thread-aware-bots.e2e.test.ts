@@ -273,6 +273,7 @@ describe("start_thread on yourself", () => {
 
       const opening = (await messages(first.body.threadId)).find((message) => message.role === "user");
       expect(opening.text).toContain("[Thread you opened yourself from #Plan the QA round.");
+      expect(opening.text).toContain('The person\'s request is "Plan the QA round."');
       expect(opening.text).toContain("Review the login fix.");
       await liveToken(first.body.threadId);
       const self = dumpOf(first.body.threadId)!.mcpConfig.mcpServers.agents;
