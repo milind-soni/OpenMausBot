@@ -58,7 +58,7 @@ export interface ModelSelection {
 }
 
 /** Which cloud computer backs computer: "cloud"; absent means Boat. */
-export type CloudBackend = "box" | "vps";
+export type CloudBackend = "box" | "vps" | "mola";
 
 /** A place a bot can act. `cloud` covers both cloud backends. */
 export type Surface = "cloud" | "vm" | "local" | "browser";

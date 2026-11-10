@@ -77,7 +77,7 @@ export function teamManagedPolicy(document: TeamPolicyDocument, team: Pick<Cloud
     allowedEngines,
     mcp: allowedMcpServers === "all" || allowedMcpServers === "team" ? { allowCustom: true, allowlist: [] } : { allowCustom: false, allowlist: allowedMcpServers },
     apps: allowedApps === "all" ? { allowAll: true, allowlist: [] } : { allowAll: false, allowlist: allowedApps },
-    computers: { thisComputer: computer("memberComputer"), localVm: computer("memberComputer"), box: computer("cloudDesktop"), vps: computer("vps") },
+    computers: { thisComputer: computer("memberComputer"), localVm: computer("memberComputer"), box: computer("cloudDesktop"), vps: computer("vps"), mola: computer("cloudDesktop") },
     remoteAccess: remoteAccess !== "off",
     team: { requireFresh: requireFreshPolicy, ownMcpOnly: allowedMcpServers === "team" },
   };

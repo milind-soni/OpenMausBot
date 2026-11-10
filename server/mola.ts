@@ -13,7 +13,11 @@ const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'
 
 // API detection: Cloud uses /computers, self-hosted uses /machines
 function isCloudApi(apiUrl: string): boolean {
-  return apiUrl.includes("cloud.mola.sh");
+  try {
+    return new URL(apiUrl).hostname === "cloud.mola.sh";
+  } catch {
+    return false;
+  }
 }
 
 function resourcePath(apiUrl: string): "computers" | "machines" {
@@ -21,7 +25,8 @@ function resourcePath(apiUrl: string): "computers" | "machines" {
 }
 
 function getMolaApiUrl(cfg: AppConfig): string {
-  return cfg.mola?.apiUrl || molaProviderApi();
+  const api = molaAccount(cfg)?.api ?? molaProviderApi();
+  return api.trim().replace(/\/+$/, "");
 }
 
 /**
@@ -148,7 +153,8 @@ function snapshotMolaConfig(cfg: AppConfig): AppConfig {
 /** An own token goes to Mola; Cloud Pro's included token only to its relay. */
 export function molaFetch(cfg: AppConfig, path: string, opts: RequestInit = {}) {
   const account = molaAccount(cfg);
-  return fetch(`${account?.api ?? molaProviderApi()}${path}`, {
+  const baseUrl = getMolaApiUrl(cfg);
+  return fetch(`${baseUrl}${path}`, {
     ...opts,
     headers: {
       authorization: `Bearer ${account?.token}`,
@@ -726,8 +732,13 @@ export async function provisionMola(cfg: AppConfig, botId: string, _botName: str
     const ready = await waitReady(cfg, mola.id);
     if (!ready) throw new Error("the cloud computer did not become ready within 90s — retry in a minute");
 
-    const joinUrl = await mintDesktopUrl(cfg, mola.id);
-    if (!joinUrl) throw new Error("the cloud computer's desktop link could not be created");
+    // Cloud API doesn't support direct desktop links yet (requires iframe embedding + postMessage)
+    // Return null joinUrl for Cloud; self-hosted gets actual desktop link
+    const apiUrl = getMolaApiUrl(cfg);
+    const joinUrl = isCloudApi(apiUrl) ? null : await mintDesktopUrl(cfg, mola.id);
+    if (joinUrl === null && !isCloudApi(apiUrl)) {
+      throw new Error("the cloud computer's desktop link could not be created");
+    }
     
     return { machineId: mola.id, machineName: vmName, reused: !created, status: ready.status, joinUrl };
   } catch (error) {
@@ -786,7 +797,19 @@ export async function execOnMola(cfg: AppConfig, botId: string, command: string)
   const ready = await waitReady(cfg, mola.id, 60_000);
   if (!ready) throw new Error("the cloud computer did not wake");
   const out = await runCommand(cfg, mola.id, isolatedRemoteCommand(command));
-  return { exitCode: out.exitCode, stdout: out.stdout.slice(-4000), stderr: out.stderr.slice(-2000) };
+  
+  // HTTP failure (401, 403, 422, etc) is not ok; throw to surface the provider error
+  if (!out.ok && out.exitCode === null) {
+    throw new Error(`Mola command failed: empty output (check Mola API key permissions)`);
+  }
+  
+  return {
+    exitCode: out.exitCode,
+    stdout: out.stdout.slice(-4000),
+    stderr: out.stderr.slice(-2000),
+    ...(out.timedOut ? { timedOut: true as const } : {}),
+    ...(out.truncated ? { truncated: true as const } : {}),
+  };
 }
 
 export const PANEL_FRAME_WIDTH = 1920;

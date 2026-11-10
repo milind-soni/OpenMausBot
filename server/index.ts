@@ -5654,7 +5654,7 @@ const computerPreviews = createComputerPreviews();
 const vpsJoinRequests = new Map<string, Promise<void>>();
 const orphanBoatLifecycleBusyIds = new Set<string>();
 const boatInventoryRequestsBusyIds = new Set<string>();
-type RemoteComputerProvider = "box" | "vps";
+type RemoteComputerProvider = "box" | "vps" | "mola";
 const computerProviderConfigTransitions = new Set<RemoteComputerProvider>();
 const localVmIdleMs = () => localVmIdleTimeoutMinutes(cfg) * 60_000;
 const LOCAL_VM_DESKTOP_WAIT_MS = 90_000;
@@ -6002,7 +6002,7 @@ function turnProvider(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string): 
   if (runOn === "cloud" || inheritedTeamComputer(bot)) return "box";
   const wants = turnSurfacePlan(bot, runOn, threadId).computer;
   if (wants !== undefined && wants !== "cloud") return null;
-  return bot.cloudBackend === "vps" ? "vps" : wants === "cloud" ? "box" : null;
+  return bot.cloudBackend === "vps" ? "vps" : bot.cloudBackend === "mola" ? "mola" : wants === "cloud" ? "box" : null;
 }
 
 /** A query never grants lifecycle authority. */
@@ -6022,6 +6022,10 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
     const remote = await vps.vpsComputerStatus(vpsConfigForBot(cfg, bot), bot.id);
     if (remote.ready || vpsDesktopOutdated(remote)) return "cloud";
   }
+  if (bot.cloudBackend === "mola") {
+    const status = await mola.molaStatus(cfg, bot.id).catch(() => null);
+    if (status?.machine?.status === "ready" || status?.machine?.status === "stopped") return "cloud";
+  }
   const target = localVmTargetForStatus(bot.id, threadId);
   if (!CLOUD_HOME && instance?.adapter.capabilities.computerMcp && localVmSeen.has(target.key)) {
     const vm = await containerComputerStatus(undefined, undefined, target).catch(() => null);
@@ -6029,7 +6033,7 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
   }
   if (!CLOUD_HOME && shouldMountLocalComputer({ requested: undefined, hostPlatform: process.platform,
     providerSupportsLocal: instance?.adapter.capabilities.localComputerMcp === true }) && desktopComputer.connection()) return "local";
-  if (bot.cloudBackend === "vps") return "cloud";
+  if (bot.cloudBackend === "vps" || bot.cloudBackend === "mola") return "cloud";
   return plan.browser ? "browser" : "off";
 }
 
@@ -6060,6 +6064,16 @@ async function selectableComputers(bot: BotRecord) {
           canCreate = Boolean(status?.configured && status.daemonUp && status.container === "missing");
           ownDesktopAwaitsUpdate ||= vpsDesktopOutdated(status);
           reason = status?.problem ? `${status.problem}${vpsDesktopOutdated(status) ? `. ${VPS_OUTDATED_HINT}` : ""}` : reason;
+        } else if (bot.cloudBackend === "mola") {
+          if (mola.molaConfigured(cfg) && canWorkOnCloud(cloudEngine(instance))) {
+            const status = await mola.molaStatus(cfg, bot.id).catch(() => null);
+            ready = status?.machine?.status === "ready";
+            canCreate = !status?.machine || status.machine.status === null;
+            canStart = status?.machine?.status === "stopped";
+            if (!ready && status?.machine?.status) reason = `Mola computer is ${status.machine.status}`;
+          } else {
+            reason = mola.molaConfigured(cfg) ? (cloudPlaceRefusal(cloudEngine(instance, bot.modelSelection.model), "works-on", bot.name) ?? { message: "Model does not support cloud computers" }).message : "Mola is not configured (add key in Settings → API keys)";
+          }
         } else if (boat.boatConfigured(cfg) && canWorkOnCloud(cloudEngine(instance))) {
           const status = await boat.boatStatus(cfg, bot.id);
           const lifecycle = boat.boatTurnLifecycleAction(status.box?.state ?? null);
@@ -6087,7 +6101,7 @@ async function selectableComputers(bot: BotRecord) {
         reason = "The built-in browser is disabled, not installed, or unsupported by this model.";
       }
     } catch (error) { reason = error instanceof Error ? error.message : String(error); }
-    const kind = surface === "local" ? "thisComputer" : surface === "vm" ? "localVm" : surface === "cloud" ? (bot.cloudBackend === "vps" ? "vps" : "box") : undefined;
+    const kind = surface === "local" ? "thisComputer" : surface === "vm" ? "localVm" : surface === "cloud" ? (bot.cloudBackend === "vps" ? "vps" : bot.cloudBackend === "mola" ? "mola" : "box") : undefined;
     const managed = kind && managedPolicy.computerRefusal(kind);
     if (managed) return { surface, label: surfaceLabel(surface), available: false, ready: false, canStart: false, canCreate: false, reason: managed };
     const available = ready || canStart || canCreate;
@@ -15222,12 +15236,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const bot = computerPreviewBot(m[1], url);
       if (!bot) return json(res, 404, { error: "no such bot" });
       const surface = url.searchParams.has("threadId") ? await computerPreviewSurface(bot, bot.threadId) : "cloud";
-      if (surface !== "cloud") return json(res, 200, { surface, configured: false, backend: bot.cloudBackend === "vps" ? "vps" : "box" });
+      if (surface !== "cloud") return json(res, 200, { surface, configured: false, backend: bot.cloudBackend === "vps" ? "vps" : bot.cloudBackend === "mola" ? "mola" : "box" });
       const teamComputer = inheritedTeamComputer(bot);
       if (teamComputer) return json(res, 200, { surface, backend: "box", teamComputer: { id: teamComputer.id, name: teamComputer.name }, ...(await boat.boatStatus(cfg, teamComputerOwner(teamComputer.id))) });
-      return bot.cloudBackend === "vps"
-        ? json(res, 200, { surface, backend: "vps", ...(await vps.vpsComputerStatus(vpsConfigForBot(cfg, bot), bot.id)) })
-        : json(res, 200, { surface, backend: "box", ...(await boat.boatStatus(cfg, bot.id)) });
+      if (bot.cloudBackend === "vps") {
+        return json(res, 200, { surface, backend: "vps", ...(await vps.vpsComputerStatus(vpsConfigForBot(cfg, bot), bot.id)) });
+      }
+      if (bot.cloudBackend === "mola") {
+        return json(res, 200, { surface, backend: "mola", ...(await mola.molaStatus(cfg, bot.id)) });
+      }
+      return json(res, 200, { surface, backend: "box", ...(await boat.boatStatus(cfg, bot.id)) });
     }
     // The person's take and release; the bot has no verb here, only a sign-in request its card settles.
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/control$/);
@@ -15286,6 +15304,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const closedViewers = auth.kind === "session" ? desktopViewer.closeForOwner(auth.session.id, bot.id) : 0;
       if (bot.cloudBackend === "vps") return json(res, 200, vps.closeVpsDesktopTunnel(bot.id));
+      if (bot.cloudBackend === "mola") return json(res, 200, { closed: false });
       return json(res, 200, { closed: closedViewers > 0 });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/(provision|join|sleep|exec|screenshot|remove)$/);
@@ -15305,7 +15324,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (m[2] === "join" && bot.cloudBackend === "vps") {
         for (let pending; (pending = vpsJoinRequests.get(botId));) await pending;
       }
-      const remoteProvider: RemoteComputerProvider = bot.cloudBackend === "vps" ? "vps" : "box";
+      const remoteProvider: RemoteComputerProvider = bot.cloudBackend === "vps" ? "vps" : bot.cloudBackend === "mola" ? "mola" : "box";
       if (computerProviderConfigTransitions.has(remoteProvider)) {
         return json(res, 409, { error: providerTransitionMessage(remoteProvider) });
       }
@@ -15363,6 +15382,38 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             vpsJoinRequests.delete(botId);
             joinSettled();
           }
+        }
+      }
+      if (bot.cloudBackend === "mola") {
+        if (m[2] === "screenshot") {
+          res.setHeader("cache-control", "private, no-store");
+          return json(res, 200, await computerPreviews.capture(botId, () => mola.screenshotMola(cfg, botId)));
+        }
+        const releaseComputerLifecycle = claimBotComputerLifecycle(botId, m[2] === "join");
+        try {
+          if (m[2] === "provision") {
+            return json(res, 200, await mola.provisionMola(cfg, botId, bot.name));
+          }
+          if (m[2] === "join") {
+            const result = await mola.joinMola(cfg, botId);
+            return json(res, 200, result);
+          }
+          if (m[2] === "sleep") {
+            return json(res, 200, await mola.sleepMola(cfg, botId));
+          }
+          if (m[2] === "exec") {
+            const body = await readBody(req);
+            const command = String(body?.command ?? "");
+            if (command.length > mola.MAX_REMOTE_COMMAND_LENGTH) {
+              return json(res, 400, { error: `command is too long (maximum ${mola.MAX_REMOTE_COMMAND_LENGTH} characters)` });
+            }
+            return json(res, 200, await mola.execOnMola(cfg, botId, command));
+          }
+          if (m[2] === "remove") {
+            return json(res, 409, { error: "Mola computers can be stopped with sleep; removal is not yet implemented" });
+          }
+        } finally {
+          releaseComputerLifecycle();
         }
       }
       const activeBoatTurn = botHasActiveTurn(botId);

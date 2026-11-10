@@ -16,6 +16,7 @@ export const CREDENTIAL_PATCH = {
   openaiLiveKey: (value) => ({ live: { key: value } }),
   tregApiKey: (value) => ({ treg: { key: value } }),
   postizApiKey: (value) => ({ postiz: { key: value } }),
+  molaApiKey: (value) => ({ mola: { token: value } }),
 };
 
 const DECIDER_ERRORS = Object.freeze({

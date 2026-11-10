@@ -9,7 +9,7 @@ afterEach(() => { for (const policy of policies.splice(0)) policy.close(); vi.us
 function policy(overrides: Partial<ManagedPolicy> = {}): ManagedPolicy {
   return { organizationId: "11111111-1111-4111-8111-111111111111", organizationName: "Fixture Agency", expiresAt: Date.now() + 60_000, version: 3,
     companyModelsOnly: false, allowedEngines: "all", mcp: { allowCustom: true, allowlist: [] },
-    computers: { thisComputer: true, localVm: true, box: true, vps: true }, remoteAccess: true, ...overrides };
+    computers: { thisComputer: true, localVm: true, box: true, vps: true, mola: true }, remoteAccess: true, ...overrides };
 }
 function overlay(value: ManagedPolicy | null, now = () => Date.now()) {
   const onChange = vi.fn(), managed = new ManagedDesktopPolicy({ now, onChange });
@@ -98,7 +98,7 @@ describe("organisation desktop policy overlay", () => {
     expect(computerKindForResource("computer:box-bot:bot-1")).toBe("box");
     expect(computerKindForResource("computer:vps:alias:bot-1")).toBe("vps");
     expect(computerKindForResource("computer:phone")).toBeUndefined();
-    const { managed } = overlay(policy({ computers: { thisComputer: false, localVm: true, box: false, vps: true } }));
+    const { managed } = overlay(policy({ computers: { thisComputer: false, localVm: true, box: false, vps: true, mola: true } }));
     expect(managed.computerRefusal("thisComputer")).toBe("Fixture Agency does not allow bots to use this computer.");
     expect(managed.computerRefusal("box")).toBe("Fixture Agency does not allow bots to use cloud computers.");
     expect(managed.computerAllowed("localVm")).toBe(true);
@@ -148,7 +148,7 @@ describe("claim-time computer refusal in bindTurnComputer", () => {
 
   it("refuses a disallowed kind before claiming anything", async () => {
     expect(start).toBeGreaterThan(0); expect(guardEnd).toBeGreaterThan(start);
-    const { managed } = overlay(policy({ computers: { thisComputer: false, localVm: true, box: true, vps: false } }));
+    const { managed } = overlay(policy({ computers: { thisComputer: false, localVm: true, box: true, vps: false, mola: true } }));
     const bindTurnComputer = bind(managed);
     await expect(bindTurnComputer({}, "computer:host")).rejects.toThrow("Fixture Agency does not allow bots to use this computer.");
     await expect(bindTurnComputer({}, "computer:vps:alias:bot")).rejects.toThrow("VPS computers");

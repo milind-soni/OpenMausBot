@@ -19,13 +19,15 @@ export function CloudBackendPicker({
       <div className="text-[12px] font-medium text-ink">{compact ? t("botAccess.cloud.provider") : t("botAccess.cloud.backend")}</div>
       <div className="mt-0.5 text-[12px] text-ink-secondary">
         {compact
-          ? value === "vps" ? t("botAccess.cloud.vpsDescription") : t("botAccess.cloud.hostedDescription")
+          ? value === "vps" ? t("botAccess.cloud.vpsDescription") : value === "mola" ? "Mola cloud computers" : t("botAccess.cloud.hostedDescription")
           : value === "vps"
           ? t("botAccess.cloud.vpsAutoDescription")
+          : value === "mola"
+          ? "Mola cloud computers (Cloud or self-hosted)"
           : t("botAccess.cloud.hostedBackendDescription")}
       </div>
       <div className="mt-2 flex overflow-hidden rounded-lg border border-hairline/40">
-        {(["box", "vps"] as const).map((backend, i) => (
+        {(["box", "mola", "vps"] as const).map((backend, i) => (
           <button
             key={backend}
             onClick={() => onChange(backend)}
@@ -35,7 +37,7 @@ export function CloudBackendPicker({
               value === backend ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
             )}
           >
-            {backend === "vps" ? t("botAccess.cloud.selfHostedVps") : t("botAccess.cloud.boat")}
+            {backend === "vps" ? t("botAccess.cloud.selfHostedVps") : backend === "mola" ? "Mola" : t("botAccess.cloud.boat")}
           </button>
         ))}
       </div>

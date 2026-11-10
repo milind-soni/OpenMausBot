@@ -50,7 +50,7 @@ export interface BusyFlag {
   set(busy: boolean): void;
 }
 
-export type RemoteComputerProvider = "box" | "vps";
+export type RemoteComputerProvider = "box" | "vps" | "mola";
 
 export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | ({ ok: false; status: number } & ServerErrorBody);
 
@@ -542,6 +542,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.live?.key !== undefined) persisted.live.key = "";
           if (persisted.treg?.key !== undefined) persisted.treg.key = "";
           if (persisted.postiz?.key !== undefined) persisted.postiz.key = "";
+          if (persisted.mola?.token !== undefined) persisted.mola.token = "";
           saveConfig(persisted);
           configWriteCommitted = true;
           syncCredentialEnv(patch);

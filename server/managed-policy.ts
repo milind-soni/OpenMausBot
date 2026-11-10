@@ -14,7 +14,7 @@ const policySchema = z.object({
   allowedEngines: z.union([z.literal("all"), z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9-]{0,63}$/)).max(64)]),
   mcp: z.object({ allowCustom: z.boolean(), allowlist: z.array(z.string().trim().min(1).max(200)).max(100) }).strict(),
   // "box" is Boat's historical key in the org-policy schema shared with the desktop parent.
-  computers: z.object({ thisComputer: z.boolean(), localVm: z.boolean(), box: z.boolean(), vps: z.boolean() }).strict(),
+  computers: z.object({ thisComputer: z.boolean(), localVm: z.boolean(), box: z.boolean(), vps: z.boolean(), mola: z.boolean() }).strict(),
   remoteAccess: z.boolean(),
   /** Connected apps by service slug. Absent: this policy says nothing about them. */
   apps: z.object({ allowAll: z.boolean(), allowlist: z.array(z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)).max(200) }).strict().optional(),
@@ -24,7 +24,7 @@ const policySchema = z.object({
 }).strict();
 export type ManagedPolicy = z.infer<typeof policySchema>;
 export type ComputerKind = keyof ManagedPolicy["computers"];
-const computerLabels: Record<ComputerKind, string> = { thisComputer: "this computer", localVm: "local virtual machines", box: "cloud computers", vps: "VPS computers" };
+const computerLabels: Record<ComputerKind, string> = { thisComputer: "this computer", localVm: "local virtual machines", box: "cloud computers", vps: "VPS computers", mola: "Mola computers" };
 const teamComputerLabels: Record<ComputerKind, string> = { ...computerLabels, thisComputer: "a member's own computer", localVm: "a member's own computer" };
 const ASK_ADMIN = "Ask a team admin.";
 
