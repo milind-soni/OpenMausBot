@@ -86,6 +86,7 @@ export const VITEST_SUBSETS = {
       "server/cloud-team-open-reach.e2e.test.ts",
       "server/cloud-team-owners.e2e.test.ts",
       "server/cloud-team-people.e2e.test.ts",
+      "server/cloud-team-per-person.e2e.test.ts",
       "server/cloud-team-phones.e2e.test.ts",
       "server/cloud-team-pictures.e2e.test.ts",
       "server/cloud-team-private.e2e.test.ts",

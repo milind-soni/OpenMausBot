@@ -79,6 +79,10 @@ export interface BotPatchRouteDeps {
   team: boolean;
   /** The bot's conversations the main-thread resolver may pick: a Team Cloud keeps only team-visible ones. */
   mainThreadTasks(botId: string): readonly TaskRecord[];
+  /** A Team Cloud: marks a bot's shared conversation read or unread for this person alone; false for a private chat. */
+  personMarkThread?(auth: RequestAuth, threadId: string, unread: boolean): boolean;
+  /** The conversation this session sees the bot on (on a Team Cloud never someone else's private chat). */
+  shownThread?(auth: RequestAuth, bot: BotRecord): string;
 }
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
@@ -127,6 +131,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       const existingBot = store.bot(m[1]); const defaultBotRefused = defaultBotPatchRefusal(existingBot, body);
       if (defaultBotRefused) return json(res, 400, { error: defaultBotRefused });
+      if (existingBot && typeof body.unread === "boolean" && deps.shownThread && deps.personMarkThread?.(auth, deps.shownThread(auth, existingBot), body.unread)) {
+        delete body.unread;
+        if (!Object.keys(body).length) return json(res, 200, { bot: wireBot(existingBot) });
+      }
       const rawSelection = (body as Record<string, unknown>).modelSelection;
       if (body.threadId !== undefined && rawSelection === undefined) {
         return json(res, 400, { error: "threadId goes with modelSelection" });
